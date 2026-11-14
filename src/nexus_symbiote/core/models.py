@@ -90,8 +90,21 @@ class ClaimEvidence(InventoryModel):
     unknown_reason: str | None = None
 
 
+def _require_component_type(schema: dict[str, Any]) -> None:
+    """Publish ``component_type`` as required: it is the tag a reader selects the model by.
+
+    Each subclass keeps its type as the default for objects built in process.
+    """
+    properties = schema["properties"]
+    properties["component_type"].pop("default", None)
+    required = {*schema.get("required", ()), "component_type"}
+    schema["required"] = [name for name in properties if name in required]
+
+
 class ComponentBase(InventoryModel):
     """Base for every AgentBOM component."""
+
+    model_config = ConfigDict(json_schema_extra=_require_component_type)
 
     bom_ref: str = Field(
         description="Unique reference within this BOM", max_length=MAX_REFERENCE_CHARS
@@ -124,7 +137,7 @@ class ComponentBase(InventoryModel):
 
 
 class CapabilityDeclaration(InventoryModel):
-    """What a component is permitted to do."""
+    """What a component is declared to do; a declaration, not a granted permission."""
 
     capabilities: list[CapabilityClass] = Field(default_factory=list)
     oauth_scopes: list[str] = Field(default_factory=list)
@@ -217,7 +230,9 @@ class MCPServerComponent(ComponentBase):
     """An MCP server that provides tools to agents."""
 
     component_type: Literal[ComponentType.MCP_SERVER] = ComponentType.MCP_SERVER
-    transport: str | None = Field(default=None, description="stdio, sse, streamable-http")
+    transport: str | None = Field(
+        default=None, description="stdio, sse, streamable-http, websocket"
+    )
     command: str | None = None
     launcher_package: str | None = Field(
         default=None,
@@ -277,7 +292,7 @@ class ToolComponent(ComponentBase):
 
     definition_hash_version: str | None = Field(
         default=None,
-        description="Canonicalization protocol, or unknown for legacy fingerprints",
+        description="Canonicalization protocol; absent, or an earlier one, for legacy fingerprints",
     )
 
 
@@ -287,7 +302,7 @@ class ModelComponent(ComponentBase):
     component_type: Literal[ComponentType.MODEL] = ComponentType.MODEL
     model_type: str | None = Field(
         default=None,
-        description="foundation, fine-tuned, adapter, embedding, quantized",
+        description="foundation, fine-tuned, adapter, embedding, quantized, hosted",
     )
     provider: str | None = None
     endpoint: str | None = None
@@ -337,7 +352,10 @@ class PromptComponent(ComponentBase):
     component_type: Literal[ComponentType.PROMPT_TEMPLATE] = ComponentType.PROMPT_TEMPLATE
     prompt_type: str | None = Field(
         default=None,
-        description="system-prompt, planner, instruction, rules-file, skill-definition",
+        description=(
+            "system-prompt, planner, instruction, rules-file, skill-definition, subagent, "
+            "imported-instruction"
+        ),
     )
     content_hash: str | None = Field(default=None, description="Hash of the exact prompt bytes")
     variable_schema: dict[str, Any] | None = Field(
@@ -429,7 +447,7 @@ class DataSourceComponent(ComponentBase):
 
 
 class RegistryEntryComponent(ComponentBase):
-    """A registry from which components are discovered or installed."""
+    """A package or image reference and the registry it comes from."""
 
     component_type: Literal[ComponentType.REGISTRY_ENTRY] = ComponentType.REGISTRY_ENTRY
     package_url: str | None = Field(
@@ -439,8 +457,8 @@ class RegistryEntryComponent(ComponentBase):
     registry_type: str | None = Field(
         default=None,
         description=(
-            "npm, pypi or docker-hub from built-in collectors; huggingface, mcp-registry and "
-            "skill-marketplace are reserved for supplied inventories"
+            "npm, pypi, docker-hub or oci from built-in collectors; huggingface, mcp-registry "
+            "and skill-marketplace are reserved for supplied inventories"
         ),
     )
     registry_uri: str | None = None
@@ -457,7 +475,7 @@ class SkillPackageComponent(ComponentBase):
 
     component_type: Literal[ComponentType.SKILL_PACKAGE] = ComponentType.SKILL_PACKAGE
     skill_type: str | None = Field(
-        default=None, description="skill, plugin, connector, hook, extension"
+        default=None, description="skill, skill-resource, plugin, connector, hook, extension"
     )
     registry_ref: str | None = None
     entry_point: str | None = None
@@ -511,7 +529,9 @@ class IDEAgentComponent(ComponentBase):
     component_type: Literal[ComponentType.IDE_AGENT] = ComponentType.IDE_AGENT
     ide_type: str | None = Field(
         default=None,
-        description="claude-code, codex, cursor, antigravity, xai, windsurf, cline",
+        description=(
+            "claude-code, codex, cursor, gemini, antigravity, xai, windsurf, cline, copilot"
+        ),
     )
     config_files: list[str] = Field(default_factory=list)
     mcp_server_refs: list[str] = Field(default_factory=list)
@@ -525,7 +545,7 @@ class VerifiedExtensionComponent(ComponentBase):
 
     component_type: Literal[ComponentType.VERIFIED_EXTENSION] = ComponentType.VERIFIED_EXTENSION
     extension_type: str | None = Field(
-        default=None, description="plugin, skill, connector, integration, action"
+        default=None, description="ide-extension, plugin, skill, connector, integration, action"
     )
     publisher: str | None = None
     publisher_verified: StrictBool | None = Field(
@@ -546,14 +566,17 @@ class DiscoveryVerification(InventoryModel):
 
     The record binds the imported report to its exact bytes (``report_digest``),
     its normalized content (``report_content_digest``), and whatever
-    repository/commit/time the report itself carries. The current ShadowScan
-    report format carries no repository or commit, so both read ``"unknown"``
-    there — never a fabricated value — and ``report_time`` is the report's own
-    ``finished_at`` (else ``started_at``), or ``"unknown"``. Import time is not
-    recorded: ``metadata.timestamp`` is set only when a caller supplies one. A
-    ``verified`` record names the signer identity and issuer whose Sigstore
-    bundle was checked over the exact report bytes; ``unverified`` means no such
-    check ran at import.
+    repository/commit/time the report itself carries: its top-level ``repository``
+    and ``commit``, or a CycloneDX report's ``shadowscan:repository`` and
+    ``shadowscan:commit`` properties, and as ``report_time`` a CycloneDX report's
+    ``metadata.timestamp``, else the report's own ``finished_at`` (else
+    ``started_at``). A value the report does not carry reads ``"unknown"`` —
+    never a fabricated value; the current ShadowScan report formats carry no
+    repository or commit. Import time is not recorded: ``metadata.timestamp`` is
+    set only when a caller supplies one. A ``verified`` record names the signer
+    identity and issuer whose Sigstore bundle was checked over the exact report
+    bytes; ``unverified`` means no such check ran at import; ``not-applicable``
+    means no discovery report was imported.
     """
 
     status: Literal["verified", "unverified", "not-applicable"] = "unverified"
@@ -576,22 +599,38 @@ class DiscoveryVerification(InventoryModel):
     )
     repository: str = Field(
         default="unknown",
-        description="Repository the report claims, or 'unknown' when it carries none",
+        description=(
+            "Repository the report claims (top-level repository, or a CycloneDX report's "
+            "shadowscan:repository property), or 'unknown' when it carries none"
+        ),
     )
     commit: str = Field(
         default="unknown",
-        description="Commit the report claims, or 'unknown' when it carries none",
+        description=(
+            "Commit the report claims (top-level commit, or a CycloneDX report's "
+            "shadowscan:commit property), or 'unknown' when it carries none"
+        ),
     )
     report_time: str = Field(
         default="unknown",
-        description="Report's own finished_at (else started_at), or 'unknown'",
+        description=(
+            "A CycloneDX report's metadata.timestamp, else the report's own finished_at "
+            "(else started_at), or 'unknown' when it carries none"
+        ),
     )
 
 
 class CompletenessClaim(InventoryModel):
     """What was actually scanned and what was excluded."""
 
-    scope: str = Field(description="What this completeness claim covers (e.g. 'full-agent')")
+    scope: str = Field(
+        description=(
+            "What this completeness claim covers. Built-in collection writes repository, "
+            "or repository+shadowscan with an imported discovery report (scan), "
+            "shadowscan-imported (import-shadowscan) or mcp-endpoint-observation "
+            "(discover-mcp)"
+        )
+    )
     surfaces_scanned: list[str] = Field(default_factory=list)
     surfaces_excluded: list[str] = Field(default_factory=list)
     scan_failures: list[str] = Field(default_factory=list)

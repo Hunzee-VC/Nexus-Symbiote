@@ -1,11 +1,11 @@
 {
   "inputSchema": {
-    "type": "object",
     "properties": {
       "id": {
         "type": "integer"
       }
-    }
+    },
+    "type": "object"
   },
   "description": "Read one issue.",
   "name": "get_issue"

@@ -31,15 +31,15 @@ def output(result) -> str:
 
 
 @pytest.mark.parametrize(
-    "scanner,filename,content",
+    "scanner,filename,content,marker",
     [
-        (MCPScanner, "mcp.json", '{"mcpServers":{"outside":{"command":"npx"}}}'),
-        (PromptScanner, "CLAUDE.md", "secret outside instructions"),
-        (RAGScanner, "rag_config.json", '{"name":"outside-source"}'),
-        (RegistryScanner, "package.json", '{"dependencies":{"openai":"1.0.0"}}'),
+        (MCPScanner, "mcp.json", '{"mcpServers":{"outside":{"command":"npx"}}}', "outside"),
+        (PromptScanner, "CLAUDE.md", "secret outside instructions", "secret outside"),
+        (RAGScanner, "rag_config.json", '{"name":"outside-source"}', "outside-source"),
+        (RegistryScanner, "package.json", '{"dependencies":{"openai":"1.0.0"}}', "openai"),
     ],
 )
-def test_symlink_file_not_read(tmp_path, scanner, filename, content):
+def test_symlink_file_not_read(tmp_path, scanner, filename, content, marker):
     outside = tmp_path / "outside"
     outside.write_text(content)
     root = tmp_path / "project"
@@ -48,7 +48,7 @@ def test_symlink_file_not_read(tmp_path, scanner, filename, content):
     result = scanner().scan(root)
     assert result.components == []
     assert result.scan_failures
-    assert "outside-source" not in output(result)
+    assert marker not in output(result)
 
 
 @pytest.mark.parametrize("scanner", SCANNERS)
@@ -289,12 +289,11 @@ def test_comment_import_is_not_runtime_store_evidence(tmp_path):
     assert not RAGScanner().scan(tmp_path).components
 
 
-def test_yaml_config_is_parsed_or_reports_missing_parser(tmp_path):
+def test_yaml_config_is_parsed(tmp_path):
     (tmp_path / "rag_config.yaml").write_text("name: docs\ntype: vector-store\n")
     result = RAGScanner().scan(tmp_path)
-    assert result.components or result.scan_failures
-    if result.components:
-        assert result.components[0].name == "docs"
+    assert not result.scan_failures
+    assert [component.name for component in result.components] == ["docs"]
 
 
 def test_yaml_recursive_alias_is_not_loaded(tmp_path):

@@ -82,14 +82,14 @@ def decorated(draw: st.DrawFn, requirement: str) -> str:
         # pip joins a continued line with nothing in between, even inside a word.
         cut = draw(st.integers(min_value=1, max_value=len(body) - 1))
         body = f"{body[:cut]}\\\n{body[cut:]}"
+    if draw(st.booleans()) and " " in body:
+        head, tail = body.split(" ", 1)
+        body = f"{head} \\\n{tail}"
     line = draw(st.sampled_from(["", " ", "\t", "   "])) + body
     if draw(st.booleans()):
         line += " --hash=sha256:" + "ab" * 32
     if draw(st.booleans()):
         line += draw(st.sampled_from([" # pinned for CUDA", "  #comment", "\t# note"]))
-    if draw(st.booleans()) and " " in requirement.strip():
-        head, tail = requirement.strip().split(" ", 1)
-        line = f"{head} \\\n{tail}"
     ending = draw(st.sampled_from(["\n", "\r\n", ""]))
     header = draw(
         st.sampled_from(["", "# generated\n", "\ufeff", "--index-url https://pypi.org/simple\n"])

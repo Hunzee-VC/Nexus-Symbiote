@@ -51,7 +51,7 @@ def test_action_passes_the_policy_only_as_data() -> None:
     assert output["value"] == "${{ steps.scan.outputs.signature_policy_digest }}"
 
 
-def test_one_policy_snapshot_reaches_collection_and_validation(tmp_path: Path) -> None:
+def test_one_policy_snapshot_reaches_collection_validation_and_risk(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     policy = tmp_path / "caller" / "signers.json"

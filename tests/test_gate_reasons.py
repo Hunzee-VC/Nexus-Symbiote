@@ -65,7 +65,7 @@ def test_report_only_shows_the_same_reasons_and_exits_zero(tmp_path, monkeypatch
     assert "collection: notes.md: invalid UTF-8" in run.output
 
 
-def test_long_failure_lists_are_summarised(tmp_path, monkeypatch):
+def test_long_failure_lists_are_summarized(tmp_path, monkeypatch):
     failures = [f"file_{index}.md: invalid UTF-8" for index in range(25)]
     result = ScanResult(scanner_name="fixed", components=[_prompt()], scan_failures=failures)
     run, _ = _run(tmp_path, monkeypatch, result)
@@ -74,11 +74,13 @@ def test_long_failure_lists_are_summarised(tmp_path, monkeypatch):
     assert "5 more in metadata.completeness.scan_failures" in run.output
 
 
-def test_reasons_are_neutralised_for_the_terminal(tmp_path, monkeypatch):
+def test_reasons_are_neutralized_for_the_terminal(tmp_path, monkeypatch):
     hostile = "evil\x1b[2J[bold]name.md: invalid UTF-8"
     result = ScanResult(scanner_name="fixed", components=[_prompt()], scan_failures=[hostile])
     run, _ = _run(tmp_path, monkeypatch, result)
+    assert run.exit_code == 1
     assert "\x1b" not in run.output
+    assert "[bold]name.md: invalid UTF-8" in run.output
 
 
 def test_risk_command_names_the_reasons(tmp_path, monkeypatch):

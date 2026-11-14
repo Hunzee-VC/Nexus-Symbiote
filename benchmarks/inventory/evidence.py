@@ -54,21 +54,26 @@ def materials() -> dict[str, str]:
 
 
 def installed_versions() -> dict[str, str]:
-    """Every distribution the scanner ran with: the environment without its bootstrap tools."""
+    """Every distribution the scanner ran with: the environment without its bootstrap tools.
+
+    A name installed twice records the first copy on sys.path, the one Python imports.
+    """
     versions: dict[str, str] = {}
     for distribution in distributions():
         name = (distribution.metadata.get_all("Name") or [""])[0]
         normalized = name.lower().replace("_", "-")
         if normalized and normalized not in BOOTSTRAP:
-            versions[normalized] = distribution.version
+            versions.setdefault(normalized, distribution.version)
     return dict(sorted(versions.items()))
 
 
 def prepare(directory: Path) -> None:
     before = materials()
     report = run()
-    if not report["passed"] or before != materials():
-        raise ValueError("benchmark failed or material changed during the run")
+    if not report["passed"]:
+        raise ValueError("benchmark failed")
+    if before != materials():
+        raise ValueError("material changed during the run")
     results = (json.dumps(report, sort_keys=True, indent=2) + "\n").encode()
     statement = {
         "_type": "https://in-toto.io/Statement/v1",

@@ -89,8 +89,8 @@ fields that merely mention a model. Consumers of standards exports must retain
 the SymBiote extension to preserve the edge assurance and provenance.
 
 ShadowScan's endpoint connector can report an MCP tool using kind `mcp-server`
-and resource type `mcp-tool`. Version 2 projects that exact combination as a
-declared, unverified tool rather than as a server. It does not infer a server
+and resource type `mcp-tool`. Since projection version 2, the importer projects that
+exact combination as a declared, unverified tool rather than as a server. It does not infer a server
 association, tool definition hash, endpoint identity or authorization. Conflicting
 tool and kind claims remain unmapped. Native JSON uses `resource_type` and
 CycloneDX uses the `shadowscan:resource-type` property. This mapping follows the
@@ -319,6 +319,7 @@ not read (it reads the first of `.shadowscan/report.json`,
 `shadowscan-report.json` and `shadowscan.json` that exists), is reported as an
 unused policy entry by `scan` and `validate --project`
 ([model integrity](model-integrity.md#operator-signature-policy)).
+
 ### Verify the native import and its producer
 
 For a BOM written by `import-shadowscan`, reproduce the direct import and compare
@@ -346,7 +347,7 @@ and issuer in the BOM. Without `--bundle` the import records `unverified`;
 `--fail-on-unsigned-discovery`) unless `--allow-unsigned-discovery` is given.
 
 The signed mode also verifies the direct native projection. Use the same importer
-version. The comparison ignores JSON object key ordering and the BOM’s locally
+version. The comparison ignores JSON object key ordering and the BOM's locally
 generated timestamp and serial number. Source findings keep their declared
 assurance. Merged, enriched and portable BOMs require their own provenance, so
 `verify-discovery --bundle` rejects a `scan` BOM; use the CI check above for one.

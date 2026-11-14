@@ -56,8 +56,9 @@ benchmark-results.json
 security-regressions.json
 .hypothesis/
 
-# Inventories that the documented commands, pre-commit hooks and baseline default
-# write to the checkout root. Anchored so fixtures elsewhere are never ignored.
+# Inventories that the documented commands and the baseline default write to the
+# checkout root, and the one the 0.1.0 pre-commit hooks wrote. Anchored so fixtures
+# elsewhere are never ignored.
 /*.aibom.json
 /.nexus-symbiote-aibom.json
 /.nexus-symbiote-baseline.json

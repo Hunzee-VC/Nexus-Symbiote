@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from nexus_symbiote.scanners.a2a import A2A_CONFIG_FILES, AGENT_CARD_NAMES
+from nexus_symbiote.scanners.mcp import _RESOLVER_FILES, MCP_CONFIG_FILES, MCP_CONFIG_NAMES
+from nexus_symbiote.scanners.model import NAMED_MODEL_FILES
 from nexus_symbiote.scanners.prompt import (
     INSTRUCTION_DIRECTORIES,
     INSTRUCTION_FILES,
@@ -26,6 +28,15 @@ def _row(collector: str) -> str:
     ("collector", "paths"),
     [
         (
+            "mcp",
+            [
+                *MCP_CONFIG_FILES,
+                *MCP_CONFIG_NAMES,
+                *(path for paths in _RESOLVER_FILES.values() for path in paths),
+            ],
+        ),
+        ("model", list(NAMED_MODEL_FILES)),
+        (
             "prompt",
             [
                 *INSTRUCTION_FILES,
@@ -40,6 +51,7 @@ def _row(collector: str) -> str:
             "ide_agents",
             [
                 ".codex/config.toml",
+                ".codex/config.json",
                 ".cursor/hooks.json",
                 ".gemini/settings.json",
                 ".vscode/extensions.json",

@@ -124,8 +124,9 @@ def test_previously_revoked_trust_signer_cannot_grief_subsequent_trust_advance(
     s2 = statuses.model_copy(update={"serial": 2, "revoked_signers": (comp_id,)})
     gateway.state.accept_trust_status(s2, {key_id(authority.public_key())})
 
-    # Serial 3 signed by valid authority + appended signature from previously revoked key:
-    s3 = statuses.model_copy(update={"serial": 3, "revoked_signers": (comp_id,)})
+    # Serial 3 signed by valid authority + appended signature from previously revoked key,
+    # without revoking it again, so only the check against the stored head can ignore it:
+    s3 = statuses.model_copy(update={"serial": 3, "revoked_signers": ()})
     trust_env = sign_contract(s3, "trust", (authority, compromised))
     result = gateway.invoke(
         call,

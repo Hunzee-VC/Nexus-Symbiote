@@ -1,4 +1,7 @@
-"""Run the versioned, labeled inventory cases locally with the public CLI."""
+"""Run the versioned, labeled inventory cases locally against the installed collectors.
+
+The public CLI runs only the coverage-gate and policy controls.
+"""
 
 import hashlib
 import json
@@ -55,18 +58,6 @@ def score_tools(
         "unknown_negative_labels": len(negatives - predicted) if collection_incomplete else 0,
         "unexpected_unlabeled": sorted(predicted - positives - negatives),
     }
-
-
-def relevant_mcp_exclusions(case: dict, exclusions: list[str]) -> list[str]:
-    """Only ignore absent config when labels explicitly concern application source."""
-    return sorted(
-        reason
-        for reason in exclusions
-        if not (
-            case.get("inventory_scope") == "source"
-            and reason == "mcp-config (no config files found)"
-        )
-    )
 
 
 def label_bounds(scores: dict) -> dict:
@@ -218,7 +209,12 @@ def run() -> dict:
                 elif name == "no_secret_in_bom":
                     ok = "SECRET_BENCH_MARKER" not in output.read_text()
                 elif name == "deceptive_localhost_flagged":
-                    ok = any(r.category == "transport_security" for s in servers for r in s.risks)
+                    ok = any(
+                        r.category == "transport_security"
+                        for s in servers
+                        if s.endpoint_url == "http://localhost.attacker.invalid"
+                        for r in s.risks
+                    )
                 elif name in {"unsafe_format", "safe_format", "unknown_format"}:
                     expected_format = {
                         "unsafe_format": "unsafe-code-execution",
@@ -229,11 +225,14 @@ def run() -> dict:
                         len(models) == 1 and models[0].serialization_safety.value == expected_format
                     )
                 elif name in {"unsigned", "signer_unverified"}:
+                    expected_status = {
+                        "unsigned": "signature-not-found",
+                        "signer_unverified": "signature-present-unverified",
+                    }[name]
                     ok = (
                         len(models) == 1
                         and not models[0].signing_identity
-                        and models[0].signing_status != "sigstore-signed"
-                        and models[0].assurance_level.value != "verified"
+                        and models[0].signing_status == expected_status
                     )
                 elif name == "critical_gate":
                     ok = critical_gate(RiskScorer().score(bom))
@@ -247,7 +246,7 @@ def run() -> dict:
                     raise ValueError(f"Unknown benchmark assertion {name}")
                 checks[name] = ok
             misses, extras = sorted(expected - predicted), sorted(predicted - expected)
-            relevant_exclusions = relevant_mcp_exclusions(case, mcp_exclusions)
+            relevant_exclusions = sorted(mcp_exclusions)
             has_tool_labels = bool(case["tools"] or case["decoys"])
             incomplete = bool(failures or (has_tool_labels and relevant_exclusions))
             scores = score_tools(

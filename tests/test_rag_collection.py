@@ -4,6 +4,7 @@ treat Python sources as a best-effort heuristic."""
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -232,6 +233,29 @@ def test_transport_check_reads_the_scheme(tmp_path, uri, severity):
     assert all("kb.example/" not in r.detail for r in component.risks)
 
 
+@pytest.mark.parametrize(
+    ("uri", "severity"),
+    [
+        ("milvus.example:19530", "low"),
+        ("redis:6379", "low"),
+        ("Host=pg.example;Port=5432;SSL Mode=Disable", "low"),
+        ("rag@db.internal/vectors", "low"),
+        ("http:\\\\kb.example\\docs", "high"),
+        ("http:kb.example/docs", "high"),
+        ("https:\\\\kb.example\\docs", None),
+        ("docs/handbook/", None),
+        ("docs/product notes/", None),
+    ],
+)
+def test_locators_written_without_a_url_are_transport_checked(tmp_path, monkeypatch, uri, severity):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    component = _source(tmp_path, {**BASE, "source_uris": [uri]})
+    assert [r.severity.value for r in component.risks] == ([] if severity is None else [severity])
+    assert all(
+        "kb.example" not in r.detail and "pg.example" not in r.detail for r in component.risks
+    )
+
+
 def test_data_file_named_like_a_knowledge_base_is_not_a_configuration(tmp_path):
     (tmp_path / "data").mkdir()
     (tmp_path / "data" / "knowledge_base.json").write_text(json.dumps([{"title": "x"}]))
@@ -445,6 +469,25 @@ def test_case_variant_of_a_configuration_name_is_a_failure(tmp_path):
     ]
 
 
+def test_case_variant_of_a_knowledge_base_is_read_as_json(tmp_path):
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "KNOWLEDGE_BASE.JSON").write_text('[\n\t{"title": "data"}\n]\n')
+    (tmp_path / "KNOWLEDGE_BASE.JSON").write_text('{\n\t"sources": []\n}\n')
+    result = RAGScanner().scan(tmp_path)
+    assert result.scan_failures == [
+        "KNOWLEDGE_BASE.JSON: case variant of knowledge_base.json is the active file "
+        "on case-insensitive file systems and is not inventoried"
+    ]
+
+
+def test_yaml_configuration_without_a_parser_names_the_file(tmp_path, monkeypatch):
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "rag_config.yaml").write_text("name: kb\n")
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    result = RAGScanner().scan(tmp_path)
+    assert result.scan_failures == ["configs/rag_config.yaml: YAML parser unavailable"]
+
+
 def test_uri_shown_in_findings_is_neutralised(tmp_path):
     component = _source(
         tmp_path, {**BASE, "source_uris": ["http://moc.elpmaxe\u202e.evil.example/x"]}
@@ -488,6 +531,43 @@ def test_more_endpoint_urls_than_one_file_may_describe_is_a_failure(tmp_path, co
         "rag_config.json: RAG configuration declares more than 1000 endpoint URLs"
     ]
     assert not [c for c in result.components if isinstance(c, RAGSourceComponent)]
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"sources": [{"name": f"s{n}", "source_uris": ["http://a"] * 1000} for n in range(2)]},
+        {
+            "endpoints": [f"s3://b{index}" for index in range(600)],
+            "sources": [{"source_uris": [f"s3://a{index}" for index in range(600)]}],
+        },
+        {
+            "sources": [
+                {"name": "a", "source_uris": [f"docs/{index}.md" for index in range(600)]},
+                {"name": "b", "mirrors": [f"s3://b{index}" for index in range(600)]},
+            ]
+        },
+    ],
+)
+def test_source_uris_share_the_file_bound_on_endpoint_urls(tmp_path, config):
+    (tmp_path / "rag_config.json").write_text(json.dumps(config))
+    result = RAGScanner().scan(tmp_path)
+    assert result.scan_failures == [
+        "rag_config.json: RAG configuration declares more than 1000 endpoint URLs and source URIs"
+    ]
+    assert not [c for c in result.components if isinstance(c, RAGSourceComponent)]
+
+
+def test_a_file_may_declare_a_thousand_endpoint_urls_and_source_uris(tmp_path):
+    config = {
+        "endpoints": ["s3://shared"],
+        "sources": [
+            {"name": "a", "source_uris": ["http://a"] * 500},
+            {"name": "b", "source_uris": ["docs/b.md"] * 498, "mirrors": ["s3://b"]},
+        ],
+    }
+    first, second = _scan_config(tmp_path, config)
+    assert len(first.source_uris) + len(second.source_uris) == 998
 
 
 @pytest.mark.parametrize(

@@ -16,6 +16,7 @@ from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import AssuranceLevel, AutonomyLevel, ComponentType
 from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import (
+    MAX_REFERENCE_CHARS,
     AgentComponent,
     AnyComponent,
     ClaimEvidence,
@@ -142,9 +143,11 @@ def _readable_entry(
     files: ConfinedCollection, path: Path, locator: str, problems: list[str]
 ) -> bool:
     """Apply the operator's exclusions to a manifest-selected path before anything reads it."""
-    from nexus_symbiote.utils.confined import DEFAULT_EXCLUDES
+    from nexus_symbiote.utils.confined import DEFAULT_EXCLUDES, fold_name
 
-    if any(part in DEFAULT_EXCLUDES for part in path.parts):
+    # Collection skips these in any spelling a case-insensitive file system treats as
+    # the same name, without recording a gap, so each spelling must be refused here.
+    if any(part in DEFAULT_EXCLUDES or fold_name(part) in DEFAULT_EXCLUDES for part in path.parts):
         problems.append(f"{locator}: names a path inside a directory that collection never reads")
         return False
     # A policy exclusion is recorded as a coverage gap by the collection itself.
@@ -224,9 +227,13 @@ def _manifest_dependencies(
     for key, model in declared.models.items():
         locator = f"{MANIFEST}#/models/{_clip(quote(key, safe=''))}"
         if model.path is None:
+            ref = f"model:{agent_ref}/hosted/{quote(key, safe='')}"
+            if len(ref) > MAX_REFERENCE_CHARS:
+                problems.append(f"{locator}: the key is too long for a component reference")
+                continue
             additions.append(
                 ModelComponent(
-                    bom_ref=f"model:{agent_ref}/hosted/{quote(key, safe='')}",
+                    bom_ref=ref,
                     name=model.requested_ref or key,
                     provider=model.provider,
                     requested_alias=model.requested_ref,
@@ -268,7 +275,7 @@ def _launcher_key(registry: RegistryEntryComponent) -> str | None:
     """The MCP launcher-package spelling of a manifest dependency, when one exists."""
     if registry.registry_type in {"pypi", "npm"}:
         return f"{registry.registry_type}:{registry.name}"
-    if registry.registry_type == "docker-hub":
+    if registry.registry_type in {"docker-hub", "oci"}:
         image = re.sub(r"@sha256:[0-9A-Fa-f]{64}$", "", registry.name)
         head, _, last = image.rpartition("/")
         last = last.split(":", 1)[0]

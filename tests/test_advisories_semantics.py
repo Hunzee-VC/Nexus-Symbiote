@@ -164,6 +164,36 @@ def test_operator_exclusions_are_never_sent():
     assert report.complete
 
 
+@pytest.mark.parametrize("pattern", ["@Corp/*", "@CORP/billing"])
+def test_npm_exclusions_withhold_a_name_written_in_another_case(pattern):
+    transport = Scripted(clean)
+    report = fetch_advisories(
+        AIBOM(components=[npm("@corp/billing"), npm("openai")]),
+        transport=transport,
+        exclude=[pattern],
+    )
+    assert sent_names(transport) == ["openai"]
+    assert report.excluded[0]["component_ref"] == "registry:npm/@corp/billing"
+
+
+@pytest.mark.parametrize("pattern", ["*billing", "@corp/*-internal", "a**"])
+def test_an_exclusion_with_a_star_before_its_end_is_refused(pattern):
+    transport = Scripted(clean)
+    with pytest.raises(ValueError, match="only as its last character"):
+        fetch_advisories(
+            AIBOM(components=[npm("@corp/billing")]), transport=transport, exclude=[pattern]
+        )
+    assert transport.calls == []
+
+
+def test_component_limit_report_says_that_nothing_was_sent(monkeypatch):
+    monkeypatch.setattr(advisories, "MAX_COMPONENTS", 2)
+    report = fetch_advisories(
+        AIBOM(components=[package("a"), package("b"), package("c")]), transport=Scripted(clean)
+    )
+    assert report.to_dict()["sent_to_osv"] == "nothing (package component limit exceeded)"
+
+
 def test_private_origin_exclusion_sends_only_lockfile_backed_public_packages(tmp_path):
     dependencies = {"@modelcontextprotocol/sdk": "1.2.3", "mcp-billing": "1.0.0", "openai": "4.0.0"}
     (tmp_path / "package.json").write_text(json.dumps({"dependencies": dependencies}))
@@ -265,7 +295,7 @@ def test_private_origin_exclusion_follows_python_lockfile_resolutions(
     assert withheld == {"mcp-acme-tools": "resolved from a non-public registry origin"}
 
 
-def test_private_packages_are_sent_unless_excluded():
+def test_private_packages_are_sent_by_default():
     transport = Scripted(clean)
     fetch_advisories(
         AIBOM(components=[npm("@acme/mcp-billing", registry_uri="https://npm.acme.internal")]),
@@ -299,9 +329,9 @@ def test_mcp_launcher_package_identity_is_reconciled():
         {"version": "0.1.16"},
         {"launcher_package": "npm:other"},
         {"launcher_package": "pypi:mcp-remote"},
-        {"package_url": "pkg:npm/mcp-remote@latest"},
+        {"package_url": "pkg:npm/mcp-remote@latest", "version": "latest"},
     ):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="disagrees|exact"):
             mcp_package_identity(SimpleNamespace(**{**vars(server), **mismatch}))  # type: ignore[arg-type]
 
 

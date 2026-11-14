@@ -420,6 +420,49 @@ def test_a_direct_eval_beside_sdk_imports_is_a_gap(tmp_path):
     assert _inventory(result) == INVENTORIED
 
 
+@pytest.mark.parametrize(
+    ("name", "call", "direct"),
+    [
+        ("server.mjs", "(eval)(code);\n", True),
+        ("server.ts", "(eval as any)(code);\n", True),
+        ("server.ts", "eval!(code);\n", True),
+        ("server.mjs", "(0, eval)(code);\n", False),
+    ],
+)
+def test_a_parenthesized_or_asserted_eval_is_still_direct(tmp_path, name, call, direct):
+    result = _scan(tmp_path, {name: IMPORT + SERVER + call + TOOL})
+    reason = "direct eval can use the MCP SDK imports of the file; what it builds not inventoried"
+    assert result.surfaces_excluded == ([_gap(name, 3, reason)] if direct else [])
+    assert _inventory(result) == INVENTORIED
+
+
+@pytest.mark.parametrize(
+    ("name", "source", "reason"),
+    [
+        (
+            "server.mjs",
+            'await import("https://esm.sh/@modelcontextprotocol/server?bundle");\n',
+            LOADED,
+        ),
+        (
+            "server.ts",
+            'import { Server } from "https://esm.sh/@modelcontextprotocol/sdk/server?dev";\n',
+            LOW_LEVEL,
+        ),
+        ("client.cjs", 'require("@modelcontextprotocol/client#main");\n', CLIENT_LOADED),
+    ],
+)
+def test_a_query_or_fragment_does_not_hide_the_module_kind(tmp_path, name, source, reason):
+    result = _scan(tmp_path, {name: source})
+    assert result.surfaces_excluded == [_gap(name, 1, reason)]
+
+
+def test_a_method_named_like_the_server_class_does_not_shadow_it(tmp_path):
+    method = "export const plugin = {\n  McpServer() {\n    const Factory = McpServer;\n  },\n};\n"
+    result = _scan(tmp_path, {"server.mjs": IMPORT + method})
+    assert result.surfaces_excluded == [_gap("server.mjs", 4, BINDING)]
+
+
 def test_names_in_type_syntax_are_not_uses(tmp_path):
     types = (
         "const typed: McpServer = new McpServer({});\n"
@@ -835,12 +878,35 @@ def test_any_call_whose_first_argument_names_an_mcp_server_module_is_a_gap(tmp_p
     [
         "import functools, importlib\nf = functools.partial(importlib.import_module, 'mcp.server.fastmcp')\n",
         "import importlib\nlist(map(importlib.import_module, ['mcp.server.fastmcp']))\n",
-        "import importlib, threading\n"
-        "threading.Thread(target=importlib.import_module, args=('mcp.server.fastmcp',))\n",
+        (
+            "import importlib, threading\n"
+            "threading.Thread(target=importlib.import_module, args=('mcp.server.fastmcp',))\n"
+        ),
         "import importlib\nFastMCP = importlib.import_module\nFastMCP('mcp.server.fastmcp')\n",
         'import importlib\nimportlib.reload(mcp_module)\nprint("x", "mcp.server")\n',
+        (
+            "import importlib, threading\n"
+            "threading.Thread(target=importlib.import_module, kwargs={'name': 'fastmcp'})\n"
+        ),
+        "import importlib\nimportlib.import_module(*['mcp.server.fastmcp'])\n",
+        "import importlib\nimportlib.import_module(**{'name': 'mcp.server'})\n",
+        "run(*('fastmcp.server',))\n",
+        "__import__(*['server', {'__package__': 'mcp'}, None, None, 1])\n",
+        "__import__(**{'name': 'server', 'globals': {'__package__': 'mcp'}, 'level': 1})\n",
     ],
-    ids=["partial", "map", "thread-target", "loader-named-like-a-server-class", "later-argument"],
+    ids=[
+        "partial",
+        "map",
+        "thread-target",
+        "loader-named-like-a-server-class",
+        "later-argument",
+        "thread-target-keywords",
+        "starred-argument",
+        "double-starred-argument",
+        "starred-argument-of-another-callee",
+        "starred-relative-name",
+        "double-starred-relative-name",
+    ],
 )
 def test_a_literal_in_any_argument_position_is_a_gap(tmp_path, source):
     result = _scan(tmp_path, {"pkg/server.py": source + "mcp_note = 1\n"})
@@ -867,7 +933,7 @@ def test_a_server_named_mcp_is_inventoried_without_a_gap(tmp_path):
     )
     result = _scan(tmp_path, {"pkg/server.py": source})
     assert result.surfaces_excluded == []
-    assert "hello" in str(_inventory(result))
+    assert _inventory(result) == [("mcp-server", "server"), ("tool", "hello")]
 
 
 def test_any_call_whose_first_argument_names_an_mcp_client_module_is_a_gap(tmp_path):

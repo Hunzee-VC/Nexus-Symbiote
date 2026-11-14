@@ -454,7 +454,7 @@ def test_cursor_hook_commands_are_counted_scored_and_digested(tmp_path):
     assert first.properties["settings_hashes"] != second.properties["settings_hashes"]
 
 
-@pytest.mark.parametrize("separator", ["\r", " ", " "])
+@pytest.mark.parametrize("separator", ["\r", "\u2028", "\u2029"])
 def test_settings_whose_line_comment_ends_differently_per_reader_are_a_failure(tmp_path, separator):
     # VS Code-based editors end a line comment at a lone carriage return, U+2028 or
     # U+2029; a reader that ends it only at a line feed would not see these hooks.
@@ -465,3 +465,18 @@ def test_settings_whose_line_comment_ends_differently_per_reader_are_a_failure(t
     _write(tmp_path, ".cursor/hooks.json", text)
     result = IDEAgentScanner().scan(tmp_path)
     assert result.scan_failures == [".cursor/hooks.json: invalid JSON or duplicate keys"]
+
+
+def test_an_invalid_permissions_object_keeps_the_other_declarations(tmp_path):
+    _write(
+        tmp_path,
+        ".claude/settings.json",
+        {"permissions": [], "enableAllProjectMcpServers": True, "apiKeyHelper": "/bin/key"},
+    )
+    result = IDEAgentScanner().scan(tmp_path)
+    assert result.scan_failures == [".claude/settings.json: invalid permission settings object"]
+    agent = _agent(result)
+    declared = agent.properties["settings_declarations"]
+    assert declared["enable_all_project_mcp_servers"] and declared["api_key_helper"]
+    categories = {risk.category for risk in agent.risks}
+    assert {"mcp_auto_approval", "credential_helper"} <= categories

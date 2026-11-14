@@ -11,6 +11,7 @@ import pytest
 
 from nexus_symbiote.live.session import PinnedStdioSession, invoke_pinned_stdio
 from nexus_symbiote.runtime import AuthorizationError, digest, sign_contract
+from nexus_symbiote.runtime_validation import MAX_ARGUMENT_BYTES
 from tests.test_runtime_authorization import DEFINITION, fixture
 
 
@@ -34,6 +35,10 @@ for line in sys.stdin:
         continue
     if method == "initialize":
         result = {{"protocolVersion": "2025-06-18", "capabilities": {{"tools": {{}}}}, "serverInfo": {{"name": "test", "version": "1"}}}}
+        if mode == "no-tools":
+            result["capabilities"] = {{}}
+        if mode == "stall-initialize":
+            time.sleep(30)
     elif method == "tools/list":
         with open(log, "a") as f:
             f.write(json.dumps([method, os.getpid()]) + "\\n")
@@ -42,6 +47,8 @@ for line in sys.stdin:
         if mode == "stall":
             time.sleep(30)
         result = {{"tools": [] if {missing!r} else [definition]}}
+        if mode == "null-cursor":
+            result["nextCursor"] = None
     elif method == "tools/call":
         with open(log, "a") as f:
             f.write(json.dumps([method, os.getpid(), msg["params"]]) + "\\n")
@@ -87,6 +94,37 @@ def test_authorized_call_uses_same_pinned_process_and_consumes_nonce(tmp_path):
     assert len(log.read_text().splitlines()) == 3  # Second process listed but did not call.
 
 
+def test_largest_admitted_arguments_reach_the_server_in_one_request(tmp_path):
+    values = list(fixture(tmp_path))
+    body = "a" * (MAX_ARGUMENT_BYTES - 96)
+    call = values[1].model_copy(update={"arguments": {"to": "team@example.test", "body": body}})
+    values[1] = call
+    values[5] = values[5].model_copy(
+        update={"request_digest": digest(call.model_dump(mode="json"))}
+    )
+    path, pin, log = launcher(tmp_path)
+    result = invoke_pinned_stdio(
+        values[0], call, command=str(path), sha256=pin, **signed_inputs(values, pin)
+    )
+    assert result["content"][0]["text"] == "ok"
+    records = [json.loads(line) for line in log.read_text().splitlines()]
+    assert [r[0] for r in records] == ["tools/list", "tools/call"]
+    assert records[1][2]["arguments"]["body"] == body
+
+
+def test_null_pagination_cursor_ends_the_tool_list(tmp_path):
+    values = fixture(tmp_path)
+    path, pin, log = launcher(tmp_path, mode="null-cursor")
+    result = invoke_pinned_stdio(
+        values[0], values[1], command=str(path), sha256=pin, **signed_inputs(values, pin)
+    )
+    assert result["content"][0]["text"] == "ok"
+    assert [json.loads(line)[0] for line in log.read_text().splitlines()] == [
+        "tools/list",
+        "tools/call",
+    ]
+
+
 def test_changed_descriptor_denied_before_call(tmp_path):
     values = fixture(tmp_path)
     path, pin, log = launcher(tmp_path, altered=True)
@@ -105,6 +143,33 @@ def test_wrong_launcher_pin_never_starts_process(tmp_path):
         invoke_pinned_stdio(
             values[0], values[1], command=str(path), sha256=pin, **signed_inputs(values, pin)
         )
+    assert not log.exists()
+
+
+@pytest.mark.parametrize(
+    ("mode", "pinned", "reason"),
+    [
+        ("normal", False, "denied"),
+        ("no-tools", True, "denied"),
+        ("stall-initialize", True, "adapter-error"),
+    ],
+)
+def test_refusals_before_the_gateway_runs_are_recorded(tmp_path, monkeypatch, mode, pinned, reason):
+    values = fixture(tmp_path)
+    decisions = []
+    values[0].on_decision = decisions.append
+    monkeypatch.setattr("nexus_symbiote.live.session.DEADLINE_SECONDS", 1.0)
+    path, pin, log = launcher(tmp_path, mode=mode)
+    if not pinned:
+        pin = "sha256:" + "0" * 64
+    with pytest.raises((AuthorizationError, OSError, ValueError)):
+        invoke_pinned_stdio(
+            values[0], values[1], command=str(path), sha256=pin, **signed_inputs(values, pin)
+        )
+    [decision] = decisions
+    assert (decision.admitted, decision.reason) == (False, reason)
+    assert (decision.server_id, decision.tool_name) == ("server:mail", "send")
+    assert decision.store_id == values[0].state.store_id
     assert not log.exists()
 
 
@@ -194,9 +259,17 @@ def test_protocol_failure_kills_and_reaps_process(tmp_path, monkeypatch, mode):
 
 
 @pytest.mark.parametrize(
-    "failure", ["workload", "changed-workload", "scope", "endpoint", "revocation", "approval"]
+    ("failure", "reason"),
+    [
+        ("workload", "trust-tenant-mismatch"),
+        ("changed-workload", "identity-changed"),
+        ("scope", "scope-mismatch"),
+        ("endpoint", "endpoint-mismatch"),
+        ("revocation", "tool-revoked"),
+        ("approval", "approval-request-mismatch"),
+    ],
 )
-def test_gateway_gates_prevent_real_process_tool_calls(tmp_path, failure):
+def test_gateway_gates_prevent_real_process_tool_calls(tmp_path, failure, reason):
     values = list(fixture(tmp_path))
     gateway, call, _, snapshot, status, approval, _, human, trust_key, _ = values
     path, pin, log = launcher(tmp_path)
@@ -216,9 +289,17 @@ def test_gateway_gates_prevent_real_process_tool_calls(tmp_path, failure):
         status = status.model_copy(update={"revoked_tools": (snapshot.tools[0].definition_digest,)})
         kwargs["trust"] = sign_contract(status, "trust", (trust_key,))
     elif failure == "approval":
-        approval = approval.model_copy(update={"request_digest": "sha256:" + "0" * 64})
+        grant = snapshot.tools[0].model_copy(update={"endpoint_identity": "stdio+launcher:" + pin})
+        pinned = snapshot.model_copy(update={"tools": (grant,)})
+        approval = approval.model_copy(
+            update={
+                "snapshot_digest": digest(pinned.model_dump(mode="json")),
+                "request_digest": "sha256:" + "0" * 64,
+            }
+        )
         kwargs["approval"] = sign_contract(approval, "approval", (human,))
-    with pytest.raises(AuthorizationError):
+    with pytest.raises(AuthorizationError) as denied:
         invoke_pinned_stdio(gateway, call, command=str(path), sha256=pin, **kwargs)
+    assert denied.value.reason == reason
     records = [json.loads(line)[0] for line in log.read_text().splitlines()] if log.exists() else []
     assert "tools/call" not in records

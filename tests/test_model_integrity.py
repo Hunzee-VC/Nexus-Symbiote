@@ -336,6 +336,78 @@ def test_savedmodel_variables_and_assets_are_bound(project):
     assert any(issue.category == "weight_files_mismatch" for issue in report.issues)
 
 
+def test_a_linked_savedmodel_directory_binds_its_files_and_fails_closed(tmp_path, project):
+    # A loader reads export/variables/* through the link; the walk lists shared/* only.
+    (project / "export").mkdir()
+    (project / "shared").mkdir()
+    (project / "export" / "saved_model.pb").write_bytes(b"\x08\x01")
+    (project / "shared" / "variables.index").write_bytes(b"index")
+    (project / "shared" / "variables.data-00000-of-00001").write_bytes(b"reviewed")
+    (project / "export" / "variables").symlink_to("../shared", target_is_directory=True)
+    policies = load_signature_policies(
+        write_policy(tmp_path, [pin(project, "export/saved_model.pb")]), project
+    )
+    result = ModelScanner(policies).scan(project)
+    refused = "hash refused (symlink, nonregular file or I/O error)"
+    assert result.scan_failures == [
+        f"export/variables/variables.data-00000-of-00001: {refused}",
+        f"export/variables/variables.index: {refused}",
+    ]
+    (component,) = result.components
+    assert component.signing_status == "partially-verified"
+    assert component.trust_tier == TrustTier.UNKNOWN
+    package = ModelPackages(project.resolve()).observe(Path("export/saved_model.pb"))
+    assert [path.as_posix() for path, _ in package.weight_files] == [
+        "export/saved_model.pb",
+        "export/variables/variables.data-00000-of-00001",
+        "export/variables/variables.index",
+    ]
+    assert not package.complete
+
+
+@pytest.mark.parametrize("name", ["Variables/variables.index", "Fingerprint.pb"])
+def test_a_case_variant_of_a_savedmodel_name_is_a_failure(project, name):
+    export = project / "export"
+    (export / name).parent.mkdir(parents=True, exist_ok=True)
+    (export / "saved_model.pb").write_bytes(b"\x08\x01")
+    (export / name).write_bytes(b"weights")
+    variant = name.partition("/")[0]
+    result = ModelScanner().scan(project)
+    assert result.scan_failures == [
+        f"export/{variant}: case variant of export/{variant.lower()} is the active file on "
+        "case-insensitive file systems and is not inventoried"
+    ]
+    assert not ModelPackages(project.resolve()).observe(Path("export/saved_model.pb")).complete
+
+
+def test_savedmodel_files_are_listed_once_for_every_model_in_a_directory(project, monkeypatch):
+    export = project / "export"
+    (export / "variables").mkdir(parents=True)
+    (export / "variables" / "variables.index").write_bytes(b"index")
+    (export / "saved_model.pb").write_bytes(b"\x08\x01")
+    (export / "saved_model.pbtxt").write_text("meta_graphs {}\n")
+    variables = Path("export/variables")
+    listings: list[Path] = []
+    below = model_collector.ModelTree.below
+
+    def counted(tree: model_collector.ModelTree, directory: Path) -> list[Path]:
+        if directory == variables:
+            listings.append(directory)
+        return below(tree, directory)
+
+    monkeypatch.setattr(model_collector.ModelTree, "below", counted)
+    components = ModelScanner().scan(project).components
+    assert [c.properties["weight_files"][0]["path"] for c in components] == [
+        "export/variables/variables.index"
+    ] * 2
+    assert listings == [variables]
+    listings.clear()
+    packages = ModelPackages(project.resolve())
+    for component in components:
+        assert packages.observe(Path(component.name)).complete
+    assert listings == [variables]
+
+
 def test_shard_index_is_bound_to_every_shard_it_lists(project):
     model = project / "llm"
     write_safetensors(model / "model-00001-of-00002.safetensors", b"aa")
@@ -480,6 +552,20 @@ def test_cross_repository_auto_map_is_named_in_the_finding(project):
     assert component.properties["custom_code"]["cross_repository"] is True
 
 
+def test_a_reference_to_a_repository_without_an_owner_names_another_repository(project):
+    # transformers splits on "--" and fetches the module from the repository gpt2.
+    write_safetensors(project / "model.safetensors")
+    (project / "config.json").write_text(
+        json.dumps({"auto_map": {"AutoModel": "gpt2--modeling_gpt.Model"}})
+    )
+    component = ModelScanner().scan(project).components[0]
+    (risk,) = [risk for risk in component.risks if risk.category == "custom_code"]
+    assert "another repository" in risk.detail
+    custom_code = component.properties["custom_code"]
+    assert custom_code["references"] == ["gpt2--modeling_gpt.Model"]
+    assert custom_code["cross_repository"] is True
+
+
 def test_python_files_without_declared_custom_code_do_not_change_the_inventory(project):
     write_safetensors(project / "model.safetensors")
     before = ModelScanner().scan(project)
@@ -578,6 +664,19 @@ def test_text_protocol_pickle_behind_another_suffix_is_unsafe(project, protocol)
     component = ModelScanner().scan(project).components[0]
     assert component.serialization_safety == SerializationSafety.UNSAFE_CODE_EXECUTION
     assert "text-protocol pickle" in component.properties["format_inspection"]
+
+
+def test_a_malformed_pickle_behind_another_suffix_is_unknown(project):
+    # NEWOBJ pops the MARK's object, so pickletools.dis pops past the stack at APPENDS.
+    (project / "model.onnx").write_bytes(b"\x80\x02(K\x01\x81e.")
+    write_safetensors(project / "model.safetensors")
+    result = ModelScanner().scan(project)
+    assert not result.scan_failures
+    assert [c.serialization_safety for c in result.components] == [
+        SerializationSafety.UNKNOWN,
+        SerializationSafety.SAFE,
+    ]
+    assert ModelPackages(project).observe(Path("model.onnx")).complete
 
 
 def test_torch_zip_checkpoint_behind_another_suffix_is_unsafe(project):
@@ -1312,6 +1411,37 @@ def test_validate_reports_unused_entries_when_completeness_is_skipped(tmp_path, 
     assert "tokenizer.json: signature policy entry names no collected model weight file" in (
         result.output
     )
+
+
+@pytest.mark.parametrize("budget", ["artifact", "bindings"])
+def test_entries_of_a_model_the_budget_left_unchecked_are_not_unused(
+    tmp_path, project, monkeypatch, budget
+):
+    export = project / "export"
+    (export / "variables").mkdir(parents=True)
+    (export / "saved_model.pb").write_bytes(b"\x08\x01")
+    (export / "variables" / "variables.data-00000-of-00001").write_bytes(b"reviewed")
+    (export / "variables" / "variables.index").write_bytes(b"index")
+    (project / "notes.txt").write_text("not a weight file")
+    names = [
+        "export/saved_model.pb",
+        "export/variables/variables.data-00000-of-00001",
+        "export/variables/variables.index",
+        "notes.txt",
+    ]
+    policy = write_policy(tmp_path, [pin(project, name) for name in names])
+    policies = load_signature_policies(policy, project)
+    bom = AIBOM(components=ModelScanner(policies).scan(project).components)
+    if budget == "bindings":
+        monkeypatch.setattr(
+            "nexus_symbiote.validators.integrity.ModelPackages",
+            functools.partial(ModelPackages, binding_budget=0),
+        )
+    validator = IntegrityValidator(policies, byte_budget=1 if budget == "artifact" else None)
+    report = validator.validate(bom, project)
+    assert any(i.category == "validation_budget_exhausted" for i in report.issues)
+    unused = [i.detail for i in report.issues if i.category == "unused_policy_entry"]
+    assert unused == ["notes.txt: signature policy entry names no collected model weight file"]
 
 
 # ONNX keys in every encoding a protobuf runtime accepts --------------------------------

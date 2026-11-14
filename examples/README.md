@@ -89,8 +89,8 @@ records its version and pin and which also names the removed version pin:
 
 ```text
 Security Alerts:
-  [CRITICAL] Critical change in 'tickets': MCP server endpoint changed. Review before execution.; MCP server static source binding changed: launcher, arguments, environment, endpoint or declared tools differ, or the binding key changed. Review before execution.; endpoint_url changed.; properties changed.
-  [CRITICAL] Critical change in 'notes': MCP server static source binding changed: launcher, arguments, environment, endpoint or declared tools differ, or the binding key changed. Review before execution.; Version changed: 2025.8.21 → None; Version pin removed — now floating or unknown.; Risk findings added: 1 high (version_pinning).; package_url changed.; properties changed.
+  [CRITICAL] Critical change in 'tickets': MCP server endpoint changed. Review before execution.; MCP server static source binding changed: launcher, arguments, environment, endpoint or declared tools differ, or the binding key changed. Review before execution.; properties.static_config_hash changed.; endpoint_url changed.
+  [CRITICAL] Critical change in 'notes': MCP server static source binding changed: launcher, arguments, environment, endpoint or declared tools differ, or the binding key changed. Review before execution.; Version changed: 2025.8.21 → None; Version pin removed — now floating or unknown.; Risk findings added: 1 high (version_pinning).; properties.static_config_hash changed.; properties.packages changed.; package_url changed.
 ```
 
 An inventory records paths relative to the project, so a snapshot of one checkout

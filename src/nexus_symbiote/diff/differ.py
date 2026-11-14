@@ -613,7 +613,7 @@ class AIBOMDiffer:
         if old.version != new.version:
             modifications.append(
                 {
-                    "detail": f"Version changed: {old.version} → {new.version}",
+                    "detail": f"Version changed: {_clip(old.version)} → {_clip(new.version)}",
                     "severity": "medium",
                 }
             )
@@ -674,12 +674,15 @@ class AIBOMDiffer:
             old_h = old.hashes.get(hash_key)
             new_h = new.hashes.get(hash_key)
             if old_h != new_h:
+                if old_h and not new_h:
+                    outcome = "removed — integrity is unknown."
+                elif old_h:
+                    outcome = "changed."
+                else:
+                    outcome = "became available."
                 modifications.append(
                     {
-                        "detail": f"File hash ({hash_key}) "
-                        + (
-                            "removed — integrity is unknown." if old_h and not new_h else "changed."
-                        ),
+                        "detail": f"File hash ({_clip(hash_key)}) {outcome}",
                         "severity": "high" if old_h else "info",
                     }
                 )
@@ -1141,8 +1144,8 @@ class AIBOMDiffer:
             # report digests bind; a moved report is information, not drift.
             improvement(
                 "source_report_path",
-                f"ShadowScan report location changed from {old.source_report_path} to "
-                f"{new.source_report_path}.",
+                f"ShadowScan report location changed from {_clip(old.source_report_path)} to "
+                f"{_clip(new.source_report_path)}.",
             )
         return {
             "source_report_digest",

@@ -112,6 +112,7 @@ class TestPolicyModel:
         'version: "2.0"',
         "risk: {}\nrisk: {}",
         'scan: {exclude_paths: ["../escape"]}',
+        "validation: {require_integrity: false}",
     ],
 )
 def test_invalid_settings_fail_closed(tmp_path, text):
@@ -178,6 +179,45 @@ def test_a_stricter_fail_threshold_alone_is_accepted(tmp_path):
     )
     with pytest.raises(PolicyError, match=r"risk \(warn_threshold cannot exceed fail_threshold\)"):
         load_policy(tmp_path)
+
+
+def test_a_project_root_that_cannot_be_listed_is_not_taken_to_have_no_policy(tmp_path, monkeypatch):
+    import os
+
+    (tmp_path / ".nexus-symbiote.yaml").write_text('risk: {fail_on_severity: "medium"}\n')
+
+    def unlistable(path):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(os, "listdir", unlistable)
+    with pytest.raises(PolicyError, match="cannot be listed: Permission denied"):
+        load_policy(tmp_path)
+
+
+def test_a_policy_path_that_is_a_directory_is_refused_without_leaking_its_descriptor(
+    tmp_path, monkeypatch
+):
+    import os
+
+    (tmp_path / ".nexus-symbiote.yaml").mkdir()
+    opened, closed = [], []
+    real_open, real_close = os.open, os.close
+
+    def recording_open(*args, **kwargs):
+        fd = real_open(*args, **kwargs)
+        opened.append(fd)
+        return fd
+
+    def recording_close(fd):
+        closed.append(fd)
+        real_close(fd)
+
+    monkeypatch.setattr(os, "open", recording_open)
+    monkeypatch.setattr(os, "close", recording_close)
+    with pytest.raises(PolicyError, match="regular file no larger than 1 MiB"):
+        load_policy(tmp_path)
+    monkeypatch.undo()
+    assert opened and set(opened) <= set(closed)
 
 
 def test_both_policy_file_names_are_refused_instead_of_one_shadowing_the_other(tmp_path):

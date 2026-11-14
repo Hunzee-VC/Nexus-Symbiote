@@ -73,9 +73,9 @@ inputs:
       from the checked-out code. Its artifact and bundle paths are relative to scan-path. The
       Action refuses relative paths, any path that passes through a symlink (including a
       symlinked RUNNER_TEMP or parent directory), hard links, non-regular and oversized files, and
-      passes one snapshot to collection, validation and the risk gate. Signatures verify offline against the
-      Sigstore trust root shipped in the Action's hash-locked sigstore package, never a runner
-      cache. Empty means no signer policy
+      passes one snapshot to collection, validation and the risk gate. Signatures verify offline
+      against the Sigstore trust root shipped in the Action's hash-locked sigstore package, never
+      a runner cache. Empty means no signer policy
     default: ""
   allow-unsigned-discovery:
     description: >-

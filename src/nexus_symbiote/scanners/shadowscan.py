@@ -185,8 +185,9 @@ def _unrecognized(
 def _clean_binding(value: Any) -> str | None:
     """One binding value from a report, or ``None`` when it is absent or unsafe.
 
-    A binding is a short string without control characters. Anything else is
-    not a repository or commit the report can be bound to.
+    A binding is a non-empty string of at most 4,096 characters without C0 control
+    characters or DEL. Anything else is not a repository or commit the report can be
+    bound to.
     """
     if not isinstance(value, str) or not value or len(value) > 4096:
         return None
@@ -689,12 +690,14 @@ class ShadowScanImporter(Scanner):
             for c in compositions
         ):
             result.limitations.append("CycloneDX source declares incomplete composition")
-        for key in (
-            "shadowscan:bom:truncated-findings",
-            "shadowscan:scan:credential-findings-excluded",
+        if any(
+            props.get(key) not in (None, "0")
+            for key in (
+                "shadowscan:bom:truncated-findings",
+                "shadowscan:scan:credential-findings-excluded",
+            )
         ):
-            if props.get(key) not in (None, "0"):
-                result.limitations.append("CycloneDX source omits or truncates findings")
+            result.limitations.append("CycloneDX source omits or truncates findings")
         # CycloneDX is a lossy projection of discovery; it cannot prove full report coverage.
         result.limitations.append(
             "CycloneDX source omits or summarizes discovery evidence and relationships"

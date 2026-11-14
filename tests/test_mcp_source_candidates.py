@@ -304,6 +304,36 @@ def test_a_framework_import_spelled_with_compatibility_characters_is_a_gap(tmp_p
     assert [c.name for c in result.components if c.component_type == "tool"] == ["lookup"]
 
 
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "import {pydantic_ai} as p\nagent = p.Agent('m')\n",
+        "from {pydantic_ai} import *\nagent = Agent('m')\n",
+        "import {langchain_core}.tools as t\n",
+        "from {langchain_core}.tools import *\n",
+    ],
+    ids=["qualified-agent", "star-agent", "qualified-decorator", "star-decorator"],
+)
+def test_a_qualified_or_star_framework_import_with_compatibility_characters_is_a_gap(
+    tmp_path, statement
+):
+    # Spelled in ASCII, the same import is a gap of the tool collector.
+    packages = ("pydantic_ai", "langchain_core")
+    hidden = {
+        name: "".join(chr(ord(letter) + 0xFEE0) if letter.isalpha() else letter for letter in name)
+        for name in packages
+    }
+    _write(tmp_path, "pkg/tools.py", statement.format(**hidden))
+    result = MCPScanner().scan(tmp_path)
+    assert result.surfaces_excluded == [
+        "pkg/tools.py: Python agent framework tool import spelled with compatibility "
+        "characters; its tools are not collected"
+    ]
+    _write(tmp_path, "pkg/tools.py", statement.format(**{name: name for name in packages}))
+    result = MCPScanner().scan(tmp_path)
+    assert result.surfaces_excluded == ["pkg/tools.py: unresolved Python SDK tool import"]
+
+
 @pytest.mark.parametrize("character", ["\ufdfa", "\u3300", "\uff4d"])
 def test_compatibility_characters_cannot_inflate_the_search(tmp_path, character):
     # U+FDFA has an 18-character compatibility form; folding the whole text at once
@@ -337,6 +367,21 @@ def test_unrelated_sources_larger_than_file_bytes_are_searched_as_a_stream(tmp_p
     assert sorted(MCPScanner().scan(tmp_path).scan_failures) == [
         "pkg/late.py: syntax-bytes limit of 256 KiB exceeded; raise it with --limit syntax-bytes=N",
         "pkg/text.py: file-bytes limit of 4 MiB exceeded; raise it with --limit file-bytes=N",
+    ]
+
+
+def test_a_source_symlinked_within_the_project_is_read_through_its_target(tmp_path):
+    _write(tmp_path, "pkg/real.py", "x = 1\n")
+    _write(tmp_path, "web/real.ts", "export const x = 1;\n")
+    _write(tmp_path, "web/server.ts", SERVER_TS)
+    (tmp_path / "pkg" / "alias.py").symlink_to("real.py")
+    (tmp_path / "web" / "alias.ts").symlink_to("real.ts")
+    (tmp_path / "web" / "linked.ts").symlink_to("server.ts")
+    result = MCPScanner().scan(tmp_path)
+    assert result.scan_failures == []
+    assert sorted(c.source_path for c in result.components if c.component_type == "tool") == [
+        "web/linked.ts",
+        "web/server.ts",
     ]
 
 
@@ -492,12 +537,38 @@ def test_the_repository_itself_passes_the_mcp_collector():
         " \n" * 131_072,
         "a\n" * 131_072,
         "/*/" * 87_381,
+        "//\n" * 43_690 + "/*" + "x" * 131_068 + "*/",
     ],
 )
 def test_comment_stripping_is_linear_at_the_syntax_limit(text):
     started = time.monotonic()
     without_js_comments(text)
     assert time.monotonic() - started < 5
+
+
+class _SearchCountingText(str):
+    searched = 0
+
+    def find(self, sub, start=None, end=None):  # type: ignore[override]
+        begin = 0 if start is None else start
+        found = super().find(sub, begin, len(self) if end is None else end)
+        self.searched += (len(self) if found < 0 else found + len(sub)) - begin
+        return found
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "//\n" * 4_000 + "/*" + "x" * 12_000 + "*/",
+        "// /*\n" * 2_000 + "x" * 12_000 + "*/",
+    ],
+)
+def test_comment_stripping_searches_for_each_block_close_once(text):
+    # Every whole-line comment before a long block comment once searched the block
+    # for its close again, so the work grew with the product of the two.
+    counted = _SearchCountingText(text)
+    assert without_js_comments(counted) == OLD_STRIPPER.sub("", text)
+    assert counted.searched <= 4 * len(text)
 
 
 @settings(max_examples=3_000, deadline=None)

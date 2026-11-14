@@ -17,6 +17,7 @@ makes the launcher unknown, because an unrecognised wrapper (``nice``, ``sudo``,
 
 from __future__ import annotations
 
+import csv
 import fnmatch
 import posixpath
 import re
@@ -81,14 +82,15 @@ _NODE_PRELOAD = frozenset({"-r", "--require", "--import", "--loader", "--experim
 # Node options that take a value as the next word (node --help); the value is never the script.
 _NODE_VALUES = _NODE_PRELOAD | _set(
     "--allow-fs-read --allow-fs-write --build-snapshot-config -C --conditions --cpu-prof-dir"
-    " --cpu-prof-interval --cpu-prof-name --diagnostic-dir --disable-proto --disable-warning"
-    " --dns-result-order --env-file --env-file-if-exists --experimental-config-file"
-    " --experimental-default-type --experimental-sea-config --experimental-test-isolation"
-    " --heap-prof-dir --heap-prof-interval --heap-prof-name --heapsnapshot-near-heap-limit"
-    " --heapsnapshot-signal --icu-data-dir --input-type --inspect-publish-uid"
-    " --localstorage-file --max-http-header-size --max-old-space-size-percentage"
-    " --network-family-autoselection-attempt-timeout --openssl-config --redirect-warnings"
-    " --report-filename --report-signal --run --secure-heap --secure-heap-min --snapshot-blob"
+    " --cpu-prof-interval --cpu-prof-name --debug-port --diagnostic-dir --disable-proto"
+    " --disable-warning --dns-result-order --env-file --env-file-if-exists"
+    " --experimental-config-file --experimental-default-type --experimental-sea-config"
+    " --experimental-test-isolation --heap-prof-dir --heap-prof-interval --heap-prof-name"
+    " --heapsnapshot-near-heap-limit --heapsnapshot-signal --icu-data-dir --input-type"
+    " --inspect-port --inspect-publish-uid --localstorage-file --max-http-header-size"
+    " --max-old-space-size-percentage --network-family-autoselection-attempt-timeout"
+    " --openssl-config --redirect-warnings --report-dir --report-directory --report-filename"
+    " --report-signal --run --secure-heap --secure-heap-min --security-revert --snapshot-blob"
     " --test-concurrency --test-coverage-branches --test-coverage-exclude"
     " --test-coverage-functions --test-coverage-include --test-coverage-lines"
     " --test-name-pattern --test-reporter --test-reporter-destination --test-shard"
@@ -97,11 +99,27 @@ _NODE_VALUES = _NODE_PRELOAD | _set(
     " --unhandled-rejections --use-largepages --v8-pool-size --watch-kill-signal --watch-path"
 )
 _INLINE_SOURCES = ("data:", "http:", "https:")
-# Rarely used interpreters: inline code flags anywhere before the script file.
+# Rarely used interpreters: inline code flags anywhere before the script file, alone, at
+# the end of a cluster, or with the code attached after a run of options that take none.
 _INLINE_FLAGS = {
-    "ruby": re.compile(r"-[a-zA-Z]*e"),
-    "perl": re.compile(r"-[a-zA-Z]*[eE]"),
-    "php": re.compile(r"-[rBRE]|--(?:run|process-begin|process-code|process-end)(?:=.*)?", re.S),
+    "ruby": re.compile(r"-[a-zA-Z]*e|-[acdlnpsSvwyhUW0-9]*e.+", re.S),
+    "perl": re.compile(r"-[a-zA-Z]*[eE]|-[acdfgnpsStTuUvwWXhl0-9]*[eE].+", re.S),
+    "php": re.compile(
+        r"-[aehilmnsvwH]*[rBRE].*|--(?:run|process-begin|process-code|process-end)(?:=.*)?", re.S
+    ),
+}
+# Their options that take the next word as a value when none is attached (ruby --help,
+# perl -h, php --help); the value is never the script.
+_INLINE_VALUES = {
+    "ruby": _set(
+        "-I -r -C -E --encoding --external-encoding --internal-encoding --enable --disable"
+        " --dump --parser --backtrace-limit --crash-report"
+    ),
+    "perl": _set("-I"),
+    "php": _set(
+        "-c -d -z -t -S --php-ini --define --zend-extension --docroot --server"
+        " --rf --rc --re --rz --ri"
+    ),
 }
 _SCRIPT_SUFFIX = re.compile(r"(?:-cli)?\.[cm]?js$|\.py$")
 # Python options that end a short-option cluster: inline code, a module, or a value.
@@ -396,12 +414,20 @@ def _combined(
     return index
 
 
-def _git(spec: str) -> Package:
-    """A git source is pinned only by a full 40-hexadecimal commit."""
+def _git(spec: str, *, python: bool = False) -> Package:
+    """A git source is pinned only by a full 40-hexadecimal commit.
+
+    npm names the commit after ``#``. pip and uv name it after the last ``@`` in the
+    path and read the fragment only for ``egg=`` and ``subdirectory=``.
+    """
     body = spec[4:] if spec.lower().startswith("git+") else spec
     reference = ""
     try:
-        if "#" in body:
+        if python:
+            body = body.partition("#")[0]
+            if "@" in urlsplit(body).path:
+                reference = urlsplit(body).path.rsplit("@", 1)[1]
+        elif "#" in body:
             body, _, reference = body.partition("#")
             reference = reference.removeprefix("commit=")
         elif "@" in urlsplit(body).path:
@@ -487,7 +513,7 @@ def python_spec(spec: str, *, shorthand: bool = False) -> Package:
         return Package("unknown", spec)
     lowered = spec.lower()
     if lowered.startswith("git+"):
-        return _git(spec)
+        return _git(spec, python=True)
     if "://" in spec and " @ " not in spec and "@ " not in spec:
         return Package("url", spec, origin=origin(spec))
     if _LOCAL_PATH.match(spec) or (_ARCHIVE.search(spec) and "://" not in spec):
@@ -510,7 +536,7 @@ def python_spec(spec: str, *, shorthand: bool = False) -> Package:
     if requirement.url:
         url = requirement.url
         if url.lower().startswith("git+"):
-            return _git(url)
+            return _git(url, python=True)
         return Package(
             "path" if url.lower().startswith("file:") else "url", spec, origin=origin(url)
         )
@@ -746,7 +772,6 @@ _DENO_RUN = _table(
     ),
 )
 _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash", "mksh", "fish"})
-# bash long options that take the next word; other long options are flags.
 # bash's long options, which it also reads after a single dash: -rcfile is --rcfile.
 _BASH_LONG_OPTIONS = _set(
     "debug debugger dump-po-strings dump-strings help init-file login noediting noprofile"
@@ -933,6 +958,11 @@ def _shell_script(
             if not word.startswith("--"):
                 # bash reads -login as --login; other shells read the letters l o g i n.
                 return None, [], _AMBIGUOUS_SHELL
+            if name == "zsh":
+                # zsh sets any option in GNU long form (--xtrace), ignoring case, - and _.
+                setting = option.replace("-", "").replace("_", "").lower()
+                interactive = interactive or setting == "interactive"
+                xtrace = xtrace or setting == "xtrace"
             continue
         letters = word[1:]
         inline = inline or "c" in letters
@@ -968,7 +998,8 @@ def _shell_script(
 
 
 def _names_option(setting: str, option: str) -> bool:
-    """Whether an -o value names ``option``, allowing the abbreviations ksh accepts."""
+    """Whether an -o value names ``option``: ksh accepts abbreviations, zsh ignores ``_``."""
+    setting = setting.replace("_", "")
     return len(setting) >= 3 and option.startswith(setting)
 
 
@@ -1235,6 +1266,8 @@ def _interpreter_reason(
                     step = 2 if position + 1 == len(letters) else 1
         elif _INLINE_FLAGS[family].fullmatch(word):
             return _inline(family, launch)
+        elif option in _INLINE_VALUES[family] and not equals:
+            step = 2
         index += step
     return None
 
@@ -1378,11 +1411,15 @@ _PATTERN_CACHE = 1024
 
 
 def _pattern(text: str, budget: list[int] | None) -> re.Pattern[str]:
-    """The compiled pattern, charged when it is compiled; short patterns are kept."""
+    """The compiled pattern; short patterns are kept.
+
+    Every use is charged as a compile, so that the budget, and whether a scan runs out
+    of it, never depends on which patterns earlier scans left in the cache.
+    """
+    # Compiling costs about what reading 2 KB of words does.
+    _charge(budget, 32 + len(text) // 16)
     found = _PATTERNS.get(text)
     if found is None:
-        # Compiling costs about what reading 2 KB of words does.
-        _charge(budget, 32 + len(text) // 16)
         found = re.compile(fnmatch.translate(text))
         if len(text) <= 2 * _LONGEST_PROGRAM + 2:
             if len(_PATTERNS) >= _PATTERN_CACHE:
@@ -1785,6 +1822,9 @@ def _command_words(command: str, args: list[str]) -> tuple[list[str] | None, str
         if close < 0:
             return None, _NOT_SIMPLE
         tail = stripped[close + 1 :]
+        if tail[:1] and not tail[0].isspace():
+            # A shell joins text after the closing quote to the quoted word: "np"x is npx.
+            return None, _NOT_SIMPLE
         words = _split_script(tail) if tail.strip() else []
         return (None, _NOT_SIMPLE) if words is None else ([stripped[1:close], *words], "")
     if not any(char.isspace() for char in stripped):
@@ -1850,8 +1890,10 @@ def _unwrap(tokens: list[str], launch: Launch) -> list[str] | None:
     if name == "wsl":
         return _unwrap_wsl(rest, launch)
     if name in {"exec", "nohup"} and rest:
-        launch.wrappers.append(name)
-        return rest
+        command = _exec_operands(name, rest, launch)
+        if command is not None:
+            launch.wrappers.append(name)
+        return command
     if name == "eval":
         # Behind a reader that keeps quoting (wsl, env -S), what eval reads is not established.
         reread = not any(wrapper in {"wsl", "env"} for wrapper in launch.wrappers)
@@ -1877,6 +1919,26 @@ def _unwrap(tokens: list[str], launch: Launch) -> list[str] | None:
         launch.wrappers.append(name)
         return rest[separator + 1 :]
     return None
+
+
+def _exec_operands(name: str, rest: list[str], launch: Launch) -> list[str] | None:
+    """The command after ``nohup [--]``, or after the shell builtin's ``exec [-cl] [-a name]``."""
+    index = 0
+    while index < len(rest) and rest[index].startswith("-") and rest[index] != "-":
+        word = rest[index]
+        index += 1
+        if word == "--":
+            break
+        named = re.fullmatch(r"-[cl]*(a.*)?", word, re.S) if name == "exec" else None
+        if named is None:
+            launch.fail(f"unrecognised {name} option")
+            return None
+        if named.group(1) == "a":
+            index += 1
+    if index >= len(rest):
+        launch.fail(f"{name} without a command")
+        return None
+    return rest[index:]
 
 
 def _unwrap_env(rest: list[str], launch: Launch) -> list[str] | None:
@@ -1932,7 +1994,7 @@ def _script_words(words: list[str], launch: Launch) -> list[str] | None:
         launch.environment.append((name, value))
         words = words[1:]
     if words and words[0] == "exec":
-        words = words[1:]
+        return _exec_operands("exec", words[1:], launch)
     return words or None
 
 
@@ -2217,6 +2279,9 @@ _PNPM_FETCHES = _set(
     " self-update approve-builds link ln fetch dedupe remove rm uninstall un"
 )
 _YARN_FETCHES = _set("dlx create add install global up upgrade set plugin import")
+# Subcommands that run another one: in one workspace, or in each (pnpm m is pnpm recursive).
+_YARN_NESTED = _set("workspace workspaces")
+_PNPM_NESTED = _set("recursive multi m")
 _BUN_FETCHES = _set("x create c add a install i update upgrade link pm remove rm")
 
 
@@ -2266,6 +2331,13 @@ def _pnpm(name: str, rest: list[str], launch: Launch) -> None:
     if found is None:
         return
     subcommand, remainder, _ = found
+    while subcommand in _PNPM_NESTED:
+        # pnpm recursive runs the next command in the directory of each workspace package.
+        launch.relocated = True
+        found = _subcommand(remainder, _table(), launch)
+        if found is None:
+            return
+        subcommand, remainder, _ = found
     if subcommand == "dlx":
         launch.launcher = "pnpm dlx"
         _package_runner(remainder, launch, _PNPM_DLX, {"--package"})
@@ -2282,7 +2354,16 @@ def _yarn(name: str, rest: list[str], launch: Launch) -> None:
     if found is None:
         return
     subcommand, remainder, _ = found
-    if subcommand == "dlx":
+    while subcommand == "workspace":
+        # yarn workspace <name> <command> runs the command in that workspace's directory.
+        if len(remainder) < 2 or remainder[1].startswith("-"):
+            launch.fail("unrecognised yarn invocation")
+            return
+        launch.relocated = True
+        subcommand, remainder = remainder[1], remainder[2:]
+    if subcommand == "workspaces":
+        launch.fail("yarn workspaces runs a command in each workspace")
+    elif subcommand == "dlx":
         launch.launcher = "yarn dlx"
         _package_runner(remainder, launch, _YARN_DLX, {"-p", "--package"})
     elif subcommand in _YARN_FETCHES:
@@ -2366,7 +2447,8 @@ def _python_runner(
     elif position < len(rest):
         program = rest[position]
         if "://" in program or program == "-":
-            # uv run downloads and runs a script named by URL, or reads one from stdin.
+            # uv run downloads and runs a script named by URL, or reads one from stdin; both
+            # are recorded as a URL source, standard input as one without an origin.
             launch.packages.insert(0, Package("url", program, origin=origin(program)))
         else:
             _start(rest[position:], launch)
@@ -2504,8 +2586,13 @@ _BROAD = re.compile(
 
 def _host_source(spec: str, *, mount: bool) -> str | None:
     if mount:
-        fields = dict(part.partition("=")[::2] for part in spec.split(","))
-        if fields.get("type", "volume") != "bind":
+        # docker reads --mount as one CSV record and lower-cases each key and the type.
+        try:
+            parts = next(csv.reader([spec]), [])
+        except csv.Error:
+            parts = spec.split(",")
+        fields = {key.lower(): value for key, _, value in (part.partition("=") for part in parts)}
+        if fields.get("type", "volume").lower() != "bind":
             return None
         return fields.get("source") or fields.get("src") or None
     if ":" not in spec:
@@ -2548,8 +2635,9 @@ def _container_context(options: list[tuple[str, str | None]], launch: Launch) ->
                 continue
             launch.mark("host_mounts")
             normalized = source.rstrip("/\\") or ("/" if source.startswith("/") else "\\")
+            # normpath keeps a leading "//", which Linux and Go's filepath.Clean read as "/".
             canonical = (
-                posixpath.normpath(normalized)
+                posixpath.normpath("/" + normalized.lstrip("/"))
                 if normalized.startswith("/") and "\\" not in normalized
                 else normalized
             )
@@ -2937,11 +3025,11 @@ _STARTS: dict[str, _Starts] = {
             " --aggregate-output --color --no-color --use-stderr",
             "-C --dir -F --filter --filter-prod --reporter --loglevel --workspace-concurrency",
         ),
-        _PNPM_FETCHES.__contains__,
+        (_PNPM_FETCHES | _PNPM_NESTED).__contains__,
     ),
     "yarn": _Starts(
         _table("-s --silent --verbose --offline --prefer-offline", "--cwd"),
-        _YARN_FETCHES.__contains__,
+        (_YARN_FETCHES | _YARN_NESTED).__contains__,
     ),
     "bun": _Starts(
         _table(

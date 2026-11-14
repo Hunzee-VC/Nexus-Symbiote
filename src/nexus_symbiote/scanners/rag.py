@@ -193,6 +193,21 @@ def _scheme(raw: str) -> str | None:
     return match.group(1).lower() if match and "://" in raw else None
 
 
+def _transport(raw: str) -> str | None:
+    """The scheme a locator connects with: ``""`` when it shows none, ``None`` for a path.
+
+    WHATWG parsers read ``http:\\host`` and ``http:host`` as ``http://host``, so a
+    leading scheme counts without ``//``; in ``redis:6379`` the name is a host. Other
+    text with ``:``, ``@`` or ``=``, such as a connection string, shows no scheme; text
+    without them is a path.
+    """
+    value = raw.strip()
+    match = _SCHEME.match(value)
+    if match:
+        return "" if value[match.end() : match.end() + 1].isdigit() else match.group(1).lower()
+    return "" if any(mark in value for mark in ":@=") else None
+
+
 def _control(value: Any) -> str:
     """Only a boolean, or an object whose ``enabled`` is a boolean, states a control."""
     if value is None:
@@ -254,7 +269,7 @@ def _transport_risks(subject: str, urls: list[str], noun: str) -> list[RiskAsses
     risks = []
     article = "an" if noun == "endpoint" else "a"
     for uri in urls:
-        scheme = _scheme(uri)
+        scheme = _transport(uri)
         shown = neutralize(_exported_uri(uri)[0])
         if scheme in _CLEAR_TEXT_SCHEMES:
             risks.append(
@@ -321,7 +336,7 @@ class RAGScanner(Scanner):
                 elif path.name in ENV_FILES and len(path.parts) == 1:
                     raw = files.read_bytes(path)
                     if raw is not None:
-                        # Only ASCII key names are read; values are never decoded or kept.
+                        # Only ASCII key names are read; values are never kept.
                         content = raw.decode("utf-8", errors="replace")
                         result.surfaces_scanned.append(path.as_posix())
                         result.components.extend(self._scan_env(content, path))
@@ -413,7 +428,7 @@ class RAGScanner(Scanner):
         )
 
     def _read_config(self, path: Path, files: ConfinedCollection, result: ScanResult) -> Any:
-        if path.suffix == ".json":
+        if path.suffix.lower() == ".json":
             return files.read_json(path)
         content = files.read_text(path)
         if content is None:
@@ -421,7 +436,7 @@ class RAGScanner(Scanner):
         try:
             import yaml
         except ImportError:
-            result.scan_failures.append(f"{path}: YAML parser unavailable (install yaml extra)")
+            result.scan_failures.append(f"{path.as_posix()}: YAML parser unavailable")
             return None
         try:
             # Anchors/aliases and tags are unnecessary for this static profile;
@@ -431,7 +446,7 @@ class RAGScanner(Scanner):
                     token, (yaml.AliasToken, yaml.AnchorToken, yaml.TagToken)
                 ):
                     result.scan_failures.append(
-                        f"{path}: YAML aliases, tags or token limit unsupported"
+                        f"{path.as_posix()}: YAML aliases, tags or token limit unsupported"
                     )
                     return None
 
@@ -460,7 +475,7 @@ class RAGScanner(Scanner):
                 raise ValueError("empty YAML configuration")
             return value
         except (yaml.YAMLError, TypeError, ValueError, RecursionError, OverflowError, IndexError):
-            result.scan_failures.append(f"{path}: invalid YAML")
+            result.scan_failures.append(f"{path.as_posix()}: invalid YAML")
             return None
 
     def _scan_rag_config(
@@ -513,12 +528,14 @@ class RAGScanner(Scanner):
         configuration_origins = sorted({_exported_uri(url)[0] for url in configuration_urls})
         components: list[RAGSourceComponent] = []
         target = files.link_target(path)
+        located = 0
         for index, source in enumerate(sources):
             if not isinstance(source, dict):
                 result.scan_failures.append(f"{relative}: RAG source must be an object")
                 continue
             try:
-                component = self._source(relative, index, source, shared, urls)
+                component = self._source(relative, index, source, shared, urls, located)
+                located += len(component.source_uris)
                 if target is not None:
                     component.properties["symlink_target"] = target
                 if configuration_origins:
@@ -552,11 +569,14 @@ class RAGScanner(Scanner):
         source: dict[str, Any],
         shared: tuple[str, dict[str, str]] | None,
         file_urls: list[str],
+        located: int,
     ) -> RAGSourceComponent:
         """One source's record.
 
         ``shared`` is the digest and binding of the fields beside the source lists, which
-        apply to every source. ``file_urls`` collects the URLs described in the file.
+        apply to every source. ``file_urls`` collects the URLs described in the file and
+        ``located`` counts the ``source_uris`` of its earlier sources: each may become a
+        finding, so together they are bounded as ``_describe`` bounds the URLs.
         """
         declared_name = source.get("name")
         if declared_name is None:
@@ -620,6 +640,10 @@ class RAGScanner(Scanner):
             file_urls,
         )
         urls = file_urls[first_url:]
+        if len(file_urls) + located + len(locators) > _MAX_ENTRIES:
+            raise _TooManyURLsError(
+                f"RAG configuration declares more than {_MAX_ENTRIES} endpoint URLs and source URIs"
+            )
         structure_hash = hash_canonical(
             {
                 "profile": SOURCE_STRUCTURE_PROFILE,

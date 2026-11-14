@@ -248,6 +248,27 @@ def test_cyclonedx_services_and_unknown_composition_are_not_ignored(tmp_path):
     assert "CANARY" not in repr(imported)
 
 
+@pytest.mark.parametrize(
+    ("truncated", "excluded", "listed"),
+    [("0", "0", 0), ("3", "0", 1), ("0", "2", 1), ("3", "2", 1)],
+)
+def test_cyclonedx_truncation_is_listed_once(truncated, excluded, listed):
+    properties = [
+        {"name": "shadowscan:scan:status", "value": "complete"},
+        {"name": "shadowscan:bom:truncated-findings", "value": truncated},
+        {"name": "shadowscan:scan:credential-findings-excluded", "value": excluded},
+    ]
+    report = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "metadata": {"properties": properties},
+        "components": [],
+        "compositions": [{"aggregate": "unknown"}],
+    }
+    imported = ShadowScanImporter().parse_report(json.dumps(report))
+    assert imported.limitations.count("CycloneDX source omits or truncates findings") == listed
+
+
 def test_conventional_scan_carries_source_fingerprint(tmp_path):
     directory = tmp_path / ".shadowscan"
     directory.mkdir()

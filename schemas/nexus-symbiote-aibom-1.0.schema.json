@@ -12,7 +12,6 @@
         },
         "component_type": {
           "const": "a2a-client",
-          "default": "a2a-client",
           "title": "Component Type",
           "type": "string"
         },
@@ -146,6 +145,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "A2AClientComponent",
@@ -163,7 +163,6 @@
         },
         "component_type": {
           "const": "a2a-server",
-          "default": "a2a-server",
           "title": "Component Type",
           "type": "string"
         },
@@ -321,6 +320,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "A2AServerComponent",
@@ -451,7 +451,6 @@
         },
         "component_type": {
           "const": "agent",
-          "default": "agent",
           "title": "Component Type",
           "type": "string"
         },
@@ -706,6 +705,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "AgentComponent",
@@ -973,7 +973,7 @@
     },
     "CapabilityDeclaration": {
       "additionalProperties": false,
-      "description": "What a component is permitted to do.",
+      "description": "What a component is declared to do; a declaration, not a granted permission.",
       "properties": {
         "capabilities": {
           "items": {
@@ -1133,7 +1133,7 @@
       "description": "What was actually scanned and what was excluded.",
       "properties": {
         "scope": {
-          "description": "What this completeness claim covers (e.g. 'full-agent')",
+          "description": "What this completeness claim covers. Built-in collection writes repository, or repository+shadowscan with an imported discovery report (scan), shadowscan-imported (import-shadowscan) or mcp-endpoint-observation (discover-mcp)",
           "title": "Scope",
           "type": "string"
         },
@@ -1358,7 +1358,6 @@
         },
         "component_type": {
           "const": "data-source",
-          "default": "data-source",
           "title": "Component Type",
           "type": "string"
         },
@@ -1527,6 +1526,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "DataSourceComponent",
@@ -1667,7 +1667,7 @@
     },
     "DiscoveryVerification": {
       "additionalProperties": false,
-      "description": "How imported ShadowScan discovery evidence was authenticated at import.\n\nThe record binds the imported report to its exact bytes (``report_digest``),\nits normalized content (``report_content_digest``), and whatever\nrepository/commit/time the report itself carries. The current ShadowScan\nreport format carries no repository or commit, so both read ``\"unknown\"``\nthere \u2014 never a fabricated value \u2014 and ``report_time`` is the report's own\n``finished_at`` (else ``started_at``), or ``\"unknown\"``. Import time is not\nrecorded: ``metadata.timestamp`` is set only when a caller supplies one. A\n``verified`` record names the signer identity and issuer whose Sigstore\nbundle was checked over the exact report bytes; ``unverified`` means no such\ncheck ran at import.",
+      "description": "How imported ShadowScan discovery evidence was authenticated at import.\n\nThe record binds the imported report to its exact bytes (``report_digest``),\nits normalized content (``report_content_digest``), and whatever\nrepository/commit/time the report itself carries: its top-level ``repository``\nand ``commit``, or a CycloneDX report's ``shadowscan:repository`` and\n``shadowscan:commit`` properties, and as ``report_time`` a CycloneDX report's\n``metadata.timestamp``, else the report's own ``finished_at`` (else\n``started_at``). A value the report does not carry reads ``\"unknown\"`` \u2014\nnever a fabricated value; the current ShadowScan report formats carry no\nrepository or commit. Import time is not recorded: ``metadata.timestamp`` is\nset only when a caller supplies one. A ``verified`` record names the signer\nidentity and issuer whose Sigstore bundle was checked over the exact report\nbytes; ``unverified`` means no such check ran at import; ``not-applicable``\nmeans no discovery report was imported.",
       "properties": {
         "status": {
           "default": "unverified",
@@ -1744,19 +1744,19 @@
         },
         "repository": {
           "default": "unknown",
-          "description": "Repository the report claims, or 'unknown' when it carries none",
+          "description": "Repository the report claims (top-level repository, or a CycloneDX report's shadowscan:repository property), or 'unknown' when it carries none",
           "title": "Repository",
           "type": "string"
         },
         "commit": {
           "default": "unknown",
-          "description": "Commit the report claims, or 'unknown' when it carries none",
+          "description": "Commit the report claims (top-level commit, or a CycloneDX report's shadowscan:commit property), or 'unknown' when it carries none",
           "title": "Commit",
           "type": "string"
         },
         "report_time": {
           "default": "unknown",
-          "description": "Report's own finished_at (else started_at), or 'unknown'",
+          "description": "A CycloneDX report's metadata.timestamp, else the report's own finished_at (else started_at), or 'unknown' when it carries none",
           "title": "Report Time",
           "type": "string"
         }
@@ -1871,7 +1871,6 @@
         },
         "component_type": {
           "const": "guardrail-policy",
-          "default": "guardrail-policy",
           "title": "Component Type",
           "type": "string"
         },
@@ -2017,6 +2016,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "GuardrailComponent",
@@ -2043,7 +2043,6 @@
         },
         "component_type": {
           "const": "ide-agent",
-          "default": "ide-agent",
           "title": "Component Type",
           "type": "string"
         },
@@ -2139,7 +2138,7 @@
             }
           ],
           "default": null,
-          "description": "claude-code, codex, cursor, antigravity, xai, windsurf, cline",
+          "description": "claude-code, codex, cursor, gemini, antigravity, xai, windsurf, cline, copilot",
           "title": "Ide Type"
         },
         "config_files": {
@@ -2185,6 +2184,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "IDEAgentComponent",
@@ -2202,7 +2202,6 @@
         },
         "component_type": {
           "const": "mcp-client",
-          "default": "mcp-client",
           "title": "Component Type",
           "type": "string"
         },
@@ -2331,6 +2330,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "MCPClientComponent",
@@ -2348,7 +2348,6 @@
         },
         "component_type": {
           "const": "mcp-server",
-          "default": "mcp-server",
           "title": "Component Type",
           "type": "string"
         },
@@ -2444,7 +2443,7 @@
             }
           ],
           "default": null,
-          "description": "stdio, sse, streamable-http",
+          "description": "stdio, sse, streamable-http, websocket",
           "title": "Transport"
         },
         "command": {
@@ -2572,6 +2571,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "MCPServerComponent",
@@ -2589,7 +2589,6 @@
         },
         "component_type": {
           "const": "memory-store",
-          "default": "memory-store",
           "title": "Component Type",
           "type": "string"
         },
@@ -2747,6 +2746,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "MemoryStoreComponent",
@@ -2764,7 +2764,6 @@
         },
         "component_type": {
           "const": "model",
-          "default": "model",
           "title": "Component Type",
           "type": "string"
         },
@@ -2860,7 +2859,7 @@
             }
           ],
           "default": null,
-          "description": "foundation, fine-tuned, adapter, embedding, quantized",
+          "description": "foundation, fine-tuned, adapter, embedding, quantized, hosted",
           "title": "Model Type"
         },
         "provider": {
@@ -3064,6 +3063,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "ModelComponent",
@@ -3081,7 +3081,6 @@
         },
         "component_type": {
           "const": "prompt-template",
-          "default": "prompt-template",
           "title": "Component Type",
           "type": "string"
         },
@@ -3177,7 +3176,7 @@
             }
           ],
           "default": null,
-          "description": "system-prompt, planner, instruction, rules-file, skill-definition",
+          "description": "system-prompt, planner, instruction, rules-file, skill-definition, subagent, imported-instruction",
           "title": "Prompt Type"
         },
         "content_hash": {
@@ -3230,6 +3229,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "PromptComponent",
@@ -3247,7 +3247,6 @@
         },
         "component_type": {
           "const": "rag-source",
-          "default": "rag-source",
           "title": "Component Type",
           "type": "string"
         },
@@ -3448,6 +3447,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "RAGSourceComponent",
@@ -3455,7 +3455,7 @@
     },
     "RegistryEntryComponent": {
       "additionalProperties": false,
-      "description": "A registry from which components are discovered or installed.",
+      "description": "A package or image reference and the registry it comes from.",
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
@@ -3465,7 +3465,6 @@
         },
         "component_type": {
           "const": "registry-entry",
-          "default": "registry-entry",
           "title": "Component Type",
           "type": "string"
         },
@@ -3574,7 +3573,7 @@
             }
           ],
           "default": null,
-          "description": "npm, pypi or docker-hub from built-in collectors; huggingface, mcp-registry and skill-marketplace are reserved for supplied inventories",
+          "description": "npm, pypi, docker-hub or oci from built-in collectors; huggingface, mcp-registry and skill-marketplace are reserved for supplied inventories",
           "title": "Registry Type"
         },
         "registry_uri": {
@@ -3660,6 +3659,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "RegistryEntryComponent",
@@ -3752,7 +3752,6 @@
         },
         "component_type": {
           "const": "skill-package",
-          "default": "skill-package",
           "title": "Component Type",
           "type": "string"
         },
@@ -3848,7 +3847,7 @@
             }
           ],
           "default": null,
-          "description": "skill, plugin, connector, hook, extension",
+          "description": "skill, skill-resource, plugin, connector, hook, extension",
           "title": "Skill Type"
         },
         "registry_ref": {
@@ -3896,6 +3895,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "SkillPackageComponent",
@@ -3913,7 +3913,6 @@
         },
         "component_type": {
           "const": "tool",
-          "default": "tool",
           "title": "Component Type",
           "type": "string"
         },
@@ -4097,12 +4096,13 @@
             }
           ],
           "default": null,
-          "description": "Canonicalization protocol, or unknown for legacy fingerprints",
+          "description": "Canonicalization protocol; absent, or an earlier one, for legacy fingerprints",
           "title": "Definition Hash Version"
         }
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "ToolComponent",
@@ -4142,7 +4142,6 @@
         },
         "component_type": {
           "const": "verified-extension",
-          "default": "verified-extension",
           "title": "Component Type",
           "type": "string"
         },
@@ -4238,7 +4237,7 @@
             }
           ],
           "default": null,
-          "description": "plugin, skill, connector, integration, action",
+          "description": "ide-extension, plugin, skill, connector, integration, action",
           "title": "Extension Type"
         },
         "publisher": {
@@ -4336,6 +4335,7 @@
       },
       "required": [
         "bom_ref",
+        "component_type",
         "name"
       ],
       "title": "VerifiedExtensionComponent",
@@ -4345,7 +4345,7 @@
   "$id": "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/schemas/nexus-symbiote-aibom-1.0.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Agent Bill of Materials \u2014 the complete supply chain inventory.",
+  "description": "Agent Bill of Materials \u2014 a supply chain inventory.\n\nIts metadata.completeness claim says what it covers.",
   "properties": {
     "metadata": {
       "$ref": "#/$defs/AIBOMMetadata"

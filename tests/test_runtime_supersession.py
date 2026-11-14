@@ -120,7 +120,7 @@ def test_same_serial_with_other_content_is_a_fork(tmp_path):
     values = list(fixture(tmp_path))
     assert invoke(values) == "executed"
     forked = reissued(values, 1, "b" * 32, not_after=NOW + timedelta(hours=2))
-    with pytest.raises(AuthorizationError, match="rollback/fork") as fork:
+    with pytest.raises(AuthorizationError, match="snapshot fork") as fork:
         invoke(forked)
     assert fork.value.reason == "snapshot-fork"
 

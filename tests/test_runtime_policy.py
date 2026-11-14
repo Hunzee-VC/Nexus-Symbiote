@@ -143,6 +143,19 @@ def test_signer_scope_limits_what_each_key_may_authorize(tmp_path, purpose, scop
     assert values[-1] == []
 
 
+def test_a_trust_status_revoking_its_own_signer_is_refused_before_signer_scopes(tmp_path):
+    # Verification order, step 3: the status's own revocations come before scopes.
+    values = list(fixture(tmp_path))
+    trust_key = key_id(values[8].public_key())
+    narrow = SignerScope(tenants=frozenset({"globex"}))
+    values[0] = configured_gateway(values[0], signer_scopes={trust_key: narrow})
+    values[4] = values[4].model_copy(update={"revoked_signers": (trust_key,)})
+    with pytest.raises(AuthorizationError) as denied:
+        invoke(values)
+    assert denied.value.reason == "trust-signer-revoked"
+    assert values[-1] == []
+
+
 def test_scope_for_a_key_outside_every_ring_is_a_configuration_error(tmp_path):
     gateway = fixture(tmp_path)[0]
     stranger = key_id(Ed25519PrivateKey.generate().public_key())

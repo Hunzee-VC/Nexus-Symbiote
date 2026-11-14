@@ -167,12 +167,25 @@ def test_a_serial_less_inventory_links_the_serial_its_cyclonedx_export_has():
         VEXGenerator().generate(dangling)
 
 
-def test_vex_without_a_uuid_serial_omits_the_bom_link():
+@pytest.mark.parametrize(
+    "serial",
+    ["urn:uuid:not-a-uuid", "not-a-urn", "urn:uuid:" + "a" * 36, "urn:uuid:" + "-" * 36],
+)
+def test_vex_without_a_uuid_serial_omits_the_bom_link(serial):
     bom = inventory()
-    bom.metadata.serial_number = "urn:uuid:not-a-uuid"
+    bom.metadata.serial_number = serial
     vex = VEXGenerator().generate(bom)
     assert "externalReferences" not in vex
     assert vex["serialNumber"] != bom.metadata.serial_number
+
+
+def test_a_finding_without_a_recommendation_has_no_trailing_space():
+    bom = inventory()
+    bom.components[0].risks[0].recommendation = None
+    details = [v["analysis"]["detail"] for v in VEXGenerator().generate(bom)["vulnerabilities"]]
+    assert "Inventory risk finding; exploitability and deployment impact are unverified." in details
+    assert all(detail == detail.strip() for detail in details)
+    assert any(detail.endswith(" Sign the artifact.") for detail in details)
 
 
 def test_vex_omits_imported_discovery_findings_and_counts_them():

@@ -320,6 +320,12 @@ def fold_name(name: str) -> str:
     return folded.translate(_IGNORED_IN_NAMES).rstrip(". ")
 
 
+def _default_excluded(name: str) -> bool:
+    """Whether a path component is one of ``DEFAULT_EXCLUDES``, in any spelling a
+    case-insensitive file system treats as the same name."""
+    return name in DEFAULT_EXCLUDES or fold_name(name) in DEFAULT_EXCLUDES
+
+
 def _lexical_target(directory: Path, text: str) -> Path:
     """Resolve a link's text against its directory without following anything.
 
@@ -329,7 +335,9 @@ def _lexical_target(directory: Path, text: str) -> Path:
     name that is not valid UTF-8 could be written to no inventory, so its link is
     refused, as a walk refuses such a name.
     """
-    if not text or os.path.isabs(text):
+    if not text:
+        raise _LinkRefusedError("symlink target is empty")
+    if os.path.isabs(text):
         raise _LinkRefusedError("symlink target is absolute")
     if _undecodable(text):
         raise _LinkRefusedError("symlink target name is not valid UTF-8; not collected")
@@ -509,6 +517,7 @@ class ConfinedCollection:
         self._root_folds = False
         self._folded_excluded: set[tuple[str, ...]] | None = None
         self._variant_budget = self.max_entries
+        self._variants_stopped = False
         self._excluded: set[tuple[str, ...]] = set()
         self._invalid_policy = False
         root_text = str(self.root)
@@ -587,7 +596,10 @@ class ConfinedCollection:
 
     @property
     def bytes_exhausted(self) -> bool:
-        """Whether the collection's total byte budget is spent, so no further read succeeds."""
+        """Whether the collection's total byte budget is spent, so no further read succeeds.
+
+        A file refused because it does not fit in what remains does not spend it.
+        """
         return self._budget.exhausted
 
     def _fail(self, path: str | Path, reason: str, *, key: str | None = None) -> None:
@@ -656,7 +668,7 @@ class ConfinedCollection:
         # Dependency caches, virtual environments and Git internals are outside
         # the documented static scope. The BOM records these patterns. Any
         # further omission within that scope is a blocking coverage gap.
-        if any(part in DEFAULT_EXCLUDES or fold_name(part) in DEFAULT_EXCLUDES for part in parts):
+        if any(_default_excluded(part) for part in parts):
             return True
         denied = bool(self._excluded) and any(
             parts[:index] in self._excluded for index in range(len(parts) + 1)
@@ -794,7 +806,7 @@ class ConfinedCollection:
                 if before.st_size > limit.value:
                     raise LimitExceededError(limit)
                 if before.st_size > budget.remaining():
-                    raise budget.refuse()
+                    raise LimitExceededError(budget.bound)
                 chunks: list[bytes] = []
                 length = 0
                 while length <= limit.value:
@@ -837,7 +849,7 @@ class ConfinedCollection:
         try:
             return raw.decode("utf-8")
         except UnicodeDecodeError:
-            self._fail(path, "invalid UTF-8")
+            self._fail(self._relative(path), "invalid UTF-8")
             return None
 
     @contextmanager
@@ -850,11 +862,16 @@ class ConfinedCollection:
         explicit chunk size (at most four MiB). Collection-wide budget still
         applies. The trusted consumer must not bypass read() with fileno().
         """
-        relative = self._relative(path)
+        named: Path | str = str(path)
         limit = self._file_bound if max_bytes is None else _bound(max_bytes, "file-bytes")
+        reason = "stream refused (symlink, nonregular file or I/O error)"
         try:
-            if self.excluded(relative) or not relative.parts:
-                raise CollectionError("file excluded by policy")
+            relative = named = self._relative(path)
+            if self.excluded(relative):
+                reason = "stream refused (excluded by policy)"
+                raise CollectionError(reason)
+            if not relative.parts:
+                raise CollectionError("expected a regular file")
             parent = self._open_parent(relative)
             try:
                 fd = self._open_leaf_no_follow(parent, relative.name)
@@ -870,10 +887,10 @@ class ConfinedCollection:
                 os.close(fd)
                 raise
         except LimitExceededError as exc:
-            self._fail(relative, exc.bound.exceeded())
+            self._fail(named, exc.bound.exceeded())
             raise OSError("confined stream unavailable") from exc
         except (OSError, CollectionError) as exc:
-            self._fail(relative, "stream refused (symlink, nonregular file or I/O error)")
+            self._fail(named, reason)
             raise OSError("confined stream unavailable") from exc
         stream = _BoundedReader(fd, self, relative, limit, self._budget)
         try:
@@ -939,7 +956,7 @@ class ConfinedCollection:
                 if before.st_size > limit.value:
                     raise LimitExceededError(limit)
                 if before.st_size > budget.remaining():
-                    raise budget.refuse()
+                    raise LimitExceededError(budget.bound)
                 digest = hashlib.sha256()
                 length = 0
                 while length <= limit.value:
@@ -979,12 +996,12 @@ class ConfinedCollection:
                 parse_constant=_refuse_constant,
                 parse_float=_finite_float,
             )
-            if value is None:
-                raise CollectionError("null configuration")
-            return value
         except (ValueError, RecursionError):
-            self._fail(path, "invalid JSON or duplicate keys")
+            self._fail(self._relative(path), "invalid JSON or duplicate keys")
             return None
+        if value is None:
+            self._fail(self._relative(path), "JSON document is null")
+        return value
 
     def root_entries(self) -> list[str]:
         """Sorted names directly beneath the pinned root; nothing is opened or followed.
@@ -1033,14 +1050,17 @@ class ConfinedCollection:
         read it, and one to the root or to a directory that holds the walked one is a
         failure. ``directory_links`` collects the directory symlinks the walk met, and
         ``skipped`` the entries it neither entered nor yielded because their name is
-        one of ``DEFAULT_EXCLUDES``, which nothing records otherwise. Every other
-        symlink is a recorded failure. Past the collection's listing bounds, the
-        walk's per-entry failures end it as one line per reason.
+        one of ``DEFAULT_EXCLUDES``, in any spelling a case-insensitive file system
+        treats as that name, which nothing records otherwise. Every other symlink is
+        a recorded failure. Past the collection's listing bounds, the walk's
+        per-entry failures end it as one line per reason.
         """
         try:
             relative = self._relative(directory)
         except CollectionError:
-            self._fail(directory, "directory is outside collection root")
+            self._fail(
+                directory, "directory is outside collection root or not a plain relative path"
+            )
             return
         if self.excluded(relative) or self._root_fd is None:
             return
@@ -1057,7 +1077,9 @@ class ConfinedCollection:
             self._fail(relative, "directory unavailable or contains a symlink")
             return
         # Each walk ends with its own summary lines, so a caller comparing the failure
-        # count before and after a walk sees every walk that met a failure.
+        # count before and after a walk sees every walk that met a failure. Once the
+        # entry budget is spent, a later walk lists nothing and records nothing: the
+        # one failure that spent it names where collection stopped.
         scope = _WalkScope(walked, directory_links, _Unlisted(), skipped)
         try:
             yield from self._walk(fd, walked, 0, self._entry_budget, scope)
@@ -1094,7 +1116,7 @@ class ConfinedCollection:
                     continue
                 child = relative / name
                 if self.excluded(child):
-                    if scope.skipped is not None and name in DEFAULT_EXCLUDES:
+                    if scope.skipped is not None and _default_excluded(name):
                         scope.skipped.append(child)
                     continue
                 metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
@@ -1167,7 +1189,7 @@ class ConfinedCollection:
 
         Returns the root-relative path that holds the bytes, which is ``path`` itself
         when no symlink is involved, or ``None`` when no such regular file exists.
-        Nothing is recorded.
+        No failure is recorded; a path excluded by policy is recorded as a coverage gap.
         """
         found = self.regular_file(path)
         return None if found is None else found[0]
@@ -1190,8 +1212,9 @@ class ConfinedCollection:
     def is_directory(self, path: str | Path) -> bool:
         """Whether ``path`` is a directory, reached through at most one in-root symlink.
 
-        Nothing is recorded: a caller that goes on to read or walk the path records
-        any refusal then.
+        No failure is recorded, though a path excluded by policy is recorded as a
+        coverage gap: a caller that goes on to read or walk the path records any
+        refusal then.
         """
         try:
             relative = self._relative(path)
@@ -1230,7 +1253,7 @@ class ConfinedCollection:
         except OSError as exc:
             if exc.errno in _LINK_ERRNOS:
                 raise _LinkRefusedError(
-                    "symlink target is or passes through another symlink"
+                    "symlink target is or passes through another symlink or a non-directory"
                 ) from exc
             raise
         self._links[relative.as_posix()] = target.as_posix()
@@ -1411,6 +1434,7 @@ class ConfinedCollection:
     def _stop_variant_searches(self, at: Path) -> NoReturn:
         """Record the spent case-variant budget once; no later path is searched."""
         self._variant_budget = 0
+        self._variants_stopped = True
         self._fail(at, self._entry_bound.exceeded())
         raise _VariantSearchStoppedError
 
@@ -1430,14 +1454,20 @@ class ConfinedCollection:
 
         The search of a path stops when it has found ``_MAX_CASE_VARIANTS`` variants or
         meets more spellings of one name than that in a directory, which is a failure;
-        once the collection's budget is spent no further path is searched, and the one
-        failure recorded then covers them.
+        once the collection's budget is spent no further path is searched, and one
+        failure covers them: the search that spent it records it, or, when a listing
+        spent it exactly, the first search that finds nothing left.
         """
         try:
             relative = self._relative(path)
         except CollectionError:
             return []
-        if self._root_fd is None or not relative.parts or self._variant_budget <= 0:
+        if self._root_fd is None or not relative.parts:
+            return []
+        if self._variant_budget <= 0:
+            if not self._variants_stopped:
+                self._variants_stopped = True
+                self._fail(relative, self._entry_bound.exceeded())
             return []
         found: list[tuple[Path, Path]] = []
         parts = relative.parts

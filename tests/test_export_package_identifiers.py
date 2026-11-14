@@ -9,7 +9,7 @@ import pytest
 
 from nexus_symbiote.core.aibom import AIBOM, native_document
 from nexus_symbiote.core.enums import AssuranceLevel, TrustTier
-from nexus_symbiote.core.models import RegistryEntryComponent
+from nexus_symbiote.core.models import MCPServerComponent, RegistryEntryComponent
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 from nexus_symbiote.generators.package_identifiers import package_identifier
 from nexus_symbiote.generators.spdx import SPDXGenerator
@@ -85,6 +85,10 @@ def test_declared_package_ids_have_standard_fields_and_keep_native_assurance(
         {"package_url": "pkg:pypi/other@1.2.3"},
         {"package_url": "pkg:pypi/openai@9.9.9"},
         {"package_url": "pkg:pypi/openai@1.2.3", "registry_type": "npm"},
+        {"registry_type": None},
+        {"registry_type": "docker-hub"},
+        {"registry_type": "huggingface"},
+        {"package_url": "pkg:npm/openai@1.2.3", "registry_type": "PyPI", "version": "1.2.3"},
         {
             "package_url": "pkg:npm/%40scope/name@latest",
             "registry_type": "npm",
@@ -106,6 +110,90 @@ def test_invalid_or_conflicting_ids_are_omitted_and_loss_is_explicit(changes):
             )
             assert "externalIdentifier" not in projected
             assert "software_packageUrl" not in projected
+        assert native_document(exporter.recover(result.document)) == native_document(bom)
+        assert any(
+            item["path"] == "/components/0/package_url" and item["severity"] == "warning"
+            for item in result.loss_report["items"]
+        )
+
+
+def test_projection_1_keeps_the_0_1_0_ecosystem_rule():
+    # 0.1.0 checked only a PyPI or npm entry's ecosystem; its exports must still recover.
+    from nexus_symbiote.generators import _legacy
+
+    entry = component(registry_type="docker-hub")
+    assert package_identifier(entry).value is None
+    assert _legacy.package_identifier(entry).value == "pkg:pypi/openai@1.2.3"
+    assert _legacy.package_identifier(component(registry_type="npm")).value is None
+
+
+def server(**changes) -> MCPServerComponent:
+    values = {
+        "bom_ref": "mcp-server:fs",
+        "name": "fs",
+        "version": "1.2.3",
+        "launcher_package": "npm:@modelcontextprotocol/server-filesystem",
+        "package_url": "pkg:npm/%40modelcontextprotocol/server-filesystem@1.2.3",
+    }
+    return MCPServerComponent(**(values | changes))
+
+
+@pytest.mark.parametrize(
+    "changes,expected",
+    [
+        ({}, "pkg:npm/%40modelcontextprotocol/server-filesystem@1.2.3"),
+        (
+            {
+                "version": "0.6.2",
+                "launcher_package": "pypi:mcp_server_git",
+                "package_url": "pkg:pypi/mcp-server-git@0.6.2",
+            },
+            "pkg:pypi/mcp-server-git@0.6.2",
+        ),
+    ],
+)
+def test_an_mcp_server_exports_the_package_it_launches(changes, expected):
+    bom = AIBOM(components=[server(**changes)])
+    cdx = CycloneDXGenerator().generate_with_report(bom)
+    assert cdx.document["components"][0]["purl"] == expected
+    assert cdx.document["components"][0]["version"] == bom.components[0].version
+    assert not any(item["path"].endswith("/package_url") for item in cdx.loss_report["items"])
+    spdx = SPDXGenerator().generate(bom)
+    projected = next(node for node in spdx["@graph"] if node["type"] == "software_Package")
+    assert projected["software_packageUrl"] == expected
+    assert projected["externalIdentifier"][0]["identifier"] == expected
+    for exporter, document in [(CycloneDXGenerator, cdx.document), (SPDXGenerator, spdx)]:
+        assert native_document(exporter.recover(document)) == native_document(bom)
+    from nexus_symbiote.generators import _legacy
+
+    assert _legacy.package_identifier(bom.components[0]).status == "unknown"
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"launcher_package": None},
+        {"launcher_package": "npm:@modelcontextprotocol/server-memory"},
+        {"launcher_package": "pypi:@modelcontextprotocol/server-filesystem"},
+        {"version": "1.2.4"},
+        {"version": None},
+        {"package_url": "pkg:npm/%40modelcontextprotocol/server-filesystem"},
+        {
+            "package_url": "pkg:npm/%40modelcontextprotocol/server-filesystem@1.2.3"
+            "?repository_url=https://npm.example.com"
+        },
+        {"launcher_package": "oci:ghcr.io/example/server", "package_url": "pkg:oci/server@1.2.3"},
+    ],
+)
+def test_an_mcp_server_package_url_that_disagrees_is_omitted_and_reported(changes):
+    bom = AIBOM(components=[server(**changes)])
+    for exporter in [CycloneDXGenerator(), SPDXGenerator()]:
+        result = exporter.generate_with_report(bom)
+        if isinstance(exporter, CycloneDXGenerator):
+            assert "purl" not in result.document["components"][0]
+        else:
+            assert all("software_packageUrl" not in node for node in result.document["@graph"])
+            assert all("externalIdentifier" not in node for node in result.document["@graph"])
         assert native_document(exporter.recover(result.document)) == native_document(bom)
         assert any(
             item["path"] == "/components/0/package_url" and item["severity"] == "warning"

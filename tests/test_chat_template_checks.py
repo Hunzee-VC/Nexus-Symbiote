@@ -237,7 +237,8 @@ def test_gguf_and_directory_templates_are_reported_by_their_own_finding(
     assert len(unknown) == (0 if "embeds" in expected else 1)
 
 
-MALFORMED_SAFETENSORS = (16).to_bytes(8, "little") + b'{"bad json!!!!}'
+_BAD_HEADER = b'{"bad json!!!!}'
+MALFORMED_SAFETENSORS = len(_BAD_HEADER).to_bytes(8, "little") + _BAD_HEADER
 UNKNOWN_ARTIFACTS = {
     "model.safetensors": MALFORMED_SAFETENSORS,
     "model.onnx": b"\x08\x08",
@@ -527,7 +528,7 @@ def test_a_linked_template_directory_that_leaves_the_root_is_a_failure(tmp_path)
     )
 
 
-def test_an_empty_template_directory_records_nothing(tmp_path):
+def test_a_template_directory_with_only_a_subdirectory_records_nothing(tmp_path):
     _safetensors(tmp_path / "m" / "model.safetensors")
     (tmp_path / "m" / "additional_chat_templates" / "nested").mkdir(parents=True)
     _template(tmp_path / "m" / "additional_chat_templates" / "nested", "t.jinja", ESCAPES[0])
@@ -573,6 +574,11 @@ def test_a_case_variant_of_a_linked_template_directory_is_a_failure(tmp_path):
 
 
 def test_another_spelling_beside_the_exact_name_is_not_read_or_reported(tmp_path):
+    (tmp_path / "probe").write_text("")
+    sensitive = not (tmp_path / "PROBE").exists()
+    (tmp_path / "probe").unlink()
+    if not sensitive:
+        pytest.skip("needs a case-sensitive file system to hold both spellings")
     _safetensors(tmp_path / "m" / "model.safetensors")
     _template(tmp_path / "m", "chat_template.jinja", BENIGN)
     _template(tmp_path / "m", "Chat_Template.jinja", ESCAPES[0])

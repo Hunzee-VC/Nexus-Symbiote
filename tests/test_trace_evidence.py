@@ -582,13 +582,13 @@ def test_only_remote_mcp_client_spans_name_an_endpoint(tmp_path):
     }
 
 
-def _shadow_inventory() -> list[AnyComponent]:
+def _shadow_inventory(endpoint: str = "https://mcp.example.com") -> list[AnyComponent]:
     return [
         MCPServerComponent(
             bom_ref="mcp:tickets",
             name="tickets",
             transport="streamable-http",
-            endpoint_url="https://mcp.example.com",
+            endpoint_url=endpoint,
         ),
         _declared_tool("tool:delete_all", "delete_all", "mcp:tickets"),
     ]
@@ -667,6 +667,18 @@ def test_a_local_call_never_matches_a_tool_of_a_remote_only_server(tmp_path, tra
     assert [(entry["inventory_ref"], entry["basis"]) for entry in matched] == [
         ("tool:local", "name")
     ]
+
+
+def test_a_local_call_never_matches_a_tool_of_a_server_whose_endpoint_was_withheld(tmp_path):
+    # The mcp collector records an environment-dependent or ambiguous URL as [redacted].
+    span = _tool("delete_all", **{"network.transport": "pipe"})
+    evidence = _evidence(tmp_path, _shadow_inventory("[redacted]"), span)
+    reconciliation = evidence["reconciliation"]
+    assert reconciliation["matched"] == []
+    assert [(e["name"], e["transport"]) for e in reconciliation["undeclared"]] == [
+        ("delete_all", "pipe")
+    ]
+    assert evidence["gate"]["passed"] is False
 
 
 def test_resource_attributes_apply_beneath_each_span(tmp_path):
@@ -852,6 +864,33 @@ def test_a_span_whose_operation_method_or_transport_cannot_be_read_fails_the_gat
 
 
 @pytest.mark.parametrize(
+    ("attributes", "kind"),
+    [
+        ({"mcp.method.name": "tools/call"}, CLIENT),
+        ({"gen_ai.operation.name": "execute_tool"}, 1),
+        (
+            {
+                "gen_ai.operation.name": "execute_tool",
+                "server.address": "mcp.example.com",
+                "server.port": 443,
+            },
+            1,
+        ),
+    ],
+)
+def test_a_tool_call_whose_transport_cannot_be_read_fails_the_gate(tmp_path, attributes, kind):
+    # Read as pipe, the transport would keep the remote-only server's tool from matching.
+    base = {**attributes, "gen_ai.tool.name": "delete_all"}
+    for transport, matched in (("pipe", []), ("pipe" + PADDED, ["tool:delete_all"])):
+        span = otlp_span({**base, "network.transport": transport}, kind=kind)
+        evidence = _evidence(tmp_path, _shadow_inventory(), span)
+        refs = [e["inventory_ref"] for e in _entries(evidence, "matched", "tool")]
+        assert refs == matched
+        assert evidence["coverage"]["spans_unclassified"] == (1 if matched else 0)
+        assert evidence["gate"]["passed"] is False
+
+
+@pytest.mark.parametrize(
     "attributes",
     [
         {"gen_ai.tool.name": "delete_all"},
@@ -890,17 +929,17 @@ def test_unreadable_details_and_transports_that_attribute_nothing_are_only_count
     components = [
         _server("mcp:t", "tickets", "https://mcp.example.com"),
         _declared_tool("tool:s", "search", "mcp:t"),
+        _hosted("model:m", "gpt-4o-mini"),
     ]
     spans = [
+        otlp_span({"mcp.method.name": "ping", "network.transport": "tcp" + PADDED}, kind=CLIENT),
+        _tool("search", **{"gen_ai.tool.type": "function" + PADDED}),
         otlp_span(
             {
-                "mcp.method.name": "tools/call",
-                "gen_ai.tool.name": "search",
-                "network.transport": "tcp" + PADDED,
-            },
-            kind=CLIENT,
+                "gen_ai.request.model": "gpt-4o-mini",
+                "gen_ai.response.model": "gpt-4o-mini-2024-07-18" + PADDED,
+            }
         ),
-        _tool("search", **{"gen_ai.tool.type": "function" + PADDED}),
         otlp_span(
             {
                 "mcp.method.name": "initialize",
@@ -916,7 +955,7 @@ def test_unreadable_details_and_transports_that_attribute_nothing_are_only_count
     coverage = evidence["coverage"]
     assert (coverage["spans_unclassified"], coverage["unreadable_identifiers"]["oversized"]) == (
         0,
-        3,
+        4,
     )
     assert evidence["gate"]["passed"] is True
 

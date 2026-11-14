@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from nexus_symbiote.core.hashing import (
     canonical_json,
     extract_version_pin,
@@ -40,12 +42,11 @@ class TestCanonicalJsonEdgeCases:
     def test_integer_vs_float(self):
         int_result = canonical_json({"n": 42})
         float_result = canonical_json({"n": 42.0})
-        assert '"n":42' in int_result
-        assert '"n":4.2e1' in float_result or '"n":42' in float_result
+        assert float_result == int_result == '{"n":42}'
 
     def test_unicode_strings(self):
         result = canonical_json({"emoji": "☃", "cjk": "世界"})
-        assert result  # should not raise
+        assert result == '{"cjk":"世界","emoji":"☃"}'
 
     def test_null_value_preserved(self):
         result = canonical_json({"key": None, "other": 1})
@@ -54,7 +55,7 @@ class TestCanonicalJsonEdgeCases:
 
     def test_mixed_array_in_value(self):
         result = canonical_json({"arr": [1, "two", True, {"nested": 3}]})
-        assert '"arr":[' in result
+        assert result == '{"arr":[1,"two",true,{"nested":3}]}'
 
     def test_key_ordering(self):
         result = canonical_json({"z": 1, "a": 2, "m": 3})
@@ -116,6 +117,19 @@ class TestHashFile:
         f.write_bytes(b"data")
         assert hash_file(f) == hash_file(f)
 
+    def test_missing_directory(self, tmp_path):
+        assert hash_file(tmp_path / "absent" / "nope") is None
+
+    @pytest.mark.parametrize("target", ["real.txt", "absent.txt", "directory"])
+    def test_links_and_directories_raise_whatever_they_point_to(self, tmp_path, target):
+        (tmp_path / "real.txt").write_bytes(b"data")
+        (tmp_path / "directory").mkdir()
+        (tmp_path / "link").symlink_to(target)
+        with pytest.raises(OSError):
+            hash_file(tmp_path / "link")
+        with pytest.raises(OSError):
+            hash_file(tmp_path / "directory")
+
 
 class TestHashBytes:
     def test_basic(self):
@@ -165,7 +179,7 @@ class TestExtractVersionPin:
         v = extract_version_pin("image:2.5.0")
         assert v == "2.5.0"
 
-    def test_url_with_version(self):
+    def test_scoped_npm_package_version(self):
         v = extract_version_pin("@modelcontextprotocol/server-filesystem@1.2.3")
         assert v == "1.2.3"
 
@@ -180,9 +194,7 @@ class TestExtractVersionPin:
         assert extract_version_pin("https://example.test/pkg-1.0.0.tgz") is None
 
     def test_prerelease(self):
-        v = extract_version_pin("1.0.0-beta.1")
-        assert v is not None
-        assert "1.0.0" in v
+        assert extract_version_pin("1.0.0-beta.1") == "1.0.0-beta.1"
 
 
 class TestRFC8785Conformance:
@@ -195,22 +207,16 @@ class TestRFC8785Conformance:
         assert canonical_json({"\ue000": 1, "\U0001f600": 2}) == '{"😀":2,"\ue000":1}'
 
     def test_nonfinite_values_rejected(self):
-        import pytest
-
         for value in [float("nan"), float("inf"), float("-inf")]:
             with pytest.raises(ValueError):
                 canonical_json({"value": value})
 
     def test_unsupported_values_and_lone_surrogates_rejected(self):
-        import pytest
-
         for value in [object(), "\ud800", 2**60]:
             with pytest.raises((ValueError, TypeError)):
                 canonical_json({"value": value})
 
     def test_strict_parser_rejects_ambiguous_or_oversize_inputs(self):
-        import pytest
-
         from nexus_symbiote.core.hashing import parse_json_strict
 
         for text in ['{"x":1,"x":2}', '{"x":NaN}', '{"x":1e999}', '{"x":9007199254740992}']:

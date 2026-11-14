@@ -187,6 +187,49 @@ def test_unusable_locations_fail_closed(location):
         read(graph(message(5, external(location))))
 
 
+# protobuf merges repeated occurrences of a singular message field, so a tensor
+# split across two of them is EXTERNAL with the location the first one carries.
+STORED = message(8, b"w") + message(13, entry(b"location", b"data.bin"))
+EXTERNAL = number(14, 1)
+
+
+def node_attribute(*fields: bytes) -> bytes:
+    return message(1, message(5, b"".join(fields)))
+
+
+@pytest.mark.parametrize(
+    "split",
+    [
+        node_attribute(message(5, STORED), message(5, EXTERNAL)),
+        node_attribute(message(5, EXTERNAL), message(5, STORED)),
+        node_attribute(message(22, message(1, STORED) + message(1, EXTERNAL))),
+        node_attribute(message(22, message(2, STORED) + message(2, EXTERNAL))),
+        node_attribute(message(22, message(1, STORED)), message(22, message(1, EXTERNAL))),
+        message(15, message(1, STORED) + message(1, EXTERNAL)),
+    ],
+    ids=[
+        "attribute-t",
+        "attribute-t-reversed",
+        "attribute-sparse-values",
+        "attribute-sparse-indices",
+        "attribute-sparse-tensor",
+        "sparse-initializer-values",
+    ],
+)
+def test_a_tensor_split_across_a_singular_field_fails_closed(split):
+    with pytest.raises(FormatError, match=ONNX_UNREADABLE):
+        read(graph(split))
+
+
+def test_repeated_tensor_fields_are_read_one_tensor_each():
+    attribute = message(10, external(b"first.bin")) + message(10, external(b"second.bin"))
+    initializers = message(5, external(b"third.bin")) + message(5, external(b"fourth.bin"))
+    data = graph(node_attribute(attribute), initializers)
+    assert read(data) == ("first.bin", "fourth.bin", "second.bin", "third.bin")
+    keyless = message(8, b"w")
+    assert read(graph(node_attribute(message(5, keyless), message(5, keyless)))) == ()
+
+
 def test_location_without_a_value_fails_only_for_external_tensors():
     keyless = message(13, message(1, b"location"))
     with pytest.raises(FormatError, match=ONNX_UNREADABLE):
@@ -307,6 +350,19 @@ def test_gguf_template_names_with_control_characters_are_named_by_position():
     )
     names = [name for name, _ in gguf_metadata(io.BytesIO(data).read).chat_templates]
     assert names == ["tokenizer.chat_template", "tokenizer.chat_template.#1"]
+
+
+def test_gguf_template_keys_end_at_a_nul_as_llama_cpp_reads_them():
+    data = gguf(
+        (b"tokenizer.chat_template\0hidden", 8, gguf_string(b"{{ x.__class__ }}")),
+        (b"tokenizer.chat_template", 8, gguf_string(b"{{ a }}")),
+        (b"tokenizer.chat_template.tool_use\0", 8, gguf_string(b"{{ b }}")),
+    )
+    assert gguf_metadata(io.BytesIO(data).read).chat_templates == (
+        ("tokenizer.chat_template.#0", b"{{ x.__class__ }}"),
+        ("tokenizer.chat_template", b"{{ a }}"),
+        ("tokenizer.chat_template.#2", b"{{ b }}"),
+    )
 
 
 def test_gguf_architecture_must_be_a_plain_name():

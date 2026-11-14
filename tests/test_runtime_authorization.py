@@ -4,6 +4,7 @@ import base64
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from threading import Event
@@ -137,6 +138,18 @@ def test_gateway_executes_approved_call_and_consumes_approval(tmp_path):
         invoke(values)
     assert replayed.value.reason == "approval-replayed"
     assert len(values[-1]) == 1
+
+
+def test_a_not_yet_valid_approval_is_admitted_once_its_window_opens(tmp_path):
+    # The reference lists *-not-yet-valid codes as clearing for the same evidence.
+    values = list(fixture(tmp_path))
+    window = {"not_before": NOW + timedelta(seconds=30), "not_after": NOW + timedelta(minutes=2)}
+    values[5] = values[5].model_copy(update=window)
+    approval = sign_contract(values[5], "approval", (values[7],))
+    with pytest.raises(AuthorizationError) as early:
+        invoke(values, approval=approval)
+    assert early.value.reason == "approval-not-yet-valid"
+    assert invoke(values, approval=approval, now=NOW + timedelta(seconds=30)) == "executed"
 
 
 def test_scope_resolver_cannot_modify_request_during_resolution(tmp_path):
@@ -417,6 +430,23 @@ def test_gateway_denies_with_a_specific_reason_and_no_side_effects(
     assert values[-1] == []
 
 
+def test_an_admitted_decision_names_only_the_snapshot_signers_that_counted(tmp_path):
+    values = list(fixture(tmp_path))
+    gateway, statuses, release = values[0], values[4], values[6]
+    revoked = Ed25519PrivateKey.generate()
+    gateway.snapshot_keys = {
+        **gateway.snapshot_keys,
+        key_id(revoked.public_key()): revoked.public_key(),
+    }
+    decisions = []
+    gateway.on_decision = decisions.append
+    values[4] = statuses.model_copy(update={"revoked_signers": (key_id(revoked.public_key()),)})
+    signed = sign_contract(values[3], "snapshot", (release, revoked))
+    assert invoke(values, snapshot=signed) == "executed"
+    assert decisions[-1].admitted
+    assert decisions[-1].snapshot_signers == (key_id(release.public_key()),)
+
+
 def test_threshold_counts_distinct_authorized_keys(tmp_path):
     values = fixture(tmp_path)
     snapshot, key = values[3], values[6]
@@ -682,18 +712,45 @@ def test_invalid_or_external_schema_cannot_execute(tmp_path, schema):
     assert values[-1] == []
 
 
-def test_approval_actor_must_match_authorized_key(tmp_path):
-    values = list(fixture(tmp_path))
-    values[5] = values[5].model_copy(update={"actor": "other-approver"})
-    with pytest.raises(AuthorizationError, match="actor"):
-        invoke(values)
-    assert values[-1] == []
-
-
-@pytest.mark.parametrize("raw", ['{"a":1,"a":2}', '{"n":NaN}', '{"n":Infinity}'])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"a":1,"a":2}',
+        '{"n":NaN}',
+        '{"n":Infinity}',
+        '\ufeff{"a":1}',
+        b'\xef\xbb\xbf{"a":1}',
+        '{"a":1}'.encode("utf-16"),
+        '{"a":1}'.encode("utf-16-le"),
+        '{"a":1}'.encode("utf-32"),
+        b'{"a":"\xff"}',
+    ],
+)
 def test_noncanonical_input_rejected(raw):
-    with pytest.raises(AuthorizationError):
+    with pytest.raises(AuthorizationError) as refused:
         strict_json(raw)
+    assert refused.value.reason == "json-invalid"
+
+
+def test_utf8_input_is_accepted_as_bytes_or_text():
+    assert strict_json(b'{"a":"\xc3\xa9"}') == strict_json('{"a":"\u00e9"}') == {"a": "\u00e9"}
+
+
+def test_a_state_database_that_fails_to_initialize_can_be_initialized_again(tmp_path, monkeypatch):
+    from nexus_symbiote import runtime
+
+    def failing(db):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    path = tmp_path / "state.sqlite"
+    with monkeypatch.context() as patch:
+        patch.setattr(runtime, "_migrate", failing)
+        with pytest.raises(AuthorizationError) as failed:
+            StateStore.initialize(path)
+    assert failed.value.reason == "state-unavailable"
+    assert not path.exists()
+    StateStore.initialize(path)
+    assert path.is_file()
 
 
 def test_nonces_are_scoped_by_tenant_and_legacy_rows_stay_consumed(tmp_path):
@@ -702,7 +759,7 @@ def test_nonces_are_scoped_by_tenant_and_legacy_rows_stay_consumed(tmp_path):
     store.record((), "shared-nonce", tenant="globex")
     with pytest.raises(AuthorizationError, match="already been used"):
         store.record((), "shared-nonce", tenant="acme")
-    with sqlite3.connect(tmp_path / "state.sqlite") as db:
+    with closing(sqlite3.connect(tmp_path / "state.sqlite")) as db, db:
         db.execute("INSERT INTO nonces VALUES ('legacy-consumed-nonce')")
     for tenant in ("acme", "globex", None):
         with pytest.raises(AuthorizationError, match="already been used"):

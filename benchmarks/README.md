@@ -2,7 +2,7 @@
 
 This small, committed corpus checks named security conditions and control contracts. It is not a representative sample of production agents, does not estimate population efficacy, and supports no competitive ranking or percentile claim.
 
-Each case has an inspectable label, rationale, task, and SHA-256 manifest of exact inputs. The harness calls the installed Nexus SymBiote scanners and validators. Detection outcomes are computed from their outputs, not from the label. Labels are used only after evaluation for confusion counts. No fixture launches a tool, loads a model, or contacts a service. The SafeTensors fixture is a valid single zero-valued F32 tensor, not a trained model; pickle fixtures contain only inert serialized data and are never deserialized.
+Each case has an inspectable label, rationale, task, and SHA-256 manifest of exact inputs. The harness calls the Nexus SymBiote scanners and validators it imports (the checkout's `src` with the command below). Detection outcomes are computed from their outputs, not from the label. Labels are used only after evaluation for confusion counts. No fixture launches a tool, loads a model, or contacts a service. The SafeTensors fixture is a valid single zero-valued F32 tensor, not a trained model; pickle fixtures contain only inert serialized data and are never deserialized.
 
 Run from a reviewed checkout with its dependencies installed:
 

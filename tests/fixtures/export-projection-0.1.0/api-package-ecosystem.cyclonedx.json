@@ -1,0 +1,171 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "version": 1,
+  "serialNumber": "urn:uuid:e28707ee-500b-5e4e-a6a9-7ec91a623852",
+  "metadata": {
+    "timestamp": "2026-11-10T12:00:00+00:00",
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "nexus-symbiote",
+          "version": "0.1.0",
+          "publisher": "aisecnomad"
+        }
+      ]
+    },
+    "properties": [
+      {
+        "name": "nexus-symbiote:dependency:relationship",
+        "value": "{\"from\":\"registry:pypi/openai\",\"to\":\"registry:docker/redis\",\"type\":\"depends-on\"}"
+      },
+      {
+        "name": "nexus-symbiote:document",
+        "value": "{\"components\":[{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:docker/redis\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"redis\",\"package_url\":\"pkg:pypi/redis@7.2.4\",\"properties\":{},\"registry_type\":\"docker-hub\",\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"7.2.4\"},{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:npm/zod\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"zod\",\"package_url\":\"pkg:npm/zod@3.23.8\",\"properties\":{},\"registry_type\":\"PyPI\",\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"3.23.8\"},{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:pypi/openai\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"openai\",\"package_url\":\"pkg:pypi/openai@1.2.3\",\"properties\":{},\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"==1.2.3\"}],\"dependencies\":[{\"relationship\":\"depends-on\",\"source_ref\":\"registry:pypi/openai\",\"target_ref\":\"registry:docker/redis\"}],\"metadata\":{\"authors\":[],\"serial_number\":\"urn:uuid:e28707ee-500b-5e4e-a6a9-7ec91a623852\",\"spec_version\":\"1.0.0\",\"timestamp\":\"2026-11-10T12:00:00Z\",\"tool_name\":\"nexus-symbiote\",\"tool_vendor\":\"aisecnomad\",\"tool_version\":\"0.1.0\",\"version\":1}}"
+      },
+      {
+        "name": "nexus-symbiote:documentDigest",
+        "value": "sha256:8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77"
+      },
+      {
+        "name": "nexus-symbiote:lossReport",
+        "value": "{\"admissionAuthority\":false,\"extensionRoundTripComplete\":true,\"itemCoverage\":\"selected-security-fields\",\"items\":[{\"path\":\"\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"agent authority, assurance, and coverage require the Nexus Symbiote extension\",\"severity\":\"info\"},{\"path\":\"/components/0/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/0/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/1/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/1/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/2/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/2/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/0/relationship\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"}],\"nativeSemanticsComplete\":false,\"normalizations\":[\"component and dependency collections sorted for deterministic output\",\"valid declared package URLs canonicalized; standard package versions use their exact PURL version\"],\"profile\":\"nexus-symbiote-export/v1\",\"sourceDigest\":\"sha256:8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77\",\"target\":\"cyclonedx-1.7\"}"
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "platform",
+      "bom-ref": "registry:docker/redis",
+      "name": "redis",
+      "version": "7.2.4",
+      "purl": "pkg:pypi/redis@7.2.4",
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "registry-entry"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:registryType",
+          "value": "docker-hub"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:docker/redis\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"redis\",\"package_url\":\"pkg:pypi/redis@7.2.4\",\"properties\":{},\"registry_type\":\"docker-hub\",\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"7.2.4\"}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "registry-entry"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        },
+        {
+          "name": "nexus-symbiote:packageIdentifierProjection",
+          "value": "declared"
+        }
+      ]
+    },
+    {
+      "type": "platform",
+      "bom-ref": "registry:npm/zod",
+      "name": "zod",
+      "version": "3.23.8",
+      "purl": "pkg:npm/zod@3.23.8",
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "registry-entry"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:registryType",
+          "value": "PyPI"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:npm/zod\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"zod\",\"package_url\":\"pkg:npm/zod@3.23.8\",\"properties\":{},\"registry_type\":\"PyPI\",\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"3.23.8\"}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "registry-entry"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        },
+        {
+          "name": "nexus-symbiote:packageIdentifierProjection",
+          "value": "declared"
+        }
+      ]
+    },
+    {
+      "type": "platform",
+      "bom-ref": "registry:pypi/openai",
+      "name": "openai",
+      "version": "1.2.3",
+      "purl": "pkg:pypi/openai@1.2.3",
+      "properties": [
+        {
+          "name": "nexus-symbiote:componentType",
+          "value": "registry-entry"
+        },
+        {
+          "name": "nexus-symbiote:trustTier",
+          "value": "unknown"
+        },
+        {
+          "name": "nexus-symbiote:assuranceLevel",
+          "value": "declared"
+        },
+        {
+          "name": "nexus-symbiote:component",
+          "value": "{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:pypi/openai\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"openai\",\"package_url\":\"pkg:pypi/openai@1.2.3\",\"properties\":{},\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"==1.2.3\"}"
+        },
+        {
+          "name": "agentbom:kind",
+          "value": "registry-entry"
+        },
+        {
+          "name": "agentbom:claimsVerifiedByExporter",
+          "value": "false"
+        },
+        {
+          "name": "nexus-symbiote:packageIdentifierProjection",
+          "value": "declared"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "registry:pypi/openai",
+      "dependsOn": [
+        "registry:docker/redis"
+      ]
+    }
+  ],
+  "compositions": [
+    {
+      "aggregate": "unknown"
+    }
+  ]
+}

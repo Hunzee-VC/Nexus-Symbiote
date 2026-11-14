@@ -17,12 +17,13 @@ _URL = re.compile(r"(?<![a-zA-Z0-9+.-])[a-zA-Z0-9+.-]+://[^\s\"'<>]+")
 # No leading word boundary: "_" is a word character, so a boundary would skip
 # GITHUB_TOKEN= and client_secret=. Delimited suffixes (DB_PASSWORD_PROD=) and
 # digits (token2=) may follow the keyword; "max_tokens" and "tokenizer" may not.
+# A backslash escapes the next character of a quoted value, as JSON reads it.
 # Possessive and bounded quantifiers keep every attempt linear.
 _ASSIGNMENT = re.compile(
     r"(?i)((?:api[-_]?key|access[-_]?key|secret[-_]?key|private[-_]?key|account[-_]?key"
     r"|token|password|passwd|passphrase|pwd|secret|credentials?|sig)"
     r"(?:\d{1,4})?(?:[-_.][a-z0-9]{1,32}){0,4}[\"']?\s*+[:=]\s*+)"
-    r"(\"[^\"\n]{0,256}\"|'[^'\n]{0,256}'|[^\s,;]++)"
+    r"(\"(?:[^\"\\\n]|\\.){0,256}\"|'(?:[^'\\\n]|\\.){0,256}'|[^\s,;]++)"
 )
 _AUTH = re.compile(r"(?i)\b(Bearer|Basic|Token|Bot|ApiKey|Api-Key)(\s++)([A-Za-z0-9_+/=.~-]{6,}+)")
 # After an Authorization or Proxy-Authorization header name the scheme's value is a
@@ -31,7 +32,7 @@ _AUTH = re.compile(r"(?i)\b(Bearer|Basic|Token|Bot|ApiKey|Api-Key)(\s++)([A-Za-z
 _AUTHORIZATION_HEADER = re.compile(r"(?i)authorization[\"']?\s{0,8}[:=]\s{0,8}[\"']?$")
 _AUTHORIZATION_LOOKBACK = 40
 # A prose word after a scheme ("Bearer authentication") is shorter than this; a value
-# this long after Bearer, Token, Bot or ApiKey is redacted whatever its shape.
+# this long after Bearer, Token, Bot, ApiKey or Api-Key is redacted whatever its shape.
 LONG_CREDENTIAL_LENGTH = 16
 # Formats distinctive enough to stand out inside a name (AWS_AKIA..., X_glpat-...).
 # Each stops at the end of its own run or matches the rest, so starting one after
@@ -54,8 +55,11 @@ TOKEN_SHAPE = re.compile(
 )
 # Names matched against other evidence keep sk-... forms; a distinct token is redacted.
 _NAMED_TOKEN = re.compile(rf"(?<![\w-]){_JWT}|(?<![A-Za-z0-9])(?:{_DISTINCT_SHAPES})")
+# A header value with no scheme is redacted when it looks like a credential; after
+# Negotiate or NTLM, which the scheme rule above does not know, whatever its shape.
 _RAW_AUTH_HEADER = re.compile(
-    r"(?i)(\b(?:proxy-)?authorization[\"']?\s{0,8}[:=]\s{0,8}[\"']?)([A-Za-z0-9_+/=.~:-]{8,}+)"
+    r"(?i)(\b(?:proxy-)?authorization[\"']?\s{0,8}[:=]\s{0,8}[\"']?)"
+    r"(?:(negotiate|ntlm)([ \t]++)([A-Za-z0-9_+/=.~-]++)|([A-Za-z0-9_+/=.~:-]{8,}+))"
 )
 _AUTH_SCHEMES = frozenset(
     {
@@ -91,7 +95,8 @@ def redact_url(value: str) -> str:
     """
     try:
         parts = urlsplit(value)
-        if not parts.scheme or not parts.hostname:
+        # WHATWG parsers, as browsers use, end the host at a backslash; urlsplit does not.
+        if not parts.scheme or not parts.hostname or "\\" in parts.netloc:
             return "[redacted-url]"
         host = parts.hostname
         if ":" in host:
@@ -204,7 +209,8 @@ def _redact_private_keys(value: str) -> str:
         if label_end < 0:
             break
         if "PRIVATE KEY" not in value[start + 10 : label_end]:
-            search = label_end + 5
+            # The closing dashes may open the next BEGIN line.
+            search = label_end
             continue
         end = value.find("-----END", label_end + 5)
         close = -1 if end < 0 else value.find("-----", end + 8)
@@ -216,7 +222,9 @@ def _redact_private_keys(value: str) -> str:
 
 
 def _raw_auth_replacement(match: re.Match[str]) -> str:
-    prefix, token = match.groups()
+    prefix, scheme, space, _credential, token = match.groups()
+    if scheme is not None:
+        return prefix + scheme + space + REDACTED
     if token.lower() in _AUTH_SCHEMES or not _credential_like(token, "token"):
         return match.group()
     return prefix + REDACTED

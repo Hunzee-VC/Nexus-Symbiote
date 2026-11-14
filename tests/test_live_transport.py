@@ -59,7 +59,7 @@ class FakeSocket:
     ],
 )
 def test_literal_nonpublic_destinations_refused(address):
-    with pytest.raises(live.DiscoveryError):
+    with pytest.raises(live.DiscoveryError, match="nonpublic destination refused"):
         live._resolve_public(address, 443, 1)
 
 
@@ -72,7 +72,7 @@ def test_mixed_dns_answers_fail_closed(monkeypatch):
             (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", 443)),
         ],
     )
-    with pytest.raises(live.DiscoveryError):
+    with pytest.raises(live.DiscoveryError, match="nonpublic or unsupported DNS answer"):
         live._resolve_public("fixture.example", 443, 1)
 
 
@@ -108,8 +108,6 @@ def test_stuck_lookups_time_out_and_at_most_two_stay_outstanding(monkeypatch):
 def test_https_dials_pinned_numeric_ip_and_verifies_original_hostname(monkeypatch):
     raw, secured = FakeSocket(), FakeSocket()
     context = ssl.create_default_context()
-    assert context.verify_mode == ssl.CERT_REQUIRED
-    assert context.check_hostname is True
     wraps = []
 
     def wrap(stream, *, server_hostname):
@@ -244,12 +242,13 @@ def test_transport_rejects_redirect_size_compression_and_ambiguous_headers(monke
 
 def test_streaming_response_stops_at_requested_jsonrpc_result(monkeypatch):
     body = b'data: {"jsonrpc":"2.0","id":2,"result":{"tools":[]}}\n\n'
+    trailing = b'data: {"jsonrpc":"2.0","method":"notifications/progress"}\n\n'
     transport, calls, _ = transport_fixture(
         monkeypatch,
         [
             Reply(
                 headers=[("Content-Type", "text/event-stream")],
-                body=body,
+                body=body + trailing,
             )
         ],
     )
@@ -283,11 +282,20 @@ def test_real_http_parser_uses_pinned_tls_adapter_and_connection_close(monkeypat
     assert secured.closed
 
 
-def test_pinned_https_context_requires_tls12_and_verified_hostnames():
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def test_pinned_https_context_requires_tls12_and_verified_hostnames(monkeypatch):
+    real = ssl.create_default_context
+
+    def lowered():
+        context = real()
+        context.minimum_version = ssl.TLSVersion.TLSv1
+        return context
+
+    monkeypatch.setattr(ssl, "create_default_context", lowered)
     connection = live._PinnedHTTPSConnection(
         "fixture.example", 443, socket.AF_INET, "93.184.216.34", 1.0
     )
     context = connection._tls_context
-    assert context.minimum_version >= ssl.TLSVersion.TLSv1_2
+    assert context.minimum_version == ssl.TLSVersion.TLSv1_2
     assert context.verify_mode == ssl.CERT_REQUIRED
     assert context.check_hostname is True

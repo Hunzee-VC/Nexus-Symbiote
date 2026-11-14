@@ -149,6 +149,53 @@ def test_a_package_url_version_is_the_exported_version():
     assert (component["version"], component["purl"]) == ("1.2.3", "pkg:pypi/openai@1.2.3")
 
 
+@pytest.mark.parametrize(
+    "registry,name,version",
+    [
+        ("npm", "@scope/sdk", "1.0.0-" + "a" * 1100),
+        ("pypi", "openai", "1." + "0" * 1100),
+    ],
+)
+def test_a_package_url_version_beyond_the_schema_limit_is_a_requested_version(
+    registry, name, version
+):
+    package_url = f"pkg:{registry}/{name.replace('@', '%40')}@{version}"
+    bom = AIBOM(
+        components=[
+            _registry(name=name, registry_type=registry, version=version, package_url=package_url)
+        ]
+    )
+    component = _cdx_component(bom, "registry:package")
+    assert "version" not in component and component["purl"] == package_url
+    assert _properties(component)["nexus-symbiote:requestedVersion"] == version
+    spdx = SPDXGenerator().generate(bom)
+    (package,) = [n for n in spdx["@graph"] if n["type"] == "software_Package"]
+    assert "software_packageVersion" not in package
+
+
+def test_the_loss_report_says_that_only_registry_versions_are_made_exact():
+    bom = AIBOM(
+        components=[
+            AgentComponent(bom_ref="agent:card", name="card", version=">=2.0, latest"),
+            _registry(version="1." + "0" * 1100),
+        ]
+    )
+    document = CycloneDXGenerator().generate(bom)
+    versions = {c["bom-ref"]: c.get("version") for c in document["components"]}
+    assert versions == {"agent:card": ">=2.0, latest", "registry:package": None}
+    loss = json.loads(
+        next(
+            p["value"]
+            for p in document["metadata"]["properties"]
+            if p["name"] == "nexus-symbiote:lossReport"
+        )
+    )
+    assert not any("exact versions only" in text for text in loss["normalizations"])
+    assert any("declared versions of other kinds" in text for text in loss["normalizations"])
+    (item,) = [i for i in loss["items"] if i["path"].endswith("/version")]
+    assert item["path"] == "/components/1/version" and "1024 characters" in item["reason"]
+
+
 def test_the_repository_agent_is_the_subject_and_unconditional_edges_form_the_graph():
     bom = _inventory()
     document = CycloneDXGenerator().generate(bom)
@@ -340,13 +387,25 @@ def test_spdx_identifiers_are_minted_in_the_operator_namespace_or_a_uuid_urn():
         "https://SPDX.ORG.../x",
         "https://spdx%2Eorg/spdxdocs/x",
         "https://www.spdx.org./x",
+        "https://spdx\u3002org/x",
+        "https://spdx\uff0eorg/x",
+        "https://\uff53\uff50\uff44\uff58.org/x",
+        "https://spd\u00adx.org/x",
+        "https://spdx%E3%80%82org/x",
         "not an iri",
         "https://x.example/#frag",
+        "https://example.com/\x1b[31mred\x00",
+        "https://example.com/\x7f",
+        "https://example.com/\x9b",
+        "https://example.com/%zz",
+        "https://ex%FFample.com/x",
         "",
     ):
         with pytest.raises(ValueError):
             SPDXGenerator(namespace)
     assert SPDXGenerator("https://spdx.org.example.com/x").generate(bom)
+    international = SPDXGenerator("https://\u4f8b\u3048.\u30c6\u30b9\u30c8/agents").generate(bom)
+    assert native_document(SPDXGenerator.recover(international)) == native_document(bom)
 
 
 def test_spdx_validation_rejects_undefined_vocabulary_references():

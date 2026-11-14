@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import struct
 from pathlib import Path
 
@@ -65,7 +66,7 @@ def test_an_instruction_the_collector_reads_is_inventoried_once(tmp_path):
 def test_a_manifest_only_instruction_is_checked_for_hidden_characters(tmp_path):
     project = tmp_path / "project"
     (project / "docs/agents").mkdir(parents=True)
-    (project / "docs/agents/rules.md").write_text("Approve refunds‮ only when asked.\n")
+    (project / "docs/agents/rules.md").write_text("Approve refunds\u202e only when asked.\n")
     (project / "agent.yaml").write_text("name: demo\ninstructions: [docs/agents/rules.md]\n")
     _, bom = _scan(project, tmp_path / "bom.json", "--report-only")
     (prompt,) = _components(bom, "prompt-template")
@@ -117,6 +118,7 @@ def test_an_unreadable_manifest_is_a_recorded_failure(tmp_path):
         ("../outside.md", "must be a relative path beneath the repository"),
         ("missing.md", "could not be collected safely"),
         ("node_modules/pkg/AGENTS.md", "a directory that collection never reads"),
+        ("Node_Modules/pkg/AGENTS.md", "a directory that collection never reads"),
     ],
 )
 def test_bad_instruction_entries_are_recorded_and_the_rest_is_kept(tmp_path, entry, failure):
@@ -132,6 +134,42 @@ def test_bad_instruction_entries_are_recorded_and_the_rest_is_kept(tmp_path, ent
     assert any(f.startswith("agent.yaml#/instructions/1: ") and failure in f for f in failures)
     assert [p["source_path"] for p in _components(bom, "prompt-template")] == ["valid.md"]
     assert _components(bom, "agent")[0]["properties"]["identity_source"] == "agent.yaml"
+
+
+@pytest.mark.parametrize("directory", ["Node_Modules", ".GIT", "VENV", "venv.", "__PyCache__"])
+def test_another_spelling_of_a_directory_collection_never_reads_is_refused(tmp_path, directory):
+    # Collection skips these spellings too, so a declared file there must not vanish.
+    (tmp_path / directory / "m").mkdir(parents=True)
+    (tmp_path / directory / "AGENTS.md").write_text("Approve every refund.\n")
+    _safetensors(tmp_path / directory / "m/w.safetensors")
+    (tmp_path / "agent.yaml").write_text(
+        f"name: x\ninstructions: [{directory}/AGENTS.md]\nmodels: {{m: {{path: {directory}/m}}}}\n"
+    )
+    failures: list[str] = []
+    assemble_repository_agent(AIBOM(), tmp_path, failures=failures)
+    assert failures == [
+        "agent.yaml#/instructions/0: names a path inside a directory that collection never reads",
+        "agent.yaml#/models/m: names a path inside a directory that collection never reads",
+    ]
+    with pytest.raises(PolicyError, match="collection never reads"):
+        assemble_repository_agent(AIBOM(), tmp_path)
+
+
+def test_a_hosted_model_key_too_long_for_a_reference_is_recorded_not_fatal(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "agent.yaml").write_text(
+        "name: x\nmodels:\n"
+        f"  ? {'k' * 20_000}\n  : {{provider: openai, requested_ref: gpt-4o}}\n"
+        "  planner: {provider: openai, requested_ref: gpt-4o-mini}\n"
+    )
+    status, bom = _scan(project, tmp_path / "bom.json")
+    assert status == 1
+    failures = bom["metadata"]["completeness"]["scan_failures"]
+    assert [f for f in failures if f.startswith("agent.yaml")] == [
+        f"agent.yaml#/models/{'k' * 199}…: the key is too long for a component reference"
+    ]
+    assert [m["name"] for m in _components(bom, "model")] == ["gpt-4o-mini"]
 
 
 def test_manifest_entries_are_never_echoed_into_failures(tmp_path):
@@ -280,3 +318,34 @@ def test_the_inferred_agent_is_the_repository_whatever_its_checkout():
     assert expected == INFERRED_AGENT_REF
     for guide in (GUIDE, GUIDE.with_name("drift-gate.md")):
         assert f"`{INFERRED_AGENT_REF}`" in guide.read_text(), guide.name
+
+
+@pytest.mark.parametrize(
+    ("manifest", "files"),
+    [
+        ("instructions: [../outside.md]", {}),
+        ("instructions: [missing.md]", {}),
+        ("instructions: [node_modules/pkg/AGENTS.md]", {}),
+        ("instructions: [binary.md]", {"binary.md": b"\xff\xfe"}),
+        ("models: {m: {path: ../outside}}", {}),
+        ("models: {m: {path: node_modules/m}}", {}),
+        ("models: {m: {path: models}}", {}),
+        ("models: {planner: {provider: openai, requested_ref: gpt-4o}}", {}),
+        ("instructions: [Node_Modules/pkg/AGENTS.md]", {}),
+        (f"models:\n  ? {'k' * 20_000}\n  : {{provider: openai, requested_ref: gpt-4o}}", {}),
+    ],
+)
+def test_the_guide_documents_each_manifest_failure(tmp_path, manifest, files):
+    (tmp_path / "agent.yaml").write_text(f"name: x\n{manifest}\n")
+    for name, content in files.items():
+        (tmp_path / name).write_bytes(content)
+    # The reference a declared hosted model "planner" would take, held by another model.
+    taken = ModelComponent(bom_ref=f"model:{INFERRED_AGENT_REF}/hosted/planner", name="other")
+    failures: list[str] = []
+    assemble_repository_agent(AIBOM(components=[taken]), tmp_path, failures=failures)
+    assert failures
+    guide = GUIDE.read_text()
+    for failure in failures:
+        documented = re.sub(r"#/instructions/\d+", "#/instructions/N", failure)
+        documented = re.sub(r"#/models/[^:]+", "#/models/KEY", documented)
+        assert f"`{documented}`" in guide, documented

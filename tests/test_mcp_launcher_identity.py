@@ -294,6 +294,32 @@ def test_git_source_pinned_by_full_commit_is_not_a_gap(tmp_path):
     assert server.launcher_package is None
 
 
+GIT = "git+https://github.com/acme/mcp.git"
+COMMIT = "0123456789abcdef0123456789abcdef01234567"
+
+
+@pytest.mark.parametrize(
+    "command,args,pinned",
+    [
+        # pip and uv read the commit after "@" and the fragment only for egg= and subdirectory=.
+        ("uvx", ["--from", f"{GIT}#{COMMIT}", "mcp"], False),
+        ("pipx", ["run", "--spec", f"{GIT}#{COMMIT}", "mcp"], False),
+        ("uvx", ["--from", f"mcp @ {GIT}#{COMMIT}", "mcp"], False),
+        ("uvx", ["--from", f"{GIT}@{COMMIT}#subdirectory=server", "mcp"], True),
+        ("uvx", ["--from", f"mcp @ {GIT}@{COMMIT}#egg=mcp", "mcp"], True),
+        # npm reads the commit after "#".
+        ("npx", [f"{GIT}#{COMMIT}"], True),
+    ],
+)
+def test_git_commit_is_read_where_each_installer_reads_it(tmp_path, command, args, pinned):
+    detail = gap_reason(tmp_path, {"command": command, "args": args})
+    if pinned:
+        server = scan_server(tmp_path, {"command": command, "args": args})
+        assert detail is None and server.version_pinned is True and server.version == COMMIT
+    else:
+        assert detail is not None and "git source without a full commit" in detail
+
+
 @pytest.mark.parametrize(
     "command,args",
     [("node", ["server.js"]), ("python", ["-m", "server"]), ("/opt/tools/my-server", [])],
@@ -474,7 +500,6 @@ EVIL = ["npx", "-y", "evil-mcp@latest"]
         ("node", ["node_modules/pnpm/bin/pnpm.cjs", "dlx", "evil"], "arguments start pnpm"),
         ("node", ["wrapper.js", *EVIL], "arguments start npx"),
         ("bash", ["start.sh", *EVIL], "arguments start npx"),
-        ("exec", ["-a", "name", *EVIL], "arguments start npx"),
         ("node", ["-e", "require('child_process').spawnSync('npx')"], "inline node code"),
         ("python3", ["-c", "import subprocess"], "inline python code"),
         ("uv", ["run", "python", "-c", "import subprocess"], "inline python code"),
@@ -819,6 +844,38 @@ def test_pinned_and_local_forms_near_the_new_rules_stay_classified(tmp_path, ser
     assert gap_reason(tmp_path, server) is None
 
 
+@pytest.mark.parametrize(
+    "command,args",
+    [
+        ("exec", ["-a", "name", "npx", "-y", "pkg@1.2.3"]),
+        ("exec", ["-cl", "--", "npx", "-y", "pkg@1.2.3"]),
+        ("exec", ["-aname", "npx", "-y", "pkg@1.2.3"]),
+        ("nohup", ["--", "npx", "-y", "pkg@1.2.3"]),
+        ("sh", ["-c", "exec -a name npx -y pkg@1.2.3"]),
+    ],
+)
+def test_exec_and_nohup_options_are_not_the_command(tmp_path, command, args):
+    assert gap_reason(tmp_path, {"command": command, "args": args}) is None
+    server = scan_server(tmp_path, {"command": command, "args": args})
+    assert server.properties["launcher"] == "npx"
+    assert server.launcher_package == "npm:pkg" and server.version_pinned is True
+
+
+@pytest.mark.parametrize(
+    "command,args,reason",
+    [
+        ("exec", ["-a", "name", *EVIL], "version_pinning"),
+        ("nohup", ["-p", *EVIL], "unrecognised nohup option"),
+        ("exec", ["-x", *EVIL], "unrecognised exec option"),
+        ("exec", ["-a", "name"], "exec without a command"),
+    ],
+)
+def test_exec_and_nohup_never_hide_the_runner(tmp_path, command, args, reason):
+    server = scan_server(tmp_path, {"command": command, "args": args})
+    assert server.version_pinned is False
+    assert any(reason in r.detail or reason == r.category for r in server.risks)
+
+
 def test_npm_command_resolution_follows_npm_aliases_and_prefixes():
     from nexus_symbiote.scanners.mcp_launch import npm_command
 
@@ -832,6 +889,38 @@ def test_npm_command_resolution_follows_npm_aliases_and_prefixes():
     }
     assert npm_command("ex") is None and npm_command("build") is None
     assert npm_command("installTest") == "install-test"
+
+
+@pytest.mark.parametrize(
+    "command,args",
+    [
+        ("yarn", ["workspace", "app", "dlx", "evil-mcp@latest"]),
+        ("pnpm", ["recursive", "dlx", "evil-mcp@latest"]),
+        ("pnpm", ["m", "dlx", "evil-mcp@latest"]),
+    ],
+)
+def test_a_command_run_in_workspaces_is_classified_as_that_command(tmp_path, command, args):
+    server = scan_server(tmp_path, {"command": command, "args": args})
+    assert server.properties["launcher"] == f"{command} dlx"
+    assert server.properties["packages"][0]["identity"] == "npm:evil-mcp"
+    assert server.version_pinned is False
+
+
+@pytest.mark.parametrize(
+    "command,args,reason",
+    [
+        ("yarn", ["workspace", "app", "add", "evil-mcp"], "yarn subcommand fetches"),
+        ("yarn", ["workspaces", "foreach", "-A", "dlx", "evil-mcp"], "yarn workspaces runs"),
+        ("yarn", ["workspace", "app"], "unrecognised yarn invocation"),
+        ("pnpm", ["recursive", "add", "evil-mcp"], "pnpm subcommand fetches"),
+        ("pnpm", ["multi", "install"], "pnpm subcommand fetches"),
+        ("nice", ["yarn", "workspace", "app", "dlx", "evil-mcp"], "arguments start yarn"),
+        ("nice", ["pnpm", "m", "add", "evil-mcp"], "arguments start pnpm"),
+    ],
+)
+def test_workspace_commands_that_fetch_are_unknown(tmp_path, command, args, reason):
+    detail = gap_reason(tmp_path, {"command": command, "args": args})
+    assert detail is not None and reason in detail
 
 
 # Coverage tracing alone nearly reaches the bound, so the coverage job runs this untraced.

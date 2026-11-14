@@ -111,7 +111,10 @@ activity: a trace cannot attribute it to a configured server, so it is counted u
 `mcp_client_spans.stdio`. A client span without `server.address` is counted as
 unattributed. Spans of other kinds never name an endpoint item, but a tool call on any
 span that sets `server.address`, other than over `pipe` or `unix`, is compared only with
-the tools served at that address.
+the tools served at that address. A tool call whose `network.transport` is present but
+unreadable fails the gate as an unclassified span, with or without `server.address`:
+read as `pipe` or `unix`, it would not match the tools of a server that has only a
+remote endpoint.
 
 ## What is extracted
 
@@ -153,14 +156,15 @@ the inventory has no reliable key for them yet. An item whose identity includes 
 that was not used (invalid, oversized or withheld) is `unidentified`: it cannot be
 compared, and for a tool, model, agent or MCP endpoint it fails the gate like an
 undeclared item. A span whose `gen_ai.operation.name` or `mcp.method.name` was not used,
-or an MCP client span that names a `server.address` but whose `network.transport` was
-not used, cannot be classified: it may be a tool or agent call, or a call to a remote
-endpoint. Such spans are counted under `spans_unclassified` and fail the gate too. So a
+an MCP client span that names a `server.address` but whose `network.transport` was not
+used, or a tool call whose `network.transport` was not used, cannot be classified: it
+may be a tool or agent call, a call to a remote endpoint, or a call over `pipe` or
+`unix`. Such spans are counted under `spans_unclassified` and fail the gate too. So a
 value chosen to look like a credential, or one longer than the bound, cannot hide a call
-that a span reports. A tool type, agent version, MCP protocol version or service name
-that was not used is counted and left out, because it decides no match. An attribute
-that a span leaves out is another matter: the span then reports less, as the
-instrumentation chose, and is read as such.
+that a span reports. A tool type, a response model beside a requested one, an agent
+version, an MCP protocol version or a service name that was not used is counted and left
+out, because it decides no match. An attribute that a span leaves out is another
+matter: the span then reports less, as the instrumentation chose, and is read as such.
 
 Declared tools, MCP servers, hosted models and named agents that no item names are
 `unobserved`. That is information, not a finding: absence from these traces is not

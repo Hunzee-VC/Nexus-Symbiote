@@ -61,11 +61,12 @@ enforcement, and verifies that `Verified CI` is required. It also requires the e
 source SHA to match the live branch head, the newest trusted run of
 `.github/workflows/ci.yml` for that SHA (a `push` or `workflow_dispatch` run on the
 expected branch in this repository) to have succeeded, and exactly one successful
-`Verified CI`, `CodeQL policy` and `Dependency advisories` jobs in that run's latest
-attempt. A pull-request or fork run for the same commit is not evidence and cannot
-displace the trusted run, whether it is newer or still waiting for approval; a newer
-trusted run that is pending or failed still wins over an older success. An unbound
-status with the same name cannot satisfy the protection preflight.
+job each named `Verified CI`, `CodeQL policy` and `Dependency advisories` in that
+run's latest attempt. A pull-request or fork run for the same commit is not
+evidence and cannot displace the trusted run, whether it is newer or still waiting
+for approval; a newer trusted run that is pending or failed still wins over an
+older success. An unbound status with the same name cannot satisfy the protection
+preflight.
 
 With `--publish testpypi` or `--publish pypi`, as the release workflow passes, it
 also requires an active ruleset that stops `refs/tags/v*` from being updated or
@@ -171,15 +172,25 @@ action that does not exist fails. It rejects `${{ }}` expressions in shell sourc
 triggers other than `push`, `pull_request`, `workflow_dispatch`, `schedule` and
 `branch_protection_rule` (so `pull_request_target` and `workflow_run` cannot appear),
 missing or writable top-level permissions, jobs without `timeout-minutes`, and
-checkouts that persist credentials. In `ci.yml` and `release.yml` it rejects
-`continue-on-error` and requires each verification job to still run the command
+checkouts that persist credentials, and it checks a file in `.github/workflows` as a
+workflow whatever its name. In `ci.yml` and `release.yml` it rejects `continue-on-error`
+on a job, and on a step unless a later step that runs reads that step's outcome (naming
+it in the later step's name does not count), and
+requires each verification job, `Verified CI` and the release attestation check among
+them, to still run the command
 that makes it a gate as a command of its own, under errexit, in `bash` (GitHub's
 default or `shell: bash`) and in the checkout's root: a gate command that is quoted,
 in an `if` or loop condition, negated, joined with `&&` or `||` (other than
-`|| exit 1`), in the background or in a pipeline without `pipefail`, that follows
-`set +e`, `set -n`, `shopt -u -o errexit`, `cd`, `trap`, `exit`, `eval` or `hash`
-(also through `builtin`, `command` or `time`, or a command name built from an expansion),
-or whose step, job or workflow sets another shell or a working directory, does not count.
+`|| exit N` for an N that is not a multiple of 256), in the background or in a pipeline
+without `pipefail`, that follows `set +e`, `set -n`, `set -t`, `shopt -u -o errexit`,
+`shopt -s -o noexec`, a `set` or `shopt` whose options come from an expansion, `cd`,
+`trap`, `exit`, `eval` or `hash` (also through `builtin`, `command` or `time`, or a
+command name built from an expansion, braces included), that runs under an option that
+prints and exits instead (`python -h`, `-V` or `-i`, `bash --version` or `-D`, a
+`timeout` option other than the reviewed ones), whose step continues on error, or whose
+step, job or workflow sets another shell or a working directory, does not count. A pin
+written in any form other than a `uses:` line of its own is rejected, because its version
+comment cannot be read.
 A `$VAR` command name counts only while a plain `VAR=value` line still binds it, and a
 script the checker reads differently from `bash` (a here-document delimiter that is
 partly quoted, or a `case` inside `$(...)`) has no gates. The scheduled CodeQL workflow also

@@ -169,7 +169,9 @@ with a key that never reaches CI, then commits both files through a reviewed pul
 request:
 
 ```bash
+mkdir -p .nexus-symbiote
 nexus-symbiote baseline . --no-project-policy -o .nexus-symbiote/reviewed.json
+rm -f .nexus-symbiote/reviewed.json.att
 nexus-symbiote attest .nexus-symbiote/reviewed.json --key ~/keys/reviewer.pem --purpose reviewed \
   --source-revision "$(git rev-parse HEAD)" --out .nexus-symbiote/reviewed.json.att
 ```
@@ -266,9 +268,9 @@ with exactly these members:
 The subject digest is the SHA-256 of the file's exact bytes, and it is the binding. The
 name is the file's base name for information only: characters that could rewrite or
 disguise terminal or CI output (controls, line breaks, format characters and every other
-default-ignorable code point, such as variation selectors and blank fillers), a
-`##name[` CI log command and undecodable bytes are
-replaced with U+FFFD, and it is cut to 255 characters. Verification does not compare
+default-ignorable code point, such as variation selectors and blank fillers) and
+undecodable bytes are replaced with U+FFFD, a U+FFFD after the `##` breaks a
+`##name[` CI log command, and it is cut to 255 characters. Verification does not compare
 it with the file name you pass. Unlike the runtime contracts, whose subject is a
 contract digest, the subject here is a file, as generic in-toto tooling expects. The
 predicate type is in the repository's current namespace; the runtime contracts'
@@ -302,8 +304,9 @@ inventory without the fields that record the collection event:
 claim, each left out only when it has the form the native format writes. Two collections of the same content therefore have the same
 content digest. `attest` decides `subject_format` from the bytes it signs: a strict
 JSON object of at most 16 MiB, with arrays and objects nested at most 256 levels deep,
-that has `metadata` and `components` and validates as a native inventory is
-`nexus-symbiote-aibom`; anything else, including a native format version this build
+that has a `components` list and validates as a native inventory is
+`nexus-symbiote-aibom` (a missing `metadata` is read as an empty object, as every
+command reads it); anything else, including a native format version this build
 cannot read, is `other`. The depth bound is part of the rule so that the same bytes get
 the same answer on every interpreter and through every entry point; a more deeply
 nested inventory that other commands still read is `other` here. For a native subject,

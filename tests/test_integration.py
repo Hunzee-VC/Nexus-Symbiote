@@ -110,14 +110,19 @@ class TestFullPipeline:
         assert diff_data["components_removed"] == []
 
     def test_all_output_formats(self, tmp_path: Path) -> None:
-        """Verify all three output formats produce valid JSON."""
+        """Verify every output format produces valid JSON."""
         project = tmp_path / "project"
         project.mkdir()
         _create_full_project(project)
 
         runner = CliRunner()
 
-        for fmt, key in [("json", "components"), ("cyclonedx", "bomFormat"), ("spdx", "@context")]:
+        for fmt, key in [
+            ("json", "components"),
+            ("cyclonedx", "bomFormat"),
+            ("spdx", "@context"),
+            ("sarif", "runs"),
+        ]:
             out = tmp_path / f"out-{fmt}.json"
             result = runner.invoke(
                 main, ["scan", "--report-only", str(project), "-f", fmt, "-o", str(out)]
@@ -133,7 +138,8 @@ class TestFullPipeline:
         _create_full_project(project)
         runner = CliRunner()
         bom_path = tmp_path / "roundtrip.json"
-        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
+        scanned = runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
+        assert scanned.exit_code == 0, scanned.output
         bom = AIBOM.load(bom_path)
         assert len(bom.components) >= 3
         assert bom.metadata.completeness is not None
@@ -146,10 +152,11 @@ class TestFullPipeline:
         _create_full_project(project)
         runner = CliRunner()
         bom_path = tmp_path / "bom.json"
-        runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
+        scanned = runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])
+        assert scanned.exit_code == 0, scanned.output
         result = runner.invoke(main, ["validate", str(bom_path), "--project", str(project)])
-        assert "Completeness check" in result.output
-        assert "Integrity check" in result.output
+        assert "Basis: project-reconciled" in result.output
+        assert "Hashes verified: 4, failed: 0" in result.output
 
     def test_risk_gate_with_unsafe_model(self, tmp_path: Path) -> None:
         """A project with a pickle model should produce risk findings."""

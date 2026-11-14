@@ -159,8 +159,9 @@ def validate_arguments(schema: Any, arguments: dict[str, Any]) -> None:
     uses the installed trusted package and an empty reference retrieval registry.
     Start-up has its own deadline; the evaluation budget starts when the worker
     reports that it is ready. Capacity exhaustion, unavailable POSIX limits,
-    crashes, malformed replies and timeouts deny the operation, each with its
-    own reason. No approval nonce is consumed here.
+    crashes, malformed replies and timeouts deny the operation with a stable
+    reason code; crashes and malformed replies share one. No approval nonce is
+    consumed here.
     """
     if not isinstance(schema, dict):
         raise ValidationBudgetError(
@@ -295,7 +296,7 @@ def _apply_worker_limits() -> None:
 
 
 # ECMA-262 WhiteSpace and LineTerminator code points, which "\s" matches there.
-_ECMA_SPACE = r"\t\n\x0b\x0c\r \xa0  -     　﻿"
+_ECMA_SPACE = r"\t\n\x0b\x0c\r \xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 _CLASS_ESCAPES = {"d": "0-9", "w": "A-Za-z0-9_", "s": _ECMA_SPACE}
 _ESCAPES = {
     "d": "[0-9]",
@@ -305,7 +306,7 @@ _ESCAPES = {
     "s": f"[{_ECMA_SPACE}]",
     "S": f"[^{_ECMA_SPACE}]",
 }
-_ANY = r"[^\n\r  ]"
+_ANY = r"[^\n\r\u2028\u2029]"
 _GROUPS = ("(?:", "(?=", "(?!", "(?<=", "(?<!")
 _LOOKAROUNDS = frozenset(_GROUPS[1:])
 _LOOKBEHINDS = frozenset(_GROUPS[3:])
@@ -672,11 +673,14 @@ class _EcmaRegex:
             raise re.error("pattern flags are not supported")
         compiled = self._compiled.get(pattern)
         if compiled is None:
-            translated = ecma_pattern(pattern)
             try:
-                compiled = re.compile(translated, re.ASCII)
+                compiled = re.compile(ecma_pattern(pattern), re.ASCII)
             except RecursionError as exc:
                 raise re.error("pattern nests too deeply") from exc
+            except (OverflowError, ValueError) as exc:
+                # Valid ECMA-262 numbers that Python cannot hold: a repetition count
+                # above its limit, or more digits than int() converts.
+                raise re.error("pattern holds a number too large to compile") from exc
             self._compiled[pattern] = compiled
         return compiled
 

@@ -148,8 +148,9 @@ _UNSAFE_SUFFIXES = {
 _PICKLE_WRAPPERS = {".tar", ".gz", ".bz2", ".xz", ".lzma", ".zst"}
 _TEXT_PICKLE_START = frozenset(b"(cNILFSV}])KJMUTX")
 _INDEX = re.compile(r"(?P<base>.+?)\.index(?:\.[A-Za-z0-9_-]+)?\.json", re.IGNORECASE)
+# transformers reads ``repository--module.Class``; a repository need not name an owner.
 _CODE_REFERENCE = re.compile(
-    r"(?:[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*--)?"
+    r"(?:[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?--)?"
     r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*"
 )
 _HUB_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,95})?")
@@ -241,7 +242,7 @@ def _recognized_pickle(stream: BinaryIO, prefix: bytes, size: int) -> str | None
         # dis() only checks opcode stack/memo consistency; it never resolves
         # globals, imports artifact code, invokes reducers or constructs objects.
         pickletools.dis(sample, out=io.StringIO())
-    except (ValueError, UnicodeError, OverflowError, RecursionError):
+    except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
         return None
     kind = "binary" if binary else "text-protocol"
     return f"Recognized {kind} pickle opcode stream; object loading can execute code"
@@ -474,7 +475,7 @@ class ModelTree:
 
 
 def _json_document(raw: bytes) -> Any:
-    """Configuration JSON as loaders read it: UTF-8, unique keys and finite numbers."""
+    """Configuration JSON as loaders read it: UTF-8, unique keys, no NaN or Infinity literals."""
 
     def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         document: dict[str, Any] = {}
@@ -588,33 +589,61 @@ def index_references(
     return references, indexes
 
 
+def _savedmodel(path: Path) -> bool:
+    detected = model_format(path)
+    return detected is not None and detected[1] == "tensorflow-savedmodel"
+
+
+def savedmodel_files(files: ConfinedCollection, tree: ModelTree, directory: Path) -> list[Path]:
+    """The files beside a SavedModel graph in ``directory`` that its loader reads.
+
+    The walk lists a directory symlink's files under its target's name only, so they
+    are listed under the names a loader opens, through the link. When one of these
+    names is absent, another spelling of it is a failure, because case-insensitive
+    file systems open it.
+    """
+    found: list[Path] = []
+    for name in SAVEDMODEL_DIRECTORIES:
+        below = directory / name
+        listed = tree.below(below)
+        if listed:
+            found.extend(listed)
+        elif not files.is_directory(below):
+            _report_variants(files, below)
+        elif (target := files.link_target(below)) is not None:
+            found.extend(below / path.relative_to(target) for path in tree.below(Path(target)))
+    for name in SAVEDMODEL_FILES:
+        if directory / name in tree.paths:
+            found.append(directory / name)
+        else:
+            _report_variants(files, directory / name)
+    return found
+
+
 def bound_weight_files(
     tree: ModelTree,
     path: Path,
     observation: ModelArtifactObservation | None,
     index_refs: Mapping[Path, Sequence[Path]],
+    savedmodel: Sequence[Path],
     fail: Callable[[str], None],
     budget: BindingBudget,
 ) -> list[Path]:
     """Return the other files a loader reads as this model's weights.
 
-    Every candidate is charged to ``budget`` before it is examined. When the budget
-    refuses them, nothing is bound: the model's weight files are unknown, and the
-    refusal is recorded in ``budget.refused``.
+    ``savedmodel`` lists the directory's SavedModel files once for all of its models
+    (``savedmodel_files``); only a SavedModel graph binds them. Every candidate is
+    charged to ``budget`` before it is examined. When the budget refuses them,
+    nothing is bound: the model's weight files are unknown, and the refusal is
+    recorded in ``budget.refused``.
     """
     directory = path.parent
-    detected = model_format(path)
     if observation is not None and observation.onnx_error is not None:
         fail(observation.onnx_error)
     indexes = index_refs.get(path, ())
     locations = (observation.external_data if observation is not None else None) or ()
-    savedmodel: list[Path] = []
-    if detected is not None and detected[1] == "tensorflow-savedmodel":
-        for name in SAVEDMODEL_DIRECTORIES:
-            savedmodel.extend(tree.below(directory / name))
-        savedmodel.extend(
-            directory / name for name in SAVEDMODEL_FILES if directory / name in tree.paths
-        )
+    if not _savedmodel(path):
+        savedmodel = ()
     if not budget.charge(path, len(indexes) + len(locations) + len(savedmodel), fail):
         return []
     bound: set[Path] = set(indexes)
@@ -681,6 +710,7 @@ class ModelPackages:
         self._bindings = BindingBudget(binding_budget)
         self._trees: dict[Path, tuple[ModelTree, bool]] = {}
         self._indexes: dict[Path, tuple[dict[Path, list[Path]], list[Path], bool]] = {}
+        self._savedmodels: dict[Path, tuple[list[Path], bool]] = {}
         self._observations: dict[Path, ModelArtifactObservation | None] = {}
         self._digests: dict[Path, str | None] = {}
         self._packages: dict[Path, ModelPackage] = {}
@@ -697,12 +727,16 @@ class ModelPackages:
             tree, walked = self._tree(files, directory)
             observation = self._observe(files, path)
             index_refs, indexes, indexed = self._index_references(files, tree, directory)
+            savedmodel, listed = (
+                self._savedmodel_files(files, tree, directory) if _savedmodel(path) else ([], True)
+            )
             weights = [(path, observation.digest if observation is not None else None)]
             for companion in bound_weight_files(
                 tree,
                 path,
                 observation,
                 index_refs,
+                savedmodel,
                 lambda reason: files._fail(path, reason),
                 self._bindings,
             ):
@@ -715,6 +749,7 @@ class ModelPackages:
             tuple(weights),
             walked
             and indexed
+            and listed
             and not exhausted
             and not failures
             and all(digest for _, digest in weights),
@@ -812,6 +847,16 @@ class ModelPackages:
             )
             self._indexes[directory] = (references, indexes, files.failures_recorded == before)
         return self._indexes[directory]
+
+    def _savedmodel_files(
+        self, files: ConfinedCollection, tree: ModelTree, directory: Path
+    ) -> tuple[list[Path], bool]:
+        """The directory's SavedModel files and whether listing them met no failure."""
+        if directory not in self._savedmodels:
+            before = files.failures_recorded
+            found = savedmodel_files(files, tree, directory)
+            self._savedmodels[directory] = (found, files.failures_recorded == before)
+        return self._savedmodels[directory]
 
 
 def unused_policy_entries(
@@ -1025,6 +1070,7 @@ class _DirectoryContext:
     # The sources of the directory's Hugging Face chat templates that carry the
     # attribute access Jinja sandbox escapes use.
     template_escapes: list[str] = field(default_factory=list)
+    savedmodel: list[Path] = field(default_factory=list)
 
 
 def _checked_config(files: ConfinedCollection, path: Path, data: dict[str, Any]) -> dict[str, Any]:
@@ -1221,6 +1267,11 @@ class ModelScanner(Scanner):
             files, tree, model_dir, self._digests, self._bindings
         )
         self._read.update(indexes)
+        savedmodel = (
+            savedmodel_files(files, tree, model_dir)
+            if any(_savedmodel(path) for path in tree.children.get(model_dir, ()))
+            else []
+        )
         return _DirectoryContext(
             config=merged,
             trust_remote_code=True if True in remote else False if remote else None,
@@ -1231,6 +1282,7 @@ class ModelScanner(Scanner):
             index_refs=index_refs,
             base_model=base_model,
             template_escapes=escapes,
+            savedmodel=savedmodel,
         )
 
     def _template_directory(self, files: ConfinedCollection, model_dir: Path) -> list[Path]:
@@ -1340,7 +1392,7 @@ class ModelScanner(Scanner):
             weight_hash = None
         self._digests[path] = weight_hash
         # A GGUF template is the artifact's own; the directory's Hugging Face templates
-        # apply to every model in it, and each gets their finding. They overrule only a
+        # apply to every model in it, and each gets its finding. They overrule only a
         # safe rating: the unverified-SafeTensors and unknown-format findings derive
         # from an unknown one, and a code-executing one is worse.
         embedded = safety == SerializationSafety.UNSAFE_TEMPLATE_INJECTION
@@ -1352,6 +1404,7 @@ class ModelScanner(Scanner):
             path,
             observation,
             context.index_refs,
+            context.savedmodel,
             lambda reason: files._fail(path, reason),
             self._bindings,
         )

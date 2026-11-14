@@ -1,9 +1,9 @@
 # Model integrity
 
-What the `model` collector records for model files, which other files it binds
-to them by digest, and how an operator signature policy verifies model weights.
-Collection is static: no model file is loaded, no template is rendered and no
-repository code is imported.
+This page describes what the `model` collector records for model files, which other
+files it binds to them by digest, and how an operator signature policy verifies
+model weights. Collection is static: no model file is loaded, no template is
+rendered and no repository code is imported.
 
 ## Model files and references
 
@@ -52,7 +52,17 @@ parse, each such key must be an external-data entry it read or a name, and a
 file it cannot parse, or one beyond its limits, fails whenever the bytes
 `location` occur in it at all. A tensor's `data_location` is read as protobuf
 reads the enum: as a 32-bit value, where a later value that the enum does not
-define never replaces an earlier `EXTERNAL`.
+define never replaces an earlier `EXTERNAL`. A singular tensor field written more
+than once, such as a node attribute's tensor, which protobuf merges into one
+tensor, is a file the reader cannot parse.
+
+When `variables/`, `assets/` or `assets.extra/` beside a SavedModel graph is a
+symlink to a directory in the project, the files below it are bound under the
+names a loader opens through the link, and they are hashed without following it,
+so each is a collection failure. When one of those directories, `fingerprint.pb`
+or `keras_metadata.pb` is absent, another spelling of its name that differs only
+by case or Unicode normalization is a failure, because case-insensitive file
+systems open it.
 
 A file that many models bind costs one binding per model, so the bindings are
 bounded. A directory with more than 16 shard indexes binds none of them and
@@ -86,7 +96,7 @@ files when present, and records the digests on each model in the directory:
 | --- | --- |
 | `properties.config_files` | `config.json`, `model_config.json`, `adapter_config.json`, `tokenizer_config.json`, `generation_config.json`, `quantize_config.json`, `preprocessor_config.json`, `processor_config.json`, `chat_template.json`; each must be a JSON object |
 | `tokenizer_hash`, `properties.tokenizer_files` | `tokenizer.json`, `tokenizer.model`, `spiece.model`, `sentencepiece.bpe.model`, `vocab.json`, `vocab.txt`, `merges.txt`, `special_tokens_map.json`, `added_tokens.json` |
-| `chat_template_hash`, `properties.chat_templates` | `chat_template` in any of the configuration files, as a string or a list of named templates; `chat_template.jinja`, `chat_template.jinja2` and `additional_chat_templates/*.jinja`; the `tokenizer.chat_template` entries embedded in a GGUF file |
+| `chat_template_hash`, `properties.chat_templates` | `chat_template` in any of the configuration files, as a string or a list of named templates; `chat_template.jinja`, `chat_template.jinja2` and `additional_chat_templates/*.jinja`; the `tokenizer.chat_template` entries embedded in a GGUF file, with each key read up to its first NUL byte, as llama.cpp reads it |
 
 `tokenizer_hash` and `chat_template_hash` are manifest digests: the SHA-256 of
 the RFC 8785 JSON `{"files": [{"path": ..., "sha256": ...}]}` built from the
@@ -118,7 +128,7 @@ recorded, so adding an unrelated script does not change the inventory. The
 
 In `diff`, a change to `tokenizer_hash` or `chat_template_hash` is a high alert,
 and a change to a bound weight file, a configuration file or custom code is a
-medium `properties changed` alert.
+high alert naming the property that records its digest.
 
 Every chat template that `properties.chat_templates` lists is checked for the
 attribute access that Jinja2 sandbox escapes use: a dunder attribute, named or
@@ -161,7 +171,10 @@ also where file names fold case.
 An entry that names neither a collected model weight file nor the ShadowScan
 report makes the `model` collector fail, and `validate --project` reports it as
 the integrity error `unused_policy_entry` even when the completeness check does
-not run, so an entry can never look enforced while nothing checks it.
+not run, so an entry can never look enforced while nothing checks it. An entry
+beneath the directory of a model that got `validation_budget_exhausted` is not
+reported as unused: that model's weight files were not all bound, and its
+`unknown` issue already keeps integrity from passing.
 
 The ShadowScan report is checked by the discovery producer check of
 `validate --project` and `risk --project`, not by `scan`, and only through a
@@ -250,5 +263,6 @@ those listed above, and NumPy `.npy` and `.npz` arrays, are not inventoried. Saf
 tensor bytes are hashed but not inspected, so a payload that also parses as
 another format is not flagged. The chat template check is a heuristic for known
 sandbox-escape shapes, not a template analysis: a template that escapes the
-sandbox another way, such as a dunder name built by concatenating strings, or that
-instructs the model, passes it.
+sandbox another way, such as a dunder name whose leading and trailing underscores
+are each split across string pieces or that a filter such as `format` builds, or
+that instructs the model, passes it.

@@ -105,8 +105,8 @@ which characters count as hidden.
   ([trace evidence](trace-evidence.md#exit-codes-and-the-gate)).
 - **Risk classes, framework references and minimum-element statuses**, which `graph`,
   `crosswalk` and `minimum-elements` report, are views of an inventory's records and
-  findings, not findings: no other gate reads them, and only
-  `minimum-elements --fail-under` gates on one of them.
+  findings, not findings: no gate reads them except
+  `minimum-elements --fail-under`, which gates on minimum-element coverage.
 
 ## SARIF rules
 

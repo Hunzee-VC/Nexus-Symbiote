@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import stat
@@ -173,8 +174,13 @@ def test_threshold_requires_distinct_trusted_signers(tmp_path):
     )
     contract = write(tmp_path, "status.json", status)
     both, one = tmp_path / "both.json", tmp_path / "one.json"
-    assert run("sign", contract, "--kind", "trust", "--key", first, "--key", second, "--out", both)
-    assert run("sign", contract, "--kind", "trust", "--key", first, "--out", one)
+    assert (
+        run(
+            "sign", contract, "--kind", "trust", "--key", first, "--key", second, "--out", both
+        ).exit_code
+        == 0
+    )
+    assert run("sign", contract, "--kind", "trust", "--key", first, "--out", one).exit_code == 0
     ring = ["--public-key", first_pub, "--public-key", second_pub, "--threshold", "2"]
     accepted = run("verify", both, "--kind", "trust", *ring)
     assert accepted.exit_code == 0, accepted.output
@@ -264,7 +270,12 @@ def test_deeply_nested_inputs_end_without_a_traceback(tmp_path):
     snapshot_key, snapshot_pub = keypair(tmp_path, "snapshot")
     signed = tmp_path / "snapshot.dsse.json"
     contract = write(tmp_path, "snapshot.json", current_snapshot({}))
-    assert run("sign", contract, "--kind", "snapshot", "--key", snapshot_key, "--out", signed)
+    assert (
+        run(
+            "sign", contract, "--kind", "snapshot", "--key", snapshot_key, "--out", signed
+        ).exit_code
+        == 0
+    )
     result = run(
         "verify", signed, "--kind", "snapshot", "--public-key", snapshot_pub, "--bom", nested
     )
@@ -383,6 +394,67 @@ def test_keygen_removes_the_public_key_when_the_private_key_cannot_be_written(
     result = run("keygen", "--private-key", private, "--public-key", public)
     assert result.exit_code == 1 and written == [public]
     assert not private.exists() and not public.exists()
+
+
+def fail_stream(monkeypatch, marker, stage):
+    """Make the new file that receives ``marker`` fail on write or close, with data on disk."""
+    fdopen = os.fdopen
+
+    class Failing:
+        def __init__(self, stream):
+            self.stream = stream
+            self.marked = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.stream.close()
+            if self.marked and stage == "close":
+                raise OSError(errno.EIO, "close failed")
+
+        def write(self, data):
+            self.marked = self.marked or marker in data
+            if self.marked and stage == "write":
+                self.stream.write(data[:16])
+                self.stream.flush()
+                raise OSError(errno.ENOSPC, "no space left")
+            return self.stream.write(data)
+
+    def patched(fd, mode="r", *args, **kwargs):
+        stream = fdopen(fd, mode, *args, **kwargs)
+        return Failing(stream) if mode == "wb" else stream
+
+    monkeypatch.setattr(os, "fdopen", patched)
+
+
+@pytest.mark.parametrize("stage", ["write", "close"])
+def test_keygen_keeps_neither_key_when_the_private_key_write_fails_part_way(
+    tmp_path, monkeypatch, stage
+):
+    fail_stream(monkeypatch, b"PRIVATE KEY", stage)
+    private, public = tmp_path / "key.pem", tmp_path / "key.pub"
+    result = run("keygen", "--private-key", private, "--public-key", public)
+    assert result.exit_code == 1 and "runtime-io-error" in result.output
+    assert not private.exists() and not public.exists()
+    monkeypatch.undo()
+    assert keypair(tmp_path, "key")
+
+
+@pytest.mark.parametrize("stage", ["write", "close"])
+def test_sign_leaves_no_partial_envelope_when_the_write_fails(tmp_path, monkeypatch, stage):
+    private, _ = keypair(tmp_path, "key")
+    now = datetime.now(UTC)
+    status = TrustStatus(
+        tenant="acme", serial=1, not_before=now, not_after=now + timedelta(minutes=5)
+    )
+    contract, out = write(tmp_path, "status.json", status), tmp_path / "signed.json"
+    fail_stream(monkeypatch, b"payload", stage)
+    result = run("sign", contract, "--kind", "trust", "--key", private, "--out", out)
+    assert result.exit_code == 1 and "runtime-io-error" in result.output
+    assert not out.exists()
+    monkeypatch.undo()
+    assert run("sign", contract, "--kind", "trust", "--key", private, "--out", out).exit_code == 0
 
 
 def test_keygen_names_existing_paths_with_a_reason_code(tmp_path):
@@ -618,6 +690,7 @@ def test_register_refuses_a_key_in_two_rings_unless_shared_keys_are_allowed(tmp_
     refused = run("register", *args)
     assert refused.exit_code == 1 and "(configuration-invalid)" in refused.output
     assert key_id(shared.public_key()) in refused.output
+    assert "--allow-shared-keys if the gateways allow shared keys" in refused.output
     assert run("register", *args, "--allow-shared-keys").exit_code == 0
 
 

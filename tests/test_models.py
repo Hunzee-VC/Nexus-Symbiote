@@ -40,9 +40,13 @@ class TestEnums:
         assert len(ComponentType) >= 11
 
     def test_risk_severity_ordering(self):
-        severities = list(RiskSeverity)
-        assert RiskSeverity.CRITICAL in severities
-        assert RiskSeverity.INFO in severities
+        assert [severity.value for severity in RiskSeverity] == [
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "info",
+        ]
 
     def test_serialization_safety_values(self):
         assert SerializationSafety.SAFE.value == "safe"
@@ -307,3 +311,78 @@ class TestAIBOM:
         assert s["total_components"] == 1
         assert s["total_risks"] == 1
         assert "high" in s["risk_breakdown"]
+
+    def test_summary_is_json_like_the_summary_command(self):
+        from datetime import UTC, datetime
+
+        bom = AIBOM()
+        bom.metadata.completeness = CompletenessClaim(
+            scope="repository", timestamp=datetime(2026, 1, 1, tzinfo=UTC)
+        )
+        completeness = json.loads(json.dumps(bom.summary()))["completeness"]
+        assert completeness["timestamp"] == "2026-01-01T00:00:00Z"
+
+
+def test_value_descriptions_name_every_value_a_built_in_collector_emits():
+    from nexus_symbiote.core.models import IDEAgentComponent, RegistryEntryComponent
+    from nexus_symbiote.scanners.ide_agents import IDE_AGENT_CONFIGS
+
+    ide = IDEAgentComponent.model_fields["ide_type"].description
+    assert set(IDE_AGENT_CONFIGS) <= set(ide.split(", "))
+    registry = RegistryEntryComponent.model_fields["registry_type"].description
+    built_in = registry.split(" from built-in collectors")[0].replace(" or ", ", ").split(", ")
+    assert set(built_in) == {"npm", "pypi", "docker-hub", "oci"}
+
+
+def _emitted_transports() -> set[str]:
+    from nexus_symbiote.scanners.mcp import _TRANSPORT_TYPES
+
+    return set(_TRANSPORT_TYPES.values())
+
+
+def _emitted_prompt_types() -> set[str]:
+    from nexus_symbiote.scanners.prompt import (
+        INSTRUCTION_DIRECTORIES,
+        INSTRUCTION_FILES,
+        NESTED_INSTRUCTION_NAMES,
+    )
+
+    tables = (INSTRUCTION_FILES, NESTED_INSTRUCTION_NAMES, INSTRUCTION_DIRECTORIES)
+    return {kind for table in tables for kind in table.values()} | {"imported-instruction"}
+
+
+@pytest.mark.parametrize(
+    ("model", "field", "emitted"),
+    [
+        ("MCPServerComponent", "transport", _emitted_transports()),
+        ("PromptComponent", "prompt_type", _emitted_prompt_types()),
+        (
+            "ModelComponent",
+            "model_type",
+            {"foundation", "adapter", "embedding", "quantized", "hosted"},
+        ),
+        ("SkillPackageComponent", "skill_type", {"skill", "skill-resource"}),
+        ("VerifiedExtensionComponent", "extension_type", {"ide-extension"}),
+    ],
+    ids=["transport", "prompt_type", "model_type", "skill_type", "extension_type"],
+)
+def test_value_lists_name_every_value_a_collector_writes(model, field, emitted):
+    from nexus_symbiote.core import models
+
+    description = getattr(models, model).model_fields[field].description
+    assert emitted <= set(description.split(", "))
+
+
+def test_claim_descriptions_name_what_collection_records():
+    from nexus_symbiote.core.models import DiscoveryVerification
+
+    scope = CompletenessClaim.model_fields["scope"].description
+    written = ("repository", "repository+shadowscan", "shadowscan-imported")
+    assert all(f" {value}" in scope for value in (*written, "mcp-endpoint-observation"))
+    assert "full-agent" not in scope
+    fields = DiscoveryVerification.model_fields
+    assert "metadata.timestamp" in fields["report_time"].description
+    assert "shadowscan:repository" in fields["repository"].description
+    assert "shadowscan:commit" in fields["commit"].description
+    docstring = " ".join((DiscoveryVerification.__doc__ or "").split())
+    assert "``not-applicable`` means no discovery report was imported" in docstring

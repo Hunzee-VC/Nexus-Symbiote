@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -141,7 +142,7 @@ def _check_rings(
             if len(purposes) > 1:
                 raise _RingError(
                     f"key {name} is in the {' and '.join(purposes)} rings; use one key per "
-                    "purpose or pass --allow-shared-keys as the gateways do"
+                    "purpose, or pass --allow-shared-keys if the gateways allow shared keys"
                 )
     for name in sorted(scopes):
         if not any(name in ring for ring in rings.values()):
@@ -162,14 +163,25 @@ def _path_exists_or_symlink(path: Path) -> bool:
 
 
 def _write_new(path: Path, content: bytes, mode: int = 0o600) -> None:
+    """Create ``path``; when the write or close fails, remove the file this call created."""
     target = path.absolute()
     root = Path(target.anchor)
     relative = _relative(root, target, allow_parent=True)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     with _parent(root, relative, create_parents=False) as parent:
         fd = os.open(relative.name, flags, mode, dir_fd=parent)
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(content)
+        created = os.fstat(fd)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(content)
+        except BaseException:
+            # A partial key or envelope would block every retry; a file that has
+            # replaced this one since it was created is left alone.
+            with contextlib.suppress(OSError):
+                current = os.stat(relative.name, dir_fd=parent, follow_symlinks=False)
+                if os.path.samestat(current, created):
+                    os.unlink(relative.name, dir_fd=parent)
+            raise
 
 
 def _unlink_created(path: Path) -> None:
@@ -302,7 +314,7 @@ def keygen(private_key: Path, public_key: Path, passphrase_file: Path | None) ->
     multiple=True,
     required=True,
     type=click.Path(exists=True, path_type=Path),
-    help="Ed25519 private key PEM with mode 0600; repeat for multiple signers.",
+    help="Ed25519 private key PEM that only its owner can access; repeat for multiple signers.",
 )
 @click.option(
     "--out",

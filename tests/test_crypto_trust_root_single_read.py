@@ -188,7 +188,7 @@ def test_oversized_trust_root_fails_closed(tmp_path: Path, monkeypatch: pytest.M
         trust_root_sha256=f"sha256:{hashlib.sha256(content).hexdigest()}",
     )
     assert not pinned.verified
-    assert pinned.error == "Explicit Sigstore trust root does not match the pinned SHA-256"
+    assert pinned.error == f"Explicit Sigstore trust root {root} exceeds the 32-byte limit"
     assert loaded == []
 
 

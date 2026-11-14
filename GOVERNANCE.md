@@ -48,7 +48,7 @@ One person is today the only reviewer, release approver, security contact and co
 
 - **Security reports** go through GitHub's private vulnerability reporting, which survives a change of maintainer, and [SECURITY.md](SECURITY.md#reporting-a-vulnerability) describes a public fallback that discloses nothing.
 - **Published versions** stay installable and verifiable without the maintainer: the README's verified install checks the attestation and the tagged lock, not a person.
-- **Forking** is the recovery path if the project stops: the MIT licence, the hash locks and the release workflow let a successor rebuild and re-attest under their own identity, but not publish under this project's PyPI name.
+- **Forking** is the recovery path if the project stops: the MIT license, the hash locks and the release workflow let a successor rebuild and re-attest under their own identity, but not publish under this project's PyPI name.
 
 The maintainer's open actions, which no repository change can do for them: add a second owner to the Hunzee-VC organization and to the `nexus-symbiote` project on PyPI and TestPyPI, record both in MAINTAINERS.md together with who can yank a release and publish a fix, give the security and conduct policies a contact other than the maintainer, and keep recovery codes for both accounts somewhere a successor can reach. Until then, organizations with supplier-continuity requirements should treat the single point of failure as unresolved.
 

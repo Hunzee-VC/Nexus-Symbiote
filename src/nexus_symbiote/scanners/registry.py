@@ -263,7 +263,8 @@ _TAG = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}")
 _DIGEST = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:[-_+.][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,}")
 _IPV6 = re.compile(r"\[[0-9A-Fa-f:.]+\]")
 _PULLED_DIGEST = re.compile(r"sha256:[0-9a-f]{64}|sha384:[0-9a-f]{96}|sha512:[0-9a-f]{128}")
-# docker/distribution's limit on a repository name.
+# docker/distribution's longest reference: a 255-character name, a 128-character tag
+# and a sha512 digest, with their separators.
 _LONGEST_IMAGE = 255 + 1 + 128 + 1 + 135
 
 
@@ -354,6 +355,8 @@ def _recorded_requirement(requirement: Requirement) -> str:
 # Real versions are short. packaging re-parses a clause's version on every
 # comparison, so a declaration with a longer one is recorded but not compared.
 _LONGEST_VERSION = 128
+# The public index and its file host; any other origin qualifies a pkg:pypi package URL.
+_PYPI_ORIGINS = frozenset({"https://pypi.org", "https://files.pythonhosted.org"})
 # All root requirements*.txt files together, in characters.
 _REQUIREMENTS_BUDGET = 4 * 1024 * 1024
 # shlex builds a token one character at a time, so its cost grows with the square
@@ -590,7 +593,7 @@ class _Package:
 
     declarations: list[_PipDeclaration] = field(default_factory=list)
     sources: set[str] = field(default_factory=set)
-    seen: set[str] = field(default_factory=set)
+    seen: set[tuple[str, str, str]] = field(default_factory=set)
     states: dict[tuple[str, str], _Declared] = field(default_factory=dict)
     conflict: bool = False
 
@@ -601,14 +604,16 @@ class _Package:
         first = not self.declarations
         self.declarations.append(declaration)
         requirement = declaration.requirement
+        # A text is compared once in each state, not only in the first that holds it.
+        key = (declaration.marker, declaration.group, declaration.reference)
         if (
             self.conflict
             or requirement is None
             or declaration.untranslated is not None
-            or declaration.reference in self.seen
+            or key in self.seen
         ):
             return
-        self.seen.add(declaration.reference)
+        self.seen.add(key)
         # Declarations under different markers apply to different environments
         # (uv writes platform splits that way), and so do different optional-
         # dependency groups (uv's cpu and cu121 extras), so only equal ones are
@@ -881,9 +886,10 @@ class RegistryScanner(Scanner):
 
     def _npm_lock(
         self, result: ScanResult
-    ) -> tuple[tuple[str, dict[str, Any], str] | None, tuple[str, bytes] | None]:
+    ) -> tuple[tuple[str, dict[str, Any], str] | None, tuple[str, bytes] | None, bool]:
         """The lockfile package.json is installed from: npm's packages map with the
-        digest of its bytes, or the bytes of a pnpm or Yarn lockfile.
+        digest of its bytes, or the bytes of a pnpm or Yarn lockfile; and whether a
+        lockfile is present that neither comes from.
 
         With the lockfiles of more than one package manager in the root, which one
         installs is unknown, so none is bound and the ambiguity is a coverage gap.
@@ -910,14 +916,14 @@ class RegistryScanner(Scanner):
             result.surfaces_excluded.append(
                 f"multiple npm lockfiles present ({listed}); resolution is ambiguous"
             )
-            return None, None
+            return None, None, True
         if not found:
-            return None, None
+            return None, None, False
         name, raw = found[0]
         if raw is None:
-            return None, None
+            return None, None, True
         if name not in self._NPM_LOCKFILES:
-            return None, (name, raw)
+            return None, (name, raw), False
         try:
             lock = parse_json_strict(raw)
             if (
@@ -934,8 +940,8 @@ class RegistryScanner(Scanner):
                 raise ValueError("unsupported npm lockfile structure")
         except (ValueError, TypeError, UnicodeError, RecursionError):
             result.scan_failures.append(f"{name}: invalid or unsupported lockfile")
-            return None, None
-        return (name, lock["packages"], hash_bytes(raw)), None
+            return None, None, True
+        return (name, lock["packages"], hash_bytes(raw)), None, False
 
     @staticmethod
     def _npm_spec(spec: str) -> tuple[str, str | None, str]:
@@ -999,7 +1005,7 @@ class RegistryScanner(Scanner):
         ):
             # Each workspace's package.json declares dependencies npm installs.
             result.surfaces_excluded.append(self._NPM_GAPS["workspaces"])
-        lock, other_lock = self._npm_lock(result)
+        lock, other_lock, lock_unread = self._npm_lock(result)
         resolutions: dict[str, Any] = lock[1] if lock else {}
         overrides = self._npm_overrides(data)
         components: list[RegistryEntryComponent] = []
@@ -1027,7 +1033,15 @@ class RegistryScanner(Scanner):
                 gaps[self._NPM_GAPS["override"]] = None
             components.append(
                 self._npm_component(
-                    key, package, kind, version_range, specs, record, lock, overridden, result
+                    key,
+                    package,
+                    kind,
+                    version_range,
+                    specs,
+                    record,
+                    lock,
+                    overridden or lock_unread,
+                    result,
                 )
             )
             if kind in ("registry", "alias"):
@@ -1045,12 +1059,20 @@ class RegistryScanner(Scanner):
             ):
                 gaps[self._NPM_GAPS["unclassified"]] = None
         result.surfaces_excluded.extend(gaps)
-        if components and other_lock is not None:
+        # A pnpm or Yarn record resolves only a package package.json declares from a
+        # registry: npm installs a git, URL or path source whatever the record says.
+        registry = [component for component, _ in fetched]
+        if registry and other_lock is not None:
             lock_name, raw_lock = other_lock
             if lock_name == "pnpm-lock.yaml":
-                self._resolve_pnpm_lockfile(raw_lock, components, result)
+                read = self._resolve_pnpm_lockfile(raw_lock, registry, components, result)
             else:
-                self._resolve_yarn_lockfile(raw_lock, components, result)
+                read = self._resolve_yarn_lockfile(raw_lock, registry, result)
+            if not read:
+                for component in registry:
+                    # The lockfile installs it, so the version an exact spec names
+                    # is in doubt.
+                    component.package_url = None
         if fetched:
             self._redirect_npm(result, fetched)
         return components
@@ -1169,7 +1191,7 @@ class RegistryScanner(Scanner):
         specs: list[tuple[str, str]],
         record: Any,
         lock: tuple[str, dict[str, Any], str] | None,
-        overridden: bool,
+        in_doubt: bool,
         result: ScanResult,
     ) -> RegistryEntryComponent:
         spec = specs[-1][1]
@@ -1246,8 +1268,9 @@ class RegistryScanner(Scanner):
         package_url = None
         if resolution is not None and resolution.consistent:
             package_url = self._npm_purl(package, resolution.version, resolution.origin)
-        elif registry and record is None and not overridden and _npm_exact(version_range):
-            # A lock record that was not taken leaves the identity in doubt.
+        elif registry and record is None and not in_doubt and _npm_exact(version_range):
+            # Only without a lock record: one that was not taken, a lockfile that was
+            # not read and an override each leave the version the spec names in doubt.
             package_url = self._npm_purl(package, version_range, None)
         return RegistryEntryComponent(
             bom_ref=f"registry:npm/{redact_text(key)}",
@@ -1571,13 +1594,20 @@ class RegistryScanner(Scanner):
         self,
         lock_bytes: bytes,
         components: list[RegistryEntryComponent],
+        declared: list[RegistryEntryComponent],
         result: ScanResult,
-    ) -> None:
+    ) -> bool:
+        """Bind pnpm records to the components, which package.json declares from a
+        registry; ``declared`` is every inventoried npm package. False when the
+        lockfile is not read."""
         try:
             import yaml
+        except ImportError:
+            result.scan_failures.append("pnpm-lock.yaml: YAML parser unavailable")
+            return False
+        from nexus_symbiote.policy import PolicyError, parse_yaml_mapping
 
-            from nexus_symbiote.policy import PolicyError, parse_yaml_mapping
-
+        try:
             text = lock_bytes.decode("utf-8")
             for index, token in enumerate(yaml.scan(text)):
                 if index >= _MAX_PNPM_LOCK_TOKENS or isinstance(
@@ -1587,8 +1617,7 @@ class RegistryScanner(Scanner):
             lock_doc = parse_yaml_mapping(text)
             lock_ver = lock_doc.get("lockfileVersion")
             if (
-                not isinstance(lock_doc, dict)
-                or lock_ver is None
+                lock_ver is None
                 or isinstance(lock_ver, bool)
                 or not isinstance(lock_ver, (str, int, float))
             ):
@@ -1596,9 +1625,9 @@ class RegistryScanner(Scanner):
             packages = lock_doc.get("packages", {})
             if packages is not None and not isinstance(packages, dict):
                 raise ValueError("unsupported pnpm packages structure")
-        except (ImportError, ValueError, UnicodeError, PolicyError, RecursionError, yaml.YAMLError):
+        except (ValueError, UnicodeError, PolicyError, RecursionError, yaml.YAMLError):
             result.scan_failures.append("pnpm-lock.yaml: invalid or unsupported lockfile")
-            return
+            return False
         lock_digest = hash_bytes(lock_bytes)
         packages = packages or {}
         importers = lock_doc.get("importers")
@@ -1608,7 +1637,8 @@ class RegistryScanner(Scanner):
             else lock_doc
         )
         importer_specs: dict[str, str] = {}
-        for dep_key in ("dependencies", "devDependencies", "optionalDependencies"):
+        dep_keys = ("dependencies", "devDependencies", "optionalDependencies")
+        for dep_key in dep_keys:
             dep_map = root_importer.get(dep_key, {})
             if isinstance(dep_map, dict):
                 for pkg_name, entry in dep_map.items():
@@ -1616,8 +1646,16 @@ class RegistryScanner(Scanner):
                         importer_specs[pkg_name] = entry["version"]
                     elif isinstance(entry, str):
                         importer_specs[pkg_name] = entry
-        counts = Counter(c.name for c in components if c.properties.get("npm_alias") is None)
-        selections = self._pnpm_selections(packages, set(counts).difference(importer_specs))
+        counts = Counter(c.name for c in declared if c.properties.get("npm_alias") is None)
+        # The root importer lists what pnpm installs for package.json; a name it does
+        # not list is not resolved by records that other packages' dependencies left.
+        # Only a lockfile without one is searched by name.
+        unlisted = "importers" not in lock_doc and not any(key in lock_doc for key in dep_keys)
+        selections = (
+            self._pnpm_selections(packages, set(counts).difference(importer_specs))
+            if unlisted
+            else {}
+        )
         for comp in components:
             alias = comp.properties.get("npm_alias")
             if alias is not None:
@@ -1726,13 +1764,16 @@ class RegistryScanner(Scanner):
                 lock_digest,
                 result,
             )
+        return True
 
     def _resolve_yarn_lockfile(
         self,
         lock_bytes: bytes,
         components: list[RegistryEntryComponent],
         result: ScanResult,
-    ) -> None:
+    ) -> bool:
+        """Bind Yarn records to the components, which package.json declares from a
+        registry. False when the lockfile is not read."""
         try:
             text = lock_bytes.decode("utf-8")
             lines = text.splitlines()
@@ -1774,7 +1815,7 @@ class RegistryScanner(Scanner):
                 raise ValueError("empty yarn.lock")
         except (ValueError, UnicodeError):
             result.scan_failures.append("yarn.lock: invalid or unsupported lockfile")
-            return
+            return False
         lock_digest = hash_bytes(lock_bytes)
         by_pkg: dict[str, list[tuple[str, dict[str, str], str]]] = {}
         for selectors, fields in stanzas:
@@ -1800,9 +1841,12 @@ class RegistryScanner(Scanner):
                 continue
             # As for pnpm: the record decides the identity, or nothing does.
             comp.package_url = None
-            req = str(comp.properties.get("requested_version", ""))
-            exact_matches = [e for e in entries if e[0] in (req, f"npm:{req}")]
-            chosen = exact_matches or entries
+            req = str(comp.properties.get("requested_version", "")).strip()
+            # Yarn records the spec package.json declares; a stanza of another spec is
+            # another package's dependency, not what this one installs.
+            chosen = [e for e in entries if e[0].strip() in (req, f"npm:{req}")]
+            if not chosen:
+                continue
             distinct_versions = {e[1].get("version") for e in chosen}
             if len(distinct_versions) > 1:
                 result.surfaces_excluded.append(
@@ -1849,6 +1893,13 @@ class RegistryScanner(Scanner):
             ):
                 result.scan_failures.append("yarn.lock: selected package lacks an exact version")
                 continue
+            if "resolution" in fields and resolution_val != f"{comp.name}@npm:{resolved_version}":
+                # Yarn Berry fetches the locator its resolution names, which has no
+                # resolved URL to check: only the registry's package and version is one.
+                result.surfaces_excluded.append(
+                    "yarn.lock: local or non-registry resolution is unverified"
+                )
+                continue
             locator = "yarn.lock#/" + locator_key.replace("~", "~0").replace("/", "~1")
             self._bind_npm_resolution(
                 comp,
@@ -1861,6 +1912,7 @@ class RegistryScanner(Scanner):
                 lock_digest,
                 result,
             )
+        return True
 
     _OVERRIDE_FIELDS = (("overrides",), ("resolutions",), ("pnpm", "overrides"))
     _OVERRIDE_ENTRIES = 10_000
@@ -2041,8 +2093,13 @@ class RegistryScanner(Scanner):
             mutable = any(
                 d.requirement is not None
                 and d.requirement.url
-                and re.match(r"(?:git|hg|svn|bzr)\+", d.requirement.url, re.I)
-                and not _vcs_pinned(d.requirement.url)
+                and (
+                    d.requirement.url.lower().startswith("http://")
+                    or (
+                        re.match(r"(?:git|hg|svn|bzr)\+", d.requirement.url, re.I) is not None
+                        and not _vcs_pinned(d.requirement.url)
+                    )
+                )
                 for d in urls
             )
             risks.append(
@@ -2510,7 +2567,7 @@ class RegistryScanner(Scanner):
                     d.requirement is not None and d.requirement.url for d in package.declarations
                 )
             }
-            self._resolve_python_lockfiles(components, result, from_urls)
+            self._resolve_python_lockfiles(components, result, from_urls, packages)
             indexed = [
                 component
                 for component, package in zip(components, packages.values(), strict=True)
@@ -2572,6 +2629,7 @@ class RegistryScanner(Scanner):
         components: list[RegistryEntryComponent],
         result: ScanResult,
         from_urls: set[str],
+        packages_declared: dict[str, _Package],
     ) -> None:
         files = self._confined()
         found_locks: list[tuple[str, str, bytes]] = []
@@ -2597,8 +2655,7 @@ class RegistryScanner(Scanner):
             lock_doc = tomllib.loads(text)
             packages = lock_doc.get("package", [])
             if (
-                not isinstance(lock_doc, dict)
-                or not isinstance(packages, list)
+                not isinstance(packages, list)
                 or len(packages) > 10_000
                 or not all(isinstance(item, dict) for item in packages)
             ):
@@ -2653,6 +2710,25 @@ class RegistryScanner(Scanner):
             if pinned is None or pinned != resolved_version:
                 result.scan_failures.append(f"{lock_name}: selected package lacks an exact version")
                 continue
+            parsed = _parsed(resolved_version)
+            package = packages_declared.get(comp.name)
+            # uv and Poetry lock no build requirements; they are resolved at build time.
+            disagree = [
+                d.source
+                for d in (package.declarations if package is not None else ())
+                if d.requirement is not None
+                and d.group != "build-system"
+                and not _satisfies(d.requirement, resolved_version, parsed)
+            ]
+            if disagree:
+                # The lockfile is stale, or the file that declares it is not installed
+                # from it: which version is installed is unknown.
+                comp.package_url = None
+                result.scan_failures.append(
+                    f"{lock_name}: selected package version disagrees with "
+                    + ", ".join(dict.fromkeys(disagree))
+                )
+                continue
             registry_origin: str | None = "https://pypi.org"
             if isinstance(source, dict):
                 raw_url = source.get("registry") if method == "uv-lockfile" else source.get("url")
@@ -2664,6 +2740,10 @@ class RegistryScanner(Scanner):
             comp.package_url = (
                 f"pkg:pypi/{quote(comp.name, safe='')}@{quote(resolved_version, safe='')}"
             )
+            if registry_origin is not None and registry_origin not in _PYPI_ORIGINS:
+                # As for npm: the package URL names the index it was resolved from, so it
+                # is not mistaken for the public package of the same name.
+                comp.package_url += f"?repository_url={registry_origin}"
             comp.registry_uri = registry_origin
             comp.source_path = lock_name
             comp.assurance_level = AssuranceLevel.DECLARED
@@ -2860,6 +2940,8 @@ class RegistryScanner(Scanner):
         if isinstance(optional, dict):
             for extra, values in optional.items():
                 strings(values, str(extra), "pyproject.toml: invalid optional dependencies")
+        else:
+            failures["pyproject.toml: invalid optional dependencies"] = None
         build = data.get("build-system", {})
         strings(
             build.get("requires", []) if isinstance(build, dict) else None,
@@ -3165,7 +3247,7 @@ class RegistryScanner(Scanner):
         unresolved: set[str] = set()
         models: set[str] = set()
 
-        def collect(image: str, filename: str, gaps: Iterable[str]) -> None:
+        def collect(image: str, filename: str, gaps: list[str]) -> None:
             files = found.setdefault(image, [])
             if filename not in files:
                 files.append(filename)
@@ -3542,12 +3624,12 @@ class RegistryScanner(Scanner):
 
     @staticmethod
     def _conflict(one: str, other: str) -> bool:
-        """Whether two declarations of a package conflict, as the collector decides it.
+        """Whether two declarations of a package in one group conflict, as the
+        collector decides it.
 
         Only declarations under the same markers are compared, and the extras a
-        requirement names are not.
-        A range and a pin that satisfies it, as pip-tools, uv and lock files write
-        them, do not conflict; two ranges are not compared.
+        requirement names are not. A range and a pin that satisfies it, as pip-tools,
+        uv and lock files write them, do not conflict; two ranges are not compared.
         """
         try:
             first, second = Requirement(one), Requirement(other)

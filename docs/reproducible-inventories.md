@@ -98,7 +98,7 @@ exports carry the same serial number and embed the native document as the native
 records it. It is a name, not a digest: compare content digests to compare content.
 
 An inventory whose content digest cannot be computed, because it holds a value outside
-the I-JSON range, such as a lone surrogate, or nests too deeply, has no serial number
+the I-JSON domain, such as a lone surrogate, or nests too deeply, has no serial number
 and is not written: `scan` and `import-shadowscan` exit 1.
 
 ## Byte-identical files with `SOURCE_DATE_EPOCH`

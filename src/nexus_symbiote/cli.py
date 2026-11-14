@@ -35,6 +35,7 @@ from nexus_symbiote.reporting import (
     print_lines,
     risk_report_lines,
     scan_gate_lines,
+    severity_rank,
     validation_report_lines,
 )
 from nexus_symbiote.runtime_cli import register_runtime_commands
@@ -1084,6 +1085,8 @@ def verify_artifact(
         not bundle and (signer_identity or issuer)
     ):
         raise click.UsageError("--bundle, --signer-identity and --issuer must be supplied together")
+    if not bundle and (trust_root or trust_root_sha256):
+        raise click.UsageError("--trust-root and --trust-root-sha256 require --bundle")
     try:
         digest = hash_confined_file(_project_root(project, label="--project"), artifact_path)
     except OSError as exc:
@@ -1172,6 +1175,8 @@ def verify_discovery(
         (bundle, signer_identity, issuer)
     ):
         raise click.UsageError("--bundle, --signer-identity and --issuer must be supplied together")
+    if not bundle and (trust_root or trust_root_sha256):
+        raise click.UsageError("--trust-root and --trust-root-sha256 require --bundle")
     try:
         doc = parse_json_strict(
             read_regular_text(Path(aibom_path), max_bytes=MAX_REPORT_BYTES),
@@ -1579,10 +1584,10 @@ def risk(
             failed = {
                 **RiskReport().to_dict(),
                 "passed": False,
-                "assessment_basis": "project-reconciliation-failed",
+                "assessment_basis": checked.basis,
                 "overall_score": None,
                 "risk_level": "unknown",
-                "coverage_status": "unreconciled",
+                "coverage_status": "unknown" if checked.is_complete else "unreconciled",
                 "gate_reasons": reasons,
                 "total_components": len(bom.components),
                 "supplier_claims": [],
@@ -1615,7 +1620,6 @@ def risk(
             "assessment_basis": "unsigned-discovery-evidence",
             "overall_score": None,
             "risk_level": "unknown",
-            "coverage_status": "unreconciled",
             "gate_reasons": [unsigned_reason],
             "total_components": len(bom.components),
             "supplier_claims": supplier_claims,
@@ -1694,12 +1698,7 @@ def summary(aibom_path: str, json_output: bool = False) -> None:
     bom = _load_bom(aibom_path)
     s = bom.summary()
     if json_output:
-        claim = bom.metadata.completeness
-        document = {
-            **s,
-            "completeness": claim.model_dump(mode="json", exclude_none=True) if claim else None,
-        }
-        click.echo(json_text(json.dumps(document, indent=2)))
+        click.echo(json_text(json.dumps(s, indent=2)))
         return
     lines: list[ReportLine] = [
         ("AIBOM Summary", "bold"),
@@ -1713,7 +1712,7 @@ def summary(aibom_path: str, json_output: bool = False) -> None:
             lines.append((safe_line("    - ", ctype, ": ", count), None))
     if s["risk_breakdown"]:
         lines.append(("  Risk breakdown:", None))
-        for sev, count in sorted(s["risk_breakdown"].items()):
+        for sev, count in sorted(s["risk_breakdown"].items(), key=severity_rank):
             lines.append((safe_line("    - ", sev, ": ", count), None))
     print_lines(lines)
 
@@ -1754,7 +1753,7 @@ def blast_radius_command(aibom_path: str, component_ref: str, json_output: bool)
     "--path",
     type=click.Path(),
     default=".",
-    help="Directory to create .nexus-symbiote.yaml in",
+    help="Directory to create the project policy file in",
 )
 def init(force: bool, path: str) -> None:
     """Initialize a .nexus-symbiote.yaml policy configuration."""

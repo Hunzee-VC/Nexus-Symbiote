@@ -53,18 +53,18 @@ short summaries, not the text of those documents.
 ## The crosswalk command
 
 ```text
-nexus-symbiote crosswalk INVENTORY [--framework NAME ...] [--format json|markdown] [-o FILE]
+nexus-symbiote crosswalk AIBOM_PATH [--framework NAME ...] [--format json|markdown] [-o PATH]
 ```
 
 `crosswalk` reads a native inventory and takes its findings exactly as `risk` scores
 them under the built-in policy: no project policy is read, so no finding is suppressed
 or ignored, and the findings that `risk` adds from a model's recorded fields are
-included. For each framework edition, every one or each that a `--framework` names, it
-lists every entry that a finding references, with those findings, and then the
-categories whose findings reference no entry of the selected editions. It runs offline
-and is a report, not a gate: exit status 0 means only that the report was written. An
-inventory that cannot be read, or a report that cannot be written, ends it with exit
-status 1.
+included. For each selected framework edition (every edition, or each one that a
+`--framework` names), it lists every entry that a finding references, with those
+findings, and then the categories whose findings reference no entry of the selected
+editions. It runs offline and is a report, not a gate: exit status 0 means only that
+the report was written. An inventory that cannot be read, or a report that cannot be
+written, ends it with exit status 1.
 
 JSON, the default, is a document with `format` `nexus-symbiote/crosswalk/v1` and
 sorted keys:

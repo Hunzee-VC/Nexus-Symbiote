@@ -1,7 +1,8 @@
 """Recover the native inventory from exported CycloneDX or SPDX text.
 
 The text is parsed like a native AgentBOM file: bounded, with duplicate keys and
-non-finite numbers rejected. Every failure is a ValueError. Recovery checks the
+non-finite numbers rejected. Every failure to recover the text is a ValueError;
+``load_export`` also raises OSError for a file it cannot read. Recovery checks the
 embedded inventory's digest and its agreement with the standard fields; it does
 not authenticate the producer.
 """

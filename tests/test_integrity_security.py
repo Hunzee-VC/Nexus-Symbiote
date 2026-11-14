@@ -146,8 +146,12 @@ def test_invalid_tensor_structure_never_becomes_safe(tmp_path, header, data):
 
 def test_oversize_header_and_duplicate_keys_are_rejected(tmp_path):
     path = tmp_path / "model.safetensors"
-    path.write_bytes((MAX_MODEL_HEADER_BYTES + 1).to_bytes(8, "little") + b" " * 8)
-    assert inspect_model_format(path)[0] == SerializationSafety.UNKNOWN
+    oversize = b"{" + b" " * MAX_MODEL_HEADER_BYTES + b"}"
+    path.write_bytes(len(oversize).to_bytes(8, "little") + oversize)
+    assert inspect_model_format(path) == (
+        SerializationSafety.UNKNOWN,
+        "SafeTensors header exceeds the inspection limit",
+    )
     duplicate = b'{"__metadata__":{},"__metadata__":{}}'
     path.write_bytes(len(duplicate).to_bytes(8, "little") + duplicate)
     assert inspect_model_format(path)[0] == SerializationSafety.UNKNOWN
@@ -496,13 +500,13 @@ def test_many_components_naming_one_artifact_read_it_once(tmp_path):
 
 
 def test_case_variant_digest_keys_are_one_algorithm_and_one_read(tmp_path):
-    content = b"weights"
-    (tmp_path / "model.bin").write_bytes(content)
+    write_safetensors(tmp_path / "model.safetensors")
+    content = (tmp_path / "model.safetensors").read_bytes()
     digest = hashlib.sha256(content).hexdigest()
     model = ModelComponent(
         bom_ref="model:m",
         name="m",
-        source_path="model.bin",
+        source_path="model.safetensors",
         hashes={"sha256": digest, "SHA256": digest, "Sha256": digest},
     )
     report = IntegrityValidator(require_model_signatures=False).validate(
@@ -511,6 +515,7 @@ def test_case_variant_digest_keys_are_one_algorithm_and_one_read(tmp_path):
     assert report.status == "fail"
     duplicates = [i for i in report.issues if "more than once" in i.detail]
     assert len(duplicates) == 2 and report.hashes_verified == 1
+    assert {i.severity for i in duplicates} == {"error"}
 
 
 def test_validation_byte_budget_fails_closed_with_a_reason(tmp_path):
@@ -708,7 +713,7 @@ def test_paths_the_readers_refuse_are_never_charged_to_the_budget(tmp_path):
     assert [i.category for i in escaped.issues if i.severity == "error"] == ["missing_artifact"]
 
 
-def test_bound_imports_report_only_unavailable_evidence_without_blocking(tmp_path):
+def test_bound_imports_downgrade_only_evidence_the_import_could_not_carry(tmp_path):
     # A format without a structural validator: its unknown verdict is not a gap in
     # evidence the import could fill, so it still blocks.
     (tmp_path / "weights.h5").write_bytes(b"\0" * 64)

@@ -172,9 +172,9 @@ def read_native_inventory(path: Path) -> NativeInventory:
             # The parse and the digest canonicalize at the same depth today, so the parse
             # refuses first; should that change, nesting is still refused as the parse does.
             raise NativeFormatError(_NOT_STRICT_JSON) from exc
-        raise NativeFormatError(
-            "It has no metadata object or no components list, so it has no content digest."
-        ) from exc
+        # The schema check accepts a missing components list, and nothing else that is
+        # valid lacks a content digest.
+        raise NativeFormatError("It has no components list, so it has no content digest.") from exc
     return NativeInventory(bom=bom, file_sha256=hash_bytes(raw), content_digest=digest)
 
 

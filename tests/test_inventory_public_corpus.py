@@ -5,6 +5,8 @@ import json
 import runpy
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -66,8 +68,6 @@ def test_label_bounds_keep_unknowns_and_empty_denominators_visible():
 
 
 def test_only_adjudicated_negatives_enter_confusion_counts():
-    import pytest
-
     score = runpy.run_path(str(ROOT / "benchmarks/inventory/run_inventory.py"))["score_tools"]
     result = score({"tool", "decoy", "unknown"}, ["tool", "missed"], ["decoy", "negative"])
     assert result == {
@@ -91,7 +91,12 @@ def test_only_adjudicated_negatives_enter_confusion_counts():
         score(set(), ["tool", "tool"], [])
 
 
-def test_unexpected_exclusion_is_unknown_and_fails_the_case(monkeypatch):
+# The collector records an absent config as scanned; reported as excluded, it is a gap too.
+@pytest.mark.parametrize(
+    "reason",
+    ["app/mcpserver_quickstart.py: unexpected omission", "mcp-config (no config files found)"],
+)
+def test_unexpected_exclusion_is_unknown_and_fails_the_case(monkeypatch, reason):
     namespace = runpy.run_path(str(ROOT / "benchmarks/inventory/run_inventory.py"))
     scanner = namespace["MCPScanner"]
     original = scanner.scan
@@ -99,7 +104,7 @@ def test_unexpected_exclusion_is_unknown_and_fails_the_case(monkeypatch):
     def incomplete(self, path):
         result = original(self, path)
         if (path / "app/mcpserver_quickstart.py").exists():
-            result.surfaces_excluded.append("app/mcpserver_quickstart.py: unexpected omission")
+            result.surfaces_excluded.append(reason)
         return result
 
     monkeypatch.setattr(scanner, "scan", incomplete)
@@ -107,13 +112,59 @@ def test_unexpected_exclusion_is_unknown_and_fails_the_case(monkeypatch):
     case = next(row for row in report["cases"] if row["case"] == "python-sdk-quickstart")
     assert not case["passed"] and case["coverage_incomplete"]
     assert case["unknown_negative_labels"] == 2
-    assert case["relevant_mcp_exclusions"] == ["app/mcpserver_quickstart.py: unexpected omission"]
+    assert case["relevant_mcp_exclusions"] == [reason]
+    assert not report["passed"]
+
+
+@pytest.mark.parametrize(
+    ("forged", "valid"),
+    [
+        ("digest-pinned", "digest-pinned"),
+        ("signature-not-found", "signature-present-unverified"),
+    ],
+)
+def test_server_and_signing_controls_judge_the_component_they_name(monkeypatch, forged, valid):
+    """A risk on the other server, a verified status or the other unverified one fails them."""
+    namespace = runpy.run_path(str(ROOT / "benchmarks/inventory/run_inventory.py"))
+    mcp, model = namespace["MCPScanner"], namespace["ModelScanner"]
+    scan_servers, scan_models = mcp.scan, model.scan
+
+    def treated_as_loopback(self, path):
+        result = scan_servers(self, path)
+        for server in result.components:
+            if getattr(server, "endpoint_url", None) == "http://localhost.attacker.invalid":
+                server.risks = [r for r in server.risks if r.category != "transport_security"]
+        return result
+
+    def misreported(self, path):
+        result = scan_models(self, path)
+        status = forged if (path / "model.sig").exists() else valid
+        result.components = [
+            c.model_copy(update={"signing_status": status}) for c in result.components
+        ]
+        return result
+
+    monkeypatch.setattr(mcp, "scan", treated_as_loopback)
+    monkeypatch.setattr(model, "scan", misreported)
+    report = namespace["run"]()
+    cases = {row["case"]: row for row in report["cases"]}
+    assert cases["scoped-servers"]["checks"] == {
+        "distinct_scoped_edges": True,
+        "origin_only": True,
+        "no_secret_in_bom": True,
+        "deceptive_localhost_flagged": False,
+    }
+    assert cases["forged-signer-and-format"]["checks"]["signer_unverified"] is False
+    assert cases["valid-safe-tensor"]["checks"] == {"safe_format": True, "unsigned": False}
+    assert not any(
+        cases[case]["passed"]
+        for case in ("scoped-servers", "forged-signer-and-format", "valid-safe-tensor")
+    )
     assert not report["passed"]
 
 
 def test_inventory_statement_binds_results_and_scanner_materials(tmp_path, monkeypatch):
     import hashlib
-    import importlib.util
 
     from nexus_symbiote.utils.crypto import VerificationResult
 
@@ -136,8 +187,6 @@ def test_inventory_statement_binds_results_and_scanner_materials(tmp_path, monke
 
     monkeypatch.setattr("nexus_symbiote.utils.crypto.verify_sigstore_digest", check)
     evidence.verify(target, "signer", "authority", compare_installation=True)
-    import pytest
-
     with pytest.raises(ValueError, match="signature"):
         evidence.verify(target, "other", "authority")
     (target / "results.json").write_bytes(b"{}")
@@ -188,8 +237,6 @@ def test_every_inventory_control_can_fail(tmp_path):
 
 
 def test_an_attested_release_archive_is_checked_without_a_sigstore_bundle(tmp_path, monkeypatch):
-    import pytest
-
     monkeypatch.syspath_prepend(str(ROOT / "benchmarks/inventory"))
     spec = importlib.util.spec_from_file_location(
         "inventory_evidence_check", ROOT / "benchmarks/inventory/evidence.py"
@@ -216,8 +263,6 @@ def test_an_attested_release_archive_is_checked_without_a_sigstore_bundle(tmp_pa
 def test_the_installation_comparison_ignores_what_created_the_environment(tmp_path, monkeypatch):
     from email.message import Message
     from types import SimpleNamespace
-
-    import pytest
 
     monkeypatch.syspath_prepend(str(ROOT / "benchmarks/inventory"))
     spec = importlib.util.spec_from_file_location(
@@ -258,3 +303,41 @@ def test_the_installation_comparison_ignores_what_created_the_environment(tmp_pa
     environment(("click", "8.4.0"), ("nexus-symbiote", "0.2.0"))
     with pytest.raises(ValueError, match="distributions differ"):
         module.check(archive, compare_installation=True)
+
+
+def _evidence_module(monkeypatch, name):
+    monkeypatch.syspath_prepend(str(ROOT / "benchmarks/inventory"))
+    spec = importlib.util.spec_from_file_location(name, ROOT / "benchmarks/inventory/evidence.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_a_shadowed_distribution_is_not_the_one_recorded(monkeypatch):
+    from email.message import Message
+    from types import SimpleNamespace
+
+    module = _evidence_module(monkeypatch, "inventory_evidence_shadowed")
+
+    def distributions():
+        # sys.path order: the first copy is the one Python imports.
+        for version in ("8.5.0", "8.4.0"):
+            metadata = Message()
+            metadata["Name"] = "click"
+            yield SimpleNamespace(metadata=metadata, version=version)
+
+    monkeypatch.setattr(module, "distributions", distributions)
+    assert module.installed_versions() == {"click": "8.5.0"}
+
+
+def test_prepare_says_why_it_refuses_and_writes_nothing(tmp_path, monkeypatch):
+    module = _evidence_module(monkeypatch, "inventory_evidence_refusals")
+    monkeypatch.setattr(module, "run", lambda: {"passed": False, "corpus_version": 3})
+    with pytest.raises(ValueError, match=r"^benchmark failed$"):
+        module.prepare(tmp_path / "failed")
+    snapshots = iter([{"corpus/manifest.json": "a"}, {"corpus/manifest.json": "b"}])
+    monkeypatch.setattr(module, "materials", lambda: next(snapshots))
+    monkeypatch.setattr(module, "run", lambda: {"passed": True, "corpus_version": 3})
+    with pytest.raises(ValueError, match=r"^material changed during the run$"):
+        module.prepare(tmp_path / "changed")
+    assert list(tmp_path.iterdir()) == []

@@ -364,3 +364,15 @@ def test_signed_report_reports_a_verified_producer(tmp_path, monkeypatch):
         + ["--signature-policy", str(_signers(tmp_path))],
     )
     assert json.loads(risk.stdout)["discovery_producer"] == "verified"
+
+
+def test_a_failed_producer_check_does_not_relabel_a_passed_reconciliation(tmp_path):
+    project, bom = _project(tmp_path, GATED)
+    args = ["risk", str(bom), "--project", str(project), "--json-output"]
+    document = json.loads(CliRunner().invoke(main, args).stdout)
+    assert document["assessment_basis"] == "project-reconciled"
+    assert document["overall_score"] is None and document["passed"] is False
+    assert document["coverage_status"] != "unreconciled"
+    text = CliRunner().invoke(main, args[:-1]).output
+    assert "Project reconciliation failed" not in text
+    assert "No operator signature policy entry names" in text

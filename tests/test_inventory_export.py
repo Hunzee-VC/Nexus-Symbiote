@@ -248,7 +248,7 @@ def test_an_imported_record_is_never_the_repository_agent(tmp_path):
 
 @pytest.mark.parametrize(
     "suffix",
-    ["0", "\n", "‮​forged", "\x1b[31m", " x"],
+    ["0", "\n", "\u202e\u200bforged", "\x1b[31m", " x"],
     ids=repr,
 )
 def test_only_an_exact_repository_reference_is_the_repository_agent(tmp_path, suffix):
@@ -485,6 +485,12 @@ def test_an_unreadable_or_invalid_inventory_is_refused(tmp_path, kind, reason):
     with pytest.raises(NativeFormatError) as refusal:
         read_native_inventory(_invalid(tmp_path, kind))
     assert reason in str(refusal.value)
+
+
+def test_an_inventory_without_components_is_refused_for_that_reason(tmp_path):
+    with pytest.raises(NativeFormatError) as refusal:
+        read_native_inventory(_invalid(tmp_path, "no-components"))
+    assert str(refusal.value) == "It has no components list, so it has no content digest."
 
 
 def test_an_oversized_inventory_is_read_only_up_to_the_limit(monkeypatch):

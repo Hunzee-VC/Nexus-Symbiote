@@ -252,7 +252,7 @@ def test_paths_rank_by_sink_weight_then_length_then_reference():
         AgentComponent(
             bom_ref="agent",
             name="agent",
-            tool_refs=["secret", "write", "exfil", "exec", "high", "crit", "exec-b"],
+            tool_refs=["secret", "write", "exfil", "exec", "high", "crit", "exec-b", "medium-only"],
             sub_agent_refs=["hop"],
         ),
         tool("secret", CapabilityClass.CREDENTIALS),
@@ -788,19 +788,20 @@ def test_hostile_inventory_text_is_inert_in_the_page():
     for hostile in HOSTILE:
         shown = UNSAFE_TEXT.sub("\ufffd", hostile).replace("##[", "##\ufffd[")
         assert shown in text, hostile
-        if len(shown) <= 28:
+        if len(shown) <= LABEL_CHARS:
             assert any(shown in value for value in attributes), hostile
 
 
 def test_hostile_text_never_reaches_a_class_id_or_data_attribute():
     page = parsed(render_html(view_of(hostile_inventory())))
-    generated = {
-        name: value
+    generated = [
+        value
         for _, attrs in page.elements
         for name, value in attrs
         if name in {"class", "id"} or (name.startswith("data-") and name != "data-name")
-    }
-    for value in generated.values():
+    ]
+    assert generated
+    for value in generated:
         assert value is None or re.fullmatch(r"[a-z0-9 -]*", value), value
 
 

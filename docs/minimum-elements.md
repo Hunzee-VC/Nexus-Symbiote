@@ -95,7 +95,7 @@ The rules:
 2. **Meaningful values.** Empty text, text with no visible character (no letter, digit,
    punctuation mark or symbol other than a blank filler such as U+3164 HANGUL FILLER or
    U+2800 BRAILLE PATTERN BLANK, so spaces, control and format characters and combining
-   marks alone do not count), `NOASSERTION` and `NoAssertionLicense` are missing. `unknown` is an explicit unknown. A digest counts
+   marks alone do not count), `NOASSERTION` and `NoAssertionLicense` are missing. `unknown` is an explicit unknown. Blank fillers are ignored like white space, so `unknown` followed by U+2800 is still an explicit unknown. A digest counts
    for a model or dataset hash only when it is hexadecimal and its algorithm is neither
    MD5 nor SHA-1.
 3. **Every subject.** A Models or Datasets Properties element is present only when
@@ -110,7 +110,8 @@ The rules:
    records only when `SOURCE_DATE_EPOCH` is set, the export writes none, and the SBOM
    timestamp is missing. The name
    `repository` that a scan gives an agent without an `agent.yaml` name is a
-   placeholder. A label that the ShadowScan importer derives from a digest is not a
+   placeholder, and so is the checkout directory's name that release 0.1.0 gave such
+   an agent (a format 1.0 inventory records `identity_source: repository-path`). A label that the ShadowScan importer derives from a digest is not a
    model name. Infrastructure software counts the npm and PyPI packages and the
    container images that the inventory records as registry entries; tool definitions,
    which the export also types `library`, and other registry entries, such as a Hugging
@@ -200,7 +201,7 @@ catalog.
 | `g7ai-2026/metadata/sbom-generation-context` | SBOM generation context | document | from-bom | A lifecycle phase or name is set. | `metadata.lifecycles[].phase`, `metadata.lifecycles[].name` | `software_sbomType` | written |
 | `g7ai-2026/metadata/sbom-timestamp` | SBOM timestamp | document | from-bom | metadata.timestamp is set, and the inventory records its own timestamp. | `metadata.timestamp` | `CreationInfo.created` | written |
 | `g7ai-2026/metadata/sbom-dependency-relationship` | SBOM dependency relationship | document | from-bom | A dependencies entry lists a dependency, or a component lists pedigree ancestors. | `dependencies[].dependsOn`, `components[].pedigree.ancestors` | `Relationship` (`dependsOn`, `contains`, `descendantOf`) | written |
-| `g7ai-2026/slp/system-name` | System name | system | from-bom | The system subject has a name other than the placeholder repository. | `metadata.component.name` | name of the root `ai_AIPackage` | written |
+| `g7ai-2026/slp/system-name` | System name | system | from-bom | The system subject has a name other than the placeholder repository or a checkout directory's name. | `metadata.component.name` | name of the root `ai_AIPackage` | written |
 | `g7ai-2026/slp/system-components` | System components | system | from-bom | The system subject exists and components is not empty. | `components[]` | `contains` and `dependsOn` relationships from the root | written |
 | `g7ai-2026/slp/system-producer` | System producer | system | from-bom | The BOM supplier, or a supplier, manufacturer or author of the system subject, has a name. | `metadata.supplier.name`, `metadata.component.supplier.name`, `metadata.component.manufacturer.name`, `metadata.component.authors[].name` | `originatedBy`, `suppliedBy` | written |
 | `g7ai-2026/slp/system-version` | System version | system | from-bom | The system subject has a version. | `metadata.component.version` | `software_packageVersion` | written |
@@ -243,7 +244,7 @@ catalog.
 
 ## Example: the demo agent
 
-```text
+```bash
 nexus-symbiote scan examples/demo-agent -o demo.aibom.json
 nexus-symbiote minimum-elements demo.aibom.json
 ```
@@ -268,7 +269,7 @@ Metadata: 6 of 9 present (66.6%); missing 3, explicit unknown 0, needs producer 
 System Level Properties: 1 of 7 present (14.2%); missing 6, explicit unknown 0, needs producer input 2, not applicable 0
   present (observed): System components (partial)
   missing: System name
-    why: The subject's name is the placeholder repository, not a declared name.
+    why: The subject's name is inferred, not declared: the placeholder repository, or the checkout directory's name that release 0.1.0 gave an agent without agent.yaml.
     how to supply it: Declare name in agent.yaml.
   missing: System producer
     how to supply it: Declare owner in agent.yaml; it is exported as the subject's supplier.

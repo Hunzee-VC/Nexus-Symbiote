@@ -55,7 +55,8 @@ alongside the declared version and, for an exact npm or PyPI version resolved
 from the default registry, `package_url`. Inventories written by 0.1.0
 identified only `npx`, `bunx`, `uvx`, `pipx` and `docker run` with a few
 options, recorded a version-tagged image as pinned (only a digest pins an image
-now) and carry static binding profile v2, which `validate --project` reports as
+now) and carry the static configuration digest profile
+`nexus-symbiote/mcp-static-config/v2`, which `validate --project` reports as
 unknown. Recollect the baseline and review the identity, the new findings and
 the `packages`, `package_sources` and `launch_context` properties before
 approving the new snapshot. Python server references no longer contain the
@@ -97,9 +98,9 @@ those exports have no marker and still recover. Projection 2
 (`cyclonedx-1.7/2`, `spdx-3.0.1/2`) changes the standard fields as follows.
 
 - CycloneDX: the repository agent of a scan is `metadata.component` instead of a
-  component; registry entries are `library` or `container` instead of `platform`;
-  `version` carries exact versions only, and other declarations move to the
-  `nexus-symbiote:requestedVersion` property; instruction-file, RAG index,
+  component; registry entries are `library` or `container` instead of `platform`,
+  their `version` carries exact versions only, and their other declarations move
+  to the `nexus-symbiote:requestedVersion` property; instruction-file, RAG index,
   dataset and lockfile digests are `hashes`; `source_path` is
   `evidence.occurrences`; the composition names the subject; a repository scan
   has the `pre-build` lifecycle. Extension properties spell booleans `true` and
@@ -113,7 +114,12 @@ those exports have no marker and still recover. Projection 2
   default identifiers are `urn:uuid` IRIs instead of IRIs under
   `https://spdx.org/spdxdocs/nexus_symbiote`.
 - Both: the loss report (profile `nexus-symbiote-export/v2`) also lists risk
-  findings and declared versions that are not exact.
+  findings and declared versions that are not exact. A package URL is a standard
+  identifier only when it is a PyPI, npm or OCI identity that agrees with the
+  component: a PyPI or npm package URL only on a registry entry whose
+  `registry_type` names that ecosystem and the registry it was resolved from, and
+  an MCP server's package URL when it names the server's launcher package and
+  version.
 
 A document with an unknown marker, or one whose standard fields match a
 projection other than the one it declares, is rejected. Recovery returns the
@@ -127,11 +133,12 @@ field.
 For historical CycloneDX exports that flattened all relationships into
 `dependsOn` and wrote no `conditional` flag, the Python API accepts
 `CycloneDXGenerator.recover(document, allow_legacy_relationships=True)`.
-Legacy mode accepts that exact historical edge projection only as a whole. It
-rejects a mixture of the historical and current edge projections, and it still
-checks every other public field, including the coverage composition, against
-the current projection. Re-export the recovered inventory to give standard
-consumers the corrected graph and flags.
+Legacy mode applies only to exports without a projection marker, and accepts
+that exact historical edge projection only as a whole. It rejects a mixture of
+the historical and current edge projections, and it still checks every other
+public field, including the coverage composition, against projection 1.
+Re-export the recovered inventory to give standard consumers the corrected
+graph and flags.
 
 Exports written by builds before 0.1.0 can fail recovery, because their
 standard fields match neither projection.
@@ -145,13 +152,6 @@ Legacy mode, which only CycloneDX recovery has, does not help with:
 - any SPDX export written before the document `comment` and relationship
   `completeness` existed, with or without an unconditional relationship exported
   as `other`.
-
-A 0.1.0 export of an inventory built through the Python API does not recover
-either when one of its package URLs is of a kind this release no longer projects:
-a type other than PyPI, npm and OCI, such as a `pkg:docker` or `pkg:generic` URL,
-or a PyPI or npm URL with a qualifier other than a `repository_url` that names the
-component's own registry. Recovery reports that the projection conflicts with the
-embedded native document.
 
 Regenerate such exports from the native AIBOM or by rescanning. Keep the
 original export when a downstream consumer discards fields such as the

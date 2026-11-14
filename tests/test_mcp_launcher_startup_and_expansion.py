@@ -98,6 +98,10 @@ def test_trace_options_and_prompts_count_as_code_loading_environment(tmp_path):
         ("sh", ["-xc", PINNED], {"PS4": "$((PATH=5))"}),
         ("sh", ["-o", "xtrace", "-c", PINNED], {"PS4": "$(./evil.sh)"}),
         ("bash", ["-c", PINNED], {"SHELLOPTS": "braceexpand:xtrace", "PS4": "`./evil.sh`"}),
+        # zsh sets any option in GNU long form and ignores case and underscores in names.
+        ("zsh", ["--xtrace", "-c", PINNED], {"PS4": "$(./evil.sh)"}),
+        ("zsh", ["--X-Trace", "-c", PINNED], {"PS4": "$(./evil.sh)"}),
+        ("zsh", ["-o", "x_trace", "-c", PINNED], {"PS4": "$(./evil.sh)"}),
     ],
 )
 def test_a_trace_prompt_with_tracing_on_is_unknown(tmp_path, command, args, env):
@@ -437,6 +441,15 @@ def test_pattern_readings_are_charged_and_not_compiled_for_each():
     args = ["-y", "pkg@1.2.3", *_pattern_words(300)]
     assert cpu(analyze, "npx", args) < 1
     assert max(map(len, mcp_launch._PATTERNS), default=0) <= 2 * mcp_launch._LONGEST_PROGRAM + 2
+
+
+def test_the_scan_budget_does_not_depend_on_patterns_earlier_scans_compiled():
+    patterns = ["b*h", "b?sh", "ba*", "*ash", "d*h", "d?sh", "da*", "k*h", "k?h"]
+    args = [word for pattern in patterns for word in (pattern, "x")]
+    mcp_launch._PATTERNS.clear()
+    first = analyze("server", args).unknown
+    assert first == "arguments exceed the launcher scan limit"
+    assert analyze("server", args).unknown == first
 
 
 @pytest.mark.no_cover

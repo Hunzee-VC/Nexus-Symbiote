@@ -38,6 +38,15 @@ def test_local_links_resolve_from_document_and_ignore_examples_and_web(tmp_path)
     assert len(hygiene.source_issues(tmp_path, [Path("docs/guide.md")])) == 2
 
 
+def test_image_wrapped_and_reference_links_are_checked_too(tmp_path):
+    (tmp_path / "docs").mkdir()
+    doc = tmp_path / "docs" / "guide.md"
+    doc.write_text("[![badge](../README.md)](missing.md)\n[ref]: also-missing.md\n")
+    (tmp_path / "README.md").write_text("# Anchor\n")
+    issues = hygiene.source_issues(tmp_path, [Path("docs/guide.md")])
+    assert len(issues) == 2 and all("missing" in issue for issue in issues)
+
+
 def test_heading_anchors_follow_github_slugs():
     text = (
         "# Install from `source`\n## Why: offline, by default\n## FAQ\n## FAQ\n"
@@ -110,6 +119,9 @@ def test_package_index_readme_links_must_be_absolute(tmp_path, readme):
     page.write_text('[docs](docs/guide.md) <img src="banner.jpg"> ![logo](img/logo.png)\n')
     issues = hygiene.readme_link_issues(tmp_path)
     assert len(issues) == 3 and all("package index" in issue for issue in issues)
+    page.write_text("[![logo](https://example.invalid/l.png)](docs/guide.md)\n[ref]: docs/a.md\n")
+    issues = hygiene.readme_link_issues(tmp_path)
+    assert len(issues) == 2 and all("package index" in issue for issue in issues)
 
 
 def test_undeclared_package_index_readme_fails_closed(tmp_path):
@@ -218,6 +230,50 @@ def test_stale_owner_slug_outside_a_url_is_reported(tmp_path):
     assert len(hygiene.owner_issues(tmp_path, [Path("docs.md")])) == 1
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "git clone https://github.com/old-owner/Widget.git\n",
+        "See https://github.com/old-owner/Widget.\n",
+        "    gh api repos/old-owner/Widget/branches/main/protection\n",
+        "![banner](https://raw.githubusercontent.com/old-owner/Widget/main/a.png)\n",
+        "[score](https://scorecard.dev/viewer/?uri=github.com/old-owner/Widget)\n",
+        "![license](https://img.shields.io/github/license/old-owner/Widget)\n",
+        "    --repo old-owner/Widget.git\n",
+    ],
+)
+def test_a_stale_owner_in_any_spelling_of_the_slug_is_reported(tmp_path, text):
+    _project(tmp_path)
+    tmp_path.joinpath("docs.md").write_text(text)
+    assert hygiene.owner_issues(tmp_path, [Path("docs.md")]) == [
+        "docs.md: links to old-owner/Widget instead of Canonical-Org/Widget"
+    ]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "[x](https://github.com/old-owner/Widget.gitx)\n",
+        "    python old-owner/Widget.py\n",
+        "git clone https://github.com/Canonical-Org/Widget.git\n",
+        "    gh api repos/Canonical-Org/Widget/rulesets\n",
+    ],
+)
+def test_other_names_and_the_canonical_slug_are_not_stale(tmp_path, text):
+    _project(tmp_path)
+    tmp_path.joinpath("docs.md").write_text(text)
+    assert hygiene.owner_issues(tmp_path, [Path("docs.md")]) == []
+
+
+def test_project_urls_other_than_the_homepage_are_checked(tmp_path):
+    _project(tmp_path)
+    with tmp_path.joinpath("pyproject.toml").open("a") as stream:
+        stream.write('Issues = "https://github.com/old-owner/Widget/issues"\n')
+    assert hygiene.owner_issues(tmp_path, [Path("pyproject.toml")]) == [
+        "pyproject.toml: links to old-owner/Widget instead of Canonical-Org/Widget"
+    ]
+
+
 def test_dated_audits_keep_the_owner_recorded_at_the_time(tmp_path):
     _project(tmp_path)
     audit = tmp_path / "docs" / "audits"
@@ -233,6 +289,35 @@ def test_unparseable_homepage_fails_closed(tmp_path):
     ]
 
 
+def test_invisible_characters_in_source_and_documentation_are_reported(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/module.py").write_text('NAME = "safe\u202eedoc"\nBOM = "\ufeff"\n', "utf-8")
+    (tmp_path / "guide.md").write_text("ordinary\nzero\u200bwidth\nline\u2028separator\n", "utf-8")
+    issues = hygiene.hidden_character_issues(tmp_path, [Path("src/module.py"), Path("guide.md")])
+    assert issues == [
+        "src/module.py:1: invisible character U+202E; write it as an escape",
+        "src/module.py:2: invisible character U+FEFF; write it as an escape",
+        "guide.md:2: invisible character U+200B; write it as an escape",
+        "guide.md:3: invisible character U+2028; write it as an escape",
+    ]
+
+
+def test_escaped_invisible_characters_and_detection_fixtures_are_accepted(tmp_path):
+    for directory in ("src", "tests", "benchmarks/fixtures/case"):
+        (tmp_path / directory).mkdir(parents=True)
+    (tmp_path / "src/module.py").write_text(
+        'RLO = "\\u202e"\nTEXT = "caf\u00e9 \u00a0 \u2014"\n', "utf-8"
+    )
+    (tmp_path / "tests/test_hidden.py").write_text('SAMPLE = "\u202e"\n', "utf-8")
+    (tmp_path / "benchmarks/fixtures/case/CLAUDE.md").write_text("hidden\u200b\n", "utf-8")
+    files = [
+        Path("src/module.py"),
+        Path("tests/test_hidden.py"),
+        Path("benchmarks/fixtures/case/CLAUDE.md"),
+    ]
+    assert hygiene.hidden_character_issues(tmp_path, files) == []
+
+
 def test_tracked_repository_passes_its_own_owner_check():
     root = Path(__file__).parents[1]
     if not (root / ".git").exists():
@@ -245,3 +330,4 @@ def test_tracked_repository_passes_its_own_owner_check():
     )
     files = [Path(value) for value in listing.stdout.decode().split("\0") if value]
     assert hygiene.owner_issues(root, files) == []
+    assert hygiene.hidden_character_issues(root, files) == []

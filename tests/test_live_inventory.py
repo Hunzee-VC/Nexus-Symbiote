@@ -37,10 +37,12 @@ def server(
     instructions: str | None = "Read-only issue access.",
     prompt: str = "Summarize an issue",
     version: str = "1.0.0",
+    protocol: str = "2025-06-18",
+    capabilities: dict[str, Any] | None = None,
 ) -> list[HTTPReply]:
     hello: dict[str, Any] = {
-        "protocolVersion": "2025-06-18",
-        "capabilities": {"tools": {}, "prompts": {}},
+        "protocolVersion": protocol,
+        "capabilities": {"tools": {}, "prompts": {}} if capabilities is None else capabilities,
         "serverInfo": {"name": "tickets", "version": version},
     }
     if instructions is not None:
@@ -138,6 +140,27 @@ def test_server_version_change_is_drift_but_not_critical(monkeypatch, tmp_path):
     status, report = diff(baseline, today)
     assert status == 1
     assert not critical(report)
+
+
+@pytest.mark.parametrize(
+    ("change", "severity"),
+    [
+        ({"version": "1.1.0"}, "high"),
+        ({"capabilities": {"tools": {"listChanged": True}, "prompts": {}}}, "high"),
+        ({"protocol": "2025-03-26"}, "medium"),
+    ],
+)
+def test_identity_drift_is_high_and_protocol_drift_alone_is_medium(
+    monkeypatch, tmp_path, change, severity
+):
+    # The server version and capabilities are in the identity digest; the protocol is not.
+    _, baseline = record(monkeypatch, tmp_path, "baseline.json", server())
+    _, today = record(monkeypatch, tmp_path, "today.json", server(**change))
+    status, report = diff(baseline, today)
+    assert status == 1
+    [alert] = report["security_alerts"]
+    assert alert["severity"] == severity, alert
+    assert ("observed_identity_hash" in alert["alert"]) is (severity == "high")
 
 
 def test_incomplete_observation_writes_no_inventory(monkeypatch, tmp_path):

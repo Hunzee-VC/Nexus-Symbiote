@@ -109,7 +109,7 @@ def _within(workspace: Path, value: str, name: str) -> Path:
         or not path.is_relative_to(workspace)
         or not path.resolve().is_relative_to(workspace)
     ):
-        raise InputError("Action paths must stay within GITHUB_WORKSPACE")
+        raise InputError(f"{name} must stay within GITHUB_WORKSPACE")
     if Path(os.path.normpath(path)) != path.resolve():
         # The checkout decides which names inside the workspace are links, so a linked
         # path would let the code under review choose what is collected or written.

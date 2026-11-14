@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import tomllib
+import unicodedata
 from collections import Counter
 from collections.abc import Iterator
 from datetime import date
@@ -21,6 +22,12 @@ import yaml
 VENDOR = Path("src/nexus_symbiote/generators/schemas/vendor")
 MAX_FILE_BYTES = 2 * 1024 * 1024
 LINK = re.compile(r'!?\[[^\]\n]*\]\((<[^>\n]+>|[^)\s]+)(?:\s+"[^"\n]*")?\)')
+# The outer target of an image used as a link, [![alt](image)](target), and a reference
+# definition, [label]: target, which LINK does not reach.
+WRAPPED_LINK = re.compile(
+    r"\[!\[[^\]\n]*\]\([^)\n]*\)\]\((<[^>\n]+>|[^)\s]+)(?:\s+\"[^\"\n]*\")?\)"
+)
+REFERENCE_LINK = re.compile(r"^ {0,3}\[[^\]\n]+\]:[ \t]*(<[^>\n]+>|\S+)")
 HTML_LINK = re.compile(r"""<(?:a|img)\b[^>]*?\b(?:href|src)=["']([^"'\s]+)["']""", re.I)
 HTML_ANCHOR = re.compile(r"""<a\b[^>]*?\b(?:id|name)=["']([^"']+)["']""", re.I)
 HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$")
@@ -31,10 +38,22 @@ MARKER = re.compile(r"^(?:<{7}|>{7}|\|{7})(?: .*)?$", re.M)
 SELF_BLOB = r"https://github\.com/{owner}/{repository}/(?:blob|tree)/main/([^\s()\"'<>?#]+)(?:\?[^\s()\"'<>#]*)?(?:#([^\s()\"'<>]+))?"
 SELF_RAW = r"https://raw\.githubusercontent\.com/{owner}/{repository}/main/([^\s()\"'<>?#]+)()"
 PROJECT_URL = re.compile(r"https://github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)")
+# A slug may end in .git, as a clone URL does, or before the full stop of a sentence.
+_SLUG_END = r"(?:\.git)?(?![A-Za-z0-9_-])(?!\.[A-Za-z0-9])"
 # Anchored so a longer URL path cannot look like an owner: the project's own
 # PyPI URL ends in /p/<name>, and GitHub URLs are matched by PROJECT_URL.
-OWNER_SLUG = "(?<![A-Za-z0-9._/-])([A-Za-z0-9._-]+)/{0}(?![A-Za-z0-9._-])"
-OWNER_TEXT_SUFFIXES = frozenset({".md", ".yml", ".yaml", ".cff"})
+OWNER_SLUG = "(?<![A-Za-z0-9._/-])([A-Za-z0-9._-]+)/{0}" + _SLUG_END
+# The paths where an owner/repo slug follows a slash: the REST API, raw file URLs,
+# a github.com URL without its scheme, and badge services.
+EMBEDDED_SLUG = (
+    r"(?:\brepos|github\.com|githubusercontent\.com|/github/[a-z-]+)/([A-Za-z0-9._-]+)/{0}"
+    + _SLUG_END
+)
+OWNER_TEXT_SUFFIXES = frozenset({".md", ".yml", ".yaml", ".cff", ".toml"})
+# Tests and benchmark fixtures hold the characters the collectors must detect.
+HIDDEN_EXEMPT_PREFIXES = (Path("tests"), Path("benchmarks"))
+HIDDEN_SUFFIXES = frozenset({".py", ".md", ".toml", ".yml", ".yaml", ".cff", ".cfg", ".txt"})
+_BLANK = frozenset({0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x2800, 0x3164, 0xFFA0})
 # Dated audits record what was inspected under the owner live at the time.
 # Rewriting their links would falsify the record rather than fix a stale one.
 OWNER_EXEMPT_PREFIXES = (Path("docs/audits"),)
@@ -118,8 +137,7 @@ def source_issues(root: Path, files: list[Path]) -> list[str]:
         if relative.suffix != ".md":
             continue
         for line in prose_lines(text):
-            links = [match[1].strip("<>") for match in LINK.finditer(line)]
-            for link in [*links, *HTML_LINK.findall(line)]:
+            for link in _line_links(line):
                 parsed = urlsplit(link)
                 if parsed.scheme or parsed.netloc:
                     continue
@@ -140,6 +158,46 @@ def source_issues(root: Path, files: list[Path]) -> list[str]:
                     errors.append(f"{relative}: missing or escaping inline local link: {link}")
                     continue
                 errors.extend(_anchor_issue(root, relative, target, parsed.fragment, link, anchors))
+    return errors
+
+
+def _hidden(character: str) -> bool:
+    """Whether a reader cannot see this character: format, separator, selector or blank filler."""
+    point = ord(character)
+    return (
+        unicodedata.category(character) in {"Cf", "Zl", "Zp"}
+        or point in _BLANK
+        or 0x180B <= point <= 0x180F
+        or 0xFE00 <= point <= 0xFE0F
+        or 0xE0100 <= point <= 0xE01EF
+    )
+
+
+def hidden_character_issues(root: Path, files: list[Path]) -> list[str]:
+    """Reject invisible characters in tracked source and documentation.
+
+    Bidirectional controls, zero-width characters and their kind make text read
+    differently from how it is processed, in a review as in an instruction file. Code
+    that needs one writes it as an escape such as ``\\u202e``.
+    """
+    errors = []
+    for relative in files:
+        if relative.suffix not in HIDDEN_SUFFIXES or VENDOR in relative.parents:
+            continue
+        if any(prefix in relative.parents for prefix in HIDDEN_EXEMPT_PREFIXES):
+            continue
+        try:
+            text = read_file(root, relative).decode("utf-8")
+        except (OSError, ValueError, UnicodeError):
+            continue
+        # Not splitlines: it would consume the separators this check reports.
+        for number, line in enumerate(text.split("\n"), 1):
+            found = sorted({f"U+{ord(character):04X}" for character in line if _hidden(character)})
+            if found:
+                errors.append(
+                    f"{relative}:{number}: invisible character {', '.join(found)}; "
+                    "write it as an escape"
+                )
     return errors
 
 
@@ -178,12 +236,16 @@ def owner_issues(root: Path, files: list[Path]) -> list[str]:
             continue
         # The bare owner/repo slug is matched too: a transfer leaves it stale in
         # command examples, where it is an argument rather than a link.
-        slug = re.compile(OWNER_SLUG.format(re.escape(repository)), re.I)
-        owners = {match[1] for match in slug.finditer(text)}
+        name = re.escape(repository)
+        owners = {
+            match[1]
+            for pattern in (OWNER_SLUG, EMBEDDED_SLUG)
+            for match in re.finditer(pattern.format(name), text, re.I)
+        }
         owners.update(
             match[1]
             for match in PROJECT_URL.finditer(text)
-            if match[2].lower() == repository.lower()
+            if match[2].lower().rstrip(".").removesuffix(".git") == repository.lower()
         )
         stale = {value for value in owners if value.lower() != owner.lower()}
         errors.extend(
@@ -226,6 +288,16 @@ def self_link_issues(root: Path, files: list[Path]) -> list[str]:
     return errors
 
 
+def _line_links(line: str) -> list[str]:
+    """Every link target on a line of prose: inline, image-wrapped, reference and HTML."""
+    links = [
+        match[1].strip("<>")
+        for pattern in (LINK, WRAPPED_LINK, REFERENCE_LINK)
+        for match in pattern.finditer(line)
+    ]
+    return [*links, *HTML_LINK.findall(line)]
+
+
 def readme_link_issues(root: Path) -> list[str]:
     """Reject relative links in the README that doubles as the package-index description.
 
@@ -241,8 +313,7 @@ def readme_link_issues(root: Path) -> list[str]:
         return ["package-index README could not be determined or read"]
     errors = []
     for line in prose_lines(text):
-        links = [match[1].strip("<>") for match in LINK.finditer(line)]
-        for link in [*links, *HTML_LINK.findall(line)]:
+        for link in _line_links(line):
             parsed = urlsplit(link)
             if not parsed.scheme and not parsed.netloc and parsed.path:
                 errors.append(
@@ -336,6 +407,7 @@ def main() -> int:
         files = [Path(value) for value in result.stdout.decode().split("\0") if value]
         errors = [
             *source_issues(root, files),
+            *hidden_character_issues(root, files),
             *owner_issues(root, files),
             *self_link_issues(root, files),
             *readme_link_issues(root),

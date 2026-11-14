@@ -18,8 +18,8 @@ from nexus_symbiote.scanners.mcp import MCPScanner
 from tests.support import scaling_ratio
 
 FACTORY = "from mcp.server.fastmcp import FastMCP\nserver = FastMCP('demo')\n"
-# The size of this repository's scanners/registry.py, which the fixed bound of
-# earlier releases refused.
+# The size scanners/registry.py once had, which the fixed bound of earlier releases refused;
+# the module has grown since, so this is a floor, not its current size.
 REGISTRY_MODULE_NODES = 21_623
 OVER_DEFAULT = "python-nodes limit of 200000 exceeded; raise it with --limit python-nodes=N"
 

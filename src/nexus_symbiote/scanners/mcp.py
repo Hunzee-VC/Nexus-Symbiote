@@ -203,7 +203,9 @@ def without_js_comments(text: str) -> str:
     while position < size:
         if 0 <= block < position:
             block = text.find("/*", position)
-        if block >= 0:
+        # The first "*/" after an earlier opener is also the first after a later one
+        # that precedes it, so each stretch of text is searched for a close only once.
+        if block >= 0 and close < block + 2:
             close = text.find("*/", block + 2)
             if close < 0:
                 block = -1
@@ -780,7 +782,18 @@ _KNOWN_SETTINGS = (
 
 
 def _environment_label(variable: str) -> str:
-    """A package source label for an environment variable, never a token-shaped name."""
+    """A package source label for an environment variable, never a token-shaped name.
+
+    Every name comes from a fixed vocabulary but the scope of an npm scoped registry,
+    which is named only as ``_setting_name`` names it, as the npm resolver view does.
+    """
+    key = _npm_key(variable)
+    if (
+        key is not None
+        and _SCOPED_REGISTRY.fullmatch(key)
+        and _setting_name(key, set()) == "[other]"
+    ):
+        return "env:npm_config_[other]"
     return "env:[redacted]" if TOKEN_SHAPE.search(variable) else f"env:{variable}"
 
 
@@ -1548,8 +1561,14 @@ class MCPScanner(Scanner):
         )
         # Launch arguments are opaque executable inputs. Only the launcher's own
         # grammar is read; argument and environment values never leave.
+        # Each header map on its own: a name in both keeps both of its values secret.
         scrubber = SecretScrubber(
-            [*secret_values(env), *secret_values(headers), *secret_values(dict(launch.environment))]
+            [
+                *secret_values(env),
+                *secret_values(config.get("headers", {})),
+                *secret_values(config.get("http_headers", {})),
+                *secret_values(dict(launch.environment)),
+            ]
         )
         cwd = config.get("cwd")
         relocated = (
@@ -2194,16 +2213,28 @@ class MCPScanner(Scanner):
                 f"MCP server '{name}' endpoint URL embeds credentials: {safe_endpoint}",
                 "Supply the credential through a header or environment reference.",
             )
-        elif (
-            endpoint_url
-            and safe_endpoint != "[redacted]"
-            and not self._secure_endpoint(endpoint_url)
-        ):
+        elif endpoint_url and endpoint_gap is None and not self._secure_endpoint(endpoint_url):
+            # An origin withheld for a credential value is still a literal URL.
             add(
                 RiskSeverity.HIGH,
                 "transport_security",
                 f"MCP server '{name}' endpoint is not HTTPS: {safe_endpoint}",
                 "Use HTTPS for all remote MCP server connections.",
+            )
+        if any(
+            _has_userinfo(url)
+            or (self._endpoint(url)[1] is None and not self._secure_endpoint(url))
+            for url in endpoints
+            if url != endpoint_url
+        ):
+            # A client may connect to any of them: Gemini CLI prefers httpUrl to url.
+            add(
+                RiskSeverity.HIGH,
+                "transport_security",
+                f"MCP server '{name}' declares another endpoint that is not HTTPS or embeds "
+                "credentials.",
+                "Declare one HTTPS endpoint, with credentials in a header or environment "
+                "reference.",
             )
         if endpoint_url and endpoint_gap:
             dynamic = expands(endpoint_url)

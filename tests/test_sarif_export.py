@@ -28,7 +28,7 @@ from nexus_symbiote.core.models import (
     ToolComponent,
 )
 from nexus_symbiote.generators.sarif import SARIFGenerator, plain_text
-from nexus_symbiote.generators.validation import validate_sarif
+from nexus_symbiote.generators.validation import require_valid, validate_sarif
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "demo-agent"
@@ -308,7 +308,7 @@ def test_messages_are_plain_text_that_cannot_render_links(tmp_path, name):
         assert "](" not in text.replace("\\]", "")
         assert "://" not in text and "www." not in text.lower()
         assert not any(char in text for char in "\x1b\u202e\u200b\n")
-        assert len(text) <= 2 * 1000
+        assert len(text) <= 2000
     assert plain_text("[a](b)") == "\\[a\\](b)"
     assert plain_text("C:\\path") == "C:\\\\path"
     assert plain_text("_https://evil.example") == "_https\\[:\\]//evil.example"
@@ -402,8 +402,6 @@ def test_structural_validation_rejects_what_code_scanning_cannot_use(tmp_path, c
         del run["invocations"][0]["executionSuccessful"]
     assert validate_sarif(document)
     with pytest.raises(ValueError):
-        from nexus_symbiote.generators.validation import require_valid
-
         require_valid(document, "sarif")
 
 

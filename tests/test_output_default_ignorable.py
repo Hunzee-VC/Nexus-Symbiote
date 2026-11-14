@@ -100,6 +100,7 @@ def test_hostile_inventory_text_reaches_no_report_raw(runner, tmp_path):
     assert crosswalk.exit_code == 0, crosswalk.output
     assert "notes" in crosswalk.output
     elements = runner.invoke(main, ["minimum-elements", str(hostile)])
+    assert elements.exit_code == 0, elements.output
     for run in (drawn, crosswalk, elements):
         assert _hidden_in(run.output) == []
 

@@ -177,6 +177,27 @@ def test_path_identity_refuses_outside_missing_and_symlinked_paths(tmp_path: Pat
         assert files.path_identity("link.bin") != files.path_identity("real.bin")
 
 
+def test_a_stream_of_a_path_the_collection_refuses_is_a_recorded_os_error(
+    tmp_path: Path,
+) -> None:
+    # Callers such as the graph's model checks catch only OSError around the stream.
+    root = tmp_path / "root"
+    (root / "node_modules").mkdir(parents=True)
+    (root / "node_modules" / "w.bin").write_bytes(b"x")
+    failures: list[str] = []
+    with ConfinedCollection(root, failures) as files:
+        for path in ("a\x00b.bin", "../outside.bin", tmp_path / "x.bin", "node_modules/w.bin"):
+            with pytest.raises(OSError), files.open_regular(path):
+                pass
+    refused = "stream refused (symlink, nonregular file or I/O error)"
+    assert failures == [
+        f"a\x00b.bin: {refused}",
+        f"../outside.bin: {refused}",
+        f"{tmp_path / 'x.bin'}: {refused}",
+        "node_modules/w.bin: stream refused (excluded by policy)",
+    ]
+
+
 @pytest.fixture
 def unchanging_descriptor(monkeypatch: pytest.MonkeyPatch) -> None:
     """Model a filesystem whose replaced inode is never unlinked or restamped.

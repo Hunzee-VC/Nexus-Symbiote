@@ -13,7 +13,7 @@ and turns what survives into one plan with acceptance tests.
   in MCP launchers, bounded launch-argument expansion), #132 (9cb6a47: the P0 audit findings
   SEC-F1, SEC-C1, ARCH-F1 and DOC-F3/F7) and #133 to #137 (through c792872: suppressions bound to
   findings, launcher classification gaps, collector bookkeeping, workflow gate checks and the
-  cached Sigstore trust root); this branch merges `main` through c792872, and the rows below that
+  cached Sigstore trust root); #138 merged `main` through c792872, and the rows below that
   #131 and #132 changed say so. Measurements in [where it stands](#where-it-stands) are still those
   taken at 3ad53a2.
 - **How:** every recommendation was located in the code, and most were reproduced by running the
@@ -137,14 +137,14 @@ the [principles](docs/security-model.md#design-principles): nothing executes wha
 nothing reaches the network unless the operator asks, and an import or report never raises
 assurance.
 
-### Now — next release (0.2.0)
+### Now — next release (after 0.2.0)
 
 | # | Item | Why | Acceptance test | Effort |
 | --- | --- | --- | --- | --- |
 | N1 | **Require an attestation in the gates.** `validate` and `risk` accept `--require-attestation ENVELOPE` with operator-held keys and fail closed on a missing, altered, wrongly purposed or unsigned inventory; the GitHub Action gains an input for a reviewed-baseline attestation | "unsigned BOMs are rejected by default in verification mode" (A, B, c R7.b, d, e) | an unsigned or altered baseline fails `validate` under the CI policy; a signed one passes and its signer is printed | M |
 | N2 | **Attest in the GitHub Action.** Optional `attest: true` input adding a pinned `actions/attest-build-provenance` step over the uploaded inventory and an `aibom-digest` output; document the caller permissions and `gh attestation verify` | G fix 17; B Now 4 | a third party verifies the Action's inventory with `gh attestation verify` | M |
 | N3 | **ShadowScan bridge depth.** Map `framework-usage` and `agent-config` findings (projection profile v5), keep every other kind an explicit gap, and carry readable names when the report verifies under the operator signer policy. (The producer check is recorded in the inventory since SEC-F1, #132.) | G fixes 7–8; c R1.a, R1.c, R7.c | a ShadowScan code report from an agent-framework repository imports with no unmapped entries | M |
-| N4 | **CycloneDX projection 3.** Remote MCP servers and A2A servers as `services` (endpoints, authentication); MCP launcher packages with their purl; model licences and a minimal `modelCard` from local model-card front matter, as declared evidence; a `--spec-version 1.6` option with the vendored 1.6 schema; projection 2 kept for recovery | G fix 13; c R5.a, R6.a; G7 elements that only standard fields satisfy | a consumer using only cyclonedx-python-lib recovers MCP services and model licences; both versions validate | L |
+| N4 | **CycloneDX projection 3.** Remote MCP servers and A2A servers as `services` (endpoints, authentication); MCP launcher packages with their purl; model licenses and a minimal `modelCard` from local model-card front matter, as declared evidence; a `--spec-version 1.6` option with the vendored 1.6 schema; projection 2 kept for recovery | G fix 13; c R5.a, R6.a; G7 elements that only standard fields satisfy | a consumer using only cyclonedx-python-lib recovers MCP services and model licenses; both versions validate | L |
 | N5 | **Operator VEX decisions.** `vex --decisions FILE` (operator-owned, outside the checkout) records `not_affected`, `exploitable`, `resolved` with justification, owner and expiry; `--advisories REPORT` links OSV results | G fix 15; c R8.e | an expired decision reverts to `in_triage` with a warning | M |
 | N6 | **Autonomy vocabulary.** Accept ISO/IEC 22989 automation names in `agent.yaml`, export them, and publish one mapping table between SymBiote's L0–L4, ShadowScan's 0–5 and the ISO names (SPDX 3.1's `isoAutomationLevel` uses the ISO ladder) | G fix 12; G standards row (SPDX 3.1) | the table is tested against both enumerations | M |
 | N7 | **Release and governance controls.** Apply the release-tag ruleset, which must now also protect the existing `v0.1.0` tag, and turn off administrator bypass on the `testpypi` and `pypi` environments (the publication preflight already refuses without them), and record the date; add the OpenSSF Scorecard badge (the workflow exists) and register for the Best Practices badge; publish the v0.1.0 audit and its remediation map under `docs/audits/` | G fix 18, move 5.a; c R11.c | `scripts/check_repository_controls.py --verify-bypass-actors` passes and is recorded | S |
@@ -162,7 +162,7 @@ assurance.
 | X3 | **Workload identity and delegation.** Declared SPIFFE IDs and delegation edges in `agent.yaml` and the deployment profile (validated against the SPIFFE ID format), an identity component type for OAuth grants and service identities imported from ShadowScan, blast radius over identities. Needs a native format minor version | A gap 5; d P0 5; e fix 5; c R1.b | `blast-radius` from a compromised tool lists the identities that can reach it | L |
 | X4 | **Model integrity depth.** Opcode-level analysis of pickle-family files against an allow-list of safe globals, without loading; OpenSSF Model Signing (DSSE bundle) verification under the operator signer policy | A gap 8; c R7.d; e fix 8 | a pickle that imports `os.system` is reported with the opcode evidence; an OMS-signed model verifies offline | L |
 | X5 | **Memory, retrieval and guardrail provenance.** Guardrail configuration digests (the `config_hash` field exists unused), memory store declarations, dataset → embedding → index lineage from declared configuration | A gap 4; c gap 4; e fix 4 | a changed guardrail policy file is a high drift alert | L |
-| X6 | **Vulnerability prioritisation.** EPSS and KEV for advisories found in live mode, joined into `risk`, SARIF and VEX | c R8.b | a KEV-listed package raises the finding's severity with its source named | M |
+| X6 | **Vulnerability prioritization.** EPSS and KEV for advisories found in live mode, joined into `risk`, SARIF and VEX | c R8.b | a KEV-listed package raises the finding's severity with its source named | M |
 | X7 | **Consumer interoperability.** Scheduled, report-only jobs that load the demo exports into a pinned Dependency-Track and GUAC, and validate the SPDX export against the SPDX SHACL shapes | B Now 9; c R6.b; G move 4.d | the jobs record the tested versions in the docs | M |
 | X8 | **SPDX AI and Dataset profiles** once N4 and X1 supply the mandatory fields; never fill a field with a placeholder | G fix 14; c R5.c | the export claims the profiles and passes SHACL | M |
 | X9 | **Per-component evidence profile** in the JSON views and the graph: which evidence each component has (pinned, digest-bound, signed under policy, observed by a collector, reported at run time, findings), instead of a single trust score | A and e TrustScore (see [decisions](#decisions-and-non-goals)) | every component shows the evidence it lacks | M |
@@ -172,7 +172,7 @@ assurance.
 
 | # | Item | Depends on |
 | --- | --- | --- |
-| L1 | CycloneDX 2.0 mapping (agents as parties, declared and observed behaviours) once Ecma ratifies the standard | the standard |
+| L1 | CycloneDX 2.0 mapping (agents as parties, declared and observed behaviors) once Ecma ratifies the standard | the standard |
 | L2 | Offer the SPDX mapping to the OWASP Agent Observability Standard (AgBOM), whose SPDX extension is unowned | other people |
 | L3 | Independent review of a tagged release; a second maintainer; schema 1.0 with a deprecation policy and a cross-release compatibility suite | other people |
 | L4 | A pre-registered, third-party benchmark round on public repositories, with every tool run in its supported mode | other people |
@@ -283,7 +283,7 @@ move between releases; read them as "per its README on that date".
 | [Nexus-ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) 0.1.4 | Nine discovery surfaces, 38 connectors, reconciliation against an approved inventory | Discovery engine; D8 and N3 deepen the bridge |
 | [Dependency-Track](https://dependencytrack.org/) | CycloneDX-native store with policies; accepts CycloneDX 1.7 from 4.14.4 and 5.1.0 | Destination; ingestion tests in X7 |
 
-Standards to track: CycloneDX 2.0 (draft; agents as parties with declared and observed behaviours),
+Standards to track: CycloneDX 2.0 (draft; agents as parties with declared and observed behaviors),
 SPDX 3.1 (development draft; `isoAutomationLevel`), the OWASP Agent Observability Standard (AgBOM),
 the OpenTelemetry GenAI and MCP semantic conventions (now in
 [their own repository](https://github.com/open-telemetry/semantic-conventions-genai), all at

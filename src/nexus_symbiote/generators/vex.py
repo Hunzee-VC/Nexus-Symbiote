@@ -1,9 +1,10 @@
 """CycloneDX 1.7 findings in triage, retaining declared model-revision evidence.
 
 The document has its own identity: a serial number derived from the inventory's,
-the inventory's version, a timestamp and the producing tool. It names the inventory
-it describes with a BOM-Link external reference, and its components carry the same
-types, versions, package URLs and digests as the CycloneDX inventory export.
+the inventory's version, the inventory's timestamp when it records one, and the
+producing tool. It names the inventory it describes with a BOM-Link external
+reference, and its components carry the same types, versions, package URLs and
+digests as the CycloneDX inventory export.
 
 Every statement is ``in_triage``. The command takes no triage decisions, so the
 document cannot state ``not_affected``, ``exploitable`` or ``resolved``, and its
@@ -28,11 +29,14 @@ from nexus_symbiote.generators.cyclonedx import standard_component
 from nexus_symbiote.generators.sarif import SEVERITY_ORDER, plain_text
 from nexus_symbiote.generators.validation import require_valid
 
-_SERIAL = re.compile(r"urn:uuid:([0-9a-fA-F-]{36})")
+_UNVERIFIED = "Inventory risk finding; exploitability and deployment impact are unverified."
+_SERIAL = re.compile(
+    r"urn:uuid:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+)
 
 
 def finding_id(component_ref: str, category: str, detail: str) -> str:
-    """Stable per component, category and finding text; equal to the SARIF fingerprint."""
+    """Stable per component, category and finding text: ``NEXUS-`` and the SARIF fingerprint."""
     digest = content_digest(
         {"rule": f"nexus_symbiote/{category}", "component": component_ref, "detail": detail}
     )
@@ -45,6 +49,8 @@ class VEXGenerator(Generator):
     format_name = "vex-cyclonedx-1.7"
 
     def generate(self, bom: AIBOM) -> dict[str, Any]:
+        from nexus_symbiote.validators.risk import effective_component_risks
+
         # The same content-derived serial as the inventory exports, so the BOM-Link
         # names the CycloneDX export of this inventory. prepare() derives the
         # serial from content (timestamps excluded); it is not wall-clock.
@@ -57,8 +63,6 @@ class VEXGenerator(Generator):
         seen: set[str] = set()
         omitted = 0
         for comp in sorted(bom.components, key=lambda c: c.bom_ref):
-            from nexus_symbiote.validators.risk import effective_component_risks
-
             risks = effective_component_risks(comp)
             if imported_discovery_component(comp):
                 omitted += len(risks)
@@ -87,10 +91,10 @@ class VEXGenerator(Generator):
                     }.items():
                         if value:
                             props["nexus-symbiote:" + key] = value
+                recommendation = plain_text(risk.recommendation or "")
                 analysis: dict[str, Any] = {
                     "state": "in_triage",
-                    "detail": "Inventory risk finding; exploitability and deployment impact "
-                    "are unverified. " + plain_text(risk.recommendation or ""),
+                    "detail": f"{_UNVERIFIED} {recommendation}" if recommendation else _UNVERIFIED,
                 }
                 if timestamp:
                     analysis["lastUpdated"] = timestamp

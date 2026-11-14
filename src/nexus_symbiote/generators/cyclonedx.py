@@ -1,8 +1,8 @@
 """CycloneDX 1.7 output generator.
 
-Maps AgentBOM components to CycloneDX 1.7 JSON, extending the standard
-with agent-specific property taxonomies under the nexus-symbiote: namespace.
-docs/standard-exports.md describes the mapping and the property names.
+Maps AgentBOM components to CycloneDX 1.7 JSON, extending the standard with
+agent-specific property taxonomies under the nexus-symbiote: and agentbom:
+namespaces. docs/standard-exports.md describes the mapping and the property names.
 """
 
 from __future__ import annotations

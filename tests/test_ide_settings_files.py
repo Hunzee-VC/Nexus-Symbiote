@@ -91,11 +91,6 @@ model = "gpt-5-mini"
 """
 
 
-@pytest.fixture(autouse=True)
-def _no_ambient_key(monkeypatch):
-    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
-
-
 def _write(root: Path, relative: str, value: str | bytes) -> None:
     path = root / relative
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -518,7 +513,11 @@ def test_with_the_key_an_ambiguous_host_change_alerts_through_the_binding(
     after = before.replace("https://", "https://attacker.example\\@")
     run = _drift(runner, tmp_path, ".codex/config.toml", before, after, "ide_agents")
     assert run.exit_code == 1, run.output
-    assert "[HIGH] High change in 'codex': properties.static_value_binding changed." in run.output
+    # The redacted file withholds the ambiguous URL, so its digest changes as well.
+    assert (
+        "[HIGH] High change in 'codex': properties.settings_hashes changed.; "
+        "properties.static_value_binding changed." in run.output
+    )
 
 
 @pytest.mark.parametrize("url", ["https://llm.corp.example/v1", "file:///srv/models"])
@@ -697,7 +696,7 @@ def test_a_settings_path_that_is_not_a_readable_regular_file_is_a_failure(tmp_pa
     assert "Shell" not in repr(result.components)
 
 
-def test_an_oversized_settings_file_names_the_limit(runner, tmp_path):
+def test_an_oversized_settings_file_names_the_limit(tmp_path):
     project = tmp_path / "project"
     _write(project, ".xai/config.json", json.dumps({"padding": "x" * 70_000}))
     with limits.applied(limits.resolve(["file-bytes=64KiB"], {})):
@@ -759,3 +758,12 @@ def test_a_short_binding_key_is_a_failure_and_binds_nothing(tmp_path, monkeypatc
         f".cursor/cli.json: {SOURCE_BINDING_KEY_ENV} must contain at least 32 characters"
     ]
     assert "static_value_binding" not in _record(result, "cursor").properties
+
+
+def test_keys_the_redaction_makes_equal_keep_every_value_in_the_digest(runner, tmp_path):
+    before = json.dumps({"profiles": {"token=abc": "safe", "token=def": "kept"}})
+    after = before.replace("safe", "changed")
+    assert _projection(json.loads(before)) != _projection(json.loads(after))
+    run = _drift(runner, tmp_path, ".cursor/cli.json", before, after, "ide_agents")
+    assert run.exit_code == 1, run.output
+    assert _high_settings_alert("cursor", run.output), run.output

@@ -392,3 +392,16 @@ def test_a_fingerprint_handles_a_detail_quoting_a_lone_surrogate():
     surrogate = finding_fingerprint("ref", "cat", RiskSeverity.HIGH, "version \ud800")
     escaped = finding_fingerprint("ref", "cat", RiskSeverity.HIGH, "version \\ud800")
     assert surrogate.startswith("sha256:") and surrogate != escaped
+
+
+@pytest.mark.parametrize("content", [None, "sha256:" + "1" * 64])
+def test_a_fingerprint_is_the_documented_digest_with_content_null_when_absent(content):
+    import hashlib
+
+    from nexus_symbiote.core.enums import RiskSeverity
+    from nexus_symbiote.validators.risk import finding_fingerprint
+
+    fields = {"component_ref": "config:a", "category": "c", "severity": "high", "detail": "d"}
+    preimage = json.dumps({**fields, "content": content}, sort_keys=True, separators=(",", ":"))
+    expected = "sha256:" + hashlib.sha256(preimage.encode("ascii")).hexdigest()
+    assert finding_fingerprint("config:a", "c", RiskSeverity.HIGH, "d", content) == expected

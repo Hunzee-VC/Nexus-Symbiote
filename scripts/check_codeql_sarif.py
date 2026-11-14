@@ -115,11 +115,13 @@ def main() -> int:
         git = shutil.which("git")
         if git is None:
             raise ValueError("git executable is unavailable")
-        checkout = subprocess.check_output([git, "rev-parse", "HEAD"], text=True).strip()  # noqa: S603
+        checkout = subprocess.check_output(  # noqa: S603 - resolved git, fixed arguments
+            [git, "rev-parse", "HEAD"], text=True, timeout=60
+        ).strip()
         if checkout != sha:
             raise ValueError("checkout differs from workflow's exact source SHA")
         subprocess.run(  # noqa: S603 - resolved git executable and fixed arguments
-            [git, "diff", "--exit-code", "HEAD", "--"], check=True, capture_output=True
+            [git, "diff", "--exit-code", "HEAD", "--"], check=True, capture_output=True, timeout=120
         )
         with args.sarif.open("rb") as stream:
             raw = stream.read(MAX_SARIF_BYTES + 1)

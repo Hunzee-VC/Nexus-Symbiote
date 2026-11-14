@@ -8,10 +8,10 @@ import json
 import os
 import re
 import runpy
+import shutil
 import subprocess
 import sys
 import tomllib
-from pathlib import Path
 
 import pytest
 import yaml
@@ -19,7 +19,7 @@ from packaging.markers import default_environment
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
-ROOT = Path(__file__).resolve().parents[1]
+from tests.support import ROOT
 
 
 @pytest.fixture
@@ -254,10 +254,13 @@ def test_coverage_gate_rejects_regressions_and_invalid_measurements(change):
         package["covered_lines"] += 100
         confined["covered_lines"] -= 1
     elif change == "module-branch":
+        package["covered_branches"] += 100
         confined["covered_branches"] -= 1
     elif change == "module-missing":
         del report["files"]["src/nexus_symbiote/utils/confined.py"]
     elif change == "module-duplicated":
+        package["covered_lines"] += 120
+        package["covered_branches"] += 220
         report["files"]["build/lib/nexus_symbiote/utils/confined.py"] = {"summary": confined}
     elif change == "script-statement":
         report["files"]["scripts/run_action.py"]["summary"]["covered_lines"] -= 1
@@ -265,7 +268,16 @@ def test_coverage_gate_rejects_regressions_and_invalid_measurements(change):
         report["files"] = {
             path: entry for path, entry in report["files"].items() if "nexus_symbiote" in path
         }
-    assert check(report)
+    failures = check(report)
+    assert failures
+    expected = {
+        "module-statement": "nexus_symbiote/utils/confined.py statement: ",
+        "module-branch": "nexus_symbiote/utils/confined.py branch: ",
+        "module-missing": "nexus_symbiote/utils/confined.py: not measured, or measured more",
+        "module-duplicated": "nexus_symbiote/utils/confined.py: not measured, or measured more",
+    }
+    if change in expected:
+        assert [f for f in failures if f.startswith(expected[change])] == failures
 
 
 def test_measured_scripts_neither_dilute_nor_inflate_the_package_floor():
@@ -304,3 +316,52 @@ def test_coverage_floors_cover_the_security_critical_modules_and_exist():
         (ROOT / ("src" if module.startswith("nexus_symbiote/") else "") / module).is_file()
         for module in floors
     )
+
+
+# Stands in for every tool the targets run. The build takes a moment and writes one fresh
+# wheel; any command given a dist/ path must see exactly that wheel, and a venv gets a
+# copy of this script as its interpreter.
+FAKE_PYTHON = """#!/bin/sh
+case "$*" in
+  "-m build --no-isolation") sleep 1; mkdir -p dist; echo fresh > dist/fresh.whl; exit 0 ;;
+  "-m venv "*) mkdir -p "$3/bin"; cp "$0" "$3/bin/python"; exit 0 ;;
+esac
+wheels=""
+for arg in "$@"; do
+  case "$arg" in dist/*) wheels="$wheels $arg" ;; esac
+done
+[ -z "$wheels" ] || { [ "$wheels" = " dist/fresh.whl" ] && [ "$(cat dist/fresh.whl)" = fresh ]; }
+"""
+
+
+@pytest.mark.parametrize("target", ["check", "wheel-smoke"])
+def test_make_inspects_only_a_fresh_build_even_in_parallel(tmp_path, target):
+    make = shutil.which("make")
+    if make is None:
+        pytest.skip("make is not installed")
+    tools = tmp_path / "bin"
+    tools.mkdir()
+    for name, script in (("python", FAKE_PYTHON), ("ruff", "#!/bin/sh\n"), ("mypy", "#!/bin/sh\n")):
+        (tools / name).write_text(script)
+        (tools / name).chmod(0o755)
+    work = tmp_path / "work"
+    (work / "dist").mkdir(parents=True)
+    shutil.copyfile(ROOT / "Makefile", work / "Makefile")
+    (work / "dist/stale.whl").write_text("a wheel of another version\n")
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL")
+    }
+    environment["PATH"] = f"{tools}{os.pathsep}{environment.get('PATH', os.defpath)}"
+    result = subprocess.run(  # noqa: S603 -- the repository Makefile with stand-in tools
+        [make, "-j", target],
+        cwd=work,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert sorted(path.name for path in (work / "dist").iterdir()) == ["fresh.whl"]

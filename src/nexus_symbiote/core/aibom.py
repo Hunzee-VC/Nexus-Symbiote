@@ -60,11 +60,12 @@ class NativeFormatError(ValueError):
     """A native AgentBOM document cannot be read; the message never quotes its content."""
 
 
-NO_CONTENT_SERIAL = (
-    "Inventory not written. Its serial number is derived from its content digest, which "
-    "cannot be computed: the inventory records a value outside the I-JSON range, such as "
-    "a lone surrogate, or nests too deeply."
+_SERIAL_UNDEFINED = (
+    "Its serial number is derived from its content digest, which cannot be computed: the "
+    "inventory records a value outside the I-JSON domain, such as a lone surrogate, or "
+    "nests too deeply."
 )
+NO_CONTENT_SERIAL = f"Inventory not written. {_SERIAL_UNDEFINED}"
 
 
 class ContentSerialError(ValueError):
@@ -72,6 +73,10 @@ class ContentSerialError(ValueError):
 
     def __init__(self) -> None:
         super().__init__(NO_CONTENT_SERIAL)
+
+
+class ExportCheckError(ValueError):
+    """The inventory fails a check every export makes; the message is fixed text."""
 
 
 def _open_failure(exc: OSError) -> str:
@@ -136,7 +141,10 @@ class DependencyEdge(BaseModel):
 
 
 class AIBOM(BaseModel):
-    """Agent Bill of Materials — the complete supply chain inventory."""
+    """Agent Bill of Materials — a supply chain inventory.
+
+    Its metadata.completeness claim says what it covers.
+    """
 
     model_config = ConfigDict(
         extra="forbid",
@@ -220,10 +228,9 @@ class AIBOM(BaseModel):
         """Fill the deterministic tool stamp only.
 
         The serial number and the observation timestamp are export concerns
-        owned by :func:`prepare`: the
-        serial is a content-derived uuid5, and no wall-clock timestamp is
-        stamped here, so two exports of the same inventory are identical.
-        A timestamp set explicitly by a caller is preserved untouched.
+        owned by :func:`prepare`: the serial is a content-derived uuid5, and no
+        wall-clock timestamp is stamped here, so two exports of the same inventory
+        are identical. A timestamp set explicitly by a caller is preserved untouched.
         """
         if self.metadata.tool_version is None:
             self.metadata.tool_version = __version__
@@ -236,14 +243,22 @@ class AIBOM(BaseModel):
         return json.dumps(self.to_dict(), indent=indent, default=str)
 
     def to_native_json(self) -> str:
-        """Render a document every reader accepts, or refuse with the limit it exceeds.
+        """Render a document every reader accepts, or refuse with a ``NativeFormatError``.
 
         Indented output is preferred; a document that only fits without indentation is
-        written compactly rather than being written in a form ``load`` rejects.
+        written compactly rather than being written in a form ``load`` rejects. The
+        refusal names the limit or the check the inventory fails, never its content.
         """
         from nexus_symbiote.core.hashing import canonical_json
 
-        payload = self.to_dict()
+        try:
+            payload = self.to_dict()
+        except ContentSerialError as exc:
+            raise NativeFormatError(_SERIAL_UNDEFINED) from exc
+        except ExportCheckError as exc:
+            raise NativeFormatError(
+                f"It fails the native JSON export's consistency checks: {exc}."
+            ) from exc
         try:
             canonical_json(payload)
         except (TypeError, ValueError) as exc:
@@ -334,7 +349,7 @@ class AIBOM(BaseModel):
             "total_risks": len(all_risks),
             "risk_breakdown": risk_counts,
             "completeness": (
-                self.metadata.completeness.model_dump(exclude_none=True)
+                self.metadata.completeness.model_dump(mode="json", exclude_none=True)
                 if self.metadata.completeness
                 else None
             ),
@@ -356,10 +371,12 @@ def prepare(bom: AIBOM) -> AIBOM:
     Formats whose schema requires a timestamp (SPDX ``CreationInfo.created``) supply
     it at render time when the inventory has none.
 
-    Raises ``ContentSerialError`` when the content digest is undefined for the inventory.
+    Raises ``ContentSerialError`` when the content digest is undefined for the inventory,
+    and ``ExportCheckError`` for a timestamp without a timezone, a duplicate component
+    reference or a dependency on an unknown component.
     """
     if bom.metadata.timestamp is not None and bom.metadata.timestamp.tzinfo is None:
-        raise ValueError("export timestamps must include a timezone")
+        raise ExportCheckError("export timestamps must include a timezone")
     if bom.metadata.tool_version is None:
         bom.metadata.tool_version = __version__
     if bom.metadata.serial_number is None:
@@ -370,11 +387,11 @@ def prepare(bom: AIBOM) -> AIBOM:
         bom.metadata.serial_number = "urn:uuid:" + str(uuid.uuid5(NAMESPACE, digest))
     ids = [c.bom_ref for c in bom.components]
     if len(ids) != len(set(ids)):
-        raise ValueError("duplicate component references")
+        raise ExportCheckError("duplicate component references")
     known = set(ids)
     for edge in bom.dependencies:
         if edge.source_ref not in known or edge.target_ref not in known:
-            raise ValueError("dependency references an unknown component")
+            raise ExportCheckError("dependency references an unknown component")
     return bom
 
 

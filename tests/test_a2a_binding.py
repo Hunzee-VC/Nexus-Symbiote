@@ -50,11 +50,6 @@ CARD: dict[str, Any] = {
 }
 
 
-@pytest.fixture(autouse=True)
-def _no_ambient_key(monkeypatch):
-    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
-
-
 def _write_card(root: Path, card: dict[str, Any]) -> None:
     (root / ".well-known").mkdir(parents=True, exist_ok=True)
     (root / ".well-known" / "agent.json").write_text(json.dumps(card))
@@ -190,9 +185,7 @@ def test_keyed_binding_ignores_key_order_and_whitespace(tmp_path, monkeypatch):
     first = _server(tmp_path / "a", CARD)
     reordered = tmp_path / "b" / ".well-known"
     reordered.mkdir(parents=True)
-    (reordered / "agent.json").write_text(
-        json.dumps(dict(reversed(list(CARD.items()))), indent=4, sort_keys=True)
-    )
+    (reordered / "agent.json").write_text(json.dumps(CARD, indent=4, sort_keys=True))
     result = A2AScanner().scan(tmp_path / "b")
     (second,) = result.components
     for key in ("static_value_binding", "static_value_binding_key_id", "static_card_hash"):
@@ -348,16 +341,18 @@ def test_legacy_authentication_needs_nonempty_schemes(tmp_path, authentication, 
 
 
 @pytest.mark.parametrize(
-    "change",
+    ("change", "drop_schemes"),
     [
         # Clients of a card with securitySchemes do not read the earlier object.
-        {"authentication": {"schemes": ["bearer"]}},
-        {"supportedInterfaces": [{"url": "https://a.example"}]},
+        ({}, False),
+        ({"supportedInterfaces": [{"url": "https://a.example"}]}, True),
     ],
 )
-def test_legacy_authentication_does_not_decide_for_current_cards(tmp_path, change):
+def test_legacy_authentication_does_not_decide_for_current_cards(tmp_path, change, drop_schemes):
     card = {**CARD, "authentication": {"schemes": ["bearer"]}, **change}
     card.pop("security")
+    if drop_schemes:
+        card.pop("securitySchemes")
     server = _server(tmp_path, card)
     assert server.authentication_required is False
     assert [r.severity for r in server.risks if r.category == "authentication"] == ["medium"]

@@ -1,0 +1,405 @@
+{
+  "@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld",
+  "@graph": [
+    {
+      "type": "SpdxDocument",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#creation",
+      "name": "Nexus SymBiote AgentBOM urn:uuid:dc74858d-f9d5-5ece-b0e3-a5fb2006d36e",
+      "element": [
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#producer-b5781ba8-ca34-5472-b128-489da94c266a",
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#generator-b5781ba8-ca34-5472-b128-489da94c266a",
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-162a5afd-4434-5fb0-aa44-972d81402b67",
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-b1d69de4-05ad-5f6b-84ae-fbd0ad4a3fe9",
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-e9349def-7f49-5864-8cf1-c3a00ffc0492",
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-e163c794-7034-5d3a-9431-8f449e699abe",
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-9948511b-e5a3-566d-bca4-aeaa50a79f98",
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#relationship-047caaa9-142a-5f16-a6b5-e8020f89fe86",
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#relationship-455b6b1c-81c9-5f78-83f0-ed7449796f35",
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#relationship-1167570e-6409-5ce2-8c8b-ea889fa65dec",
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#relationship-b2a899e7-2617-5656-9ef1-b994cbf18937",
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#license-relationship-6d08f891-e45d-54e2-b567-38240b21a2a9",
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#license-relationship-62b14701-47e9-55ac-af4b-c373f7e83f74"
+      ],
+      "rootElement": [
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-162a5afd-4434-5fb0-aa44-972d81402b67"
+      ],
+      "profileConformance": [
+        "core",
+        "software",
+        "extension"
+      ],
+      "comment": "Collection coverage is unknown: static collection does not observe runtime, network or live tool surfaces. This document does not assert complete collection.",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:document",
+              "extension_cdxPropValue": "{\"components\":[{\"assurance_level\":\"declared\",\"authorizations\":[],\"autonomy_level\":null,\"bom_ref\":\"agent:support\",\"claims\":{},\"component_type\":\"agent\",\"data_refs\":[],\"deployment_status\":\"unknown\",\"guardrail_refs\":[],\"hashes\":{},\"memory_refs\":[],\"model_refs\":[],\"name\":\"support\",\"prompt_refs\":[],\"properties\":{},\"risks\":[],\"skill_refs\":[],\"sub_agent_refs\":[],\"tool_refs\":[],\"trust_tier\":\"unknown\"},{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:docker/library/redis\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"library/redis\",\"package_url\":\"pkg:docker/library/redis@7.0\",\"properties\":{},\"registry_type\":\"docker-hub\",\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"7.0\"},{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:generic/agent-runtime\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"agent-runtime\",\"package_url\":\"pkg:generic/agent-runtime@1.0\",\"properties\":{},\"registry_type\":\"generic\",\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"1.0\"},{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:npm/zod\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"zod\",\"package_url\":\"pkg:npm/zod@3.23.8?repository_url=https://npm.mirror.example.com\",\"properties\":{},\"registry_type\":\"npm\",\"registry_uri\":\"https://registry.npmjs.org\",\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"3.23.8\"},{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:pypi/openai\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"openai\",\"package_url\":\"pkg:pypi/openai@1.2.3?file_name=openai-1.2.3.tar.gz\",\"properties\":{},\"registry_type\":\"pypi\",\"registry_uri\":\"https://pypi.org\",\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"1.2.3\"}],\"dependencies\":[{\"relationship\":\"depends-on\",\"source_ref\":\"agent:support\",\"target_ref\":\"registry:docker/library/redis\"},{\"relationship\":\"depends-on\",\"source_ref\":\"agent:support\",\"target_ref\":\"registry:generic/agent-runtime\"},{\"relationship\":\"depends-on\",\"source_ref\":\"agent:support\",\"target_ref\":\"registry:npm/zod\"},{\"relationship\":\"depends-on\",\"source_ref\":\"agent:support\",\"target_ref\":\"registry:pypi/openai\"}],\"metadata\":{\"authors\":[],\"serial_number\":\"urn:uuid:dc74858d-f9d5-5ece-b0e3-a5fb2006d36e\",\"spec_version\":\"1.0.0\",\"timestamp\":\"2026-11-10T12:00:00Z\",\"tool_name\":\"nexus-symbiote\",\"tool_vendor\":\"aisecnomad\",\"tool_version\":\"0.1.0\",\"version\":1}}"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:documentDigest",
+              "extension_cdxPropValue": "sha256:514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:lossReport",
+              "extension_cdxPropValue": "{\"admissionAuthority\":false,\"extensionRoundTripComplete\":true,\"itemCoverage\":\"selected-security-fields\",\"items\":[{\"path\":\"\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"agent authority, assurance, and coverage require the Nexus Symbiote extension\",\"severity\":\"info\"},{\"path\":\"/components/0/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/0/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/1/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/1/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/2/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/2/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/3/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/3/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/4/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/4/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/0/relationship\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/1/relationship\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/2/relationship\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/3/relationship\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"}],\"nativeSemanticsComplete\":false,\"normalizations\":[\"component and dependency collections sorted for deterministic output\",\"valid declared package URLs canonicalized; standard package versions use their exact PURL version\"],\"profile\":\"nexus-symbiote-export/v1\",\"sourceDigest\":\"sha256:514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d\",\"target\":\"spdx-3.0.1\"}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "SoftwareAgent",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#producer-b5781ba8-ca34-5472-b128-489da94c266a",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#creation",
+      "name": "nexus-symbiote"
+    },
+    {
+      "type": "Tool",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#generator-b5781ba8-ca34-5472-b128-489da94c266a",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#creation",
+      "name": "nexus-symbiote",
+      "summary": "0.1.0"
+    },
+    {
+      "type": "ai_AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-162a5afd-4434-5fb0-aa44-972d81402b67",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#creation",
+      "name": "support",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:component",
+              "extension_cdxPropValue": "{\"assurance_level\":\"declared\",\"authorizations\":[],\"autonomy_level\":null,\"bom_ref\":\"agent:support\",\"claims\":{},\"component_type\":\"agent\",\"data_refs\":[],\"deployment_status\":\"unknown\",\"guardrail_refs\":[],\"hashes\":{},\"memory_refs\":[],\"model_refs\":[],\"name\":\"support\",\"prompt_refs\":[],\"properties\":{},\"risks\":[],\"skill_refs\":[],\"sub_agent_refs\":[],\"tool_refs\":[],\"trust_tier\":\"unknown\"}"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:kind",
+              "extension_cdxPropValue": "agent"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:claimsVerifiedByExporter",
+              "extension_cdxPropValue": "false"
+            }
+          ]
+        }
+      ],
+      "software_downloadLocation": "NOASSERTION",
+      "software_primaryPurpose": "application",
+      "ai_autonomyType": "noAssertion",
+      "ai_informationAboutTraining": "Not supplied by the inventory producer.",
+      "ai_informationAboutApplication": "Not supplied by the inventory producer.",
+      "ai_limitation": "Inventory assertions do not establish model safety or authorization.",
+      "ai_useSensitivePersonalInformation": "noAssertion"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-b1d69de4-05ad-5f6b-84ae-fbd0ad4a3fe9",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#creation",
+      "name": "library/redis",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:component",
+              "extension_cdxPropValue": "{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:docker/library/redis\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"library/redis\",\"package_url\":\"pkg:docker/library/redis@7.0\",\"properties\":{},\"registry_type\":\"docker-hub\",\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"7.0\"}"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:kind",
+              "extension_cdxPropValue": "registry-entry"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:claimsVerifiedByExporter",
+              "extension_cdxPropValue": "false"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:packageIdentifierProjection",
+              "extension_cdxPropValue": "declared"
+            }
+          ]
+        }
+      ],
+      "externalIdentifier": [
+        {
+          "type": "ExternalIdentifier",
+          "externalIdentifierType": "packageUrl",
+          "identifier": "pkg:docker/library/redis@7.0",
+          "comment": "Declared package identity; not authenticated by the exporter."
+        }
+      ],
+      "software_packageUrl": "pkg:docker/library/redis@7.0",
+      "software_packageVersion": "7.0",
+      "software_downloadLocation": "NOASSERTION"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-e9349def-7f49-5864-8cf1-c3a00ffc0492",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#creation",
+      "name": "agent-runtime",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:component",
+              "extension_cdxPropValue": "{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:generic/agent-runtime\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"agent-runtime\",\"package_url\":\"pkg:generic/agent-runtime@1.0\",\"properties\":{},\"registry_type\":\"generic\",\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"1.0\"}"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:kind",
+              "extension_cdxPropValue": "registry-entry"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:claimsVerifiedByExporter",
+              "extension_cdxPropValue": "false"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:packageIdentifierProjection",
+              "extension_cdxPropValue": "declared"
+            }
+          ]
+        }
+      ],
+      "externalIdentifier": [
+        {
+          "type": "ExternalIdentifier",
+          "externalIdentifierType": "packageUrl",
+          "identifier": "pkg:generic/agent-runtime@1.0",
+          "comment": "Declared package identity; not authenticated by the exporter."
+        }
+      ],
+      "software_packageUrl": "pkg:generic/agent-runtime@1.0",
+      "software_packageVersion": "1.0",
+      "software_downloadLocation": "NOASSERTION"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-e163c794-7034-5d3a-9431-8f449e699abe",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#creation",
+      "name": "zod",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:component",
+              "extension_cdxPropValue": "{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:npm/zod\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"zod\",\"package_url\":\"pkg:npm/zod@3.23.8?repository_url=https://npm.mirror.example.com\",\"properties\":{},\"registry_type\":\"npm\",\"registry_uri\":\"https://registry.npmjs.org\",\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"3.23.8\"}"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:kind",
+              "extension_cdxPropValue": "registry-entry"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:claimsVerifiedByExporter",
+              "extension_cdxPropValue": "false"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:packageIdentifierProjection",
+              "extension_cdxPropValue": "declared"
+            }
+          ]
+        }
+      ],
+      "externalIdentifier": [
+        {
+          "type": "ExternalIdentifier",
+          "externalIdentifierType": "packageUrl",
+          "identifier": "pkg:npm/zod@3.23.8?repository_url=https://npm.mirror.example.com",
+          "comment": "Declared package identity; not authenticated by the exporter."
+        }
+      ],
+      "software_packageUrl": "pkg:npm/zod@3.23.8?repository_url=https://npm.mirror.example.com",
+      "software_packageVersion": "3.23.8",
+      "software_downloadLocation": "NOASSERTION"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-9948511b-e5a3-566d-bca4-aeaa50a79f98",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#creation",
+      "name": "openai",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:component",
+              "extension_cdxPropValue": "{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:pypi/openai\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"openai\",\"package_url\":\"pkg:pypi/openai@1.2.3?file_name=openai-1.2.3.tar.gz\",\"properties\":{},\"registry_type\":\"pypi\",\"registry_uri\":\"https://pypi.org\",\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"1.2.3\"}"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:kind",
+              "extension_cdxPropValue": "registry-entry"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:claimsVerifiedByExporter",
+              "extension_cdxPropValue": "false"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:packageIdentifierProjection",
+              "extension_cdxPropValue": "declared"
+            }
+          ]
+        }
+      ],
+      "externalIdentifier": [
+        {
+          "type": "ExternalIdentifier",
+          "externalIdentifierType": "packageUrl",
+          "identifier": "pkg:pypi/openai@1.2.3?file_name=openai-1.2.3.tar.gz",
+          "comment": "Declared package identity; not authenticated by the exporter."
+        }
+      ],
+      "software_packageUrl": "pkg:pypi/openai@1.2.3?file_name=openai-1.2.3.tar.gz",
+      "software_packageVersion": "1.2.3",
+      "software_downloadLocation": "NOASSERTION"
+    },
+    {
+      "type": "Relationship",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#relationship-047caaa9-142a-5f16-a6b5-e8020f89fe86",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#creation",
+      "relationshipType": "dependsOn",
+      "from": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-162a5afd-4434-5fb0-aa44-972d81402b67",
+      "to": [
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-b1d69de4-05ad-5f6b-84ae-fbd0ad4a3fe9"
+      ],
+      "completeness": "noAssertion",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:relationship",
+              "extension_cdxPropValue": "{\"relationship\":\"depends-on\",\"source_ref\":\"agent:support\",\"target_ref\":\"registry:docker/library/redis\"}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Relationship",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#relationship-455b6b1c-81c9-5f78-83f0-ed7449796f35",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#creation",
+      "relationshipType": "dependsOn",
+      "from": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-162a5afd-4434-5fb0-aa44-972d81402b67",
+      "to": [
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-e9349def-7f49-5864-8cf1-c3a00ffc0492"
+      ],
+      "completeness": "noAssertion",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:relationship",
+              "extension_cdxPropValue": "{\"relationship\":\"depends-on\",\"source_ref\":\"agent:support\",\"target_ref\":\"registry:generic/agent-runtime\"}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Relationship",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#relationship-1167570e-6409-5ce2-8c8b-ea889fa65dec",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#creation",
+      "relationshipType": "dependsOn",
+      "from": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-162a5afd-4434-5fb0-aa44-972d81402b67",
+      "to": [
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-e163c794-7034-5d3a-9431-8f449e699abe"
+      ],
+      "completeness": "noAssertion",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:relationship",
+              "extension_cdxPropValue": "{\"relationship\":\"depends-on\",\"source_ref\":\"agent:support\",\"target_ref\":\"registry:npm/zod\"}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Relationship",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#relationship-b2a899e7-2617-5656-9ef1-b994cbf18937",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#creation",
+      "relationshipType": "dependsOn",
+      "from": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-162a5afd-4434-5fb0-aa44-972d81402b67",
+      "to": [
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-9948511b-e5a3-566d-bca4-aeaa50a79f98"
+      ],
+      "completeness": "noAssertion",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:relationship",
+              "extension_cdxPropValue": "{\"relationship\":\"depends-on\",\"source_ref\":\"agent:support\",\"target_ref\":\"registry:pypi/openai\"}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Relationship",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#license-relationship-6d08f891-e45d-54e2-b567-38240b21a2a9",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#creation",
+      "relationshipType": "hasDeclaredLicense",
+      "from": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-162a5afd-4434-5fb0-aa44-972d81402b67",
+      "to": [
+        "https://spdx.org/rdf/3.0.1/terms/Licensing/NoAssertion"
+      ]
+    },
+    {
+      "type": "Relationship",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#license-relationship-62b14701-47e9-55ac-af4b-c373f7e83f74",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#creation",
+      "relationshipType": "hasConcludedLicense",
+      "from": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#component-162a5afd-4434-5fb0-aa44-972d81402b67",
+      "to": [
+        "https://spdx.org/rdf/3.0.1/terms/Licensing/NoAssertion"
+      ]
+    },
+    {
+      "type": "CreationInfo",
+      "@id": "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#creation",
+      "specVersion": "3.0.1",
+      "created": "2026-11-10T12:00:00Z",
+      "createdBy": [
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#producer-b5781ba8-ca34-5472-b128-489da94c266a"
+      ],
+      "createdUsing": [
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/514adb760157592740dff98e62a56f833c773e9ac38a263861438a53b8736a6d#generator-b5781ba8-ca34-5472-b128-489da94c266a"
+      ]
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from pydantic import ValidationError
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.enums import ComponentType
 from nexus_symbiote.core.models import AgentComponent, CapabilityDeclaration
 
 
@@ -48,15 +50,43 @@ def test_published_examples_match_schema_and_runtime():
         AIBOM.model_validate(document)
 
 
+def test_the_example_links_and_fingerprints_tools_as_collection_does():
+    from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
+    from nexus_symbiote.graph import validate_graph
+
+    example = AIBOM.load(Path(__file__).parents[1] / "schemas/examples/minimal-aibom.json")
+    servers = {c.bom_ref for c in example.get_components_by_type(ComponentType.MCP_SERVER)}
+    tools = {c.bom_ref for c in example.get_components_by_type(ComponentType.TOOL)}
+    provided = {
+        (edge.source_ref, edge.target_ref)
+        for edge in example.dependencies
+        if edge.relationship == "provides-tool"
+    }
+    assert {target for _, target in provided} == tools and {s for s, _ in provided} == servers
+    assert not validate_graph(example)
+    exported = CycloneDXGenerator().generate(example)["dependencies"]
+    assert {entry["ref"] for entry in exported} >= tools
+    digests = [
+        digest
+        for component in example.to_dict()["components"]
+        for key, digest in component.items()
+        if key in {"schema_hash", "definition_hash", "content_hash"}
+    ]
+    assert len(digests) == 4
+    assert all(re.fullmatch(r"sha256:[0-9a-f]{64}", digest) for digest in digests)
+
+
 def test_nested_capability_unknown_semantics_rejected():
     with pytest.raises(ValidationError):
         CapabilityDeclaration.model_validate({"unrecognized_approval_bypass": True})
 
 
-def test_loader_rejects_duplicate_keys_and_limits(tmp_path):
+def test_loader_rejects_duplicate_keys(tmp_path):
+    from nexus_symbiote.core.aibom import NativeFormatError
+
     path = tmp_path / "bom.json"
     path.write_text('{"components":[],"components":[]}')
-    with pytest.raises(ValueError):
+    with pytest.raises(NativeFormatError, match="duplicate keys"):
         AIBOM.load(path)
 
 
@@ -91,6 +121,24 @@ def test_dependency_edges_reject_unknown_fields_in_schema_and_model():
     assert list(_schema_validator().iter_errors(document))
     with pytest.raises(ValidationError):
         AIBOM.model_validate(document)
+
+
+def test_the_schema_requires_the_component_type_the_reader_selects_a_model_by():
+    validator = _schema_validator()
+    mapping = validator.schema["properties"]["components"]["items"]["discriminator"]["mapping"]
+    assert set(mapping) == {kind.value for kind in ComponentType}
+    for kind in mapping:
+        component = AIBOM.model_validate(
+            {"components": [{"bom_ref": "c", "component_type": kind, "name": "c"}]}
+        ).to_dict()["components"][0]
+        assert not list(validator.iter_errors({"components": [component]})), kind
+        del component["component_type"]
+        document = {"components": [component]}
+        assert list(validator.iter_errors(document)), kind
+        with pytest.raises(ValidationError, match="discriminator 'component_type'"):
+            AIBOM.model_validate(document)
+    untyped = {"components": [{"bom_ref": "agent:x", "name": "x", "autonomy_level": "L2-agent"}]}
+    assert list(validator.iter_errors(untyped))
 
 
 @pytest.mark.parametrize(
@@ -209,6 +257,52 @@ def test_writer_and_reader_share_one_size_limit(tmp_path, monkeypatch):
         bom.to_native_json()
     with pytest.raises(NativeFormatError, match="native inventory limit"):
         AIBOM.load(path)
+
+
+@pytest.mark.parametrize(
+    ("document", "check"),
+    [
+        (
+            {"metadata": {"timestamp": "2026-01-01T00:00:00"}},
+            "export timestamps must include a timezone",
+        ),
+        (
+            {
+                "components": [{"bom_ref": "agent:a", "component_type": "agent", "name": "a"}],
+                "dependencies": [
+                    {"source_ref": "agent:a", "target_ref": "agent:b", "relationship": "invokes"}
+                ],
+            },
+            "dependency references an unknown component",
+        ),
+    ],
+)
+def test_a_readable_document_the_writer_refuses_fails_as_a_format_error(tmp_path, document, check):
+    from nexus_symbiote.core.aibom import NativeFormatError
+
+    bom = AIBOM.from_native(document)
+    with pytest.raises(NativeFormatError, match=f"consistency checks: {check}"):
+        bom.to_native_json()
+    with pytest.raises(NativeFormatError):
+        bom.save(tmp_path / "bom.json")
+    assert not (tmp_path / "bom.json").exists()
+
+
+def test_an_inventory_without_a_serial_fails_as_a_format_error_with_the_serial_text():
+    from nexus_symbiote.core.aibom import NO_CONTENT_SERIAL, NativeFormatError
+
+    bom = AIBOM(components=[AgentComponent(bom_ref="agent:a", name="\ud800")])
+    with pytest.raises(NativeFormatError) as refused:
+        bom.to_native_json()
+    assert f"Inventory not written. {refused.value}" == NO_CONTENT_SERIAL
+
+
+@pytest.mark.parametrize("value", ["1700000000", "99999999999", "-5"])
+def test_a_string_of_digits_is_not_read_as_a_timestamp(value):
+    document = AIBOM().to_dict()
+    document["metadata"]["timestamp"] = value
+    with pytest.raises(ValidationError):
+        AIBOM.model_validate(document)
 
 
 def test_overlong_references_are_refused():

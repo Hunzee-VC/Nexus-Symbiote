@@ -15,7 +15,10 @@ NAMESPACE = uuid.UUID("ccaa2a43-8ba9-58e6-8f22-f8793a2039d5")
 
 
 def json_text(value: Any) -> str:
-    """Deterministic UTF-8 JSON representation; not a claim of RFC 8785 canonicalization."""
+    """Deterministic JSON text, not ASCII-escaped, so it can hold a lone surrogate.
+
+    Not a claim of RFC 8785 canonicalization.
+    """
     return json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
     )

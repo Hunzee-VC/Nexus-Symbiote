@@ -102,6 +102,7 @@ built-in policy.
 | `scanners/live_mcp.py`, `live/`, `advisories.py` | Live observation and OSV queries; see [offline and live modes](offline-and-live-modes.md) |
 | `runtime.py`, `runtime_validation.py`, `live/session.py` | Signed runtime contracts, the reference gateway, schema validation in a separate worker process, and the pinned stdio session |
 | `utils/terminal.py`, `utils/files.py`, `utils/secrets.py` | Inert terminal and CI output, atomic output files, and redaction |
+| `utils/markdown.py` | The text of a Markdown file outside its code, as CommonMark reads it, from which the `prompt` collector takes `@path` imports |
 
 ## Trust boundaries
 

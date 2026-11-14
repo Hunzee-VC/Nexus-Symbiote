@@ -9,7 +9,10 @@ records which trust root the verifier was built from.
 
 from __future__ import annotations
 
+import errno
 import hashlib
+import io
+import os
 import shutil
 import stat
 from pathlib import Path
@@ -22,8 +25,8 @@ from nexus_symbiote.utils import crypto
 from nexus_symbiote.utils.crypto import (
     TRUST_ROOT_ENV,
     TRUST_ROOT_SHA256_ENV,
+    _read_explicit_trust_root,
     _read_sigstore_cache,
-    _resolve_explicit_trust_root,
     verify_sigstore_bundle,
     verify_sigstore_digest,
 )
@@ -117,6 +120,7 @@ def test_group_writable_cache_dir_fails_closed(private_cache: Path, stub_verifie
     assert failed_path is None
     assert failed_error is not None
     assert "group/world-writable" in failed_error
+    assert "point XDG_CACHE_HOME at a directory you own" in failed_error
     result = verify_sigstore_digest("0" * 64, b"{}", IDENTITY, ISSUER)
     assert not result.verified
     assert result.error is not None
@@ -188,6 +192,46 @@ def test_symlinked_trusted_root_file_fails_closed(private_cache: Path) -> None:
     assert "symlink" in failed_error
 
 
+def test_a_symlink_above_the_cache_is_named_as_the_reason(
+    private_cache: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = tmp_path / "real-cache"
+    real.mkdir(mode=0o700)
+    linked = tmp_path / "linked-cache"
+    linked.symlink_to(real, target_is_directory=True)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(linked))
+    path, error = _prepare_sigstore_cache()
+    assert path is None
+    assert error is not None
+    assert error.endswith("without following symlinks; no directory on its path may be a symlink")
+
+
+def test_a_seed_that_fails_on_close_leaves_no_partial_root(
+    private_cache: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The embedded root fits the write buffer, so a full disk surfaces when the file closes.
+    real_fdopen = os.fdopen
+
+    class FullDisk(io.BufferedWriter):
+        def flush(self) -> None:
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+    def fdopen(fd: int, mode: str = "r", *args: object, **kwargs: object) -> object:
+        if mode == "wb":
+            return FullDisk(io.FileIO(fd, "wb"))
+        return real_fdopen(fd, mode, *args, **kwargs)
+
+    monkeypatch.setattr(os, "fdopen", fdopen)
+    path, error = _prepare_sigstore_cache()
+    assert path is None
+    assert error is not None and error.startswith("Cannot seed the Sigstore trusted root")
+    assert not _expected_cache_path(private_cache).exists()
+    monkeypatch.setattr(os, "fdopen", real_fdopen)
+    path, error = _prepare_sigstore_cache()
+    assert error is None and path is not None
+    assert path.read_bytes() == _embedded_root()
+
+
 def test_foreign_owned_cache_dir_fails_closed(
     private_cache: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -246,7 +290,7 @@ def test_explicit_trust_root_directory_resolves_to_file(
     root_dir.chmod(0o700)  # Plain mkdir follows the ambient umask, which may be group-writable.
     (root_dir / "trusted_root.json").write_bytes(b"operator trust root")
     (root_dir / "trusted_root.json").chmod(0o600)
-    path, source, error = _resolve_explicit_trust_root(root_dir, None)
+    path, _content, source, error = _read_explicit_trust_root(root_dir, None)
     assert error is None
     assert path == root_dir / "trusted_root.json"
     assert source == "flag"
@@ -259,7 +303,7 @@ def test_explicit_trust_root_env_var_is_honoured(
     root.write_bytes(b"operator trust root")
     root.chmod(0o600)
     monkeypatch.setenv(TRUST_ROOT_ENV, str(root))
-    path, source, error = _resolve_explicit_trust_root(None, None)
+    path, _content, source, error = _read_explicit_trust_root(None, None)
     assert error is None
     assert path == root
     assert source == "environment"
@@ -272,7 +316,7 @@ def test_flag_beats_env_for_trust_root(tmp_path: Path, monkeypatch: pytest.Monke
         candidate.write_bytes(b"operator trust root")
         candidate.chmod(0o600)
     monkeypatch.setenv(TRUST_ROOT_ENV, str(env_root))
-    path, source, error = _resolve_explicit_trust_root(str(flag_root), None)
+    path, _content, source, error = _read_explicit_trust_root(str(flag_root), None)
     assert error is None
     assert path == flag_root
     assert source == "flag"
@@ -284,16 +328,18 @@ def test_explicit_trust_root_pinned_hash(tmp_path: Path) -> None:
     root.write_bytes(content)
     root.chmod(0o664)  # A pinned hash excuses permissive modes: content is pinned.
     digest = hashlib.sha256(content).hexdigest()
-    path, source, error = _resolve_explicit_trust_root(str(root), f"sha256:{digest}")
+    path, _content, source, error = _read_explicit_trust_root(str(root), f"sha256:{digest}")
     assert error is None
     assert path == root
     assert source == "flag"
-    bad_path, _bad_source, bad_error = _resolve_explicit_trust_root(str(root), "sha256:" + "0" * 64)
+    bad_path, _bad_content, _bad_source, bad_error = _read_explicit_trust_root(
+        str(root), "sha256:" + "0" * 64
+    )
     assert bad_path is None
     assert bad_error is not None
     assert "pinned SHA-256" in bad_error
-    malformed_path, _malformed_source, malformed_error = _resolve_explicit_trust_root(
-        str(root), "not-a-digest"
+    malformed_path, _malformed_content, _malformed_source, malformed_error = (
+        _read_explicit_trust_root(str(root), "not-a-digest")
     )
     assert malformed_path is None
     assert malformed_error is not None
@@ -304,7 +350,7 @@ def test_pinned_hash_without_a_trust_root_is_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(TRUST_ROOT_SHA256_ENV, "sha256:" + "0" * 64)
-    path, _source, error = _resolve_explicit_trust_root(None, None)
+    path, _content, _source, error = _read_explicit_trust_root(None, None)
     assert path is None
     assert error is not None
     assert "without a trust root" in error
@@ -317,10 +363,14 @@ def test_explicit_trust_root_requires_a_private_file(tmp_path: Path) -> None:
     root = parent / "trusted_root.json"
     root.write_bytes(b"operator trust root")
     root.chmod(0o664)
-    path, _source, error = _resolve_explicit_trust_root(str(root), None)
+    path, _content, _source, error = _read_explicit_trust_root(str(root), None)
     assert path is None
     assert error is not None
     assert "group/world-writable" in error
+    assert error.endswith(
+        "make the file private, make its directory private, or pin the trust root's "
+        f"SHA-256 ({TRUST_ROOT_SHA256_ENV} or --trust-root-sha256)"
+    )
 
 
 def test_explicit_trust_root_group_writable_file_in_private_dir_passes(
@@ -332,7 +382,7 @@ def test_explicit_trust_root_group_writable_file_in_private_dir_passes(
     root = parent / "trusted_root.json"
     root.write_bytes(b"operator trust root")
     root.chmod(0o664)
-    path, _source, error = _resolve_explicit_trust_root(str(root), None)
+    path, _content, _source, error = _read_explicit_trust_root(str(root), None)
     assert error is None
     assert path == root
 
@@ -342,7 +392,7 @@ def test_explicit_trust_root_symlink_is_rejected(tmp_path: Path) -> None:
     real.write_bytes(b"operator trust root")
     link = tmp_path / "trusted_root.json"
     link.symlink_to(real)
-    path, _source, error = _resolve_explicit_trust_root(str(link), None)
+    path, _content, _source, error = _read_explicit_trust_root(str(link), None)
     assert path is None
     assert error is not None
     assert "symlink" in error
@@ -355,10 +405,13 @@ def test_explicit_trust_root_group_writable_parent_is_rejected(tmp_path: Path) -
     root.write_bytes(b"operator trust root")
     root.chmod(0o600)
     parent.chmod(0o775)  # the insecure fixture under test
-    path, _source, error = _resolve_explicit_trust_root(str(root), None)
+    path, _content, _source, error = _read_explicit_trust_root(str(root), None)
     assert path is None
-    assert error is not None
-    assert "group/world-writable" in error
+    assert error == (
+        f"Explicit Sigstore trust-root directory {parent} is group/world-writable; make it "
+        f"private, or pin the trust root's SHA-256 ({TRUST_ROOT_SHA256_ENV} or "
+        "--trust-root-sha256)"
+    )
 
 
 def test_verify_bundle_reports_trust_root_path(
@@ -506,7 +559,9 @@ def test_explicit_trust_root_symlinked_directory_is_rejected(tmp_path: Path) -> 
     (real / "trusted_root.json").chmod(0o600)
     link = tmp_path / "linked"
     link.symlink_to(real, target_is_directory=True)
-    path, _source, error = _resolve_explicit_trust_root(str(link / "trusted_root.json"), None)
+    path, _content, _source, error = _read_explicit_trust_root(
+        str(link / "trusted_root.json"), None
+    )
     assert path is None
     assert error is not None
     assert "symlink" in error
@@ -519,6 +574,13 @@ def test_explicit_trust_root_pinned_symlink_is_rejected(tmp_path: Path) -> None:
     link = tmp_path / "trusted_root.json"
     link.symlink_to(real)
     digest = hashlib.sha256(content).hexdigest()
-    path, _source, error = _resolve_explicit_trust_root(str(link), f"sha256:{digest}")
+    path, _content, _source, error = _read_explicit_trust_root(str(link), f"sha256:{digest}")
     assert path is None
-    assert error == "Explicit Sigstore trust root does not match the pinned SHA-256"
+    assert error == f"Explicit Sigstore trust root {link} must not be a symlink"
+
+
+def test_a_pinned_trust_root_that_cannot_be_read_names_the_reason(tmp_path: Path) -> None:
+    missing = tmp_path / "trusted_root.json"
+    path, _content, _source, error = _read_explicit_trust_root(str(missing), "sha256:" + "0" * 64)
+    assert path is None
+    assert error == f"Explicit Sigstore trust root {missing} cannot be inspected"

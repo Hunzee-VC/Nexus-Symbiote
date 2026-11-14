@@ -28,7 +28,7 @@ def clone_corpus(tmp_path):
 # The digest of the committed manifest, labels and fixtures. The gate compares results
 # only with the manifest they were produced from, so a label flipped in the same change as
 # the detector would pass it; changing any case must also change this line, visibly.
-CORPUS_DIGEST = "49c5c3bd73140f0b37f7137d08c533d8e221d77fab002b6d301b5e0a1e139dcd"
+CORPUS_DIGEST = "cfa1b7b2ae15f80adbca486a2ae53dd77e54d3a10cddb8f6976765c13382c7cc"
 
 
 def test_committed_inputs_have_exact_hashes_and_explicit_labels():
@@ -108,6 +108,16 @@ def test_predictions_do_not_read_labels_and_use_real_scanner():
     assert original == contradictory_label
     assert original["prediction"] is True
     assert "invisible_characters" in original["facts"]["risk_categories"]
+
+
+def test_the_key_order_case_needs_canonical_descriptor_hashing(monkeypatch):
+    manifest, _ = benchmark.load_manifest(benchmark.DEFAULT_MANIFEST)
+    case = next(c for c in manifest["cases"] if c["id"] == "tool-key-order-only")
+    directory = benchmark.DEFAULT_MANIFEST.parent / case["directory"]
+    assert benchmark._evaluate(case, directory)["prediction"] is False
+    # Insertion-order serialization is what the case exists to rule out.
+    monkeypatch.setattr("nexus_symbiote.core.hashing.canonical_json", json.dumps)
+    assert benchmark._evaluate(case, directory)["prediction"] is True
 
 
 def test_actual_corpus_run_records_evidence_and_unknown_coverage():

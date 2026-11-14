@@ -6,16 +6,20 @@ enforcement. Consumers must independently verify the referenced evidence.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from enum import Enum
 from typing import Annotated, Self
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator, model_validator
 
+_ISO_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+
 
 def _timestamp_input(value: object) -> object:
     # JSON has no timestamp type: only ISO 8601 text is a timestamp, never a number.
-    if isinstance(value, datetime | str):
+    # Pydantic reads a string of digits as Unix time, so text must start with a date.
+    if isinstance(value, datetime) or (isinstance(value, str) and _ISO_DATE.match(value)):
         return value
     raise ValueError("timestamps must be ISO 8601 strings")
 

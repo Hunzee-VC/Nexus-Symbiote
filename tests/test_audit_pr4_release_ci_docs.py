@@ -121,5 +121,7 @@ def test_sub_millisecond_scaling_ratio_and_non_loopback_socket_guard() -> None:
     try:
         with pytest.raises(OSError, match="blocked outbound non-loopback"):
             sock.connect(("93.184.216.34", 443))
+        with pytest.raises(OSError, match="blocked outbound non-loopback"):
+            sock.connect((b"93.184.216.34", 443))
     finally:
         sock.close()

@@ -13,7 +13,7 @@ from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 
 from nexus_symbiote.core.hashing import extract_version_pin
-from nexus_symbiote.core.models import AnyComponent, RegistryEntryComponent
+from nexus_symbiote.core.models import AnyComponent, MCPServerComponent, RegistryEntryComponent
 
 _DEFAULT_REGISTRIES: dict[str, frozenset[str]] = {
     "pypi": frozenset({"https://pypi.org", "https://files.pythonhosted.org"}),
@@ -28,6 +28,30 @@ class PackageIdentifierProjection:
     version: str | None = None
 
 
+@dataclass(frozen=True)
+class _Declaration:
+    """What a component declares about the package its package URL must name."""
+
+    registry_type: str | None
+    registry_uri: str | None
+    name: str
+    version: str | None
+
+
+def _declaration(component: AnyComponent) -> tuple[str, _Declaration] | None:
+    if isinstance(component, RegistryEntryComponent) and component.package_url is not None:
+        return component.package_url, _Declaration(
+            component.registry_type, component.registry_uri, component.name, component.version
+        )
+    if isinstance(component, MCPServerComponent) and component.package_url is not None:
+        # The launched package, which the collector records only from its default registry.
+        kind, _, name = (component.launcher_package or "").partition(":")
+        return component.package_url, _Declaration(
+            kind if kind in {"pypi", "npm"} else None, None, name, component.version
+        )
+    return None
+
+
 def package_identifier(component: AnyComponent) -> PackageIdentifierProjection:
     """Validate and canonicalize a declared identifier, not its publisher or artifact.
 
@@ -35,12 +59,16 @@ def package_identifier(component: AnyComponent) -> PackageIdentifierProjection:
     before that normalization; otherwise a newline or malformed escape could be
     silently repaired into an apparently usable identifier. PyPI/npm identities
     also agree with the component's declared ecosystem, name, exact version and
-    registry, and OCI identities with the digest its image reference pins.
-    Unsupported or invalid claims remain available in the native extension only.
+    registry, and OCI identities with the digest its image reference pins. An MCP
+    server's identity is the package it launches: its launcher package and version
+    from the default registry. Unsupported or invalid claims remain available in
+    the native extension only. Projection 1, which recovers 0.1.0 exports, keeps
+    the 0.1.0 rule in ``generators._legacy``.
     """
-    if not isinstance(component, RegistryEntryComponent) or component.package_url is None:
+    declared = _declaration(component)
+    if declared is None:
         return PackageIdentifierProjection(None, "unknown")
-    value = component.package_url
+    value, declaration = declared
     invalid = PackageIdentifierProjection(None, "unavailable-invalid")
     if (
         not value
@@ -71,21 +99,21 @@ def package_identifier(component: AnyComponent) -> PackageIdentifierProjection:
             if len(keys) != len(set(keys)) or any(not content for _, content in qualifiers):
                 return invalid
         parsed = PackageURL.from_string(value)
-        if not _agrees_with_component(parsed, component):
+        if not _agrees_with_component(parsed, declaration):
             return invalid
         return PackageIdentifierProjection(parsed.to_string(), "declared", parsed.version)
     except (ValueError, TypeError, UnicodeError):
         return invalid
 
 
-def _agrees_with_component(package: PackageURL, component: RegistryEntryComponent) -> bool:
+def _agrees_with_component(package: PackageURL, component: _Declaration) -> bool:
     """Whether a package URL names what the component declares.
 
     Only PyPI, npm and OCI identities have such a rule; any other type is not
     projected, because nothing ties it to the component. A qualifier these rules
     do not know could change what the identifier names, so it is not accepted.
     """
-    if component.registry_type in {"pypi", "npm"} and package.type != component.registry_type:
+    if package.type in {"pypi", "npm"} and component.registry_type != package.type:
         return False
     qualifiers = package.qualifiers if isinstance(package.qualifiers, dict) else None
     if qualifiers is None:
@@ -159,9 +187,7 @@ def _agrees_with_component(package: PackageURL, component: RegistryEntryComponen
     return True
 
 
-def _oci_agrees(
-    package: PackageURL, qualifiers: dict[str, str], component: RegistryEntryComponent
-) -> bool:
+def _oci_agrees(package: PackageURL, qualifiers: dict[str, str], component: _Declaration) -> bool:
     """An OCI identity names the digest the component's image reference pins."""
     from nexus_symbiote.scanners.registry import parse_image_reference
 

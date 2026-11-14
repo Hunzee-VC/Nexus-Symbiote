@@ -42,6 +42,11 @@ def print_lines(lines: Iterable[ReportLine], *, err: bool = False) -> None:
         click.echo(_style(text, style), err=err, color=color)
 
 
+def severity_rank(item: tuple[str, object]) -> tuple[int, str]:
+    name = item[0]
+    return (SEVERITY_ORDER.index(name) if name in SEVERITY_ORDER else len(SEVERITY_ORDER), name)
+
+
 def _at_or_above(severity: object, cutoff: object) -> bool:
     if severity not in SEVERITY_ORDER or cutoff not in SEVERITY_ORDER:
         return False
@@ -146,6 +151,17 @@ def gate_reason_lines(
     return lines
 
 
+def _producer_lines(document: Mapping[str, Any]) -> list[ReportLine]:
+    if document.get("discovery_producer") != "not-verified":
+        return []
+    outcome = (
+        "unsigned"
+        if document.get("assessment_basis") == "unsigned-discovery-evidence"
+        else "unsigned evidence accepted"
+    )
+    return [(f"  Discovery producer: not verified ({outcome})", None)]
+
+
 def risk_report_lines(
     document: Mapping[str, Any], *, failures: Sequence[str] = ()
 ) -> list[ReportLine]:
@@ -155,8 +171,13 @@ def risk_report_lines(
     """
     lines: list[ReportLine] = []
     passed = document.get("passed") is True
-    if document.get("assessment_basis") == "project-reconciliation-failed":
-        lines.append(("Risk unknown. Project reconciliation failed.", "yellow"))
+    if document.get("overall_score") is None:
+        basis = document.get("assessment_basis")
+        if basis == "project-reconciliation-failed":
+            lines.append(("Risk unknown. Project reconciliation failed.", "yellow"))
+        else:
+            lines.append((safe_line("Risk unknown (", basis, "): not scored."), "yellow"))
+        lines.extend(_producer_lines(document))
     else:
         level = neutralize(document.get("risk_level", "unknown"))
         color = {"critical": "red", "high": "red", "moderate": "yellow", "clean": "green"}
@@ -164,9 +185,7 @@ def risk_report_lines(
         lines.append((f"Risk Score: {score} ({level})", color.get(level, "yellow")))
         basis = document.get("assessment_basis", "unknown")
         lines.append((safe_line("  Assessment basis: ", basis), None))
-        if document.get("discovery_producer") == "not-verified":
-            outcome = "unsigned evidence accepted" if document.get("passed") else "unsigned"
-            lines.append((f"  Discovery producer: not verified ({outcome})", None))
+        lines.extend(_producer_lines(document))
         lines.append((safe_line("  Coverage: ", document.get("coverage_status", "unknown")), None))
         total = _shown(document.get("total_components"))
         risky = _shown(document.get("components_with_risks"))
@@ -174,7 +193,7 @@ def risk_report_lines(
         counts = document.get("severity_counts") or {}
         if counts:
             lines.append(("  Severity breakdown:", None))
-            for severity, count in sorted(counts.items()):
+            for severity, count in sorted(counts.items(), key=severity_rank):
                 lines.append((safe_line("    - ", severity, ": ", count), None))
         findings = [f for f in document.get("findings") or [] if isinstance(f, Mapping)]
         if findings:

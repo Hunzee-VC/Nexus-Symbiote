@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -224,3 +225,23 @@ def test_the_scaling_check_tells_linear_from_quadratic_work():
 
     assert scaling_ratio(linear) < 10
     assert scaling_ratio(quadratic) > 10
+
+
+def test_a_ratio_skewed_by_a_burst_of_load_is_measured_once_more(monkeypatch):
+    from tests import support
+
+    def clock(durations):
+        ticks, now = [], 0.0
+        for duration in durations:
+            ticks += [now, now + duration]
+            now += duration
+        return SimpleNamespace(process_time=iter(ticks).__next__)
+
+    # Two runs at four times the size, then two at the size: the first pair of sizes
+    # looks quadratic, the second is linear.
+    monkeypatch.setattr(support, "time", clock([1.6, 1.6, 0.1, 0.1, 0.4, 0.4, 0.1, 0.1]))
+    assert support.scaling_ratio(lambda scale: None) == pytest.approx(4)
+    monkeypatch.setattr(support, "time", clock([1.6, 1.6, 0.1, 0.1] * 2))
+    assert support.scaling_ratio(lambda scale: None) == pytest.approx(16)
+    monkeypatch.setattr(support, "time", clock([0.5, 0.5, 0.1, 0.1]))
+    assert support.scaling_ratio(lambda scale: None) == pytest.approx(5)

@@ -7,8 +7,8 @@ are listed in the report and not audited. Without ``--lock`` the installed envir
 inventory.
 
 A reviewed waiver (``--waivers``) can accept one advisory for one exact package version until
-an expiry date at most 90 days ahead; it is printed and recorded. An expired, malformed or
-unused waiver fails the check.
+an expiry date at most 90 days ahead; it is printed and recorded. An expired or malformed
+waiver fails the check, and so does one that matches no advisory of a version this run audits.
 
 Batch ordering and per-query pagination: https://google.github.io/osv.dev/post-v1-querybatch/
 """
@@ -98,7 +98,8 @@ def load_waivers(path: Path, today: date) -> list[dict[str, str]]:
             "expires",
         }:
             raise ValueError(
-                "each advisory waiver needs exactly id, package, version, reason and expires"
+                "each advisory waiver needs exactly advisory_id, package, version, reason"
+                " and expires"
             )
         if any(not isinstance(value, str) for value in waiver.values()):
             raise ValueError("advisory waiver fields must be strings")
@@ -106,7 +107,9 @@ def load_waivers(path: Path, today: date) -> list[dict[str, str]]:
         if expires < today:
             raise ValueError(f"advisory waiver for {waiver['advisory_id']} has expired")
         if expires > today + timedelta(days=MAX_WAIVER_DAYS):
-            raise ValueError(f"advisory waiver for {waiver['advisory_id']} lasts over 90 days")
+            raise ValueError(
+                f"advisory waiver for {waiver['advisory_id']} lasts over {MAX_WAIVER_DAYS} days"
+            )
         if len(waiver["reason"].strip()) < 20:
             raise ValueError(f"advisory waiver for {waiver['advisory_id']} gives no reason")
         accepted.append(waiver)
@@ -247,16 +250,16 @@ def main(argv: list[str] | None = None) -> int:
         # The waiver file is reviewed repository configuration; its problems name themselves.
         message = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
         waivers, waiver_error = [], f"advisory waivers rejected: {message}"
+    locked: list[dict[str, str]] | None = None
     try:
         if args.lock:
-            packages = lock_inventory(args.lock)
+            packages = locked = lock_inventory(args.lock)
             report = audit(packages)
             report["scope"] = (
                 "every exact PyPI version pinned by the named locks, whatever its marker;"
                 " OSV knowledge is incomplete"
             )
             report["locks"] = [path.name for path in args.lock]
-            report["unlocked_installed"] = unlocked_installed(packages)
         else:
             report = audit(installed_packages())
         apply_waivers(report, waivers)
@@ -266,6 +269,13 @@ def main(argv: list[str] | None = None) -> int:
             "passed": False,
             "errors": ["dependency identities unavailable"],
         }
+    if locked is not None and "advisories" in report:
+        # Listing the runner's own tools is informational: its failure keeps the audit.
+        try:
+            report["unlocked_installed"] = unlocked_installed(locked)
+        except (OSError, ValueError, TypeError):
+            report["errors"].append("installed distributions outside the locks unavailable")
+            report["passed"] = False
     if waiver_error is not None:
         report["errors"].append(waiver_error)
         report["passed"] = False

@@ -49,7 +49,7 @@ change them. See [collection limits](collection-limits.md).
 | Command | Mode | Purpose |
 |---|---|---|
 | [`scan`](#scan) | offline | Inventory a project and write an AgentBOM (native JSON, CycloneDX, SPDX or SARIF) |
-| [`import-shadowscan`](#import-shadowscan) | offline | Convert a Nexus ShadowScan report into an AgentBOM of imported claims |
+| [`import-shadowscan`](#import-shadowscan) | offline | Convert a Nexus-ShadowScan report into an AgentBOM of imported claims |
 | [`validate`](#validate) | offline | Check an AgentBOM's completeness and integrity, optionally against the project |
 | [`risk`](#risk) | offline | Score findings and apply the risk gate |
 | [`diff`](#diff) | offline | Compare two AgentBOMs and report security-relevant drift |
@@ -148,7 +148,7 @@ What exit status 1 means for each gate:
 | `verify-live` | A stdio server could not be observed completely (a run with no stdio server observes nothing), or a server's served tools, declarations or identity differ from the inventory; with `--record`, such drift fails unless `--accept-drift` is given. |
 | `discover-mcp` | The observation is incomplete; with `--record`, nothing is written. |
 | `advisories` | An advisory was found (unless `--no-fail-on-advisory`), or not every package in scope was looked up (`coverage` is `partial` or `none`); with `--dry-run`, only when the report lists an error. |
-| `trace-diff` | With the default `--fail-on undeclared`: the traces report a tool, model, agent or MCP endpoint that the inventory does not declare, or one whose identifier could not be read, or a span whose operation name, MCP method or MCP transport could not be read, or a span or resource has more than 128 attributes, or no span carries a GenAI or MCP attribute of its own. An inventory or trace file that cannot be read always exits 1. |
+| `trace-diff` | With the default `--fail-on undeclared`: the traces report a tool, model, agent or MCP endpoint that the inventory does not declare, or one whose identifier could not be read, or a span whose operation name, MCP method or MCP transport could not be read, or a span or resource has more than 128 attributes, or no span carries a GenAI or MCP attribute of its own. An inventory or trace file that cannot be read always exits 1; a missing file or a directory is a usage error (exit 2). |
 | `export-inventory` | The inventory holds no repository agent or more than one, its agent's identity is not declared and `--include-unnamed` is absent, or its name or owner cannot be written so that ShadowScan reads it back exactly; nothing is written. |
 
 `--report-only` on `scan` and `import-shadowscan` reports collection failures and
@@ -169,7 +169,7 @@ the same run counts as verification; the outcome recorded in the BOM is not trus
 | `NEXUS_SYMBIOTE_MODE` | `offline` or `live`; selects the mode when no mode flag is given. Any other value is a usage error. |
 | `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` | An operator secret of at least 32 characters. `scan`, `validate --project` and `risk --project` then bind MCP, A2A, RAG and IDE settings values with an HMAC under it; the key never enters the inventory. A shorter key is a usage error before any collector runs. See [verification source binding](verification-source-binding.md). |
 | `NEXUS_SYMBIOTE_LIMITS` | Raised collection limits for this invocation, as `NAME=VALUE` pairs separated by commas; the CLI validates the names and values. It is read from the environment of the operator, never from a scanned checkout. The GitHub Action sets it only from its `limits` input. |
-| `NO_COLOR` | Any value turns colors off. |
+| `NO_COLOR` | Any nonempty value turns colors off. |
 | `XDG_CACHE_HOME`, `HOME` | Where sigstore-python caches the trusted root that offline Sigstore verification uses; see [known limitations](known-limitations.md#signatures). |
 | `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` | An explicit Sigstore `trusted_root.json` file, or a directory holding one, for offline Sigstore verification. `--trust-root` overrides it. Without a pinned digest the file and its directory must be owned by the user and not writable by group or others. |
 | `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256` | The SHA-256 the explicit trust root's bytes must match. `--trust-root-sha256` overrides it; set without a trust root, it is a usage error. |
@@ -238,8 +238,8 @@ catch a misplaced policy; they do not authenticate it.
 
 | Command | Document |
 |---|---|
-| `validate --json-output` | `passed`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `project-not-reconciled` when the project policy skips the completeness check); `policy_source` and `policy_weakened`; `completeness` and `integrity`, each with a `status` (`pass`, `fail`, `unknown` for integrity, or `skipped` with `skipped_by`) and the validator's report (its own `assessment_basis`, issues, `issues_omitted`; for completeness `supplier_claims` and `supplier_claims_omitted`; for integrity `bytes_charged`); `discovery_producer` (`null` without discovery evidence or a producer check, otherwise a `status` of `verified`, `failed`, `not-applicable` or `not-verified`, with `problems`); `minimum_assurance_level`, `assurance_errors` and `graph_issues`. |
-| `risk --json-output` | `passed`; `overall_score` (`null` when `--project` reconciliation failed); `risk_level`; `coverage_status` and `coverage_gaps`; `gate_reasons`; `gate` (the effective thresholds, cutoff, ignored categories and suppression count, each with a `*_source` of `cli`, `project policy` or `built-in`); `findings`, each with its `fingerprint`; `severity_counts`; `category_scores`; `ignored_findings`; `suppressed_findings`, `suppressions_expired`, `suppressions_unused` and `suppressions_stale`; `total_components` and `components_with_risks`; `warning_threshold_exceeded`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `unsigned-discovery-evidence` when unverified discovery evidence fails the run); `supplier_claims` and `supplier_claims_omitted`; `discovery_producer` (`verified`, `failed`, `not-verified` or `not-applicable`); `score_threshold` (`null` with `--no-score-threshold`); `fail_on_severity`; `policy_source` and `policy_weakened`. A failed reconciliation has the same keys, with empty findings. |
+| `validate --json-output` | `passed`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `project-not-reconciled` when the project policy skips the completeness check); `policy_source` and `policy_weakened`; `completeness` and `integrity`, each with a `status` (`pass`, `fail`, `unknown` for integrity, or `skipped` with `skipped_by`) and the validator's report (its own `assessment_basis`, issues, `issues_omitted`; for completeness `supplier_claims` and `supplier_claims_omitted`; for integrity `bytes_charged`); `discovery_producer` (`null` without discovery evidence or a producer check, otherwise a `status` of `verified`, `failed`, `not-applicable` or `not-verified`, with `problems`); `unsigned_discovery` (`null`, or why unverified discovery evidence failed the run); `minimum_assurance_level`, `assurance_errors` and `graph_issues`. |
+| `risk --json-output` | `passed`; `overall_score` (`null` when the run is not scored: `--project` reconciliation or the discovery producer check failed, or unverified discovery evidence was gated); `risk_level`; `coverage_status` and `coverage_gaps`; `gate_reasons`; `gate` (the effective thresholds, cutoff, ignored categories and suppression count, each with a `*_source` of `cli`, `project policy` or `built-in`); `findings`, each with its `fingerprint`; `severity_counts`; `category_scores`; `ignored_findings`; `suppressed_findings`, `suppressions_expired`, `suppressions_unused` and `suppressions_stale`; `total_components` and `components_with_risks`; `warning_threshold_exceeded`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `unsigned-discovery-evidence` when unverified discovery evidence fails the run); `supplier_claims` and `supplier_claims_omitted`; `discovery_producer` (`verified`, `failed`, `not-verified` or `not-applicable`); `score_threshold` (`null` with `--no-score-threshold`); `fail_on_severity`; `policy_source` and `policy_weakened`. A failed reconciliation has the same keys, with empty findings. |
 | `diff --json-output` | `has_changes`, `total_changes`, `components_added`, `components_removed`, `components_modified`, `dependencies_added`, `dependencies_removed` (each with its `severity` and `conditions`), `security_alerts`, `metadata_changes` and `notes`. |
 | `summary --json-output` | `total_components`, `component_types`, `total_dependencies`, `total_risks`, `risk_breakdown` and the inventory's `completeness` claim. |
 | `minimum-elements --format json` | `format` (`nexus-symbiote/minimum-elements/v1`), `edition`, `guidance`, `statement`, `evaluated` (the standard, the projection and the tool version), `subjects`, `coverage` (`present`, `assessable` and `percent`), `counts` per status, `gate` (`null` without `--fail-under`), `clusters` and `elements`; see [G7 AI SBOM minimum elements](minimum-elements.md#running-the-command). |
@@ -298,7 +298,7 @@ nexus-symbiote advisories [OPTIONS] AIBOM_PATH
 |---|---|
 | `-o`, `--output` `PATH` | Write the advisory report to this file instead of standard output. |
 | `--fail-on-advisory` / `--no-fail-on-advisory` | Exit with status 1 when an advisory is found (default: fail). |
-| `--exclude` `NAME` | Never send this package name to OSV; a trailing `*` matches a prefix (repeatable). |
+| `--exclude` `NAME` | Never send this package name to OSV; a trailing `*` matches a prefix, and a `*` anywhere else is refused. Names are compared as PyPI normalizes them, and in any case (repeatable). |
 | `--exclude-private-origins` | Send only packages whose lockfile resolution records the public PyPI or npm registry. A Python package that no `uv.lock` or `poetry.lock` resolves has no recorded origin, so it is withheld; withhold private names with `--exclude` instead to keep public ones checked. |
 | `--dry-run` | List the package identities that would be sent, without contacting OSV (works offline). |
 
@@ -384,7 +384,7 @@ nexus-symbiote crosswalk [OPTIONS] AIBOM_PATH
 | Option | Description |
 |---|---|
 | `--framework` `NAME` | Report only this framework edition: `owasp-llm-2025`, `owasp-llm-2026`, `owasp-asi-2026`, `mitre-atlas-2026.10`, `nist-ai-rmf-1.0`, `eu-ai-act-2024`, `iso-iec-42001-2023` or `cwe`. Repeatable; default: every edition. |
-| `--format` `json` or `markdown` | Report format (default: `json`). |
+| `--format` `json\|markdown` | Report format (default: `json`). |
 | `-o`, `--output` `PATH` | Write the report to this file instead of standard output. A path that names the inventory is a usage error. |
 
 The findings are those that `risk` scores under the built-in policy; no project policy
@@ -553,7 +553,7 @@ nexus-symbiote init [OPTIONS]
 | Option | Description |
 |---|---|
 | `--force` | Overwrite the existing project policy file (`.nexus-symbiote.yaml`, or `.nexus-symbiote.yml` when that is the only one); refused when both exist |
-| `--path` `PATH` | Directory to create .nexus-symbiote.yaml in |
+| `--path` `PATH` | Directory to create the project policy file in |
 
 ### `minimum-elements`
 
@@ -606,6 +606,7 @@ with, the first 20 of the inventory's collection failures (and how many more
 findings the project policy suppressed, and each suppression that no longer matches
 its changed finding. When unsigned ShadowScan evidence was accepted,
 the report says `Discovery producer: not verified (unsigned evidence accepted)`.
+
 ### `runtime keygen`
 
 Create an Ed25519 key pair without overwriting existing files.
@@ -635,7 +636,7 @@ nexus-symbiote runtime sign [OPTIONS] CONTRACT_PATH
 | Option | Description |
 |---|---|
 | `--kind` `snapshot\|approval\|trust\|model` | Contract purpose; a signature is valid only for this purpose. (required) |
-| `--key` `PATH` | Ed25519 private key PEM with mode 0600; repeat for multiple signers. (required, repeatable) |
+| `--key` `PATH` | Ed25519 private key PEM that only its owner can access; repeat for multiple signers. (required, repeatable) |
 | `--out` `PATH` | Signed envelope file to create; must not exist. (required) |
 | `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file, which only its owner may read. |
 
@@ -841,6 +842,7 @@ or signature could be verified. When the inventory carries ShadowScan discovery
 evidence that no producer check covered, the report says
 `Discovery producer: not verified (unsigned evidence accepted)`. The report ends with
 `Validation: PASSED` or `Validation: FAILED`.
+
 ### `verify-artifact`
 
 Verify a local artifact's digest and optionally its Sigstore bundle.
@@ -856,8 +858,8 @@ nexus-symbiote verify-artifact [OPTIONS] ARTIFACT_PATH
 | `--bundle` `FILE` | Optional Sigstore bundle |
 | `--signer-identity` `TEXT` | Expected Sigstore signing identity |
 | `--issuer` `TEXT` | Expected Sigstore OIDC issuer |
-| `--trust-root` `FILE` | Explicit Sigstore trusted_root.json file (or directory holding one); overrides `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` and the user cache |
-| `--trust-root-sha256` `TEXT` | Pinned SHA-256 (sha256:\<hex\>) the explicit trust root must match |
+| `--trust-root` `PATH` | Explicit Sigstore trusted_root.json file (or directory holding one); overrides `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` and the user cache; requires `--bundle` |
+| `--trust-root-sha256` `TEXT` | Pinned SHA-256 (sha256:\<hex\>) the explicit trust root must match; requires `--bundle` |
 
 A malformed `--sha256`, or a `--bundle`, `--signer-identity` and `--issuer` set that
 is incomplete, is a usage error (exit 2).
@@ -909,8 +911,8 @@ nexus-symbiote verify-discovery [OPTIONS] AIBOM_PATH REPORT_PATH
 | `--bundle` `FILE` | Verify the report producer's Sigstore bundle and the direct native projection. |
 | `--signer-identity` `TEXT` | Expected report signer from operator policy. |
 | `--issuer` `TEXT` | Expected OIDC issuer from operator policy. |
-| `--trust-root` `FILE` | Explicit Sigstore trusted_root.json file (or directory holding one); overrides `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` and the user cache |
-| `--trust-root-sha256` `TEXT` | Pinned SHA-256 (sha256:\<hex\>) the explicit trust root must match |
+| `--trust-root` `PATH` | Explicit Sigstore trusted_root.json file (or directory holding one); overrides `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` and the user cache; requires `--bundle` |
+| `--trust-root-sha256` `TEXT` | Pinned SHA-256 (sha256:\<hex\>) the explicit trust root must match; requires `--bundle` |
 
 ### `verify-live`
 
@@ -928,13 +930,17 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 | `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools, declarations or the server identity drifted, unless `--accept-drift`. |
 | `--accept-drift` | With `--record`, exit 0 although changed or new tools, declarations or server identity were recorded. |
 
-Servers whose transport is `sse`, `streamable-http` or `http` are reported as not
-verifiable by `verify-live` (reason `remote-transport`) and do not make the run
-incomplete; observe them with `discover-mcp --record` and compare the inventories
-with `diff`. Any transport label other than these and `stdio`, such as the
-`websocket` that the `mcp` collector records for a `ws://` or `wss://` endpoint, fails
-with reason `unsupported-transport`. The [launch policy](#launch-policy) section gives the
-policy's format and where it may be kept.
+Servers whose transport is `sse`, `streamable-http` or `http` and that record no
+launch command are reported as not verifiable by `verify-live` (reason
+`remote-transport`) and do not make the run incomplete; observe them with
+`discover-mcp --record` and compare the inventories with `diff`. Such a server that
+records a launch command, which a client may start, fails with reason
+`ambiguous-transport` unless the launch policy names it; one that the launch policy
+names is observed through its pinned launcher. Any transport label other than these
+and `stdio`, such as the `websocket` that the `mcp` collector records for a `ws://` or
+`wss://` endpoint, fails with reason `unsupported-transport`. The
+[launch policy](#launch-policy) section gives the policy's format and where it may be
+kept.
 
 ### `vex`
 

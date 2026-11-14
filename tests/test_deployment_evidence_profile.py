@@ -55,22 +55,24 @@ def test_deployment_authority_and_evidence_round_trip():
 def test_unknown_is_not_an_empty_permission_set():
     claim = AuthorityClaim(kind="effective", state="unknown", unknown_reason="access denied")
     assert claim.principal is None and claim.resource is None
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="unknown authority requires a reason"):
         AuthorityClaim(kind="effective", state="unknown")
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="unknown or not-applicable authority must not carry"):
         AuthorityClaim(kind="effective", state="unknown", unknown_reason="denied", action="read")
     na = AuthorityClaim(kind="observed", state="not-applicable")
     assert na.action is None
 
 
 def test_known_claim_requires_scoped_authority_and_evidence():
-    with pytest.raises(ValidationError):
+    with pytest.raises(
+        ValidationError, match="known authority requires principal, action and resource"
+    ):
         AuthorityClaim(kind="declared", state="declared", principal="alice", action="read")
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="known authority requires evidence provenance"):
         AuthorityClaim(
             kind="declared", state="declared", principal="alice", action="read", resource="*"
         )
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="observed authority requires an observation time"):
         AuthorityClaim(
             kind="observed",
             state="observed",
@@ -82,9 +84,9 @@ def test_known_claim_requires_scoped_authority_and_evidence():
 
 
 def test_verified_is_only_a_well_formed_producer_claim():
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="reported verification requires subject digest"):
         evidence(verification_status="verified")
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="verified authority requires a reported verified"):
         AuthorityClaim(
             kind="effective",
             state="verified",
@@ -124,6 +126,13 @@ def test_timestamps_must_have_timezone():
             observed_at=datetime(2026, 1, 1),
             evidence=[evidence()],
         )
+
+
+@pytest.mark.parametrize("value", ["1700000000", "99999999999", "1700000000.5", "-5"])
+def test_a_string_of_digits_is_not_read_as_unix_time(value):
+    with pytest.raises(ValidationError):
+        evidence(collected_at=value)
+    assert evidence(collected_at="2026-01-01T00:00:00Z").collected_at == NOW
 
 
 def test_native_schema_checks_deployment_profile_shape():

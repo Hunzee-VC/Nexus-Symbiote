@@ -296,7 +296,10 @@ ELEMENTS: tuple[Element, ...] = (
         WRITTEN,
         "metadata.component.name",
         "name of the root ai_AIPackage",
-        "The system subject has a name other than the placeholder repository.",
+        (
+            "The system subject has a name other than the placeholder repository or a "
+            "checkout directory's name."
+        ),
         "Declare name in agent.yaml.",
     ),
     _element(
@@ -866,7 +869,8 @@ REASONS = {
         "such as this build's version or a serial number derived from the content."
     ),
     "inferred-placeholder": (
-        "The subject's name is the placeholder repository, not a declared name."
+        "The subject's name is inferred, not declared: the placeholder repository, or the "
+        "checkout directory's name that release 0.1.0 gave an agent without agent.yaml."
     ),
     "no-dataset-component": "The inventory records no dataset or retrieval source.",
     "no-model-component": "The inventory records no model component.",
@@ -905,8 +909,11 @@ _INFRASTRUCTURE_TYPES = frozenset(
 # Package and image registries; a model hub or tool registry entry is neither.
 _SOFTWARE_REGISTRIES = frozenset({"npm", "pypi", "docker-hub", "docker", "oci"})
 _POLICY_REFERENCES = frozenset({"rfc-9116", "security-contact"})
-# Letters and symbols that render as blank space.
-_BLANK = frozenset("\u115f\u1160\u3164\uffa0\u2800")
+# Letters and symbols that render as blank space; a value is read without them.
+_BLANK = str.maketrans(dict.fromkeys("\u115f\u1160\u3164\uffa0\u2800"))
+# The identity source a scan records for an agent without a manifest; release 0.1.0
+# then named the agent after the checkout directory, not the placeholder repository.
+_INFERRED_IDENTITY = "repository-path"
 
 
 def _obj(value: object) -> Mapping[str, Any]:
@@ -918,8 +925,8 @@ def _seq(value: object) -> list[Any]:
 
 
 def _visible(character: str) -> bool:
-    """A letter, digit, punctuation mark or symbol that does not render as blank space."""
-    return unicodedata.category(character)[0] in "LNPS" and character not in _BLANK
+    """A letter, digit, punctuation mark or symbol."""
+    return unicodedata.category(character)[0] in "LNPS"
 
 
 def _text_state(value: object) -> str:
@@ -927,11 +934,12 @@ def _text_state(value: object) -> str:
 
     Text without a visible character (no letter, digit, punctuation mark or symbol
     other than a blank filler), NOASSERTION and NoAssertionLicense are not present;
-    the literal unknown is an explicit unknown.
+    the literal unknown is an explicit unknown. Blank fillers are ignored like white
+    space, so they cannot turn a placeholder into a value.
     """
     if not isinstance(value, str):
         return MISSING
-    visible = UNSAFE_TEXT.sub("", value).strip()
+    visible = UNSAFE_TEXT.sub("", value).translate(_BLANK).strip()
     if not any(map(_visible, visible)) or visible.casefold() in _PLACEHOLDERS:
         return MISSING
     return EXPLICIT_UNKNOWN if visible.casefold() == "unknown" else PRESENT
@@ -1240,11 +1248,11 @@ def _system_name(context: _Context, subject: _Located) -> _Outcome:
         _texts(subject.exported, subject.pointer, "name"), _basis(subject.native, "name")
     )
     native = subject.native
-    if (
-        outcome.state == PRESENT
-        and native.name == INFERRED_AGENT_NAME
-        and "name" not in native.claims
-    ):
+    inferred = (
+        native.name == INFERRED_AGENT_NAME
+        or native.properties.get("identity_source") == _INFERRED_IDENTITY
+    )
+    if outcome.state == PRESENT and inferred and "name" not in native.claims:
         return _Outcome(MISSING, reasons=("inferred-placeholder",))
     return outcome
 

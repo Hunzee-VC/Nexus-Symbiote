@@ -118,6 +118,12 @@ def test_every_limit_is_documented_with_its_default_and_maximum():
         )
 
 
+def test_a_single_byte_is_not_plural():
+    assert limits.format_value("total-bytes", 1) == "1 byte"
+    assert limits.format_value("total-bytes", 2) == "2 bytes"
+    assert limits.Bound(1, "total-bytes").exceeded().startswith("total-bytes limit of 1 byte ")
+
+
 def test_reaching_a_limit_fails_the_scan_and_names_how_to_raise_it(tmp_path):
     project = _project(tmp_path / "project", files=12)
     runner = CliRunner()

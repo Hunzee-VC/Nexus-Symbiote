@@ -46,6 +46,29 @@ def test_the_repository_workflows_and_action_pass(monkeypatch, capsys):
     assert checker.main() == 0, capsys.readouterr().out
 
 
+def test_a_tree_without_workflows_fails_instead_of_passing(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    assert checker.main() == 1
+    assert "no workflow found" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "script",
+    [
+        'PY=python3\nPY+=" -c pass"\n$PY scripts/check_locks.py',
+        "PY=python3\nPY[0]=echo\n$PY scripts/check_locks.py",
+    ],
+)
+def test_appending_to_or_indexing_a_command_variable_forgets_its_value(tmp_path, script):
+    errors = workflow_errors(tmp_path, "ci.yml", run_locks(script))
+    assert any(NOT_A_GATE in error for error in errors), errors
+
+
+def test_a_here_document_before_the_command_name_is_read(tmp_path):
+    script = "<<EOF cat\nnotes\nEOF\npython scripts/check_locks.py"
+    assert workflow_errors(tmp_path, "ci.yml", run_locks(script)) == []
+
+
 def test_a_reviewed_workflow_passes(repository, capsys):
     assert run_checker(repository, SAFE, capsys) == (0, "")
 
@@ -83,6 +106,13 @@ def test_one_commit_cannot_carry_two_version_labels(repository, capsys):
     assert status == 1 and "is labelled" in output
 
 
+def test_a_pin_the_version_check_cannot_read_is_rejected(repository, capsys):
+    pin = CHECKOUT.split(" #", 1)[0]
+    workflow = SAFE + f"      - {{uses: {pin}, with: {{persist-credentials: false}}}}\n"
+    status, output = run_checker(repository, workflow, capsys)
+    assert status == 1 and "write each pinned uses on a line of its own" in output
+
+
 def test_a_local_action_is_checked_like_any_other(repository, capsys):
     action = repository / ".github/actions/setup"
     action.mkdir(parents=True)
@@ -118,6 +148,7 @@ def ci_workflow():
         ("action", "sys.exit(bool(failures))"),
         ("action-annotations", "symbiote-injected-annotation"),
         ("action-annotations", "set-output"),
+        ("verified", "sys.exit(bool(failed))"),
     ],
 )
 def test_a_gate_job_hollowed_out_under_its_name_is_rejected(tmp_path, job, command):
@@ -128,6 +159,29 @@ def test_a_gate_job_hollowed_out_under_its_name_is_rejected(tmp_path, job, comma
     path = tmp_path / "ci.yml"
     path.write_text(yaml.safe_dump(workflow))
     assert any(f"{job} no longer runs {command}" in error for error in checker.check(path))
+
+
+@pytest.mark.parametrize(
+    "job,command",
+    [("build", "--strict-skips"), ("verify", "gh attestation verify")],
+)
+def test_a_release_gate_hollowed_out_under_its_name_is_rejected(tmp_path, job, command):
+    workflow = yaml.safe_load((ROOT / ".github/workflows/release.yml").read_text())
+    for step in workflow["jobs"][job]["steps"]:
+        if command in step.get("run", ""):
+            step["run"] = step["run"].replace(command, "true")
+    path = tmp_path / "release.yml"
+    path.write_text(yaml.safe_dump(workflow))
+    assert any(f"{job} no longer runs {command}" in error for error in checker.check(path))
+
+
+def test_a_workflow_named_like_an_action_is_still_checked_as_a_workflow(repository, capsys):
+    (repository / ".github/workflows/action.yml").write_text(
+        SAFE.replace("on: pull_request", "on: pull_request_target")
+    )
+    status = checker.main()
+    assert status == 1
+    assert "triggers must be among" in capsys.readouterr().out
 
 
 def workflow_errors(tmp_path, name, change):
@@ -169,6 +223,8 @@ def condition(job, command, value):
         # The preflight's reviewed condition does not carry over to another gate.
         ("release.yml", "build", "python -m pytest", "inputs.publish != 'none'"),
         ("release.yml", "compatibility", "scripts/check_installed_wheel.py", False),
+        ("release.yml", "verify", "gh attestation verify", False),
+        ("ci.yml", "verified", "sys.exit(bool(failed))", False),
     ],
 )
 def test_a_gate_step_that_a_condition_can_skip_is_rejected(tmp_path, name, job, command, value):
@@ -446,6 +502,41 @@ def test_the_action_jobs_outcome_assertions_must_run(tmp_path):
     assert any("action must not continue on error" in error for error in errors), errors
 
 
+def test_a_later_steps_name_does_not_read_an_outcome(tmp_path):
+    workflow = ci_workflow()
+    steps = workflow["jobs"]["codeql"]["steps"]
+    steps[-2].update({"id": "probe", "continue-on-error": True})
+    steps.append({"name": "Report (steps.probe.outcome)", "run": "true"})
+    path = tmp_path / "ci.yml"
+    path.write_text(yaml.safe_dump(workflow))
+    assert any("codeql must not continue on error" in error for error in checker.check(path))
+
+
+@pytest.mark.parametrize(
+    "name,job,command",
+    [
+        ("ci.yml", "test", "python -m pytest"),
+        ("ci.yml", "quality", "ruff check src tests scripts"),
+        ("release.yml", "verify", "gh attestation verify"),
+    ],
+)
+def test_a_gate_in_a_step_that_continues_on_error_does_not_count(tmp_path, name, job, command):
+    # A later step reads the outcome, so the step may continue on error, but its gate's
+    # failure would no longer fail the job.
+    def change(jobs):
+        steps = jobs[job]["steps"]
+        step = step_running(jobs[job], command)
+        step.update({"id": "gate", "continue-on-error": True})
+        steps.insert(
+            steps.index(step) + 1,
+            {"env": {"OUTCOME": "${{ steps.gate.outcome }}"}, "run": 'echo "$OUTCOME"'},
+        )
+
+    errors = workflow_errors(tmp_path, name, change)
+    assert f"{job} runs {command} only in a step that continues on error" in "\n".join(errors)
+    assert not any("must not continue on error" in error for error in errors), errors
+
+
 def run_locks(script, **step_changes):
     """Replace the quality job's lock check with `script` and the step settings given."""
 
@@ -526,6 +617,27 @@ LOCKS = "python scripts/check_locks.py"
         "python -uc scripts/check_locks.py",
         "python --version scripts/check_locks.py",
         f"bash -n -c '{LOCKS}'",
+        f"{LOCKS} || exit 256",
+        f"exit 256\n{LOCKS}",
+        f"exit 0256\n{LOCKS}",
+        "python -V scripts/check_locks.py",
+        "python -h scripts/check_locks.py",
+        "python -? scripts/check_locks.py",
+        "python -i scripts/check_locks.py",
+        f"timeout --help {LOCKS}",
+        f"timeout --version 5m {LOCKS}",
+        f"bash --version -e -c '{LOCKS}'",
+        f"bash --help -ec '{LOCKS}'",
+        f"bash -D -e -c '{LOCKS}'",
+        f"shopt -s -o noexec\n{LOCKS}",
+        f"shopt -so noexec\n{LOCKS}",
+        f"set -t\n{LOCKS}",
+        f"set -o onecmd\n{LOCKS}",
+        f"OPTS=+e\nset $OPTS\n{LOCKS}\necho done",
+        f"x=e\nset +$x\n{LOCKS}\necho done",
+        f"n=errexit\nset +o $n\n{LOCKS}\necho done",
+        f"{{set,+e}}\n{LOCKS}\necho done",
+        f"{{exit,0}}\n{LOCKS}",
     ],
 )
 def test_a_gate_command_that_does_not_stand_alone_is_rejected(tmp_path, script):
@@ -543,6 +655,9 @@ def test_a_gate_command_that_does_not_stand_alone_is_rejected(tmp_path, script):
         ('PY=python3\n"$PY" -I scripts/check_locks.py --strict', {}),
         (f"bash --noprofile --norc -e -o pipefail -c '\n  {LOCKS} | tee log\n'", {}),
         (f"timeout 5m {LOCKS}", {}),
+        (f"timeout --signal=INT --kill-after=30s 12m {LOCKS}", {}),
+        (f"timeout -k 5 -s TERM --preserve-status 5m {LOCKS}", {}),
+        (f"{LOCKS} || exit 257", {}),
         (f"if true; then echo ok; fi\n{LOCKS}", {}),
         (f"{LOCKS}", {"shell": "bash --noprofile --norc -eo pipefail {0}"}),
         (f"echo $'it\\'s'\n{LOCKS}", {}),

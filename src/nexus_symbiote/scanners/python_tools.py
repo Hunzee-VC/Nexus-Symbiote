@@ -59,6 +59,8 @@ _AGENT_FACTORIES = {
     ("pydantic_ai", "Agent"): "pydantic-ai",
     ("pydantic_ai.agent", "Agent"): "pydantic-ai",
 }
+# Agent constructor keywords that carry tools, or could.
+_AGENT_REGISTERING_KEYWORDS = frozenset({"tools", "toolsets", "builtin_tools", "mcp_servers"})
 
 
 def _bindings(nodes: list[ast.AST]) -> Counter[str]:
@@ -145,7 +147,9 @@ def _record_sdk_decorator(
     source_digest: str,
     seen_refs: set[str],
     result: ScanResult,
+    owner: str | None = None,
 ) -> None:
+    """Record one decorated tool; ``owner`` names the agent it is registered on."""
     lineno = getattr(deco, "lineno", 1)
     name: object = default_name
     if isinstance(deco, ast.Call):
@@ -174,7 +178,8 @@ def _record_sdk_decorator(
             f"{path.as_posix()}:{lineno}: unresolved Python SDK tool name"
         )
         return
-    ref = f"tool:python:{quote(path.as_posix(), safe='')}/{name}"
+    scope = quote(path.as_posix(), safe="") + (f"/{owner}" if owner else "")
+    ref = f"tool:python:{scope}/{name}"
     if ref in seen_refs:
         result.scan_failures.append(
             f"{path.as_posix()}:{lineno}: duplicate Python SDK tool declaration"
@@ -333,6 +338,10 @@ def _collect_agent_decorators(
                 or bindings[factory] != 1
                 or target.id in changed_receivers
                 or bindings[target.id] != 1
+                or any(isinstance(arg, ast.Starred) for arg in call.args)
+                or any(
+                    kw.arg is None or kw.arg in _AGENT_REGISTERING_KEYWORDS for kw in call.keywords
+                )
             ):
                 continue
             handled.add(call)
@@ -350,7 +359,14 @@ def _collect_agent_decorators(
                         continue
                     handled.add(deco)
                     _record_sdk_decorator(
-                        deco, stmt.name, framework, path, source_digest, seen_refs, result
+                        deco,
+                        stmt.name,
+                        framework,
+                        path,
+                        source_digest,
+                        seen_refs,
+                        result,
+                        deco.value.id,
                     )
                 elif (
                     isinstance(deco, ast.Call)
@@ -364,7 +380,14 @@ def _collect_agent_decorators(
                         continue
                     handled.add(deco.func)
                     _record_sdk_decorator(
-                        deco, stmt.name, framework, path, source_digest, seen_refs, result
+                        deco,
+                        stmt.name,
+                        framework,
+                        path,
+                        source_digest,
+                        seen_refs,
+                        result,
+                        deco.func.value.id,
                     )
     candidates: set[ast.AST] = set(calls)
     candidates.update(
@@ -375,13 +398,22 @@ def _collect_agent_decorators(
         and isinstance(node.value, ast.Name)
         and node.value.id in agents
     )
-    aliases = any(
-        isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr))
-        and isinstance(node.value, ast.Name)
-        and node.value.id in agents
+    # An agent used other than through an attribute or a `with` statement, such as
+    # aliased, passed to a function or held in a list, can be given tools elsewhere.
+    reached = _annotation_names(nodes)
+    for node in nodes:
+        if isinstance(node, ast.Attribute):
+            reached.add(node.value)
+        elif isinstance(node, ast.withitem):
+            reached.add(node.context_expr)
+    escaped = any(
+        isinstance(node, ast.Name)
+        and isinstance(node.ctx, ast.Load)
+        and node.id in agents
+        and node not in reached
         for node in nodes
     )
-    if unsupported_factory or aliases or (candidates - handled):
+    if unsupported_factory or escaped or (candidates - handled):
         result.surfaces_excluded.append(
             f"{path.as_posix()}: unsupported Python SDK tool binding or dynamic registration"
         )
@@ -545,17 +577,24 @@ def _helper(function: ast.FunctionDef | ast.AsyncFunctionDef) -> _Helper:
 
 
 def _benign_helper_arguments(
-    tree: ast.Module, nodes: list[ast.AST], servers: dict[str, MCPServerComponent]
+    tree: ast.Module,
+    nodes: list[ast.AST],
+    servers: dict[str, MCPServerComponent],
+    bindings: Counter[str],
 ) -> set[ast.AST]:
     """Servers passed to a helper of this file that registers nothing on them.
 
-    Each helper is read once, however many calls pass it a server, so the work stays
+    Only an undecorated function whose name the file binds once is read, since a
+    call can otherwise reach another definition or what a decorator returned. Each
+    helper is read once, however many calls pass it a server, so the work stays
     linear in the size of the file.
     """
     functions = {
         stmt.name: stmt
         for stmt in tree.body
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and not stmt.decorator_list
+        and bindings[stmt.name] == 1
     }
     helpers: dict[str, _Helper] = {}
     benign: set[ast.AST] = set()
@@ -608,12 +647,13 @@ def _has_unsupported_registration(
     handled: set[ast.AST],
     servers: dict[str, MCPServerComponent],
     factories: dict[str, ast.ImportFrom],
+    bindings: Counter[str],
 ) -> bool:
     """Whether a recognised server or factory escapes the supported forms."""
     if calls - handled:
         return True
     factory_calls = {call.func for call in calls}
-    safe = _benign_helper_arguments(tree, nodes, servers) | _annotation_names(nodes)
+    safe = _benign_helper_arguments(tree, nodes, servers, bindings) | _annotation_names(nodes)
     for node in nodes:
         if (
             isinstance(node, ast.Attribute)
@@ -771,7 +811,7 @@ def collect_python_tools(
             result.components.append(server)
         elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
             _record_decorated_tools(stmt, servers, handled, path, source_digest, result)
-    if _has_unsupported_registration(tree, nodes, calls, handled, servers, factories) or (
+    if _has_unsupported_registration(tree, nodes, calls, handled, servers, factories, bindings) or (
         _imported_receivers(tree)
     ):
         result.surfaces_excluded.append(

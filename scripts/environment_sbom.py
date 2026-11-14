@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from packageurl import PackageURL
 from packaging.requirements import InvalidRequirement, Requirement
 
 from nexus_symbiote.generators.validation import require_valid
@@ -59,10 +60,13 @@ def _component(record: dict[str, Any]) -> dict[str, Any]:
     name, version = metadata.get("name"), metadata.get("version")
     if not isinstance(name, str) or not isinstance(version, str) or not name or not version:
         raise ValueError("an installed distribution has no name or version")
-    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}", name) is None or len(version) > 200:
+    if (
+        re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,199}", name) is None
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.+!-]{0,199}", version) is None
+    ):
         raise ValueError("an installed distribution's name or version cannot be represented")
     canonical = normalize(name)
-    purl = f"pkg:pypi/{canonical}@{version}"
+    purl = PackageURL(type="pypi", name=canonical, version=version).to_string()
     component: dict[str, Any] = {
         "type": "library",
         "bom-ref": purl,
@@ -234,7 +238,8 @@ def build_sbom(
         "type": "application",
         "bom-ref": "environment",
         "name": "nexus-symbiote-runtime-environment",
-        "description": "Installed Python distributions of the locked release runtime",
+        "description": "Installed Python distributions of the "
+        + ("locked release runtime" if lock is not None else "inspected environment"),
     }
     if python:
         root["version"] = "python-" + python
@@ -279,12 +284,17 @@ def main() -> int:
         raw = stream.read(MAX_INPUT_BYTES + 1)
     if len(raw) > MAX_INPUT_BYTES:
         raise SystemExit("pip inspect output exceeds the size limit")
+    # The CLI's rule: unset means now, and any value that is not an epoch is refused.
     epoch = os.environ.get("SOURCE_DATE_EPOCH")
-    timestamp = (
-        datetime.fromtimestamp(int(epoch), tz=UTC)
-        if epoch and epoch.isdigit()
-        else datetime.now(UTC)
-    )
+    if epoch is None:
+        timestamp = datetime.now(UTC)
+    else:
+        try:
+            if re.fullmatch(r"[0-9]{1,12}", epoch) is None:
+                raise ValueError
+            timestamp = datetime.fromtimestamp(int(epoch), tz=UTC)
+        except (OverflowError, OSError, ValueError):
+            raise SystemExit("SOURCE_DATE_EPOCH must be a whole number of seconds") from None
     document = build_sbom(json.loads(raw), timestamp=timestamp, lock=lock)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")

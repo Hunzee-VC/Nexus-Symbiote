@@ -203,10 +203,9 @@ class TestRegistryScanner:
         (tmp_path / "package.json").write_text(json.dumps(pkg))
         scanner = RegistryScanner()
         result = scanner.scan(tmp_path)
-        for comp in result.components:
-            if "modelcontextprotocol" in comp.name:
-                pin_risks = [r for r in comp.risks if r.category == "version_pinning"]
-                assert len(pin_risks) >= 1
+        sdk = [c for c in result.components if "modelcontextprotocol" in c.name]
+        assert len(sdk) == 1
+        assert [r for r in sdk[0].risks if r.category == "version_pinning"]
 
     def test_scan_no_deps(self, tmp_path):
         scanner = RegistryScanner()
@@ -304,6 +303,8 @@ class TestMCPScannerAdvanced:
         result = scanner.scan(tmp_path)
         mcp_comps = [c for c in result.components if c.component_type == ComponentType.MCP_SERVER]
         assert len(mcp_comps) == 1
+        assert mcp_comps[0].version_pinned is False
+        assert any(r.category == "version_pinning" for r in mcp_comps[0].risks)
 
     def test_uvx_package_ref(self, tmp_path):
         config = {

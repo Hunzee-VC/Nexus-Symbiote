@@ -664,7 +664,7 @@ class _SSEDecoder:
             raise DiscoveryError("invalid SSE UTF-8") from exc
         if not self._started:
             self._started = True
-            line = line.removeprefix("﻿")
+            line = line.removeprefix("\ufeff")
         if not line:
             return self._dispatch()
         if line.startswith(":"):

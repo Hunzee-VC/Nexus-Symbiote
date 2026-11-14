@@ -55,14 +55,17 @@ A way around a limit that its entry does not describe is worth a
   as a coverage gap, so excluding a file that fails collection turns the failure
   into a gap; the default gates still fail.
 - **Default exclusions match by name.** Any path component named `.git`,
-  `node_modules`, `__pycache__`, `.venv` or `venv` is skipped. These defaults are
+  `node_modules`, `__pycache__`, `.venv` or `venv` is skipped, and so is one whose
+  name differs from these only by case, Unicode normalization, ignored format
+  characters or trailing dots and spaces, such as `Venv` or `NODE_MODULES`, which
+  case-insensitive file systems treat as the same name. These defaults are
   listed under `exclusions` in the inventory but are not a gap, except inside a
   directory whose every file the `prompt` collector reads, such as a skill, command,
-  rule or subagent directory. There such an entry, such as `.claude/skills/venv` or
-  `.claude/agents/node_modules`, is a coverage gap that names it, so the default
-  gates fail. A skill checked out with its own `.git`, including a Git submodule,
-  whose `.git` is a file, or one whose script left a `__pycache__` beside it, fails
-  them until that entry is removed.
+  rule or subagent directory. There such an entry, such as `.claude/skills/venv`,
+  `.claude/skills/Venv` or `.claude/agents/node_modules`, is a coverage gap that
+  names it, so the default gates fail. A skill checked out with its own `.git`,
+  including a Git submodule, whose `.git` is a file, or one whose script left a
+  `__pycache__` beside it, fails them until that entry is removed.
 - **Case variants.** When a fixed path such as `CLAUDE.md`, `.mcp.json`,
   `.claude/settings.json` or a model directory's configuration, tokenizer or chat
   template file or `additional_chat_templates` directory is absent, a file or
@@ -141,15 +144,15 @@ A way around a limit that its entry does not describe is worth a
   as MCP clients provide; it imports exported functions (`BASH_FUNC_<name>%%` and its
   variants) from the environment; a non-interactive bash sources `BASH_ENV` and an
   interactive POSIX shell (`-i` or `-o interactive`) `ENV`; a shell tracing its
-  commands (`-x`, `-o xtrace` or `xtrace` in `SHELLOPTS`) expands `PS4` before each
-  one. Each runs code before the script that can replace the runner it names. A
-  startup-file option or an exported function makes the launcher unknown, and so does
-  a `PS4` with an expansion while tracing is on; `BASH_ENV`, and `ENV` for an
-  interactive shell, do when the file may lie in the project: a path that is not
+  commands (`-x`, `-o xtrace`, zsh's `--xtrace` or `xtrace` in `SHELLOPTS`) expands
+  `PS4` before each one. Each runs code before the script that can replace the runner
+  it names. A startup-file option or an exported function makes the launcher unknown,
+  and so does a `PS4` with an expansion while tracing is on; `BASH_ENV`, and `ENV` for
+  an interactive shell, do when the file may lie in the project: a path that is not
   absolute, has a `..` segment, or lies under `/proc` or `/dev/fd`. An absolute
   `BASH_ENV`, `ENV` for a shell that is not interactive, and `SHELLOPTS`, `BASHOPTS`
   or `PS4` otherwise stay a medium code-loading finding; an absolute path that happens
-  to lead into the checkout through another link is not recognised.
+  to lead into the checkout through another link is not recognized.
 - **A runner named by a path is classified by its name.** `./tools/npx`,
   `${workspaceFolder}/tools/npx` or a `PATH` entry in the project can run checkout
   code that the record attributes to the registry package. On Windows, an
@@ -254,8 +257,9 @@ A way around a limit that its entry does not describe is worth a
   a container or returned by a function is covered, and so is one that names a
   client module: `mcp.client`, `agents.mcp`, `pydantic_ai.mcp`,
   `langchain_mcp_adapters` or a submodule. The literal may be in any argument
-  position, a keyword or an element of a list, tuple or set argument, so
-  `functools.partial`, `map` and a thread target are covered too. A call to another
+  position, a keyword or an element of a list, tuple, set or dict argument, also
+  behind `*` or `**`, so `functools.partial`, `map` and a thread target's `args` or
+  `kwargs` are covered too. A call to another
   function with such a literal is a gap as well, except `logging.getLogger` and a
   server class imported from its own module, such as `FastMCP("mcp")`. A literal is a string or an
   f-string without placeholders. A dynamic import (`importlib.import_module`,
@@ -299,7 +303,11 @@ A way around a limit that its entry does not describe is worth a
   decorated with `@tool` (LangChain, CrewAI, smolagents), `@function_tool` (OpenAI
   Agents SDK) or PydanticAI's `@agent.tool` are collected by name; the descriptor is
   not. A decorated function that is not at module level, a rebound decorator, a
-  qualified import and a star import are gaps. Class-based tools, such as
+  qualified import and a star import are gaps. So is a PydanticAI agent given `tools=`,
+  `toolsets=`, `builtin_tools=`, `mcp_servers=` or `*` or `**` arguments, or used
+  other than through an attribute or a `with` statement, such as passed to a
+  function or held in a list. Each agent's tools are named per agent, so two agents
+  of a file can each have a tool of the same name. Class-based tools, such as
   `BaseTool` subclasses and `StructuredTool.from_function`, are neither collected
   nor reported.
 - **Tool definitions are fingerprinted only when declared or observed.** A static
@@ -356,6 +364,12 @@ A way around a limit that its entry does not describe is worth a
   spelling of either that a subagent, rule, prompt, skill or command directory holds,
   resolved from that file's directory. The imports of other instruction files, such
   as `AGENTS.md` or a rule file, are followed only when a memory file imports them.
+  Imports are read from the text outside fenced code and code spans as CommonMark
+  reads it, across lines and inside block quotes and list items. Where CommonMark
+  readers disagree, as after a link reference definition or inside raw HTML, the
+  text is searched as written, so more is looked up; a host that reads Markdown
+  otherwise, such as with GitHub's table or autolink extensions, can still import a
+  file from text read here as code.
   An import that leaves the project root, names an excluded path or lies deeper than
   the `depth` limit is a gap, so write a path alias such as `@/components` as code. A
   project with more than the [`import-lookups`](collection-limits.md#limits) limit of
@@ -417,7 +431,7 @@ A way around a limit that its entry does not describe is worth a
   such a record carries a low `completeness` finding. The redaction ends a URL or
   an assigned value at a shell operator (`;`, `|`, `&`, `$`, `` ` ``, parentheses,
   braces, `<`, `>` or a line break), and starts a new URL at each later scheme
-  such as `https://`, so a command or operator glued to one without white space, and
+  such as `https://`, so a command or operator glued to one without whitespace, and
   a host glued to one after an operator or a scheme, as in
   `--webhooks=https://a.example/n,https://b.example`, do alert. Other text glued
   to a URL without an operator or another scheme stays part of its redacted path;
@@ -503,8 +517,15 @@ A way around a limit that its entry does not describe is worth a
 - **RAG values that are not exported enter the digest only as their type.** Without
   the key, a content filter written as `"strict"` and changed to `"off"` raises no
   alert. A boolean control is compared.
+- **RAG transport is read from the locator's scheme.** A `source_uris` entry with a
+  clear-text scheme such as `http`, with or without `//`, is a high finding. One with
+  another scheme that is neither encrypted nor local, a `host:port`, a connection
+  string or a `user@host` form is low, whatever TLS setting a connection string
+  states. An entry without `:`, `@` or `=`, such as a bare host name, is read as a
+  path and raises none.
 - **Moved credential endpoints raise at most a medium alert.** A token endpoint or
-  interface moved to another host raises a medium `properties changed` alert, and
+  interface moved to another host raises a medium alert naming the property, such as
+  `properties.security_scheme_origins changed`, and
   none when the card already uses the new host for such a URL or the URL is
   exported as `[redacted]`.
 - **A backslash before `@` misleads the export.** `https://evil.example\@good.example/`
@@ -539,11 +560,12 @@ A way around a limit that its entry does not describe is worth a
 
 - **Producer verification is recorded, and unsigned evidence fails in CI.** Importing a report
   records the verification outcome in the BOM (`metadata.completeness.discovery_verification`):
-  `verified` with the signer identity and issuer when `import-shadowscan --bundle` (or a passing
-  `validate`/`risk --project` producer check) authenticated the exact report bytes, otherwise
-  `unverified`, with the report digest, the report's own run time, and the repository/commit the
-  report carries — currently both `unknown`, because the ShadowScan report format carries neither,
-  so the digest and run time are the binding, not a repository claim. Unsigned evidence warns
+  `verified` with the signer identity and issuer when `import-shadowscan --bundle` authenticated
+  the exact report bytes, otherwise `unverified`, with the report digest, the report's own run
+  time, and the repository/commit the report carries — currently both `unknown`, because the
+  ShadowScan report format carries neither, so the digest and run time are the binding, not a
+  repository claim. A passing producer check of `validate` or `risk` with
+  `--project --signature-policy` counts for that run only and writes no BOM. Unsigned evidence warns
   loudly on `import-shadowscan`, `validate` and `risk`, and fails the run in CI (or with
   `--fail-on-unsigned-discovery`) unless the operator explicitly passes `--allow-unsigned-discovery`.
   A project-policy setting can still be removed by the change it gates, and is ignored under
@@ -598,7 +620,9 @@ A way around a limit that its entry does not describe is worth a
   such as self-hosted runners, set `XDG_CACHE_HOME` to an empty directory you own;
   on macOS, setting `HOME` alone is not enough when `XDG_CACHE_HOME` is set.
   The cached or explicit trust root is opened once without following symlinks, checked on
-  that descriptor, and verification uses exactly the bytes read. The unpinned cache is still
+  that descriptor, and verification uses exactly the bytes read, so no directory on its
+  path, including those above the cache such as a linked `~/.cache`, may be a symlink
+  (macOS's `/var`, `/tmp` and `/etc` links excepted). The unpinned cache is still
   trusted because it is private: a process running as your user can write a root there
   before verification starts, which only an explicit, pinned trust root rules out.
 - **The Action's trust root ages.** The Action gives its scans an empty private
@@ -637,8 +661,9 @@ A way around a limit that its entry does not describe is worth a
 
 - **Coverage is coarse in standard fields.** CycloneDX `compositions` and SPDX
   relationship `completeness` say only `incomplete`, or `unknown` (`noAssertion` in
-  SPDX), never `complete`: `unknown` with only the default exclusions, `incomplete`
-  with any other exclusion entry. Which collectors ran, failed or were excluded is
+  SPDX), never `complete`: `incomplete` when a collector failed, was not run or left a
+  gap, a surface or a path beyond the default exclusions was excluded, or discovery was
+  imported, and `unknown` otherwise. Which collectors ran, failed or were excluded is
   only in the embedded native inventory. An SPDX export without native-edge
   relationships states its coverage only in the document `comment`.
 - **Rewriting tools drop the coverage warning.** cyclonedx-python-lib 11.12.0 drops
@@ -649,11 +674,7 @@ A way around a limit that its entry does not describe is worth a
   with `"conditional": true`; the condition text and assurance level are only in the
   embedded native inventory.
 - **Some earlier exports do not recover.** CycloneDX and SPDX exports written by
-  builds before 0.1.0 can fail recovery, and so can a 0.1.0 export of an inventory
-  built through the Python API with a package URL this release does not project:
-  a type other than PyPI, npm and OCI, such as `pkg:docker` or `pkg:generic`, or a
-  PyPI or npm URL with a qualifier other than a `repository_url` that names the
-  component's own registry. Regenerate them from the native inventory; see
+  builds before 0.1.0 can fail recovery. Regenerate them from the native inventory; see
   [standard projection versions](fingerprint-migration.md#standard-projection-versions).
 - **A recorded timestamp does not change the serial.** The serial number is the
   version 5 UUID of the inventory content digest, which excludes `metadata.timestamp`,
@@ -699,6 +720,14 @@ A way around a limit that its entry does not describe is worth a
 - **Without `--project`, only claims are checked.** `validate` and `risk` then check
   the inventory's own coverage claim and consistency. Pass `--project` to compare it
   with a fresh collection of the checkout.
+- **A re-hash of the checkout counts as verified.** With `--project`, which the
+  GitHub Action passes, integrity passes once one recorded digest matches the
+  checkout and no check fails or is unknown. The digest of an instruction file that
+  the same run read from that checkout matches, so a repository with only an MCP
+  configuration moves from unknown to passing integrity when it adds a `CLAUDE.md`,
+  although nothing about its MCP servers was verified. Without a signer policy,
+  passing integrity shows only that the inventory matches the checkout. The
+  [roadmap](../ROADMAP.md#plan) tracks the change (N12).
 - **A project policy can weaken its own gate.** `scan`, and `validate` and `risk`
   with `--project`, apply the checkout's `.nexus-symbiote.yaml`, including
   suppressions, ignored categories and raised thresholds. Each relaxation is listed
@@ -738,8 +767,8 @@ A way around a limit that its entry does not describe is worth a
   a document another build wrote with its lists in another order has another content
   digest than its sorted rewrite; see
   [reproducible inventories](reproducible-inventories.md#limits).
-- **Some readable inventories have no digests.** A document without a `metadata`
-  object or a `components` list has no content digest, and one larger or deeper than
+- **Some readable inventories have no digests.** A document without a `components`
+  list has no content digest, and one larger or deeper than
   a runtime snapshot binds has no canonical digest; `digest` prints `unavailable`
   for the missing one and exits 1.
 - **A malformed `SOURCE_DATE_EPOCH` stops collection.** `scan`, `baseline` and
@@ -762,10 +791,11 @@ A way around a limit that its entry does not describe is worth a
   agent name, a server address or a port reports less, without failing the gate; a
   span that reports a server address is compared only with the tools served there,
   even when it leaves out its transport. A tool, model, agent or endpoint identifier,
-  an operation name, an MCP method or an MCP transport that is present but cannot be
-  read fails the gate. A trace cannot attribute pipe or unix-socket MCP activity to a
-  configured server, and skills, data sources, memory stores and prompts are listed
-  for information only.
+  an operation name, an MCP method, or the transport of a tool call or of an MCP client
+  span that reports a server address, that is present but cannot be read fails the
+  gate. A trace cannot attribute pipe or unix-socket MCP activity to a configured
+  server, and skills, data sources, memory stores and prompts are listed for
+  information only.
 - **Remote tools are undeclared until recorded.** A static scan records only the
   tools that a client configuration declares for a remote MCP server, not the tools
   the server serves, so calls to its other tools are undeclared until an inventory
@@ -797,8 +827,8 @@ A way around a limit that its entry does not describe is worth a
 - **Exposure paths show potential reach.** A path is the shortest chain of recorded
   associations from an agent or IDE agent to a risky component. It does not show that
   the agent can invoke the component, that a credential reaches it or that an exploit
-  is possible. At most 200 agents are searched and 200 paths kept, and the view
-  reports how many were left out.
+  is possible. At most 200 agents and IDE agents are searched and 200 paths kept, and
+  the view reports how many were left out.
 - **Large inventories make large pages.** `--max-nodes` bounds components, not edges,
   and the HTML page renders every detail when it is written, so a large or dense
   inventory gives a page that a browser opens slowly. Use `--focus` or

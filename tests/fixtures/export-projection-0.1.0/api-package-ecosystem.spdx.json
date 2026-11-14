@@ -1,0 +1,228 @@
+{
+  "@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld",
+  "@graph": [
+    {
+      "type": "SpdxDocument",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#creation",
+      "name": "Nexus SymBiote AgentBOM urn:uuid:e28707ee-500b-5e4e-a6a9-7ec91a623852",
+      "element": [
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#producer-b5781ba8-ca34-5472-b128-489da94c266a",
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#generator-b5781ba8-ca34-5472-b128-489da94c266a",
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#component-702fba64-f94f-590a-bbc2-6640dd09b1ba",
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#component-e163c794-7034-5d3a-9431-8f449e699abe",
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#component-9948511b-e5a3-566d-bca4-aeaa50a79f98",
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#relationship-1407cf76-8380-5f70-8874-186598ee9189"
+      ],
+      "rootElement": [],
+      "profileConformance": [
+        "core",
+        "software",
+        "extension"
+      ],
+      "comment": "Collection coverage is unknown: static collection does not observe runtime, network or live tool surfaces. This document does not assert complete collection.",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:document",
+              "extension_cdxPropValue": "{\"components\":[{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:docker/redis\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"redis\",\"package_url\":\"pkg:pypi/redis@7.2.4\",\"properties\":{},\"registry_type\":\"docker-hub\",\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"7.2.4\"},{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:npm/zod\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"zod\",\"package_url\":\"pkg:npm/zod@3.23.8\",\"properties\":{},\"registry_type\":\"PyPI\",\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"3.23.8\"},{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:pypi/openai\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"openai\",\"package_url\":\"pkg:pypi/openai@1.2.3\",\"properties\":{},\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"==1.2.3\"}],\"dependencies\":[{\"relationship\":\"depends-on\",\"source_ref\":\"registry:pypi/openai\",\"target_ref\":\"registry:docker/redis\"}],\"metadata\":{\"authors\":[],\"serial_number\":\"urn:uuid:e28707ee-500b-5e4e-a6a9-7ec91a623852\",\"spec_version\":\"1.0.0\",\"timestamp\":\"2026-11-10T12:00:00Z\",\"tool_name\":\"nexus-symbiote\",\"tool_vendor\":\"aisecnomad\",\"tool_version\":\"0.1.0\",\"version\":1}}"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:documentDigest",
+              "extension_cdxPropValue": "sha256:8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:lossReport",
+              "extension_cdxPropValue": "{\"admissionAuthority\":false,\"extensionRoundTripComplete\":true,\"itemCoverage\":\"selected-security-fields\",\"items\":[{\"path\":\"\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"agent authority, assurance, and coverage require the Nexus Symbiote extension\",\"severity\":\"info\"},{\"path\":\"/components/0/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/0/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/1/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/1/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/2/trust_tier\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/components/2/assurance_level\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Full agent-specific field semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"},{\"path\":\"/dependencies/0/relationship\",\"preservedIn\":\"nexus-symbiote:document\",\"reason\":\"Complete relationship semantics require the extension; the standard projection may omit or normalize them\",\"severity\":\"warning\"}],\"nativeSemanticsComplete\":false,\"normalizations\":[\"component and dependency collections sorted for deterministic output\",\"valid declared package URLs canonicalized; standard package versions use their exact PURL version\"],\"profile\":\"nexus-symbiote-export/v1\",\"sourceDigest\":\"sha256:8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77\",\"target\":\"spdx-3.0.1\"}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "SoftwareAgent",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#producer-b5781ba8-ca34-5472-b128-489da94c266a",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#creation",
+      "name": "nexus-symbiote"
+    },
+    {
+      "type": "Tool",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#generator-b5781ba8-ca34-5472-b128-489da94c266a",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#creation",
+      "name": "nexus-symbiote",
+      "summary": "0.1.0"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#component-702fba64-f94f-590a-bbc2-6640dd09b1ba",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#creation",
+      "name": "redis",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:component",
+              "extension_cdxPropValue": "{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:docker/redis\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"redis\",\"package_url\":\"pkg:pypi/redis@7.2.4\",\"properties\":{},\"registry_type\":\"docker-hub\",\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"7.2.4\"}"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:kind",
+              "extension_cdxPropValue": "registry-entry"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:claimsVerifiedByExporter",
+              "extension_cdxPropValue": "false"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:packageIdentifierProjection",
+              "extension_cdxPropValue": "declared"
+            }
+          ]
+        }
+      ],
+      "externalIdentifier": [
+        {
+          "type": "ExternalIdentifier",
+          "externalIdentifierType": "packageUrl",
+          "identifier": "pkg:pypi/redis@7.2.4",
+          "comment": "Declared package identity; not authenticated by the exporter."
+        }
+      ],
+      "software_packageUrl": "pkg:pypi/redis@7.2.4",
+      "software_packageVersion": "7.2.4",
+      "software_downloadLocation": "NOASSERTION"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#component-e163c794-7034-5d3a-9431-8f449e699abe",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#creation",
+      "name": "zod",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:component",
+              "extension_cdxPropValue": "{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:npm/zod\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"zod\",\"package_url\":\"pkg:npm/zod@3.23.8\",\"properties\":{},\"registry_type\":\"PyPI\",\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"3.23.8\"}"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:kind",
+              "extension_cdxPropValue": "registry-entry"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:claimsVerifiedByExporter",
+              "extension_cdxPropValue": "false"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:packageIdentifierProjection",
+              "extension_cdxPropValue": "declared"
+            }
+          ]
+        }
+      ],
+      "externalIdentifier": [
+        {
+          "type": "ExternalIdentifier",
+          "externalIdentifierType": "packageUrl",
+          "identifier": "pkg:npm/zod@3.23.8",
+          "comment": "Declared package identity; not authenticated by the exporter."
+        }
+      ],
+      "software_packageUrl": "pkg:npm/zod@3.23.8",
+      "software_packageVersion": "3.23.8",
+      "software_downloadLocation": "NOASSERTION"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#component-9948511b-e5a3-566d-bca4-aeaa50a79f98",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#creation",
+      "name": "openai",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:component",
+              "extension_cdxPropValue": "{\"assurance_level\":\"declared\",\"bom_ref\":\"registry:pypi/openai\",\"claims\":{},\"component_type\":\"registry-entry\",\"hashes\":{},\"name\":\"openai\",\"package_url\":\"pkg:pypi/openai@1.2.3\",\"properties\":{},\"risks\":[],\"trust_tier\":\"unknown\",\"version\":\"==1.2.3\"}"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:kind",
+              "extension_cdxPropValue": "registry-entry"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "agentbom:claimsVerifiedByExporter",
+              "extension_cdxPropValue": "false"
+            },
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:packageIdentifierProjection",
+              "extension_cdxPropValue": "declared"
+            }
+          ]
+        }
+      ],
+      "externalIdentifier": [
+        {
+          "type": "ExternalIdentifier",
+          "externalIdentifierType": "packageUrl",
+          "identifier": "pkg:pypi/openai@1.2.3",
+          "comment": "Declared package identity; not authenticated by the exporter."
+        }
+      ],
+      "software_packageUrl": "pkg:pypi/openai@1.2.3",
+      "software_packageVersion": "1.2.3",
+      "software_downloadLocation": "NOASSERTION"
+    },
+    {
+      "type": "Relationship",
+      "spdxId": "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#relationship-1407cf76-8380-5f70-8874-186598ee9189",
+      "creationInfo": "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#creation",
+      "relationshipType": "dependsOn",
+      "from": "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#component-9948511b-e5a3-566d-bca4-aeaa50a79f98",
+      "to": [
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#component-702fba64-f94f-590a-bbc2-6640dd09b1ba"
+      ],
+      "completeness": "noAssertion",
+      "extension": [
+        {
+          "type": "extension_CdxPropertiesExtension",
+          "extension_cdxProperty": [
+            {
+              "type": "extension_CdxPropertyEntry",
+              "extension_cdxPropName": "nexus-symbiote:relationship",
+              "extension_cdxPropValue": "{\"relationship\":\"depends-on\",\"source_ref\":\"registry:pypi/openai\",\"target_ref\":\"registry:docker/redis\"}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "CreationInfo",
+      "@id": "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#creation",
+      "specVersion": "3.0.1",
+      "created": "2026-11-10T12:00:00Z",
+      "createdBy": [
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#producer-b5781ba8-ca34-5472-b128-489da94c266a"
+      ],
+      "createdUsing": [
+        "https://spdx.org/spdxdocs/nexus_symbiote/document/8cbd0f9a190214844f9387db644272214fefe4b425f6b370fa83c96b7b814b77#generator-b5781ba8-ca34-5472-b128-489da94c266a"
+      ]
+    }
+  ]
+}

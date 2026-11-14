@@ -318,6 +318,19 @@ def test_optional_dependency_groups_are_not_compared_with_each_other(tmp_path):
     assert CONFLICT.format("openai") in [r.detail for r in by_name["openai"].risks]
 
 
+def test_a_pin_in_another_group_does_not_hide_a_conflict_within_a_group(tmp_path):
+    # The same text in requirements.txt, read first, is still compared in the extra.
+    (tmp_path / "requirements.txt").write_text("torch==2.0.0\n")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "agent"\nversion = "0.1.0"\ndependencies = []\n'
+        "[project.optional-dependencies]\n"
+        'gpu = ["torch==2.0.0", "torch==2.1.0"]\n'
+    )
+    (component,) = RegistryScanner().scan(tmp_path).components
+    assert CONFLICT.format("torch") in [r.detail for r in component.risks]
+    assert component.package_url is None
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -651,10 +664,8 @@ def test_a_link_to_an_unreachable_target_is_replaced_not_refused(tmp_path):
     assert (tmp_path / "regular").read_text() == "keep"
 
 
-@pytest.mark.skipif(not hasattr(__import__("os"), "mkfifo"), reason="needs FIFOs")
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs FIFOs")
 def test_no_command_replaces_a_fifo_or_a_link_to_one(tmp_path):
-    import os
-
     project = tmp_path / "project"
     project.mkdir()
     (project / "AGENTS.md").write_text("Keep receipts.")

@@ -145,6 +145,28 @@ def test_stream_budget_names_the_bound_that_stopped_it(tmp_path):
     ]
 
 
+def test_a_file_that_does_not_fit_leaves_the_byte_budget_to_files_that_do(tmp_path):
+    # The mcp and a2a source searches stop at the first refused file once the budget
+    # is spent, so a file refused for its size must not mark it spent.
+    for name, size in (("a", 8), ("b", 5), ("c", 1), ("d", 4)):
+        (tmp_path / name).write_bytes(b"x" * size)
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures, max_total_bytes=10) as files:
+        assert files.read_bytes("a") == b"x" * 8
+        assert files.read_bytes("b") is None
+        assert files.hash_file("b") is None
+        assert not files.bytes_exhausted
+        assert files.read_bytes("c") == b"x"
+        with pytest.raises(ValueError), files.open_regular("d") as stream:
+            stream.read(16)
+        assert files.bytes_exhausted
+        assert files.read_bytes("c") is None
+    assert failures == [
+        f"{name}: total-bytes limit of 10 bytes exceeded; this limit is fixed for this input"
+        for name in ("b", "d", "c")
+    ]
+
+
 def test_overflowing_json_numbers_are_invalid_json(tmp_path):
     (tmp_path / "x.json").write_text('{"maximum": 1e400}')
     (tmp_path / "y.json").write_text('{"minimum": -1E999, "ok": 1e-400}')
@@ -162,6 +184,19 @@ def test_overflowing_json_numbers_are_invalid_json(tmp_path):
     assert MCPScanner().scan(tmp_path).scan_failures == [
         ".mcp.json: invalid JSON or duplicate keys"
     ]
+
+
+def test_undecodable_and_unparsable_files_are_listed_once_under_the_root_relative_path(
+    tmp_path,
+):
+    (tmp_path / "bad.txt").write_bytes(b"\xff")
+    (tmp_path / "bad.json").write_text("{")
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        for name in ("bad.txt", "bad.json"):
+            for spelling in (name, f"./{name}", tmp_path / name):
+                assert files.read_json(spelling) is None
+    assert failures == ["bad.txt: invalid UTF-8", "bad.json: invalid JSON or duplicate keys"]
 
 
 def test_policy_exclusion_checks_do_not_grow_with_the_number_of_entries(tmp_path):
@@ -494,3 +529,18 @@ def test_project_paths_with_a_symlinked_component_are_resolved_like_scan(tmp_pat
         ["verify-artifact", "model.bin", "--project", str(tmp_path / "alias"), "--sha256", digest],
     )
     assert result.exit_code == 0, result.output
+
+
+def test_a_null_document_and_an_unwalkable_directory_name_are_named_as_such(tmp_path):
+    (tmp_path / "x.json").write_text("null")
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        assert files.read_json("x.json") is None
+        assert list(files.iter_files("../x")) == []
+        assert list(files.iter_files("a\x00b")) == []
+    unwalkable = "directory is outside collection root or not a plain relative path"
+    assert failures == [
+        "x.json: JSON document is null",
+        f"../x: {unwalkable}",
+        f"a\x00b: {unwalkable}",
+    ]

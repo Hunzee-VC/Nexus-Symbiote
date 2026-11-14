@@ -151,7 +151,8 @@ class LineageIndex:
             raise ValueError("missing or cyclic parent")
         if value.kind != "source" and not value.parents:
             raise ValueError("derived records require parent evidence")
-        if any(self.versions[p].withdrawn for p in value.parents):
+        # A record withdrawn with its parent, as withdraw() leaves it, can be loaded again.
+        if not value.withdrawn and any(self.versions[p].withdrawn for p in value.parents):
             raise ValueError("cannot derive from withdrawn records")
         self.versions[value.id] = value
         self._acl_revisions[value.id] = {value.acl_revision}

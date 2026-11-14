@@ -137,7 +137,8 @@ other than letters, digits, `.`, `-`, `_` or `:`, such as `https://host\path`
 (WHATWG parsers read a path after the backslash). A backslash before an `@` is not
 caught: `https://evil.example\@good.example/` is exported as `https://good.example`
 while WHATWG parsers connect to `evil.example`, and the change raises only the
-medium structure-digest alert for user information.
+high structure-digest alert for user information (`properties.static_card_hash
+changed`).
 
 The scanner reads A2A 0.3 cards and A2A 1.0 cards. For 1.0 it follows the
 `lf.a2a.v1` messages in `specification/a2a.proto` of the A2A repository and, as
@@ -168,8 +169,8 @@ Several security declarations are recorded in clear:
   prefix) is exported as `***`; a scheme-less scope that contains `?`, `#` or
   `@`, such as `a?b=1`, is exported in full. A change to the set of scopes raises a high
   `capabilities changed` alert. A scope moved between the card and a skill, or
-  between skills, changes only the structure digest below and raises a medium
-  `properties changed` alert.
+  between skills, changes only the structure digest below and raises a high
+  `properties.static_card_hash changed` alert.
 - `properties.security_scheme_types` lists the declared scheme types, mapped onto
   `apiKey`, `http`, `oauth2`, `openIdConnect`, `mutualTLS` or `other`. A 0.3
   `type` is matched without regard to case, so `OAuth2` counts as `oauth2`. A 1.0
@@ -183,17 +184,19 @@ Several security declarations are recorded in clear:
   maps), of `additionalInterfaces`, and of `supportedInterfaces` in their declared
   order. Without a key, moving a token endpoint or interface to a host the card did not
   already use for such a URL, or putting first a supported interface with a
-  different origin or path depth, raises a medium `properties changed` alert;
-  reordering supported interfaces that share an origin and path depth is detected
-  only with the key. Moving the endpoint, including the first supported interface
+  different origin, raises a medium alert that names the changed origins property,
+  such as `properties.security_scheme_origins changed`; a different path depth
+  changes the structure digest below and raises a high
+  `properties.static_card_hash changed` alert. Reordering supported interfaces
+  that share an origin and path depth is detected only with the key. Moving the endpoint, including the first supported interface
   of a card without `url`, raises a high `endpoint_url changed` alert.
 
 Requirement values of schemes that are not declared as `oauth2` or
 `openIdConnect` (`apiKey`, `http`, `mutualTLS`, `other`, or a scheme the card does
 not declare) may be role names or anything else, even a pasted credential, so they
 are not exported. The structure digest below covers them instead, so a change such
-as `read:only` to `admin` raises a medium `properties changed` alert without a key,
-in a skill's requirements as in the card's.
+as `read:only` to `admin` raises a high `properties.static_card_hash changed` alert
+without a key, in a skill's requirements as in the card's.
 
 `authentication_required` is true only when the card declares at least one of
 `security`, `securityRequirements` or a legacy `authentication` object, and each
@@ -242,8 +245,8 @@ With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` set, records also carry
 `nexus-symbiote/a2a-card-values/v1`) or client entry (profile
 `nexus-symbiote/a2a-client-values/v1`), and the key identifier that MCP records use
 for the same key. A changed path, query, token URL, interface tenant or any other
-value then changes a compared property, and `diff --fail-on-alert` reports a medium
-`properties changed` alert. Each record states `source_values_bound`, so a keyed
+value then changes a compared property, and `diff --fail-on-alert` reports a high
+`properties.static_value_binding changed` alert. Each record states `source_values_bound`, so a keyed
 baseline validated without its key, or with a different key, fails reconciliation.
 The binding needs RFC 8785 JSON values: under the key, a client entry with a value
 such as an unquoted YAML date is a scan failure that names the key.
@@ -275,8 +278,9 @@ scan failure, and a card without a name is identified by its path. Server record
 also carry `card_signatures` (count, `alg` and `kid`; `card_signature_verified` is
 `not-checked`), `capability_flags`, the origins and `required` flags of
 `extensions`, and `provider_origin`, so removing a signature, enabling push
-notifications or adding a required extension raises a medium `properties changed`
-alert without the key.
+notifications or adding a required extension raises an alert without the key: it
+changes the structure digest too, so the alert is high and names
+`properties.static_card_hash` beside the changed property.
 
 ## RAG sources
 
@@ -295,7 +299,8 @@ exported origin and shape; other text and numbers enter it only as their type. T
 URL origins are exported as `endpoint_origins` and `configuration_endpoint_origins`
 and checked for encrypted transport like `source_uris`; a finding about the shared
 fields is recorded once, on the file's first source. A file that declares more than
-1,000 such URLs is a collection failure. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`
+1,000 such URLs and `source_uris` entries together is a collection failure, since
+each may become a finding. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`
 set, `static_value_binding` is an HMAC-SHA256 (profile
 `nexus-symbiote/rag-source-values/v1`) over the source object and an HMAC of the
 shared fields. Without the key, a source whose URIs go beyond their exported origins,

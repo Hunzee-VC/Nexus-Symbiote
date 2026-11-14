@@ -45,7 +45,7 @@ This Code of Conduct applies within all community spaces, and also applies when 
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement through the [repository owner's GitHub profile](https://github.com/aisecnomad).
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement through the [lead maintainer's GitHub profile](https://github.com/aisecnomad).
 
 All complaints will be reviewed and investigated promptly and fairly.
 

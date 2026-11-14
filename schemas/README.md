@@ -7,7 +7,7 @@ These JSON Schemas (draft 2020-12) describe the native Nexus SymBiote formats. T
 | [`nexus-symbiote-aibom-1.0.schema.json`](nexus-symbiote-aibom-1.0.schema.json) | A native AgentBOM document of format 1.x (this build writes 1.1.0): `metadata`, `components` and `dependencies` | `tests/test_native_contract.py` |
 | [`deployment-profile-1.0.schema.json`](deployment-profile-1.0.schema.json) | The optional `deployment_profile` on an agent component; see [deployment evidence](../docs/deployment-evidence.md) | `tests/test_deployment_evidence_profile.py` |
 | [`agent-manifest-1.0.schema.json`](agent-manifest-1.0.schema.json) | The optional `agent.yaml` at a project root; see [agent manifest](../docs/agent-manifest.md) | `tests/test_agent_manifest.py` |
-| [`examples/minimal-aibom.json`](examples/minimal-aibom.json) | A minimal valid AgentBOM: one agent, an MCP server and its tools, a model, a prompt and a registry entry | `tests/test_native_contract.py` |
+| [`examples/minimal-aibom.json`](examples/minimal-aibom.json) | A minimal schema-valid AgentBOM: one agent, an MCP server and its tools, a model, a prompt and a registry entry | `tests/test_native_contract.py` |
 
 ## Validate a document
 
@@ -37,7 +37,7 @@ A schema-valid document is not a verified one. Validity says nothing about wheth
 
 ## Compatibility
 
-Unknown fields are rejected rather than ignored, on every object including dependency edges, so a producer cannot smuggle unreviewed semantics into a document. Booleans, integers and timestamps are as strict as the schema: the model refuses `"no"` or `0` for a boolean, `"3"` for an integer and a number for a timestamp. Missing security values mean **unknown**, not `false`; see the [security defaults migration](../docs/security-defaults-migration.md). Standard exports (CycloneDX 1.7 and SPDX 3.0.1) are validated against the official schemas vendored under `src/nexus_symbiote/generators/schemas/vendor/`, whose provenance digests the hygiene check and the package verify. [Standard exports](../docs/standard-exports.md#extension-properties) lists the properties that carry the native semantics.
+Unknown fields are rejected rather than ignored, on every object including dependency edges, so a producer cannot smuggle unreviewed semantics into a document. Booleans, integers and timestamps are as strict as the schema: the model refuses `"no"` or `0` for a boolean, `"3"` for an integer and a number, or a string of digits such as `"1700000000"`, for a timestamp. Missing security values mean **unknown**, not `false`; see the [security defaults migration](../docs/security-defaults-migration.md). Standard exports (CycloneDX 1.7 and SPDX 3.0.1) are validated against the official schemas vendored under `src/nexus_symbiote/generators/schemas/vendor/`, whose provenance digests the hygiene check and the package verify. [Standard exports](../docs/standard-exports.md#extension-properties) lists the properties that carry the native semantics.
 
 ### Format versions
 

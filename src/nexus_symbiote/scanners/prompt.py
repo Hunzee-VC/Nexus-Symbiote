@@ -16,33 +16,34 @@ from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import PromptComponent, RiskAssessment, SkillPackageComponent
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection, fold_name
+from nexus_symbiote.utils.markdown import text_outside_code
 from nexus_symbiote.utils.terminal import neutralize
 
 INVISIBLE_CHARS: dict[str, str] = {
-    "​": "ZERO WIDTH SPACE",
-    "‌": "ZERO WIDTH NON-JOINER",
-    "‍": "ZERO WIDTH JOINER",
-    "⁠": "WORD JOINER",
-    "­": "SOFT HYPHEN",
+    "\u200b": "ZERO WIDTH SPACE",
+    "\u200c": "ZERO WIDTH NON-JOINER",
+    "\u200d": "ZERO WIDTH JOINER",
+    "\u2060": "WORD JOINER",
+    "\u00ad": "SOFT HYPHEN",
 }
 
 BIDI_OVERRIDES: dict[str, str] = {
-    "‪": "LEFT-TO-RIGHT EMBEDDING",
-    "‫": "RIGHT-TO-LEFT EMBEDDING",
-    "‬": "POP DIRECTIONAL FORMATTING",
-    "‭": "LEFT-TO-RIGHT OVERRIDE",
-    "‮": "RIGHT-TO-LEFT OVERRIDE",
-    "⁦": "LEFT-TO-RIGHT ISOLATE",
-    "⁧": "RIGHT-TO-LEFT ISOLATE",
-    "⁨": "FIRST STRONG ISOLATE",
-    "⁩": "POP DIRECTIONAL ISOLATE",
+    "\u202a": "LEFT-TO-RIGHT EMBEDDING",
+    "\u202b": "RIGHT-TO-LEFT EMBEDDING",
+    "\u202c": "POP DIRECTIONAL FORMATTING",
+    "\u202d": "LEFT-TO-RIGHT OVERRIDE",
+    "\u202e": "RIGHT-TO-LEFT OVERRIDE",
+    "\u2066": "LEFT-TO-RIGHT ISOLATE",
+    "\u2067": "RIGHT-TO-LEFT ISOLATE",
+    "\u2068": "FIRST STRONG ISOLATE",
+    "\u2069": "POP DIRECTIONAL ISOLATE",
 }
 
 # Marks that set the direction of neutral characters; ordinary in right-to-left text.
 DIRECTIONAL_MARKS: dict[str, str] = {
-    "‎": "LEFT-TO-RIGHT MARK",
-    "‏": "RIGHT-TO-LEFT MARK",
-    "؜": "ARABIC LETTER MARK",
+    "\u200e": "LEFT-TO-RIGHT MARK",
+    "\u200f": "RIGHT-TO-LEFT MARK",
+    "\u061c": "ARABIC LETTER MARK",
 }
 
 TAG_CHAR_RANGE = re.compile(r"[\U000e0000-\U000e007f]")
@@ -61,14 +62,14 @@ _UNASSIGNED_PLANE_14 = re.compile(r"[\U000e0080-\U000e00ff\U000e01f0-\U000e0fff]
 # distinct character's category, so format characters added in later versions are
 # found too.
 _HIDDEN = re.compile(
-    "[­͏؀-؅؜۝܏࢐࢑࣢ᅟᅠ"
-    "឴឵᠋-᠏​-‏‪-‮⁠-⁤⁦-⁯"
-    "⠀ㅤ︀-️﻿ﾠ￹-￻\U000110bd\U000110cd"
+    "[\u00ad\u034f\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891\u08e2\u115f\u1160"
+    "\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f"
+    "\u2800\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff9-\ufffb\U000110bd\U000110cd"
     "\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a"
     f"\U000e0000-\U000e007f\U000e0100-\U000e01ef{_UNASSIGNED_IGNORABLE}]"
 )
-_ZWJ = "‍"
-_PRESENTATION_SELECTORS = frozenset({"︎", "️"})
+_ZWJ = "\u200d"
+_PRESENTATION_SELECTORS = frozenset({"\ufe0e", "\ufe0f"})
 _SKIN_TONES = range(0x1F3FB, 0x1F400)
 # The three subdivision flags that are recommended emoji: England, Scotland and Wales.
 _FLAG_SEQUENCE = re.compile(
@@ -127,7 +128,7 @@ def _emoji_context(content: str, index: int) -> bool:
             before >= 0
             and after < len(content)
             and _pictographic(content[before])
-            and (_pictographic(content[after]))
+            and _pictographic(content[after])
         )
     if before < 0:
         return False
@@ -489,8 +490,6 @@ _MAX_IMPORTS = 1000
 # not bound the inventory.
 _MAX_LISTED_IMPORT_CHARACTERS = 256 * 1024
 _IMPORT = re.compile(r"(?<!\S)@(\S+)")
-_FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
-_CODE_SPAN = re.compile(r"`[^`\n]*`")
 _DRIVE = re.compile(r"[A-Za-z]:[\\/]")
 # Sentence punctuation after a reference; the file is inventoried without it.
 _TRAILING = ".,;:!?)]}\"'"
@@ -547,22 +546,9 @@ def _resolve_import(directory: tuple[str, ...], token: str) -> tuple[list[str], 
 
 
 def _import_tokens(text: str) -> list[str]:
-    """@path references outside fenced code blocks and code spans."""
-    tokens: list[str] = []
-    fence = ""
-    for line in text.splitlines():
-        opened = _FENCE.match(line)
-        if opened:
-            marker = opened.group(1)
-            if not fence:
-                fence = marker[0] * len(marker)
-            elif marker.startswith(fence):
-                fence = ""
-            continue
-        if fence:
-            continue
-        tokens.extend(_IMPORT.findall(_CODE_SPAN.sub(" ", line)))
-    return tokens
+    """@path references in the text of a Markdown file, outside its code as CommonMark
+    reads it."""
+    return [token for part in text_outside_code(text) for token in _IMPORT.findall(part)]
 
 
 class _ImportListing:

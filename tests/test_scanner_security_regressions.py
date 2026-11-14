@@ -90,6 +90,12 @@ def test_bounded_reader_rejects_symlinks_and_large_files(tmp_path: Path) -> None
     parent_link.symlink_to(tmp_path, target_is_directory=True)
     with pytest.raises(OSError):
         read_regular_text(parent_link / "target")
+    # A collection would read a relative link to a file beside it through its target.
+    beside = tmp_path / "beside"
+    beside.symlink_to("target")
+    with pytest.raises(OSError):
+        read_regular_text(beside)
+    assert read_regular_text(target) == "abcd"
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO required")

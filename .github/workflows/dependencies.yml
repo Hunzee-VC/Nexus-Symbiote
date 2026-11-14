@@ -1,6 +1,9 @@
 name: Dependency health
-# Not part of Verified CI: these runs resolve from PyPI and query OSV, so they report on
-# the outside world rather than on the change. A pull request that changes the declared
+# Not part of Verified CI: these runs repeat the locked-pin audit daily, audit the floor lock
+# and run the full suite on the newest releases the ranges admit, so they report on the
+# outside world rather than on the change. Verified CI keeps only a smoke install of the
+# wheel on freshly resolved releases and the OSV audit of the CI and Action locks, which a
+# new release or advisory can still turn red. A pull request that changes the declared
 # ranges or the locks must still have a green run here before it merges (CONTRIBUTING.md).
 on:
   schedule:
@@ -104,6 +107,7 @@ jobs:
         env:
           RESOLVED: ${{ runner.temp }}/newest-python-${{ matrix.python }}.txt
         run: |
+          set -euo pipefail
           python -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock
           python -m pip install --no-build-isolation --upgrade --upgrade-strategy eager -e '.[all]'
           python -m pip check

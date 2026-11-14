@@ -192,13 +192,13 @@ text:
   28 characters, with the text up to 2,000 characters in the node's `<title>`; details
   at 2,000), so a long name costs no more than a short one; control, line-break,
   bidirectional and invisible characters, including every default-ignorable code point
-  such as variation selectors and blank fillers, become U+FFFD and a `##[` CI log
-  command is broken; and the result is HTML-escaped, quotes included. Cutting only drops the end
-  of the text and adds an ellipsis, so it cannot form what the next step removes. The
-  text appears only as element text or as the value of an `aria-label`
-  or `data-name` attribute, never in a script, a style, a URL, an id, a class or an
-  attribute name. Ids, classes and the other `data-*` attributes are built from node
-  indexes and fixed words.
+  such as variation selectors and blank fillers, become U+FFFD and a `##name[` CI log
+  command, such as `##vso[`, is broken; and the result is HTML-escaped, quotes included.
+  Cutting only drops the end of the text and adds an ellipsis, so it cannot form what
+  the next step removes. The text appears only as element text or as the value of an
+  `aria-label` or `data-name` attribute, never in a script, a style, a URL, an id, a
+  class or an attribute name. Ids, classes and the other `data-*` attributes are built
+  from node indexes and fixed words.
 - The first element of `<head>` is a `Content-Security-Policy` that allows nothing but
   the page's one style block and one script, each pinned by its SHA-256 hash, and
   `data:` images: `default-src 'none'`, `base-uri 'none'` and `form-action 'none'`. The
@@ -215,7 +215,7 @@ nodes and edges; use the chips to show only components with a risk class, a high
 critical finding, `unpinned` as the [JSON document](#the-json-document) defines it, or
 no classification (a component must match every chip selected); type in the name
 filter, which matches a name as the page shows it, whole up to 200 characters and
-otherwise its first 199; and press Escape to clear everything. The page follows the system's light or dark theme and prints with every
+otherwise its first 199; and press Escape to clear the selection and the filters. The page follows the system's light or dark theme and prints with every
 component's details.
 
 ## Example: the demo agent

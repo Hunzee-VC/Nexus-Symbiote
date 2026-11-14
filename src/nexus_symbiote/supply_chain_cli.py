@@ -34,6 +34,10 @@ def _load_inventory(path: Path) -> AIBOM:
     # Parser and validation messages can quote attacker-controlled input; keep them out.
     try:
         return AIBOM.load(path)
+    except NativeFormatError as exc:
+        raise click.ClickException(
+            f"{neutralize(path)} is not a valid native AIBOM file. {neutralize(exc)}"
+        ) from exc
     except (OSError, ValueError, RecursionError) as exc:
         raise click.ClickException(f"{neutralize(path)} is not a valid native AIBOM file.") from exc
 
@@ -66,8 +70,9 @@ def _check_launch_policy(policy: Path, project: Path, inventory: Path) -> None:
 
     The policy must lie outside the project, outside the repositories that hold the
     project and the inventory, be a single-link regular file owned by the caller or
-    root that only its owner can write, in a directory others cannot write unless it
-    is sticky. This catches misplacement; it does not authenticate the policy.
+    root that only its owner can write, in a directory owned by you or root that
+    others cannot write unless it is sticky. This catches misplacement; it does not
+    authenticate the policy.
     """
     resolved = policy.resolve()
     untrusted = [project.resolve()]
@@ -98,7 +103,8 @@ def _check_launch_policy(policy: Path, project: Path, inventory: Path) -> None:
     ):
         raise click.UsageError(
             "launch policy must be a single-link regular file owned by you or root and "
-            "writable only by its owner, in a directory that others cannot write"
+            "writable only by its owner, in a directory owned by you or root that others "
+            "cannot write unless it is sticky"
         )
 
 
@@ -407,18 +413,21 @@ def register_supply_chain_commands(main: click.Group) -> None:
         Sends each package's ecosystem, normalized name and exact version to
         api.osv.dev, including packages from private registries unless excluded.
         Exits 1 when an advisory is found (unless --no-fail-on-advisory) or when
-        not every package in scope was looked up, including when none was.
+        not every package in scope was looked up, including when none was; with
+        --dry-run, only when the report lists an error.
         """
         if not dry_run:
             modes.require_live("advisories")
         from nexus_symbiote.advisories import fetch_advisories
-        from nexus_symbiote.core.hashing import hash_bytes, open_regular_file, parse_json_strict
+        from nexus_symbiote.core.hashing import hash_bytes
 
         _refuse_source_overwrite(output, aibom_path)
         try:
-            with open_regular_file(aibom_path) as stream:
-                data = stream.read(16 * 1024 * 1024 + 1)
-            bom = AIBOM.from_document(parse_json_strict(data, max_bytes=16 * 1024 * 1024))
+            bom, data = AIBOM.load_with_bytes(aibom_path)
+        except NativeFormatError as exc:
+            raise click.ClickException(
+                f"{neutralize(aibom_path)} is not a valid native AIBOM file. {neutralize(exc)}"
+            ) from exc
         except (OSError, ValueError, TypeError, RecursionError) as exc:
             raise click.ClickException(
                 f"{neutralize(aibom_path)} is not a valid native AIBOM file."

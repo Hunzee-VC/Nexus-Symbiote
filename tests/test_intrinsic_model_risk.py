@@ -21,9 +21,7 @@ def imported_model(**fields) -> AIBOM:
         collectors_requested=collectors,
         collectors_completed=collectors,
     )
-    document = bom.model_dump(mode="json")
-    document["components"][0]["risks"] = []
-    return AIBOM.model_validate(document)
+    return AIBOM.model_validate(bom.model_dump(mode="json"))
 
 
 @pytest.mark.parametrize(

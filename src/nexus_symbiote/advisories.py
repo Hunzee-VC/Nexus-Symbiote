@@ -94,6 +94,8 @@ class AdvisoryReport:
             "sent_to_osv": (
                 "nothing (dry run)"
                 if self.dry_run
+                else "nothing (package component limit exceeded)"
+                if len(self.queries) > MAX_COMPONENTS
                 else "ecosystem, normalized package name and exact version of each query"
             ),
         }
@@ -171,11 +173,13 @@ def mcp_package_identity(server: MCPServerComponent) -> tuple[str, str, str]:
 
 
 def _excluded(kind: str, name: str, patterns: Iterable[str]) -> bool:
+    # A queried npm name is lower case, so a pattern in another case still withholds it.
+    name = _normalize(kind, name).lower()
     for pattern in patterns:
         if pattern.endswith("*"):
-            if _normalize(kind, name).startswith(_normalize(kind, pattern[:-1])):
+            if name.startswith(_normalize(kind, pattern[:-1]).lower()):
                 return True
-        elif _normalize(kind, name) == _normalize(kind, pattern):
+        elif name == _normalize(kind, pattern).lower():
             return True
     return False
 
@@ -229,6 +233,8 @@ def fetch_advisories(
     patterns = list(exclude)
     if any(not isinstance(p, str) or not p or len(p) > 256 for p in patterns):
         raise ValueError("exclusion patterns must be 1 to 256 characters")
+    if any("*" in p[:-1] for p in patterns):
+        raise ValueError("an exclusion pattern may hold '*' only as its last character")
     report = AdvisoryReport(
         checked_at=datetime.now(UTC).isoformat(),
         inventory_sha256=inventory_sha256,

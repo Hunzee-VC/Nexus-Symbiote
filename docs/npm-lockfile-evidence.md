@@ -18,8 +18,8 @@ URL names the registry with a `repository_url` qualifier when the record resolve
 from a host other than `registry.npmjs.org` and `registry.yarnpkg.com`. A record is
 checked before it is taken:
 
-- A `resolved` value that is not an `https` URL with a host, or that holds white
-  space, a control character, a backslash, a non-ASCII character or a percent sign
+- A `resolved` value that is not an `https` URL with a host, or that holds
+  whitespace, a control character, a backslash, a non-ASCII character or a percent sign
   in the host, is a collection failure. A WHATWG URL parser, which npm uses, can read
   such a value as another host than Python does.
 - A version that is not an exact SemVer version, an integrity value that does not
@@ -36,8 +36,13 @@ checked before it is taken:
 
 `pnpm-lock.yaml` and `yarn.lock` (v1 and Berry) are read when one of them is the only
 lockfile in the project root (`npm-shrinkwrap.json` and `package-lock.json` count as
-npm's one): the root importer's or the matching stanza's exact version, its SRI
-integrity and its tarball origin. Their records are checked as an npm record is: the
+npm's one), for each package that `package.json` declares from a registry: the exact
+version, SRI integrity and tarball origin of the root importer's record, or of the
+stanza for the spec `package.json` declares. A pnpm lockfile with no root importer,
+neither `importers` nor top-level dependency maps, is searched for the package by
+name. A record that only another package's dependency left, such as a stanza for
+another range, is not taken, and neither is a record of a git, URL or path
+dependency. Their records are checked as an npm record is: the
 `resolved` or `tarball` URL, the exact version, an exact `package.json` version it
 contradicts and the integrity value are collection failures as above (so a Yarn v1
 `sha1-` value is one), and a tarball URL that names another package or version is a
@@ -47,19 +52,29 @@ more than one package manager no lockfile evidence is bound, and the conflict is
 reported as an exclusion. Workspace, link, file and git resolutions (and Yarn
 `patch:` and `portal:` ones), `npm:` aliases, which only npm's own records resolve,
 and more than one resolution for the same package are reported as exclusions too.
-Yarn Berry `checksum` values are not recorded.
+So is a Yarn Berry `resolution` other than the registry package and version the
+record names (`openai@npm:4.52.0` for a record of `openai` 4.52.0): Berry fetches
+what the resolution names, a tarball URL or a git repository among them, and records
+no URL to check. Yarn Berry `checksum` values are not recorded.
 
 For Python, `uv.lock` or `poetry.lock` in the project root supplies the exact
 version and the index origin of each AI package declared in `requirements*.txt` or
 `pyproject.toml`, the lockfile record's position, and the SHA-256 of the lockfile.
 Artifact digests in the lockfile are not recorded. With both lockfiles present, for
 a package with a local, git or URL source in the lockfile, or for one that a root
-file declares from a URL, no resolution is bound.
+file declares from a URL, no resolution is bound. A version that a declaration of
+the package does not admit, in any root file and under any marker or group, is a
+collection failure, as for npm: the lockfile is stale, or the file is not installed
+from it. `[build-system]` requires are not compared, because neither lockfile locks
+them.
 
 These are declared resolution claims with unknown trust. The collector does not
 fetch packages, establish their presence, verify registry ownership or publisher
 identity, or prove that package bytes match the lockfile. Raw download paths,
 userinfo, tokens and signed URL parameters are omitted. A manifest without a
-supported lock record does not establish a registry origin. `bun.lock`, `bun.lockb`,
-`Pipfile.lock` and `pdm.lock` are not read; when one exists, each package of its
-ecosystem gets a low `lockfile_unread` finding.
+supported lock record does not establish a registry origin. An exact version in
+`package.json` names a package URL without a record only when the project root has
+no npm lockfile, or the one read has no record of the package: a lockfile that is
+ambiguous, refused or not parsed may install it from elsewhere. `bun.lock`,
+`bun.lockb`, `Pipfile.lock` and `pdm.lock` are not read; when one exists, each
+package of its ecosystem gets a low `lockfile_unread` finding.

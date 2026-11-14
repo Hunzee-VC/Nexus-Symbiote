@@ -192,7 +192,8 @@ class Observations:
         address = values.get("server.address")
         local = transport if transport in _LOCAL_TRANSPORTS else None
         # A tool call that reports a server address is compared only with the tools served
-        # there, whatever the span's kind or transport: the address may name another server.
+        # there, whatever the span's kind, unless its transport is pipe or unix: the address
+        # may name another server.
         host: Identifier | None = None
         port: Identifier | None = None
         if address is not None and local is None:
@@ -209,8 +210,6 @@ class Observations:
                 self._observe(span, names, "mcp-endpoint", (host, port), version)
             else:
                 self.mcp_clients["unattributed"] += 1
-        if unclassified:
-            self.unclassified += 1
         # A span that names a tool reports a call to it whatever it calls its operation:
         # instrumentation may omit the operation name or use a value of its own.
         tool = values.get("gen_ai.tool.name")
@@ -218,8 +217,13 @@ class Observations:
             if tool is None:
                 self.without_identifier["tool"] += 1
             else:
+                # Read, the transport could make this a call over a pipe or unix socket,
+                # which the tools of a server with only a remote endpoint do not serve.
+                unclassified = unclassified or isinstance(transport, Unreadable)
                 kind = values.get("gen_ai.tool.type")
                 self._observe(span, names, "tool", (tool, host, port, local), kind)
+        if unclassified:
+            self.unclassified += 1
         requested = values.get("gen_ai.request.model")
         response = values.get("gen_ai.response.model")
         if requested is not None or response is not None:
@@ -372,7 +376,8 @@ class _Inventory:
                 self.declared.append(("mcp-server", component))
                 endpoint = _endpoint(component.endpoint_url)
                 local = component.command is not None or _trimmed(component.transport) == "stdio"
-                if endpoint is not None and not local:
+                # An endpoint the collector withheld as [redacted] is still a remote endpoint.
+                if _trimmed(component.endpoint_url) is not None and not local:
                     remote_only.add(component.bom_ref)
                 if endpoint is not None:
                     host, port = endpoints[component.bom_ref] = endpoint

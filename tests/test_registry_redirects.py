@@ -270,12 +270,10 @@ def test_other_registries_and_look_alikes_are_redirects(tmp_path, value, origin)
     ],
 )
 def test_unicode_look_alikes_of_a_default_host_are_redirects(tmp_path, files):
-    package = "package.json" if ".npmrc" in files else "requirements.txt"
-    base = {"package.json": NPM} if package == "package.json" else {}
+    base = {"package.json": NPM} if ".npmrc" in files else {}
     _, entries = _collect(tmp_path, {**base, **files})
     assert entries["openai"].package_url is None
     assert len(_redirects(entries["openai"])) == 1
-    assert entries["openai"].package_url is None
 
 
 def test_credentials_paths_and_tokens_never_leave_the_settings(tmp_path):
@@ -665,7 +663,7 @@ def test_the_configuration_keys_are_every_long_name_of_pip_index_options():
         "[global]\n[global]\n",
         "[global]\nnot a setting\n",
         "[global]\n= https://m.example\n",
-        "﻿[global]\nindex-url = https://m.example\n",
+        "\ufeff[global]\nindex-url = https://m.example\n",
     ],
 )
 def test_a_pip_configuration_pip_would_refuse_is_a_gap(tmp_path, text):

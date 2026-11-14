@@ -17,6 +17,7 @@ from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.models import AgentComponent, ToolComponent
 from nexus_symbiote.graph_view import SCRIPT, build_view, view_document
 from nexus_symbiote.utils.terminal import OUTPUT_REFUSED
+from tests.conftest import ISOLATED_NAMES, ISOLATED_PREFIXES
 
 ROOT = Path(__file__).resolve().parents[1]
 UNSET = {modes.ENV_VAR: None}
@@ -27,8 +28,16 @@ def demo(tmp_path_factory: pytest.TempPathFactory) -> Path:
     from click.testing import CliRunner
 
     output = tmp_path_factory.mktemp("demo") / "demo.aibom.json"
+    # A module-scoped fixture runs before the per-test isolation, so it clears the ambient names itself.
+    ambient = {
+        name: None
+        for name in os.environ
+        if name.startswith(ISOLATED_PREFIXES) or name in ISOLATED_NAMES
+    }
     scanned = CliRunner().invoke(
-        main, ["scan", str(ROOT / "examples" / "demo-agent"), "-o", str(output)], env=UNSET
+        main,
+        ["scan", str(ROOT / "examples" / "demo-agent"), "-o", str(output)],
+        env={**ambient, **UNSET},
     )
     assert scanned.exit_code == 0, scanned.output
     return output
@@ -37,6 +46,12 @@ def demo(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def saved(tmp_path: Path, bom: AIBOM, name: str = "bom.json") -> Path:
     path = tmp_path / name
     bom.save(path)
+    return path
+
+
+def write_inventory(tmp_path: Path, content: bytes) -> Path:
+    path = tmp_path / "inventory.json"
+    path.write_bytes(content)
     return path
 
 
@@ -192,12 +207,6 @@ def test_an_invalid_graph_fails_like_blast_radius(runner, tmp_path):
     assert result.stdout == ""
 
 
-def write_inventory(tmp_path: Path, content: bytes) -> Path:
-    path = tmp_path / "inventory.json"
-    path.write_bytes(content)
-    return path
-
-
 @pytest.mark.parametrize(
     ("content", "reason"),
     [
@@ -305,4 +314,5 @@ def test_the_documented_demo_view_matches_a_real_run(runner, demo):
     stated = re.search(r"Graph view: [^\n]+", text)
     assert stated is not None
     html = runner.invoke(main, ["graph", str(demo), "-o", str(demo.parent / "g.html")])
+    assert html.exit_code == 0, html.output
     assert html.stderr.strip() == stated.group(0)

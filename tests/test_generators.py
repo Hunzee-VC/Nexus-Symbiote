@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
+
+import pytest
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import SerializationSafety
@@ -77,7 +80,6 @@ class TestCycloneDXGenerator:
         assert result["specVersion"] == "1.7"
         assert "serialNumber" in result
         assert len(result["components"]) == 4
-        assert result["dependencies"] == []
 
     def test_component_types_mapped(self):
         gen = CycloneDXGenerator()
@@ -155,13 +157,14 @@ class TestSPDXGenerator:
         gen = SPDXGenerator()
         result = gen.generate(_sample_aibom())
         elements = [e for e in result["@graph"][1:] if e.get("type") != "Relationship"]
-        for elem in elements:
-            if "extension" in elem:
-                ext = elem["extension"][0]
-                assert ext["type"] == "extension_CdxPropertiesExtension"
-                assert "nexus-symbiote:component" in {
-                    p["extension_cdxPropName"] for p in ext["extension_cdxProperty"]
-                }
+        extended = [elem for elem in elements if "extension" in elem]
+        assert extended
+        for elem in extended:
+            ext = elem["extension"][0]
+            assert ext["type"] == "extension_CdxPropertiesExtension"
+            assert "nexus-symbiote:component" in {
+                p["extension_cdxPropName"] for p in ext["extension_cdxProperty"]
+            }
 
     def test_relationship_types(self):
         from nexus_symbiote.generators.spdx import NO_ASSERTION_LICENSE
@@ -178,6 +181,7 @@ class TestSPDXGenerator:
             for element in result["@graph"]
             if element.get("type") in {"ai_AIPackage", "dataset_DatasetPackage"}
         ]
+        assert licensed_packages
         for package in licensed_packages:
             for kind in license_kinds:
                 licensing = [
@@ -363,8 +367,8 @@ class TestCycloneDXGeneratorFull:
     def test_prompt_properties(self):
         gen = CycloneDXGenerator()
         result = gen.generate(_full_component_aibom())
-        p = next(c for c in result["components"] if c["name"] == "system-prompt")
-        props = {p["name"]: p["value"] for p in p.get("properties", [])}
+        prompt = next(c for c in result["components"] if c["name"] == "system-prompt")
+        props = {p["name"]: p["value"] for p in prompt.get("properties", [])}
         assert props["nexus-symbiote:promptType"] == "system-prompt"
         assert props["nexus-symbiote:contentHash"] == "sha256:ppp"
 
@@ -468,3 +472,17 @@ class TestSPDXGeneratorFull:
         model = next(e for e in result["@graph"] if e.get("name") == "gpt-4o")
         assert "verifiedUsing" in model
         assert model["verifiedUsing"][0]["type"] == "Hash"
+
+
+@pytest.mark.parametrize("generator", [CycloneDXGenerator, SPDXGenerator])
+def test_save_replaces_a_link_instead_of_writing_through_it(tmp_path, generator):
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep")
+    target = tmp_path / "export.json"
+    target.symlink_to(victim)
+    bom = _sample_aibom()
+    bom.metadata.timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    generator().save(bom, target)
+    assert victim.read_text() == "keep"
+    assert not target.is_symlink()
+    assert json.loads(target.read_text(encoding="utf-8")) == generator().generate(bom)

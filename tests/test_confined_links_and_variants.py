@@ -12,7 +12,12 @@ import pytest
 
 from nexus_symbiote.scanners.base import parse_python
 from nexus_symbiote.scanners.mcp import MCPScanner
-from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
+from nexus_symbiote.utils.confined import (
+    CollectionError,
+    ConfinedCollection,
+    _lexical_target,
+    fold_name,
+)
 
 
 def _collect(root: Path) -> tuple[list[Path], list[str]]:
@@ -95,7 +100,23 @@ def test_read_through_a_link_into_a_further_link_is_refused(tmp_path):
     with ConfinedCollection(tmp_path, failures) as files:
         assert files.read_json("entry.json") is None
         assert files.in_root_target("entry.json") is None
-    assert failures == ["entry.json: symlink target is or passes through another symlink"]
+    assert failures == [
+        "entry.json: symlink target is or passes through another symlink or a non-directory"
+    ]
+
+
+def test_a_link_whose_target_passes_through_a_file_says_so(tmp_path):
+    (tmp_path / "a").write_text("x")
+    (tmp_path / "x.md").symlink_to("a/b.md")
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        assert files.read_bytes("x.md") is None
+    assert failures == [
+        "x.md: symlink target is or passes through another symlink or a non-directory"
+    ]
+    # No POSIX system lets a symlink be created with empty text; refuse it as empty.
+    with pytest.raises(CollectionError, match="^symlink target is empty$"):
+        _lexical_target(Path(), "")
 
 
 def test_missing_fixed_path_reports_its_case_variants(tmp_path):
@@ -148,7 +169,7 @@ def test_names_fold_as_case_insensitive_file_systems_compare_them():
     "source", ["x = " + "-" * 100_000 + "1\n", "if a:\n    pass\n" + "elif a:\n    pass\n" * 20_000]
 )
 def test_parser_resource_failures_become_value_errors(source):
-    with pytest.raises((ValueError, SyntaxError)):
+    with pytest.raises(ValueError):
         parse_python(source)
 
 
@@ -216,7 +237,8 @@ def test_case_variant_search_follows_one_link_only(tmp_path):
         assert files.case_variants(".claude/settings.json") == []
         assert files.read_json(".claude/settings.json", missing_ok=True) is None
     assert failures == [
-        ".claude/settings.json: symlink target is or passes through another symlink"
+        ".claude/settings.json: symlink target is or passes through another symlink "
+        "or a non-directory"
     ]
 
 
@@ -335,6 +357,25 @@ def test_a_spent_variant_budget_is_one_failure_and_ends_every_later_search(tmp_p
     assert len(failures) == 1 and failures[0].endswith(
         ": entries limit of 1000 exceeded; this limit is fixed for this input"
     )
+
+
+@pytest.mark.parametrize("fillers", [3, 0])
+def test_a_variant_budget_spent_exactly_fails_the_next_search(tmp_path, fillers):
+    # Listing the root costs its entries and itself: 5 of 5 with three fillers, or
+    # 2 of 2 with B.md alone. The search that spends it all misses nothing, but
+    # every later one is refused and must say so.
+    (tmp_path / "B.md").write_text("x")
+    for index in range(fillers):
+        (tmp_path / f"f{index}").write_text("x")
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures, max_entries=fillers + 2) as files:
+        assert files.read_bytes("a.md", missing_ok=True) is None
+        assert failures == []
+        assert files.read_bytes("b.md", missing_ok=True) is None
+        assert files.case_variants("c.md") == []
+    assert failures == [
+        f"b.md: entries limit of {fillers + 2} exceeded; this limit is fixed for this input"
+    ]
 
 
 def test_failures_recorded_once_beside_those_the_caller_appends(tmp_path):

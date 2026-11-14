@@ -50,7 +50,7 @@ def test_tensor_metadata_is_confined_and_does_not_claim_weight_byte_integrity(tm
     assert safetensors_fingerprint(a, root=project) == safetensors_fingerprint(b, root=project)
     outside = tmp_path / "outside.safetensors"
     _tensor(outside)
-    with pytest.raises(ValueError):
+    with pytest.raises(OSError, match="confined stream unavailable"):
         safetensors_fingerprint(outside, root=project)
     (project / "link.safetensors").symlink_to(outside)
     with pytest.raises((OSError, ValueError)):
@@ -189,11 +189,12 @@ def test_osv_identity_mismatch_prevents_network(mutation):
 @pytest.mark.parametrize(
     "body,status",
     [
-        (b"{}", 302),
+        (b'{"results":[{}]}', 302),
         (b"[]", 200),
-        (b'{"vulns":{}}', 200),
-        (b'{"vulns":[],"next_page_token":"more"}', 200),
-        (b"x" * (MAX_RESPONSE_BYTES + 1), 200),
+        (b'{"results":[{"vulns":{}}]}', 200),
+        (b'{"results":[{"vulns":[],"next_page_token":"more"}]}', 200),
+        (b'{"results":[{}],"error":"x"}', 200),
+        (b'{"results":[{}' + b" " * MAX_RESPONSE_BYTES + b"]}", 200),
     ],
 )
 def test_osv_incomplete_or_malformed_results_fail(body, status):

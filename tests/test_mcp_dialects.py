@@ -382,6 +382,44 @@ def test_endpoint_with_user_information_is_named_accurately(tmp_path):
     assert "pw" not in finding.detail
 
 
+def test_plain_http_endpoint_withheld_for_a_header_value_is_still_not_https(tmp_path):
+    record, _ = single(
+        tmp_path,
+        {
+            "url": "http://attacker.example.net/mcp",
+            "headers": {"X-Api-Key": "attacker.example.net"},
+        },
+    )
+    assert record.endpoint_url == "[redacted]"
+    finding = next(r for r in record.risks if r.category == "transport_security")
+    assert finding.severity.value == "high"
+    assert finding.detail == "MCP server 's' endpoint is not HTTPS: [redacted]"
+
+
+@pytest.mark.parametrize(
+    "server",
+    [
+        {"url": "https://good.example/sse", "httpUrl": "http://evil.example/mcp"},
+        {"url": "https://good.example/mcp", "serverUrl": "https://user:pw@evil.example/mcp"},
+    ],
+)
+def test_every_declared_endpoint_is_checked_for_transport_security(tmp_path, server):
+    result = scan(tmp_path, {".gemini/settings.json": json.dumps({"mcpServers": {"s": server}})})
+    record = servers(result)["s"]
+    assert record.endpoint_url == "https://good.example"
+    [finding] = [r for r in record.risks if r.category == "transport_security"]
+    assert finding.severity.value == "high"
+    assert "another endpoint" in finding.detail and "evil" not in finding.detail
+
+
+def test_repeated_secure_endpoint_fields_add_no_transport_finding(tmp_path):
+    record, gaps = single(
+        tmp_path, {"url": "https://good.example/mcp", "httpUrl": "https://good.example/mcp"}
+    )
+    assert not any(r.category == "transport_security" for r in record.risks)
+    assert gaps == []
+
+
 @pytest.mark.parametrize(
     "args,high,medium",
     [
@@ -392,6 +430,14 @@ def test_endpoint_with_user_information_is_named_accurately(tmp_path):
             [],
         ),
         (["run", "--mount", "type=bind,source=/,target=/host", "img"], ["host root mount"], []),
+        # docker reads --mount as CSV and lower-cases its keys and type.
+        (["run", "--mount", "Type=BIND,Source=/,Target=/h", "img"], ["host root mount"], []),
+        (["run", "--mount", '"type=bind","src=/","dst=/h"', "img"], ["host root mount"], []),
+        # Linux and Go's filepath.Clean read a leading "//" as "/".
+        (["run", "-v", "//.:/host", "img"], ["host root mount"], []),
+        (["run", "-v", "//etc/..:/host", "img"], ["host root mount"], []),
+        (["run", "--mount", "type=bind,source=//.,target=/h", "img"], ["host root mount"], []),
+        (["run", "-v", "//etc:/x", "img"], [], ["broad host directory mount"]),
         (["run", "--security-opt", "seccomp=unconfined", "img"], ["disabled confinement"], []),
         (["run", "--network", "host", "--pid=host", "img"], [], ["a host namespace"]),
         (
@@ -428,6 +474,22 @@ def test_container_launch_context_is_rated_without_values(tmp_path, args, high, 
         ({"command": "python3", "args": ["-Ic", "import x"]}, "inline python code"),
         ({"command": "python3", "args": ["-W", "ignore", "-c", "x"]}, "inline python code"),
         ({"command": "ruby", "args": ["-I", "lib", "-e", "x"]}, "inline ruby code"),
+        # An option's value is never the script, even when it reads like a path.
+        ({"command": "ruby", "args": ["-I", "./lib", "-e", "x"]}, "inline ruby code"),
+        ({"command": "ruby", "args": ["-r", "./boot.rb", "-e", "x"]}, "inline ruby code"),
+        ({"command": "ruby", "args": ["-C", "./srv", "-e", "x"]}, "inline ruby code"),
+        ({"command": "perl", "args": ["-I", "lib/perl5", "-e", "x"]}, "inline perl code"),
+        ({"command": "php", "args": ["-c", "./php.ini", "-r", "x"]}, "inline php code"),
+        ({"command": "php", "args": ["-d", "include_path=./lib", "-r", "x"]}, "inline php code"),
+        # Code attached to the flag, after options that take no value.
+        ({"command": "ruby", "args": ["-eputs 1"]}, "inline ruby code"),
+        ({"command": "perl", "args": ["-de0"]}, "inline perl code"),
+        ({"command": "perl", "args": ["-leprint 1"]}, "inline perl code"),
+        ({"command": "php", "args": ["-nrecho 1;"]}, "inline php code"),
+        ({"command": "node", "args": ["--report-dir", "r", "-e", "x"]}, "inline node code"),
+        ({"command": "node", "args": ["--inspect-port", "9229", "-e", "x"]}, "inline node code"),
+        ({"command": "node", "args": ["--debug-port", "9229", "-e", "x"]}, "inline node code"),
+        ({"command": "node", "args": ["--security-revert", "x", "-e", "x"]}, "inline node code"),
         ({"command": "uv", "args": ["run", "python", "-c", "x"]}, "inline python code"),
         ({"command": "npx", "args": ["-p", "pkg@1.2.3", "node", "-e", "x"]}, "inline node code"),
         ({"command": "deno", "args": ["eval", "import('npm:x')"]}, "inline deno code"),
@@ -449,6 +511,11 @@ def test_inline_interpreter_code_is_an_unknown_launcher(tmp_path, server, reason
         {"command": "node", "args": ["--inspect", "dist/index.js"]},
         {"command": "python3", "args": ["-u", "-m", "my_server", "-c", "config.toml"]},
         {"command": "python3", "args": ["-X", "dev", "server.py"]},
+        {"command": "ruby", "args": ["-I", "./lib", "server.rb", "-e", "production"]},
+        {"command": "php", "args": ["-c", "./php.ini", "server.php", "-r", "x"]},
+        {"command": "ruby", "args": ["-rdotenv/load", "server.rb"]},
+        {"command": "perl", "args": ["-Ilib/perl5", "server.pl"]},
+        {"command": "php", "args": ["-dmemory_limit=1G", "server.php"]},
     ],
 )
 def test_script_arguments_are_not_interpreter_options(tmp_path, server):

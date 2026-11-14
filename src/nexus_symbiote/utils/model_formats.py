@@ -156,6 +156,13 @@ _SCHEMA: dict[int, dict[int, int]] = {
     _ANNOTATION: {2: _ENTRY},
     _OPSET: {},
 }
+# Singular fields that hold a tensor. protobuf merges repeated occurrences of one into
+# a single tensor, so a tensor split across them could be EXTERNAL with a location
+# that no one occurrence pairs with EXTERNAL; such a file is not read.
+_SINGULAR: dict[int, frozenset[int]] = {
+    _ATTRIBUTE: frozenset({5, 22}),
+    _SPARSE: frozenset({1, 2}),
+}
 _KEY = b"location"
 # Field 1 length-delimited, then a length of 8, then the key, with each varint in any
 # encoding of up to ten bytes: protobuf's C++ parsers, which ONNX Runtime uses, keep
@@ -276,6 +283,8 @@ def _message(
         raise FormatError(ONNX_LIMIT)
     location = 0
     externals: list[bytes | None] = []
+    singular = _SINGULAR.get(kind, frozenset())
+    seen: set[int] = set()
     key: bytes | None = None
     value: bytes | None = None
     while (reader.offset < end) if end is not None else not reader.exhausted():
@@ -316,6 +325,10 @@ def _message(
         if child is None:
             reader.skip(length)
             continue
+        if number in singular:
+            if number in seen:
+                raise FormatError(ONNX_UNREADABLE)
+            seen.add(number)
         entry_key, entry_value = _message(reader, stop, child, depth + 1, state)
         if kind == _TENSOR and number == 13 and entry_key == _KEY:
             externals.append(entry_value)
@@ -370,6 +383,7 @@ _GGUF_SCALARS = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 1
 _GGUF_STRING = 8
 _GGUF_ARRAY = 9
 _ARCHITECTURE = re.compile(rb"[a-z0-9][a-z0-9_.-]{0,63}")
+_TEMPLATE = b"tokenizer.chat_template"
 _TEMPLATE_KEY = re.compile(rb"tokenizer\.chat_template(?:\.[A-Za-z0-9_-]{1,64})?")
 
 
@@ -427,7 +441,9 @@ def gguf_metadata(read: Read, budget: InspectionBudget | None = None) -> GGUFMet
         budget.charge(1, GGUF_LIMIT)
         key = _gguf_string(reader)
         kind = reader.uint(4)
-        template = key == b"tokenizer.chat_template" or key.startswith(b"tokenizer.chat_template.")
+        # llama.cpp looks keys up as C strings, so a key ends at its first NUL there.
+        base = key.split(b"\0", 1)[0]
+        template = base == _TEMPLATE or base.startswith(_TEMPLATE + b".")
         if kind == _GGUF_STRING and (template or key == b"general.architecture"):
             value = _gguf_string(reader)
             if template:
@@ -450,10 +466,10 @@ def gguf_metadata(read: Read, budget: InspectionBudget | None = None) -> GGUFMet
 # Chat templates ----------------------------------------------------------------
 
 # Jinja sandbox escapes reach Python internals through dunder attributes: by name,
-# by a string that a subscript, the attr filter or an attribute argument looks up,
-# or through the attr filter. Ordinary chat templates do none of these. Jinja skips
-# Unicode whitespace between tokens, so the pattern matches text, not bytes. A dunder
-# name joined from two string literals is matched by either half.
+# by a string that a subscript or an attribute argument looks up, or through the
+# attr filter. Ordinary chat templates do none of these. Jinja skips Unicode
+# whitespace between tokens, so the pattern matches text, not bytes. A dunder name
+# joined from two string literals is matched by either half.
 _TEMPLATE_ESCAPE = re.compile(
     r"\.\s*__[A-Za-z0-9_]+__|['\"]__[A-Za-z0-9_]+__['\"]|(?<![A-Za-z0-9_])attr\s*\("
     r"|['\"]__[A-Za-z0-9_]*['\"]\s*[~+]|[~+]\s*['\"][A-Za-z0-9_]*__['\"]"
