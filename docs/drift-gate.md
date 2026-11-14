@@ -160,7 +160,7 @@ invalid input is an error (exit 1); a missing file is a usage error (exit 2).
 On `pull_request`, GitHub runs the workflow file of the pull request's merge commit, so the pull request under review can change these inputs, switch a gate off or delete the step unless workflow edits are restricted. Make the gate one the pull request cannot weaken:
 
 1. **In a GitHub organization (recommended):** require the workflow through an organization ruleset (*Require workflows to pass before merging*), which pins the gate to a reusable workflow file and ref outside the pull request's reach.
-2. **In any repository:** run on `pull_request` with read-only permissions, stage the baseline from `github.event.pull_request.base.sha` into `$RUNNER_TEMP`, require a mandatory `CODEOWNERS` review from security owners for `.github/` and `.nexus-symbiote/reviewed.json`, and configure branch protection to require that check to pass:
+2. **In any repository:** run on `pull_request` with read-only permissions, stage the baseline from `github.event.pull_request.base.sha` into `$RUNNER_TEMP`, pass the binding key the baseline was recorded with from a repository secret, require a mandatory `CODEOWNERS` review from security owners for `.github/` and `.nexus-symbiote/reviewed.json`, and configure branch protection to require that check to pass. The job below skips pull requests from forks, which receive no secrets; see the note after it:
 
 ```yaml
 name: Agent inventory gate
@@ -169,6 +169,9 @@ permissions:
   contents: read
 jobs:
   inventory:
+    # Fork pull requests receive no secrets, so the keyed comparison runs only for
+    # pull requests from this repository.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -184,9 +187,11 @@ jobs:
           "repos/$GITHUB_REPOSITORY/contents/.nexus-symbiote/reviewed.json?ref=$BASE_SHA"
           > "$RUNNER_TEMP/reviewed.json"
       - uses: Hunzee-VC/Nexus-Symbiote@<reviewed-40-character-commit-sha>
+        env:
+          NEXUS_SYMBIOTE_SOURCE_BINDING_KEY: ${{ secrets.AGENTBOM_BINDING_KEY }}
         with:
           scan-path: .
           reviewed-baseline: ${{ runner.temp }}/reviewed.json
 ```
 
-Avoid checking out `github.event.pull_request.head.sha` inside a `pull_request_target` workflow ("pwn request" hazard): `pull_request_target` runs in the base repository's security context, where adding any build, test, cache or secret step later turns an untrusted fork checkout into secret exfiltration or repository compromise. On `pull_request`, same-repository pull requests can supply `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` from repository secrets; fork pull requests receive no secrets, so a gate that also runs for forks needs a baseline recorded without the key, which cannot alert on the values only the key binds; otherwise run keyed comparisons only for same-repository pull requests and trusted branches.
+Avoid checking out `github.event.pull_request.head.sha` inside a `pull_request_target` workflow ("pwn request" hazard): `pull_request_target` runs in the base repository's security context, where adding any build, test, cache or secret step later turns an untrusted fork checkout into secret exfiltration or repository compromise. On `pull_request`, same-repository pull requests can supply `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` from repository secrets; fork pull requests receive no secrets, so a gate that also runs for forks needs a baseline recorded without the key, which cannot alert on the values only the key binds; otherwise run keyed comparisons only for same-repository pull requests and trusted branches. A job that `if:` skips counts as passed for a required check, so in a repository that accepts fork pull requests, also run the keyed gate on a trusted event before merging, such as `merge_group` with a merge queue, or add a second, keyless job for forks with a baseline recorded without the key.

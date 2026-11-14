@@ -898,3 +898,42 @@ def test_a_symlink_replaced_after_its_check_is_not_inventoried(tmp_path, monkeyp
     result = PromptScanner().scan(tmp_path)
     assert "prompt:import:docs/guide.md" not in _components(result)
     assert "docs/guide.md: file changed during collection" in result.scan_failures
+
+
+@pytest.mark.parametrize("keyed", [False, True])
+def test_a_baseline_with_an_import_content_hash_alerts_once_as_documented(
+    tmp_path, monkeypatch, keyed
+):
+    # A baseline from an earlier build recorded the import's content hash: the upgrade
+    # raises one high alert on it, with or without the key, which the release notes and
+    # the upgrade guide must say.
+    from nexus_symbiote.core.hashing import hash_bytes
+    from nexus_symbiote.scanners.source_binding import SOURCE_BINDING_KEY_ENV
+
+    if keyed:
+        monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, "upgrade-key-" + "0123456789abcdef" * 2)
+    project = tmp_path / "project"
+    _write(project, "CLAUDE.md", "@prompts/system.txt\n")
+    _write(project, "prompts/system.txt", "Answer briefly.\n")
+    current = tmp_path / "current.json"
+    runner = CliRunner()
+    scan = runner.invoke(main, ["scan", str(project), "--no-project-policy", "-o", str(current)])
+    assert scan.exit_code == 0, scan.output
+    bom = json.loads(current.read_text())
+    (record,) = [c for c in bom["components"] if c.get("source_path") == "prompts/system.txt"]
+    assert record.get("content_hash") is None
+    record["content_hash"] = hash_bytes(b"Answer briefly.\n")
+    earlier = tmp_path / "earlier.json"
+    earlier.write_text(json.dumps(bom))
+    run = runner.invoke(main, ["diff", str(earlier), str(current), "--fail-on-alert"])
+    assert run.exit_code == 1, run.output
+    assert "Content hash removed" in run.output
+    root = Path(__file__).resolve().parents[1]
+    changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    upgrade = (root / "docs/verification-source-binding.md").read_text(encoding="utf-8")
+    upgrade = upgrade.split("## Upgrade existing snapshots", 1)[1].split("\n## ", 1)[0]
+    for text in (changelog, upgrade):
+        flat = " ".join(text.split())
+        assert "`Content hash removed`" in flat
+        assert "`project-reconciliation-failed`" in flat
+        assert "`@prompts/system.txt`" in flat

@@ -460,7 +460,14 @@ Older static MCP snapshots lack the source binding and configured tool locators,
 and older A2A snapshots lack the structure digests or carry the superseded
 `nexus-symbiote/a2a-card-structure/v1` or `v2` profile; older RAG records carry no
 structure digest, and older IDE agent records no keyed settings binding and no
-`settings_hashes_profile`. They cannot establish this
+`settings_hashes_profile`. Prompt records from earlier builds carry a
+`content_hash` for files this build inventories without one: an `@path` import of a
+file without a Markdown suffix, such as `@prompts/system.txt`, a recorded instruction
+file that is a symlink to such a file, and a rule, prompt or subagent file whose name
+has a suffix other than a Markdown one, such as `.clinerules/style.txt`. Against such a
+baseline, `diff --fail-on-alert` raises a one-time high `Content hash removed` alert on
+each of them, and `validate --project` reports `project-reconciliation-failed`, with or
+without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`. They cannot establish this
 stronger reconciliation contract. Missing or unknown binding profiles fail
 validation and require recollection; copying a newly calculated digest into an
 old approved snapshot is not a migration.

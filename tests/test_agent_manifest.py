@@ -326,6 +326,30 @@ def test_a_declared_withheld_instruction_is_checked_by_its_keyed_binding(tmp_pat
     ]
 
 
+@pytest.mark.parametrize("keyed", [False, True])
+def test_a_declared_imported_text_prompt_scans_and_validates(tmp_path, monkeypatch, keyed):
+    # agent.yaml naming the file a CLAUDE.md @import also names: the import record
+    # withholds its unkeyed hash, which assembly must not read as a changed instruction.
+    from nexus_symbiote.scanners.source_binding import SOURCE_BINDING_KEY_ENV
+
+    if keyed:
+        monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, BINDING_KEY)
+    project = tmp_path / "project"
+    (project / "prompts").mkdir(parents=True)
+    (project / "prompts/system.txt").write_text("Answer briefly.\n")
+    (project / "CLAUDE.md").write_text("@prompts/system.txt\n")
+    (project / "agent.yaml").write_text("name: a\ninstructions: [prompts/system.txt]\n")
+    output = tmp_path / "bom.json"
+    code, bom = _scan(project, output)
+    assert code == 0, bom["metadata"]["completeness"]["scan_failures"]
+    assert "changed since scanner collection" not in json.dumps(bom)
+    result = CliRunner().invoke(
+        main, ["validate", str(output), "--no-project-policy", "--project", str(project)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "changed since scanner collection" not in result.output
+
+
 def test_an_undeclared_local_model_is_recorded_without_aborting(tmp_path):
     (tmp_path / "agent.yaml").write_text("name: x\nmodels: {m: {path: models}}\n")
     failures: list[str] = []
