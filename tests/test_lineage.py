@@ -57,10 +57,23 @@ def test_withdrawal_invalidates_all_descendants():
 def test_acl_revocation_applies_through_derived_records():
     index = LineageIndex("acme", (version("source"), version("chunk", "chunk", ("source",))))
     index.update_acl("source", revision="v2", principals=())
+    index.update_acl("chunk", revision="v2", principals=("reader",))
     with pytest.raises(PermissionError):
         index.retrieve(
             ("chunk",),
             principal="reader",
+            acl_revision="v2",
+            observed_at=NOW,
+            read_watermark="commit:2",
+        )
+
+
+def test_a_principal_outside_the_allowed_set_is_refused_at_the_current_revision():
+    index = LineageIndex("acme", (version("source"), version("chunk", "chunk", ("source",))))
+    with pytest.raises(PermissionError):
+        index.retrieve(
+            ("chunk",),
+            principal="intruder",
             acl_revision="v1",
             observed_at=NOW,
             read_watermark="commit:2",
@@ -75,11 +88,12 @@ def test_cross_tenant_and_missing_ancestry_rejected():
 
 
 def test_alias_is_not_cryptographically_pinned_and_attestation_must_verify():
+    now = datetime.now(UTC)
     identity = HostedModelIdentity(
         provider="provider",
         endpoint="https://models.example.test",
         requested_alias="latest",
-        observed_at=NOW,
+        observed_at=now,
     )
     assert not identity.immutable_identity_established
     key = Ed25519PrivateKey.generate()
@@ -88,8 +102,8 @@ def test_alias_is_not_cryptographically_pinned_and_attestation_must_verify():
         endpoint=identity.endpoint,
         requested_alias="latest",
         resolved_revision="rev123",
-        not_before=NOW - timedelta(seconds=1),
-        not_after=NOW + timedelta(hours=1),
+        not_before=now - timedelta(seconds=1),
+        not_after=now + timedelta(hours=1),
     )
     envelope = sign_contract(statement, "model", (key,))
     claimed = HostedModelIdentity(
@@ -101,14 +115,14 @@ def test_alias_is_not_cryptographically_pinned_and_attestation_must_verify():
         }
     )
     assert not claimed.immutable_identity_established
-    claimed.verify_attestation(envelope, {key_id(key.public_key()): key.public_key()}, now=NOW)
+    claimed.verify_attestation(envelope, {key_id(key.public_key()): key.public_key()}, now=now)
     assert claimed.immutable_identity_established
     assert not claimed.model_copy(update={"revision": "rev999"}).immutable_identity_established
-    assert not claimed.identity_is_verified(now=NOW + timedelta(hours=2))
+    assert not claimed.identity_is_verified(now=now + timedelta(hours=2))
     restored = HostedModelIdentity.model_validate(claimed.model_dump(mode="json"))
     assert not restored.immutable_identity_established
     with pytest.raises(ValueError):
-        claimed.verify_attestation(envelope, {}, now=NOW)
+        claimed.verify_attestation(envelope, {}, now=now)
     assert not claimed.immutable_identity_established
 
 

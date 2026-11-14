@@ -68,8 +68,6 @@ def test_label_bounds_keep_unknowns_and_empty_denominators_visible():
 
 
 def test_only_adjudicated_negatives_enter_confusion_counts():
-    import pytest
-
     score = runpy.run_path(str(ROOT / "benchmarks/inventory/run_inventory.py"))["score_tools"]
     result = score({"tool", "decoy", "unknown"}, ["tool", "missed"], ["decoy", "negative"])
     assert result == {
@@ -167,7 +165,6 @@ def test_server_and_signing_controls_judge_the_component_they_name(monkeypatch, 
 
 def test_inventory_statement_binds_results_and_scanner_materials(tmp_path, monkeypatch):
     import hashlib
-    import importlib.util
 
     from nexus_symbiote.utils.crypto import VerificationResult
 
@@ -190,8 +187,6 @@ def test_inventory_statement_binds_results_and_scanner_materials(tmp_path, monke
 
     monkeypatch.setattr("nexus_symbiote.utils.crypto.verify_sigstore_digest", check)
     evidence.verify(target, "signer", "authority", compare_installation=True)
-    import pytest
-
     with pytest.raises(ValueError, match="signature"):
         evidence.verify(target, "other", "authority")
     (target / "results.json").write_bytes(b"{}")
@@ -242,8 +237,6 @@ def test_every_inventory_control_can_fail(tmp_path):
 
 
 def test_an_attested_release_archive_is_checked_without_a_sigstore_bundle(tmp_path, monkeypatch):
-    import pytest
-
     monkeypatch.syspath_prepend(str(ROOT / "benchmarks/inventory"))
     spec = importlib.util.spec_from_file_location(
         "inventory_evidence_check", ROOT / "benchmarks/inventory/evidence.py"
@@ -270,8 +263,6 @@ def test_an_attested_release_archive_is_checked_without_a_sigstore_bundle(tmp_pa
 def test_the_installation_comparison_ignores_what_created_the_environment(tmp_path, monkeypatch):
     from email.message import Message
     from types import SimpleNamespace
-
-    import pytest
 
     monkeypatch.syspath_prepend(str(ROOT / "benchmarks/inventory"))
     spec = importlib.util.spec_from_file_location(

@@ -206,7 +206,7 @@ def test_only_the_shadowscan_simple_format_exists(runner, tmp_path):
         ("", "is empty"),
         ("github:acme/agent ", "starts or ends with white space"),
         ("github:acme/agent\n::error::forged", "control, format, line-separator"),
-        ("github:acme/‮agent", "control, format, line-separator"),
+        ("github:acme/\u202eagent", "control, format, line-separator"),
         ("github:acme/\udcffagent", "unencodable"),
         ("github:acme/[REDACTED]", "contains [REDACTED]"),
         ("x" * 4097, "longer than 4,096 characters"),
@@ -221,7 +221,7 @@ def test_an_unusable_resource_prefix_is_a_usage_error(runner, tmp_path, prefix, 
     assert result.exit_code == 2
     assert "Invalid value for '--resource-prefix': The resource prefix" in result.output
     assert reason in result.output
-    assert "forged" not in result.output and "‮" not in result.output
+    assert "forged" not in result.output and "\u202e" not in result.output
     assert not output.exists()
 
 
@@ -299,6 +299,7 @@ def test_an_oversized_inventory_is_refused(runner, tmp_path):
     result = runner.invoke(main, _args(source, tmp_path / "approved.json"))
     assert result.exit_code == 1
     assert "It exceeds the 16 MiB native inventory limit." in result.output
+    assert not (tmp_path / "approved.json").exists()
 
 
 def _nested(tmp_path: Path, depth: int) -> Path:
@@ -336,7 +337,7 @@ def test_nesting_at_the_depth_limit_gets_the_fixed_refusal(runner, tmp_path):
     ("changes", "reason"),
     [
         ({"name": "evil\x1b]8;;https://attacker.example\x07click\x1b]8;;\x07"}, "agent name"),
-        ({"name": "Approved‮gpj.exe"}, "agent name"),
+        ({"name": "Approved\u202egpj.exe"}, "agent name"),
         ({"supplier": "team\n::error::forged"}, "agent owner"),
         ({"supplier": " team"}, "agent owner"),
     ],
@@ -346,7 +347,7 @@ def test_hostile_identifiers_are_refused_without_being_echoed(runner, tmp_path, 
     result = runner.invoke(main, _args(_with_agent(tmp_path, **changes), output))
     assert result.exit_code == 1
     assert f"Error: The {reason} " in result.output
-    for marker in ("attacker", "gpj", "forged", "\x1b", "‮"):
+    for marker in ("attacker", "gpj", "forged", "\x1b", "\u202e"):
         assert marker not in result.output
     assert not output.exists()
 

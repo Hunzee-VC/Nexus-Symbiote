@@ -664,10 +664,8 @@ def test_a_link_to_an_unreachable_target_is_replaced_not_refused(tmp_path):
     assert (tmp_path / "regular").read_text() == "keep"
 
 
-@pytest.mark.skipif(not hasattr(__import__("os"), "mkfifo"), reason="needs FIFOs")
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs FIFOs")
 def test_no_command_replaces_a_fifo_or_a_link_to_one(tmp_path):
-    import os
-
     project = tmp_path / "project"
     project.mkdir()
     (project / "AGENTS.md").write_text("Keep receipts.")

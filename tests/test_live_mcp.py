@@ -201,11 +201,12 @@ def test_read_only_annotation_does_not_become_authorization_or_safety_claim():
         [initialization(), notification_accepted(), rpc_result(2, {"tools": [tool()]})]
     )
     assert result.complete
-    assert result.tools[0].lints
+    assert "unverified declarations" in result.tools[0].lints[0]
+    assert "no capability was authorized" in result.tools[0].lints[0]
     data = result.to_dict()
-    assert "verified" not in data or data["verified"] is False
-    assert "safe" not in data or data["safe"] is False
-    assert "authorized" not in data or data["authorized"] is False
+    assert data["coverage"]["authorization_verified"] is False
+    assert data["coverage"]["tool_execution_performed"] is False
+    assert data["tools"][0]["descriptor"]["annotations"] == {"readOnlyHint": True}
 
 
 @pytest.mark.parametrize("status", [301, 302, 303, 307, 308])

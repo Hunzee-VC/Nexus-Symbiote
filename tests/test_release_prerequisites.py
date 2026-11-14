@@ -185,6 +185,9 @@ def test_the_committed_release_tag_ruleset_satisfies_the_administrator_check():
 def test_a_ruleset_that_lets_release_tags_move_is_rejected(changes):
     errors, notices = controls.evaluate_tag_rulesets([committed_ruleset(**changes)])
     assert errors and not notices
+
+
+def test_no_ruleset_at_all_is_rejected():
     assert controls.evaluate_tag_rulesets([])[0]
 
 

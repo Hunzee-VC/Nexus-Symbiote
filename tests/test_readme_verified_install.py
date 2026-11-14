@@ -75,8 +75,17 @@ def _run(tmp_path: Path, *, tag: str = COMMIT, gh_status: int = 0, gh: bool = Tr
     work.mkdir()
     log = tmp_path / "calls.log"
     log.touch()
+    system = "/usr/bin:/bin"
+    if not gh:
+        without_gh = tmp_path / "system-without-gh"
+        without_gh.mkdir()
+        for directory in ("/bin", "/usr/bin"):
+            for tool in Path(directory).iterdir():
+                if tool.name != "gh" and not (without_gh / tool.name).exists():
+                    (without_gh / tool.name).symlink_to(tool)
+        system = str(without_gh)
     env = {
-        "PATH": f"{stubs}:/usr/bin:/bin",
+        "PATH": f"{stubs}:{system}",
         "HOME": str(tmp_path),
         "STUB_DIR": str(stubs),
         "STUB_LOG": str(log),
@@ -140,5 +149,7 @@ def test_verified_install_stops_and_installs_nothing_after_a_failed_step(
         # The wheel stub leaves an entry point behind on purpose: the block must still
         # stop at the failed install instead of running it.
         assert not (work / ".venv/bin/nexus-symbiote").exists()
+    if failure == {"gh": False}:
+        assert result.returncode == 127 and "gh: command not found" in result.stderr
     if before_attestation:
         assert "--require-hashes" not in calls and "--no-deps dist/" not in calls

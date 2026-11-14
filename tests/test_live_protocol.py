@@ -195,7 +195,7 @@ def test_event_stream_ignores_priming_comment_unknown_fields_and_other_event_typ
 
 
 def test_event_stream_keeps_unicode_line_separators_inside_json_strings():
-    payload = {"jsonrpc": "2.0", "id": 2, "result": {"text": "a b c\x85d"}}
+    payload = {"jsonrpc": "2.0", "id": 2, "result": {"text": "a\u2028b\u2029c\x85d"}}
     body = b"data: " + json.dumps(payload, ensure_ascii=False).encode() + b"\n\n"
     assert live_mcp._sse(body, 10) == [payload]
 
