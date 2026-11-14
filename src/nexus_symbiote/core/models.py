@@ -44,6 +44,9 @@ SUPPORTED_SPEC_MINORS = {1: (0, 1)}
 MAX_REFERENCE_CHARS = 16_384
 """Upper bound for a component reference; collector references stay far below it."""
 
+UNBOUND_VALUES_DETAIL = "values not bound in this inventory"
+"""Phrase in the completeness finding for values that only a source binding key binds."""
+
 _SPEC_VERSION = re.compile(r"(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,5})")
 
 
