@@ -260,6 +260,21 @@ MAX_LIST_ENTRIES = 1000
 MAX_TOOL_NODES = 20_000
 MAX_TOOL_DEPTH = 64
 MAX_FILE_NODES = 200_000
+# These runners install the named package, then resolve its dependencies from the
+# network at launch. An exact top-level version does not pin that tree.
+_TRANSITIVE_RUNNERS = frozenset(
+    {
+        "npx",
+        "npm exec",
+        "bunx",
+        "bun x",
+        "pnpm dlx",
+        "yarn dlx",
+        "uvx",
+        "uv tool run",
+        "pipx run",
+    }
+)
 
 # Exported bindings must not be computable from secret values: an unkeyed digest
 # over credentials lets anyone holding the BOM confirm guesses offline. The
@@ -2224,6 +2239,23 @@ class MCPScanner(Scanner):
                 "version_pinning",
                 f"MCP server '{name}' container image has neither a digest nor a release tag.",
                 "Pin to a SHA256 artifact digest and verify its provenance.",
+            )
+        if (
+            launch.unknown is None
+            and launch.launcher in _TRANSITIVE_RUNNERS
+            and any(
+                package.pinned and package.pin == "version" and package.registry
+                for package in launch.packages
+            )
+        ):
+            add(
+                RiskSeverity.MEDIUM,
+                "transitive_resolution",
+                (
+                    f"MCP server '{name}' pins its package but resolves dependencies at launch "
+                    "without a lockfile."
+                ),
+                "Vendor a lockfile-installed server, or launch an image by digest.",
             )
         if any(p.ecosystem == "oci" and p.pin == "tag" for p in floating):
             add(

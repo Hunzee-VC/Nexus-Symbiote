@@ -115,7 +115,7 @@ nexus-symbiote crosswalk demo.aibom.json --framework mitre-atlas-2026.10 --forma
 
 A reference means that the finding records a precondition for the framework entry, a weakness of its type, or evidence relevant to it. It does not mean that a technique was used, that an attack happened, that a control fails or is met, or that a legal obligation applies. Findings describe what the inventory records; neither a finding nor its absence shows that an agent, model or tool is safe.
 
-Findings: 10, as `risk` scores them under the built-in policy, with 0 suppressed and 0 ignored. Collection coverage, as `risk` assesses it: reported.
+Findings: 11, as `risk` scores them under the built-in policy, with 0 suppressed and 0 ignored. Collection coverage, as `risk` assesses it: reported.
 
 Entries that no finding references are not listed; that says nothing about whether the risk an entry names is present.
 
@@ -123,7 +123,7 @@ Entries that no finding references are not listed; that says nothing about wheth
 
 | Framework | Edition | Verification | Entries referenced | Findings with a reference | Findings without a reference |
 | --- | --- | --- | --- | --- | --- |
-| MITRE ATLAS | 2026.10 | primary | 4 | 6 | 4 |
+| MITRE ATLAS | 2026.10 | primary | 4 | 7 | 4 |
 
 ## MITRE ATLAS 2026.10
 
@@ -134,7 +134,7 @@ Source: <https://github.com/mitre-atlas/atlas-data/blob/main/dist/v6/ATLAS-2026.
 | AML.T0010.003 | Supply Chain Compromise: Model Repository | 1 | 0 | 1 | 0 | 0 | 0 |
 | AML.T0010.005 | Supply Chain Compromise: AI Agent Tool | 2 | 0 | 0 | 2 | 0 | 0 |
 | AML.T0070 | RAG Poisoning | 1 | 0 | 0 | 1 | 0 | 0 |
-| AML.T0109 | AI Supply Chain Rug Pull | 2 | 0 | 2 | 0 | 0 | 0 |
+| AML.T0109 | AI Supply Chain Rug Pull | 3 | 0 | 2 | 1 | 0 | 0 |
 
 ### AML.T0010.003 Supply Chain Compromise: Model Repository
 
@@ -163,12 +163,14 @@ Source: <https://github.com/mitre-atlas/atlas-data/blob/main/dist/v6/ATLAS-2026.
 
 ### AML.T0109 AI Supply Chain Rug Pull
 
+- transitive\_resolution: A dependency resolved at launch can be replaced without moving the package pin.
 - version\_pinning: An unpinned reference takes the next published version, which a rug pull relies on.
 
 | Severity | Category | Component | Detail |
 | --- | --- | --- | --- |
 | high | version\_pinning | mcp\-server\:c56be5e8e4f376d7d44d2f3af332507c8c938032e49a4d816d2de33334af242f | MCP server \'memory\' uses an unpinned package reference \(arguments omitted\)\. |
 | high | version\_pinning | registry\:docker\/ollama\/ollama\:latest | Docker image \'ollama\/ollama\:latest\' lacks an immutable digest pin\. |
+| medium | transitive\_resolution | mcp\-server\:da7146a8034e04b49f26a150811b1283ef7e3fa0c3b40353a73a5ac045d8d032 | MCP server \'notes\' pins its package but resolves dependencies at launch without a lockfile\. |
 
 ## Categories without a reference
 
@@ -788,6 +790,19 @@ No reference: no entry was defensible for this category.
 | `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `cwe` | CWE-451 User Interface (UI) Misrepresentation of Critical Information | all | The file can display differently from what the agent processes. |
 | `cwe` | CWE-1427 Improper Neutralization of Input Used for LLM Prompting | all | Instruction text reaches the model with characters that are not neutralized. |
+
+### `transitive_resolution`
+
+| Framework | Entry | Severities | Rationale |
+| --- | --- | --- | --- |
+| `owasp-llm-2025` | LLM03:2025 Supply Chain | all | A pinned MCP package whose dependencies are resolved at launch is a supply chain weakness. |
+| `owasp-llm-2026` | LLM04:2026 Supply Chain | all | A pinned MCP package whose dependencies are resolved at launch is a supply chain weakness. |
+| `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | The agent's launched packages can change without a change to the pin. |
+| `mitre-atlas-2026.10` | AML.T0109 AI Supply Chain Rug Pull | all | A dependency resolved at launch can be replaced without moving the package pin. |
+| `nist-ai-rmf-1.0` | MANAGE-3.1 Third-party AI risks are monitored and controlled | all | Records a third-party component whose identity, version or resolution is not established. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
+| `iso-iec-42001-2023` | A.10.3 Suppliers are managed | all | Records a supplied component whose identity, version or resolution is not established. |
+| `cwe` | CWE-829 Inclusion of Functionality from Untrusted Control Sphere | all | Dependencies of a pinned package are resolved when the server starts. |
 
 ### `transport_ambiguity`
 
