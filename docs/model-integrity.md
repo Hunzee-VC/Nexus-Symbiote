@@ -47,7 +47,7 @@ The serialization rating is:
 | `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or, under any other model suffix and for a file inventoried by its content, content recognized as a binary or text-protocol pickle, a NumPy array with an object dtype, which `np.load(allow_pickle=True)` unpickles, or a ZIP archive with a pickle-family member (`.pkl`, as `torch.save` writes `data.pkl`, `.pickle`, the other listed suffixes, or such a name inside a compression suffix such as `.pkl.gz`) or with such an array as a member. A binary pickle is recognized by its PROTO opcode and at least 16 well-formed opcodes in its first 64 KiB, whatever follows them; a text-protocol one by a consistent opcode stream of at most 4,096 opcodes. An object dtype is found in a NumPy version 1, 2 or 3 header of at most 64 KiB, which holds every version 1 header however it is padded, parsed as `np.load` parses it; only its `descr` value names types, in structured, nested and subarray dtypes too, so a field name is never taken for a type. A ZIP member's name is read from the archive's first local header or from its central directory, read from the end of the archive up to 1 MiB, including ZIP64; every listed member, whatever its name, is checked for an array from its local header and the start of its data, stored or DEFLATE-compressed |
 | `safe` | A SafeTensors file whose header is UTF-8 JSON with string metadata, known dtypes and tensor spans that index the whole data region, with no configured chat template matching the access-pattern heuristic. The rating is not a guarantee that the template is safe; `validate` compares templates only through its completeness check |
 | `unsafe-template-injection` | A GGUF file whose embedded chat template matches the access-pattern heuristic, or a SafeTensors file that would be `safe` in a directory whose Hugging Face chat template matches it. A match does not establish that the renderer executes the pattern or that its sandbox is bypassed |
-| `unknown` | Everything else, including ONNX, GGUF, Keras, HDF5, SavedModel, TFLite, Core ML and ExecuTorch files, a SafeTensors header over the 1 MiB inspection limit, a NumPy array header over 64 KiB, and a ZIP archive whose central directory is malformed or over 1 MiB or that has a member that was not checked: one compressed by another method, such as BZIP2 or LZMA, one whose data runs past the next member's local header, or one with an array header over 64 KiB |
+| `unknown` | Everything else, including ONNX, GGUF, Keras, HDF5, SavedModel, TFLite, Core ML and ExecuTorch files, a SafeTensors header over the 1 MiB inspection limit, a NumPy array header over 64 KiB or past the 16,000,000 structure units one scan shares with the ONNX and GGUF readers, at one unit a header byte, and a ZIP archive whose central directory is malformed or over 1 MiB or that has a member that was not checked: one compressed by another method, such as BZIP2 or LZMA, one whose data runs past the next member's local header, or one with an array header past those limits |
 
 ## Files bound to the weights
 
@@ -171,8 +171,8 @@ checked, and is a coverage gap in `surfaces_excluded`.
 
 A GGUF file whose metadata exceeds the reader's bounds (65,536 keys, 16 MiB
 strings, 2,097,152 array items, 128 MiB of metadata, or the 16,000,000
-structure units one scan may spend on ONNX and GGUF files) keeps the rating
-`unknown`, records `properties.gguf_metadata` and is a coverage gap in
+structure units one scan may spend on ONNX and GGUF files and NumPy array headers)
+keeps the rating `unknown`, records `properties.gguf_metadata` and is a coverage gap in
 `surfaces_excluded`, because its chat templates were not inspected.
 
 ## Operator signature policy

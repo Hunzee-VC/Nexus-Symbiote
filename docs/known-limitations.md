@@ -362,7 +362,9 @@ A way around a limit that its entry does not describe is worth a
   opcode and 16 well-formed opcodes in the first 64 KiB, and a text-protocol pickle
   by a consistent stream of at most 4,096 opcodes. A NumPy array's version 1, 2 or 3
   header is parsed when it is at most 64 KiB long, as every version 1 header is, and
-  only its `descr` value is read for types, so a field named `O` is not one. A ZIP
+  while the 16,000,000 structure units one scan shares with the ONNX and GGUF readers
+  last, at one unit a header byte; only its `descr` value is read for types, so a
+  field named `O` is not one. A ZIP
   archive is recognized by a pickle-family member in its first local header or in a
   central directory of at most 1 MiB, read from the end of the archive, including
   ZIP64, and by an object-dtype array as any member, read from the member's local

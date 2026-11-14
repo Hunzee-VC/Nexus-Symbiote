@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety
+from nexus_symbiote.scanners import model
 from nexus_symbiote.scanners.model import (
     MAX_PICKLE_INSPECTION_BYTES,
     NUMPY_HEADER_UNREAD,
@@ -22,6 +23,7 @@ from nexus_symbiote.scanners.model import (
     ModelScanner,
     inspect_model_format,
 )
+from nexus_symbiote.utils import model_formats
 
 UNSAFE = SerializationSafety.UNSAFE_CODE_EXECUTION
 NOT_RECOGNIZED = (
@@ -204,3 +206,45 @@ def test_an_object_array_under_a_model_name_is_a_critical_component(tmp_path: Pa
             risk.severity is RiskSeverity.CRITICAL and risk.category == "serialization_format"
             for risk in component.risks
         )
+
+
+def test_array_headers_spend_the_inspection_budget_one_scan_shares(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parsed: list[int] = []
+    declares = model._declares_object
+
+    def counted(header: bytes, major: int) -> bool:
+        parsed.append(len(header))
+        return declares(header, major)
+
+    monkeypatch.setattr(model, "_declares_object", counted)
+    monkeypatch.setattr(model_formats, "MAX_INSPECTION_UNITS", 200_000)
+    # Each 60 KiB header inflates from about a hundred bytes.
+    padded = _npy("'<f8'", version=2, lead=60_000)
+    archive = _zip([(f"m{index}.npy", padded) for index in range(40)], zipfile.ZIP_DEFLATED)
+    assert len(archive) < 40 * 1024
+    (tmp_path / "arrays.npz").write_bytes(archive)
+    (tmp_path / "first.npy").write_bytes(_npy("'|O'", lead=60_000))
+    (tmp_path / "second.npy").write_bytes(_npy("'|O'", lead=60_000))
+    result = ModelScanner().scan(tmp_path)
+    assert not result.scan_failures
+    assert sum(parsed) <= 200_000
+    assert {c.name: c.properties["format_inspection"] for c in result.components} == {
+        "arrays.npz": ZIP_MEMBER_UNREAD,
+        "first.npy": NUMPY_HEADER_UNREAD,
+        "second.npy": NUMPY_HEADER_UNREAD,
+    }
+
+
+def test_a_header_that_claims_more_than_it_holds_costs_only_what_it_holds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(model_formats, "MAX_INSPECTION_UNITS", 4_096)
+    claim = b"\x93NUMPY\x02\x00" + MAX_PICKLE_INSPECTION_BYTES.to_bytes(4, "little") + b"{}"
+    for index in range(100):
+        (tmp_path / f"short{index:03d}.npy").write_bytes(claim)
+    (tmp_path / "zz.npy").write_bytes(_npy("'|O'"))
+    result = ModelScanner().scan(tmp_path)
+    assert not result.scan_failures
+    assert {c.name: c.serialization_safety for c in result.components} == {"zz.npy": UNSAFE}

@@ -160,14 +160,14 @@ ZIP_DIRECTORY_UNREAD = (
 )
 ZIP_MEMBER_UNREAD = (
     "ZIP archive with a member that could not be inspected (overlapping, compressed by "
-    "another method or with an array header over the inspection limit); no bounded "
+    "another method or with an array header past the inspection limits); no bounded "
     "structural validator for this format/loader"
 )
 # ZIP verdicts that leave the rating unknown; each read the archive to its end.
 _ZIP_UNRATED = frozenset({ZIP_WITHOUT_PICKLE, ZIP_DIRECTORY_UNREAD, ZIP_MEMBER_UNREAD})
 NUMPY_OBJECT_ARRAY = "NumPy object-dtype array; np.load(allow_pickle=True) unpickles it"
 NUMPY_HEADER_UNREAD = (
-    "NumPy array whose header is over the inspection limit; no bounded structural "
+    "NumPy array whose header is past the inspection limits; no bounded structural "
     "validator for this format/loader"
 )
 # Content that a bound left unread: a file no model name rates is inventoried for it.
@@ -339,7 +339,7 @@ def _recognized_pickle(stream: BinaryIO, prefix: bytes, size: int) -> str | None
 
 
 def _pickle_member(name: bytes) -> bool:
-    """A ZIP member named as a pickle-family file is, wherever it sits in the archive.
+    """Whether a ZIP member's name is a pickle-family file name, wherever the member sits.
 
     ``torch.load`` unpickles ``data.pkl``; a loader handed the archive can open any other
     member, so a member is rated by its name, as a file on disk is.
@@ -352,7 +352,7 @@ def _little(data: bytes, offset: int, width: int) -> int:
 
 
 class _ZipMember(NamedTuple):
-    """One central directory entry: the name, method and size a loader reads it by."""
+    """One central directory entry: what a loader reads a member by."""
 
     name: bytes
     method: int
@@ -514,7 +514,7 @@ class _MemberData:
 
 
 def _members_hold_object_array(
-    stream: BinaryIO, members: list[_ZipMember], directory: int
+    stream: BinaryIO, members: list[_ZipMember], directory: int, budget: InspectionBudget
 ) -> bool | None:
     """Whether a member of a ZIP archive is a NumPy array with an object dtype.
 
@@ -523,22 +523,27 @@ def _members_hold_object_array(
     of its data, stored or raw DEFLATE, read again from the stream that read the
     archive to its end. As ``zipfile`` does, members are taken in offset order and a
     member whose data runs past the next local header or into the directory is not
-    read, so the bytes read again are at most the archive's. ``None`` when a member
-    could not be checked: its data overlaps, it is compressed by another method, or its
-    array header is longer than ``MAX_PICKLE_INSPECTION_BYTES``.
+    read, so the bytes read again are at most the archive's. Each array header is
+    charged to ``budget`` before it is read or inflated: DEFLATE expands about a
+    thousandfold, so a small archive could otherwise make many members inflate and parse
+    a full header. ``None`` when a member could not be checked: its data overlaps, it
+    is compressed by another method, or its array header is longer than
+    ``MAX_PICKLE_INSPECTION_BYTES`` or than the budget left.
     """
     ordered = sorted(members, key=lambda member: member.offset)
     unread = False
     for index, member in enumerate(ordered):
         end = min(ordered[index + 1].offset, directory) if index + 1 < len(ordered) else directory
-        found = _member_holds_object_array(stream, member, end)
+        found = _member_holds_object_array(stream, member, end, budget)
         if found:
             return True
         unread = unread or found is None
     return None if unread else False
 
 
-def _member_holds_object_array(stream: BinaryIO, member: _ZipMember, end: int) -> bool | None:
+def _member_holds_object_array(
+    stream: BinaryIO, member: _ZipMember, end: int, budget: InspectionBudget
+) -> bool | None:
     if member.size == 0:
         return False
     if member.offset < 0 or member.offset + 30 > end:
@@ -554,18 +559,23 @@ def _member_holds_object_array(stream: BinaryIO, member: _ZipMember, end: int) -
         return None
     data = _MemberData(stream, start, member.size, deflated=member.method == 8)
     try:
-        return _object_array(b"", data.read)
+        return _object_array(b"", data.read, budget)
     except zlib.error:
         # zipfile raises the same error when it inflates the member.
         return False
 
 
-def _object_array(start: bytes, more: Callable[[int], bytes]) -> bool | None:
+def _object_array(
+    start: bytes, more: Callable[[int], bytes], budget: InspectionBudget
+) -> bool | None:
     """Whether a NumPy array that begins with ``start``, continued by ``more``, holds objects.
 
     ``more(n)`` returns up to the next ``n`` bytes. A version 1, 2 or 3 header is read
     whole up to ``MAX_PICKLE_INSPECTION_BYTES``, which a version 1 header never exceeds,
-    however it is padded. ``None`` when the header is longer; ``False`` for anything
+    however it is padded. Each header byte read or inflated is a unit of ``budget``,
+    which the format readers of one scan share, charged as it arrives, so a header that
+    claims more than it holds costs only what it holds. ``None`` when the header is
+    longer than that bound or than what is left of ``budget``; ``False`` for anything
     ``np.load`` does not read as an array.
     """
     if len(start) < 12:
@@ -578,9 +588,18 @@ def _object_array(start: bytes, more: Callable[[int], bytes]) -> bool | None:
     length = _little(start, 8, preamble - 8)
     if length > MAX_PICKLE_INSPECTION_BYTES:
         return None
-    header = start[preamble : preamble + length]
-    header += more(length - len(header))
-    return len(header) == length and _declares_object(header, start[6])
+    header = bytearray(start[preamble : preamble + length])
+    try:
+        budget.charge(len(header), NUMPY_HEADER_UNREAD)
+        while len(header) < length:
+            chunk = more(min(4096, length - len(header)))
+            if not chunk:
+                return False
+            budget.charge(len(chunk), NUMPY_HEADER_UNREAD)
+            header += chunk
+    except FormatError:
+        return None
+    return _declares_object(bytes(header), start[6])
 
 
 def _declares_object(header: bytes, major: int) -> bool:
@@ -662,7 +681,7 @@ def _object_dtype_string(text: str) -> bool:
 
 
 def _recognized_code_container(
-    stream: BinaryIO, prefix: bytes, size: int
+    stream: BinaryIO, prefix: bytes, size: int, budget: InspectionBudget
 ) -> tuple[SerializationSafety, str] | None:
     """A verdict on content a loader can run code from, or ``None`` for content not recognized.
 
@@ -672,7 +691,7 @@ def _recognized_code_container(
     directory at the end of the archive, which lists every member, is read.
     """
     if prefix[:6] == _NUMPY_MAGIC:
-        array = _object_array(prefix, stream.read)
+        array = _object_array(prefix, stream.read, budget)
         if array is None:
             return SerializationSafety.UNKNOWN, NUMPY_HEADER_UNREAD
         return (SerializationSafety.UNSAFE_CODE_EXECUTION, NUMPY_OBJECT_ARRAY) if array else None
@@ -695,16 +714,18 @@ def _recognized_code_container(
     members, offset = directory
     if any(_pickle_member(member.name) for member in members):
         return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_PICKLE_MEMBER
-    arrays = _members_hold_object_array(stream, members, offset)
+    arrays = _members_hold_object_array(stream, members, offset, budget)
     if arrays:
         return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_OBJECT_ARRAY
     return SerializationSafety.UNKNOWN, ZIP_WITHOUT_PICKLE if arrays is False else ZIP_MEMBER_UNREAD
 
 
 def inspect_model_format(
-    path: Path, *, stream: BinaryIO | None = None
+    path: Path, *, stream: BinaryIO | None = None, budget: InspectionBudget | None = None
 ) -> tuple[SerializationSafety, str]:
     """Inspect bounded structure without deserializing a model or running code.
+
+    ``budget`` is shared with the other files of one scan; NumPy array headers spend it.
 
     SAFE means the checked file has a supported non-executable tensor container
     layout. It is not a claim about model behavior, parser vulnerabilities,
@@ -725,7 +746,9 @@ def inspect_model_format(
                 and 2 <= length <= min(MAX_MODEL_HEADER_BYTES, size - 8)
             )
             if not tensor_candidate:
-                container = _recognized_code_container(opened, prefix, size)
+                container = _recognized_code_container(
+                    opened, prefix, size, budget or InspectionBudget()
+                )
                 if container is not None and (
                     container[0] is SerializationSafety.UNSAFE_CODE_EXECUTION or not safetensors
                 ):
@@ -817,7 +840,8 @@ def observe_model_artifact(
     this descriptor when the caller's read ends, so the verdict and digest are
     never attributed to a pathname that now names other bytes.
     """
-    return _complete_observation(path, stream, _inspect_opened(path, stream), budget)
+    budget = budget or InspectionBudget()
+    return _complete_observation(path, stream, _inspect_opened(path, stream, budget), budget)
 
 
 def observe_content(
@@ -832,7 +856,8 @@ def observe_content(
     observed from the same stream, so every byte is read, and charged, once. The caller
     holds a confined regular-file context, as for ``observe_model_artifact``.
     """
-    inspected = _inspect_opened(path, stream)
+    budget = budget or InspectionBudget()
+    inspected = _inspect_opened(path, stream, budget)
     if (
         inspected.safety != SerializationSafety.UNSAFE_CODE_EXECUTION
         and inspected.explanation not in _CONTENT_UNREAD
@@ -848,17 +873,17 @@ class _Inspected(NamedTuple):
     explanation: str
 
 
-def _inspect_opened(path: Path, stream: BinaryIO) -> _Inspected:
+def _inspect_opened(path: Path, stream: BinaryIO, budget: InspectionBudget) -> _Inspected:
     before = os.fstat(stream.fileno())
     if before.st_size > limits.current().model_bytes:
         raise OSError("model artifact exceeds the hash byte limit")
     observed = _HashingModelReader(stream)
-    safety, explanation = inspect_model_format(path, stream=cast(BinaryIO, observed))
+    safety, explanation = inspect_model_format(path, stream=cast(BinaryIO, observed), budget=budget)
     return _Inspected(before, observed, safety, explanation)
 
 
 def _complete_observation(
-    path: Path, stream: BinaryIO, inspected: _Inspected, budget: InspectionBudget | None
+    path: Path, stream: BinaryIO, inspected: _Inspected, budget: InspectionBudget
 ) -> ModelArtifactObservation:
     """Complete an inspection with format metadata and the SHA-256 of every byte."""
     before, observed, safety, explanation = inspected
