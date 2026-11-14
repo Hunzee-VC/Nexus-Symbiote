@@ -22,8 +22,15 @@ tokenizer and chat template files that a model directory's readers open are, suc
 as `config.json` or `tokenizer.json`, and Python and Jinja sources are not checked
 this way. Such a file is a component when its content is rated
 `unsafe-code-execution` by the checks in the table below, or when the content is a
-NumPy array or a ZIP archive that those checks' bounds left unread, which is rated
-`unknown`. Any other content, such as a numeric NumPy array or a ZIP archive with
+NumPy array, a ZIP archive or a binary pickle that those checks' bounds left unread,
+which is rated `unknown`. A pickle found this way must name a callable: its inspected
+opcodes must include one through which unpickling reaches code (`GLOBAL`,
+`STACK_GLOBAL`, `INST`, `OBJ`, `REDUCE`, `NEWOBJ`, `NEWOBJ_EX`, `BUILD` or `EXT1`,
+`EXT2`, `EXT4`). Without one the stream runs nothing, as text that starts `N.B.` or
+`Mar.`, or 16-bit samples that start with the value 11854, are well-formed
+text-protocol pickles that load `None` or an integer, so such a file is not a
+component; a binary pickle that names none in the opcodes read before the 64 KiB or
+4,096-opcode bound is rated `unknown`, because what follows was not read. Any other content, such as a numeric NumPy array or a ZIP archive with
 neither a pickle-family member nor an object-dtype array as a member, is not a
 component. Each such file is opened once, after every file that the models with a
 name bind and their directories configure has been read, and only if it is not one
@@ -45,7 +52,7 @@ The serialization rating is:
 
 | Rating | When |
 | --- | --- |
-| `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or, under any other model suffix and for a file inventoried by its content, content recognized as a binary or text-protocol pickle, a NumPy array with an object dtype, which `np.load(allow_pickle=True)` unpickles, or a ZIP archive with a pickle-family member (`.pkl`, as `torch.save` writes `data.pkl`, `.pickle`, the other listed suffixes, or such a name inside a compression suffix such as `.pkl.gz`) or with such an array as a member. A binary pickle is recognized by its PROTO opcode and at least 16 well-formed opcodes in its first 64 KiB, whatever follows them; a text-protocol one by a consistent opcode stream of at most 4,096 opcodes. An object dtype is found in a NumPy version 1, 2 or 3 header of at most 64 KiB, which holds every version 1 header however it is padded, parsed as `np.load` parses it; only its `descr` value names types, in structured, nested and subarray dtypes too, so a field name is never taken for a type. A ZIP member's name is read from the archive's first local header or from its central directory, read from the end of the archive up to 1 MiB, including ZIP64; every listed member, whatever its name, is checked for an array from its local header and the start of its data, stored or DEFLATE-compressed |
+| `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or, under any other model suffix and for a file inventoried by its content, content recognized as a binary or text-protocol pickle, a NumPy array with an object dtype, which `np.load(allow_pickle=True)` unpickles, or a ZIP archive with a pickle-family member (`.pkl`, as `torch.save` writes `data.pkl`, `.pickle`, the other listed suffixes, or such a name inside a compression suffix such as `.pkl.gz`) or with such an array as a member. A binary pickle is recognized by its PROTO opcode and at least 16 well-formed opcodes in its first 64 KiB, whatever follows them, or by an opcode that names a callable before an opcode whose data runs past those 64 KiB, as a protocol 5 pickle of a large NumPy array writes it; a text-protocol one by a consistent opcode stream of at most 4,096 opcodes. An object dtype is found in a NumPy version 1, 2 or 3 header of at most 64 KiB, which holds every version 1 header however it is padded, parsed as `np.load` parses it; only its `descr` value names types, in structured, nested and subarray dtypes too, so a field name is never taken for a type. A ZIP member's name is read from the archive's first local header or from its central directory, read from the end of the archive up to 1 MiB, including ZIP64; every listed member, whatever its name, is checked for an array from its local header and the start of its data, stored or DEFLATE-compressed |
 | `safe` | A SafeTensors file whose header is UTF-8 JSON with string metadata, known dtypes and tensor spans that index the whole data region, with no configured chat template matching the access-pattern heuristic. The rating is not a guarantee that the template is safe; `validate` compares templates only through its completeness check |
 | `unsafe-template-injection` | A GGUF file whose embedded chat template matches the access-pattern heuristic, or a SafeTensors file that would be `safe` in a directory whose Hugging Face chat template matches it. A match does not establish that the renderer executes the pattern or that its sandbox is bypassed |
 | `unknown` | Everything else, including ONNX, GGUF, Keras, HDF5, SavedModel, TFLite, Core ML and ExecuTorch files, a SafeTensors header over the 1 MiB inspection limit, a NumPy array header over 64 KiB or past the 16,000,000 structure units one scan shares with the ONNX and GGUF readers, at one unit a header byte, and a ZIP archive whose central directory is malformed or over 1 MiB or that has a member that was not checked: one compressed by another method, such as BZIP2 or LZMA, one whose data runs past the next member's local header, or one with an array header past those limits |
@@ -285,7 +292,8 @@ those listed above is inventoried only by its content, and only under the names 
 directories [listed above](#model-files-and-references): a pickle renamed outside
 them, such as `assets/blob`, is not inventoried, nor is a pickle that the bounded
 check does not recognize, such as a binary pickle whose first 64 KiB hold neither 16
-opcodes nor its end. SafeTensors
+opcodes nor its end, or a pickle inventoried by its content whose inspected
+opcodes name no callable. SafeTensors
 tensor bytes are hashed but not inspected, so a payload that also parses as
 another format is not flagged. The chat template check is a heuristic, not template
 analysis: a name assembled through variables, formatting, filters, nested expressions

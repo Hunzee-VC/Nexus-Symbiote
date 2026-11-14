@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import pickle
+import pickletools
 import random
 import zipfile
 from dataclasses import replace
@@ -18,6 +19,7 @@ from nexus_symbiote.scanners.model import (
     MAX_PICKLE_INSPECTION_BYTES,
     NUMPY_HEADER_UNREAD,
     NUMPY_OBJECT_ARRAY,
+    PICKLE_UNREAD,
     ZIP_DIRECTORY_UNREAD,
     ZIP_MEMBER_UNREAD,
     ZIP_OBJECT_ARRAY,
@@ -247,3 +249,127 @@ def test_validation_observes_a_content_artifact_as_the_scan_did(tmp_path: Path) 
         assert (reference, "unsafe_format") in issues
         assert (reference, "format_subject_mismatch") not in issues
         assert (reference, "format_claim_mismatch") not in issues
+
+
+# Opcodes through which unpickling resolves or calls an object.
+_CODE_OPCODES = {
+    "GLOBAL",
+    "STACK_GLOBAL",
+    "INST",
+    "OBJ",
+    "REDUCE",
+    "NEWOBJ",
+    "NEWOBJ_EX",
+    "BUILD",
+    "EXT1",
+    "EXT2",
+    "EXT4",
+}
+
+
+def _names_a_callable(data: bytes) -> bool:
+    names: set[str] = set()
+    try:
+        for opcode, _, _ in pickletools.genops(data[:MAX_PICKLE_INSPECTION_BYTES]):
+            names.add(opcode.name)
+    except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
+        pass
+    return bool(names & _CODE_OPCODES)
+
+
+def test_text_that_reads_as_a_harmless_pickle_is_not_inventoried(tmp_path: Path) -> None:
+    (tmp_path / "models").mkdir()
+    # "N." is NONE then STOP, "Mar." BININT2 then STOP: well-formed, but they run nothing.
+    (tmp_path / "models" / "NOTES.txt").write_bytes(b"N.B. retrain after the next release\n")
+    (tmp_path / "samples.dat").write_bytes((11854).to_bytes(2, "little") + bytes(range(64)))
+    (tmp_path / "service.dat").write_bytes(b"Mar. 3 12:00:01 service started\n")
+    assert _components(tmp_path) == {}
+    # A name on the pickle suffix list is still rated by the name.
+    (tmp_path / "models" / "notes.pkl").write_bytes(b"N.B.")
+    assert _components(tmp_path)["models/notes.pkl"].serialization_safety is UNSAFE
+
+
+@pytest.mark.parametrize("protocol", range(pickle.HIGHEST_PROTOCOL + 1))
+def test_a_pickle_that_reaches_code_is_critical_by_content_at_every_protocol(
+    tmp_path: Path, protocol: int
+) -> None:
+    payload = pickle.dumps(_Boom(), protocol=protocol)
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "weights").write_bytes(payload)
+    (tmp_path / "state.dat").write_bytes(payload)
+    (tmp_path / "bundle.npz").write_bytes(_zip([("arr_0.npy", _npy("|O")), ("x.pkl", payload)]))
+    found = _components(tmp_path)
+    assert sorted(found) == ["bundle.npz", "models/weights", "state.dat"]
+    for component in found.values():
+        assert component.serialization_safety is UNSAFE
+        assert _critical(component)
+
+
+def test_random_files_are_never_critical_without_an_opcode_that_reaches_code(
+    tmp_path: Path,
+) -> None:
+    rng = random.Random(1520)  # noqa: S311 - fixed test data, not a secret
+    starts = [b"N.", b"Mar.", b"I12\n.", b"(l.", b"].", b"}.", b"K\x07.", b"\x80\x02N."]
+    (tmp_path / "models").mkdir()
+    written: dict[str, bytes] = {}
+    for index in range(240):
+        kind = index % 4
+        if kind == 0:
+            data = rng.choice(starts) + bytes(rng.choices(range(32, 127), k=rng.randrange(200)))
+        elif kind == 1:
+            data = rng.choice(starts) + rng.randbytes(rng.randrange(400))
+        elif kind == 2:
+            data = bytes([0x80, rng.randrange(2, 6)]) + rng.randbytes(rng.randrange(400))
+        else:
+            data = b"".join(
+                rng.randrange(-(2**15), 2**15).to_bytes(2, "little", signed=True)
+                for _ in range(rng.randrange(1, 100))
+            )
+        relative = f"models/file{index}.txt" if index % 2 else f"data{index}.dat"
+        (tmp_path / relative).write_bytes(data)
+        written[relative] = data
+    for relative, component in _components(tmp_path).items():
+        if _critical(component):
+            assert _names_a_callable(written[relative]), relative
+
+
+class _LargeBuffer:
+    """Reduces as NumPy does at protocol 5: a callable, then the array's bytes in-band."""
+
+    def __reduce_ex__(self, protocol: object) -> tuple[object, tuple[object]]:
+        return (eval, (pickle.PickleBuffer(bytearray(MAX_PICKLE_INSPECTION_BYTES + 4096)),))
+
+
+def test_a_protocol_5_pickle_of_a_large_buffer_is_critical(tmp_path: Path) -> None:
+    payload = pickle.dumps(_LargeBuffer(), protocol=5)
+    names = [opcode.name for opcode, _, _ in pickletools.genops(payload)]
+    # The bytes run past the inspection bound after fewer than 16 opcodes.
+    assert names.index("BYTEARRAY8") < 16
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "array").write_bytes(payload)
+    (tmp_path / "array.dat").write_bytes(payload)
+    found = _components(tmp_path)
+    assert sorted(found) == ["array.dat", "models/array"]
+    for component in found.values():
+        assert component.serialization_safety is UNSAFE
+        assert component.properties["format_inspection"] == BINARY_PICKLE
+
+
+def test_a_binary_pickle_with_no_callable_before_the_bound_is_unknown(tmp_path: Path) -> None:
+    filler = b"N0" * 20 + b"\x8e" + (MAX_PICKLE_INSPECTION_BYTES).to_bytes(8, "little")
+    payload = b"\x80\x04" + filler + b"x" * MAX_PICKLE_INSPECTION_BYTES
+    payload += pickle.dumps(_Boom(), protocol=4)[2:]
+    (tmp_path / "padded.dat").write_bytes(payload)
+    # The same opcodes cut short before the bound run nothing: not a payload.
+    (tmp_path / "short.dat").write_bytes(b"\x80\x04" + filler + b"x" * 100)
+    found = _components(tmp_path)
+    assert sorted(found) == ["padded.dat"]
+    component = found["padded.dat"]
+    assert component.serialization_safety is SerializationSafety.UNKNOWN
+    assert component.properties["format_inspection"] == PICKLE_UNREAD
+    assert any(risk.category == "serialization_format_unknown" for risk in component.risks)
+    bom = AIBOM(components=list(found.values()))
+    report = IntegrityValidator(require_model_signatures=False).validate(bom, tmp_path)
+    categories = {issue.category for issue in report.issues}
+    assert "format_claim_mismatch" not in categories
+    assert "format_subject_mismatch" not in categories
