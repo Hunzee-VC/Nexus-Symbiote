@@ -294,6 +294,11 @@ A way around a limit that its entry does not describe is worth a
   in a statement of its own, which discards it; and passing it to a function of
   the same file, undecorated and bound once, that uses that parameter only in
   these ways and not inside a nested function, lambda, class or comprehension.
+  The server must bind that parameter by the call alone: passed positionally
+  before any `*` spread, or by the keyword of a parameter that is not
+  positional-only, in a call with no `**` spread. A server that may reach
+  another parameter, `*args` or `**kwargs`, as in `configure(*(), server)` or
+  `configure(srv=server)` with `srv` positional-only, is a gap.
   Any other use is a gap, such as saving, passing or dereferencing a bound method
   (`method = server.run`, `anyio.run(server.run_stdio_async)`), keeping a
   decorator, or naming the server in an annotation. An app or run coroutine still

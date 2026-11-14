@@ -705,9 +705,11 @@ def _record_decorated_tools(
 class _Helper(NamedTuple):
     """How a call binds a top-level function's parameters, and the parameters it uses
     unsafely: any use a server's name could not have at the top level, and any use in a
-    nested scope, which closes over the parameter."""
+    nested scope, which closes over the parameter. A keyword never binds a
+    positional-only parameter, so ``keywords`` leaves those out of ``named``."""
 
     positional: tuple[str, ...]
+    keywords: frozenset[str]
     named: frozenset[str]
     unsafe: frozenset[str]
 
@@ -728,7 +730,8 @@ def _helper(
     function: ast.FunctionDef | ast.AsyncFunctionDef, parents: dict[ast.AST, ast.AST]
 ) -> _Helper:
     positional = tuple(arg.arg for arg in (*function.args.posonlyargs, *function.args.args))
-    named = frozenset({*positional, *(arg.arg for arg in function.args.kwonlyargs)})
+    keywords = frozenset(arg.arg for arg in (*function.args.args, *function.args.kwonlyargs))
+    named = keywords | frozenset(arg.arg for arg in function.args.posonlyargs)
     unsafe: set[str] = set()
     pending: list[tuple[ast.AST, bool]] = [(n, False) for n in ast.iter_child_nodes(function)]
     while pending:
@@ -745,7 +748,7 @@ def _helper(
             unsafe.add(node.id)
         nested = nested or isinstance(node, _SCOPES)
         pending.extend((child, nested) for child in ast.iter_child_nodes(node))
-    return _Helper(positional, named, frozenset(unsafe))
+    return _Helper(positional, keywords, named, frozenset(unsafe))
 
 
 def _benign_helper_arguments(
@@ -761,7 +764,9 @@ def _benign_helper_arguments(
     Only an undecorated function whose name the file binds once is read, since a
     call can otherwise reach another definition or what a decorator returned. Each
     helper is read once, however many calls pass it a server, so the work stays
-    linear in the size of the file.
+    linear in the size of the file. A positional argument at or after a ``*``
+    spread, and every argument of a call with a ``**`` spread, binds a parameter
+    that cannot be read from the call, so none of them is judged benign.
     """
     functions = {
         stmt.name: stmt
@@ -781,14 +786,20 @@ def _benign_helper_arguments(
             for value in (*node.args, *(keyword.value for keyword in node.keywords))
         ):
             continue
+        if any(keyword.arg is None for keyword in node.keywords):
+            continue
         helper = helpers.get(function.name)
         if helper is None:
             helper = helpers[function.name] = _helper(function, parents)
+        known = len(helper.positional)
+        for index, value in enumerate(node.args):
+            if isinstance(value, ast.Starred):
+                known = min(known, index)
         passed = [
-            (helper.positional[index] if index < len(helper.positional) else None, value)
+            (helper.positional[index] if index < known else None, value)
             for index, value in enumerate(node.args)
         ] + [
-            (keyword.arg if keyword.arg in helper.named else None, keyword.value)
+            (keyword.arg if keyword.arg in helper.keywords else None, keyword.value)
             for keyword in node.keywords
         ]
         for parameter, value in passed:

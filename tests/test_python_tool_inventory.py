@@ -451,6 +451,53 @@ def test_a_helper_the_call_may_not_reach_is_not_judged_benign(tmp_path, helper):
     )
 
 
+@pytest.mark.parametrize(
+    "call",
+    [
+        "def configure(srv, label=None):\n    srv.tool()(delete_all)\nconfigure(*(), mcp)\n",
+        "def configure(srv, label=None):\n    srv.tool()(delete_all)\nconfigure(*[], mcp)\n",
+        "def configure(srv, label=None, extra=None):\n    srv.tool()(delete_all)\n"
+        + "configure(*(), 'x', mcp)\n",
+        "def configure(srv=None, /, **options):\n    options['srv'].tool()(delete_all)\n"
+        + "configure(srv=mcp)\n",
+        "def configure(srv=None, /):\n    pass\nconfigure(srv=mcp)\n",
+        "def configure(srv, label=None):\n    return srv.sse_app()\n"
+        + "configure(mcp, **options)\n",
+        "def configure(label, *rest):\n    rest[0].tool()(delete_all)\nconfigure('x', mcp)\n",
+        "def configure(**options):\n    options['srv'].tool()(delete_all)\n"
+        + "configure(srv=mcp)\n",
+    ],
+)
+def test_a_server_whose_helper_parameter_is_not_certain_is_a_gap(tmp_path, call):
+    source = FASTMCP + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\ndef delete_all(): pass\n"
+    result, tools = scan(tmp_path, source + call)
+    assert [tool.name for tool in tools] == ["add"]
+    assert "pkg/server.py: unsupported Python MCP binding or dynamic registration" in (
+        result.surfaces_excluded
+    )
+    (tmp_path / "CLAUDE.md").write_text("Be helpful.\n")
+    checked = CliRunner().invoke(main, ["scan", "--no-project-policy", "--check", str(tmp_path)])
+    assert checked.exit_code == 1, checked.output
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "def build(srv, label=None):\n    return srv.sse_app()\napp = build(mcp, *labels)\n",
+        "def build(srv, /, label=None):\n    return srv.sse_app()\napp = build(mcp, label='x')\n",
+        "def build(label=None, srv=None):\n    return srv.sse_app()\napp = build(srv=mcp)\n",
+        "def build(label, *, srv):\n    return srv.sse_app()\napp = build('x', srv=mcp)\n",
+        "def build(srv, *rest, **options):\n    return srv.sse_app()\n"
+        + "app = build(mcp, 'x', label='y')\n",
+    ],
+)
+def test_a_server_bound_to_a_certain_helper_parameter_stays_benign(tmp_path, call):
+    source = FASTMCP + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n"
+    result, tools = scan(tmp_path, source + call)
+    assert [tool.name for tool in tools] == ["add"]
+    assert not result.scan_failures and not result.surfaces_excluded
+
+
 AGENT = "from pydantic_ai import Agent\n"
 
 
