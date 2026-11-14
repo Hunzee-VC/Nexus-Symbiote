@@ -538,7 +538,17 @@ def run(
                 "json, cyclonedx or spdx. No artifact was exported and no gate ran."
             )
             return finish()
-        emit_export(native, config.output, config.format)
+        try:
+            from nexus_symbiote.utils.files import OutputRefusedError
+
+            emit_export(native, config.output, config.format)
+        except (OutputRefusedError, OSError):
+            record("collection", "failed")
+            _say(
+                "Collection failed: the output path was refused or could not be written, "
+                "so no artifact was exported and no gate ran."
+            )
+            return finish()
         out.emit_path("aibom_path", config.output)
         inventory = _json_object(native.read_text(encoding="utf-8")) or {}
         claim = (inventory.get("metadata") or {}).get("completeness") or {}
@@ -560,7 +570,15 @@ def run(
             notes.append("SARIF upload skipped: imported discovery cannot be carried in SARIF")
         elif config.sarif:
             sarif = config.output.with_name(config.output.name + ".sarif")
-            emit_export(native, sarif, "sarif")
+            try:
+                emit_export(native, sarif, "sarif")
+            except (OutputRefusedError, OSError):
+                record("collection", "failed")
+                _say(
+                    "Collection failed: the SARIF output path was refused or could not be "
+                    "written, so no gate ran."
+                )
+                return finish()
             out.emit_path("sarif_path", sarif)
 
         if not config.validate:

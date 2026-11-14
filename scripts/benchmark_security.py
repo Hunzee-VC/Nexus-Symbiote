@@ -21,9 +21,11 @@ from typing import Any
 import nexus_symbiote
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import ComponentType
+from nexus_symbiote.core.hashing import open_regular_file
 from nexus_symbiote.scanners.mcp import MCPScanner
 from nexus_symbiote.scanners.model import ModelScanner
 from nexus_symbiote.scanners.prompt import PromptScanner
+from nexus_symbiote.utils.files import OutputRefusedError, write_output_file
 from nexus_symbiote.validators.integrity import IntegrityValidator
 
 KINDS = frozenset(
@@ -65,6 +67,14 @@ def _strict_json(raw: bytes) -> Any:
     return json.loads(raw, object_pairs_hook=pairs, parse_constant=invalid_constant)
 
 
+def _read_regular_bytes(path: Path, limit: int, label: str) -> bytes:
+    with open_regular_file(path) as handle:
+        data = handle.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError(f"{label} exceeds size limit")
+    return data
+
+
 def _contained(base: Path, value: str) -> Path:
     relative = Path(value)
     if relative.is_absolute() or ".." in relative.parts:
@@ -81,10 +91,8 @@ def _contained(base: Path, value: str) -> Path:
 
 
 def load_manifest(path: Path) -> tuple[dict[str, Any], str]:
+    raw = _read_regular_bytes(path, MAX_MANIFEST_BYTES, "manifest")
     path = path.resolve(strict=True)
-    if path.stat().st_size > MAX_MANIFEST_BYTES:
-        raise ValueError("manifest exceeds size limit")
-    raw = path.read_bytes()
     manifest = _strict_json(raw)
     if (
         not isinstance(manifest, dict)
@@ -215,7 +223,13 @@ def _evaluate(case: dict[str, Any], directory: Path) -> dict[str, Any]:
                 "unknown_reason": "required approved descriptor was not collected",
                 "facts": facts,
             }
-        observed = json.loads((directory / "observed-tool.json").read_text(encoding="utf-8"))
+        observed = _strict_json(
+            _read_regular_bytes(
+                _contained(directory, "observed-tool.json"),
+                MAX_FIXTURE_BYTES,
+                "observed-tool.json",
+            )
+        )
         # The approved digest stays fixed while the actual observed descriptor is substituted.
         changed = tools[0].model_copy(
             update={
@@ -437,7 +451,9 @@ def run_benchmark(manifest_path: Path = DEFAULT_MANIFEST) -> dict[str, Any]:
         "corpus": {
             "name": manifest["name"],
             "digest": corpus_digest,
-            "manifest_sha256": _sha(manifest_path.read_bytes()),
+            "manifest_sha256": _sha(
+                _read_regular_bytes(manifest_path, MAX_MANIFEST_BYTES, "manifest")
+            ),
             "cases": len(results),
         },
         "runner_sha256": _sha(Path(__file__).read_bytes()),
@@ -488,7 +504,11 @@ def main() -> int:
         return 2
     content = json.dumps(report, indent=2, allow_nan=False) + "\n"
     if args.out:
-        args.out.write_text(content, encoding="utf-8")
+        try:
+            write_output_file(args.out, content, create_parents=True)
+        except (OutputRefusedError, OSError) as exc:
+            print(f"Benchmark output rejected: {exc}", file=sys.stderr)
+            return 2
     else:
         print(content, end="")
     incomplete = report["metrics"]["unknown_predictions"] or report["controls"]["unknown"]

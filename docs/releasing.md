@@ -89,14 +89,23 @@ as described below.
    `--extra-index-url`):
 
    ```bash
-   python3 -m venv /tmp/rehearsal && . /tmp/rehearsal/bin/activate
-   pip download --no-deps --index-url https://test.pypi.org/simple/ \
-     nexus-symbiote==<version> -d /tmp/rehearsal-dist
-   cd /tmp/rehearsal-dist
-   sed 's#  dist/#  #' /path/to/run/SHA256SUMS | grep -F "$(ls ./*.whl | xargs -n1 basename)" \
-     | sha256sum --strict -c -
-   pip install /tmp/rehearsal-dist/*.whl
-   nexus-symbiote --version
+   (
+     set -euo pipefail
+     rehearsal_dir="$(mktemp -d)"
+     trap 'rm -rf "$rehearsal_dir"' EXIT
+     python3 -I -m venv "$rehearsal_dir/venv"
+     "$rehearsal_dir/venv/bin/python" -I -m pip download --isolated --only-binary=:all: \
+       --no-deps --index-url https://test.pypi.org/simple/ \
+       nexus-symbiote==<version> -d "$rehearsal_dir/dist"
+     (
+       cd "$rehearsal_dir/dist"
+       sed 's#  dist/#  #' /path/to/run/SHA256SUMS | grep -F "$(ls ./*.whl | xargs -n1 basename)" \
+         | sha256sum --strict -c -
+     )
+     "$rehearsal_dir/venv/bin/python" -I -m pip install --isolated --only-binary=:all: \
+       "$rehearsal_dir/dist"/*.whl
+     "$rehearsal_dir/venv/bin/nexus-symbiote" --version
+   )
    ```
 
    Confirm the PEP 740 provenance the index itself publishes: the file page must

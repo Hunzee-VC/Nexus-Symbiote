@@ -69,7 +69,7 @@ older success. An unbound status with the same name cannot satisfy the protectio
 preflight.
 
 With `--publish testpypi` or `--publish pypi`, as the release workflow passes, it
-also requires an active ruleset that stops `refs/tags/v*` from being updated or
+also requires an active ruleset that requires signed release tags (`required_signatures`) and stops `refs/tags/v*` from being updated, force-pushed (`non_fast_forward`) or
 deleted and that the checking token itself cannot bypass, and requires the named
 environment to have a required reviewer, administrator bypass turned off and
 deployments limited to `main` by a single branch policy (the *Protected branches*
@@ -88,7 +88,7 @@ characters, which is printed. A commit with no `push` run, such as one pushed wi
 `[skip ci]`, has no landing time and needs that override: a `workflow_dispatch` run
 names its ref only by name, which a tag can share with the branch. It also requires
 the signed, annotated tag `v<version>` (the version in `pyproject.toml`) to point at
-the source commit with a signature GitHub reports as verified.
+the source commit with a signature GitHub reports as verified; when `ALLOWED_RELEASE_TAG_SIGNERS` lists comma-separated tagger emails, the tag's `tagger.email` must also match that allowlist. All GitHub API calls bypass ambient proxy environment variables, enforce TLS 1.2+ without key logging, and reject duplicate JSON keys or non-finite numbers.
 
 Missing or truncated run, job, ruleset or environment data, an API failure,
 redirects and an unprotected branch fail closed; the one exception is the bypass list
@@ -135,8 +135,8 @@ standalone SARIF evaluator does not authenticate an arbitrary file's origin.
 Weekly/manual CodeQL runs apply the same policy; only the exact-source CI run
 supplies publication acceptance.
 
-`Dependency advisories` audits every exact version pinned by `requirements-ci.lock`
-and `requirements-action.lock`, whatever its environment marker, so pins that only
+`Dependency advisories` audits every exact version pinned by `requirements-ci.lock`,
+`requirements-action.lock` and `requirements-floor.lock`, whatever its environment marker, so pins that only
 Python 3.11 or Windows installs are queried too even though the job runs on Python
 3.12 on Linux. Distributions installed on the runner but pinned by no lock, such as
 the runner's own pip, are listed in the report and not audited: they are not part of

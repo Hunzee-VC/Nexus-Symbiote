@@ -144,4 +144,16 @@ jobs:
       - name: Explore new inputs with the randomized Hypothesis profile
         run: >-
           python -m pytest -vv --hypothesis-profile=fuzz -o test_timeout=1800
-          --hypothesis-show-statistics tests/test_properties.py tests/test_parser_properties.py
+          --hypothesis-show-statistics
+          tests/test_properties.py
+          tests/test_parser_properties.py
+          tests/test_attestation.py
+          tests/test_cli_terminal_safety.py
+          tests/test_export_validation.py
+          tests/test_inventory_export.py
+          tests/test_live_protocol.py
+          tests/test_mcp_launcher_identity.py
+          tests/test_mcp_origin_labels.py
+          tests/test_mcp_source_candidates.py
+          tests/test_registry_pnpm_index.py
+          tests/test_registry_redirects.py

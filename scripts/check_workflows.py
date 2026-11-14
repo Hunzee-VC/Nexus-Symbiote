@@ -107,6 +107,7 @@ REQUIRED_COMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
             "scripts/check_dependency_advisories.py",
             "--lock requirements-ci.lock",
             "--lock requirements-action.lock",
+            "--lock requirements-floor.lock",
         ),
         "codeql": (
             "github/codeql-action/init@",
@@ -187,6 +188,11 @@ PYTHON = re.compile(r"python(?:\d+(?:\.\d+)?)?")
 # Python options that print and exit before the script runs, or keep the process alive and
 # discard its status.
 PYTHON_EXITS = frozenset("h?Vi")
+# Flags and inline environment overrides that neutralize a required gate command.
+NEUTRALIZING_GATE_FLAGS = frozenset(
+    {"-h", "--help", "-V", "--version", "--exit-zero", "--collect-only"}
+)
+UNSAFE_GATE_ENV = frozenset({"LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONHOME", "PYTHONINSPECT"})
 # The timeout options that leave the command's status intact, alone or with a value.
 TIMEOUT_FLAGS = frozenset({"--foreground", "--preserve-status", "-v", "--verbose"})
 TIMEOUT_VALUED = frozenset({"-k", "--kill-after", "-s", "--signal"})
@@ -909,6 +915,11 @@ class _Gate:
 
     def runs(self, required: str) -> bool:
         """Whether this command runs the required command, or passes it what it needs."""
+        for arg in self.args:
+            if arg == "--":
+                break
+            if arg.partition("=")[0] in NEUTRALIZING_GATE_FLAGS:
+                return False
         if " ".join([self.program, *self.args]).startswith(required):
             return True
         if PYTHON.fullmatch(self.program.rsplit("/", 1)[-1]) is None:
@@ -1060,8 +1071,13 @@ def _item_gates(item: _Item, pipefail: bool, variables: dict[str, str]) -> list[
         if command.body is not None or (index < len(commands) - 1 and not pipefail):
             continue
         words = command.words
-        while words and ASSIGNMENT.match(words[0]):
+        unsafe_env = False
+        while words and (assigned := ASSIGNMENT.match(words[0])):
+            if assigned[1] in UNSAFE_GATE_ENV:
+                unsafe_env = True
             words = words[1:]
+        if unsafe_env:
+            continue
         if words and words[0] == "timeout":
             words = _after_timeout(words[1:])
         if not words:
@@ -1289,14 +1305,14 @@ def pin_comments(paths: list[Path]) -> list[str]:
         text = path.read_text(encoding="utf-8")
         # The comment is read line by line, so a pin in any other YAML spelling, such as a
         # flow mapping, would escape this check; the parsed file says how many there are.
-        parsed = sum(
-            1
+        parsed = [
+            value
             for value in _uses_values(yaml.safe_load(text))
             if not value.startswith("./") and PIN.fullmatch(value)
-        )
+        ]
         lines = [USES_LINE.match(line) for line in text.splitlines()]
         read = [m for m in lines if m and not m[1].startswith("./") and PIN.fullmatch(m[1])]
-        if len(read) != parsed:
+        if [m[1] for m in read] != parsed:
             errors.append(f"{path}: write each pinned uses on a line of its own, as uses: <pin>")
         for match in read:
             reference, comment = match[1], match[2] or ""

@@ -9,6 +9,7 @@ import re
 import string
 import subprocess
 import sys
+import time
 import tracemalloc
 from pathlib import Path
 
@@ -421,7 +422,16 @@ def _cli_usage(*arguments: str) -> tuple[int, float, int]:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    _, status, usage = os.wait4(process.pid, 0)
+    deadline = time.monotonic() + 120.0
+    while True:
+        pid, status, usage = os.wait4(process.pid, os.WNOHANG)
+        if pid != 0:
+            break
+        if time.monotonic() >= deadline:
+            process.kill()
+            os.wait4(process.pid, 0)
+            raise TimeoutError("CLI subprocess timed out")
+        time.sleep(0.01)
     process.returncode = os.waitstatus_to_exitcode(status)
     peak = usage.ru_maxrss // 1024 if sys.platform == "darwin" else usage.ru_maxrss
     return process.returncode, usage.ru_utime + usage.ru_stime, peak
