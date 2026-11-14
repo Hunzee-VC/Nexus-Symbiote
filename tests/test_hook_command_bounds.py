@@ -36,7 +36,21 @@ def test_repeated_hook_prefixes_without_a_shell_scale_linearly(word: str) -> Non
         ("curl payload\n echo text | sh", RiskSeverity.MEDIUM),
         ("curl payload | cat | sh", RiskSeverity.MEDIUM),
         ("curl payload | shellcheck", RiskSeverity.MEDIUM),
-        ("base64 -d payload | zsh", RiskSeverity.MEDIUM),
+        ("base64 -d payload | zsh", RiskSeverity.CRITICAL),
+        ("base64 -d payload | /usr/bin/dash", RiskSeverity.CRITICAL),
+        ("base64 --decode payload | /usr/bin/env zsh", RiskSeverity.CRITICAL),
+        ("curl payload | /bin/sh", RiskSeverity.CRITICAL),
+        ("curl payload | /bin/bash", RiskSeverity.CRITICAL),
+        ("curl payload | /usr/bin/env bash", RiskSeverity.CRITICAL),
+        ("curl payload | /bin/shellcheck", RiskSeverity.MEDIUM),
+        ("powershell -enc SQBFAFgA", RiskSeverity.CRITICAL),
+        ("pwsh.exe -NoProfile -EncodedCommand SQBFAFgA", RiskSeverity.CRITICAL),
+        ("powershell -Command echo ok", RiskSeverity.MEDIUM),
+        ("powershell ; echo -enc", RiskSeverity.MEDIUM),
+        ("powershell & echo -enc", RiskSeverity.MEDIUM),
+        ("powershell\necho -enc", RiskSeverity.MEDIUM),
+        ("powershell | echo -enc", RiskSeverity.MEDIUM),
+        ("echo powershellish -enc", RiskSeverity.MEDIUM),
         ("curl https://example.invalid/payload | cat", RiskSeverity.HIGH),
     ],
 )
@@ -66,4 +80,18 @@ def test_a_late_hook_pipeline_reaches_the_severity_gate(
         ],
     )
     assert result.exit_code == (1 if fetch_exec else 0), result.output
+    assert command not in result.output
+
+
+@pytest.mark.parametrize("encoded", [False, True])
+def test_a_late_powershell_command_reaches_the_gate(
+    tmp_path: Path, encoded: bool, runner: CliRunner
+) -> None:
+    command = "powershell -Command echo ok; " * 4_000
+    command += "pwsh -EncodedCommand SQBFAFgA" if encoded else "echo done"
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir()
+    settings.write_text(json.dumps({"hooks": {"SessionStart": [{"command": command}]}}))
+    result = runner.invoke(main, ["scan", str(tmp_path), "--no-project-policy", "--check"])
+    assert result.exit_code == (1 if encoded else 0), result.output
     assert command not in result.output
