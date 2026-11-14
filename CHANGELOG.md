@@ -4,10 +4,18 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ## [Unreleased]
 
+### Security
+
+- The CI, Action and floor locks pin `dnspython` 2.9.2 instead of 2.9.1, which advisory GHSA-vvf4-9x63-8xvv affects. `dnspython` is a transitive dependency of `email-validator`, and the Action installs it from `requirements-action.lock`. The locks' upload cut-off moves to 2026-11-07; every other CI and Action pin is unchanged, and the floor lock's unpinned transitive dependencies resolve again at that cut-off.
+
 ### Added
 
 - A [collector reference](docs/collectors.md) and a [GitHub Action](docs/github-action.md) page. They hold the per-collector path lists, the coding-agent settings, the Action's gate semantics and the signer-policy setup that the README carried, so the README is now a short landing page. The *protect the gate* workflow moved to [Gate drift in CI](docs/drift-gate.md#protect-the-gate), and the requirements-file and Dockerfile gaps to the [registry collector](docs/registry-collector.md#requirements-files) page.
 - An [operational guidance](docs/operational-guidance.md) page that collects the operator and CI practices the documented guarantees depend on: ignoring project policy on untrusted checkouts, job timeouts, sandboxing, keeping operator-owned inputs out of a pull request's reach, and what is not implemented.
+
+### Fixed
+
+- The test suite's linear-time checks (`tests.support.scaling_ratio`) time each run with the cyclic garbage collector off, as `timeit` does. A full collection costs time in proportion to everything the test process holds, so late in the suite it made linear scans read as superlinear and failed the dependency-floor job on `main`.
 
 ## [0.2.0] - 2026-11-12
 
