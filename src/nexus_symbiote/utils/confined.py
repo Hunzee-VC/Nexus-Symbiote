@@ -418,7 +418,7 @@ class _BoundedReader(io.RawIOBase):
         return True
 
     def fileno(self) -> int:
-        raise io.UnsupportedOperation("direct descriptor access bypasses budget enforcement")
+        return self._fd
 
     def read(self, size: int = -1) -> bytes:
         if self.closed:
