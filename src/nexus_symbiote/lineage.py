@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-from pydantic import Field, PrivateAttr, model_validator
+from pydantic import ConfigDict, Field, PrivateAttr, model_validator
 
 from nexus_symbiote.runtime import (
     Contract,
@@ -91,6 +91,10 @@ class HostedModelIdentity(Contract):
 
 
 class DataVersion(Contract):
+    # model_copy(update=...) and model_construct() can produce invalid instances.
+    # Revalidate them even when nested inside a snapshot or supplied to add().
+    model_config = ConfigDict(revalidate_instances="always")
+
     id: str
     tenant: str
     kind: Literal["source", "chunk", "index", "cache", "memory"]
@@ -114,29 +118,52 @@ class RetrievalRecord(Contract):
     read_watermark: str
 
 
+class LineageSnapshot(Contract):
+    """Serializable graph and ACL history; ``None`` marks an unknown history.
+
+    This is a state representation, not an authenticated or rollback-protected
+    document. The caller is responsible for protecting it and loading the latest
+    committed snapshot.
+    """
+
+    format: Literal["nexus-symbiote-lineage/1"]
+    tenant: str
+    versions: tuple[DataVersion, ...]
+    acl_revisions: dict[str, tuple[str, ...] | None]
+
+
 class LineageIndex:
-    """Tenant-local immutable version graph with cascading source withdrawal."""
+    """Tenant-local version graph with cascading withdrawal and ACL history.
+
+    Versions passed to the constructor have unknown ACL history. Use ``add``
+    for a new record, or ``from_snapshot`` to restore recorded history.
+    """
 
     def __init__(self, tenant: str, versions: tuple[DataVersion, ...] = ()) -> None:
         self.tenant = tenant
         self.versions: dict[str, DataVersion] = {}
         self._children: dict[str, list[str]] = {}
-        self._acl_revisions: dict[str, set[str]] = {}
+        self._acl_revisions: dict[str, set[str] | None] = {}
         by_id: dict[str, DataVersion] = {}
-        for value in versions:
+        for supplied in versions:
+            value = DataVersion.model_validate(supplied)
             if value.id in by_id:
                 raise ValueError("cross-tenant or duplicate lineage version")
             by_id[value.id] = value
         # Kahn's algorithm: each version is added once all of its parents are.
-        waiting = {value.id: len(set(value.parents)) for value in versions}
+        waiting = {value.id: len(set(value.parents)) for value in by_id.values()}
         dependents: dict[str, list[str]] = {}
-        for value in versions:
+        for value in by_id.values():
             for parent in set(value.parents):
                 dependents.setdefault(parent, []).append(value.id)
-        ready = deque(value.id for value in versions if waiting[value.id] == 0)
+        ready = deque(value.id for value in by_id.values() if waiting[value.id] == 0)
         while ready:
             current = ready.popleft()
-            self.add(by_id[current])
+            self._add_validated(by_id[current])
+            # A versions-only import may have omitted prior ACL revisions. It is
+            # safe for retrieval against the current ACL, but cannot accept updates
+            # until the operator recovers the complete history.
+            self._acl_revisions[current] = None
             for child in dependents.get(current, ()):
                 waiting[child] -= 1
                 if waiting[child] == 0:
@@ -144,7 +171,79 @@ class LineageIndex:
         if len(self.versions) != len(by_id):
             raise ValueError("lineage contains missing parents or a cycle")
 
+    @classmethod
+    def from_new_versions(cls, tenant: str, versions: tuple[DataVersion, ...]) -> LineageIndex:
+        """Initialize a new graph whose versions have never had earlier ACL revisions.
+
+        This is an operator assertion, not a safe way to restore an existing graph.
+        """
+        result = cls(tenant, versions)
+        for version_id, value in result.versions.items():
+            result._acl_revisions[version_id] = {value.acl_revision}
+        return result
+
+    @classmethod
+    def from_snapshot(cls, snapshot: LineageSnapshot | Mapping[str, object]) -> LineageIndex:
+        """Restore a snapshot after the caller has established its trust and freshness."""
+        # Revalidate even a model object: model_copy(update=...) skips validation.
+        document = (
+            snapshot.model_dump(mode="python", warnings="none")
+            if isinstance(snapshot, LineageSnapshot)
+            else snapshot
+        )
+        state = LineageSnapshot.model_validate(document)
+        result = cls(state.tenant, state.versions)
+        if set(state.acl_revisions) != set(result.versions):
+            raise ValueError("ACL history must name exactly the lineage versions")
+        for version_id, revisions in state.acl_revisions.items():
+            if revisions is None:
+                continue
+            if len(revisions) != len(set(revisions)):
+                raise ValueError("ACL history contains a duplicate revision")
+            if result.versions[version_id].acl_revision not in revisions:
+                raise ValueError("ACL history must contain the current revision")
+            result._acl_revisions[version_id] = set(revisions)
+        return result
+
+    @classmethod
+    def from_legacy_versions(
+        cls,
+        tenant: str,
+        versions: tuple[DataVersion, ...],
+        *,
+        acl_revisions: Mapping[str, tuple[str, ...]],
+    ) -> LineageIndex:
+        """Migrate versions using complete ACL histories supplied by the operator.
+
+        The index can validate structure and current revisions, not whether the
+        supplied histories contain every prior revision.
+        """
+        state = LineageSnapshot(
+            format="nexus-symbiote-lineage/1",
+            tenant=tenant,
+            versions=versions,
+            acl_revisions=dict(acl_revisions),
+        )
+        if any(revisions is None for revisions in state.acl_revisions.values()):
+            raise ValueError("migration requires complete ACL history for every version")
+        return cls.from_snapshot(state)
+
+    def snapshot(self) -> LineageSnapshot:
+        """Return a deterministic state snapshot, including unknown histories."""
+        return LineageSnapshot(
+            format="nexus-symbiote-lineage/1",
+            tenant=self.tenant,
+            versions=tuple(self.versions[key] for key in sorted(self.versions)),
+            acl_revisions={
+                key: None if revisions is None else tuple(sorted(revisions))
+                for key, revisions in sorted(self._acl_revisions.items())
+            },
+        )
+
     def add(self, value: DataVersion) -> None:
+        self._add_validated(DataVersion.model_validate(value))
+
+    def _add_validated(self, value: DataVersion) -> None:
         if value.tenant != self.tenant or value.id in self.versions:
             raise ValueError("cross-tenant or duplicate lineage version")
         if value.id in value.parents or any(p not in self.versions for p in value.parents):
@@ -181,13 +280,20 @@ class LineageIndex:
         against it.
         """
         current = self.versions[version]
-        used = self._acl_revisions.setdefault(version, {current.acl_revision})
-        if revision in used:
-            raise ValueError("ACL revision was already used for this version")
-        used.add(revision)
-        self.versions[version] = current.model_copy(
-            update={"acl_revision": revision, "allowed_principals": principals}
+        used = self._acl_revisions[version]
+        if used is None:
+            raise ValueError("ACL history is unknown; restore or migrate complete history first")
+        candidate = DataVersion.model_validate(
+            {
+                **current.model_dump(mode="python", warnings="none"),
+                "acl_revision": revision,
+                "allowed_principals": principals,
+            }
         )
+        if candidate.acl_revision in used:
+            raise ValueError("ACL revision was already used for this version")
+        used.add(candidate.acl_revision)
+        self.versions[version] = candidate
 
     def retrieve(
         self,

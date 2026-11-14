@@ -30,7 +30,7 @@ jobs:
   build:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
       actions: read
@@ -166,7 +166,7 @@ jobs:
           set -euo pipefail
           python -m venv "$RUNNER_TEMP/compatibility"
           python_bin="$RUNNER_TEMP/compatibility/bin/python"
-          "$python_bin" -m pip install dist/*.whl
+          "$python_bin" -m pip install --only-binary=:all: dist/*.whl
           "$python_bin" -m pip check
           "$python_bin" -m pip freeze --all
           mkdir "$RUNNER_TEMP/source"

@@ -140,6 +140,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `shadowscan-inventory-unmatched` | Imported unmatched discovery | none | none | none | none | none | GOVERN-1.6 |
 | `signing_status` | Unsigned model artifact | CWE-345 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.003 | MANAGE-3.2 |
 | `tag_characters` | Unicode tag characters in instructions | CWE-451, CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
+| `transitive_resolution` | Dependencies resolved at launch | CWE-829 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0109 | MANAGE-3.1 |
 | `transport_ambiguity` | Ambiguous MCP transport | none | none | none | none | none | MEASURE-2.7 |
 | `transport_security` | Transport security | CWE-319 (critical and high findings) | none | none | ASI07 | none | MEASURE-2.7 |
 | `version_pinning` | Unpinned version | CWE-829 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0109 | MANAGE-3.1 |

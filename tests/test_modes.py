@@ -10,6 +10,7 @@ import re
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,7 @@ from nexus_symbiote import modes
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.scanners.base import Scanner, ScanResult
-from nexus_symbiote.scanners.live_mcp import DiscoveryResult
+from nexus_symbiote.scanners.live_mcp import DiscoveryLimits, DiscoveryResult, discover_tools
 
 UNSET = {modes.ENV_VAR: None}
 
@@ -729,3 +730,16 @@ def test_collectors_called_directly_stay_offline_on_hostile_input(tmp_path):
         for collector in ALL_SCANNERS:
             collector().scan(tmp_path)
     assert not marker.exists()
+
+
+def test_live_discovery_under_the_offline_guard_fails_at_once_not_at_the_timeout():
+    # The resolver thread used to catch only OSError, so the violation it met died with
+    # the thread and a library caller waited the whole DNS timeout for an empty answer.
+    started = time.monotonic()
+    with modes.enforce(modes.Mode.OFFLINE), pytest.raises(modes.OfflineViolation):
+        discover_tools(
+            "https://fixture.example/mcp",
+            allowed_origins=["https://fixture.example"],
+            limits=DiscoveryLimits(timeout_seconds=3),
+        )
+    assert time.monotonic() - started < 2

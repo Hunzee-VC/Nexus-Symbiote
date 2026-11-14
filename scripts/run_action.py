@@ -42,6 +42,10 @@ THRESHOLD = re.compile(r"(?:0|[1-9][0-9]{0,2})(?:\.[0-9]{1,4})?")
 MAX_BASELINE_BYTES = 16 * 1024 * 1024
 MAX_LIMITS_LENGTH = 1024
 LIMITS_ENV = "NEXUS_SYMBIOTE_LIMITS"
+TRUST_ROOT_ENVS = (
+    "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT",
+    "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256",
+)
 RELAY_PREFIX = "| "
 
 
@@ -228,10 +232,12 @@ class Config:
             else None
         )
         validate = _boolean(env.get("SYMBIOTE_VALIDATE", "true"), "validate")
-        if validate and scanners and set(scanners) != SCANNERS:
+        risk_check = _boolean(env.get("SYMBIOTE_RISK_CHECK", "true"), "risk-check")
+        if (validate or risk_check) and scanners and set(scanners) != SCANNERS:
+            # Either gate fails on partial coverage, so the run could only fail later.
             raise InputError(
-                "scanners subset requires validate to be false, because completeness "
-                "requires all built-in collectors"
+                "scanners subset requires validate and risk-check to be false, because "
+                "both gates require all built-in collectors"
             )
         return cls(
             workspace,
@@ -240,7 +246,7 @@ class Config:
             fmt,
             scanners,
             validate,
-            _boolean(env.get("SYMBIOTE_RISK_CHECK", "true"), "risk-check"),
+            risk_check,
             threshold,
             _boolean(env.get("SYMBIOTE_SARIF", "false"), "sarif-upload"),
             signers,
@@ -264,8 +270,12 @@ def _run(args: list[str], *, private: Path, limits: str = "") -> subprocess.Comp
         "XDG_CACHE_HOME": str(private / "cache"),
         "XDG_DATA_HOME": str(private / "data"),
     }
-    # Collection limits come only from the limits input, never from the job environment.
+    # Collection limits come only from the limits input, never from the job environment,
+    # and the Sigstore trust root only from the hash-locked sigstore package: an explicit
+    # trust root in the job environment would let an earlier step choose the authorities.
     env.pop(LIMITS_ENV, None)
+    for name in TRUST_ROOT_ENVS:
+        env.pop(name, None)
     if limits:
         env[LIMITS_ENV] = limits
     # The executable is this interpreter; arguments never pass through a shell.
@@ -600,10 +610,9 @@ def run(
             out.emit(passed="skipped")
         else:
             arguments = ["risk", "--no-project-policy", str(native), "--json-output", *unsigned]
-            if config.validate:
-                # The same reconciliation and signers as validation, so a signer policy
-                # that verifies the discovery producer counts here too.
-                arguments += ["--project", str(config.project), *signers]
+            # The same reconciliation and signers as validation, whether or not it ran,
+            # so a signer policy that verifies the discovery producer counts here too.
+            arguments += ["--project", str(config.project), *signers]
             if config.threshold == 0:
                 arguments.append("--no-score-threshold")
             else:
