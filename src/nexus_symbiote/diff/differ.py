@@ -19,6 +19,7 @@ from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import ComponentType, SerializationSafety, TrustTier
 from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION, canonical_json
 from nexus_symbiote.core.models import (
+    UNBOUND_VALUES_DETAIL,
     AnyComponent,
     CompletenessClaim,
     MCPServerComponent,
@@ -31,6 +32,22 @@ from nexus_symbiote.utils.crypto import (
 )
 
 SEVERITIES = ("info", "low", "medium", "high", "critical")
+
+
+def _launch_values_unbound(component: MCPServerComponent) -> bool:
+    """True when this snapshot left launch values out of the keyed binding.
+
+    The collector records that as a low completeness finding. The structural hash
+    still matches after an argument or environment value changes, so diff cannot
+    see the change and must not report the snapshots as equal.
+    """
+    if component.properties.get("static_value_binding"):
+        return False
+    return any(
+        risk.category == "completeness" and UNBOUND_VALUES_DETAIL in risk.detail
+        for risk in component.risks
+    )
+
 
 TRUST_TIER_ORDER = {
     TrustTier.INTERNAL_VERIFIED: 0,
@@ -583,6 +600,20 @@ class AIBOMDiffer:
                             "changed. Review before execution."
                         ),
                         "severity": "critical",
+                    }
+                )
+            elif _launch_values_unbound(old) or _launch_values_unbound(new):
+                # Redacted arguments, environment values and endpoint paths are not in the
+                # structural hash. Without the keyed binding a widened filesystem root
+                # compares equal, so the comparison itself is the alert.
+                modifications.append(
+                    {
+                        "detail": (
+                            "MCP server launch values are unbound in one snapshot; argument, "
+                            "environment and endpoint-path drift is undetectable. Set "
+                            "NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections."
+                        ),
+                        "severity": "medium",
                     }
                 )
 

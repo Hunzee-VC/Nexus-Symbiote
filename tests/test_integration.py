@@ -101,11 +101,13 @@ class TestFullPipeline:
         assert diff.exit_code == 0
         diff_data = json.loads(diff.output)
         assert diff_data["has_changes"] is True
-        assert {c["bom_ref"] for c in diff_data["components_modified"]} == {
+        modified = diff_data["components_modified"]
+        assert {c["bom_ref"] for c in modified if c["bom_ref"].startswith("registry:")} == {
             "registry:pypi/langchain",
             "registry:pypi/openai",
             "registry:pypi/transformers",
         }
+        assert any("unbound" in " ".join(c["details"]) for c in modified)
         assert [c["bom_ref"] for c in diff_data["components_added"]] == ["registry:pypi/chromadb"]
         assert diff_data["components_removed"] == []
 
