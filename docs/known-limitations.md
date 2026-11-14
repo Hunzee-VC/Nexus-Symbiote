@@ -929,8 +929,8 @@ A way around a limit that its entry does not describe is worth a
   approved. Protect the gate with a workflow that an organization ruleset requires
   and `CODEOWNERS` review on `.github/`, as the [drift gate guide](drift-gate.md#protect-the-gate)
   shows, and avoid checking out untrusted pull request heads in `pull_request_target`
-  workflows. Selecting a subset of `scanners` requires `validate: 'false'`, because
-  completeness requires all built-in collectors.
+  workflows. Selecting a subset of `scanners` requires `validate: 'false'` and
+  `risk-check: 'false'`, because both gates require all built-in collectors.
 - **Earlier steps in the job are trusted.** A step that runs untrusted code before
   the Action can change the runner's Python or rewrite files under `RUNNER_TEMP`
   before the Action reads them. Write the signer policy and the reviewed baseline

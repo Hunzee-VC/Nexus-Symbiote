@@ -19,8 +19,8 @@ inputs:
     description: >-
       Comma-separated scanner names including shadowscan, a2a, ide_agents; empty means all.
       A list that leaves any collector out makes coverage partial, so the validate and
-      risk-check gates fail whenever they are on, and the Action refuses such a list while
-      validate is 'true'. Leave it empty in a workflow that gates
+      risk-check gates fail whenever they are on, and the Action refuses such a list unless
+      both are 'false'. Leave it empty in a workflow that gates
     default: ""
   validate:
     description: >-
@@ -82,7 +82,7 @@ inputs:
       'true' accepts ShadowScan discovery evidence whose producer signature was not verified,
       passing --allow-unsigned-discovery to validate and risk; the acceptance is printed as a
       warning. With 'false', such evidence fails the completeness and risk gates in CI, unless
-      validate is 'true' and signature-policy names the report and verifies its producer
+      signature-policy names the report and verifies its producer
     default: "false"
   limits:
     description: >-
