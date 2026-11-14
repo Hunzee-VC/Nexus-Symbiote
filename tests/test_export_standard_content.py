@@ -149,6 +149,30 @@ def test_a_package_url_version_is_the_exported_version():
     assert (component["version"], component["purl"]) == ("1.2.3", "pkg:pypi/openai@1.2.3")
 
 
+@pytest.mark.parametrize(
+    "registry,name,version",
+    [
+        ("npm", "@scope/sdk", "1.0.0-" + "a" * 1100),
+        ("pypi", "openai", "1." + "0" * 1100),
+    ],
+)
+def test_a_package_url_version_beyond_the_schema_limit_is_a_requested_version(
+    registry, name, version
+):
+    package_url = f"pkg:{registry}/{name.replace('@', '%40')}@{version}"
+    bom = AIBOM(
+        components=[
+            _registry(name=name, registry_type=registry, version=version, package_url=package_url)
+        ]
+    )
+    component = _cdx_component(bom, "registry:package")
+    assert "version" not in component and component["purl"] == package_url
+    assert _properties(component)["nexus-symbiote:requestedVersion"] == version
+    spdx = SPDXGenerator().generate(bom)
+    (package,) = [n for n in spdx["@graph"] if n["type"] == "software_Package"]
+    assert "software_packageVersion" not in package
+
+
 def test_the_repository_agent_is_the_subject_and_unconditional_edges_form_the_graph():
     bom = _inventory()
     document = CycloneDXGenerator().generate(bom)

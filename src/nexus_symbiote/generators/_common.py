@@ -66,10 +66,14 @@ def repository_scan(bom: AIBOM) -> bool:
 
 
 def standard_version(component: AnyComponent) -> str | None:
-    """The version for standard version fields: an exact version or nothing."""
+    """The version for standard version fields, at most 1024 characters long.
+
+    A registry entry gets an exact version or nothing; any other kind keeps its
+    declared version.
+    """
     package = package_identifier(component)
     if package.version is not None:
-        return package.version
+        return package.version if len(package.version) <= MAX_STANDARD_VERSION else None
     version = component.version
     if not version or len(version) > MAX_STANDARD_VERSION:
         return None
