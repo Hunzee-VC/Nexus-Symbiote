@@ -4,6 +4,7 @@ bounds on import bookkeeping, and the named byte limit of a streamed skill asset
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import re
 import string
@@ -730,3 +731,170 @@ def test_markdown_imports_keep_their_content_hash(tmp_path):
     _write(tmp_path, "docs/style.md", "# Style\n")
     imported = _components(PromptScanner().scan(tmp_path))["prompt:import:docs/style.md"]
     assert imported.content_hash == hash_bytes(b"# Style\n")
+
+
+BINDING_KEY = "prompt-import-key-" + "0123456789abcdef" * 2
+# A synthetic credential line: nothing here is a real secret.
+SYNTHETIC_CREDENTIAL = "SYNTHETIC_API_TOKEN=not-a-real-credential-0001\n"
+
+
+def test_credential_named_markdown_imports_are_read_and_hashed(tmp_path):
+    from nexus_symbiote.core.hashing import hash_bytes
+
+    names = ("docs/secrets-handling.md", "docs/password-policy.md", "docs/style.md")
+    _write(tmp_path, "CLAUDE.md", "Read " + ", ".join(f"@{name}" for name in names) + ".\n")
+    for name in names:
+        _write(tmp_path, name, f"# {name}\n")
+    result = PromptScanner().scan(tmp_path)
+    assert not result.surfaces_excluded
+    components = _components(result)
+    for name in names:
+        imported = components[f"prompt:import:{name}"]
+        assert imported.content_hash == hash_bytes(f"# {name}\n".encode())
+        assert "content_hash_withheld" not in imported.properties
+
+
+def _validate(bom: Path, project: Path, *options: str):
+    return CliRunner().invoke(
+        main, ["validate", str(bom), "--project", str(project), "--no-project-policy", *options]
+    )
+
+
+@pytest.mark.parametrize("keyed", [False, True])
+def test_a_withheld_import_hash_passes_project_validation(tmp_path, monkeypatch, keyed):
+    from nexus_symbiote.scanners.source_binding import SOURCE_BINDING_KEY_ENV
+
+    if keyed:
+        monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, BINDING_KEY)
+    project = tmp_path / "project"
+    _write(project, "CLAUDE.md", "Apply @config/app.json settings.\n")
+    _write(project, "config/app.json", '{"mode": "strict"}\n')
+    bom = tmp_path / "bom.json"
+    assert _scan(project, bom).exit_code == 0
+    run = _validate(bom, project)
+    assert run.exit_code == 0, run.output
+    assert "Completeness check\n  Status: PASS\n" in run.output
+    assert "Integrity check\n  Status: PASS\n" in run.output
+    assert "has no integrity hash" not in run.output
+    counts = "verified: 2, failed: 0\n" if keyed else "verified: 1, failed: 0, unbound: 1\n"
+    assert f"  Hashes {counts}" in run.output
+    report = json.loads(_validate(bom, project, "--json-output").output)
+    assert (report["completeness"]["status"], report["integrity"]["status"]) == ("pass", "pass")
+    issues = [
+        (issue["category"], issue["severity"])
+        for issue in report["integrity"]["issues"]
+        if issue["component_ref"] == "prompt:import:config/app.json"
+    ]
+    assert issues == ([] if keyed else [("unbound_content", "info")])
+    _write(project, "config/app.json", '{"mode": "lax"}\n')
+    changed = json.loads(_validate(bom, project, "--json-output").output)
+    integrity = changed["integrity"]
+    if keyed:
+        assert changed["passed"] is False
+        assert (integrity["status"], integrity["hashes_failed"]) == ("fail", 1)
+        assert changed["completeness"]["status"] == "fail"
+    else:
+        # Nothing binds the content without the key, as its low completeness finding says.
+        assert changed["passed"] is True
+        assert (integrity["hashes_verified"], integrity["hashes_unbound"]) == (1, 1)
+
+
+def test_a_keyed_import_binding_never_passes_unless_it_matches(tmp_path, monkeypatch):
+    from nexus_symbiote.scanners.source_binding import SOURCE_BINDING_KEY_ENV
+    from nexus_symbiote.validators.integrity import IntegrityValidator
+
+    ref = "prompt:import:config/app.json"
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, BINDING_KEY)
+    _write(tmp_path, "CLAUDE.md", "Apply @config/app.json settings.\n")
+    _write(tmp_path, "config/app.json", '{"mode": "strict"}\n')
+    bom = AIBOM(components=PromptScanner().scan(tmp_path).components)
+
+    def outcome(inventory: AIBOM = bom) -> tuple[str, tuple[int, int, int], list[tuple[str, str]]]:
+        report = IntegrityValidator().validate(inventory, tmp_path)
+        counts = (report.hashes_verified, report.hashes_failed, report.hashes_unbound)
+        found = [(i.category, i.severity) for i in report.issues if i.component_ref == ref]
+        return report.status, counts, found
+
+    assert outcome() == ("pass", (2, 0, 0), [])
+    profiled = bom.model_copy(deep=True)
+    imported = next(c for c in profiled.components if c.bom_ref == ref)
+    imported.properties["static_value_binding_profile"] = "nexus-symbiote/prompt-import-content/v0"
+    assert outcome(profiled) == ("unknown", (1, 0, 0), [("binding_profile_unknown", "unknown")])
+    _write(tmp_path, "config/app.json", '{"mode": "lax"}\n')
+    assert outcome() == ("fail", (1, 1, 0), [("hash_mismatch", "error")])
+    _write(tmp_path, "config/app.json", '{"mode": "strict"}\n')
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, "another-" + BINDING_KEY)
+    assert outcome() == ("unknown", (1, 0, 0), [("binding_key_unknown", "unknown")])
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV)
+    assert outcome() == ("pass", (1, 0, 1), [("unbound_content", "info")])
+
+
+def test_only_a_non_markdown_import_may_withhold_its_content_hash(tmp_path):
+    from nexus_symbiote.validators.integrity import IntegrityValidator
+
+    _write(tmp_path, "CLAUDE.md", "See @docs/style.md.\n")
+    _write(tmp_path, "docs/style.md", "# Style\n")
+    components = PromptScanner().scan(tmp_path).components
+    for component in components:
+        component.content_hash = None
+        component.properties["content_hash_withheld"] = "claimed by the inventory"
+    report = IntegrityValidator().validate(AIBOM(components=components), tmp_path)
+    assert report.status == "unknown"
+    assert report.hashes_unbound == 0
+    assert {(i.component_ref, i.category) for i in report.issues} >= {
+        ("prompt:CLAUDE.md", "missing_hash"),
+        ("prompt:import:docs/style.md", "missing_hash"),
+    }
+
+
+def _linked_guide(project: Path, target: str, content: str) -> None:
+    _write(project, "CLAUDE.md", "Read @docs/guide.md first.\n")
+    _write(project, target, content)
+    (project / "docs").mkdir()
+    (project / "docs" / "guide.md").symlink_to(f"../{target}")
+
+
+def test_a_markdown_name_cannot_bring_a_credential_file_into_the_inventory(tmp_path):
+    from nexus_symbiote.core.hashing import hash_bytes
+
+    project = tmp_path / "project"
+    _linked_guide(project, ".env", SYNTHETIC_CREDENTIAL)
+    result = PromptScanner().scan(project)
+    assert "prompt:import:docs/guide.md" not in _components(result)
+    assert result.surfaces_excluded == [
+        "docs/guide.md: imported by CLAUDE.md but a symlink leads to .env, whose name says it "
+        + "holds credentials; not read or inventoried"
+    ]
+    run = _scan(project, tmp_path / "bom.json")
+    assert run.exit_code == 1, run.output
+    assert hash_bytes(SYNTHETIC_CREDENTIAL.encode()) not in (tmp_path / "bom.json").read_text()
+
+
+def test_a_markdown_name_does_not_hash_the_other_file_a_symlink_leads_to(tmp_path, monkeypatch):
+    from nexus_symbiote.core.hashing import hash_bytes
+    from nexus_symbiote.scanners.source_binding import SOURCE_BINDING_KEY_ENV
+    from nexus_symbiote.validators.integrity import IntegrityValidator
+
+    content = '{"endpoint": "https://internal.example/v1"}\n'
+    _linked_guide(tmp_path, "config/app.json", content)
+    result = PromptScanner().scan(tmp_path)
+    imported = _components(result)["prompt:import:docs/guide.md"]
+    assert imported.properties["symlink_target"] == "config/app.json"
+    assert imported.content_hash is None
+    assert "content_hash_withheld" in imported.properties
+    assert hash_bytes(content.encode()) not in AIBOM(components=result.components).to_json()
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, BINDING_KEY)
+    bom = AIBOM(components=PromptScanner().scan(tmp_path).components)
+    report = IntegrityValidator().validate(bom, tmp_path)
+    assert (report.status, report.hashes_verified, report.hashes_unbound) == ("pass", 2, 0)
+
+
+def test_a_symlink_replaced_after_its_check_is_not_inventoried(tmp_path, monkeypatch):
+    from nexus_symbiote.utils.confined import ConfinedCollection
+
+    _linked_guide(tmp_path, ".env", SYNTHETIC_CREDENTIAL)
+    # As if the link named another file when it was checked and .env when it was read.
+    monkeypatch.setattr(ConfinedCollection, "in_root_target", lambda self, path: None)
+    result = PromptScanner().scan(tmp_path)
+    assert "prompt:import:docs/guide.md" not in _components(result)
+    assert "docs/guide.md: file changed during collection" in result.scan_failures

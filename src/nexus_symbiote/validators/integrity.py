@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -29,7 +30,7 @@ from nexus_symbiote.core.models import (
     PromptComponent,
     ToolComponent,
 )
-from nexus_symbiote.scanners.mcp import MCPScanner
+from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV, MCPScanner
 from nexus_symbiote.scanners.model import (
     ModelPackages,
     memoized,
@@ -37,6 +38,8 @@ from nexus_symbiote.scanners.model import (
     unused_policy_entries,
     verify_weight_files,
 )
+from nexus_symbiote.scanners.prompt import IMPORT_CONTENT_BINDING_PROFILE, withholds_content_hash
+from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.crypto import (
     MAX_BUNDLE_BYTES,
@@ -90,6 +93,7 @@ class IntegrityReport:
     components_checked: int = 0
     hashes_verified: int = 0
     hashes_failed: int = 0
+    hashes_unbound: int = 0
     signatures_checked: int = 0
     signatures_verified: int = 0
     issues: list[IntegrityIssue] = field(default_factory=list)
@@ -132,6 +136,7 @@ class IntegrityReport:
             "components_checked": self.components_checked,
             "hashes_verified": self.hashes_verified,
             "hashes_failed": self.hashes_failed,
+            "hashes_unbound": self.hashes_unbound,
             "signatures_checked": self.signatures_checked,
             "signatures_verified": self.signatures_verified,
             "bytes_charged": self.bytes_charged,
@@ -197,6 +202,27 @@ class _ArtifactDigests:
         value = f"{algorithm}:{digest.hexdigest()}"
         self._digests[key] = value
         return value
+
+    def read(self, path: Path) -> bytes | None:
+        """Return the bytes of ``path``, at most the ``file-bytes`` limit that bounded its
+        collection, or None when it cannot be read safely."""
+        try:
+            with open_regular_file(path) as stream:
+                before = os.fstat(stream.fileno())
+                if before.st_size > limits.current().file_bytes:
+                    return None
+                self.charge(before.st_size)
+                content = stream.read(before.st_size + 1)
+                after = os.fstat(stream.fileno())
+                if (
+                    len(content) != before.st_size
+                    or descriptor_binding(before) != descriptor_binding(after)
+                    or pathname_identity(path) != (after.st_dev, after.st_ino)
+                ):
+                    return None
+        except (OSError, ValueError):
+            return None
+        return content
 
 
 def _locate_artifact(project_root: Path, source_path: str) -> Path | str:
@@ -823,6 +849,9 @@ class IntegrityValidator:
         self, comp: PromptComponent, project_root: Path | None, report: IntegrityReport
     ) -> None:
         if not comp.content_hash:
+            if withholds_content_hash(comp):
+                self._check_import_binding(comp, project_root, report)
+                return
             report.issues.append(
                 IntegrityIssue(
                     comp.bom_ref, "missing_hash", "Prompt content digest is unavailable", "unknown"
@@ -834,6 +863,102 @@ class IntegrityValidator:
             report.hashes_failed += 1
             return
         self._verify_digest(comp, path, comp.content_hash, None, report, "hash_mismatch")
+
+    def _check_import_binding(
+        self, comp: PromptComponent, project_root: Path | None, report: IntegrityReport
+    ) -> None:
+        """Verify the keyed binding of an import whose unkeyed content hash is withheld.
+
+        The collector withholds the hash of an imported file that is not Markdown, so
+        its absence is not missing evidence. With the operator key the HMAC is
+        recomputed from the file; without the key, or for an inventory collected
+        without it, nothing binds the content and the component is counted as unbound.
+        A binding under another profile or key cannot be checked and is unknown.
+        """
+        recorded = comp.properties.get("static_value_binding")
+        if not os.environ.get(SOURCE_BINDING_KEY_ENV) or recorded is None:
+            report.hashes_unbound += 1
+            report.issues.append(
+                IntegrityIssue(
+                    comp.bom_ref,
+                    "unbound_content",
+                    "Imported file carries no unkeyed content digest by design; collect and "
+                    f"validate with {SOURCE_BINDING_KEY_ENV} to verify its keyed binding",
+                    "info",
+                )
+            )
+            return
+        if comp.properties.get("static_value_binding_profile") != IMPORT_CONTENT_BINDING_PROFILE:
+            report.issues.append(
+                IntegrityIssue(
+                    comp.bom_ref,
+                    "binding_profile_unknown",
+                    "Imported file content binding has an unknown profile; re-collect it",
+                    "unknown",
+                )
+            )
+            return
+        path = self._artifact_path(comp, project_root, report)
+        if path is None:
+            report.hashes_failed += 1
+            return
+        try:
+            content = self._digests.read(path)
+        except _BudgetExhaustedError:
+            report.issues.append(_budget_issue(comp.bom_ref, self.byte_budget))
+            return
+        if content is None:
+            report.hashes_failed += 1
+            report.issues.append(
+                IntegrityIssue(
+                    comp.bom_ref, "hash_mismatch", "Failed to read a regular artifact file"
+                )
+            )
+            return
+        try:
+            binding = value_binding(
+                IMPORT_CONTENT_BINDING_PROFILE,
+                {"path": comp.source_path, "content": content.decode("utf-8")},
+            )
+        except BindingError as exc:
+            report.issues.append(
+                IntegrityIssue(comp.bom_ref, "binding_unavailable", str(exc), "unknown")
+            )
+            return
+        except UnicodeDecodeError:
+            # Only UTF-8 text is collected and bound, so this file is no longer what was.
+            binding = {}
+        if binding and binding["static_value_binding_key_id"] != comp.properties.get(
+            "static_value_binding_key_id"
+        ):
+            report.issues.append(
+                IntegrityIssue(
+                    comp.bom_ref,
+                    "binding_key_unknown",
+                    "Imported file content was bound under another key; validate with the "
+                    "key it was collected with",
+                    "unknown",
+                )
+            )
+            return
+        if (
+            binding
+            and isinstance(recorded, str)
+            and hmac.compare_digest(
+                binding["static_value_binding"].encode(),
+                recorded.encode("utf-8", "surrogatepass"),
+            )
+        ):
+            report.hashes_verified += 1
+            return
+        report.hashes_failed += 1
+        report.issues.append(
+            IntegrityIssue(
+                comp.bom_ref,
+                "hash_mismatch",
+                "Keyed content binding mismatch against the imported file",
+            )
+        )
 
     def _verify_digest(
         self,

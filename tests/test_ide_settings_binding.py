@@ -489,3 +489,71 @@ def test_an_invalid_permissions_object_keeps_the_other_declarations(tmp_path):
     assert declared["enable_all_project_mcp_servers"] and declared["api_key_helper"]
     categories = {risk.category for risk in agent.risks}
     assert {"mcp_auto_approval", "credential_helper"} <= categories
+
+
+# Known-answer vector for `settings_hashes`. A change to the redacted projection needs a
+# new profile version and a new vector, because every stored baseline would otherwise
+# mismatch.
+VECTOR_SETTINGS: dict[str, Any] = {
+    "permissions": {"allow": ["Bash(npm test)"]},
+    "env": {"MODE": "review", "PROVIDER_TOKEN": "vector-secret-value-0001"},
+    "apiKeyHelper": "printf vector-passphrase-0001",
+    "statusLine": {
+        "type": "command",
+        "command": "curl -s https://status.example/v1/line?token=vector-0001",
+    },
+}
+VECTOR_PREIMAGE = (
+    '{"apiKeyHelper":"***","env":["MODE","PROVIDER_TOKEN"],"permissions":{"allow":'
+    '["Bash(npm test)"]},"statusLine":{"command":"curl -s  https://status.example",'
+    '"type":"command"}}'
+)
+VECTOR_DIGEST = "sha256:6396eb8b05d88748d955b12b9211130efd700967c9e0ecfc14880bc258fe62df"
+
+
+@pytest.mark.parametrize("keyed", [False, True])
+def test_settings_digest_known_answer_vector(tmp_path, monkeypatch, keyed):
+    import hashlib
+
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    if keyed:
+        monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    agent = _claude(tmp_path / "vector", VECTOR_SETTINGS)
+    profile = "nexus-symbiote/ide-settings-redacted/v1"
+    assert agent.properties["settings_hashes_profile"] == profile
+    from nexus_symbiote.scanners.ide_agents import SETTINGS_DIGEST_PROFILE
+
+    assert profile == SETTINGS_DIGEST_PROFILE
+    assert "sha256:" + hashlib.sha256(VECTOR_PREIMAGE.encode()).hexdigest() == VECTOR_DIGEST
+    assert agent.properties["settings_hashes"] == {".claude/settings.json": VECTOR_DIGEST}
+    # A file the redaction leaves as it is keeps the digest of the file as read.
+    plain = _claude(tmp_path / "plain", BASE)
+    assert plain.properties["settings_hashes_profile"] == profile
+    assert plain.properties["settings_hashes"] == {".claude/settings.json": hash_canonical(BASE)}
+
+
+def test_a_credential_helper_command_is_bound_only_by_the_key(tmp_path, monkeypatch):
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    marker = tmp_path / "helper-ran"
+    settings = {**BASE, "apiKeyHelper": f"printf synthetic-passphrase > {marker}"}
+    moved = {**BASE, "apiKeyHelper": "printf another-passphrase"}
+    agent = _claude(tmp_path / "a", settings)
+    recorded = agent.properties["settings_hashes"][".claude/settings.json"]
+    assert recorded != hash_canonical(settings)
+    assert recorded == hash_canonical({**BASE, "apiKeyHelper": "***"})
+    assert "synthetic-passphrase" not in agent.model_dump_json()
+    assert agent.properties["settings_declarations"]["api_key_helper"] is True
+    categories = {risk.category for risk in agent.risks}
+    assert {"credential_helper", "completeness"} <= categories
+    # The digest does not follow the command, so it cannot confirm a guess of it.
+    assert _claude(tmp_path / "b", moved).properties["settings_hashes"] == {
+        ".claude/settings.json": recorded
+    }
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    keyed, rekeyed = _claude(tmp_path / "c", settings), _claude(tmp_path / "d", moved)
+    assert keyed.properties["settings_hashes"] == agent.properties["settings_hashes"]
+    assert keyed.properties["static_value_binding"] != rekeyed.properties["static_value_binding"]
+    assert not any(risk.category == "completeness" for risk in keyed.risks)
+    assert not marker.exists()

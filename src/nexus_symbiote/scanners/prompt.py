@@ -499,14 +499,47 @@ _CREDENTIAL_NAMES = frozenset({".netrc", ".npmrc", ".pypirc", "id_rsa", "id_ecds
 IMPORT_CONTENT_BINDING_PROFILE = "nexus-symbiote/prompt-import-content/v1"
 
 
+def _markdown(path: str) -> bool:
+    return PurePosixPath(path).suffix.lower() in _MARKUP_SUFFIXES
+
+
 def _credential_shaped(path: str) -> bool:
-    """Whether an import target's name says it holds credentials, not instructions."""
+    """Whether a file that is not Markdown is named as one that holds credentials.
+
+    A Markdown file is an instruction surface whatever its name, such as
+    ``docs/secrets-handling.md``.
+    """
+    if _markdown(path):
+        return False
     name = PurePosixPath(path).name.lower()
     if name in _CREDENTIAL_NAMES or name.startswith(".env"):
         return True
     if PurePosixPath(name).suffix in _CREDENTIAL_SUFFIXES:
         return True
     return any(marker in name for marker in _CREDENTIAL_MARKERS)
+
+
+def _instruction_import(path: str, link_target: object) -> bool:
+    """Whether an imported file keeps an unkeyed content hash: the path imported and the
+    file a symlink there leads to, if any, are both Markdown."""
+    return _markdown(path) and (
+        link_target is None or (isinstance(link_target, str) and _markdown(link_target))
+    )
+
+
+def withholds_content_hash(component: PromptComponent) -> bool:
+    """Whether the collector withholds the unkeyed content hash of ``component`` by design.
+
+    Such an import is bound only by the operator key, so validation verifies that
+    binding, or counts the component as unbound, instead of reporting a missing hash.
+    """
+    return (
+        component.prompt_type == "imported-instruction"
+        and bool(component.properties.get("content_hash_withheld"))
+        and not _instruction_import(
+            component.source_path or "", component.properties.get("symlink_target")
+        )
+    )
 
 
 # Path characters that the `imports` and `imported_by` lists of one collection hold
@@ -917,14 +950,14 @@ class PromptScanner(Scanner):
         """Bind a non-instruction import's content with the key, never an unkeyed digest.
 
         An imported Markdown file is an instruction surface and keeps the unkeyed
-        ``content_hash`` every instruction file carries. Any other imported file is
-        named by the checkout, so its exact bytes may hold configuration or secrets:
-        an unkeyed digest of them would let anyone holding the inventory confirm
-        guesses offline (see ``source_binding``). Its hash is withheld; with the
-        operator key an HMAC binds the content, and without one the component says
-        the content is unbound.
+        ``content_hash`` every instruction file carries, unless a symlink there leads to
+        a file that is not Markdown. Any other imported file is named by the checkout,
+        so its exact bytes may hold configuration or secrets: an unkeyed digest of them
+        would let anyone holding the inventory confirm guesses offline (see
+        ``source_binding``). Its hash is withheld; with the operator key an HMAC binds
+        the content, and without one the component says the content is unbound.
         """
-        if PurePosixPath(target).suffix.lower() in _MARKUP_SUFFIXES:
+        if _instruction_import(target, component.properties.get("symlink_target")):
             return
         component.content_hash = None
         component.properties["content_hash_withheld"] = (
@@ -961,7 +994,12 @@ class PromptScanner(Scanner):
     def _read_import(
         importer: str, target: str, files: ConfinedCollection, result: ScanResult
     ) -> bytes | None:
-        """An imported file's bytes, or None when it is absent, a directory or a gap."""
+        """An imported file's bytes, or None when it is absent, a directory or a gap.
+
+        A symlink that leads to a file named as one that holds credentials is a gap
+        whatever name imports it, so a Markdown name cannot bring the content hash of
+        such a file into the inventory.
+        """
         if len(PurePosixPath(target).parts) > files.max_depth + 1:
             result.surfaces_excluded.append(
                 f"{target}: imported by {importer} below the collection depth limit "
@@ -976,7 +1014,20 @@ class PromptScanner(Scanner):
             return None
         if files.is_directory(target):
             return None
-        return files.read_bytes(target, missing_ok=True)
+        linked = files.in_root_target(target)
+        if linked is not None and _credential_shaped(linked.as_posix()):
+            result.surfaces_excluded.append(
+                f"{target}: imported by {importer} but a symlink leads to {linked.as_posix()}, "
+                "whose name says it holds credentials; not read or inventoried"
+            )
+            return None
+        content = files.read_bytes(target, missing_ok=True)
+        followed = files.link_target(target)
+        if content is not None and followed is not None and _credential_shaped(followed):
+            # The symlink was replaced after the check above.
+            result.scan_failures.append(f"{target}: file changed during collection")
+            return None
+        return content
 
     def _scan_skills(
         self, files: ConfinedCollection, result: ScanResult, reported: set[Path]

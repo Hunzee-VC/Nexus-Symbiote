@@ -372,18 +372,24 @@ A way around a limit that its entry does not describe is worth a
   file from text read here as code.
   An import that leaves the project root, names an excluded path or lies deeper than
   the `depth` limit is a gap, so write a path alias such as `@/components` as code. An
-  import whose name says it holds credentials (`.env*`, `.netrc`, `.npmrc`, `.pypirc`,
-  key and certificate suffixes, or a name containing `secret`, `credential`,
-  `password` or an `api key` spelling) is a gap and is not read. An imported file
-  without a Markdown suffix is inventoried without a content hash: its exact bytes
-  may hold configuration or secrets, and an unkeyed digest of them could be confirmed
-  by guessing; with `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` a keyed binding covers the
-  content, and without one the component carries a low `completeness` finding. A
-  project with more than the [`import-lookups`](collection-limits.md#limits) limit of
-  memory files and import targets fails until the limit is raised. Past 262,144
-  characters of listed paths, an `imports` list is replaced by `imports_count` and
-  `imports_digest`, and an `imported_by` list by `imported_by_count`; every file is
-  still inventoried.
+  import of a file without a Markdown suffix whose name says it holds credentials
+  (`.env*`, `.netrc`, `.npmrc`, `.pypirc`, key and certificate suffixes, or a name
+  containing `secret`, `credential`, `password` or an `api key` spelling) is a gap and
+  is not read, and so is an import, whatever its name, that a symlink resolves to such
+  a file, such as `docs/guide.md` linked to `.env`. A Markdown file is read whatever
+  its name, such as `docs/secrets-handling.md`, so a credential kept in one is covered
+  by its unkeyed content hash like any instruction file's text. An imported file is
+  inventoried without a content hash unless both the path imported and the file a
+  symlink there leads to, if any, have a Markdown suffix: its exact bytes may hold
+  configuration or secrets, and an unkeyed digest of them could be confirmed by
+  guessing. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` a keyed binding covers the
+  content, which `validate --project` with the same key verifies; without the key the
+  component carries a low `completeness` finding, validation counts it as unbound, and
+  a change to the file raises no alert and fails no validation. A project with more
+  than the [`import-lookups`](collection-limits.md#limits) limit of memory files and
+  import targets fails until the limit is raised. Past 262,144 characters of listed
+  paths, an `imports` list is replaced by `imports_count` and `imports_digest`, and an
+  `imported_by` list by `imported_by_count`; every file is still inventoried.
 - **Fixtures count.** A nested `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` or `.cursorrules`
   in test fixtures or vendored code is inventoried, and its findings count, like any
   other.
@@ -418,32 +424,30 @@ A way around a limit that its entry does not describe is worth a
 - **Effective permissions are not resolved.** User and managed settings, workspace
   trust and session flags are not read, and deny and ask rules are counted, not
   applied to the allow list.
-- **Settings digests can confirm guesses.** Without
-  `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, the digests of the Claude Code settings,
-  plugin manifests and plugin hooks, the Gemini CLI, Windsurf and Cline settings,
-  `.cursor/settings.json`, `.cursor/hooks.json` and `.codex/config.json` cover the
-  file as read, including the environment values of the MCP servers that
-  `.gemini/settings.json` declares, which the `mcp` records bind only with the key,
-  so anyone holding the inventory can confirm a guess of a whole file. With the key,
-  and for the other settings files without it, a value the redaction leaves in
-  place, such as a password pasted into a hook command, can still be confirmed. Keep
-  credentials out of settings files; see
+- **Settings digests can confirm guesses of what the redaction keeps.** Every digest
+  in `settings_hashes` covers its file after the redaction, with or without
+  `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, so it cannot confirm a guess of an `env` value,
+  such as the environment of an MCP server that `.gemini/settings.json` declares, of
+  the command of `apiKeyHelper`, or of a credential the redaction recognises. A value
+  the redaction leaves in place, such as a password pasted into a hook command, stored
+  under a key name or passed to a command under any setting other than `apiKeyHelper`,
+  can still be confirmed. Keep credentials out of settings files; see
   [IDE agent settings](verification-source-binding.md#ide-agent-settings).
-- **Some settings changes alert only with the key.** `.codex/config.toml`,
-  `.cursor/cli.json` and the Antigravity, xAI and Copilot settings files are
-  digested after the redaction, so that their digests cannot confirm a guess either.
-  Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a change only to a value the
-  redaction removes, such as an MCP server's environment value, a token, or a URL
-  path, query or userinfo on the same host in a `notify` command, raises no alert;
-  such a record carries a low `completeness` finding. The redaction ends a URL or
-  an assigned value at a shell operator (`;`, `|`, `&`, `$`, `` ` ``, parentheses,
-  braces, `<`, `>` or a line break), and starts a new URL at each later scheme
-  such as `https://`, so a command or operator glued to one without whitespace, and
-  a host glued to one after an operator or a scheme, as in
-  `--webhooks=https://a.example/n,https://b.example`, do alert. Other text glued
-  to a URL without an operator or another scheme stays part of its redacted path;
-  without the key a URL whose authority
-  parsers read differently, such as one with a backslash, is a failure.
+- **Some settings changes alert only with the key.** Every settings file is digested
+  after the redaction, so that its digest cannot confirm a guess. Without
+  `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a change only to a value the redaction removes,
+  such as an `env` value, including an MCP server's environment value, the command of
+  `apiKeyHelper`, a token, or a URL path, query or userinfo on the same host in a
+  `notify` command, raises no alert; such a record carries a low `completeness`
+  finding. Adding or removing an `env` name or `apiKeyHelper` still alerts. The
+  redaction ends a URL or an assigned value at a shell operator (`;`, `|`, `&`, `$`,
+  `` ` ``, parentheses, braces, `<`, `>` or a line break), and starts a new URL at
+  each later scheme such as `https://`, so a command or operator glued to one without
+  whitespace, and a host glued to one after an operator or a scheme, as in
+  `--webhooks=https://a.example/n,https://b.example`, do alert. Other text glued to a
+  URL without an operator or another scheme stays part of its redacted path; without
+  the key a URL whose authority parsers read differently, such as one with a
+  backslash, is a failure.
 - **Codex settings are interpreted in part.** `.codex/config.toml` is digested
   whole after the redaction, so a new `notify` command or another changed setting
   raises an alert, unless only a value the redaction removes changed and the scans
