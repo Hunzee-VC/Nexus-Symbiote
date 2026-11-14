@@ -62,7 +62,7 @@ class NativeFormatError(ValueError):
 
 _SERIAL_UNDEFINED = (
     "Its serial number is derived from its content digest, which cannot be computed: the "
-    "inventory records a value outside the I-JSON range, such as a lone surrogate, or "
+    "inventory records a value outside the I-JSON domain, such as a lone surrogate, or "
     "nests too deeply."
 )
 NO_CONTENT_SERIAL = f"Inventory not written. {_SERIAL_UNDEFINED}"

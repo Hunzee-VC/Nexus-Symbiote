@@ -61,11 +61,12 @@ enforcement, and verifies that `Verified CI` is required. It also requires the e
 source SHA to match the live branch head, the newest trusted run of
 `.github/workflows/ci.yml` for that SHA (a `push` or `workflow_dispatch` run on the
 expected branch in this repository) to have succeeded, and exactly one successful
-`Verified CI`, `CodeQL policy` and `Dependency advisories` jobs in that run's latest
-attempt. A pull-request or fork run for the same commit is not evidence and cannot
-displace the trusted run, whether it is newer or still waiting for approval; a newer
-trusted run that is pending or failed still wins over an older success. An unbound
-status with the same name cannot satisfy the protection preflight.
+job each named `Verified CI`, `CodeQL policy` and `Dependency advisories` in that
+run's latest attempt. A pull-request or fork run for the same commit is not
+evidence and cannot displace the trusted run, whether it is newer or still waiting
+for approval; a newer trusted run that is pending or failed still wins over an
+older success. An unbound status with the same name cannot satisfy the protection
+preflight.
 
 With `--publish testpypi` or `--publish pypi`, as the release workflow passes, it
 also requires an active ruleset that stops `refs/tags/v*` from being updated or

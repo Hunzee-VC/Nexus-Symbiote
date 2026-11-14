@@ -16,7 +16,7 @@ TestPyPI and PyPI use the same pipeline, the same gates and the same kind of att
 bytes, so a successful rehearsal exercises everything except the final index. This is
 the only workflow that publishes to either index.
 
-This repository change does not configure GitHub environments, package-index
+Nothing in this repository configures GitHub environments, package-index
 ownership, trusted publishers or repository protection. A maintainer does that once,
 as described below.
 
@@ -46,8 +46,9 @@ as described below.
    environment `pypi` or `testpypi` respectively. Always set the environment:
    without it, any job in the workflow holding an OIDC token could publish. No API
    token is needed or stored.
-4. **Protect `main`** and require reviewed changes and successful `Verified CI`,
-   including CodeQL high/critical and dependency-advisory acceptance, following
+4. **Protect `main`** and require successful `Verified CI`, including CodeQL
+   high/critical and dependency-advisory acceptance, and, once a second
+   authorized reviewer exists, reviewed changes, following the configurations in
    [repository controls](repository-controls.md). The workflow cannot create these
    controls itself. Apply the release-tag ruleset described there before creating the
    first `v*` tag: the README's verified-release install trusts the tag to stay on the
@@ -216,7 +217,8 @@ reach the source distribution. Two local builds of the same commit produced
 identical files; reproducibility across runners is not attested. The job then
 checks that there is exactly one wheel and one sdist, runs `twine check --strict`,
 and uploads them **before** anything runs tests, writes evidence or installs
-packages. Later jobs receive those bytes by their immutable artifact ID, so a step
+anything but the hash-locked build environment and the checkout, which it installs
+first. Later jobs receive those bytes by their immutable artifact ID, so a step
 that misbehaves later in the build job cannot change the distributions that are
 attested or published. Before deriving benchmark and checksum evidence from `dist/`,
 the build re-checks the files against the digests recorded at staging and fails on
