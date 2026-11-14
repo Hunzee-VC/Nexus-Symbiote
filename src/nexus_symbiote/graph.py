@@ -142,9 +142,11 @@ def _readable_entry(
     files: ConfinedCollection, path: Path, locator: str, problems: list[str]
 ) -> bool:
     """Apply the operator's exclusions to a manifest-selected path before anything reads it."""
-    from nexus_symbiote.utils.confined import DEFAULT_EXCLUDES
+    from nexus_symbiote.utils.confined import DEFAULT_EXCLUDES, fold_name
 
-    if any(part in DEFAULT_EXCLUDES for part in path.parts):
+    # Collection skips these in any spelling a case-insensitive file system treats as
+    # the same name, without recording a gap, so each spelling must be refused here.
+    if any(part in DEFAULT_EXCLUDES or fold_name(part) in DEFAULT_EXCLUDES for part in path.parts):
         problems.append(f"{locator}: names a path inside a directory that collection never reads")
         return False
     # A policy exclusion is recorded as a coverage gap by the collection itself.

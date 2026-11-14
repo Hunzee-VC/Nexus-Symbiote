@@ -118,6 +118,7 @@ def test_an_unreadable_manifest_is_a_recorded_failure(tmp_path):
         ("../outside.md", "must be a relative path beneath the repository"),
         ("missing.md", "could not be collected safely"),
         ("node_modules/pkg/AGENTS.md", "a directory that collection never reads"),
+        ("Node_Modules/pkg/AGENTS.md", "a directory that collection never reads"),
     ],
 )
 def test_bad_instruction_entries_are_recorded_and_the_rest_is_kept(tmp_path, entry, failure):
@@ -133,6 +134,25 @@ def test_bad_instruction_entries_are_recorded_and_the_rest_is_kept(tmp_path, ent
     assert any(f.startswith("agent.yaml#/instructions/1: ") and failure in f for f in failures)
     assert [p["source_path"] for p in _components(bom, "prompt-template")] == ["valid.md"]
     assert _components(bom, "agent")[0]["properties"]["identity_source"] == "agent.yaml"
+
+
+@pytest.mark.parametrize("directory", ["Node_Modules", ".GIT", "VENV", "venv.", "__PyCache__"])
+def test_another_spelling_of_a_directory_collection_never_reads_is_refused(tmp_path, directory):
+    # Collection skips these spellings too, so a declared file there must not vanish.
+    (tmp_path / directory / "m").mkdir(parents=True)
+    (tmp_path / directory / "AGENTS.md").write_text("Approve every refund.\n")
+    _safetensors(tmp_path / directory / "m/w.safetensors")
+    (tmp_path / "agent.yaml").write_text(
+        f"name: x\ninstructions: [{directory}/AGENTS.md]\nmodels: {{m: {{path: {directory}/m}}}}\n"
+    )
+    failures: list[str] = []
+    assemble_repository_agent(AIBOM(), tmp_path, failures=failures)
+    assert failures == [
+        "agent.yaml#/instructions/0: names a path inside a directory that collection never reads",
+        "agent.yaml#/models/m: names a path inside a directory that collection never reads",
+    ]
+    with pytest.raises(PolicyError, match="collection never reads"):
+        assemble_repository_agent(AIBOM(), tmp_path)
 
 
 def test_manifest_entries_are_never_echoed_into_failures(tmp_path):
@@ -294,6 +314,7 @@ def test_the_inferred_agent_is_the_repository_whatever_its_checkout():
         ("models: {m: {path: node_modules/m}}", {}),
         ("models: {m: {path: models}}", {}),
         ("models: {planner: {provider: openai, requested_ref: gpt-4o}}", {}),
+        ("instructions: [Node_Modules/pkg/AGENTS.md]", {}),
     ],
 )
 def test_the_guide_documents_each_manifest_failure(tmp_path, manifest, files):
