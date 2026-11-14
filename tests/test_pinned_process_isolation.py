@@ -9,6 +9,9 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
+from nexus_symbiote.live import pinned_process
 from nexus_symbiote.live.pinned_process import isolation_off
 from nexus_symbiote.live.session import PinnedStdioSession
 from nexus_symbiote.live.stdio import observe_pinned
@@ -79,6 +82,16 @@ def test_a_pinned_session_kills_a_setsid_descendant(tmp_path: Path) -> None:
     command, digest = _launcher(tmp_path, marker)
     with PinnedStdioSession(command=str(command), sha256=digest, server_id="server:mail"):
         pass
+    _assert_dead(_host_pid(marker))
+
+
+def test_setsid_descendant_dies_when_the_pid_namespace_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pinned_process, "namespace_available", lambda: False)
+    marker = tmp_path / "pid"
+    command, digest = _launcher(tmp_path, marker)
+    observe_pinned(str(command), digest)
     _assert_dead(_host_pid(marker))
 
 

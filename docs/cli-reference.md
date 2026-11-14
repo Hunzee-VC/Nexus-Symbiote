@@ -931,9 +931,10 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 | `--accept-drift` | With `--record`, exit 0 although changed or new tools, declarations or server identity were recorded. |
 | `--no-isolation` | Do not run the launcher in a PID namespace. A descendant that calls `setsid` can then outlive the session. Printed as a warning. |
 
-By default the launcher is pid 1 of a new user and PID namespace, so killing the
-session also kills a descendant that called `setsid`. That needs util-linux
-`unshare`. It is not a filesystem or network sandbox.
+By default a descendant that called `setsid` dies with the session. When the kernel
+allows it, the launcher is pid 1 of a new user and PID namespace (`unshare`). A host
+that refuses the namespace, as Ubuntu 24.04 runners do, still runs the launcher and
+kills its descendant tree. It is not a filesystem or network sandbox.
 
 Servers whose transport is `sse`, `streamable-http` or `http` and that record no
 launch command are reported as not verifiable by `verify-live` (reason

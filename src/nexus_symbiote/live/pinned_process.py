@@ -1,9 +1,11 @@
-"""Stage one digest-pinned launcher and run it in a PID namespace.
+"""Stage one digest-pinned launcher and stop it, including ``setsid`` descendants.
 
 ``live.stdio`` and ``live.session`` both copy the approved bytes and execute that
-private copy. One helper keeps the copy, the digest check and the process-group
-termination from drifting apart. The launcher is pid 1 of a new PID namespace, so
-a descendant that calls ``setsid`` still dies when the namespace's init is killed.
+private copy. One helper keeps the copy, the digest check and the termination from
+drifting apart. When the kernel allows a user and PID namespace, the launcher is
+pid 1 of that namespace and dies with every descendant. Ubuntu 24.04 runners often
+refuse the namespace; there the helper kills the descendant tree itself, so a
+``setsid`` child still does not outlive the session.
 """
 
 from __future__ import annotations
@@ -25,6 +27,8 @@ _ISOLATION: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "nexus_symbiote_pinned_isolation", default=True
 )
 _LAUNCHER_BUDGET = 128 * 1024 * 1024
+_NAMESPACE_OK: bool | None = None
+_NAMESPACED: set[int] = set()
 
 
 class PinnedProcessError(OSError):
@@ -69,9 +73,7 @@ def stage_pinned_executable(command: str, digest: str, work: Path) -> Path:
             while chunk := source.read(1024 * 1024):
                 budget -= len(chunk)
                 if budget < 0:
-                    raise PinnedProcessError(
-                        "launcher-unavailable", "launcher exceeds byte budget"
-                    )
+                    raise PinnedProcessError("launcher-unavailable", "launcher exceeds byte budget")
                 hasher.update(chunk)
                 out.write(chunk)
     except PinnedProcessError:
@@ -93,16 +95,56 @@ def _unshare_path() -> str | None:
     return found
 
 
+def namespace_available() -> bool:
+    """Whether this process can start a user and PID namespace.
+
+    The result is cached. Ubuntu 24.04 with AppArmor's unprivileged-user-namespace
+    restriction returns false; the probe is one short ``unshare`` of ``/bin/true``.
+    """
+    global _NAMESPACE_OK
+    if _NAMESPACE_OK is None:
+        _NAMESPACE_OK = _probe_namespace()
+    return _NAMESPACE_OK
+
+
+def _probe_namespace() -> bool:
+    tool = _unshare_path()
+    true_bin = shutil.which("true", path=os.defpath)
+    if tool is None or true_bin is None or not Path(true_bin).is_absolute():
+        return False
+    try:
+        result = subprocess.run(  # noqa: S603
+            [
+                tool,
+                "--user",
+                "--map-root-user",
+                "--pid",
+                "--fork",
+                "--kill-child",
+                "--",
+                true_bin,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
 def isolated_argv(staged: Path) -> list[str]:
-    """The argv that runs ``staged``, inside a PID namespace unless isolation is off."""
-    if not isolation_enabled():
+    """The argv that runs ``staged``.
+
+    A PID namespace is used when isolation is on and the kernel allows it. Otherwise
+    the staged launcher is executed directly and termination kills its descendants.
+    """
+    if not isolation_enabled() or not namespace_available():
         return [str(staged)]
     tool = _unshare_path()
     if tool is None:
-        raise PinnedProcessError(
-            "isolation-unavailable",
-            "pinned execution needs util-linux unshare for a user and PID namespace",
-        )
+        return [str(staged)]
     # --kill-child delivers SIGKILL to the namespace init when unshare dies, and the
     # kernel then kills every process in that namespace, including setsid descendants.
     return [
@@ -117,11 +159,58 @@ def isolated_argv(staged: Path) -> list[str]:
     ]
 
 
+def _descendant_pids(root: int) -> set[int]:
+    """Process-tree descendants of ``root``, including those that called ``setsid``."""
+    children: dict[int, list[int]] = {}
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return set()
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        try:
+            with open(f"/proc/{pid}/status", encoding="utf-8") as status:
+                ppid = next(
+                    (int(line.split()[1]) for line in status if line.startswith("PPid:")),
+                    None,
+                )
+        except OSError:
+            continue
+        if ppid is not None:
+            children.setdefault(ppid, []).append(pid)
+    found: set[int] = set()
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        for child in children.get(current, ()):
+            if child not in found:
+                found.add(child)
+                stack.append(child)
+    return found
+
+
+def _kill_descendants(root: int) -> None:
+    """SIGKILL the descendant tree. Repeated so a fork during the sweep is caught."""
+    for _ in range(8):
+        victims = _descendant_pids(root)
+        if not victims:
+            return
+        for victim in victims:
+            try:
+                os.kill(victim, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
 def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
     """Start the staged launcher with a private cwd, a default PATH and a new session."""
     try:
-        return subprocess.Popen(  # noqa: S603
-            isolated_argv(staged),
+        argv = isolated_argv(staged)
+        namespaced = isolation_enabled() and bool(argv) and argv[0] != str(staged)
+        proc = subprocess.Popen(  # noqa: S603
+            argv,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -134,11 +223,23 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
         raise
     except OSError as exc:
         raise PinnedProcessError("launcher-start-failed", "launcher could not be run") from exc
+    if namespaced:
+        _NAMESPACED.add(proc.pid)
+    return proc
 
 
 def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
-    """Kill the launcher's session. The PID namespace reaps descendants."""
+    """Kill the launcher's session and, outside a PID namespace, its descendants.
+
+    Descendants are killed first, while their parent is still alive, so a ``setsid``
+    child is still visible in the process tree. The process group is killed after that.
+    """
+    namespaced = proc.pid in _NAMESPACED
+    if isolation_enabled() and not namespaced:
+        _kill_descendants(proc.pid)
     try:
         os.killpg(proc.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
+    if isolation_enabled() and not namespaced:
+        _kill_descendants(proc.pid)
