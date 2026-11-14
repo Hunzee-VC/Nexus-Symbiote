@@ -29,6 +29,7 @@ from nexus_symbiote.scanners.model import (
     ZIP_PICKLE_MEMBER,
     ModelScanner,
 )
+from nexus_symbiote.utils import pickle_load
 from nexus_symbiote.validators.integrity import IntegrityValidator
 
 UNSAFE = SerializationSafety.UNSAFE_CODE_EXECUTION
@@ -346,19 +347,21 @@ class _LargeBuffer:
         return (eval, (pickle.PickleBuffer(bytearray(MAX_PICKLE_INSPECTION_BYTES + 4096)),))
 
 
-def test_a_protocol_5_pickle_of_a_large_buffer_is_critical(tmp_path: Path) -> None:
+def test_a_protocol_5_pickle_of_a_large_buffer_is_unknown_by_content(tmp_path: Path) -> None:
     payload = pickle.dumps(_LargeBuffer(), protocol=5)
     names = [opcode.name for opcode, _, _ in pickletools.genops(payload)]
-    # The bytes run past the inspection bound after fewer than 16 opcodes.
-    assert names.index("BYTEARRAY8") < 16
+    # The bytes run past the inspection bound after the name, before the call.
+    assert names.index("STACK_GLOBAL") < names.index("BYTEARRAY8") < names.index("REDUCE")
     (tmp_path / "models").mkdir()
     (tmp_path / "models" / "array").write_bytes(payload)
     (tmp_path / "array.dat").write_bytes(payload)
+    (tmp_path / "array.pt").write_bytes(payload)
     found = _components(tmp_path)
-    assert sorted(found) == ["array.dat", "models/array"]
-    for component in found.values():
-        assert component.serialization_safety is UNSAFE
-        assert component.properties["format_inspection"] == BINARY_PICKLE
+    assert sorted(found) == ["array.dat", "array.pt", "models/array"]
+    for relative in ("array.dat", "models/array"):
+        assert found[relative].serialization_safety is SerializationSafety.UNKNOWN
+        assert found[relative].properties["format_inspection"] == PICKLE_NAME_UNCALLED
+    assert found["array.pt"].serialization_safety is UNSAFE
 
 
 def test_a_binary_pickle_with_no_callable_before_the_bound_is_unknown(tmp_path: Path) -> None:
@@ -553,7 +556,7 @@ def test_text_that_reads_as_a_name_without_a_call_is_not_critical(tmp_path: Path
     (tmp_path / "models").mkdir()
     # Alone, a text-protocol call cut short is as likely prose.
     (tmp_path / "models" / "readme").write_bytes(b"config\nvalues\nbuild\n")
-    (tmp_path / "text.dat").write_bytes(_TEXT_CALL)
+    (tmp_path / "text.dat").write_bytes(_TEXT_CALL[:-1])
     # After a STOP: words that are no module name, or no call after the name.
     (tmp_path / "models" / "notes").write_bytes(b"N.c see notes\nfor details\nb")
     (tmp_path / "log.dat").write_bytes(b"N.bad\n")
@@ -806,3 +809,252 @@ def test_a_frame_that_ends_at_its_stop_is_read_as_before(tmp_path: Path) -> None
     (tmp_path / "header.dat").write_bytes(pickle.dumps({"protocol_version": 1001}, protocol=4))
     (tmp_path / "pair.dat").write_bytes(pickle.dumps(1, protocol=4) + pickle.dumps(2, protocol=4))
     assert _components(tmp_path) == {}
+
+
+# A harmless pickle, then one whose BUILD sets no state, padded past each inspection
+# bound, with a call of exec beyond it.
+_PAYLOAD_PAST_A_BOUND = b"cbuiltins\nexec\n(S'import builtins;builtins.HIT=1'\ntR."
+_PADDED_PAST_A_BOUND = {
+    "opcodes": b"N." + b"NNb" + b"N0" * 3000 + _PAYLOAD_PAST_A_BOUND,
+    "marks": b"N." + b"NNb" + b"(0" * 70 + _PAYLOAD_PAST_A_BOUND,
+    "bytes": b"N." + b"NNb0S'" + b"a" * 70000 + b"'\n0" + _PAYLOAD_PAST_A_BOUND,
+    "torch-header": _header(2) + b"NNb" + b"N0" * 3000 + _PAYLOAD_PAST_A_BOUND,
+}
+
+
+@pytest.mark.parametrize("data", _PADDED_PAST_A_BOUND.values(), ids=_PADDED_PAST_A_BOUND)
+def test_a_pickle_after_a_stop_that_a_bound_cuts_short_is_unknown(
+    tmp_path: Path, data: bytes
+) -> None:
+    assert _runs_exec(data)
+    (tmp_path / "models").mkdir()
+    files = ["models/x", "x.dat", "x.npy", "legacy.tar.dat"]
+    for relative in files:
+        (tmp_path / relative).write_bytes(data)
+    (tmp_path / "x.pt").write_bytes(data)
+    found = _components(tmp_path)
+    assert sorted(found) == sorted([*files, "x.pt"])
+    for relative in files:
+        assert found[relative].serialization_safety is SerializationSafety.UNKNOWN
+        assert found[relative].properties["format_inspection"] == PICKLE_UNREAD
+    assert found["x.pt"].serialization_safety is UNSAFE
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"VERSION\n.h\ncache\nlogs\nREADME.md\n",
+        b"N.g0\ncos\nsystem\n(S'id'\ntR.",
+        b"N.j\x07\x00\x00\x00cos\nsystem\n)R.",
+        b"N.cos\nsystem\nq\x01h\x02)R.",
+    ],
+    ids=["text", "get", "long-binget", "other-slot"],
+)
+def test_a_memo_slot_never_stored_ends_the_pickle(tmp_path: Path, data: bytes) -> None:
+    # pickle.load raises "Memo value not found" at the read, before anything after it.
+    assert not _calls_anything(data)
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "x").write_bytes(data)
+    (tmp_path / "x.dat").write_bytes(data)
+    assert _components(tmp_path) == {}
+
+
+def test_a_memo_slot_that_was_stored_is_read_back(tmp_path: Path) -> None:
+    data = b"N.cos\nsystem\nq\x050h\x05(S'id'\ntR."
+    assert _calls_anything(data)
+    (tmp_path / "x.dat").write_bytes(data)
+    assert _components(tmp_path)["x.dat"].serialization_safety is UNSAFE
+
+
+# An oracle for the property tests below: pickle.load in a loop, by the C and the
+# pure-Python unpicklers, with find_class returning a class that records each way it is
+# invoked instead of importing anything, and persistent_load an inert object. find_class
+# fails for a name that is not a dotted identifier, as an import of it does.
+
+
+class _Log:
+    def __init__(self) -> None:
+        self.resolved = False
+        self.called = False
+
+
+def _recording(log: _Log) -> type:
+    def record(*_: object, **__: object) -> object:
+        log.called = True
+        return None
+
+    class Meta(type):
+        def __call__(cls, *_: object, **__: object) -> object:
+            log.called = True
+            return object.__new__(cls)
+
+    def new(cls: type, *_: object, **__: object) -> object:
+        log.called = True
+        return object.__new__(cls)
+
+    return Meta("Recorded", (), {"__new__": new, "__setstate__": record, "__slots__": ()})
+
+
+def _unpickler(base: type) -> type:
+    class Recording(base):  # type: ignore[misc, valid-type]
+        log: _Log
+
+        def find_class(self, module: str, name: str) -> type:
+            self.log.resolved = True
+            if not all(part.isidentifier() for part in [*module.split("."), *name.split(".")]):
+                raise ImportError(module)
+            return _recording(self.log)
+
+        def persistent_load(self, _: object) -> object:
+            # torch.load's returns a storage: an object that runs nothing it is given.
+            return object()
+
+    return Recording
+
+
+_UNPICKLERS = {"c": _unpickler(pickle.Unpickler), "py": _unpickler(pickle._Unpickler)}  # type: ignore[attr-defined]
+
+
+def _oracle_walk(flavor: str, stream: io.BufferedIOBase | io.BytesIO, size: int) -> list:
+    walk: list[tuple[str, bool, int | None]] = []
+    for _ in range(32):
+        log = _Log()
+        if stream.tell() >= size:
+            walk.append(("error", False, None))
+            break
+        unpickler = _UNPICKLERS[flavor](stream)
+        unpickler.log = log
+        try:
+            unpickler.load()
+        except Exception:  # noqa: BLE001 - pickle.load stops at any exception
+            walk.append(("called" if log.called else "error", log.resolved, None))
+            break
+        if log.called:
+            walk.append(("called", log.resolved, None))
+            break
+        walk.append(("stop", log.resolved, stream.tell()))
+    return walk
+
+
+def _machine_walk(flavor: pickle_load.Flavor, data: bytes) -> list:
+    budget = pickle_load.Budget(10**6, 10**6)
+    walk: list[tuple[str, bool, int | None]] = []
+    start = 0
+    for _ in range(32):
+        segment = pickle_load.load_segment(data, len(data), start, flavor, budget)
+        if segment.outcome != "stop":
+            walk.append((segment.outcome, segment.resolved, None))
+            break
+        start = segment.resumes[0]
+        walk.append(("stop", segment.resolved, start))
+    return walk
+
+
+_SNIPPETS = [
+    *(b"N", b"\x88", b"\x89", b"I1\n", b"I01\n", b"I017\n", b"I 5\n", b"L5L\n", b"F1.5\n"),
+    *(b"F 1\n", b"K\x07", b"M\x01\x02", b"J\x01\x00\x00\x00", b"G?\xf0\x00\x00\x00\x00\x00\x00"),
+    *(b"S'x'\n", b"Sx\n", b"Vhi\n", b"U\x02ab", b"X\x01\x00\x00\x00x", b"\x8c\x01s", b"C\x03abc"),
+    *(b"B\x01\x00\x00\x00z", b"\x96\x02\x00\x00\x00\x00\x00\x00\x00ab", b"T\x01\x00\x00\x00\xe9"),
+    *(b"(", b")", b"]", b"}", b"\x8f", b"t", b"l", b"d", b"\x85", b"\x86", b"\x87", b"a", b"e"),
+    *(b"s", b"u", b"\x90", b"\x91", b"0", b"1", b"2", b"p0\n", b"g0\n", b"q\x01", b"h\x01"),
+    *(b"r\x02\x00\x00\x00", b"j\x02\x00\x00\x00", b"\x94", b"R", b"o", b"b", b"\x81", b"\x92"),
+    *(b"\x93", b"Q", b"P1\n", b"\x98", b".", b".", b"cos\nsystem\n", b"cbuiltins\nexec\n"),
+    *(b"ca b\nc\n", b"c\n\n", b"\x8c\x08builtins\x8c\x04exec", b"ios\nsystem\n", b"\x80\x02"),
+    *(b"\x80\x04", b"\x82\x01", b"\xff", b"\x8c\x02os\x8c\x06system", b"NNb", b"N}b", b"N)b"),
+]
+
+
+def _generated(seed: int, count: int) -> list[bytes]:
+    rng = random.Random(seed)  # noqa: S311 - a reproducible corpus, not a secret
+    samples = []
+    for _ in range(count):
+        parts = [rng.choice(_SNIPPETS) for _ in range(rng.randrange(1, 24))]
+        if rng.random() < 0.3:
+            cut = rng.randrange(len(parts) + 1)
+            body = b"".join(parts[:cut])
+            # A frame of its body, or one byte longer or shorter than it.
+            length = len(body) + rng.choice([0, 0, 1, -1])
+            parts = [b"\x95" + max(0, length).to_bytes(8, "little") + body, *parts[cut:]]
+        data = rng.choice([b"", b"N.", b"\x80\x02N.", _header(2)]) + b"".join(parts)
+        if rng.random() < 0.2 and data:
+            index = rng.randrange(len(data))
+            data = data[:index] + bytes([rng.randrange(256)]) + data[index + 1 :]
+        samples.append(data)
+    return samples
+
+
+_PROPERTY_SAMPLES = _generated(152, 1500)
+
+
+@pytest.mark.parametrize("flavor", pickle_load.FLAVORS)
+def test_the_interpreter_ends_each_pickle_where_the_unpickler_does(flavor: str) -> None:
+    mismatched = [
+        data
+        for data in _PROPERTY_SAMPLES
+        if _machine_walk(flavor, data) != _oracle_walk(flavor, io.BytesIO(data), len(data))  # type: ignore[arg-type]
+    ]
+    assert not mismatched, mismatched[:5]
+
+
+_Z7 = b"\x00" * 7
+_BYTEARRAY = b"\x96\x01" + _Z7 + b"a"
+# Each opcode's corner where the C and pure-Python unpicklers part, or fail.
+_EDGES = [
+    *(b"}]Ns.", b"(]\x91.", b"(Nd.", b"(NNd.", b"I017\n.", b"I 5\n.", b"I1_0\n.", b"F1e400\n."),
+    *(b"Finf\n.", b"F1_0\n.", b"F 1\n.", b"T\x01\x00\x00\x00a.", b"T\xff\xff\xff\xff."),
+    *(b"\x8d\x01" + _Z7 + b"a.", _BYTEARRAY + b"\x98.", b"C\x01a\x98.", b"N\x98."),
+    *(b"](NeK\x00Ns.", b"]K\x00Ns.", _BYTEARRAY + b"K\x00K\x05s.", _BYTEARRAY + b"K\x00M,\x01s."),
+    *(b")K\x00Ns.", b"}(u.", b"}(Nu.", b"}(NNu.", b"N(u.", b"](e.", b"N(e.", b"](NNe."),
+    *(_BYTEARRAY + b"(K\x01e.", _BYTEARRAY + b"(M,\x01e.", b"\x8f(N\x90.", b"\x8f(]\x90."),
+    *(b"N(\x90.", b"(\x91(N\x90.", b"\x8f(\x90.", b"\x84\x01\x00\x00\x00.", b"(o.", b"N(o."),
+    *(b"cos\nsystem\n}b.", b"N(NNtb.", b"N(N}tb.", b"N(N(K\x01K\x02dtb.", b"N(}Ntb.", b"Np-1\n."),
+    *(b"cos\nsystem\n)}\x92.", b"cos\nsystem\n)(K\x01Nd\x92.", b"cos\nsystem\n)(Vk\nNd\x92."),
+    *(b"cos\nsystem\n]R.", b"cos\nsystem\nNR.", b"Va b\nVc\n\x93.", b"Vos\nVsystem\n\x93)R."),
+    *(b"N)\x81.", b"cos\nsystem\nN\x81.", b"\x95\x0a" + _Z7 + _frame(b"N") + b".", b"N\x88b."),
+    *(b"P1\n)R.", b"NQ}b.", b"(iA\nB\n.", b"iA\nB\n.", b"(iA\nB", b"cA\n", b"c\n\n."),
+    *(_frame(b"I12") + b"\n.", _frame(b"J\x01") + b"\x00\x00\x00.", b"\x95\x0a" + _Z7 + b"N."),
+    *(b"\x80\x06N.", b"(0N.", b"1", b"N2\x86.", b"\x87.", b"(\x85.", b"\x97.", b"I\n."),
+    *(b"\x95" + b"\xff" * 8, b"\x8b\x01\x00\x00\x00\x05.", b"\x8b\xff\xff\xff\xff."),
+    *(b"\x8fK\x00Ns.", b"Ncos\nsystem\nb."),
+]
+
+
+@pytest.mark.parametrize("flavor", pickle_load.FLAVORS)
+def test_the_interpreter_follows_each_unpickler_at_its_corners(flavor: str) -> None:
+    for data in _EDGES:
+        walk = _oracle_walk(flavor, io.BytesIO(data), len(data))
+        assert _machine_walk(flavor, data) == walk, data  # type: ignore[arg-type]
+
+
+def _oracle(data: bytes, path: Path) -> tuple[bool, bool]:
+    """Whether a loader resolves, and whether it calls, anything from ``data``.
+
+    io.BytesIO for both unpicklers, and a buffered file, which the C unpickler peeks
+    in: after a STOP inside a frame it resumes right after the STOP.
+    """
+    path.write_bytes(data)
+    walks = [_oracle_walk(flavor, io.BytesIO(data), len(data)) for flavor in _UNPICKLERS]
+    with path.open("rb") as stream:
+        walks.append(_oracle_walk("c", stream, len(data)))
+    steps = [step for walk in walks for step in walk]
+    return any(step[1] for step in steps), any(step[0] == "called" for step in steps)
+
+
+def test_content_ratings_follow_what_the_unpicklers_do(tmp_path: Path) -> None:
+    from nexus_symbiote.scanners.model import inspect_model_format
+
+    (tmp_path / "models").mkdir()
+    missed, flagged = [], []
+    for data in _PROPERTY_SAMPLES:
+        resolved, called = _oracle(data, tmp_path / "oracle.bin")
+        for relative in ("models/x", "x.dat"):
+            path = tmp_path / relative
+            path.write_bytes(data)
+            safety, explanation = inspect_model_format(path)
+            critical = safety is UNSAFE
+            if called and not critical:
+                missed.append((data, relative, explanation))
+            if critical and not resolved:
+                flagged.append((data, relative))
+    assert not missed, missed[:5]
+    assert not flagged, flagged[:5]

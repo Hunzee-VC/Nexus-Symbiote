@@ -44,6 +44,7 @@ from nexus_symbiote.core.hashing import (
 from nexus_symbiote.core.models import ClaimEvidence, ModelComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.scanners.shadowscan import REPORT_PATHS
+from nexus_symbiote.utils import pickle_load
 from nexus_symbiote.utils.confined import MAX_ENTRIES, ConfinedCollection
 from nexus_symbiote.utils.crypto import (
     POLICY_REF_PREFIX,
@@ -175,9 +176,8 @@ PICKLE_UNREAD = (
     "no bounded structural validator for this format/loader"
 )
 PICKLE_NAME_UNCALLED = (
-    "pickle opcode stream after a STOP that names a callable and is cut short by the "
-    "inspection limits before calling it; no bounded structural validator for this "
-    "format/loader"
+    "pickle opcode stream that resolves a callable and is cut short by the inspection "
+    "limits before calling it; no bounded structural validator for this format/loader"
 )
 PICKLE_FRAME_TAIL = (
     "pickle opcode stream with bytes after a STOP inside its frame, where loaders resume "
@@ -216,37 +216,8 @@ _UNSAFE_SUFFIXES = {
 # Archive and compression suffixes do not change what a pickle loader unpickles.
 _PICKLE_WRAPPERS = {".tar", ".gz", ".bz2", ".xz", ".lzma", ".zst"}
 _TEXT_PICKLE_START = frozenset(b"(cNILFSV}])KJMUTX")
-# Opcodes that resolve or call an object: only through them does unpickling run code.
-_CODE_OPCODES = frozenset(
-    {
-        "GLOBAL",
-        "STACK_GLOBAL",
-        "INST",
-        "OBJ",
-        "REDUCE",
-        "NEWOBJ",
-        "NEWOBJ_EX",
-        "BUILD",
-        "EXT1",
-        "EXT2",
-        "EXT4",
-    }
-)
-# Bytes that start an opcode: the next pickle after a STOP may start with any of them.
+# Bytes that start an opcode: pickle.load reads a pickle that starts with any of them.
 _OPCODE_BYTES = frozenset(opcode.code.encode("latin-1")[0] for opcode in pickletools.opcodes)
-# Opcodes that push a string, which ``pickle.load`` decodes to ``str`` by default.
-_STRING_OPCODES = frozenset(
-    {
-        "STRING",
-        "BINSTRING",
-        "SHORT_BINSTRING",
-        "UNICODE",
-        "SHORT_BINUNICODE",
-        "BINUNICODE",
-        "BINUNICODE8",
-    }
-)
-_DOTTED_NAME = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", re.ASCII)
 _INDEX = re.compile(r"(?P<base>.+?)\.index(?:\.[A-Za-z0-9_-]+)?\.json", re.IGNORECASE)
 # transformers reads ``repository--module.Class``; a repository need not name an owner.
 _CODE_REFERENCE = re.compile(
@@ -361,88 +332,87 @@ def manifest_digest(entries: Iterable[tuple[str, str]]) -> str:
 def _recognized_pickle(
     stream: BinaryIO, prefix: bytes, size: int, *, by_content: bool = False
 ) -> tuple[SerializationSafety, str] | None:
-    """Recognize bounded pickle instructions without loading objects.
+    """Rate what ``pickle.load`` does with a pickle sample, without loading objects.
 
-    PROTO alone is insufficient: valid tensor header lengths can have the same
-    first byte. A binary stream of PROTO and ``MIN_PICKLE_OPCODES`` well-formed
-    opcodes is a pickle whatever follows them: a loader runs what they name before it
-    meets a flaw further on, so the opcode count only bounds the work. So is a binary
-    stream that names a callable and is cut short only by the inspection bounds, as a
-    protocol 5 pickle of a large array is. A shorter sample, or a text-protocol one,
-    must pass static opcode/stack checks to STOP within the limits; this intentionally
-    leaves other unsupported and truncated samples unknown.
+    The sample is read as ``pickle.load`` reads it, in a loop, as ``torch.load`` reads
+    the legacy format's header pickles before the one that rebuilds the tensors: by the
+    C and the pure-Python unpicklers both (``utils.pickle_load``), within the
+    inspection bounds. A pickle that calls what it resolved is a payload, wherever it
+    starts. One that the bounds cut short before the loader's behaviour is decided is
+    rated unknown (``PICKLE_NAME_UNCALLED`` when it resolved a callable, else
+    ``PICKLE_UNREAD``); one that ends in a STOP or a flaw within them calls nothing, as
+    the loader stops at the flaw. A STOP inside a FRAME with bytes left in it is rated
+    unknown at least, and the next pickle is read both after the frame, as
+    ``io.BytesIO`` gives it, and after the STOP, as a buffered file gives it to the C
+    unpickler.
 
-    A file found ``by_content``, which no pickle-family name rates, is a pickle only
-    when its inspected opcodes name a callable (``_CODE_OPCODES``): short text such as
-    ``N.`` or ``Mar.`` is a well-formed text-protocol stream that runs nothing, and a
-    loader stops at a flaw before it runs anything. A binary stream that names none
-    before the inspection bounds is rated unknown: what follows was not read. Such a
-    file is read past a STOP that names nothing, within the same bounds: a loader can
-    unpickle the pickles that follow, as ``torch.load`` does with the legacy format's
-    three harmless header pickles before the one that rebuilds the tensors. Once one
-    pickle has reached STOP, a following one cut short by the bounds before naming a
-    callable is rated unknown in either protocol; a text-protocol stream cut short
-    before any STOP is not a pickle, as text may read as one.
-
-    ``pickle.load`` calls what a pickle names before it meets a flaw further on, so a
-    segment that names a callable by module and name and then calls it is recognized
-    however it ends: under a model name, and by content when it is binary or follows a
-    STOP. One that follows a STOP and names such a callable without calling it is rated
-    unknown only when the bounds cut it short; a flaw in the file stops ``pickle.load``
-    before any call. A pickle that follows a STOP may start with any opcode,
-    as ``pickle.load`` reads it, and a call counts only when the unpickler's stack
-    holds a named callable, or an object made from one, where the calling opcode takes
-    it (``_Stack``). A STOP inside a FRAME with bytes left in the frame is rated unknown
-    at least, and the next pickle is read both after the STOP and after the frame.
+    A file found ``by_content``, which no pickle-family name rates, is not rated unknown
+    by a text-protocol first pickle that the bounds cut short: on its own it is as
+    likely prose. Under a model name, a sample is also
+    recognized by its shape, as before content was read past a STOP: a binary stream
+    of PROTO and ``MIN_PICKLE_OPCODES`` well-formed opcodes, or a stream that passes
+    static opcode/stack checks to STOP within the limits.
     """
-    binary = len(prefix) >= 2 and prefix[0] == 0x80 and 2 <= prefix[1] <= 5
-    if not binary and (not prefix or prefix[0] not in _TEXT_PICKLE_START):
+    if not prefix or prefix[0] not in _OPCODE_BYTES:
         return None
     sample = prefix + stream.read(max(0, min(size, MAX_PICKLE_INSPECTION_BYTES) - len(prefix)))
-    count = _Count()
-    pending: list[tuple[int, bool]] = [(0, binary)]
-    worst: tuple[SerializationSafety, str] | None = None
-    while pending:
-        start, binary = pending.pop()
-        segment = _pickle_segment(sample, size, start, binary, by_content, count)
-        ratings = [segment.rating]
-        if segment.end is not None:
-            # A STOP inside a FRAME with bytes left in it: an unpickler that reads with
-            # peek resumes after the STOP, and one reading io.BytesIO or an unbuffered
-            # file, or the pure-Python one, after the frame. Both are read.
-            ends = [segment.end]
-            if segment.frame_end is not None:
-                ratings.append((SerializationSafety.UNKNOWN, PICKLE_FRAME_TAIL))
-                ends.append(segment.frame_end)
-            for end in reversed(ends):
-                following = _following(sample, size, end)
-                if isinstance(following, bool):
-                    pending.append((end, following))
-                else:
-                    ratings.append(following)
-        for rating in ratings:
-            worst = _worse(worst, rating)
+    binary = len(prefix) >= 2 and prefix[0] == 0x80 and 2 <= prefix[1] <= 5
+    shaped = binary or prefix[0] in _TEXT_PICKLE_START
+    worst = _pickle_shape(sample, binary) if shaped and not by_content else None
+    for flavor in pickle_load.FLAVORS:
         if worst is not None and worst[0] is SerializationSafety.UNSAFE_CODE_EXECUTION:
-            return worst
+            break
+        worst = _worse(worst, _pickle_loads(sample, size, flavor, by_content=by_content))
     return worst
 
 
-def _following(
-    sample: bytes, size: int, start: int
-) -> bool | tuple[SerializationSafety, str] | None:
-    """Whether the pickle at ``start`` is binary, or the rating when none starts there."""
-    following = sample[start : start + 2]
-    unread = (SerializationSafety.UNKNOWN, PICKLE_UNREAD) if len(sample) < size else None
-    if not following:
-        return unread
-    if following[0] not in _OPCODE_BYTES:
-        return None
-    if following[0] == 0x80 and len(following) < 2:
-        return unread
-    if following[0] == 0x80 and following[1] > 5:
-        return None
-    # Any opcode can start the next pickle; only PROTO 2 to 5 marks a binary one.
-    return following[0] == 0x80 and following[1] >= 2
+def _pickle_shape(sample: bytes, binary: bool) -> tuple[SerializationSafety, str] | None:
+    """A pickle by its opcodes alone: what a model name is rated by."""
+    seen = marks = 0
+    try:
+        for opcode, _, _ in pickletools.genops(sample):
+            seen += 1
+            marks += opcode.name == "MARK"
+            if seen > MAX_PICKLE_OPCODES or marks > MAX_PICKLE_MARKS:
+                break
+        else:
+            # dis() only checks opcode stack/memo consistency; it never resolves
+            # globals, imports artifact code, invokes reducers or constructs objects.
+            pickletools.dis(sample, out=io.StringIO())
+            return _recognized(binary)
+    except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
+        pass
+    return _recognized(binary) if binary and seen >= MIN_PICKLE_OPCODES else None
+
+
+def _recognized(binary: bool) -> tuple[SerializationSafety, str]:
+    kind = "binary" if binary else "text-protocol"
+    return (
+        SerializationSafety.UNSAFE_CODE_EXECUTION,
+        f"Recognized {kind} pickle opcode stream; object loading can execute code",
+    )
+
+
+def _pickle_loads(
+    sample: bytes, size: int, flavor: pickle_load.Flavor, *, by_content: bool
+) -> tuple[SerializationSafety, str] | None:
+    """Rate the pickles one unpickler reads from ``sample`` in a loop."""
+    budget = pickle_load.Budget(MAX_PICKLE_OPCODES, MAX_PICKLE_MARKS)
+    pending = [0]
+    worst: tuple[SerializationSafety, str] | None = None
+    while pending:
+        start = pending.pop()
+        segment = pickle_load.load_segment(sample, size, start, flavor, budget)
+        binary = sample[start : start + 1] == b"\x80"
+        if segment.outcome == "called":
+            return _recognized(binary)
+        if segment.outcome == "unread" and (start or binary or not by_content):
+            unread = PICKLE_NAME_UNCALLED if segment.resolved else PICKLE_UNREAD
+            worst = _worse(worst, (SerializationSafety.UNKNOWN, unread))
+        if len(segment.resumes) > 1:
+            worst = _worse(worst, (SerializationSafety.UNKNOWN, PICKLE_FRAME_TAIL))
+        pending.extend(reversed(segment.resumes))
+    return worst
 
 
 def _worse(
@@ -457,200 +427,6 @@ def _worse(
     ):
         return second
     return first
-
-
-class _Count:
-    """The opcodes and MARKs read so far, charged across every pickle of one sample."""
-
-    def __init__(self) -> None:
-        self.seen = 0
-        self.marks = 0
-
-
-class _Segment(NamedTuple):
-    """One pickle of a sample: its rating, or where the next begins when it ran nothing."""
-
-    rating: tuple[SerializationSafety, str] | None
-    end: int | None = None
-    frame_end: int | None = None
-
-
-def _pickle_segment(
-    sample: bytes, size: int, start: int, binary: bool, by_content: bool, count: _Count
-) -> _Segment:
-    """Rate the pickle at ``start`` of ``sample``.
-
-    Only a file found ``by_content`` continues past a STOP, at ``end``, and also at
-    ``frame_end`` when the STOP falls inside a FRAME with bytes after it; ``count``
-    holds the opcodes and MARKs of every pickle read, charged to the same bounds.
-    """
-    kind = "binary" if binary else "text-protocol"
-    recognized = (
-        SerializationSafety.UNSAFE_CODE_EXECUTION,
-        f"Recognized {kind} pickle opcode stream; object loading can execute code",
-    )
-    own = 0
-    code = named = invoked = bounded = False
-    frame_end: int | None = None
-    stack: _Stack | None = _Stack()
-    opcodes = io.BytesIO(sample)
-    opcodes.seek(start)
-    try:
-        for opcode, argument, _ in pickletools.genops(opcodes):
-            count.seen += 1
-            own += 1
-            count.marks += opcode.name == "MARK"
-            code = code or opcode.name in _CODE_OPCODES
-            if opcode.name == "FRAME" and isinstance(argument, int):
-                frame_end = opcodes.tell() + argument
-            if stack is not None:
-                # pickle.load stops at a stack underflow: what follows names nothing.
-                names = _names_callable(opcode.name, argument, stack.strings())
-                named = named or names
-                calls = stack.apply(opcode, argument, names)
-                if calls is None:
-                    stack = None
-                else:
-                    invoked = invoked or (named and calls)
-            if count.seen > MAX_PICKLE_OPCODES or count.marks > MAX_PICKLE_MARKS:
-                bounded = True
-                break
-        else:
-            end = opcodes.tell()
-            # dis() only checks opcode stack/memo consistency; it never resolves
-            # globals, imports artifact code, invokes reducers or constructs objects.
-            pickletools.dis(sample[start:end], out=io.StringIO())
-            if by_content and not code:
-                tail = frame_end if frame_end is not None and frame_end > end else None
-                return _Segment(None, end, tail)
-            return _Segment(recognized)
-    except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
-        # The sample ended inside an opcode, before the end of the file.
-        bounded = len(sample) < size and opcodes.tell() >= len(sample)
-    # pickle.load calls what a segment names before it meets the flaw that ends it. A
-    # text-protocol one read by content counts only after an earlier STOP: alone, it is
-    # as likely prose.
-    if invoked and (binary or start > 0 or not by_content):
-        return _Segment(recognized)
-    # A name with no call before a flaw in the file is never called: pickle.load stops
-    # there. Only a bound that left the rest unread keeps it from being known.
-    if by_content and named and start > 0 and bounded:
-        return _Segment((SerializationSafety.UNKNOWN, PICKLE_NAME_UNCALLED))
-    if by_content and not code:
-        # A text-protocol segment cut short is read as a pickle only after an earlier
-        # one reached STOP: on its own it is as likely ordinary text.
-        unread = bounded and (binary or start > 0)
-        return _Segment((SerializationSafety.UNKNOWN, PICKLE_UNREAD) if unread else None)
-    if not binary:
-        return _Segment(None)
-    return _Segment(recognized if own >= MIN_PICKLE_OPCODES or (code and bounded) else None)
-
-
-class _Stack:
-    """The unpickler's stack, MARK fences and memo, each item tagged by whether it may run code.
-
-    An item that may run code is one a callable was named by (``GLOBAL``,
-    ``STACK_GLOBAL``, ``EXT1``, ``EXT2``, ``EXT4``) or one a call returned; a memo entry
-    that was never stored may be one the same unpickler stored earlier, so it is too. A
-    string item is kept as the string, wherever the memo or ``DUP`` moves it, so that
-    ``STACK_GLOBAL`` is read by the two items it takes, whatever opcodes came between.
-    """
-
-    def __init__(self) -> None:
-        self.items: list[bool | str] = []
-        self.fences: list[int] = []
-        self.memo: dict[object, bool | str] = {}
-
-    def strings(self) -> list[str | None]:
-        """The top two items above the innermost MARK, each the string it is or ``None``."""
-        if self._above() < 2:
-            return []
-        return [item if isinstance(item, str) else None for item in self.items[-2:]]
-
-    def _above(self) -> int:
-        return len(self.items) - (self.fences[-1] if self.fences else 0)
-
-    def _pop(self, count: int) -> list[bool | str] | None:
-        if self._above() < count:
-            return None
-        popped = self.items[len(self.items) - count :]
-        del self.items[len(self.items) - count :]
-        return popped
-
-    def _pop_mark(self) -> list[bool | str] | None:
-        if not self.fences:
-            return None
-        fence = self.fences.pop()
-        popped = self.items[fence:]
-        del self.items[fence:]
-        return popped
-
-    def apply(self, opcode: pickletools.OpcodeInfo, argument: object, names: bool) -> bool | None:
-        """Apply one opcode: whether it calls an item that may run code, or None on underflow."""
-        name = opcode.name
-        if name == "MARK":
-            self.fences.append(len(self.items))
-            return False
-        if name == "POP" and not self._above() and self.fences:
-            self.fences.pop()
-            return False
-        if name in {"PUT", "BINPUT", "LONG_BINPUT", "MEMOIZE"}:
-            if not self._above():
-                return None
-            self.memo[len(self.memo) if name == "MEMOIZE" else argument] = self.items[-1]
-            return False
-        if name in {"GET", "BINGET", "LONG_BINGET"}:
-            self.items.append(self.memo.get(argument, True))
-            return False
-        before = [item.name for item in opcode.stack_before]
-        if "mark" in before:
-            index = before.index("mark")
-            above = self._pop_mark()
-            below = self._pop(index)
-            if above is None or below is None or len(above) < len(before) - index - 2:
-                return None
-            operands = below + above
-        else:
-            popped = self._pop(len(before))
-            if popped is None:
-                return None
-            operands = popped
-        calls: list[bool | str] | None = None
-        if name in {"REDUCE", "NEWOBJ", "NEWOBJ_EX", "BUILD", "OBJ"}:
-            calls = operands[:1]
-        elif name == "INST":
-            calls = [names]
-        if calls is not None:
-            # What BUILD sets the state of stays what it was; a call may return code.
-            self.items.append(operands[0] if name == "BUILD" else True)
-            return any(item is True for item in calls)
-        if name in _STRING_OPCODES and isinstance(argument, str):
-            self.items.append(argument)
-        elif name == "DUP":
-            self.items.extend(operands * 2)
-        elif name in {"APPEND", "APPENDS", "SETITEM", "SETITEMS", "ADDITEMS", "READONLY_BUFFER"}:
-            self.items.append(operands[0])
-        else:
-            may_run = name in {"GLOBAL", "STACK_GLOBAL", "EXT1", "EXT2", "EXT4"}
-            self.items.extend([may_run] * len(opcode.stack_after))
-        return False
-
-
-def _names_callable(name: str, argument: object, strings: list[str | None]) -> bool:
-    """Whether an opcode names a callable by a module and a name, as ``find_class`` reads.
-
-    GLOBAL and INST carry both; STACK_GLOBAL takes the two strings on top of the stack.
-    """
-    parts: list[str | None]
-    if name in {"GLOBAL", "INST"}:
-        parts = [*argument.split(" ")] if isinstance(argument, str) else []
-    elif name == "STACK_GLOBAL":
-        parts = strings
-    else:
-        return False
-    return len(parts) == 2 and all(
-        part is not None and _DOTTED_NAME.fullmatch(part) for part in parts
-    )
 
 
 def _pickle_member(name: bytes) -> bool:
