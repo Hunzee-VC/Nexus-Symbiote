@@ -1,11 +1,17 @@
 """Exact-spelling fallback listings share the collection's entry budget."""
 
+import json
 import os
+import unicodedata
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
+from nexus_symbiote.cli import main
 from nexus_symbiote.utils.confined import ConfinedCollection
+
+_SPENT = "entries limit of 20 exceeded"
 
 
 def _tree(root, count=20):
@@ -120,3 +126,68 @@ def test_non_ascii_exact_name_is_also_bounded(tmp_path):
         assert files.read_text(Path("café")) is None
         assert not files._exact_names
     assert any("entries limit of 10 exceeded" in failure for failure in failures)
+
+
+def _spent_tree(root: Path) -> None:
+    (root / "0bulk").mkdir()
+    for index in range(30):
+        (root / "0bulk" / f"f{index}").write_text("x")
+    # "123" has no other case, so checking its exact spelling lists the root.
+    (root / "123").write_text("target")
+    (root / "1link").symlink_to("123")
+
+
+def test_symlink_met_after_the_entry_budget_is_spent_ends_the_walk(tmp_path):
+    _spent_tree(tmp_path)
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures, max_entries=20) as files:
+        assert list(files.iter_files()) == [Path("123")]
+    assert [failure.split(";")[0] for failure in failures] == [f"0bulk: {_SPENT}"]
+
+
+def _listed_variant_tree(root: Path) -> None:
+    composed = unicodedata.normalize("NFC", "café")
+    decomposed = unicodedata.normalize("NFD", "café")
+    # "1" has no other case, so opening it lists the directory that holds it.
+    (root / composed / "1").mkdir(parents=True)
+    (root / composed / "1" / "present.json").write_text("{}")
+    (root / decomposed / "1").mkdir(parents=True)
+    (root / "bulk").mkdir()
+    for index in range(30):
+        (root / "bulk" / f"f{index}").write_text("x")
+
+
+@pytest.mark.parametrize("operation", ["read_json", "case_variants"])
+def test_case_variant_search_after_the_entry_budget_is_spent_ends_quietly(tmp_path, operation):
+    _listed_variant_tree(tmp_path)
+    prefix = Path(unicodedata.normalize("NFC", "café"), "1")
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures, max_entries=20) as files:
+        assert files.read_json(prefix / "present.json") == {}
+        assert list(files.iter_files("bulk")) == []
+        assert [failure.split(";")[0] for failure in failures] == [f"bulk: {_SPENT}"]
+        if operation == "read_json":
+            assert files.read_json(prefix / "missing.json", missing_ok=True) is None
+        else:
+            assert files.case_variants(prefix / "missing.json") == []
+    assert [failure.split(";")[0] for failure in failures] == [f"bulk: {_SPENT}"]
+
+
+def test_scan_keeps_what_collectors_found_once_the_entry_budget_is_spent(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"server": {"command": "node", "args": ["x.js"]}}})
+    )
+    _spent_tree(project)
+    output = tmp_path / "inventory.json"
+    result = CliRunner().invoke(
+        main,
+        ["--limit", "entries=20", "scan", str(project), "--no-project-policy", "-o", str(output)],
+    )
+    assert result.exit_code == 1
+    assert "scanner-input-error" not in result.output
+    inventory = json.loads(output.read_text())
+    failures = inventory["metadata"]["completeness"]["scan_failures"]
+    assert failures and set(failures) == {f"0bulk: {_SPENT}; raise it with --limit entries=N"}
+    assert "server" in {component["name"] for component in inventory["components"]}
