@@ -906,3 +906,27 @@ def test_a_deeply_nested_native_value_cannot_exhaust_the_stack():
     licence = result(me.evaluate(bom, export), "model-license")
     assert licence.extension_only
     assert licence.native.items == ("/components/0/properties/license",)
+
+
+@pytest.mark.parametrize("value", ["unknown⠀", "⠀Unknown", "unknownㅤ"])
+def test_a_blank_filler_does_not_turn_unknown_into_a_value(value):
+    model = ModelComponent(bom_ref="model:w", name="w", version=value)
+    report = me.assess(inventory(subject(version=value), model))
+    assert result(report, "system-version").status == me.EXPLICIT_UNKNOWN
+    assert result(report, "model-version").status == me.EXPLICIT_UNKNOWN
+    licence = ModelComponent(bom_ref="model:w", name="w")
+    bom = inventory(licence)
+    export = export_of(bom)
+    export["components"][0]["licenses"] = [{"license": {"id": "NOASSERTION⠀"}}]
+    assert result(me.evaluate(bom, export), "model-license").status == me.MISSING
+
+
+def test_a_legacy_agent_named_after_its_checkout_has_no_system_name():
+    # Release 0.1.0 named an agent without agent.yaml after the checkout directory.
+    legacy = subject(name="checkout", properties={"identity_source": "repository-path"})
+    name = result(me.assess(inventory(legacy)), "system-name")
+    assert (name.status, name.reasons) == (me.MISSING, ("inferred-placeholder",))
+    declared = subject(
+        name="checkout", properties={"identity_source": "agent.yaml"}, claims=["name"]
+    )
+    assert result(me.assess(inventory(declared)), "system-name").status == me.PRESENT
