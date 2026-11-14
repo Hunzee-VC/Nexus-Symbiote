@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from nexus_symbiote.core.hashing import hash_tool_definition
 from nexus_symbiote.runtime import (
+    MAX_STRICT_JSON_DEPTH,
     PREDICATES,
     REASONS,
     STATEMENT_TYPE,
@@ -876,3 +877,46 @@ def test_out_of_range_timestamp_is_a_validation_error_not_an_overflow(tmp_path):
         TrustStatus(tenant="acme", serial=1, not_before=NOW, not_after=far)
     with pytest.raises(AuthorizationError, match="does not validate"):
         sign_contract(status.model_copy(update={"not_after": far}), "trust", (key,))
+
+
+@pytest.mark.parametrize(
+    "subject",
+    [
+        [{"name": "snapshot", "digest": {"sha256": "0" * 64}}],
+        [{"name": "approval", "digest": {"sha256": "CANONICAL"}}],
+        [{"name": "snapshot", "digest": {"sha256": "CANONICAL"}}] * 2,
+        [],
+    ],
+    ids=["other-digest", "other-name", "repeated", "empty"],
+)
+def test_a_valid_signature_over_a_mismatched_subject_is_rejected(tmp_path, subject):
+    values = fixture(tmp_path)
+    snapshot, key = values[3], values[6]
+    ring = {key_id(key.public_key()): key.public_key()}
+    canonical = digest(snapshot.model_dump(mode="json")).split(":", 1)[1]
+    statement = json.loads(base64.b64decode(sign_contract(snapshot, "snapshot", (key,)).payload))
+    statement["subject"] = json.loads(json.dumps(subject).replace("CANONICAL", canonical))
+    payload = canonical_bytes(statement)
+    altered = Envelope(
+        payload=base64.b64encode(payload).decode(),
+        signatures=(
+            EnvelopeSignature(
+                key_id=key_id(key.public_key()),
+                signature=base64.b64encode(key.sign(_pae(payload))).decode(),
+            ),
+        ),
+    )
+    with pytest.raises(AuthorizationError) as denied:
+        verify_contract(altered, "snapshot", ring)
+    assert denied.value.reason == "subject-mismatch"
+    assert str(denied.value) == "subject digest mismatch"
+
+
+@pytest.mark.parametrize(("opening", "closing"), [("[", "]"), ('{"a":', "}")])
+def test_strict_json_nesting_is_bounded_explicitly(opening, closing):
+    deepest = opening * MAX_STRICT_JSON_DEPTH + "1" + closing * MAX_STRICT_JSON_DEPTH
+    assert strict_json(deepest) is not None
+    with pytest.raises(AuthorizationError) as denied:
+        strict_json(opening + deepest + closing)
+    assert denied.value.reason == "json-invalid"
+    assert str(denied.value) == "input nests too deeply"
