@@ -2762,12 +2762,17 @@ def _deno(name: str, rest: list[str], launch: Launch) -> None:
         launch.fail("deno --lock is followed by a word that may be its file; write --lock=FILE")
         return
     for option, value in options:
-        if option in {"-c", "--config"}:
+        if option in {"-c", "--config", "--no-config"}:
+            # The fixed root resolver view does not resolve an explicitly selected
+            # file's precedence or dependencies; a keyed binding cannot cover it.
+            launch.fail("explicit Deno configuration selection is not collected")
             # Deno reads .npmrc next to its configuration file.
             directory = re.split(r"[\\/]", value or "")[:-1]
             launch.relocated = launch.relocated or _moves("/".join(directory))
         elif option in _DENO_SOURCES and value is not None:
             launch.sources.append((option, value))
+            if option == "--import-map":
+                launch.fail("explicit Deno import-map selection is not collected")
         elif option in {"--preload", "--require"}:
             launch.mark("preload_module")
     script = rest[position]

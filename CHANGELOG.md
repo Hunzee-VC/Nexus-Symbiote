@@ -13,6 +13,8 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
   shared credential redactor before entering inventories or exports. Recognized
   tokens and password assignments are withheld, including Hugging Face and npm
   tokens; existing exports may contain those values and should be recollected.
+- Deno keyed resolver bindings retain import-name/target and scope associations under mcp-static-values/v3. Explicit configuration/import-map selectors and unsupported resolver forms now fail collection coverage; recollect and review older baselines.
+
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
 - Redaction recognises Pinecone, Groq, Replicate, Perplexity, xAI, LangSmith, Tavily and Fireworks key formats. RAG identifier fields are exported only when the identifier rules leave them unchanged and they hold no `:`, and a bare token in `source_uris` is no longer exported as a plain path. An MCP launcher package whose name or specifier is token-shaped is withheld like a token-shaped command, with no package URL; one server's environment and header values are scrubbed from every server of the same file; and an aliased npm package whose name the redaction changes gets no package URL.

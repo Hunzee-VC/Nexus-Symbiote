@@ -73,6 +73,20 @@ conditional relationships remain in the native extension, and the
 `"conditional": true`. CycloneDX and SPDX recovery check the standard projection
 against the embedded document.
 
+## MCP resolver binding v3
+
+`nexus-symbiote/mcp-static-values/v3` retains the complete Deno import-name-to-target
+and scope associations in the private keyed preimage. Version 2 could keep the
+same binding when two import targets were swapped. Recollect and review keyed
+MCP baselines and candidates under v3; v2 records fail project reconciliation.
+Do not relabel an old digest or compare the profiles as if they authenticated the
+same preimage. The exported-structure profile remains `mcp-static-config/v3`.
+
+Explicit Deno `--config`/`-c`/`--no-config` and `--import-map` selection, referenced
+`importMap` files and unsupported import/scopes shapes now produce coverage gaps.
+Review and replace those launch forms or resolve them outside this collector;
+do not approve their partial inventories as trusted baselines.
+
 ## SARIF rule identifiers
 
 0.1.0 keyed SARIF rules by category (`nexus_symbiote/<category>`) and raised a
