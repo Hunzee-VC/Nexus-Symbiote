@@ -384,7 +384,7 @@ def _hidden_character_risks(
 _HIDDEN_INSTRUCTION = re.compile(
     r"https?://|~/"
     r"|\b(?:ignore|disregard|exfiltrate|execute|download|upload|send|steal|override|"
-    r"bypass|curl|wget|fetch|eval|install)\b",
+    r"bypass|curl|wget|fetch|eval|install|run)\b",
     re.IGNORECASE,
 )
 

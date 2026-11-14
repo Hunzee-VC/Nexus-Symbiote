@@ -321,9 +321,12 @@ def _projection(value: Any, depth: int = 0, *, env: bool = False, unkeyed: bool 
     return value
 
 
+# sh, bash, zsh, dash, including /bin/sh, /usr/bin/bash and `/usr/bin/env bash`.
+_SHELL = r"(?:[/\\]?(?:[\w.+-]+[/\\])*)?(?:env\s+)?(?:ba|z|da)?sh\b"
 _FETCH_EXEC = re.compile(
-    r"(?:curl|wget|iwr|invoke-webrequest)\b[^|\n;]*\|\s*(?:ba|z|da)?sh\b"
-    r"|base64\s+(?:-d|--decode)\b[^|\n]*\|\s*(?:ba)?sh\b",
+    rf"(?:curl|wget|iwr|invoke-webrequest)\b[^|\n;]*\|\s*{_SHELL}"
+    rf"|base64\s+(?:-d|--decode)\b[^|\n]*\|\s*{_SHELL}"
+    r"|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n|;&]*\s-(?:e|en|enc|encodedcommand)\b",
     re.IGNORECASE,
 )
 _HOOK_URL = re.compile(r"https?://", re.IGNORECASE)
