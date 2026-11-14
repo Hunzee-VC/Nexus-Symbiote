@@ -183,8 +183,19 @@ def _reflective_access(
 
 
 # Constructor keywords that carry tools, or could, are registrations the
-# collector does not resolve.
-_REGISTERING_KEYWORDS = frozenset({"tools", "tool_serializer", "providers", "mount"})
+# collector does not resolve. The SDK hands a lifespan the server, middleware
+# sees and rewrites tool lists, and transformations rename or hide tools.
+_REGISTERING_KEYWORDS = _names(
+    "tools tool_serializer providers mount lifespan middleware tool_transformations"
+)
+# Past the name and instructions, older SDK releases take keywords such as
+# `lifespan` positionally.
+_PLAIN_POSITIONALS = 2
+# A request context hands handler and middleware code the server: `fastmcp` on a
+# context, the context a middleware context holds, and the low-level request context.
+_SERVER_HANDLES = _names("fastmcp fastmcp_context")
+_REQUEST_CONTEXT = "request_context"
+_SDK_ROOTS = _names("mcp fastmcp")
 
 _DECORATOR_IMPORTS = {
     ("langchain_core.tools", "tool"): "langchain",
@@ -650,6 +661,7 @@ def _server_from_assignment(
         or bindings[factory] != 1
         or target.id in changed_receivers
         or bindings[target.id] != 1
+        or len(call.args) > _PLAIN_POSITIONALS
         or any(isinstance(arg, ast.Starred) for arg in call.args)
         or any(kw.arg is None or kw.arg in _REGISTERING_KEYWORDS for kw in call.keywords)
     ):
@@ -952,6 +964,34 @@ def _report_imported_receivers(tree: ast.Module, path: Path, result: ScanResult)
         )
 
 
+def _report_context_handles(nodes: list[ast.AST], path: Path, result: ScanResult) -> None:
+    """A server reached through a request context can be given tools from any handler.
+
+    ``request_context`` is common outside MCP, so it counts only in a file that imports
+    from ``mcp`` or ``fastmcp``.
+    """
+    sdk_import = any(
+        (
+            isinstance(node, ast.Import)
+            and any(a.name.split(".")[0] in _SDK_ROOTS for a in node.names)
+        )
+        or (
+            isinstance(node, ast.ImportFrom)
+            and not node.level
+            and (node.module or "").split(".")[0] in _SDK_ROOTS
+        )
+        for node in nodes
+    )
+    if any(
+        isinstance(node, ast.Attribute)
+        and (node.attr in _SERVER_HANDLES or (sdk_import and node.attr == _REQUEST_CONTEXT))
+        for node in nodes
+    ):
+        result.surfaces_excluded.append(
+            f"{path.as_posix()}: Python MCP server reachable through a request context"
+        )
+
+
 def _report_unused_factories(
     nodes: list[ast.AST], factories: dict[str, ast.ImportFrom], path: Path, result: ScanResult
 ) -> None:
@@ -1006,6 +1046,7 @@ def collect_python_tools(
         if stmt.module is not None and (stmt.module, a.name) in _AGENT_FACTORIES
     }
     _report_import_scope(imports, nodes, path, result)
+    _report_context_handles(nodes, path, result)
     _report_unused_factories(nodes, factories, path, result)
     if not factories and not decorators and not agent_factories:
         _report_imported_receivers(tree, path, result)

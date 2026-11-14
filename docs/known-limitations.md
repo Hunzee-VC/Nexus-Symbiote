@@ -268,7 +268,10 @@ A way around a limit that its entry does not describe is worth a
   from `mcp.server`, `mcp.server.fastmcp`, `mcp.server.fastmcp.server`, `fastmcp`,
   `fastmcp.server` or `fastmcp.server.server`, and from `MCPServer` imported from
   `mcp.server.mcpserver`. Forms the collector recognizes but cannot follow are
-  gaps: the low-level `Server`, a constructor given `tools=` or `**` arguments, a
+  gaps: the low-level `Server`, a constructor given `tools=`, `tool_serializer=`,
+  `providers=`, `mount=`, `lifespan=`, `middleware=`, `tool_transformations=`, more
+  than two positional arguments or `**` arguments, because the SDK hands a lifespan
+  the server and middleware can rewrite the tool list, a
   server passed to a helper other than the same-file helper described below, an
   aliased or subclassed factory,
   `FastMCP.from_openapi`, decorators on a server imported from another module, a
@@ -298,7 +301,14 @@ A way around a limit that its entry does not describe is worth a
   (`method = server.run`, `anyio.run(server.run_stdio_async)`), keeping a
   decorator, or naming the server in an annotation. An app or run coroutine still
   holds the server, so code that digs it back out of one other than by the
-  reflection below is not seen. A type in an annotation is the whole annotation,
+  reflection below is not seen. A request context also hands handlers the server,
+  so in any Python file the collector reads, an attribute named `fastmcp` or
+  `fastmcp_context`, as in `ctx.fastmcp.add_tool(...)` or a middleware's
+  `context.fastmcp_context`, is a gap, and so is one named `request_context` in a
+  file that imports from `mcp` or `fastmcp`. Using a context only to log, report
+  progress or read its request ID is not a gap. A context passed to a file that
+  names no MCP SDK or framework, which is not read, or reached by reflection
+  there, is not seen. A type in an annotation is the whole annotation,
   a member of a `|` union, or an argument of a generic of `typing`,
   `typing_extensions` or `collections.abc`, such as `Optional[FastMCP]`, or of a
   built-in generic such as `list[FastMCP]`. Any other part of an annotation, such

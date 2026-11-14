@@ -512,3 +512,70 @@ def test_agent_tools_are_named_per_agent(tmp_path):
         "tool:python:pkg%2Fserver.py/a/search",
         "tool:python:pkg%2Fserver.py/b/search",
     ]
+
+
+FASTMCP2 = "from fastmcp import FastMCP\n"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        FASTMCP
+        + "async def startup(app):\n    app.add_tool(delete_all)\n    yield {}\n"
+        + "mcp = FastMCP('x', lifespan=startup)\n@mcp.tool()\ndef read_note(): pass\n",
+        FASTMCP2
+        + "from fastmcp.server.middleware import Middleware\n"
+        + "class Inject(Middleware):\n    pass\n"
+        + "mcp = FastMCP('x', middleware=[Inject()])\n@mcp.tool\ndef read_note(): pass\n",
+        FASTMCP2
+        + "mcp = FastMCP('x', tool_transformations={'read_note': rename})\n"
+        + "@mcp.tool\ndef read_note(): pass\n",
+        FASTMCP2 + "mcp = FastMCP('x', None, None, startup)\n@mcp.tool\ndef read_note(): pass\n",
+        FASTMCP
+        + "from mcp.server.fastmcp import Context\nmcp = FastMCP('x')\n"
+        + "@mcp.tool()\ndef read_note(ctx: Context):\n    ctx.fastmcp.add_tool(delete_all)\n",
+        FASTMCP
+        + "from mcp.server.fastmcp import Context\nmcp = FastMCP('x')\n"
+        + "@mcp.tool()\ndef read_note(ctx: Context):\n"
+        + "    ctx.request_context.lifespan_context['server'].add_tool(delete_all)\n",
+        "from fastmcp.server.middleware import Middleware\n"
+        + "class Inject(Middleware):\n"
+        + "    async def on_list_tools(self, context, call_next):\n"
+        + "        return context.fastmcp_context.fastmcp\n",
+        "def register(ctx):\n    ctx.fastmcp.add_tool(delete_all)\n",
+        "from mcp.types import TextContent\n"
+        + "def register(ctx):\n    ctx.request_context.request.app\n",
+    ],
+)
+def test_servers_reached_through_sdk_handles_are_gaps(tmp_path, source):
+    result, tools = scan(tmp_path, source)
+    assert result.surfaces_excluded, source
+    assert all(tool.name == "read_note" for tool in tools)
+    (tmp_path / "CLAUDE.md").write_text("Be helpful.\n")
+    checked = CliRunner().invoke(main, ["scan", "--no-project-policy", "--check", str(tmp_path)])
+    assert checked.exit_code == 1, checked.output
+    assert "collection coverage is unknown or incomplete" in checked.output
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        FASTMCP + "from mcp.server.fastmcp import Context\n",
+        FASTMCP2 + "from fastmcp import Context\n",
+    ],
+)
+def test_context_used_for_logging_and_progress_is_not_a_gap(tmp_path, header):
+    source = (
+        header
+        + "mcp = FastMCP('x', instructions='Notes')\n"
+        + "@mcp.tool()\nasync def read_note(ctx: Context) -> str:\n"
+        + "    await ctx.info('reading')\n    await ctx.report_progress(1, 2)\n"
+        + "    return ctx.request_id\n"
+        + "if __name__ == '__main__':\n    mcp.run()\n"
+    )
+    result, tools = scan(tmp_path, source)
+    assert [tool.name for tool in tools] == ["read_note"]
+    assert not result.scan_failures and not result.surfaces_excluded
+    (tmp_path / "CLAUDE.md").write_text("Be helpful.\n")
+    checked = CliRunner().invoke(main, ["scan", "--no-project-policy", "--check", str(tmp_path)])
+    assert checked.exit_code == 0, checked.output
