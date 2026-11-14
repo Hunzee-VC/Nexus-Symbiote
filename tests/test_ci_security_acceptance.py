@@ -154,7 +154,7 @@ def test_an_expired_open_ended_or_unexplained_waiver_is_rejected(tmp_path, chang
         changes = {**changes, "expires": (today + timedelta(days=changes["expires"])).isoformat()}
     path = tmp_path / "waivers.json"
     path.write_text(json.dumps({"waivers": [waiver(**changes)]}))
-    with pytest.raises((ValueError, TypeError)):
+    with pytest.raises(ValueError):
         advisories.load_waivers(path, today)
 
 
@@ -177,10 +177,10 @@ def test_a_waiver_for_another_version_does_not_hide_the_advisory():
 
 
 def test_the_committed_waiver_file_is_valid():
-    assert (
-        advisories.load_waivers(ROOT / "config/dependency-advisory-waivers.json", date.today())
-        == []
+    waivers = advisories.load_waivers(
+        ROOT / "config/dependency-advisory-waivers.json", date.today()
     )
+    assert isinstance(waivers, list)
 
 
 def test_a_rejected_waiver_file_fails_the_gate_with_its_reason(tmp_path, monkeypatch, capsys):

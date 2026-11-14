@@ -28,12 +28,16 @@ class TestVerifyFileHash:
     def test_wrong_hash_fails(self, tmp_path):
         f = tmp_path / "test.bin"
         f.write_bytes(b"hello world")
-        result = verify_file_hash(f, "sha256:0000000000000000000000000000000000000000")
+        result = verify_file_hash(f, "sha256:" + "0" * 64)
         assert result.verified is False
-        assert (
-            "mismatch" in (result.error or "").lower()
-            or "malformed" in (result.error or "").lower()
-        )
+        assert "mismatch" in (result.error or "").lower()
+
+    def test_short_digest_is_malformed(self, tmp_path):
+        f = tmp_path / "test.bin"
+        f.write_bytes(b"hello world")
+        result = verify_file_hash(f, "sha256:" + "0" * 40)
+        assert result.verified is False
+        assert "malformed" in (result.error or "").lower()
 
     def test_bare_hash_with_explicit_algo(self, tmp_path):
         f = tmp_path / "test.bin"
@@ -50,9 +54,9 @@ class TestVerifyFileHash:
         assert "unsupported" in (result.error or "").lower()
 
     def test_missing_file(self, tmp_path):
-        result = verify_file_hash(tmp_path / "nonexistent", "sha256:abc")
+        result = verify_file_hash(tmp_path / "nonexistent", "sha256:" + "0" * 64)
         assert result.verified is False
-        assert result.error is not None
+        assert result.error == "Failed to read a regular artifact file"
 
     def test_empty_file(self, tmp_path):
         f = tmp_path / "empty"

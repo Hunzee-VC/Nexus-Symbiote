@@ -172,7 +172,7 @@ def test_signed_discovery_report_satisfies_default_require_integrity_gate(
             }
         )
     )
-    # Default policy has require_integrity: true AND require_completeness: true!
+    # The default policy requires both integrity and completeness.
     res = CliRunner().invoke(
         main,
         [
@@ -292,7 +292,7 @@ def test_differ_propagates_added_severity_unsafe_serialization_and_status_drops(
     )
     assert mod_report.components_modified[0].severity == "critical"
 
-    # Stripping source_report_status from complete -> None while report remains imported alerts!
+    # Dropping source_report_status (complete -> None) while the report stays imported is an alert.
     digest = "sha256:" + "1" * 64
     old_bom = AIBOM()
     old_bom.metadata.completeness = CompletenessClaim(
@@ -371,7 +371,7 @@ def test_strict_i_json_save_load_a2a_bool_and_aware_timestamps(tmp_path: Path) -
         parse_json_strict(b'\xef\xbb\xbf{"a": 1}')
     with pytest.raises(ValueError, match="Byte-order marks"):
         parse_json_strict('\ufeff{"a": 1}')
-    with pytest.raises((UnicodeError, ValueError)):
+    with pytest.raises(ValueError):
         parse_json_strict('{"a": 1}'.encode("utf-16-le"))
 
     bom_file = tmp_path / "bom_with_bom.json"
@@ -423,3 +423,9 @@ def test_strict_i_json_save_load_a2a_bool_and_aware_timestamps(tmp_path: Path) -
         }
     )
     assert naive.observed_at is not None and naive.observed_at.tzinfo is None
+
+    # Writing is strict: an export timestamp must carry a timezone.
+    unaware = AIBOM()
+    unaware.metadata.timestamp = datetime(2026, 11, 12, 12, 0)
+    with pytest.raises(ValueError, match="must include a timezone"):
+        unaware.to_native_json()

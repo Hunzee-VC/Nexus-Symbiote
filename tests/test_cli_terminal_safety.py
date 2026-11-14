@@ -98,7 +98,7 @@ def test_risk_project_failure_reasons_print_without_terminal_controls(tmp_path):
     # File names are project data; reconciliation reasons quote the component ref.
     project = tmp_path / "project"
     (project / "models").mkdir(parents=True)
-    hostile = "evil\x1b[1A\x1b[2K\rfake‮gpj"
+    hostile = "evil\x1b[1A\x1b[2K\rfake\u202egpj"
     sample = Path(__file__).parents[1] / "examples/demo-agent/models/intent-classifier.safetensors"
     (project / "models" / f"{hostile}.safetensors").write_bytes(sample.read_bytes())
     bom = tmp_path / "bom.json"
@@ -109,7 +109,7 @@ def test_risk_project_failure_reasons_print_without_terminal_controls(tmp_path):
     assert result.exit_code == 1, result.output
     assert "Project reconciliation failed." in result.output
     assert "evil" in result.output and "fake" in result.output
-    for character in ("\x1b", "\r", "‮"):
+    for character in ("\x1b", "\r", "\u202e"):
         assert character not in result.output
 
 
@@ -196,7 +196,7 @@ def test_invalid_policy_keys_cannot_forge_output_lines(tmp_path):
     ):
         result = runner.invoke(main, args)
         assert result.exit_code == 1, args
-        assert "invalid policy" in result.stderr and "�" in result.stderr
+        assert "invalid policy" in result.stderr and "\ufffd" in result.stderr
         assert not _injected_lines(result.output)
         assert "\x1b" not in result.output and "\r" not in result.output
 

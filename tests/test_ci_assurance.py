@@ -12,7 +12,6 @@ import shutil
 import subprocess
 import sys
 import tomllib
-from pathlib import Path
 
 import pytest
 import yaml
@@ -20,7 +19,7 @@ from packaging.markers import default_environment
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
-ROOT = Path(__file__).resolve().parents[1]
+from tests.support import ROOT
 
 
 @pytest.fixture
@@ -255,10 +254,13 @@ def test_coverage_gate_rejects_regressions_and_invalid_measurements(change):
         package["covered_lines"] += 100
         confined["covered_lines"] -= 1
     elif change == "module-branch":
+        package["covered_branches"] += 100
         confined["covered_branches"] -= 1
     elif change == "module-missing":
         del report["files"]["src/nexus_symbiote/utils/confined.py"]
     elif change == "module-duplicated":
+        package["covered_lines"] += 120
+        package["covered_branches"] += 220
         report["files"]["build/lib/nexus_symbiote/utils/confined.py"] = {"summary": confined}
     elif change == "script-statement":
         report["files"]["scripts/run_action.py"]["summary"]["covered_lines"] -= 1
@@ -266,7 +268,16 @@ def test_coverage_gate_rejects_regressions_and_invalid_measurements(change):
         report["files"] = {
             path: entry for path, entry in report["files"].items() if "nexus_symbiote" in path
         }
-    assert check(report)
+    failures = check(report)
+    assert failures
+    expected = {
+        "module-statement": "nexus_symbiote/utils/confined.py statement: ",
+        "module-branch": "nexus_symbiote/utils/confined.py branch: ",
+        "module-missing": "nexus_symbiote/utils/confined.py: not measured, or measured more",
+        "module-duplicated": "nexus_symbiote/utils/confined.py: not measured, or measured more",
+    }
+    if change in expected:
+        assert [f for f in failures if f.startswith(expected[change])] == failures
 
 
 def test_measured_scripts_neither_dilute_nor_inflate_the_package_floor():

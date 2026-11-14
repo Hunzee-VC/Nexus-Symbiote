@@ -705,4 +705,4 @@ def test_a_missing_choice_option_lists_its_choices_on_their_own_lines(tmp_path):
 def test_a_command_group_without_arguments_still_prints_its_help():
     result = CliRunner().invoke(main, ["runtime"], prog_name="nexus-symbiote")
     assert result.output.startswith("Usage: nexus-symbiote runtime")
-    assert "Commands:" in result.output and "�" not in result.output
+    assert "Commands:" in result.output and "\ufffd" not in result.output

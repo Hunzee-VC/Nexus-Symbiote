@@ -17,7 +17,7 @@ from nexus_symbiote.core.models import (
     DiscoveryVerification,
 )
 from nexus_symbiote.diff.differ import AIBOMDiffer
-from nexus_symbiote.generators.spdx import SPDXGenerator
+from nexus_symbiote.generators.spdx import SPDXGenerator, _without_created
 from nexus_symbiote.scanners.shadowscan import ShadowScanImporter
 
 REPORT = Path(__file__).parent / "fixtures/shadowscan/code-report-0.1.4.json"
@@ -81,10 +81,12 @@ def test_spdx_recovery_without_a_native_timestamp_ignores_only_creation_info() -
     for node in _creation_nodes(document):
         node["created"] = "2030-01-01T00:00:00Z"
     SPDXGenerator.recover(json.loads(json.dumps(document)))
+    tool = {"type": "Tool", "created": "2030-01-01T00:00:00Z"}
+    assert _without_created({"@graph": [tool]}) == {"@graph": [tool]}
     for node in document["@graph"]:
         if node.get("type") == "Tool":
-            node["created"] = "2030-01-01T00:00:00Z"
-    with pytest.raises(ValueError):
+            node["name"] = "another-generator"
+    with pytest.raises(ValueError, match="conflicts with the embedded native document"):
         SPDXGenerator.recover(document)
 
 

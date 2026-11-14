@@ -185,7 +185,7 @@ class TestScanCommand:
         data = json.loads(out.read_text())
         assert len(data["components"]) >= 1
 
-    def test_scan_unknown_scanner_warns(self, tmp_path):
+    def test_scan_unknown_scanner_is_an_error(self, tmp_path):
         project = _create_test_project(tmp_path)
         out = tmp_path / "unknown.json"
         runner = CliRunner()
@@ -522,6 +522,11 @@ class TestDiffFixture:
         result = runner.invoke(main, ["diff", str(old_path), str(new_path)])
         assert "added" in result.output.lower()
         assert "removed" in result.output.lower()
+        assert "modified" in result.output.lower()
+        data = json.loads(
+            runner.invoke(main, ["diff", str(old_path), str(new_path), "--json-output"]).output
+        )
+        assert [c["bom_ref"] for c in data["components_modified"]] == ["mcp-fs"]
 
 
 class TestSummaryFixture:
