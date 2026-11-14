@@ -475,7 +475,7 @@ class ModelTree:
 
 
 def _json_document(raw: bytes) -> Any:
-    """Configuration JSON as loaders read it: UTF-8, unique keys and finite numbers."""
+    """Configuration JSON as loaders read it: UTF-8, unique keys, no NaN or Infinity literals."""
 
     def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         document: dict[str, Any] = {}
@@ -1392,7 +1392,7 @@ class ModelScanner(Scanner):
             weight_hash = None
         self._digests[path] = weight_hash
         # A GGUF template is the artifact's own; the directory's Hugging Face templates
-        # apply to every model in it, and each gets their finding. They overrule only a
+        # apply to every model in it, and each gets its finding. They overrule only a
         # safe rating: the unverified-SafeTensors and unknown-format findings derive
         # from an unknown one, and a code-executing one is worse.
         embedded = safety == SerializationSafety.UNSAFE_TEMPLATE_INJECTION

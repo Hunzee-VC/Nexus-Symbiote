@@ -56,12 +56,13 @@ define never replaces an earlier `EXTERNAL`. A singular tensor field written mor
 than once, such as a node attribute's tensor, which protobuf merges into one
 tensor, is a file the reader cannot parse.
 
-A SavedModel `variables/`, `assets/` or `assets.extra/` symlink to a directory in
-the project is bound under the names a loader opens, through the link, and those
-files are hashed without following it, so each is a collection failure. When one
-of the SavedModel directories or files is absent, another spelling of its name
-that differs only by case or Unicode normalization is a failure, because
-case-insensitive file systems open it.
+When `variables/`, `assets/` or `assets.extra/` beside a SavedModel graph is a
+symlink to a directory in the project, the files below it are bound under the
+names a loader opens through the link, and they are hashed without following it,
+so each is a collection failure. When one of those directories, `fingerprint.pb`
+or `keras_metadata.pb` is absent, another spelling of its name that differs only
+by case or Unicode normalization is a failure, because case-insensitive file
+systems open it.
 
 A file that many models bind costs one binding per model, so the bindings are
 bounded. A directory with more than 16 shard indexes binds none of them and

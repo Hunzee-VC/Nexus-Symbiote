@@ -2,10 +2,10 @@
 
 Only files that contain an SDK marker are parsed: the MCP SDK, or for Python one of
 the agent frameworks whose tools are collected. Finding them is a streaming search
-under the collector's source budget, so unrelated source files, however large or
-many, never fail the collector and appear nowhere in the inventory. Python source is
-searched as CPython reads it: decoded as its encoding declaration says, also as
-``python -x`` reads it, with identifiers compared in NFKC form. A declaration whose
+under the collector's source budget, so unrelated source files appear nowhere in the
+inventory, and plain ASCII ones that fit the budget never fail the collector. Python
+source is searched as CPython reads it: decoded as its encoding declaration says, also
+as ``python -x`` reads it, with identifiers compared in NFKC form. A declaration whose
 decoding static reading cannot follow is a failure. TypeScript and JavaScript, in
 every suffix tsc reads, are searched as tsc reads them: UTF-16 after a UTF-16 byte
 order mark, otherwise UTF-8. A Python module of the MCP SDK that a dynamic import
@@ -176,7 +176,7 @@ class _UnreadableError(ValueError):
 
 
 class _BudgetSpentError(Exception):
-    """The source budget ran out during a read; the budget recorded the one gap."""
+    """The source budget ran out during a read; the budget recorded the one failure."""
 
 
 @functools.cache
@@ -1003,7 +1003,7 @@ def collect_source_references(
 
     ``sources`` is the collector's walk of the root. Every eligible file is searched
     as a stream, root files first, and ``budget`` bounds the text read: running out
-    of it is the budget's one named gap, and nothing after it is read.
+    of it is the budget's one named failure, and nothing after it is read.
     """
     settings = limits.current()
     python_nodes = limits.bound("python-nodes")
