@@ -46,6 +46,17 @@ TRUST_ROOT_ENVS = (
     "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT",
     "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256",
 )
+WITHHELD_ENV = (
+    "NEXUS_SYMBIOTE_MODE",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_URL",
+    "ACTIONS_RUNTIME_TOKEN",
+    "ACTIONS_RUNTIME_URL",
+    "ACTIONS_RESULTS_URL",
+    "ACTIONS_CACHE_URL",
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+)
 RELAY_PREFIX = "| "
 
 
@@ -301,7 +312,12 @@ def _run(
     # and the Sigstore trust root only from the hash-locked sigstore package: an explicit
     # trust root in the job environment would let an earlier step choose the authorities.
     env.pop(LIMITS_ENV, None)
-    for name in TRUST_ROOT_ENVS:
+    # These commands run offline whatever NEXUS_SYMBIOTE_MODE says; a job-level value
+    # could only fail them. Remove these named runner and OIDC credential variables from
+    # children; other variables, including custom secrets and the source-binding key,
+    # can remain, and a child running as the same user can still read this process's
+    # environment. This filtering is not a process sandbox.
+    for name in (*TRUST_ROOT_ENVS, *WITHHELD_ENV):
         env.pop(name, None)
     if limits:
         env[LIMITS_ENV] = limits
