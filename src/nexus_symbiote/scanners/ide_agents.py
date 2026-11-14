@@ -354,15 +354,22 @@ def _count(value: Any) -> int:
 
 
 # Declared starting modes beyond the two named in _starting_mode_risk that run
-# without approval prompts, rated as the Codex TOML path rates its equivalents:
-# unsandboxed full access high, never-ask medium.
-_PROMPT_SKIPPING_MODES: dict[str, RiskSeverity] = {
-    "danger-full-access": RiskSeverity.HIGH,
-    "full-access": RiskSeverity.HIGH,
-    "dontAsk": RiskSeverity.MEDIUM,
-    "never": RiskSeverity.MEDIUM,
-    "auto": RiskSeverity.MEDIUM,
-    "on-failure": RiskSeverity.MEDIUM,
+# without approval prompts, and what each runs that way. Unsandboxed full access is
+# high and the rest medium, as the Codex TOML path rates `danger-full-access`,
+# `never` and `on-failure`. Claude Code's dontAsk is not one: it denies a tool that
+# is not pre-approved instead of prompting for it.
+_PROMPT_SKIPPING_MODES: dict[str, tuple[RiskSeverity, str]] = {
+    "danger-full-access": (RiskSeverity.HIGH, "runs without approval prompts"),
+    "full-access": (RiskSeverity.HIGH, "runs without approval prompts"),
+    "never": (RiskSeverity.MEDIUM, "runs without approval prompts"),
+    "auto": (RiskSeverity.MEDIUM, "runs without approval prompts"),
+    "on-failure": (RiskSeverity.MEDIUM, "runs commands without approval prompts unless they fail"),
+}
+# Codex approval policies that run commands without asking first. `on-failure` asks
+# only to rerun a command that failed in the sandbox, outside it.
+_UNPROMPTED_APPROVALS = {
+    "never": "that commands never ask for approval",
+    "on-failure": "that commands run without asking for approval unless they fail",
 }
 
 
@@ -394,14 +401,15 @@ def _starting_mode_risk(ide_type: str, mode: str | None) -> RiskAssessment | Non
                 "rules instead."
             ),
         )
-    severity = _PROMPT_SKIPPING_MODES.get(mode or "")
-    if severity is not None:
+    skipping = _PROMPT_SKIPPING_MODES.get(mode or "")
+    if skipping is not None:
+        severity, runs = skipping
         return RiskAssessment(
             severity=severity,
             category="permission_scope",
             detail=(
-                f"IDE agent '{ide_type}' declares starting mode '{mode}', which runs "
-                "without approval prompts; effective approval remains unverified."
+                f"IDE agent '{ide_type}' declares starting mode '{mode}', which {runs}; "
+                "effective approval remains unverified."
             ),
             recommendation=(
                 "Use a default or sandboxed mode in project settings and approve "
@@ -844,7 +852,12 @@ class IDEAgentScanner(Scanner):
             sandbox = None
         properties["approval_policy"] = approval
         properties["sandbox_mode"] = sandbox
-        if sandbox == "danger-full-access" or approval == "never":
+        declared = (
+            "an unsandboxed full-access mode"
+            if sandbox == "danger-full-access"
+            else _UNPROMPTED_APPROVALS.get(approval or "")
+        )
+        if declared is not None:
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.HIGH
@@ -852,13 +865,8 @@ class IDEAgentScanner(Scanner):
                     else RiskSeverity.MEDIUM,
                     category="permission_scope",
                     detail=(
-                        "IDE agent 'codex' declares "
-                        + (
-                            "an unsandboxed full-access mode"
-                            if sandbox == "danger-full-access"
-                            else "that commands never ask for approval"
-                        )
-                        + "; effective approval remains unverified."
+                        f"IDE agent 'codex' declares {declared}; "
+                        "effective approval remains unverified."
                     ),
                     recommendation="Keep the workspace-write sandbox and on-request approval.",
                 )
