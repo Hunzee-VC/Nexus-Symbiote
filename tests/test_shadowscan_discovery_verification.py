@@ -528,7 +528,7 @@ def test_verification_for_another_digest_is_rejected():
 
 @pytest.mark.parametrize(
     "hostile",
-    ["https://example.test/a\x9bb", "repo name", "acme‮repo.example"],
+    ["https://example.test/a\x9bb", "repo\u2028name", "acme\u202erepo.example"],
 )
 def test_bindings_with_disguising_characters_stay_unknown(hostile):
     data = json.loads(json.dumps(MINIMAL))

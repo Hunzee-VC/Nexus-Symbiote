@@ -52,7 +52,8 @@ from nexus_symbiote.generators.validation import (
 )
 from nexus_symbiote.utils.terminal import neutralize
 
-PROJECTION = "spdx-3.0.1/2"
+PROJECTION = "spdx-3.0.1/3"
+PREVIOUS_PROJECTION = "spdx-3.0.1/2"
 SPDX_TYPE_MAP = {
     ComponentType.AGENT: "ai_AIPackage",
     ComponentType.MODEL: "ai_AIPackage",
@@ -184,7 +185,9 @@ class SPDXGenerator(Generator):
             )
         return _DocumentIds(f"{self._namespace}/document/{revision}")
 
-    def _projection(self, aibom: AIBOM, native: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _projection(
+        self, aibom: AIBOM, native: dict[str, Any] | None = None, *, legacy_v2: bool = False
+    ) -> dict[str, Any]:
         prepare(aibom)
         native = native_document(aibom) if native is None else native
         # Native refs are BOM-local, and producers can reuse serial numbers across revisions.
@@ -241,7 +244,10 @@ class SPDXGenerator(Generator):
         coverage = coverage_aggregate(aibom.metadata.completeness)
         relationships = [
             self._relationship(
-                edge_values[key], ids, "incomplete" if coverage == "incomplete" else "noAssertion"
+                edge_values[key],
+                ids,
+                "incomplete" if coverage == "incomplete" else "noAssertion",
+                neutralize_comments=not legacy_v2,
             )
             for key in sorted(edge_values)
         ]
@@ -296,7 +302,10 @@ class SPDXGenerator(Generator):
             "extension": _extension(
                 [
                     *document_properties(aibom, self.format_name, native),
-                    {"name": PROJECTION_PROPERTY, "value": PROJECTION},
+                    {
+                        "name": PROJECTION_PROPERTY,
+                        "value": PREVIOUS_PROJECTION if legacy_v2 else PROJECTION,
+                    },
                 ]
             ),
         }
@@ -371,7 +380,13 @@ class SPDXGenerator(Generator):
         return element
 
     @staticmethod
-    def _relationship(edge: DependencyEdge, ids: _DocumentIds, completeness: str) -> dict[str, Any]:
+    def _relationship(
+        edge: DependencyEdge,
+        ids: _DocumentIds,
+        completeness: str,
+        *,
+        neutralize_comments: bool = True,
+    ) -> dict[str, Any]:
         mapping = {
             "invokes": "usesTool",
             "trained-on": "trainedOn",
@@ -396,18 +411,23 @@ class SPDXGenerator(Generator):
                 [{"name": "nexus-symbiote:relationship", "value": json_text(body)}]
             ),
         }
+        # Projection 2 rendered the original text. Retain that exact rendering
+        # only for recovery; new exports declare projection 3 and neutralize it.
+        shown_relationship = (
+            neutralize(edge.relationship) if neutralize_comments else edge.relationship
+        )
         if edge.conditions:
             # SARIF and VEX neutralize inventory text in rendered messages; SPDX
             # comments are rendered by viewers the same way.
-            conditions = neutralize(edge.conditions)
+            conditions = neutralize(edge.conditions) if neutralize_comments else edge.conditions
             if len(conditions) > MAX_CONDITION_COMMENT:
                 conditions = conditions[:MAX_CONDITION_COMMENT] + " [truncated]"
             relationship["comment"] = (
-                f"Conditional native relationship '{neutralize(edge.relationship)}' (conditions: "
+                f"Conditional native relationship '{shown_relationship}' (conditions: "
                 f"{conditions}). Not an unconditional {typed or 'relationship'} assertion."
             )
         elif typed is None:
-            relationship["comment"] = f"Native relationship '{neutralize(edge.relationship)}'."
+            relationship["comment"] = f"Native relationship '{shown_relationship}'."
         return relationship
 
     @staticmethod
@@ -444,8 +464,10 @@ class SPDXGenerator(Generator):
         projection = declared_projection(properties)
         namespace = _document_namespace(doc["spdxId"])
         recovered, native = recover_native(properties)
-        if projection == PROJECTION:
-            expected = SPDXGenerator(namespace)._projection(recovered, native)
+        if projection in {PROJECTION, PREVIOUS_PROJECTION}:
+            expected = SPDXGenerator(namespace)._projection(
+                recovered, native, legacy_v2=projection == PREVIOUS_PROJECTION
+            )
         elif projection is None and namespace is not None:
             expected = _legacy.spdx_projection(recovered, namespace, native)
         else:
