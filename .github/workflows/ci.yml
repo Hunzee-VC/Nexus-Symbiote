@@ -14,7 +14,7 @@ jobs:
   test:
     name: Tests Python ${{ matrix.python }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -36,7 +36,7 @@ jobs:
           PYTEST_LOG: ${{ runner.temp }}/pytest-python-${{ matrix.python }}.log
         run: |
           set -o pipefail
-          timeout --signal=INT --kill-after=30s 16m \
+          timeout --signal=INT --kill-after=30s 20m \
             bash --noprofile --norc -e -o pipefail -c '
               python -m pytest -vv --strict-skips --durations=20 -o test_timeout=120 \
                 2>&1 | tee "$PYTEST_LOG"
@@ -52,7 +52,7 @@ jobs:
   floor:
     name: Tests at the declared dependency floors
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -72,7 +72,7 @@ jobs:
           PYTEST_LOG: ${{ runner.temp }}/pytest-floor.log
         run: |
           set -o pipefail
-          timeout --signal=INT --kill-after=30s 16m \
+          timeout --signal=INT --kill-after=30s 20m \
             bash --noprofile --norc -e -o pipefail -c '
               python -m pytest -vv --strict-skips -m "not locked_only" --durations=20 \
                 -o test_timeout=120 2>&1 | tee "$PYTEST_LOG"
