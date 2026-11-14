@@ -57,10 +57,18 @@ def value_binding(profile: str, declaration: dict[str, Any]) -> dict[str, str]:
 
 
 def odd_host(url: str) -> bool:
-    """urlsplit keeps "host\\path" in the host, where WHATWG parsers read a path."""
+    """Whether urlsplit and WHATWG parsers may read different hosts from ``url``.
+
+    WHATWG parsers end the authority at a backslash. urlsplit does not: it keeps
+    "host\\path" in the host, and in "evil\\@good" it reads the host after the "@",
+    so the exported host would be one the client never connects to.
+    """
     try:
-        hostname = urlsplit(url).hostname
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
     except ValueError:
+        return True
+    if "\\" in parsed.netloc:
         return True
     return hostname is not None and not _HOSTNAME.fullmatch(hostname)
 
