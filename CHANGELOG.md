@@ -6,6 +6,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- The test suite's network tripwire covers what its docstring claims: UDP datagrams and name resolution to anywhere but loopback are blocked beside TCP connects, the guard holds in every operating mode as a backstop behind the tool's own offline guard, TMPDIR joins HOME and the XDG directories in each test's private directory, and the `--strict-skips` expected reasons are anchored so a skip whose reason merely contains the words cannot pass CI.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
 - The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.
@@ -21,6 +22,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Fixed
 
+- Documentation corrections from an audit: the README verified-install block says the wheel is downloaded before the attestation check, the examples walkthrough scopes its offline claim to the offline steps, the Code of Conduct names a private reporting route and records the missing dedicated channel, and the release rehearsal uses `mktemp -d` instead of fixed `/tmp` paths.
 - TypeScript collection records SDK uses hidden by `eval` wrappers, URL queries and fragments, and method names, and records nothing from ambient declarations. Python collection judges a helper only when a call must reach its definition, reads git revisions where pip and uv read them, and counts module literals behind `*` and `**`.
 - Claude settings with an invalid `permissions` value keep their other declarations, and keys the redaction makes equal keep every value in the drift digest.
 - Lockfile collection binds pnpm and Yarn records only to what they resolve and checks Python lock versions against every declaration; a private Python index is named in the package URL.
