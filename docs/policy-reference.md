@@ -21,7 +21,7 @@ A project policy selects collectors and sets the thresholds of the `scan`, `vali
 
 A policy file in a parent directory, or beside an inventory file, is never applied; `validate` and `risk` name such a file on stderr when they did not apply it. When both `.nexus-symbiote.yaml` and `.nexus-symbiote.yml` exist, a command that reads the project policy refuses to run until one is removed, because either could silently shadow the other; `init` refuses too, and `init --force` overwrites the one file that exists. A symbolic link, a non-regular file or a file over 1 MiB is refused.
 
-The built-in policy is what you get with no file, or with `--no-project-policy`. Use `--no-project-policy` whenever the checkout must not choose your gates, for example for a pull request from an untrusted fork. The GitHub Action always passes it.
+The built-in policy is what you get with no file, or with `--no-project-policy`. Use `--no-project-policy` whenever the checkout must not choose your gates, for example for a pull request from an untrusted fork. The GitHub Action always passes it. When a CI variable such as `CI` or `GITHUB_ACTIONS` is set, `scan`, `validate` and `risk` refuse a project policy that weakens a gate (exit 1) unless `--no-project-policy` ignores it or `--accept-project-policy` accepts it explicitly, as unsigned discovery evidence needs `--allow-unsigned-discovery`; outside CI they warn. Only a relaxation that can turn a failing gate into a passing one is refused; a setting that changes what is reported, such as an `output` setting, is still listed and warned about.
 
 ## File format
 
@@ -128,6 +128,7 @@ How a suppression applies:
 | `scan.failure_mode=report-only` | collection failures never fail `scan` |
 | `scan.scanners=NAMES` | fewer collectors than the built-in set |
 | `scan.exclude_paths=PATHS` | paths beyond the four defaults |
+| `output.default_format=FORMAT` | the project selects an export format other than `json`, which changes what `scan -o` writes without `-f` |
 
 Stricter values, such as a lower threshold or `fail_on_severity: high`, are not listed. Human-readable `scan`, `validate` and `risk` print the list on stderr as a warning.
 

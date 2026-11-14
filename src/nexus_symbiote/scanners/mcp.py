@@ -16,6 +16,7 @@ from __future__ import annotations
 import hmac
 import ipaddress
 import json
+import math
 import os
 import posixpath
 import re
@@ -248,6 +249,8 @@ UNPARSED_CLIENT_FILES = (
 UNPARSED_CLIENT_DIRECTORIES = (".continue/mcpServers",)
 
 MAX_SERVERS_PER_FILE = 1000
+# Credential values of all servers in one file, each scrubbed from every server's text.
+MAX_SECRETS_PER_FILE = 4096
 MAX_TOOLS_PER_SERVER = 1000
 MAX_TOOLS_PER_FILE = 5000
 MAX_ARGUMENTS = 1024
@@ -257,6 +260,21 @@ MAX_LIST_ENTRIES = 1000
 MAX_TOOL_NODES = 20_000
 MAX_TOOL_DEPTH = 64
 MAX_FILE_NODES = 200_000
+# These runners install the named package, then resolve its dependencies from the
+# network at launch. An exact top-level version does not pin that tree.
+_TRANSITIVE_RUNNERS = frozenset(
+    {
+        "npx",
+        "npm exec",
+        "bunx",
+        "bun x",
+        "pnpm dlx",
+        "yarn dlx",
+        "uvx",
+        "uv tool run",
+        "pipx run",
+    }
+)
 
 # Exported bindings must not be computable from secret values: an unkeyed digest
 # over credentials lets anyone holding the BOM confirm guesses offline. The
@@ -651,9 +669,20 @@ def _reject_constant(value: str) -> Any:
     raise ValueError("nonfinite JSON")
 
 
+def _finite_float(text: str) -> float:
+    # json.loads and tomllib read 1e400 and inf as infinity, which no export can carry.
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError("nonfinite number")
+    return value
+
+
 def _load_jsonc(text: str) -> Any:
     return json.loads(
-        strip_jsonc(text), object_pairs_hook=_unique_pairs, parse_constant=_reject_constant
+        strip_jsonc(text),
+        object_pairs_hook=_unique_pairs,
+        parse_constant=_reject_constant,
+        parse_float=_finite_float,
     )
 
 
@@ -1020,7 +1049,9 @@ def _ini_text(raw: str) -> str:
         inner = text[1:-1] if text[0] == "'" else text
         try:
             decoded = json.loads(inner)
-        except ValueError:
+        except (ValueError, RecursionError):
+            # A value nested beyond the parser's limit is text, as any other that is
+            # not JSON; it must not escape as an error attributed to every server.
             return inner if text[0] == "'" else text
         return decoded if isinstance(decoded, str) else json.dumps(decoded)
     kept: list[str] = []
@@ -1376,6 +1407,9 @@ class MCPScanner(Scanner):
     ) -> bool:
         """Read each client file in ``paths``; whether any of them was present."""
         found_any = False
+        # Server references per host, sorted once at the end: sorting the union after
+        # every file would cost the square of the number of nested client files.
+        pending_refs: dict[str, set[str]] = {}
         for path in paths:
             dialect = _dialect(path)
             data = self._read_dialect(files, dialect, result)
@@ -1392,6 +1426,13 @@ class MCPScanner(Scanner):
             if key_error is not None and entries:
                 result.scan_failures.append(f"{dialect.path}: {key_error}")
                 continue
+            file_secrets = SecretScrubber(self._file_secrets(entries))
+            if len(file_secrets) > MAX_SECRETS_PER_FILE:
+                result.scan_failures.append(
+                    f"{dialect.path}: more than {MAX_SECRETS_PER_FILE} credential values in one "
+                    "file; not collected"
+                )
+                continue
             server_refs: list[str] = []
             for server_name, server_config in entries:
                 problem = (
@@ -1404,7 +1445,7 @@ class MCPScanner(Scanner):
                     continue
                 try:
                     mcp_comp, tool_comps = self._parse_server(
-                        server_name, server_config, dialect, key, result
+                        server_name, server_config, dialect, key, result, file_secrets
                     )
                 except SourceBindingKeyError as exc:
                     result.scan_failures.append(f"{dialect.path}: {exc}")
@@ -1429,9 +1470,28 @@ class MCPScanner(Scanner):
                         properties={"collection_mode": "static-config", "config_paths": []},
                     )
                 client = clients[host]
-                client.server_refs = sorted({*client.server_refs, *server_refs})
+                pending_refs.setdefault(host, set(client.server_refs)).update(server_refs)
                 client.properties["config_paths"].append(dialect.path)
+        for host, refs in pending_refs.items():
+            clients[host].server_refs = sorted(refs)
         return found_any
+
+    @staticmethod
+    def _file_secrets(entries: list[tuple[str, Any]]) -> list[str]:
+        """Credential values of every server in a file.
+
+        One server's tool text or name may repeat a value that another server's
+        environment or headers hold, so the file's values are scrubbed from each.
+        """
+        values: list[str] = []
+        for _, config in entries:
+            if not isinstance(config, dict):
+                continue
+            for field in ("env", "headers", "http_headers"):
+                mapping = config.get(field)
+                if isinstance(mapping, dict):
+                    values.extend(secret_values(mapping))
+        return values
 
     @staticmethod
     def _read_dialect(files: ConfinedCollection, dialect: McpDialect, result: ScanResult) -> Any:
@@ -1441,7 +1501,9 @@ class MCPScanner(Scanner):
         if text is None:
             return None
         try:
-            return tomllib.loads(text) if dialect.syntax == "toml" else _load_jsonc(text)
+            if dialect.syntax == "toml":
+                return tomllib.loads(text, parse_float=_finite_float)
+            return _load_jsonc(text)
         except (ValueError, RecursionError):
             syntax = "TOML" if dialect.syntax == "toml" else "JSON or duplicate keys"
             result.scan_failures.append(f"{dialect.path}: invalid {syntax}")
@@ -1545,6 +1607,7 @@ class MCPScanner(Scanner):
         dialect: McpDialect,
         key: bytes | None,
         result: ScanResult,
+        file_secrets: SecretScrubber | None = None,
     ) -> tuple[MCPServerComponent, list[ToolComponent]]:
         config_scope = dialect.path
         command = config.get("command", "")
@@ -1562,7 +1625,9 @@ class MCPScanner(Scanner):
         # Launch arguments are opaque executable inputs. Only the launcher's own
         # grammar is read; argument and environment values never leave.
         # Each header map on its own: a name in both keeps both of its values secret.
-        scrubber = SecretScrubber(
+        # The file's other servers contribute too: this server's free text may repeat
+        # a value that one of them holds.
+        scrubber = (file_secrets or SecretScrubber()).extended(
             [
                 *secret_values(env),
                 *secret_values(config.get("headers", {})),
@@ -1818,7 +1883,11 @@ class MCPScanner(Scanner):
         packages: list[dict[str, Any]] = []
         identities: list[str] = []
         for package in launch.packages:
-            hidden = scrubber.contains(package.spec)
+            # A credential in the package position is withheld as _safe_name withholds
+            # a token-shaped command; the name may be a normalised form of the spec.
+            hidden = scrubber.contains(package.spec) or any(
+                TOKEN_SHAPE.search(text) for text in (package.spec, package.name) if text
+            )
             if hidden:
                 withheld.append("launcher package")
             entry_identity = "[withheld]" if hidden else package.identity
@@ -2170,6 +2239,23 @@ class MCPScanner(Scanner):
                 "version_pinning",
                 f"MCP server '{name}' container image has neither a digest nor a release tag.",
                 "Pin to a SHA256 artifact digest and verify its provenance.",
+            )
+        if (
+            launch.unknown is None
+            and launch.launcher in _TRANSITIVE_RUNNERS
+            and any(
+                package.pinned and package.pin == "version" and package.registry
+                for package in launch.packages
+            )
+        ):
+            add(
+                RiskSeverity.MEDIUM,
+                "transitive_resolution",
+                (
+                    f"MCP server '{name}' pins its package but resolves dependencies at launch "
+                    "without a lockfile."
+                ),
+                "Vendor a lockfile-installed server, or launch an image by digest.",
             )
         if any(p.ecosystem == "oci" and p.pin == "tag" for p in floating):
             add(

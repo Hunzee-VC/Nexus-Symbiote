@@ -15,6 +15,26 @@ inside an archive or compression suffix, such as `checkpoint.pth.tar` or
 `model.pkl.gz`, counts as pickle family too. TensorFlow graphs named
 `saved_model.pb` or `saved_model.pbtxt` are collected; other `.pb` files are not.
 
+A file that no name above rates is inventoried by its content when it is named
+`.npy`, `.npz` or `.dat`, or has any name below a directory named `model`, `models`,
+`weights`, `checkpoint` or `checkpoints`. A file named as the configuration,
+tokenizer and chat template files that a model directory's readers open are, such
+as `config.json` or `tokenizer.json`, and Python and Jinja sources are not checked
+this way. Such a file is a component when its content is rated
+`unsafe-code-execution` by the checks in the table below, or when the content is a
+NumPy array or a ZIP archive that those checks' bounds left unread, which is rated
+`unknown`. Any other content, such as a numeric NumPy array or a ZIP archive with
+neither a pickle-family member nor an object-dtype array as a member, is not a
+component. Each such file is opened once, after every file that the models with a
+name bind and their directories configure has been read, and only if it is not one
+of those files. Reading stops as soon as its content is known not to be a payload:
+after the first 8 bytes when they can start no pickle, NumPy array or ZIP archive,
+after at most 64 KiB when they can start a pickle, and after the header of a NumPy
+array; a ZIP archive is read to its end, as a model archive is. A component is
+digested from the same read, so each byte is charged once to the `model-total-bytes`
+limit. A file larger than the `model-bytes` limit is a collection failure, as a
+model file is.
+
 Each model file is one component. Its `bom_ref` is `model:` followed by the
 file's path relative to the scanned root, and its `name` and `source_path` are
 that relative path, so the same tree scanned at two locations produces identical
@@ -25,10 +45,10 @@ The serialization rating is:
 
 | Rating | When |
 | --- | --- |
-| `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or content recognized as a binary or text-protocol pickle, or a ZIP archive whose first member is a pickle (as `torch.save` writes it), under any other model suffix |
-| `safe` | A SafeTensors file whose header is UTF-8 JSON with string metadata, known dtypes and tensor spans that index the whole data region, in a directory that configures no chat template that reaches Python internals; the scan and `validate` check the header with the same validator, and `validate` compares the templates only through its completeness check |
-| `unsafe-template-injection` | A GGUF file whose embedded chat template reaches Python internals through dunder attributes or the `attr` filter, as Jinja2 sandbox escapes such as CVE-2024-34359 do, or a SafeTensors file that would be `safe` in a directory whose Hugging Face chat template does |
-| `unknown` | Everything else, including ONNX, GGUF, Keras, HDF5, SavedModel, TFLite, Core ML and ExecuTorch files, and a SafeTensors header over the 1 MiB inspection limit |
+| `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or, under any other model suffix and for a file inventoried by its content, content recognized as a binary or text-protocol pickle, a NumPy array with an object dtype, which `np.load(allow_pickle=True)` unpickles, or a ZIP archive with a pickle-family member (`.pkl`, as `torch.save` writes `data.pkl`, `.pickle`, the other listed suffixes, or such a name inside a compression suffix such as `.pkl.gz`) or with such an array as a member. A binary pickle is recognized by its PROTO opcode and at least 16 well-formed opcodes in its first 64 KiB, whatever follows them; a text-protocol one by a consistent opcode stream of at most 4,096 opcodes. An object dtype is found in a NumPy version 1, 2 or 3 header of at most 64 KiB, which holds every version 1 header however it is padded, parsed as `np.load` parses it; only its `descr` value names types, in structured, nested and subarray dtypes too, so a field name is never taken for a type. A ZIP member's name is read from the archive's first local header or from its central directory, read from the end of the archive up to 1 MiB, including ZIP64; every listed member, whatever its name, is checked for an array from its local header and the start of its data, stored or DEFLATE-compressed |
+| `safe` | A SafeTensors file whose header is UTF-8 JSON with string metadata, known dtypes and tensor spans that index the whole data region, with no configured chat template matching the access-pattern heuristic. The rating is not a guarantee that the template is safe; `validate` compares templates only through its completeness check |
+| `unsafe-template-injection` | A GGUF file whose embedded chat template matches the access-pattern heuristic, or a SafeTensors file that would be `safe` in a directory whose Hugging Face chat template matches it. A match does not establish that the renderer executes the pattern or that its sandbox is bypassed |
+| `unknown` | Everything else, including ONNX, GGUF, Keras, HDF5, SavedModel, TFLite, Core ML and ExecuTorch files, a SafeTensors header over the 1 MiB inspection limit, a NumPy array header over 64 KiB or past the 16,000,000 structure units one scan shares with the ONNX and GGUF readers, at one unit a header byte, and a ZIP archive whose central directory is malformed or over 1 MiB or that has a member that was not checked: one compressed by another method, such as BZIP2 or LZMA, one whose data runs past the next member's local header, or one with an array header past those limits |
 
 ## Files bound to the weights
 
@@ -130,12 +150,14 @@ In `diff`, a change to `tokenizer_hash` or `chat_template_hash` is a high alert,
 and a change to a bound weight file, a configuration file or custom code is a
 high alert naming the property that records its digest.
 
-Every chat template that `properties.chat_templates` lists is checked for the
-attribute access that Jinja2 sandbox escapes use: a dunder attribute, named or
-subscripted, a dunder name as a string such as an `attribute=` argument, or the
-`attr` filter. The template is matched as Jinja reads it, with Unicode whitespace
-between tokens and string escapes such as `\x5f` decoded, and a backslash before a
-line break in a string removed. A Hugging Face template
+Every chat template that `properties.chat_templates` lists is checked for potential
+Python-internals access patterns: a dunder attribute, named or subscripted, a
+dunder name as a string such as an `attribute=` argument, or the `attr` filter.
+The heuristic decodes string escapes such as `\x5f`, removes a backslash before a
+line break, and folds adjacent constant strings joined with `~` or `+`, or written
+next to each other, inside Jinja expressions. It does not evaluate templates.
+Matches may be harmless in the actual context; a correctly configured sandbox can
+deny the access. Other ways to construct names may not match. A Hugging Face template
 that matches gives every
 model in its directory a critical `serialization_format` finding that names up to
 three matching templates and counts the rest, and a model that would otherwise be
@@ -150,8 +172,8 @@ checked, and is a coverage gap in `surfaces_excluded`.
 
 A GGUF file whose metadata exceeds the reader's bounds (65,536 keys, 16 MiB
 strings, 2,097,152 array items, 128 MiB of metadata, or the 16,000,000
-structure units one scan may spend on ONNX and GGUF files) keeps the rating
-`unknown`, records `properties.gguf_metadata` and is a coverage gap in
+structure units one scan may spend on ONNX and GGUF files and NumPy array headers)
+keeps the rating `unknown`, records `properties.gguf_metadata` and is a coverage gap in
 `surfaces_excluded`, because its chat templates were not inspected.
 
 ## Operator signature policy
@@ -258,11 +280,15 @@ not make a verified model look mismatched or changed.
 A pin or a signature shows that the bytes are the ones the operator or signer
 approved, not that the model is benign. Formats rated `unknown` have no
 structural validator: Keras Lambda layers, SavedModel operations and custom
-TensorRT or TFLite operators are not inspected. Pickles under names other than
-those listed above, and NumPy `.npy` and `.npz` arrays, are not inventoried. SafeTensors
+TensorRT or TFLite operators are not inspected. A file under a name other than
+those listed above is inventoried only by its content, and only under the names and
+directories [listed above](#model-files-and-references): a pickle renamed outside
+them, such as `assets/blob`, is not inventoried, nor is a pickle that the bounded
+check does not recognize, such as a binary pickle whose first 64 KiB hold neither 16
+opcodes nor its end. SafeTensors
 tensor bytes are hashed but not inspected, so a payload that also parses as
-another format is not flagged. The chat template check is a heuristic for known
-sandbox-escape shapes, not a template analysis: a template that escapes the
-sandbox another way, such as a dunder name whose leading and trailing underscores
-are each split across string pieces or that a filter such as `format` builds, or
-that instructs the model, passes it.
+another format is not flagged. The chat template check is a heuristic, not template
+analysis: a name assembled through variables, formatting, filters, nested expressions
+or other operations can pass it, as can a template that instructs the model. The
+heuristic does not establish whether a renderer is vulnerable or a sandbox escape
+exists. Review templates and use an appropriately sandboxed renderer.

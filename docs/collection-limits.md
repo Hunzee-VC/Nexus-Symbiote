@@ -224,18 +224,23 @@ shorten lists whose content is recorded or bound anyway.
 | TypeScript native parse time per file | 250 ms, in proportion to `syntax-bytes` above its default |
 | TypeScript analysis time per file | 2 s, in proportion to `ts-nodes` above its default |
 | Native inventories and ShadowScan reports read by any command | 16 MiB |
+| Nesting levels of arrays and objects in a native inventory read by any command, the root counted | 128 |
 | `agent.yaml` and `.nexus-symbiote.yaml` | 1 MiB each |
 | Operator signature policy | 4 MiB |
 | Model artifact named in an operator signature policy | 5 GiB |
 | Sigstore bundle named in an operator signature policy | 4 MiB |
 | Model file header read to identify and inspect its format | 1 MiB |
+| Pickle sample inspected under another model suffix or in a file checked by content, and the opcodes read from it | 64 KiB; 4,096 |
+| NumPy array header parsed in a model file, a file checked by content or a ZIP member; a longer one is rated `unknown` | 64 KiB |
+| ZIP central directory read from the end of a model file or a file checked by content to find a pickle-family or object-array member; a longer one is rated `unknown` | 1 MiB |
 | Shard indexes in one model directory | 16 |
 | GGUF metadata the model collector inspects: keys, one string, one array, all metadata; a file beyond them is a gap | 65,536; 16 MiB; 2,097,152 items; 128 MiB |
 | ONNX structure the model collector reads for external data: nesting, fields in one file, one location; a file beyond them that may name external data is a failure | 64; 4,000,000; 4,096 bytes |
-| Structure units the ONNX and GGUF readers spend in one scan or one validation | 16,000,000 |
+| Structure units the ONNX and GGUF readers spend in one scan or one validation, shared with NumPy array headers at one unit a byte; a header past them is rated `unknown` | 16,000,000 |
 | Python file the a2a and rag import heuristics parse; a larger file is skipped, and for a2a one that names `AgentCard` is a gap | 262,144 characters |
-| Root `requirements*.txt` files, together | 4 MiB |
+| Root `requirements*.txt` files, together: text, and logical lines | 4 MiB; 100,000 |
 | MCP servers in one MCP client file | 1,000 |
+| Credential values of all MCP servers in one client file, each scrubbed from every server's text; a file with more is a named failure and is not collected | 4,096 |
 | MCP tools declared in one MCP client file, and by one server | 5,000 and 1,000 |
 | Arguments, environment variables and headers of one MCP server | 1,024, 256 and 64 |
 | Entries in one list field of an MCP server, such as `alwaysAllow` | 1,000 |

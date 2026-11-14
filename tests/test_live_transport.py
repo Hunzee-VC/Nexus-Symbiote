@@ -299,3 +299,86 @@ def test_pinned_https_context_requires_tls12_and_verified_hostnames(monkeypatch)
     assert context.minimum_version == ssl.TLSVersion.TLSv1_2
     assert context.verify_mode == ssl.CERT_REQUIRED
     assert context.check_hostname is True
+
+
+class ChunkedReply(Reply):
+    """A streaming reply delivered by read1 in the pieces given, as chunked transfer is."""
+
+    def __init__(self, chunks):
+        super().__init__(headers=[("Content-Type", "text/event-stream")], body=b"".join(chunks))
+        self.chunks = list(chunks)
+
+    def read1(self, size):
+        if not self.chunks:
+            return b""
+        taken, rest = self.chunks[0][:size], self.chunks[0][size:]
+        if rest:
+            self.chunks[0] = rest
+        else:
+            self.chunks.pop(0)
+        return taken
+
+
+LIST_REQUEST = b'{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+
+
+def stream_request(monkeypatch, reply, *, max_bytes=300):
+    transport, calls, _ = transport_fixture(monkeypatch, [reply])
+    with pytest.raises(live.DiscoveryError) as refusal:
+        transport.request(
+            "https://fixture.example/mcp", LIST_REQUEST, {}, timeout=1, max_bytes=max_bytes
+        )
+    assert len(calls) == 1 and calls[0].closed
+    return str(refusal.value)
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        Reply(
+            headers=[("Content-Type", "text/event-stream")],
+            body=b'data: {"jsonrpc":"2.0","method":"notifications/progress"}\n\n',
+        ),
+        Reply(
+            headers=[("Content-Type", "text/event-stream")],
+            body=b'data: {"jsonrpc":"2.0","id":7,"result":{}}\n\n',
+        ),
+        Reply(headers=[("Content-Type", "text/event-stream")], body=b""),
+        ChunkedReply([b'data: {"jsonrpc":"2.0","id":2,"result":{}}\n']),
+    ],
+    ids=["notification-only", "other-id", "empty", "unterminated"],
+)
+def test_a_stream_that_ends_without_the_requested_response_is_refused(monkeypatch, reply):
+    assert stream_request(monkeypatch, reply) == "SSE ended without matching response"
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        # One line longer than the limit, read in one piece with no line ending in sight.
+        ChunkedReply([b"x" * 301]),
+        # A complete line whose end falls exactly one byte past the limit.
+        ChunkedReply([b"x" * 300 + b"\n"]),
+        # A bare CR as the last byte read: the decoder waits for a possible LF, but the
+        # bytes held already exceed the limit.
+        ChunkedReply([b"data: a\n", b"x" * 292 + b"\r"]),
+        # Many small events whose total passes the limit before the response arrives.
+        ChunkedReply([b'data: {"jsonrpc":"2.0","method":"notifications/progress"}\n\n'] * 8),
+        # The readline path, without read1, on one long line.
+        Reply(headers=[("Content-Type", "text/event-stream")], body=b"x" * 400),
+    ],
+    ids=["one-piece", "line-end-past-limit", "bare-cr-at-limit", "many-events", "readline"],
+)
+def test_a_stream_over_the_byte_limit_is_refused_before_the_response(monkeypatch, reply):
+    assert stream_request(monkeypatch, reply) == "SSE response byte limit exceeded"
+
+
+def test_a_stream_within_the_limit_returns_the_response_and_drops_the_rest(monkeypatch):
+    response = b'data: {"jsonrpc":"2.0","id":2,"result":{}}\n\n'
+    reply = ChunkedReply([b": ping\r", b"\n\r\n", response[:10], response[10:], b"x" * 500])
+    transport, calls, _ = transport_fixture(monkeypatch, [reply])
+    result = transport.request(
+        "https://fixture.example/mcp", LIST_REQUEST, {}, timeout=1, max_bytes=300
+    )
+    assert result.body == b": ping\r\n\r\n" + response
+    assert calls[0].closed

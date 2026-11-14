@@ -9,6 +9,7 @@ code. Weight files count as signed only under an operator signature policy.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import hmac
 import io
@@ -16,12 +17,16 @@ import json
 import os
 import pickletools
 import re
+import tokenize
+import warnings
+import zlib
+from collections import deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from functools import partial
-from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO, cast
+from pathlib import Path, PurePath, PurePosixPath
+from typing import Any, BinaryIO, NamedTuple, cast
 
 from nexus_symbiote import limits
 from nexus_symbiote.core.enums import (
@@ -129,7 +134,49 @@ SIGNING_FILES = [
 SIGNING_SUFFIXES = [".sig", ".sigstore", ".sigstore.json"]
 
 MAX_MODEL_HEADER_BYTES = 1024 * 1024
+# The most a content check reads from where a pickle or a NumPy array header starts:
+# a pickle sample, or an array header, which no version 1 header exceeds.
 MAX_PICKLE_INSPECTION_BYTES = 65536
+# Opcodes read from a pickle sample, which bounds the work, and the well-formed
+# binary opcodes after PROTO that recognize a pickle whatever follows them.
+MAX_PICKLE_OPCODES = 4096
+MAX_PICKLE_MARKS = 64
+MIN_PICKLE_OPCODES = 16
+# A ZIP central directory is listed from the archive's end; a longer one is not read.
+MAX_ZIP_DIRECTORY_BYTES = MAX_MODEL_HEADER_BYTES
+_ZIP_END_RECORD_BYTES = 22 + 65_535 + 20 + 56
+_ZIP_TAIL_BYTES = MAX_ZIP_DIRECTORY_BYTES + _ZIP_END_RECORD_BYTES
+ZIP_PICKLE_MEMBER = "ZIP archive with a pickle member; torch.load unpickles it"
+ZIP_OBJECT_ARRAY = (
+    "ZIP archive with a NumPy object-dtype array member; np.load(allow_pickle=True) unpickles it"
+)
+ZIP_WITHOUT_PICKLE = (
+    "ZIP archive whose directory lists no pickle member; no bounded structural validator "
+    "for this format/loader"
+)
+ZIP_DIRECTORY_UNREAD = (
+    "ZIP archive whose directory is malformed or over the inspection limit; no bounded "
+    "structural validator for this format/loader"
+)
+ZIP_MEMBER_UNREAD = (
+    "ZIP archive with a member that could not be inspected (overlapping, compressed by "
+    "another method or with an array header past the inspection limits); no bounded "
+    "structural validator for this format/loader"
+)
+# ZIP verdicts that leave the rating unknown; each read the archive to its end.
+_ZIP_UNRATED = frozenset({ZIP_WITHOUT_PICKLE, ZIP_DIRECTORY_UNREAD, ZIP_MEMBER_UNREAD})
+NUMPY_OBJECT_ARRAY = "NumPy object-dtype array; np.load(allow_pickle=True) unpickles it"
+NUMPY_HEADER_UNREAD = (
+    "NumPy array whose header is past the inspection limits; no bounded structural "
+    "validator for this format/loader"
+)
+# Content that a bound left unread: a file no model name rates is inventoried for it.
+_CONTENT_UNREAD = frozenset({ZIP_DIRECTORY_UNREAD, ZIP_MEMBER_UNREAD, NUMPY_HEADER_UNREAD})
+_NUMPY_MAGIC = b"\x93NUMPY"
+# Dtype names that make an object dtype: the type code, with the sizes NumPy accepted,
+# and the names that NumPy and its earlier releases accept.
+_OBJECT_TYPE = re.compile(r"O\d*|[Oo]bject\w*")
+ZIP_NOT_GGUF = "the file is a ZIP archive"
 # Chat templates a finding names; it counts the rest.
 _LISTED_TEMPLATES = 3
 _UNSAFE_SUFFIXES = {
@@ -190,13 +237,49 @@ SHARED_DIGESTS_EXHAUSTED = (
 Verify = Callable[[Path, Path, str | None, str | None], VerificationResult]
 
 
-def _pickle_family(path: Path) -> bool:
+# A file no model name rates is checked by its content under these names and suffixes.
+_MODEL_DIR_NAMES = frozenset({"models", "model", "weights", "checkpoints", "checkpoint"})
+_CONTENT_SUFFIXES = frozenset({".dat", ".npy", ".npz"})
+# A model directory's own readers open these, and no loader unpickles source code.
+_DIRECTORY_FILES = frozenset([*MODEL_CONFIG_FILES, *TOKENIZER_FILES, *CHAT_TEMPLATE_FILES])
+_SOURCE_SUFFIXES = frozenset({".py", ".jinja", ".jinja2"})
+
+
+def _pickle_family(path: PurePath) -> bool:
     suffixes = [suffix.lower() for suffix in path.suffixes]
     if suffixes and suffixes[-1] in _UNSAFE_SUFFIXES:
         return True
     return (
         len(suffixes) > 1 and suffixes[-1] in _PICKLE_WRAPPERS and suffixes[-2] in _UNSAFE_SUFFIXES
     )
+
+
+def _content_candidate(path: Path) -> bool:
+    """Whether a file no model name rates is inventoried when its content is a payload.
+
+    ``.npy``, ``.npz`` and the generic ``.dat`` are candidates anywhere; any other name
+    is one below a ``model``, ``models``, ``weights``, ``checkpoint`` or ``checkpoints``
+    directory, where a pickle renamed off the suffix list is kept. A model directory's
+    configuration, tokenizer and chat template files, which its own readers open once,
+    and Python and Jinja sources, which no loader unpickles, are not candidates.
+    """
+    if model_format(path) is not None:
+        return False
+    suffix = path.suffix.lower()
+    if path.name in _DIRECTORY_FILES or suffix in _SOURCE_SUFFIXES:
+        return False
+    return suffix in _CONTENT_SUFFIXES or any(
+        part.lower() in _MODEL_DIR_NAMES for part in path.parts[:-1]
+    )
+
+
+def _content_format(explanation: str) -> tuple[str, str]:
+    """The (format key, format name) of a file inventoried by what its content is."""
+    if explanation in (NUMPY_OBJECT_ARRAY, NUMPY_HEADER_UNREAD):
+        return "npy", "numpy"
+    if explanation in (ZIP_PICKLE_MEMBER, ZIP_OBJECT_ARRAY) or explanation in _ZIP_UNRATED:
+        return "zip", "zip-archive"
+    return "pickle", "pickle"
 
 
 def model_format(path: Path) -> tuple[str, str] | None:
@@ -226,44 +309,423 @@ def _recognized_pickle(stream: BinaryIO, prefix: bytes, size: int) -> str | None
     """Recognize bounded pickle instructions without loading objects.
 
     PROTO alone is insufficient: valid tensor header lengths can have the same
-    first byte. Static opcode/stack checks must reach STOP within local limits.
-    This intentionally leaves unsupported, truncated and large samples unknown.
+    first byte. A binary stream of PROTO and ``MIN_PICKLE_OPCODES`` well-formed
+    opcodes is a pickle whatever follows them: a loader runs what they name before it
+    meets a flaw further on, so the opcode count only bounds the work. A shorter
+    sample, or a text-protocol one, must pass static opcode/stack checks to STOP within
+    the limits; this intentionally leaves other unsupported and truncated samples unknown.
     """
     binary = len(prefix) >= 2 and prefix[0] == 0x80 and 2 <= prefix[1] <= 5
     if not binary and (not prefix or prefix[0] not in _TEXT_PICKLE_START):
         return None
     sample = prefix + stream.read(max(0, min(size, MAX_PICKLE_INSPECTION_BYTES) - len(prefix)))
-    try:
-        marks = 0
-        for count, (opcode, _, _) in enumerate(pickletools.genops(sample), start=1):
-            marks += opcode.name == "MARK"
-            if count > 4096 or marks > 64:
-                return None
-        # dis() only checks opcode stack/memo consistency; it never resolves
-        # globals, imports artifact code, invokes reducers or constructs objects.
-        pickletools.dis(sample, out=io.StringIO())
-    except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
-        return None
     kind = "binary" if binary else "text-protocol"
-    return f"Recognized {kind} pickle opcode stream; object loading can execute code"
+    recognized = f"Recognized {kind} pickle opcode stream; object loading can execute code"
+    seen = marks = 0
+    try:
+        for opcode, _, _ in pickletools.genops(sample):
+            seen += 1
+            marks += opcode.name == "MARK"
+            if seen > MAX_PICKLE_OPCODES or marks > MAX_PICKLE_MARKS:
+                break
+        else:
+            # dis() only checks opcode stack/memo consistency; it never resolves
+            # globals, imports artifact code, invokes reducers or constructs objects.
+            pickletools.dis(sample, out=io.StringIO())
+            return recognized
+    except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
+        pass
+    return recognized if binary and seen >= MIN_PICKLE_OPCODES else None
 
 
-def _recognized_code_container(stream: BinaryIO, prefix: bytes, size: int) -> str | None:
-    if prefix[:4] == b"PK\x03\x04":
-        # torch.save writes its pickle as the first ZIP member.
-        header = prefix + stream.read(22)
-        if len(header) == 30:
-            name_length = int.from_bytes(header[26:28], "little")
-            if 0 < name_length <= 4096 and stream.read(name_length).lower().endswith(b".pkl"):
-                return "ZIP archive whose first member is a pickle; torch.load unpickles it"
+def _pickle_member(name: bytes) -> bool:
+    """Whether a ZIP member's name is a pickle-family file name, wherever the member sits.
+
+    ``torch.load`` unpickles ``data.pkl``; a loader handed the archive can open any other
+    member, so a member is rated by its name, as a file on disk is.
+    """
+    return _pickle_family(PurePosixPath(name.decode("latin-1")))
+
+
+def _little(data: bytes, offset: int, width: int) -> int:
+    return int.from_bytes(data[offset : offset + width], "little")
+
+
+class _ZipMember(NamedTuple):
+    """One central directory entry: what a loader reads a member by."""
+
+    name: bytes
+    method: int
+    size: int
+    offset: int
+
+
+def _zip_directory(
+    stream: BinaryIO, consumed: int, size: int
+) -> tuple[list[_ZipMember], int] | None:
+    """The members the central directory at the end of a ZIP archive lists, and its offset.
+
+    The rest of the stream is read in bounded chunks, keeping only the tail that can
+    hold the directory within ``MAX_ZIP_DIRECTORY_BYTES``, the end-of-central-directory
+    record with its comment and the ZIP64 records. ``None`` when the directory is
+    malformed, truncated or beyond that bound, or the stream ends before ``size``.
+    """
+    tail: deque[bytes] = deque()
+    held = 0
+    remaining = size - consumed
+    while remaining > 0:
+        chunk = stream.read(min(65536, remaining))
+        if not chunk:
+            return None
+        remaining -= len(chunk)
+        tail.append(chunk)
+        held += len(chunk)
+        while held - len(tail[0]) >= _ZIP_TAIL_BYTES:
+            held -= len(tail.popleft())
+    data = b"".join(tail)
+    start = size - len(data)
+    end_record = data.rfind(b"PK\x05\x06", max(0, len(data) - 22 - 65_535))
+    if end_record < 0 or end_record + 22 > len(data):
         return None
-    return _recognized_pickle(stream, prefix, size)
+    directory_end = end_record
+    directory_size = _little(data, end_record + 12, 4)
+    directory_offset = _little(data, end_record + 16, 4)
+    if _little(data, end_record + 10, 2) == 0xFFFF or 0xFFFFFFFF in (
+        directory_size,
+        directory_offset,
+    ):
+        locator = end_record - 20
+        if locator < 0 or data[locator : locator + 4] != b"PK\x06\x07":
+            return None
+        record = _little(data, locator + 8, 8) - start
+        if record < 0 or record + 56 > locator or data[record : record + 4] != b"PK\x06\x06":
+            return None
+        directory_end = record
+        directory_size = _little(data, record + 40, 8)
+        directory_offset = _little(data, record + 48, 8)
+    members = _directory_members(data, directory_offset - start, directory_size, directory_end)
+    return None if members is None else (members, directory_offset)
+
+
+def _directory_members(data: bytes, begin: int, size: int, end: int) -> list[_ZipMember] | None:
+    """Walk the central directory entries that ``data`` holds from ``begin`` to ``end``."""
+    if size > MAX_ZIP_DIRECTORY_BYTES or begin < 0 or begin + size > end:
+        return None
+    members: list[_ZipMember] = []
+    position = begin
+    while position < begin + size:
+        if position + 46 > begin + size or data[position : position + 4] != b"PK\x01\x02":
+            return None
+        name_length = _little(data, position + 28, 2)
+        extra_length = _little(data, position + 30, 2)
+        name = data[position + 46 : position + 46 + name_length]
+        if len(name) < name_length:
+            return None
+        extra_at = position + 46 + name_length
+        located = _zip64_location(
+            data[extra_at : extra_at + extra_length],
+            _little(data, position + 24, 4),
+            _little(data, position + 20, 4),
+            _little(data, position + 42, 4),
+        )
+        if located is None:
+            return None
+        members.append(_ZipMember(name, _little(data, position + 10, 2), *located))
+        position = extra_at + extra_length + _little(data, position + 32, 2)
+    return members
+
+
+def _zip64_location(
+    extra: bytes, uncompressed: int, compressed: int, offset: int
+) -> tuple[int, int] | None:
+    """A member's compressed size and local header offset, from ZIP64 when they overflow.
+
+    The ZIP64 extra field holds, in this order, each of the uncompressed size, the
+    compressed size and the offset whose 32-bit field is 0xFFFFFFFF. ``None`` when one
+    it must hold is missing, which ``zipfile`` refuses as a corrupt archive.
+    """
+    if 0xFFFFFFFF not in (uncompressed, compressed, offset):
+        return compressed, offset
+    position = 0
+    while position + 4 <= len(extra):
+        length = _little(extra, position + 2, 2)
+        if _little(extra, position, 2) == 1:
+            field = extra[position + 4 : position + 4 + length]
+            values = [uncompressed, compressed, offset]
+            cursor = 0
+            for index, value in enumerate(values):
+                if value == 0xFFFFFFFF:
+                    if cursor + 8 > len(field):
+                        return None
+                    values[index] = _little(field, cursor, 8)
+                    cursor += 8
+            return values[1], values[2]
+        position += 4 + length
+    return None
+
+
+def _reread(stream: BinaryIO, offset: int, size: int) -> bytes:
+    """``size`` bytes at ``offset`` of what ``stream`` has read, read again.
+
+    A confined or hashing stream re-reads from its own descriptor without charging the
+    bytes again; a plain file is read at that offset.
+    """
+    reread = getattr(stream, "reread", None)
+    if reread is not None:
+        data: bytes = reread(offset, size)
+        return data
+    return os.pread(stream.fileno(), size, offset)
+
+
+class _MemberData:
+    """The data of one ZIP member, read again from the archive, inflated if DEFLATE.
+
+    Compressed input is read again in growing chunks, so a member costs about what its
+    array header needs; it never reads past the member's compressed size.
+    """
+
+    def __init__(self, stream: BinaryIO, start: int, size: int, *, deflated: bool) -> None:
+        self._stream = stream
+        self._position = start
+        self._remaining = size
+        self._inflater = zlib.decompressobj(wbits=-zlib.MAX_WBITS) if deflated else None
+        self._pending = b""
+        self._chunk = 512
+
+    def _input(self, size: int) -> bytes:
+        data = _reread(self._stream, self._position, min(size, self._remaining))
+        self._position += len(data)
+        self._remaining -= len(data)
+        return data
+
+    def read(self, size: int) -> bytes:
+        if self._inflater is None:
+            return self._input(size)
+        out = bytearray()
+        while len(out) < size and not self._inflater.eof:
+            if not self._pending:
+                if self._remaining <= 0:
+                    break
+                self._pending = self._input(self._chunk)
+                self._chunk = min(2 * self._chunk, 65536)
+            out += self._inflater.decompress(self._pending, size - len(out))
+            self._pending = self._inflater.unconsumed_tail
+        return bytes(out)
+
+
+def _members_hold_object_array(
+    stream: BinaryIO, members: list[_ZipMember], directory: int, budget: InspectionBudget
+) -> bool | None:
+    """Whether a member of a ZIP archive is a NumPy array with an object dtype.
+
+    ``np.load`` reads every member that starts with the NumPy magic as an array,
+    whatever its name, so every member is checked from its local header and the start
+    of its data, stored or raw DEFLATE, read again from the stream that read the
+    archive to its end. As ``zipfile`` does, members are taken in offset order and a
+    member whose data runs past the next local header or into the directory is not
+    read, so the bytes read again are at most the archive's. Each array header is
+    charged to ``budget`` before it is read or inflated: DEFLATE expands about a
+    thousandfold, so a small archive could otherwise make many members inflate and parse
+    a full header. ``None`` when a member could not be checked: its data overlaps, it
+    is compressed by another method, or its array header is longer than
+    ``MAX_PICKLE_INSPECTION_BYTES`` or than the budget left.
+    """
+    ordered = sorted(members, key=lambda member: member.offset)
+    unread = False
+    for index, member in enumerate(ordered):
+        end = min(ordered[index + 1].offset, directory) if index + 1 < len(ordered) else directory
+        found = _member_holds_object_array(stream, member, end, budget)
+        if found:
+            return True
+        unread = unread or found is None
+    return None if unread else False
+
+
+def _member_holds_object_array(
+    stream: BinaryIO, member: _ZipMember, end: int, budget: InspectionBudget
+) -> bool | None:
+    if member.size == 0:
+        return False
+    if member.offset < 0 or member.offset + 30 > end:
+        return None
+    header = _reread(stream, member.offset, 30)
+    if header[:4] != b"PK\x03\x04":
+        # zipfile refuses a member without a local header; np.load cannot read it.
+        return False
+    start = member.offset + 30 + _little(header, 26, 2) + _little(header, 28, 2)
+    if start + member.size > end:
+        return None
+    if member.method not in (0, 8):
+        return None
+    data = _MemberData(stream, start, member.size, deflated=member.method == 8)
+    try:
+        return _object_array(b"", data.read, budget)
+    except zlib.error:
+        # zipfile raises the same error when it inflates the member.
+        return False
+
+
+def _object_array(
+    start: bytes, more: Callable[[int], bytes], budget: InspectionBudget
+) -> bool | None:
+    """Whether a NumPy array that begins with ``start``, continued by ``more``, holds objects.
+
+    ``more(n)`` returns up to the next ``n`` bytes. A version 1, 2 or 3 header is read
+    whole up to ``MAX_PICKLE_INSPECTION_BYTES``, which a version 1 header never exceeds,
+    however it is padded. Each header byte read or inflated is a unit of ``budget``,
+    which the format readers of one scan share, charged as it arrives, so a header that
+    claims more than it holds costs only what it holds. ``None`` when the header is
+    longer than that bound or than what is left of ``budget``; ``False`` for anything
+    ``np.load`` does not read as an array.
+    """
+    if len(start) < 12:
+        start += more(12 - len(start))
+    if len(start) < 10 or start[:6] != _NUMPY_MAGIC or start[7] != 0 or start[6] not in (1, 2, 3):
+        return False
+    preamble = 10 if start[6] == 1 else 12
+    if len(start) < preamble:
+        return False
+    length = _little(start, 8, preamble - 8)
+    if length > MAX_PICKLE_INSPECTION_BYTES:
+        return None
+    header = bytearray(start[preamble : preamble + length])
+    try:
+        budget.charge(len(header), NUMPY_HEADER_UNREAD)
+        while len(header) < length:
+            chunk = more(min(4096, length - len(header)))
+            if not chunk:
+                return False
+            budget.charge(len(chunk), NUMPY_HEADER_UNREAD)
+            header += chunk
+    except FormatError:
+        return None
+    return _declares_object(bytes(header), start[6])
+
+
+def _declares_object(header: bytes, major: int) -> bool:
+    """Whether a NumPy header, a dict literal, declares a dtype with an object field.
+
+    It is parsed as ``np.load`` parses it, with ``ast.literal_eval``, and again without
+    the ``L`` that Python 2 wrote after an integer when that alone fails. Only the
+    ``descr`` value is examined, so a field name is never taken for a type.
+    """
+    try:
+        text = header.decode("utf-8" if major == 3 else "latin-1")
+    except UnicodeDecodeError:
+        return False
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", SyntaxWarning)
+        warnings.simplefilter("ignore", DeprecationWarning)
+        try:
+            try:
+                parsed = ast.literal_eval(text)
+            except SyntaxError:
+                parsed = ast.literal_eval(_without_long_suffixes(text))
+        except (
+            SyntaxError,
+            ValueError,
+            TypeError,
+            MemoryError,
+            RecursionError,
+            tokenize.TokenError,
+        ):
+            return False
+    return isinstance(parsed, dict) and _descr_has_object(parsed.get("descr"))
+
+
+def _without_long_suffixes(text: str) -> str:
+    """``text`` without an ``L`` token after a number, as NumPy filters Python 2 headers."""
+    tokens: list[tokenize.TokenInfo] = []
+    after_number = False
+    for token in tokenize.generate_tokens(io.StringIO(text).readline):
+        if after_number and token.type == tokenize.NAME and token.string == "L":
+            continue
+        tokens.append(token)
+        after_number = token.type == tokenize.NUMBER
+    return tokenize.untokenize(tokens)
+
+
+def _descr_has_object(descr: object) -> bool:
+    """Whether a NumPy ``descr`` names an object dtype anywhere, as ``np.load`` reads it.
+
+    A string is a dtype string. A tuple is a subarray of its first item. Any other
+    container lists fields, each unpacked as ``(name, descr)`` or
+    ``(name, descr, shape)``, so its second item is the field's type, nested to any
+    depth. A set field's items have no order, so each is checked.
+    """
+    pending: list[object] = [descr]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            if _object_dtype_string(item):
+                return True
+        elif isinstance(item, tuple):
+            pending.extend(item[:1])
+        elif isinstance(item, list | dict | set):
+            for entry in item:
+                if isinstance(entry, str | tuple | list | dict | set) and len(entry) in (2, 3):
+                    unpacked = list(entry)
+                    pending.extend(unpacked if isinstance(entry, set) else unpacked[1:2])
+    return False
+
+
+def _object_dtype_string(text: str) -> bool:
+    """Whether a dtype string such as ``|O``, ``object`` or ``i4,(2,)O`` has an object part.
+
+    Each comma-separated part is read without its byte order and shape prefix.
+    """
+    return any(
+        _OBJECT_TYPE.fullmatch(part.strip().lstrip("<>|=()0123456789, ").strip())
+        for part in text.split(",")
+    )
+
+
+def _recognized_code_container(
+    stream: BinaryIO, prefix: bytes, size: int, budget: InspectionBudget
+) -> tuple[SerializationSafety, str] | None:
+    """A verdict on content a loader can run code from, or ``None`` for content not recognized.
+
+    A pickle, a NumPy array with an object dtype, and a ZIP archive with a pickle-family
+    member or such an array as a member are recognized. ``torch.save`` writes
+    ``data.pkl``, usually first, so the first local header is read forward before the
+    directory at the end of the archive, which lists every member, is read.
+    """
+    if prefix[:6] == _NUMPY_MAGIC:
+        array = _object_array(prefix, stream.read, budget)
+        if array is None:
+            return SerializationSafety.UNKNOWN, NUMPY_HEADER_UNREAD
+        return (SerializationSafety.UNSAFE_CODE_EXECUTION, NUMPY_OBJECT_ARRAY) if array else None
+    if prefix[:4] != b"PK\x03\x04":
+        pickle = _recognized_pickle(stream, prefix, size)
+        return None if pickle is None else (SerializationSafety.UNSAFE_CODE_EXECUTION, pickle)
+    header = prefix + stream.read(22)
+    consumed = len(header)
+    first = b""
+    if len(header) == 30:
+        name_length = int.from_bytes(header[26:28], "little")
+        if 0 < name_length <= 4096:
+            first = stream.read(name_length)
+            consumed += len(first)
+    if _pickle_member(first):
+        return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_PICKLE_MEMBER
+    directory = _zip_directory(stream, consumed, size)
+    if directory is None:
+        return SerializationSafety.UNKNOWN, ZIP_DIRECTORY_UNREAD
+    members, offset = directory
+    if any(_pickle_member(member.name) for member in members):
+        return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_PICKLE_MEMBER
+    arrays = _members_hold_object_array(stream, members, offset, budget)
+    if arrays:
+        return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_OBJECT_ARRAY
+    return SerializationSafety.UNKNOWN, ZIP_WITHOUT_PICKLE if arrays is False else ZIP_MEMBER_UNREAD
 
 
 def inspect_model_format(
-    path: Path, *, stream: BinaryIO | None = None
+    path: Path, *, stream: BinaryIO | None = None, budget: InspectionBudget | None = None
 ) -> tuple[SerializationSafety, str]:
     """Inspect bounded structure without deserializing a model or running code.
+
+    ``budget`` is shared with the other files of one scan; NumPy array headers spend it.
 
     SAFE means the checked file has a supported non-executable tensor container
     layout. It is not a claim about model behavior, parser vulnerabilities,
@@ -284,9 +746,13 @@ def inspect_model_format(
                 and 2 <= length <= min(MAX_MODEL_HEADER_BYTES, size - 8)
             )
             if not tensor_candidate:
-                container = _recognized_code_container(opened, prefix, size)
-                if container is not None:
-                    return SerializationSafety.UNSAFE_CODE_EXECUTION, container
+                container = _recognized_code_container(
+                    opened, prefix, size, budget or InspectionBudget()
+                )
+                if container is not None and (
+                    container[0] is SerializationSafety.UNSAFE_CODE_EXECUTION or not safetensors
+                ):
+                    return container
             if not safetensors:
                 return (
                     SerializationSafety.UNKNOWN,
@@ -323,6 +789,12 @@ class _HashingModelReader:
         self.digest.update(content)
         self.prefix.extend(content[: max(0, MAX_MODEL_HEADER_BYTES + 8 - len(self.prefix))])
         return content
+
+    def reread(self, offset: int, size: int) -> bytes:
+        """Read again bytes already hashed; the digest and the byte count are unchanged."""
+        if offset < 0 or size < 0 or offset + size > self.bytes_read:
+            raise OSError("re-read past the bytes inspected")
+        return _reread(self.stream, offset, size)
 
 
 class _ReplayReader:
@@ -368,11 +840,53 @@ def observe_model_artifact(
     this descriptor when the caller's read ends, so the verdict and digest are
     never attributed to a pathname that now names other bytes.
     """
+    budget = budget or InspectionBudget()
+    return _complete_observation(path, stream, _inspect_opened(path, stream, budget), budget)
+
+
+def observe_content(
+    path: Path, *, stream: BinaryIO, budget: InspectionBudget | None = None
+) -> ModelArtifactObservation | None:
+    """Observe a file that no model name rates when its content makes it a model artifact.
+
+    That content is a pickle, a NumPy array with an object dtype, a ZIP archive with a
+    pickle-family member or such an array as a member, or a NumPy array or ZIP archive
+    that a bound left unread. For other content ``None`` is returned once the inspection
+    has read what it needed, which for a ZIP archive is all of it. An artifact is
+    observed from the same stream, so every byte is read, and charged, once. The caller
+    holds a confined regular-file context, as for ``observe_model_artifact``.
+    """
+    budget = budget or InspectionBudget()
+    inspected = _inspect_opened(path, stream, budget)
+    if (
+        inspected.safety != SerializationSafety.UNSAFE_CODE_EXECUTION
+        and inspected.explanation not in _CONTENT_UNREAD
+    ):
+        return None
+    return _complete_observation(path, stream, inspected, budget)
+
+
+class _Inspected(NamedTuple):
+    before: os.stat_result
+    reader: _HashingModelReader
+    safety: SerializationSafety
+    explanation: str
+
+
+def _inspect_opened(path: Path, stream: BinaryIO, budget: InspectionBudget) -> _Inspected:
     before = os.fstat(stream.fileno())
     if before.st_size > limits.current().model_bytes:
         raise OSError("model artifact exceeds the hash byte limit")
     observed = _HashingModelReader(stream)
-    safety, explanation = inspect_model_format(path, stream=cast(BinaryIO, observed))
+    safety, explanation = inspect_model_format(path, stream=cast(BinaryIO, observed), budget=budget)
+    return _Inspected(before, observed, safety, explanation)
+
+
+def _complete_observation(
+    path: Path, stream: BinaryIO, inspected: _Inspected, budget: InspectionBudget
+) -> ModelArtifactObservation:
+    """Complete an inspection with format metadata and the SHA-256 of every byte."""
+    before, observed, safety, explanation = inspected
     detected = model_format(path)
     key = detected[0] if detected is not None else None
     extra: dict[str, Any] = {}
@@ -382,6 +896,14 @@ def observe_model_artifact(
             artifact_size=before.st_size,
             max_header_bytes=MAX_MODEL_HEADER_BYTES,
         )
+    elif key in ("onnx", "gguf") and explanation in _ZIP_UNRATED:
+        # The directory was read from the archive's end, past the prefix a format
+        # reader replays; an archive holds no ONNX external data and no GGUF metadata,
+        # which is what the readers found before the directory was read.
+        if key == "onnx":
+            extra["external_data"] = ()
+        else:
+            extra["gguf_error"] = ZIP_NOT_GGUF
     elif safety != SerializationSafety.UNSAFE_CODE_EXECUTION and key == "onnx":
         try:
             extra["external_data"] = onnx_external_data(_ReplayReader(observed).read, budget)
@@ -401,8 +923,8 @@ def observe_model_artifact(
             if any(template_escape_markers(text) for _, text in metadata.chat_templates):
                 safety = SerializationSafety.UNSAFE_TEMPLATE_INJECTION
                 explanation = (
-                    "Embedded chat template reaches Python internals through dunder "
-                    "attributes, as Jinja sandbox escapes do"
+                    "Embedded chat template contains a potential Python-internals "
+                    "access pattern; actual behavior depends on the renderer"
                 )
     while observed.read(65536):
         pass
@@ -1147,18 +1669,17 @@ class ModelScanner(Scanner):
             self._digests, self._read, self._budget = {}, set(), InspectionBudget()
             self._bindings, self._verified = BindingBudget(), {}
             self._shared = BindingBudget(reason=SHARED_DIGESTS_EXHAUSTED)
-            model_dirs = sorted(
+            named = sorted(
                 {
                     path.parent
                     for path in tree.files
                     if model_format(path) is not None or _index_base(path) is not None
                 }
             )
-            if not model_dirs and not result.scan_failures and not result.surfaces_excluded:
-                result.surfaces_scanned.append("model-weights (no model files found)")
+            contexts: dict[Path, _DirectoryContext] = {}
             covered: set[Path] = set()
-            for model_dir in model_dirs:
-                context = self._directory_context(files, model_dir)
+            for model_dir in named:
+                context = contexts[model_dir] = self._directory_context(files, model_dir)
                 for path in tree.children.get(model_dir, ()):
                     detected = model_format(path)
                     if detected is not None:
@@ -1167,11 +1688,53 @@ class ModelScanner(Scanner):
                         )
                         result.components.append(component)
                         covered.update(weight_files)
+            # A file no name rates is a model artifact by its content. It is checked after
+            # the files that the models above bind and their directories configure, and
+            # only if none of them is it, so no byte is read twice.
+            found: dict[Path, ModelArtifactObservation] = {}
+            for path in tree.files:
+                if path not in self._read and _content_candidate(path):
+                    observation = self._content_artifact(files, path)
+                    if observation is not None:
+                        found[path] = observation
+            if not (named or found or result.scan_failures or result.surfaces_excluded):
+                result.surfaces_scanned.append("model-weights (no model files found)")
+            for model_dir in sorted({path.parent for path in found}):
+                context = (
+                    contexts[model_dir]
+                    if model_dir in contexts
+                    else self._directory_context(files, model_dir)
+                )
+                for path in tree.children.get(model_dir, ()):
+                    observation = found.get(path)
+                    if observation is not None:
+                        component, weight_files = self._scan_model_file(
+                            files,
+                            path,
+                            _content_format(observation.explanation),
+                            context,
+                            observation=observation,
+                        )
+                        result.components.append(component)
+                        covered.update(weight_files)
             # An operator entry that no check verifies must not look enforced.
             for label, reason in unused_policy_entries(files, self._policies, covered):
                 files._fail(label, reason)
             result.surfaces_scanned.extend(sorted(path.as_posix() for path in self._read))
         return result
+
+    def _content_artifact(
+        self, files: ConfinedCollection, path: Path
+    ) -> ModelArtifactObservation | None:
+        """The observation of a file no model name rates, when its content is an artifact."""
+        try:
+            with files.open_regular(path, max_bytes=limits.bound("model-bytes")) as stream:
+                observed = observe_content(path, stream=stream, budget=self._budget)
+        except (OSError, ValueError):
+            files._fail(path, "model inspection or hashing failed")
+            return None
+        # Only now has the confined stream confirmed the pathname still names those bytes.
+        return observed
 
     def _digest(self, files: ConfinedCollection, path: Path) -> str | None:
         if path not in self._digests:
@@ -1365,18 +1928,21 @@ class ModelScanner(Scanner):
         path: Path,
         detected: tuple[str, str],
         context: _DirectoryContext,
+        *,
+        observation: ModelArtifactObservation | None = None,
     ) -> tuple[ModelComponent, list[Path]]:
+        """A component for ``path``; a file inventoried by content comes with its observation."""
         fmt_key, fmt_name = detected
         self._read.add(path)
-        observation: ModelArtifactObservation | None = None
-        try:
-            with files.open_regular(path, max_bytes=limits.bound("model-bytes")) as stream:
-                observed = observe_model_artifact(path, stream=stream, budget=self._budget)
-            # Commit only after the confined stream confirmed the pathname still
-            # names the bytes that were read.
-            observation = observed
-        except (OSError, ValueError):
-            files._fail(path, "model inspection or hashing failed")
+        if observation is None:
+            try:
+                with files.open_regular(path, max_bytes=limits.bound("model-bytes")) as stream:
+                    observed = observe_model_artifact(path, stream=stream, budget=self._budget)
+                # Commit only after the confined stream confirmed the pathname still
+                # names the bytes that were read.
+                observation = observed
+            except (OSError, ValueError):
+                files._fail(path, "model inspection or hashing failed")
         if observation is not None:
             safety, format_evidence = observation.safety, observation.explanation
             weight_hash: str | None = observation.digest
@@ -1564,9 +2130,9 @@ class ModelScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.CRITICAL,
                     category="serialization_format",
-                    detail=f"Model '{path.name}' embeds a chat template that reaches Python internals, as Jinja2 sandbox escapes such as CVE-2024-34359 do.",
-                    recommendation="Remove the template or replace it with a reviewed one; render templates only in a sandboxed Jinja2 environment (llama-cpp-python >= 0.2.72).",
-                    references=["https://nvd.nist.gov/vuln/detail/CVE-2024-34359"],
+                    detail=f"Model '{path.name}' embeds a chat template with a potential Python-internals access pattern; actual behavior depends on the renderer and its sandbox.",
+                    recommendation="Remove the template or replace it with a reviewed one; render templates only in a sandboxed Jinja2 environment that the loader keeps patched.",
+                    references=[DOCUMENTATION],
                 )
             )
 
@@ -1580,17 +2146,16 @@ class ModelScanner(Scanner):
                     severity=RiskSeverity.CRITICAL,
                     category="serialization_format",
                     detail=(
-                        f"Model '{path.name}' is configured with a chat template that reaches "
-                        "Python internals through dunder attributes or the attr filter, as "
-                        f"Jinja2 sandbox escapes such as CVE-2024-34359 do: {shown}"
+                        f"Model '{path.name}' is configured with a chat template containing "
+                        f"a potential Python-internals access pattern: {shown}"
                         + (f" and {more} more" if more > 0 else "")
-                        + "."
+                        + ". Actual behavior depends on the renderer and its sandbox."
                     ),
                     recommendation=(
                         "Remove the template or replace it with a reviewed one; render chat "
                         "templates only in a sandboxed Jinja2 environment."
                     ),
-                    references=["https://nvd.nist.gov/vuln/detail/CVE-2024-34359"],
+                    references=[DOCUMENTATION],
                 )
             )
 

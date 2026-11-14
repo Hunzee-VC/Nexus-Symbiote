@@ -63,15 +63,6 @@ class PinnedObservation:
     launcher_sha256: str | None = field(default=None)
 
 
-def strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate JSON key")
-        result[key] = value
-    return result
-
-
 def _ready(fd: int, event: int, deadline: float) -> None:
     remaining = deadline - time.monotonic()
     if remaining <= 0:

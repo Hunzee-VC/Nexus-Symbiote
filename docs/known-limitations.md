@@ -169,7 +169,9 @@ A way around a limit that its entry does not describe is worth a
   unknown. Other locations and the runner's own namespace (`UV_*`, `PIP_*`,
   `YARN_*`, `BUN_*`, `DOCKER_*` and similar) are a medium `package_source`
   finding, and the package URL is withheld. Configuration names that look like
-  tokens or hold one after a prefix (`AWS_AKIA...`) are exported as `[redacted]`.
+  tokens or hold one after a prefix (`AWS_AKIA...`) are exported as `[redacted]`,
+  and a launcher package whose name or specifier looks like a token is withheld
+  (`[withheld]`, no package URL) with a medium `completeness` finding.
 - **Changed values need the binding key.** Launch arguments, environment and header
   values are exported only as redacted positions and names, and endpoint and
   package index URLs as origins. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, `diff`
@@ -319,6 +321,11 @@ A way around a limit that its entry does not describe is worth a
 - **Tool digests are unkeyed.** A tool's `definition_hash` covers the declared
   descriptor, including text the exported descriptor omits, so anyone holding the
   inventory can confirm a guess of a low-entropy value withheld there.
+- **Loopback endpoints raise no finding.** An MCP server declared with a `url` on
+  `localhost` or a loopback address over plain `http`, and no `command`, is recorded
+  without a transport or local-program finding: the endpoint is treated as secure
+  because it does not leave the host, and nothing records which process serves it.
+  Review such servers by other means.
 
 ## Models
 
@@ -337,11 +344,41 @@ A way around a limit that its entry does not describe is worth a
   TFLite, Core ML and ExecuTorch files are rated `unknown`: Keras Lambda layers,
   SavedModel operations and custom operators are not inspected. Each is a high
   finding, which the default gate does not fail on by severity alone.
-- **Some files are not inventoried.** Pickles under names other than the
-  [listed suffixes](model-integrity.md#model-files-and-references), NumPy `.npy` and
-  `.npz` arrays, and `.pb` files other than `saved_model.pb` produce no component.
+- **Some files are not inventoried.** A file outside the
+  [listed names](model-integrity.md#model-files-and-references) is inventoried by
+  its content only when it is named `.npy`, `.npz` or `.dat` or has any name below a
+  directory named `model`, `models`, `weights`, `checkpoint` or `checkpoints`, and it
+  does not have the name of a model directory's configuration, tokenizer or chat
+  template file, such as `config.json`, and is not a Python or Jinja source. There, a
+  recognized pickle, a NumPy array with an object dtype (which
+  `np.load(allow_pickle=True)` unpickles) and a ZIP archive with a pickle-family
+  member or such an array as a member are rated
+  `unsafe-code-execution`, and a NumPy header or ZIP archive left unread at the
+  bounds below is rated `unknown`. A pickle renamed anywhere else, an unrecognized
+  pickle, a numeric NumPy array, a ZIP archive with neither kind of member, and `.pb`
+  files other than `saved_model.pb` produce no component. A candidate ZIP archive is
+  read to its end and digested, as a model archive is, and a candidate larger than
+  the `model-bytes` limit is a collection failure.
+- **Content recognition is bounded.** A binary pickle is recognized by its PROTO
+  opcode and 16 well-formed opcodes in the first 64 KiB, and a text-protocol pickle
+  by a consistent stream of at most 4,096 opcodes. A NumPy array's version 1, 2 or 3
+  header is parsed when it is at most 64 KiB long, as every version 1 header is, and
+  while the 16,000,000 structure units one scan shares with the ONNX and GGUF readers
+  last, at one unit a header byte; only its `descr` value is read for types, so a
+  field named `O` is not one. A ZIP
+  archive is recognized by a pickle-family member in its first local header or in a
+  central directory of at most 1 MiB, read from the end of the archive, including
+  ZIP64, and by an object-dtype array as any member, read from the member's local
+  header and the start of its stored or DEFLATE-compressed data. A longer array
+  header, a longer or malformed directory, a member compressed by another method,
+  such as BZIP2 or LZMA, and a member whose data runs past the next member's local
+  header are rated `unknown`, a high finding; a pickle hidden otherwise under
+  `.onnx`, `.gguf` or another suffix is rated `unknown` too, and
+  `validate --project` still refuses it as unverified.
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat
-  templates are checked only for known sandbox-escape shapes. A template file larger
+  templates are checked for potential Python-internals access patterns, not evaluated;
+  computed names can evade the heuristic, and a match does not establish a sandbox
+  escape or execution. A template file larger
   than the `file-bytes` limit is digested but not checked, and is a coverage gap.
   SafeTensors tensor bytes are hashed but not inspected. See
   [what this does not establish](model-integrity.md#what-this-does-not-establish).
@@ -410,7 +447,13 @@ A way around a limit that its entry does not describe is worth a
   `properties.settings_hashes changed` alert that names the agent, not the setting.
 - **Effective permissions are not resolved.** User and managed settings, workspace
   trust and session flags are not read, and deny and ask rules are counted, not
-  applied to the allow list.
+  applied to the allow list. A Claude Code allow rule whose command word is a shell,
+  an interpreter or a launcher and that contains a wildcard, such as `Bash(sh:*)`,
+  `Bash(python3 -c:*)` or `Bash(sudo:*)`, is conservatively reported as an unscoped
+  shell grant. This heuristic also flags a fixed script with wildcard arguments,
+  such as `Bash(python3 scripts/report.py:*)`; it does not establish that every
+  matching rule permits arbitrary commands. A rule that names another program, such as
+  `Bash(npm run build:*)`, is read as scoped even where that program runs project code.
 - **Settings digests can confirm guesses.** Without
   `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, the digests of the Claude Code settings,
   plugin manifests and plugin hooks, the Gemini CLI, Windsurf and Cline settings,
@@ -426,8 +469,10 @@ A way around a limit that its entry does not describe is worth a
   `.cursor/cli.json` and the Antigravity, xAI and Copilot settings files are
   digested after the redaction, so that their digests cannot confirm a guess either.
   Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a change only to a value the
-  redaction removes, such as an MCP server's environment value, a token, or a URL
-  path, query or userinfo on the same host in a `notify` command, raises no alert;
+  redaction removes, such as an MCP server's environment value, a token, the value
+  of an `Authorization`, `Cookie` or credential-named key such as `password` or
+  `X-Api-Key`, or a URL path, query or userinfo on the same host in a `notify`
+  command, raises no alert;
   such a record carries a low `completeness` finding. The redaction ends a URL or
   an assigned value at a shell operator (`;`, `|`, `&`, `$`, `` ` ``, parentheses,
   braces, `<`, `>` or a line break), and starts a new URL at each later scheme
@@ -732,8 +777,10 @@ A way around a limit that its entry does not describe is worth a
   with `--project`, apply the checkout's `.nexus-symbiote.yaml`, including
   suppressions, ignored categories and raised thresholds. Each relaxation is listed
   in `policy_weakened`, in the inventory's metadata and in `risk --json-output`, and
-  printed as a warning. Pass `--no-project-policy` in CI; there is no
-  operator-owned policy file. See
+  printed as a warning. When a CI variable such as `CI` or `GITHUB_ACTIONS` is set, a
+  policy that weakens a gate fails the command unless `--no-project-policy` ignores it
+  or `--accept-project-policy` accepts it explicitly; interactive runs only warn. There
+  is no operator-owned policy file. See
   [what `policy_weakened` reports](policy-reference.md#what-policy_weakened-reports).
 - **A suppressed chat template finding is bound to the model file.** A suppression
   names the [fingerprint](policy-reference.md#suppressions) of the finding, which
@@ -771,6 +818,15 @@ A way around a limit that its entry does not describe is worth a
   list has no content digest, and one larger or deeper than
   a runtime snapshot binds has no canonical digest; `digest` prints `unavailable`
   for the missing one and exits 1.
+- **An inventory nested deeper than 128 levels is not read.** Every command that
+  reads a native inventory, `diff`, `validate`, `risk`, `graph`, `summary`,
+  `digest`, `export-inventory` and the rest, refuses one whose arrays and objects
+  nest more than 128 levels, the root counted, with "inventory nests deeper than 128
+  levels" and exit 1. The bound is fixed, not the interpreter's recursion limit, so
+  the same file is read or refused by every caller. A collected inventory stays
+  within it, since its deepest values, MCP tool definitions, nest at most 64 levels;
+  one edited by hand or written by another producer needs its `properties`
+  flattened.
 - **A malformed `SOURCE_DATE_EPOCH` stops collection.** `scan`, `baseline` and
   `import-shadowscan` exit 2 when it is set to anything but 1 to 12 ASCII digits
   naming an instant up to 9999-12-31T23:59:59Z, an empty value included. Unset it to
@@ -890,6 +946,11 @@ A way around a limit that its entry does not describe is worth a
 
 ## Runtime gateway
 
+- **Lineage persistence needs trusted, current state.** The lineage helper's
+  snapshot retains ACL revision histories, but does not authenticate them or stop
+  rollback. Versions imported without their histories cannot have their ACLs
+  updated until an operator supplies complete history; see
+  [lineage persistence](runtime-assurance.md#hosted-identity-and-mutable-data).
 - **Only mediated calls are governed.** `ReferenceGateway` authorizes only calls
   routed through `invoke`. The operator builds the authentication, description,
   scope and execution adapters and must close every other path to the tools; see
@@ -927,8 +988,8 @@ A way around a limit that its entry does not describe is worth a
   approved. Protect the gate with a workflow that an organization ruleset requires
   and `CODEOWNERS` review on `.github/`, as the [drift gate guide](drift-gate.md#protect-the-gate)
   shows, and avoid checking out untrusted pull request heads in `pull_request_target`
-  workflows. Selecting a subset of `scanners` requires `validate: 'false'`, because
-  completeness requires all built-in collectors.
+  workflows. Selecting a subset of `scanners` requires `validate: 'false'` and
+  `risk-check: 'false'`, because both gates require all built-in collectors.
 - **Earlier steps in the job are trusted.** A step that runs untrusted code before
   the Action can change the runner's Python or rewrite files under `RUNNER_TEMP`
   before the Action reads them. Write the signer policy and the reviewed baseline

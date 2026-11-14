@@ -145,6 +145,23 @@ def test_stream_budget_names_the_bound_that_stopped_it(tmp_path):
     ]
 
 
+def test_a_stream_reads_again_only_what_it_read_and_charges_it_once(tmp_path):
+    (tmp_path / "a.bin").write_bytes(b"0123456789")
+    failures: list[str] = []
+    with (
+        ConfinedCollection(tmp_path, failures, max_total_bytes=6) as files,
+        files.open_regular("a.bin") as stream,
+    ):
+        assert stream.read(6) == b"012345"
+        assert stream.reread(2, 4) == b"2345"
+        assert stream.reread(0, 6) == b"012345"
+        with pytest.raises(ValueError, match="already read"):
+            stream.reread(4, 3)
+        with pytest.raises(ValueError, match="already read"):
+            stream.reread(-1, 1)
+    assert failures == []
+
+
 def test_a_file_that_does_not_fit_leaves_the_byte_budget_to_files_that_do(tmp_path):
     # The mcp and a2a source searches stop at the first refused file once the budget
     # is spent, so a file refused for its size must not mark it spent.
@@ -544,3 +561,35 @@ def test_a_null_document_and_an_unwalkable_directory_name_are_named_as_such(tmp_
         f"../x: {unwalkable}",
         f"a\x00b: {unwalkable}",
     ]
+
+
+@pytest.mark.parametrize("outside", ["../outside", "/etc", "a/../../b", "/"])
+def test_an_exclusion_outside_the_root_invalidates_the_policy_and_collects_nothing(
+    tmp_path, outside
+):
+    (tmp_path / "kept.json").write_text("{}")
+    failures: list[str] = []
+    exclusions: list[str] = []
+    with ConfinedCollection(tmp_path, failures, exclusions, exclude_paths=[outside]) as files:
+        assert list(files.iter_files()) == []
+        assert files.read_bytes("kept.json", missing_ok=True) is None
+    assert failures[0] == ".: excluded path is outside collection root"
+    assert exclusions == []
+
+
+def test_an_exclusion_outside_the_root_fails_the_scan_gate(tmp_path, monkeypatch):
+    (tmp_path / ".mcp.json").write_text('{"mcpServers": {"a": {"command": "x"}}}')
+
+    class Escaping(MCPScanner):
+        def configure(self, exclude_paths=()):
+            super().configure([*exclude_paths, "../outside"])
+
+    monkeypatch.setattr("nexus_symbiote.cli._get_scanners", lambda: {"mcp": Escaping})
+    output = tmp_path / "bom.json"
+    result = CliRunner().invoke(
+        main, ["scan", str(tmp_path), "--no-project-policy", "--scanner", "mcp", "-o", str(output)]
+    )
+    assert result.exit_code == 1, result.output
+    assert "Scan gate failed" in result.output
+    assert "collection: .: excluded path is outside collection root" in result.output
+    assert not any(c.bom_ref.startswith("mcp:") for c in AIBOM.load(output).components)
