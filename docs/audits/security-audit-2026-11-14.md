@@ -223,7 +223,7 @@ contains the change and a regression test that failed before it.
   an unscoped shell grant. The list (`_COMMAND_RUNNERS` in `ide_agents.py`) names
   shells such as `sh`, `bash` and `zsh`, interpreters such as `node`, `perl` and
   `ruby`, launchers such as `env`, `sudo`, `xargs`, `docker`, `npx` and `uvx`, and
-  `python`, `pypy`, `ruby`, `php`, `perl` or `node` with a version suffix; a shell,
+  `python`, `pypy`, `ruby`, `php`, `perl` or `node` with or without a version suffix; a shell,
   interpreter or launcher not on it, such as `mksh`, `tclsh`, `awk` or `java`, stays
   scoped. A fixed script with wildcard arguments, such as
   `Bash(python3 scripts/report.py:*)`, also matches. The heuristic and its limits (that over-match, and a program such as
