@@ -184,8 +184,9 @@ the same run counts as verification; the outcome recorded in the BOM is not trus
 
 `--signature-policy` (`scan`, `validate`, `risk`, `baseline`) and the Action's
 `signature-policy` input take a strict JSON file, at most 4 MiB and 1,000 artifacts,
-written by the operator, never by the checkout. A policy inside the scanned project,
-also under another name for the project directory, or one with other hard links is
+written by the operator, never by the checkout. A policy inside the scanned project
+or inside any Git working tree that encloses it, including a submodule's superproject,
+also under another name for any of these directories, or one with other hard links is
 refused:
 
 ```json
@@ -208,6 +209,11 @@ takes these four fields and an optional `expected_sha256`, and `digest-pin` take
 `artifact_path` and `expected_sha256`; see [model integrity](model-integrity.md#operator-signature-policy).
 Unknown fields, duplicate keys or artifacts, symbolic links and missing files are
 refused.
+
+Every directory at or above the project with a `.git` entry counts as an enclosing
+repository. So neither a trusted base checkout that encloses the pull request's
+checkout nor a home directory that is itself a repository (`~/.git`) can hold the
+policy for a project below it; keep the policy where no repository encloses it.
 
 ### Launch policy
 
