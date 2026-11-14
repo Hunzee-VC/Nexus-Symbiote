@@ -57,32 +57,31 @@ def _refuse_source_overwrite(output: Path | None, source: Path) -> None:
         raise click.BadParameter("output must not overwrite the source inventory")
 
 
-def _repository_roots(path: Path) -> tuple[Path, ...]:
-    """Every enclosing checkout, including superprojects above a nested marker."""
-    return tuple(
-        candidate for candidate in (path, *path.parents) if os.path.lexists(candidate / ".git")
-    )
+def _repository_roots(path: Path) -> list[Path]:
+    """Every directory at or above ``path`` that holds a ``.git`` entry."""
+    return [candidate for candidate in (path, *path.parents) if os.path.lexists(candidate / ".git")]
 
 
 def _check_launch_policy(policy: Path, project: Path, inventory: Path) -> None:
     """Refuse a launch policy that the change under review could have written.
 
-    The policy must lie outside the project, outside the repositories that hold the
-    project and the inventory (including enclosing superprojects), be a single-link
-    regular file owned by the caller or
+    The policy must lie outside the project, outside every repository that encloses
+    the project or the inventory, be a single-link regular file owned by the caller or
     root that only its owner can write, in directories owned by you or root that others
     cannot write unless they are sticky, up to the file system root. This catches
-    misplacement; it does not
-    authenticate the policy.
+    misplacement; it does not authenticate the policy.
     """
     resolved = policy.resolve()
     untrusted = [project.resolve()]
     for start in (project.resolve(), inventory.resolve().parent):
+        # A nested checkout (a submodule or vendored repository) has its own .git, but
+        # the change under review can still edit the repository around it.
         untrusted.extend(_repository_roots(start))
     if any(resolved.is_relative_to(root) for root in untrusted):
         raise click.UsageError(
             "launch policy must be provisioned outside the untrusted project and outside "
-            "the repository that holds the project or the inventory"
+            "the repository that holds the project or the inventory, and any repository "
+            "enclosing either"
         )
     if os.name != "posix":
         return
@@ -137,7 +136,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         required=True,
         help=(
             "Untrusted project root; the launch policy must be outside it and outside "
-            "the repository that holds the project or the inventory."
+            "every repository that encloses the project or the inventory."
         ),
     )
     @click.option(
