@@ -166,7 +166,7 @@ jobs:
           set -euo pipefail
           python -m venv "$RUNNER_TEMP/compatibility"
           python_bin="$RUNNER_TEMP/compatibility/bin/python"
-          "$python_bin" -m pip install dist/*.whl
+          "$python_bin" -m pip install --only-binary=:all: dist/*.whl
           "$python_bin" -m pip check
           "$python_bin" -m pip freeze --all
           mkdir "$RUNNER_TEMP/source"
