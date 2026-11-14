@@ -40,7 +40,8 @@ text-protocol pickle cut short that way after an earlier pickle reached STOP, as
 legacy file with protocol 0 headers and a padded `sys_info` is; a text-protocol stream
 cut short before any STOP is not a component. `pickle.load` calls what a pickle names
 before it meets a flaw further on, so a pickle that names a callable by a module and a
-name (`GLOBAL` or `INST` with two identifiers, or `STACK_GLOBAL` after two such strings)
+name (`GLOBAL` or `INST` with two identifiers, or `STACK_GLOBAL` whose two stack items
+are such strings, wherever the memo, `DUP` or other opcodes between moved them)
 and then calls it (`REDUCE`, `INST`, `OBJ`, `NEWOBJ`, `NEWOBJ_EX` or `BUILD`) is
 recognized however it ends, at the end of the file, at a byte that is no opcode or at
 a stack underflow: a binary one in any position, and a text-protocol one after an
@@ -50,7 +51,9 @@ stack, which the check follows with its MARK fences and memo, holds what the opc
 calls and that item is a named callable or an object a call returned: the lines
 `VERSION`, `.cache`, `build` read as a pickle, then a name and a `BUILD` with nothing to
 build, which `pickle.load` refuses at a stack underflow without calling anything, so
-such text is rated `unknown` at most. Any other content, such as a numeric NumPy array or a ZIP archive with
+such text is rated `unknown` at most. A name that comes only after a stack underflow,
+where `pickle.load` stops, counts for nothing, so a list such as `VERSION`, `.build`,
+`checkpoints`, `logs` is not a component. Any other content, such as a numeric NumPy array or a ZIP archive with
 neither a pickle-family member nor an object-dtype array as a member, is not a
 component. Each such file is opened once, after every file that the models with a
 name bind and their directories configure has been read, and only if it is not one

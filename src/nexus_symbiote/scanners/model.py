@@ -228,6 +228,18 @@ _CODE_OPCODES = frozenset(
 )
 # Bytes that start an opcode: the next pickle after a STOP may start with any of them.
 _OPCODE_BYTES = frozenset(opcode.code.encode("latin-1")[0] for opcode in pickletools.opcodes)
+# Opcodes that push a string, which ``pickle.load`` decodes to ``str`` by default.
+_STRING_OPCODES = frozenset(
+    {
+        "STRING",
+        "BINSTRING",
+        "SHORT_BINSTRING",
+        "UNICODE",
+        "SHORT_BINUNICODE",
+        "BINUNICODE",
+        "BINUNICODE8",
+    }
+)
 _DOTTED_NAME = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", re.ASCII)
 _INDEX = re.compile(r"(?P<base>.+?)\.index(?:\.[A-Za-z0-9_-]+)?\.json", re.IGNORECASE)
 # transformers reads ``repository--module.Class``; a repository need not name an owner.
@@ -422,7 +434,6 @@ def _pickle_segment(
     )
     own = 0
     code = named = invoked = bounded = False
-    strings: list[str | None] = []
     stack: _Stack | None = _Stack()
     opcodes = io.BytesIO(sample)
     opcodes.seek(start)
@@ -432,17 +443,15 @@ def _pickle_segment(
             own += 1
             marks += opcode.name == "MARK"
             code = code or opcode.name in _CODE_OPCODES
-            names = _names_callable(opcode.name, argument, strings)
-            named = named or names
             if stack is not None:
+                # pickle.load stops at a stack underflow: what follows names nothing.
+                names = _names_callable(opcode.name, argument, stack.strings())
+                named = named or names
                 calls = stack.apply(opcode, argument, names)
                 if calls is None:
-                    # pickle.load stops at a stack underflow: nothing after it runs.
                     stack = None
                 else:
                     invoked = invoked or (named and calls)
-            if opcode.name != "MEMOIZE":
-                strings = [*strings[-1:], argument if isinstance(argument, str) else None]
             if seen > MAX_PICKLE_OPCODES or marks > MAX_PICKLE_MARKS:
                 bounded = True
                 break
@@ -479,25 +488,33 @@ class _Stack:
 
     An item that may run code is one a callable was named by (``GLOBAL``,
     ``STACK_GLOBAL``, ``EXT1``, ``EXT2``, ``EXT4``) or one a call returned; a memo entry
-    that was never stored may be one the same unpickler stored earlier, so it is too.
+    that was never stored may be one the same unpickler stored earlier, so it is too. A
+    string item is kept as the string, wherever the memo or ``DUP`` moves it, so that
+    ``STACK_GLOBAL`` is read by the two items it takes, whatever opcodes came between.
     """
 
     def __init__(self) -> None:
-        self.items: list[bool] = []
+        self.items: list[bool | str] = []
         self.fences: list[int] = []
-        self.memo: dict[object, bool] = {}
+        self.memo: dict[object, bool | str] = {}
+
+    def strings(self) -> list[str | None]:
+        """The top two items above the innermost MARK, each the string it is or ``None``."""
+        if self._above() < 2:
+            return []
+        return [item if isinstance(item, str) else None for item in self.items[-2:]]
 
     def _above(self) -> int:
         return len(self.items) - (self.fences[-1] if self.fences else 0)
 
-    def _pop(self, count: int) -> list[bool] | None:
+    def _pop(self, count: int) -> list[bool | str] | None:
         if self._above() < count:
             return None
         popped = self.items[len(self.items) - count :]
         del self.items[len(self.items) - count :]
         return popped
 
-    def _pop_mark(self) -> list[bool] | None:
+    def _pop_mark(self) -> list[bool | str] | None:
         if not self.fences:
             return None
         fence = self.fences.pop()
@@ -535,19 +552,18 @@ class _Stack:
             if popped is None:
                 return None
             operands = popped
-        calls = {
-            "REDUCE": operands[:1],
-            "NEWOBJ": operands[:1],
-            "NEWOBJ_EX": operands[:1],
-            "BUILD": operands[:1],
-            "OBJ": operands[:1],
-            "INST": [names],
-        }.get(name)
+        calls: list[bool | str] | None = None
+        if name in {"REDUCE", "NEWOBJ", "NEWOBJ_EX", "BUILD", "OBJ"}:
+            calls = operands[:1]
+        elif name == "INST":
+            calls = [names]
         if calls is not None:
             # What BUILD sets the state of stays what it was; a call may return code.
             self.items.append(operands[0] if name == "BUILD" else True)
-            return any(calls)
-        if name == "DUP":
+            return any(item is True for item in calls)
+        if name in _STRING_OPCODES and isinstance(argument, str):
+            self.items.append(argument)
+        elif name == "DUP":
             self.items.extend(operands * 2)
         elif name in {"APPEND", "APPENDS", "SETITEM", "SETITEMS", "ADDITEMS", "READONLY_BUFFER"}:
             self.items.append(operands[0])
@@ -560,7 +576,7 @@ class _Stack:
 def _names_callable(name: str, argument: object, strings: list[str | None]) -> bool:
     """Whether an opcode names a callable by a module and a name, as ``find_class`` reads.
 
-    GLOBAL and INST carry both; STACK_GLOBAL takes the two strings pushed just before it.
+    GLOBAL and INST carry both; STACK_GLOBAL takes the two strings on top of the stack.
     """
     parts: list[str | None]
     if name in {"GLOBAL", "INST"}:

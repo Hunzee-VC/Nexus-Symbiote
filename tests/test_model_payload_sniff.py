@@ -669,3 +669,77 @@ def test_a_name_with_no_operands_for_its_call_is_not_critical(tmp_path: Path) ->
 def test_a_call_with_its_operands_after_a_stop_is_critical(tmp_path: Path, data: bytes) -> None:
     (tmp_path / "call.dat").write_bytes(data)
     assert _components(tmp_path)["call.dat"].serialization_safety is UNSAFE
+
+
+def _short(text: bytes) -> bytes:
+    return b"\x8c" + bytes([len(text)]) + text
+
+
+# STACK_GLOBAL takes the two strings on the stack, whatever opcodes come between them
+# and it: protocols 2 and 3 memoize each string with BINPUT.
+_MEMOIZED_STACK_CALL = (
+    _short(b"builtins") + b"q\x00" + _short(b"exec") + b"q\x01\x93" + _short(b"builtins.HIT=1")
+)
+_STACK_CALL_AFTER_A_GAP = {
+    "binput-invalid-opcode": b"N." + _MEMOIZED_STACK_CALL + b"\x85R\xff",
+    "binput-eof": b"N." + _MEMOIZED_STACK_CALL + b"\x85R",
+    "proto-4-binput-invalid-opcode": b"N.\x80\x04" + _MEMOIZED_STACK_CALL + b"\x85R\xff",
+    "header-proto-2-binput": _header(2) + b"\x80\x02" + _MEMOIZED_STACK_CALL + b"\x85R\xff",
+    "header-binput-eof": _header(2) + _MEMOIZED_STACK_CALL + b"\x85R",
+    "newtrue-pop": b"N."
+    + _short(b"builtins")
+    + _short(b"exec")
+    + b"\x880\x93"
+    + _short(b"builtins.HIT=1")
+    + b"\x85R\xff",
+    "unicode-newtrue-pop": b"N.Vbuiltins\nVexec\n\x880\x93" + _short(b"builtins.HIT=1") + b"\x85R",
+    "first-proto-4-binput": b"\x80\x04" + _MEMOIZED_STACK_CALL + b"\x85R\xff",
+}
+
+
+@pytest.mark.parametrize("data", _STACK_CALL_AFTER_A_GAP.values(), ids=_STACK_CALL_AFTER_A_GAP)
+def test_a_stack_global_is_named_by_the_strings_on_the_stack(tmp_path: Path, data: bytes) -> None:
+    assert _runs_exec(data)
+    (tmp_path / "models").mkdir()
+    files = ["models/x", "x.dat", "x.npy", "w.bin"]
+    for relative in files:
+        (tmp_path / relative).write_bytes(data)
+    found = _components(tmp_path)
+    assert sorted(found) == sorted(files)
+    for component in found.values():
+        assert component.serialization_safety is UNSAFE
+        assert _critical(component)
+
+
+def _finds_a_class(data: bytes) -> bool:
+    found: list[str] = []
+
+    class _Unpickler(pickle.Unpickler):
+        def find_class(self, module: str, name: str) -> type:
+            found.append(f"{module}.{name}")
+            return object
+
+    stream = io.BytesIO(data)
+    for _ in range(8):
+        try:
+            _Unpickler(stream).load()
+        except Exception:  # noqa: BLE001 - the stream fails where pickle.load does
+            break
+    return bool(found)
+
+
+# Text whose name-shaped lines come only after a stack underflow, where pickle.load stops.
+_NAMED_PAST_AN_UNDERFLOW = {
+    "models/.gitignore": b"VERSION\n.build\ncheckpoints\nlogs\n",
+    "paths.dat": b"VERSION\n.build\ncheckpoints\nlogs\n",
+    "models/build-notes": b"N.build\na\nbuild\nos\n",
+    "dirs.dat": b"N.build\nbin\ncache\nos\nsystem\n",
+}
+
+
+def test_a_name_past_a_stack_underflow_is_not_inventoried(tmp_path: Path) -> None:
+    (tmp_path / "models").mkdir()
+    for relative, data in _NAMED_PAST_AN_UNDERFLOW.items():
+        assert not _finds_a_class(data)
+        (tmp_path / relative).write_bytes(data)
+    assert _components(tmp_path) == {}
