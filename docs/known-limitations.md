@@ -306,39 +306,52 @@ A way around a limit that its entry does not describe is worth a
   decorator, or naming the server in an annotation. An app or run coroutine still
   holds the server, so code that digs it back out of one other than by the
   reflection below is not seen. A request context also hands handlers the server,
-  so in any Python file the collector reads, an attribute named `fastmcp`, with or
-  without leading underscores, as in `ctx.fastmcp.add_tool(...)` or `ctx._fastmcp`,
-  is a gap. In a file that imports from `mcp` or `fastmcp`, so is an attribute
-  named `fastmcp_context`, `current_context`, `request_ctx`, `request_context` or
+  so in any Python file the collector reads, an attribute named `fastmcp` or
+  `fastmcp_server`, with or without leading underscores, as in
+  `ctx.fastmcp.add_tool(...)`, `ctx._fastmcp` or the
+  `request.app.state.fastmcp_server` of a `fastmcp` HTTP app, is a gap. In a file
+  that imports from `mcp` or `fastmcp`, so is an attribute named `fastmcp_context`, `current_context`, `request_ctx`, `request_context` or
   `mcp_server`, as in a middleware's `context.fastmcp_context` or an `MCPServer`
   context's `ctx.mcp_server`, or one of the `fastmcp` accessors and dependency
   defaults `get_server`, `current_server`, `fastmcp_request_ctx`, `CurrentFastMCP`,
-  `CurrentContext` and `OptionalCurrentContext`, as in
-  `def read_note(server=CurrentFastMCP())`, each with or without leading
-  underscores, and so is importing any of these names from `mcp` or `fastmcp`. In
-  `mcp.server.fastmcp.exceptions`, `fastmcp` is a module path of a name bound only
+  `CurrentContext`, `OptionalCurrentContext`, `get_http_request` and
+  `CurrentRequest`, or the context variables and hooks `current_http_request`,
+  `extension_dispatch_scope`, `delegated_extension_scope`, `worker_server_resolver`
+  and `background_context_factory`, as in `def read_note(server=CurrentFastMCP())`
+  or `get_http_request().app`, each with or without leading underscores, and so is
+  importing any of these names from `mcp` or `fastmcp`. Because a release can keep
+  the server in a private variable these lists do not name, importing any private
+  name (one leading underscore, not a dunder such as `__version__`) from an `mcp` or
+  `fastmcp` module, or reading one as an attribute of an SDK module or of a name
+  imported from one, as in `extensions._extension_dispatch_scope`, is a gap too; a
+  private name reached any other way, such as through a dynamic import, is not
+  seen. In `mcp.server.fastmcp.exceptions`, `fastmcp` is a module path of a name bound only
   by `import mcp...` and not a gap; `fastmcp` on any other object, such as a
   settings object's `config.fastmcp`, is. In a file that imports from `mcp` or
   `fastmcp`, a parameter typed as the SDK `Context` (a `Context` imported from an
-  SDK module, a qualified `Context` of an SDK module, or a string annotation naming
-  one), and a name bound to the result of a `get_context()` call, by name or as an
-  attribute of anything, may only be read for `request_id`, `client_id`,
+  SDK module, a qualified `Context` of an SDK module, `getattr(..., "Context")`, or
+  a string annotation naming one), and a name bound by a plain
+  assignment of the result of a `get_context()` call, by name or as an attribute of
+  anything, may only be read for `request_id`, `client_id`,
   `session_id`, `session`, `headers`, `protocol_version`, `client_capabilities`,
   `transport`, `task_id`, `origin_request_id` or `is_background_task`, compared with
   `is`, tested, or have a known SDK method called on it: a logging, progress,
   resource, prompt, elicitation, sampling, roots, state, notification, extension
   or visibility method. Passing it to a call, storing, returning or aliasing it,
   reading any other attribute without calling it (a bound method holds the
-  context), calling any other method (`model_copy()` returns the context), or using
-  `get_context` any other way is a gap, because it can hand the server to a module
+  context), calling any other method (`model_copy()` returns the context), binding
+  the result of `get_context()` to a name declared `global` or `nonlocal` there, or
+  using `get_context` any other way is a gap, because it can hand the server to a module
   the collector does not read. The imported `Context` itself may only appear in
-  parameter annotations: an alias such as `Ctx = Context`, a subclass, an
+  parameter annotations: an alias such as `Ctx = Context` or
+  `Ctx = getattr(context, "Context")`, a subclass, an
   `isinstance` check, a return or variable annotation, or importing it without
   using it, which can re-export it to another module, is a gap. Using a context
   only to log, report progress or read its request data is not a gap. A context
   reached in any other way, such as an unannotated middleware context passed on,
-  a coroutine a context method returns, an SDK module object passed to code the
-  collector does not read, or a context reached by reflection in a file that
+  a coroutine a context method returns, an HTTP request or app (whose state holds
+  the server) passed to code the collector does not read, an SDK module object
+  passed to code the collector does not read, or a context reached by reflection in a file that
   names no MCP SDK or framework, which is not read, is not seen. A type in an annotation is the whole annotation,
   a member of a `|` union, or an argument of a generic of `typing`,
   `typing_extensions` or `collections.abc`, such as `Optional[FastMCP]`, or of a
