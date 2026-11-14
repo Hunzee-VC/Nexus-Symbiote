@@ -346,9 +346,11 @@ A way around a limit that its entry does not describe is worth a
   `.npz` arrays, and `.pb` files other than `saved_model.pb` produce no component.
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat
   templates are checked only for known sandbox-escape shapes. The check matches text:
-  a dunder name written without a quoted `__` literal, such as
-  `dict(__class__=1)|first` or `"_" ~ "_class_" ~ "_"`, is not found, so a
-  SafeTensors model beside such a template stays `safe`. A template file larger
+  some constructions of dunder names, such as `dict(__class__=1)|first` or
+  `"_" ~ "_class_" ~ "_"`, are not found, although direct attribute access such as
+  `obj.__class__` is found. Without other unsafe evidence, a SafeTensors model
+  beside an unrecognized template keeps its `safe` serialization rating; that
+  rating does not establish that the template is safe to render. A template file larger
   than the `file-bytes` limit is digested but not checked, and is a coverage gap.
   SafeTensors tensor bytes are hashed but not inspected. See
   [what this does not establish](model-integrity.md#what-this-does-not-establish).
@@ -379,8 +381,9 @@ A way around a limit that its entry does not describe is worth a
   file from text read here as code.
   A reference is read only where `@` starts the text or follows white space, and
   without the sentence punctuation after it. A host that also starts a reference
-  after inline markup (`**@docs/x.md**`, the text of a link, `<b>@x.md</b>`), or keeps that
-  punctuation, an escaped space or a `#fragment` in the path, imports a file that is
+  after inline markup (`**@docs/x.md**`, the text of a link, `<b>@x.md</b>`), keeps that
+  punctuation, decodes an escaped space, or interprets a `#fragment` instead of
+  treating it as part of the literal filename can import a different file that is
   not inventoried here; which hosts do has not been established by test.
   An import that leaves the project root, names an excluded path or lies deeper than
   the `depth` limit is a gap, so write a path alias such as `@/components` as code. A
