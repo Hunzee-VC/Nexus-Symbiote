@@ -97,7 +97,7 @@ def normalize_digest(expected_hash: str, algorithm: str | None = None) -> tuple[
     return algorithm, digest.lower()
 
 
-def descriptor_binding(info: os.stat_result) -> tuple[int, int, int, int, int]:
+def descriptor_binding(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
     """Return the open-descriptor evidence that must stay fixed across one observation.
 
     Size and mtime alone cannot detect a rename-over: when the replacement
@@ -108,14 +108,10 @@ def descriptor_binding(info: os.stat_result) -> tuple[int, int, int, int, int]:
     such as a file in an overlayfs lower layer, keeps all of these values; only
     the pathname's current identity (``pathname_identity``) reveals that swap.
 
-    ``st_ctime_ns`` is deliberately not part of the binding. Some filesystems
-    advance ctime asynchronously after a write returns — btrfs with
-    ``compress-force`` updates the inode ~1–200 ms after a large write, while
-    mtime stays fixed — so a ctime-only change during a read is a benign
-    metadata update, not a replacement: it changes neither the bytes nor any
-    of the fields above, and a rename-over is already caught by the link
-    count. Including ctime made freshly written large files fail collection
-    spuriously and charged the digest budget twice for one artifact.
+    Ctime also detects in-place, same-length writes followed by restoring mtime.
+    A ctime-only difference cannot establish that a change was harmless metadata:
+    invalidate cached digests and refuse a changed observation. A later stable
+    observation can succeed, but must read and charge its bytes again.
     """
     return (
         info.st_dev,
@@ -123,6 +119,7 @@ def descriptor_binding(info: os.stat_result) -> tuple[int, int, int, int, int]:
         info.st_nlink,
         info.st_size,
         info.st_mtime_ns,
+        info.st_ctime_ns,
     )
 
 
