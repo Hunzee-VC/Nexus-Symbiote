@@ -12,7 +12,8 @@ local program or project script started as an MCP server runs, cannot alert. Wit
 argument other than the launcher package, a changed environment or header value, an
 endpoint or package index path changed on the same host, a changed value of a project
 resolver setting such as an `.npmrc` entry, an A2A or RAG URL path changed on the same
-host that keeps its depth, or a value the redaction removes from `.codex/config.toml`,
+host that keeps its depth, changed inline RAG document content at the same count,
+or a value the redaction removes from `.codex/config.toml`,
 `.cursor/cli.json` or the Antigravity, xAI and Copilot settings files, such as a token or
 a URL path in a `notify` command; see [source binding](verification-source-binding.md).
 The [known limitations](known-limitations.md) list those surfaces.
@@ -87,6 +88,15 @@ request with itself, and that gate can never fail.
   jobs receive no secrets, so collect fork baselines without the key or run keyed
   comparisons on trusted branches. See
   [source binding](verification-source-binding.md).
+- **Recollect v1 RAG baselines once.** Under RAG structure profile v2, every RAG
+  source's `static_config_hash` changes once, not only sources with inline
+  documents: the profile name is part of the digested structure, and an absent
+  `documents` key is digested as `{"present": false}` where v1 digested `null`. On
+  an unchanged project, a baseline that 0.2.0 wrote raises a high
+  `properties.static_config_hash changed` alert for every RAG source, and
+  `validate --project` fails reconciliation on every v1 inventory that records a
+  RAG source, until both are recollected. Take a new baseline at the commit the old
+  one was reviewed at; see [RAG sources](verification-source-binding.md#rag-sources).
 - **Paths are root-relative.** Recorded paths are relative to the scan root, so a
   snapshot taken in `/Users/alice/agent` compares with one taken in
   `/home/runner/work/agent/agent`. Without a manifest `id`, the repository agent is

@@ -18,6 +18,8 @@ from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 from nexus_symbiote.scanners.rag import SOURCE_STRUCTURE_PROFILE, RAGScanner
 
 KEY = "rag-binding-key-" + "0123456789abcdef" * 2
+FIXTURES = Path(__file__).parent / "fixtures"
+V1_FIXTURE_SOURCE = {"name": "kb", "documents": ["yes"], "sanitization": True}
 
 
 @pytest.fixture(autouse=True)
@@ -124,22 +126,143 @@ def test_only_a_boolean_true_declares_a_control(tmp_path, value, state):
     assert flagged is (state != "enabled")
 
 
-def test_inline_documents_are_counted_and_digested_never_exported(tmp_path):
+def test_inline_documents_are_counted_but_not_unkeyedly_fingerprinted(tmp_path, monkeypatch):
     canary = "CANARY customer ACME contract terms"
     source = {"name": "kb", "documents": [canary, "second document"], "sanitization": True}
     component = _source(tmp_path / "a", source)
     assert component.document_count == 2
     assert component.source_uris == []
-    assert component.properties["inline_documents_hash"].startswith("sha256:")
+    assert "inline_documents_hash" not in component.properties
     assert canary not in component.model_dump_json()
     edited = _source(tmp_path / "b", {**source, "documents": [canary + "!", "second document"]})
-    assert (
-        edited.properties["inline_documents_hash"] != component.properties["inline_documents_hash"]
-    )
+    assert edited.properties["static_config_hash"] == component.properties["static_config_hash"]
+    assert any("inline document contents" in risk.detail for risk in component.risks)
+
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    keyed = _source(tmp_path / "c", source)
+    changed = _source(tmp_path / "d", {**source, "documents": [canary + "!", "second document"]})
+    assert keyed.properties["static_config_hash"] == changed.properties["static_config_hash"]
+    assert keyed.properties["static_value_binding"] != changed.properties["static_value_binding"]
+    assert not any(risk.category == "completeness" for risk in keyed.risks)
+    assert canary not in keyed.model_dump_json()
+
+
+def test_inline_document_drift_is_bound_only_with_key(tmp_path, monkeypatch):
+    before = {"name": "kb", "documents": ["yes"], "sanitization": True}
+    after = {**before, "documents": ["no"]}
+    unkeyed, keyed = tmp_path / "unkeyed", tmp_path / "keyed"
+    unkeyed.mkdir()
+    keyed.mkdir()
+    assert _scan_and_diff(unkeyed, before, after).exit_code == 0
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    result = _scan_and_diff(keyed, before, after)
+    assert result.exit_code == 1, result.output
+    assert "static_value_binding" in result.output
+
+
+def test_inline_document_count_still_alerts_without_key(tmp_path):
+    before = {"name": "kb", "documents": ["yes"], "sanitization": True}
+    result = _scan_and_diff(tmp_path, before, {**before, "documents": ["yes", "no"]})
+    assert result.exit_code == 1, result.output
+    assert "rag:kb" in result.output
+
+
+def test_v1_rag_inventory_requires_recollection_and_reports_drift(tmp_path):
+    from nexus_symbiote.core.aibom import AIBOM
+    from nexus_symbiote.core.hashing import hash_canonical
+    from nexus_symbiote.diff.differ import AIBOMDiffer
+    from nexus_symbiote.validators.completeness import CompletenessValidator
+
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "rag_config.json").write_text(json.dumps({"sources": [V1_FIXTURE_SOURCE]}))
+    output = tmp_path / "inventory.json"
+    run = CliRunner().invoke(main, ["scan", str(project), "--report-only", "-o", str(output)])
+    assert run.exit_code == 0, run.output
+    current = AIBOM.load(output)
+    # Captured by scanning the same project with commit 4aaf727 (profile v1),
+    # not by constructing or editing a current-format record.
+    legacy = AIBOM.load(FIXTURES / "rag-source-structure-v1.json")
+    rag = next(c for c in legacy.components if c.bom_ref == "rag:kb")
+    assert rag.properties["static_config_hash_profile"] == "nexus-symbiote/rag-source-structure/v1"
+    assert rag.properties["inline_documents_hash"] == hash_canonical({"documents": ["yes"]})
+    diff = AIBOMDiffer().diff(legacy, current)
+    assert any(alert["component"] == "rag:kb" for alert in diff.security_alerts)
+    report = CompletenessValidator().validate_against_project(legacy, project)
+    assert not report.is_complete
+    assert any(issue.surface == "rag:kb" for issue in report.issues)
+    assert CompletenessValidator().validate_against_project(current, project).is_complete
+
+
+def test_v2_rag_structure_digest_matches_its_published_vector(tmp_path):
+    from nexus_symbiote.core.aibom import AIBOM
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    # Known-answer vector for the same source the v1 capture was taken from. A change
+    # to the digested structure needs a new profile version and a new vector, because
+    # every stored baseline would otherwise mismatch.
+    vector = json.loads((FIXTURES / "rag-source-structure-v2.json").read_text())
+    assert vector["profile"] == SOURCE_STRUCTURE_PROFILE
+    assert vector["source"] == V1_FIXTURE_SOURCE
+    digest_input = vector["digest_input"]
+    assert digest_input["profile"] == SOURCE_STRUCTURE_PROFILE
+    assert digest_input["structure"]["documents"] == {"present": True, "count": 1}
+    assert hash_canonical(digest_input) == vector["static_config_hash"]
+    component = _source(tmp_path, vector["source"])
+    assert component.properties["static_config_hash"] == vector["static_config_hash"]
+    assert component.properties["static_config_hash_profile"] == vector["profile"]
+    legacy = AIBOM.load(FIXTURES / "rag-source-structure-v1.json")
+    rag = next(c for c in legacy.components if c.bom_ref == "rag:kb")
+    assert rag.properties["static_config_hash"] != vector["static_config_hash"]
+
+
+def test_absent_documents_are_digested_as_not_present_under_v2(tmp_path):
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    vector = json.loads((FIXTURES / "rag-source-structure-v2.json").read_text())
+    without = {k: v for k, v in vector["source"].items() if k != "documents"}
+    structure = {
+        **vector["digest_input"]["structure"],
+        "fields": sorted(without),
+        "documents": {"present": False},
+    }
+    expected = hash_canonical({"profile": SOURCE_STRUCTURE_PROFILE, "structure": structure})
+    component = _source(tmp_path, without)
+    assert component.document_count is None
+    assert component.properties["static_config_hash"] == expected
+    assert component.properties["static_config_hash"] != vector["static_config_hash"]
+    assert not any(risk.category == "completeness" for risk in component.risks)
+
+
+def test_shared_nested_documents_do_not_leak_contents_into_unkeyed_structure(tmp_path, monkeypatch):
+    before = {
+        "retriever": {"documents": [{"yes": True, "url": "https://yes.example/x"}]},
+        "sources": [{"name": "kb", "sanitization": True}],
+    }
+    after = {
+        "retriever": {"documents": [{"no": False, "url": "https://no.example/x"}]},
+        "sources": [{"name": "kb", "sanitization": True}],
+    }
+    (first,) = _scan_config(tmp_path / "a", before)
+    (second,) = _scan_config(tmp_path / "b", after)
+    assert first.properties["static_config_hash"] == second.properties["static_config_hash"]
+    assert "yes.example" not in first.model_dump_json()
+    assert any(risk.category == "completeness" for risk in first.risks)
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    (keyed,) = _scan_config(tmp_path / "c", before)
+    (changed,) = _scan_config(tmp_path / "d", after)
+    assert keyed.properties["static_value_binding"] != changed.properties["static_value_binding"]
 
 
 @pytest.mark.parametrize("output_format", ["json", "cyclonedx", "spdx", "sarif"])
-def test_document_text_and_connection_strings_never_reach_any_export(tmp_path, output_format):
+@pytest.mark.parametrize("keyed", [False, True])
+def test_document_text_and_connection_strings_never_reach_any_export(
+    tmp_path, output_format, keyed, monkeypatch
+):
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    if keyed:
+        monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
     project = tmp_path / "project"
     project.mkdir()
     (project / "knowledge_base.json").write_text(
@@ -181,7 +304,10 @@ def test_document_text_and_connection_strings_never_reach_any_export(tmp_path, o
         ],
     )
     assert run.exit_code == 0, run.output
-    assert "CANARY" not in output.read_text()
+    exported = output.read_text()
+    assert "CANARY" not in exported
+    assert hash_canonical({"documents": ["CANARY-DOC private text"]}) not in exported
+    assert "inline_documents_hash" not in exported
 
 
 def test_credential_shaped_locators_are_redacted(tmp_path):
