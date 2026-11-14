@@ -24,11 +24,22 @@ a tool whose descriptor declares one of them gets a new fingerprint once, and
 its baseline needs one re-approval. Exported schemas omit literal defaults,
 examples, constants and enumeration values, which can contain credentials. When
 the displayed definition differs, `redacted_definition_hash` binds that view.
-The inventory displays only the name, description, input schema and
-annotations, so a tool that declares `title`, `outputSchema` or `_meta` always
-has a `redacted_definition_hash`, and `validate` reports its fingerprint as
-`unknown` (`descriptor_source_unavailable`) until source evidence corroborates
-it. The source fingerprint is an unkeyed digest of the original, so anyone
+Static MCP configuration inventories display the name, description, input
+schema and annotations; they omit `title`, `outputSchema` and `_meta`, so a
+static tool that declares any of these has a `redacted_definition_hash`.
+Current live observation inventories retain the safe extension values in
+`mcp_title`, `mcp_output_schema` and `mcp_meta`. They have a
+`redacted_definition_hash` only when their displayed descriptor differs from
+the original. `validate` reports either kind as `unknown`
+(`descriptor_source_unavailable`) until source evidence corroborates it.
+Every displayed extension participates in the digest check. A historical
+observation with an extension-free display hash still passes this consistency
+check when its full displayed descriptor matches its original definition
+hash. If redaction prevents that match, recollect it; an extension-free hash
+cannot corroborate displayed extension values. The fingerprint profile and
+digests of unchanged descriptors stay the same.
+
+The source fingerprint is an unkeyed digest of the original, so anyone
 holding the BOM who knows the rest of a descriptor can confirm a guess of an
 omitted low-entropy literal or of scrubbed text; keep credentials out of tool
 descriptors and treat exported BOMs as sensitive. For a static MCP

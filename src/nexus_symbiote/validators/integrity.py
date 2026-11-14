@@ -541,23 +541,16 @@ class IntegrityValidator:
                 comp.annotations,
                 **extensions,
             )
-            # Pre-0.2.0 observation inventories stored the display hash without
-            # title/outputSchema/_meta while the fingerprint already bound them,
-            # so a legacy BOM's redacted hash is the extension-free digest and
-            # its definition hash is the extended one. Accept either
-            # computation against either stored digest; a descriptor that
-            # matches neither is still a mismatch.
-            legacy_recomputed = hash_tool_definition(
-                comp.name,
-                comp.description_text,
-                comp.input_schema,
-                comp.annotations,
-            )
+            # Every displayed extension must be bound by the matching digest.
+            # Historical observation inventories may have an extension-free
+            # redacted hash, but their full descriptor must still match the
+            # original hash. Omitting extensions here would let changed metadata
+            # pass by matching only the unchanged base fields.
             raw_hash = f"{algorithm}:{expected}"
             accepted = {raw_hash}
             if comp.redacted_definition_hash is not None:
                 accepted.add(comp.redacted_definition_hash)
-            if recomputed not in accepted and legacy_recomputed not in accepted:
+            if recomputed not in accepted:
                 raise ValueError("Tool definition differs from its declared digest")
             if comp.bom_ref in local_tools:
                 local = local_tools[comp.bom_ref]
