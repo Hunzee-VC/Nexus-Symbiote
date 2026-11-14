@@ -334,7 +334,11 @@ flag.
 checks evidence in this order and stops at the first failure. Every denial raises
 `AuthorizationError`, whose `reason` is a code from the table below. Exceptions
 raised by the integrator's adapters (`authenticate`, `describe`, `resolve_scope`,
-`execute`) propagate unchanged; treat every exception from `invoke` as a denial.
+`execute`) propagate unchanged. Exceptions before admission prevent execution;
+`execute` runs after admission commits, so its exception does not undo admission
+or restore the nonce. The external operation may already have taken effect.
+Reconcile the admission record and downstream outcome before retrying; use
+downstream idempotency where available instead of treating every exception as denial.
 
 1. Copy the call and check its arguments against the budget and the I-JSON
    domain (`arguments-too-large`, `arguments-number-out-of-range`,

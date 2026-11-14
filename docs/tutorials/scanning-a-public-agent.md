@@ -55,7 +55,7 @@ type, its dependencies and its findings by severity. The inventory itself
 records per-collector status, failures and excluded paths:
 
 ```bash
-jq '.metadata.completeness | {scanner_status, scan_failures, exclusions}' public.aibom.json
+jq '.metadata.completeness | {scanner_status, scan_failures, exclusions, surfaces_excluded}' public.aibom.json
 ```
 
 A completed search can report zero matches for a collector; that is coverage
