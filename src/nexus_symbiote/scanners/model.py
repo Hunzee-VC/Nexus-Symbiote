@@ -168,6 +168,8 @@ _UNSAFE_SUFFIXES = {
 }
 # Archive and compression suffixes do not change what a pickle loader unpickles.
 _PICKLE_WRAPPERS = {".tar", ".gz", ".bz2", ".xz", ".lzma", ".zst"}
+_PICKLE_MEMBER_SUFFIXES = tuple(suffix.encode("ascii") for suffix in sorted(_UNSAFE_SUFFIXES))
+_PICKLE_MEMBER_WRAPPERS = tuple(suffix.encode("ascii") for suffix in sorted(_PICKLE_WRAPPERS))
 _TEXT_PICKLE_START = frozenset(b"(cNILFSV}])KJMUTX")
 _INDEX = re.compile(r"(?P<base>.+?)\.index(?:\.[A-Za-z0-9_-]+)?\.json", re.IGNORECASE)
 # transformers reads ``repository--module.Class``; a repository need not name an owner.
@@ -272,13 +274,29 @@ def _numpy_object_header(blob: bytes) -> bool:
 
 
 def _zip_pickle_member(blob: bytes) -> bool:
-    """True when a ZIP local header's first member name ends in ``.pkl``."""
+    """Recognize pickle members using only the candidate's bounded prefix."""
     if not blob.startswith(b"PK\x03\x04") or len(blob) < 30:
         return False
-    name_len = int.from_bytes(blob[26:28], "little")
-    if name_len <= 0 or name_len > 4096 or 30 + name_len > len(blob):
-        return False
-    return blob[30 : 30 + name_len].lower().endswith(b".pkl")
+    listed = _zip_lists_pickle(io.BytesIO(blob), 0, len(blob))
+    if listed is not None:
+        return listed
+    position = 0
+    for _ in range(4096):
+        if position + 30 > len(blob) or blob[position : position + 4] != b"PK\x03\x04":
+            break
+        flags = _little(blob, position + 6, 2)
+        compressed = _little(blob, position + 18, 4)
+        name_length = _little(blob, position + 26, 2)
+        extra_length = _little(blob, position + 28, 2)
+        name_at = position + 30
+        if not 0 < name_length <= 4096 or name_at + name_length > len(blob):
+            break
+        if _pickle_member(blob[name_at : name_at + name_length]):
+            return True
+        if flags & 0x08:
+            break
+        position = name_at + name_length + extra_length + compressed
+    return False
 
 
 def _prefix_is_pickle(blob: bytes) -> bool:
@@ -300,7 +318,7 @@ def sniffed_payload(blob: bytes) -> str | None:
     if _numpy_object_header(blob):
         return "NumPy object-dtype array; np.load(allow_pickle=True) unpickles it"
     if _zip_pickle_member(blob):
-        return "ZIP archive whose first member is a pickle; torch.load unpickles it"
+        return ZIP_PICKLE_MEMBER
     if _prefix_is_pickle(blob):
         return "Recognized pickle opcode stream; object loading can execute code"
     return None
@@ -363,7 +381,13 @@ def _recognized_pickle(stream: BinaryIO, prefix: bytes, size: int) -> str | None
 
 
 def _pickle_member(name: bytes) -> bool:
-    return name.lower().endswith(b".pkl")
+    base = name.rsplit(b"/", 1)[-1].rsplit(b"\\", 1)[-1].lower()
+    if base.endswith(_PICKLE_MEMBER_SUFFIXES):
+        return True
+    return any(
+        base.endswith(wrapper) and base[: -len(wrapper)].endswith(_PICKLE_MEMBER_SUFFIXES)
+        for wrapper in _PICKLE_MEMBER_WRAPPERS
+    )
 
 
 def _little(data: bytes, offset: int, width: int) -> int:

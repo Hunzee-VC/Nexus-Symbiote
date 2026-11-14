@@ -387,17 +387,23 @@ A way around a limit that its entry does not describe is worth a
   finding, which the default gate does not fail on by severity alone.
 - **Some files are not inventoried.** A pickle whose header is not a recognized
   opcode stream, a numeric NumPy `.npy` or `.npz` array, and `.pb` files other than
-  `saved_model.pb` produce no component. A pickle opcode stream, a ZIP whose first
-  member is a `.pkl`, or an object-dtype NumPy array is inventoried wherever it is
+  `saved_model.pb` produce no component. A pickle opcode stream, a ZIP with a
+  pickle-family member name in a local header or central directory contained in
+  the first 64 KiB, or an object-dtype NumPy array is inventoried wherever it is
   named `.npy`, `.npz` or `.dat`, and under a directory named `model`, `models`,
   `weights`, `checkpoint` or `checkpoints` whatever its name is. Object-dtype arrays
   are rated `unsafe-code-execution` because `np.load(allow_pickle=True)` unpickles
-  them.
+  them. A candidate with an unknown suffix is not inventoried when the identifying
+  member header and directory are both beyond that prefix; discovery does not
+  stream the entire candidate just to locate a ZIP directory.
 - **Pickle recognition under another suffix is bounded.** A binary pickle is
   recognized by its PROTO opcode and 16 well-formed opcodes in the first 64 KiB, a
   text-protocol pickle by a consistent stream of at most 4,096 opcodes, and a ZIP
-  archive by a `.pkl` member in its first local header or in a central directory of
-  at most 1 MiB, read from the end of the archive. A pickle hidden otherwise under
+  archive under a known model name by a pickle-family member (`.pkl`, `.pickle`,
+  `.pt`, the other listed suffixes, or one wrapped by `.gz`, `.tar` and the other
+  supported compression suffixes) in its first local header or in a central
+  directory of at most 1 MiB, read from the end of the archive, including ZIP64.
+  A pickle hidden otherwise under
   `.onnx`, `.gguf` or another suffix is rated `unknown`, a high finding, and
   `validate --project` still refuses it as unverified.
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat

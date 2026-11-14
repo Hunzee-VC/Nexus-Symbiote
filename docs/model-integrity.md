@@ -25,7 +25,7 @@ The serialization rating is:
 
 | Rating | When |
 | --- | --- |
-| `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or content recognized as a binary or text-protocol pickle, or a ZIP archive with a `.pkl` member (as `torch.save` writes `data.pkl`), under any other model suffix. A binary pickle is recognized by its PROTO opcode and at least 16 well-formed opcodes in its first 64 KiB, whatever follows them; a text-protocol one by a consistent opcode stream of at most 4,096 opcodes; a ZIP member by the archive's first local header or by its central directory, read from the end of the archive up to 1 MiB |
+| `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or content recognized as a binary or text-protocol pickle, or a ZIP archive with a pickle-family member (`.pkl`, `.pickle`, the other listed suffixes or a compression-wrapped name such as `.pkl.gz`), under any other model suffix. A binary pickle is recognized by its PROTO opcode and at least 16 well-formed opcodes in its first 64 KiB, whatever follows them; a text-protocol one by a consistent opcode stream of at most 4,096 opcodes; a ZIP member by the archive's first local header or by its central directory, read from the end of the archive up to 1 MiB, including ZIP64 |
 | `safe` | A SafeTensors file whose header is UTF-8 JSON with string metadata, known dtypes and tensor spans that index the whole data region, with no configured chat template matching the access-pattern heuristic. The rating is not a guarantee that the template is safe; `validate` compares templates only through its completeness check |
 | `unsafe-template-injection` | A GGUF file whose embedded chat template matches the access-pattern heuristic, or a SafeTensors file that would be `safe` in a directory whose Hugging Face chat template matches it. A match does not establish that the renderer executes the pattern or that its sandbox is bypassed |
 | `unknown` | Everything else, including ONNX, GGUF, Keras, HDF5, SavedModel, TFLite, Core ML and ExecuTorch files, and a SafeTensors header over the 1 MiB inspection limit |
@@ -264,8 +264,12 @@ approved, not that the model is benign. Formats rated `unknown` have no
 structural validator: Keras Lambda layers, SavedModel operations and custom
 TensorRT or TFLite operators are not inspected. A pickle under a name other than
 those listed above, or an object-dtype NumPy `.npy` or `.npz` array, is inventoried only
-when its content is recognized in the first 64 KiB of a candidate file; a numeric
-NumPy array and a pickle whose content is not recognized are not. SafeTensors
+when its content is recognized in the first 64 KiB of a candidate file. For ZIP
+candidates, a local member header or the central directory must fit within that
+prefix; a later member name is not discovered by reading the file's tail. Files
+already recognized by a model name use a separate streaming ZIP inspection that
+retains a central directory of at most 1 MiB, including ZIP64. A numeric NumPy
+array and a candidate whose content is not recognized are not inventoried. SafeTensors
 tensor bytes are hashed but not inspected, so a payload that also parses as
 another format is not flagged. The chat template check is a heuristic, not template
 analysis: a name assembled through variables, formatting, filters, nested expressions
