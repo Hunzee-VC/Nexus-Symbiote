@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 
@@ -480,6 +481,7 @@ def test_save_replaces_a_link_instead_of_writing_through_it(tmp_path, generator)
     target = tmp_path / "export.json"
     target.symlink_to(victim)
     bom = _sample_aibom()
+    bom.metadata.timestamp = datetime(2026, 1, 1, tzinfo=UTC)
     generator().save(bom, target)
     assert victim.read_text() == "keep"
     assert not target.is_symlink()
