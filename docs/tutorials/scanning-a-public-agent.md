@@ -154,6 +154,7 @@ jobs:
           validate: 'true'
           risk-check: 'true'
           risk-threshold: '50'
+          fail-on-severity: 'high'
           sarif-upload: 'false'
 ```
 
