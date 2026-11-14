@@ -1025,6 +1025,52 @@ def test_an_overlong_property_name_is_clipped_in_the_alert():
 
 
 @pytest.mark.parametrize(
+    ("update", "detail"),
+    [
+        ({"version": "1." + "9" * 100_000}, "Version changed: 1.0 → 1.9"),
+        ({"hashes": {"sha256": "sha256:" + "a" * 64, "k" * 100_000: "b"}}, "File hash (kkk"),
+    ],
+)
+def test_an_overlong_value_is_clipped_in_the_change(update, detail):
+    old = ModelComponent(
+        bom_ref="m", name="m", version="1.0", hashes={"sha256": "sha256:" + "a" * 64}
+    )
+    (change,) = (
+        AIBOMDiffer()
+        .diff(AIBOM(components=[old]), AIBOM(components=[old.model_copy(update=update)]))
+        .components_modified
+    )
+    assert [d.startswith(detail) and len(d) < 500 for d in change.details] == [True]
+
+
+def test_an_overlong_report_location_is_clipped_in_the_note():
+    old = CompletenessClaim(scope="shadowscan-imported", source_report_path="a.json")
+    new = old.model_copy(update={"source_report_path": "d/" * 100_000 + "a.json"})
+    (change,) = _compare(old, new).metadata_changes
+    assert change["field"] == "completeness.source_report_path" and len(change["detail"]) < 500
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "severity", "detail"),
+    [
+        (None, "sha256:" + "a" * 64, "info", "File hash (sha256) became available."),
+        ("sha256:" + "a" * 64, "sha256:" + "b" * 64, "high", "File hash (sha256) changed."),
+        ("sha256:" + "a" * 64, None, "high", "File hash (sha256) removed — integrity is unknown."),
+    ],
+)
+def test_a_file_hash_change_says_whether_it_was_added_changed_or_removed(
+    before, after, severity, detail
+):
+    def model(digest):
+        return ModelComponent(bom_ref="m", name="m", hashes={"sha256": digest} if digest else {})
+
+    (change,) = (
+        AIBOMDiffer().diff(AIBOM(components=[model(before)]), AIBOM(components=[model(after)]))
+    ).components_modified
+    assert (change.severity, change.details) == (severity, [detail])
+
+
+@pytest.mark.parametrize(
     ("before", "after", "severity"),
     [
         ("partially-verified", "signature-not-found", "high"),
