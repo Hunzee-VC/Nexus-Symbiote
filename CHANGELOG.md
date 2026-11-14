@@ -6,6 +6,8 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- Release-tag creation is restricted to repository administrators in a separate creation-only ruleset. The independent update/deletion ruleset has no bypass, so release creators cannot move or delete a tag. Combining creation with the no-bypass rule would prevent every legitimate release tag; the publication preflight now rejects that deadlock.
+- The wheel smoke installs in CI and the release compatibility job resolve dependencies with `--only-binary=:all:`, so a poisoned source distribution of a dependency cannot run a build hook there. The platform smoke and the randomized property-test jobs run with `--strict-skips`, so a missing optional dependency fails them instead of skipping their Sigstore cases.
 - **Breaking (GitHub Action):** `fail-on-severity` defaults to `high`. A finding at or above that severity fails the Action even when the aggregate score stays under `risk-threshold`. The previous Action behavior failed on severity only for critical findings, so a pull request that granted `bypassPermissions` and `Bash(*)`, added an automatic hook and launched unpinned `npx -y` servers could pass every default gate with a score under 50. Set `fail-on-severity: critical` to keep that behavior. `none` disables the severity check and is printed as a warning. The CLI and the built-in project policy still default to `critical`. The aggregate score is the uncapped sum of finding weights; `risk --json-output` records `gate.score_scale` as `unbounded-sum`, and a score equal to `fail_threshold` is reported as at or above the threshold.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
@@ -22,6 +24,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Fixed
 
+- The test and dependency-floor CI jobs get a 16-minute suite budget inside a 20-minute job, up from 12 inside 15. The suite takes 7 to 12 minutes on hosted runners, and the push run of `main` at `4aaf727` was killed by the old budget two seconds short of finishing on Python 3.12 (exit 124), which left `Verified CI` red on a commit that passed everywhere else and blocked the release preflight.
 - TypeScript collection records SDK uses hidden by `eval` wrappers, URL queries and fragments, and method names, and records nothing from ambient declarations. Python collection judges a helper only when a call must reach its definition, reads git revisions where pip and uv read them, and counts module literals behind `*` and `**`.
 - Claude settings with an invalid `permissions` value keep their other declarations, and keys the redaction makes equal keep every value in the drift digest.
 - Lockfile collection binds pnpm and Yarn records only to what they resolve and checks Python lock versions against every declaration; a private Python index is named in the package URL.
