@@ -16,9 +16,18 @@ It does not intercept other network requests, sandbox a process, or establish
 that an unchanged tool backend is benign. Restrict bypass paths through the
 surrounding runtime, credentials, sandbox and network policy.
 
-Every denial raises `AuthorizationError` with a stable `reason` code. Exceptions
-raised by the operator's adapters propagate unchanged, so treat every exception
-from `invoke` as a denial.
+Every authorization denial raises `AuthorizationError` with a stable `reason`
+code. Exceptions raised by the operator's adapters propagate unchanged. Before
+admission, a failure prevents the gateway from calling `execute`. After admission,
+`execute` can perform an external action and then raise, for example when its response times out. That
+is an admitted attempt with an unknown execution outcome; the exception does not
+prove denial or the absence of side effects, even if its type is
+`AuthorizationError`. An `admitted` decision records authorization, not execution
+success. Record the executor's outcome separately and reconcile it before
+retrying, using executor-supported idempotency where available. The approval
+nonce remains consumed; obtaining a fresh approval alone does not make a retry
+safe. The [worked example](runtime-contract-reference.md#worked-example) shows
+this distinction with a synthetic side effect.
 
 `invoke_pinned_stdio` starts the pinned launcher and completes the MCP `initialize`
 handshake before the gateway checks the trust status, snapshot and approval, because

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
-from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.aibom import AIBOM, NativeFormatError, parse_native_bytes
 
 CANARY = "\x1b]8;;https://attacker.example\x07canary-input\x1b]8;;\x07"
 
@@ -15,7 +17,11 @@ CANARY = "\x1b]8;;https://attacker.example\x07canary-input\x1b]8;;\x07"
 def malformed(request, tmp_path):
     path = tmp_path / "bom.json"
     if request.param == "schema":
-        path.write_text('{"metadata": "' + CANARY.encode("unicode_escape").decode() + '"}')
+        path.write_text(json.dumps({"metadata": CANARY}))
+        parsed = parse_native_bytes(path.read_bytes())
+        assert parsed["metadata"] == CANARY
+        with pytest.raises(NativeFormatError, match="native AgentBOM schema"):
+            AIBOM.from_native(parsed)
     elif request.param == "truncated":
         path.write_text('{"metadata": {"spec_version": ')
     elif request.param == "not-utf8":
