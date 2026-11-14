@@ -318,8 +318,8 @@ version 2 entry (`"kind": "sigstore-message-signature"`) with `expected_sha256`
 set to the report's SHA-256: the check then also fails for other report bytes,
 however they are signed. The report needs such a signature entry: a
 `digest-pin` entry for it, or an entry for a report location the collector does
-not read (it reads the first of `.shadowscan/report.json`,
-`shadowscan-report.json` and `shadowscan.json` that exists), is reported as an
+not read (it considers `.shadowscan/report.json`, `shadowscan-report.json` and
+`shadowscan.json`, and rejects multiple distinct reports), is reported as an
 unused policy entry by `scan` and `validate --project`
 ([model integrity](model-integrity.md#operator-signature-policy)).
 

@@ -14,15 +14,12 @@ For a target you did not author, see the tutorial on
 it walks through the same inventory against a real open-source repository
 pinned to a reviewed revision.
 
-Run it from a repository checkout (the wheel does not include the examples),
-installed with the hash-locked runtime as described in
-[install from reviewed source](../README.md#install-from-reviewed-source):
+First complete [install from reviewed source](../README.md#install-from-reviewed-source),
+including the reviewed commit and HEAD check. The wheel does not include the
+examples. After that block succeeds, enter that checkout and activate its environment:
 
 ```bash
-git clone https://github.com/Hunzee-VC/Nexus-Symbiote && cd Nexus-Symbiote
-python3 -m venv .venv && . .venv/bin/activate
-python -m pip install --require-hashes --only-binary=:all: -r requirements-action.lock
-python -m pip install --no-deps --no-build-isolation .
+cd Nexus-Symbiote && . .venv/bin/activate
 ```
 
 ### 1. Inventory the project

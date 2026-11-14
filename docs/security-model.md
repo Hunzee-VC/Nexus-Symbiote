@@ -23,7 +23,7 @@ Collectors must preserve coverage limitations, denied reads, unsupported inputs,
 2. **Offline by default, enforced at run time.** Every command runs under a tripwire that makes this package and its dependencies fail closed on name resolution, network connections and process creation unless you opt into live mode for one of three commands. It is not a sandbox; add an operating-system network boundary where one is required.
 3. **Unknown is not safe.** Failed reads, skipped collectors and the unsupported declarations a collector recognizes are recorded as gaps, and default gates fail on them instead of passing silently. Surfaces the collectors do not support are not recorded at all; the [known limitations](known-limitations.md) list them.
 4. **Claims are not evidence.** Declared, observed, approved and mediated states stay separate. A supplier label or an adjacent signature file never upgrades trust by itself, and `--no-project-policy` stops an untrusted checkout from choosing its own gates.
-5. **Standards first.** One native inventory exports to CycloneDX 1.7, SPDX 3.0.1, SARIF 2.1.0 and VEX. Standard exports carry the full native inventory in a digest-bound extension, so a consumer that keeps it loses nothing.
+5. **Standards first.** One native inventory exports to CycloneDX 1.7, SPDX 3.0.1, SARIF 2.1.0 and VEX. CycloneDX and SPDX carry the full native inventory in a digest-bound extension; retain it to recover native semantics. SARIF and VEX project findings and do not carry the full inventory.
 
 When a supplier gives you an inventory and you have the corresponding checkout,
 use both commands against the same project root.
