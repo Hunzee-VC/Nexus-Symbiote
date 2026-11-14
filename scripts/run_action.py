@@ -42,6 +42,19 @@ THRESHOLD = re.compile(r"(?:0|[1-9][0-9]{0,2})(?:\.[0-9]{1,4})?")
 MAX_BASELINE_BYTES = 16 * 1024 * 1024
 MAX_LIMITS_LENGTH = 1024
 LIMITS_ENV = "NEXUS_SYMBIOTE_LIMITS"
+WITHHELD_ENV = (
+    "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT",
+    "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256",
+    "NEXUS_SYMBIOTE_MODE",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_URL",
+    "ACTIONS_RUNTIME_TOKEN",
+    "ACTIONS_RUNTIME_URL",
+    "ACTIONS_RESULTS_URL",
+    "ACTIONS_CACHE_URL",
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+)
 RELAY_PREFIX = "| "
 
 
@@ -266,6 +279,14 @@ def _run(args: list[str], *, private: Path, limits: str = "") -> subprocess.Comp
     }
     # Collection limits come only from the limits input, never from the job environment.
     env.pop(LIMITS_ENV, None)
+    # The trust root is the one in the Action's hash-locked sigstore package, whatever
+    # the job sets. These commands run offline whatever NEXUS_SYMBIOTE_MODE says; a
+    # job-level value could only fail them. Remove these named runner and OIDC credential
+    # variables from children; other variables, including custom secrets and the
+    # source-binding key, can remain, and a child running as the same user can still
+    # read this process's environment. This filtering is not a process sandbox.
+    for name in WITHHELD_ENV:
+        env.pop(name, None)
     if limits:
         env[LIMITS_ENV] = limits
     # The executable is this interpreter; arguments never pass through a shell.
