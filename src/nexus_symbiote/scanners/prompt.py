@@ -13,7 +13,12 @@ from pathlib import Path, PurePosixPath
 from nexus_symbiote import limits
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import hash_bytes
-from nexus_symbiote.core.models import PromptComponent, RiskAssessment, SkillPackageComponent
+from nexus_symbiote.core.models import (
+    UNBOUND_VALUES_DETAIL,
+    PromptComponent,
+    RiskAssessment,
+    SkillPackageComponent,
+)
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 from nexus_symbiote.scanners.source_binding import BindingError, value_binding
@@ -1052,8 +1057,8 @@ class PromptScanner(Scanner):
                 severity=RiskSeverity.LOW,
                 category="completeness",
                 detail=(
-                    f"Imported file '{neutralize(target)}' is not bound in this inventory: "
-                    "its content is not an instruction file and carries no unkeyed digest."
+                    f"Imported file '{neutralize(target)}' {UNBOUND_VALUES_DETAIL}: its "
+                    "content, which is not an instruction file and carries no unkeyed digest."
                 ),
                 recommendation=(
                     f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes to "
