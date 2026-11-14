@@ -6,6 +6,8 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- The committed release-tag ruleset also blocks tag creation, so that a pre-created `v*` tag cannot squat the next release's name; the publication preflight already requires the ruleset to block updates and deletions.
+- The wheel smoke installs in CI and the release compatibility job resolve dependencies with `--only-binary=:all:`, so a poisoned source distribution of a dependency cannot run a build hook there. The platform smoke and the randomized property-test jobs run with `--strict-skips`, so a missing optional dependency fails them instead of skipping their Sigstore cases.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
 - The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.

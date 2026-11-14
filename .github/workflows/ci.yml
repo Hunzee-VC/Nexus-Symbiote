@@ -175,7 +175,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m venv "$RUNNER_TEMP/wheel-smoke"
-          "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip install dist/*.whl
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip install --only-binary=:all: dist/*.whl
           "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip check
           "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip freeze --all
           "$RUNNER_TEMP/wheel-smoke/bin/python" -I scripts/check_installed_wheel.py --source .

@@ -319,6 +319,11 @@ A way around a limit that its entry does not describe is worth a
 - **Tool digests are unkeyed.** A tool's `definition_hash` covers the declared
   descriptor, including text the exported descriptor omits, so anyone holding the
   inventory can confirm a guess of a low-entropy value withheld there.
+- **Loopback endpoints raise no finding.** An MCP server declared with a `url` on
+  `localhost` or a loopback address over plain `http`, and no `command`, is recorded
+  without a transport or local-program finding: the endpoint is treated as secure
+  because it does not leave the host, and nothing records which process serves it.
+  Review such servers by other means.
 
 ## Models
 
