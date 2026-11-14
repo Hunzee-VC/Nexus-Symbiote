@@ -196,9 +196,12 @@ contains the change and a regression test that failed before it.
   .shadowscan/report.json`, no failures; the same two reports in a real directory were
   refused. The documentation's claim that "a file committed under another name cannot
   silently replace the report a pipeline generated" did not hold.
-- Fix: a report that only a link reaches is a recorded failure, "ShadowScan report is
-  reached through a symbolic link; not imported", and nothing is imported while one
-  exists. `tests/test_shadowscan_symlinked_report.py` fails on the old code.
+- Fix: a report reached through a symbolic link in a parent directory, such as a linked
+  `.shadowscan` directory, is a recorded failure, "ShadowScan report is reached through
+  a symbolic link; not imported", and nothing is imported while one exists. A leaf link
+  such as `.shadowscan/report.json -> ../vendor/report.json` is still read when it meets
+  the ordinary confinement rules, as before. `tests/test_shadowscan_symlinked_report.py`
+  fails on the old code.
 - Verify: `python -m pytest tests/test_shadowscan_symlinked_report.py tests/test_shadowscan_report_selection.py`.
 - Maps to: CWE-59, CWE-345; OWASP LLM03; MITRE ATLAS AML.T0010.
 
@@ -216,8 +219,10 @@ contains the change and a regression test that failed before it.
 - Evidence: reproduced: `_broad_grants(["Bash(sh:*)"]) == []` before the fix;
   `Bash(*)` gave `["shell commands"]`.
 - Fix: a Bash rule whose command word is a shell, an interpreter or a launcher and that
-  ends in a wildcard is an unscoped shell grant. The heuristic and its limit (a program
-  such as `npm run` that runs project code stays scoped) are documented in the
+  contains a wildcard is conservatively reported as an unscoped shell grant; a fixed
+  script with wildcard arguments, such as `Bash(python3 scripts/report.py:*)`, also
+  matches. The heuristic and its limits (that over-match, and a program such as
+  `npm run` that runs project code staying scoped) are documented in the
   [known limitations](../known-limitations.md#instructions-and-ide-settings).
   `tests/test_ide_interpreter_prefix_grants.py` fails on the old code.
 - Verify: `python -m pytest tests/test_ide_interpreter_prefix_grants.py tests/test_ide_permission_semantics.py`.
