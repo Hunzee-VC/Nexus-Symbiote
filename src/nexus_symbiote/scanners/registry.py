@@ -11,7 +11,6 @@ import binascii
 import fnmatch
 import re
 import shlex
-import tomllib
 import unicodedata
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
@@ -45,6 +44,8 @@ from nexus_symbiote.scanners.mcp_launch import expands
 from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.secrets import redact_text, redact_url
 from nexus_symbiote.utils.terminal import UNSAFE_TEXT
+from nexus_symbiote.utils.toml import TOMLBoundsError
+from nexus_symbiote.utils.toml import loads as load_toml
 
 # The registry collector inventories only the packages these name, on PyPI and npm
 # alike; docs/registry-collector.md lists them. A name is compared in its normal
@@ -395,50 +396,10 @@ _LONGEST_OPTIONS = 16 * 1024
 # a key's parts and with the file's size. Real files are tens of kilobytes and
 # their keys have a handful of parts.
 _PYPROJECT_BUDGET = 256 * 1024
-_LONGEST_DOTTED_KEY = 16
 # A pnpm lockfile holds about 40 YAML tokens per package, so a lockfile at the 4 MiB
 # read limit is about 650,000. The bound refuses denser input before it is parsed.
 _MAX_PNPM_LOCK_TOKENS = 1_000_000
 _PNPM_NAME_END = re.compile("[@/]")
-
-
-_TOML_SPECIAL = re.compile(r"""[#"'.=,{}\[\]\n]""")
-_TOML_STOPS = {
-    ('"', False): re.compile(r'["\\\n]'),
-    ("'", False): re.compile(r"['\n]"),
-    ('"', True): re.compile(r'["\\]'),
-    ("'", True): re.compile(r"'"),
-}
-
-
-def _toml_string_end(text: str, position: int, quote_char: str) -> int:
-    """Where a TOML string that opened just before position ends.
-
-    A basic string skips the character after a backslash. A multi-line string ends
-    at the last three quotes of the first run of three or more, since up to two
-    may end its content; a single-line one also ends at a line break.
-    """
-    multiline = text.startswith(quote_char * 2, position)
-    if multiline:
-        position += 2
-    stops = _TOML_STOPS[quote_char, multiline]
-    while True:
-        found = stops.search(text, position)
-        if found is None:
-            return len(text)
-        if found.group() == "\\":
-            position = found.end() + 1
-            continue
-        if found.group() == "\n":
-            return found.start()
-        if not multiline:
-            return found.end()
-        run = found.end()
-        while run < len(text) and text[run] == quote_char:
-            run += 1
-        if run - found.start() >= 3:
-            return run
-        position = run
 
 
 def _parsed(text: str) -> Version | None:
@@ -2705,11 +2666,7 @@ class RegistryScanner(Scanner):
         lock_name, method, lock_bytes = found_locks[0]
         try:
             text = lock_bytes.decode("utf-8")
-            if self._longest_dotted_key(text) > _LONGEST_DOTTED_KEY:
-                # As for pyproject.toml: tomllib's cost grows with the square of a
-                # dotted key's parts, and lockfile keys have one or two.
-                raise ValueError("dotted key exceeds the length limit")
-            lock_doc = tomllib.loads(text)
+            lock_doc = load_toml(text)
             packages = lock_doc.get("package", [])
             if (
                 not isinstance(packages, list)
@@ -2953,31 +2910,6 @@ class RegistryScanner(Scanner):
                         noted.add(message)
                         result.surfaces_excluded.append(message)
 
-    @staticmethod
-    def _longest_dotted_key(text: str) -> int:
-        """The most dots between two TOML structure characters outside strings and
-        comments, in one linear pass: a dotted key or table name has that many.
-
-        A string is skipped without ending the count, since a quoted part such as
-        "" or 'a' is still one part of a dotted key.
-        """
-        longest = dots = 0
-        position = 0
-        while True:
-            found = _TOML_SPECIAL.search(text, position)
-            if found is None:
-                return max(longest, dots)
-            char, position = found.group(), found.end()
-            if char == ".":
-                dots += 1
-            elif char in "\"'":
-                position = _toml_string_end(text, position, char)
-            else:
-                longest, dots = max(longest, dots), 0
-                if char == "#":
-                    newline = text.find("\n", position)
-                    position = len(text) if newline < 0 else newline
-
     def _toml(self, name: str, result: ScanResult) -> dict[str, Any] | None:
         """A root TOML file read within the bounds that keep tomllib's work linear."""
         content = self._read(name, result)
@@ -2986,11 +2918,11 @@ class RegistryScanner(Scanner):
         if len(content) > _PYPROJECT_BUDGET:
             result.scan_failures.append(f"{name}: exceeds the size limit: not read")
             return None
-        if self._longest_dotted_key(content) > _LONGEST_DOTTED_KEY:
+        try:
+            return load_toml(content)
+        except TOMLBoundsError:
             result.scan_failures.append(f"{name}: dotted key exceeds the length limit: not read")
             return None
-        try:
-            return tomllib.loads(content)
         except (ValueError, RecursionError, MemoryError):
             # TOMLDecodeError is a ValueError; tomllib raises a plain one for a decimal
             # integer past CPython's limit on digits it converts.

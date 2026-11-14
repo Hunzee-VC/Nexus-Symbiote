@@ -19,7 +19,6 @@ import json
 import os
 import posixpath
 import re
-import tomllib
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -76,6 +75,7 @@ from nexus_symbiote.utils.secrets import (
     secret_values,
 )
 from nexus_symbiote.utils.terminal import neutralize
+from nexus_symbiote.utils.toml import loads as load_toml
 
 
 @dataclass(frozen=True)
@@ -1159,8 +1159,8 @@ class _Resolvers:
         if text is None:
             return {}
         try:
-            return tomllib.loads(text)
-        except (tomllib.TOMLDecodeError, RecursionError):
+            return load_toml(text)
+        except (ValueError, RecursionError, MemoryError):
             self._result.scan_failures.append(f"{path}: invalid TOML")
             return {}
 
@@ -1499,8 +1499,8 @@ class MCPScanner(Scanner):
         if text is None:
             return None
         try:
-            return tomllib.loads(text) if dialect.syntax == "toml" else _load_jsonc(text)
-        except (ValueError, RecursionError):
+            return load_toml(text) if dialect.syntax == "toml" else _load_jsonc(text)
+        except (ValueError, RecursionError, MemoryError):
             syntax = "TOML" if dialect.syntax == "toml" else "JSON or duplicate keys"
             result.scan_failures.append(f"{dialect.path}: invalid {syntax}")
             return None
