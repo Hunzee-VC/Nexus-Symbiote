@@ -340,6 +340,7 @@ def _index_origin(value: object) -> str | None:
         return None
     netloc = parts.netloc.rpartition("@")[2]
     host = netloc.rsplit(":", 1)[0] if port is not None else netloc
+    host = host.lower()
     if "%" in netloc or not _INDEX_HOST.fullmatch(host):
         return None
     return f"{parts.scheme}://{host}" + (f":{port}" if port is not None else "")
@@ -2750,18 +2751,21 @@ class RegistryScanner(Scanner):
                 # A source the collector cannot read as one index origin is not PyPI:
                 # a directory of wheels, an upper-case scheme or an authority that URL
                 # parsers split differently names somewhere else.
-                registry_origin = _index_origin(
+                index_origin = _index_origin(
                     source.get("registry") if method == "uv-lockfile" else source.get("url")
                 )
-                if registry_origin is None:
+                if index_origin is None:
                     comp.package_url = comp.registry_uri = None
                     result.surfaces_excluded.append(
                         f"{lock_name}: package index of the selected record is not a plain "
                         "http(s) URL; its origin is unverified"
                     )
                     continue
-                https = registry_origin.startswith("https://")
-                registry_origin = registry_origin.removesuffix(":443") if https else registry_origin
+                registry_origin = (
+                    index_origin.removesuffix(":443")
+                    if index_origin.startswith("https://")
+                    else index_origin
+                )
             locator = f"{lock_name}#/package/{index}"
             comp.version = resolved_version
             comp.package_url = (
