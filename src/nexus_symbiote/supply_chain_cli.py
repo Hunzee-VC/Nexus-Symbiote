@@ -264,6 +264,15 @@ def register_supply_chain_commands(main: click.Group) -> None:
         help="Use built-in policy without reading configuration from the target, as scan does.",
     )
     @click.option(
+        "--accept-project-policy",
+        is_flag=True,
+        help=(
+            "In CI, accept a project policy that weakens the built-in gates explicitly for "
+            "collection, as scan does; the staged inventory is still re-gated by the built-in "
+            "policy."
+        ),
+    )
+    @click.option(
         "--signature-policy",
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
         help="Explicit operator signer policy JSON, kept outside the project, as for scan.",
@@ -274,6 +283,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         project_path: str,
         baseline_path: Path,
         no_project_policy: bool = False,
+        accept_project_policy: bool = False,
         signature_policy: Path | None = None,
     ) -> None:
         """Stage a static snapshot for review; publish it only after the scan gate passes.
@@ -313,6 +323,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 report_only=False,
                 signature_policy=signature_policy,
                 no_project_policy=no_project_policy,
+                accept_project_policy=accept_project_policy,
             )
             # A project policy may select report-only mode; it cannot authorize
             # promotion of incomplete evidence into an approved baseline.
