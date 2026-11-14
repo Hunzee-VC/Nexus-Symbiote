@@ -872,8 +872,9 @@ def _collect_source(content: bytes, path: Path, result: ScanResult) -> None:
         return
     file_digest = hash_bytes(content)
     servers: dict[int, tuple[MCPServerComponent, int]] = {}
+    # An ambient declaration, such as `declare namespace`, is erased and never runs.
     for node in index.nodes:
-        if node.type != "new_expression":
+        if node.type != "new_expression" or node.id in index.erased:
             continue
         if not _sdk_constructor(node.child_by_field_name("constructor"), resolver):
             continue
@@ -922,7 +923,7 @@ def _collect_source(content: bytes, path: Path, result: ScanResult) -> None:
     components: list[MCPServerComponent | ToolComponent] = [s for s, _ in servers.values()]
     registrations = 0
     for node in index.nodes:
-        if node.type != "call_expression":
+        if node.type != "call_expression" or node.id in index.erased:
             continue
         member = node.child_by_field_name("function")
         if member is None or member.type not in {"member_expression", "subscript_expression"}:

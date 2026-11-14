@@ -195,6 +195,20 @@ def test_receiver_shadowing_in_block_does_not_use_outer_binding(tmp_path):
     assert any("unresolved MCP registration receiver" in x for x in result.surfaces_excluded)
 
 
+def test_ambient_declarations_record_no_server_or_tool(tmp_path):
+    result = _scan(
+        tmp_path,
+        IMPORT
+        + SERVER
+        + 'server.tool("read", {}, handler);\n'
+        + "declare namespace Ambient {\n"
+        + '  const ghost = new Server({}); ghost.tool("ghost", {}, handler);\n'
+        + '  server.tool("phantom", {}, handler);\n}\n',
+    )
+    servers = [c.name for c in result.components if isinstance(c, MCPServerComponent)]
+    assert servers == ["server"] and [t.name for t in _tools(result)] == ["read"]
+
+
 def test_method_names_bind_nothing_inside_the_method(tmp_path):
     result = _scan(
         tmp_path,

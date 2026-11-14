@@ -132,7 +132,8 @@ These leave no gap:
   analysis cannot resolve is still a gap.
 - Servers built with other frameworks.
 
-The analysis reads a `var` declaration as scoped to its block, like `let`.
+The analysis reads a `var` declaration as scoped to its block, like `let`. Code inside an
+ambient declaration, such as `declare namespace`, is erased and records nothing.
 
 ## Limits
 
