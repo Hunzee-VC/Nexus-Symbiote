@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import bisect
 import heapq
 import re
 from collections.abc import Iterable, Mapping
@@ -105,6 +106,8 @@ _CREDENTIAL_NAME = re.compile(
 )
 _URL_USERINFO = re.compile(r"://[^/\s@?#]*@")
 _PLAIN_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s@?#]+")
+# The authority a URL's shown origin is taken from, as urlsplit delimits it.
+_NETLOC = re.compile(r"[^/?#]*")
 
 
 def redact_url(value: str) -> str:
@@ -158,19 +161,57 @@ def _longest_first(value: str) -> tuple[int, str]:
     return (-len(value), value)
 
 
+def _smallest_period(value: str) -> int:
+    """The smallest shift at which ``value`` overlaps itself, its length when none does."""
+    border = 0
+    borders = [0] * len(value)
+    for index in range(1, len(value)):
+        while border and value[index] != value[border]:
+            border = borders[border - 1]
+        if value[index] == value[border]:
+            border += 1
+        borders[index] = border
+    return len(value) - (borders[-1] if value else 0)
+
+
+Span = tuple[int, int]
+
+
+def _periodic_end(text: str, end: int, period: int) -> int:
+    """Extend ``end`` while ``text`` repeats itself ``period`` characters back.
+
+    Galloping, then halving, compares slices in C, so a run costs its length and only
+    the logarithm of it in interpreted steps. Steps are powers of two, so halving the
+    first one that fails tries every length below it.
+    """
+    step = 1
+    while text.startswith(text[end - period : end - period + step], end):
+        end += step
+        step *= 2
+    while step > 1:
+        step //= 2
+        if text.startswith(text[end - period : end - period + step], end):
+            end += step
+    return end
+
+
 class SecretScrubber:
     """Known secret values, prepared once per source and applied linearly per text.
 
-    Each value is located with one substring search, longest first, so scrubbing a
-    text costs its length times the number of values, never values times every
-    string of a document. Texts shorter than the shortest value are skipped.
+    Every occurrence of every value is located in the original text, overlapping ones
+    included, so one value can never hide part of another. Each value costs a scan of
+    the text: a run of a value overlapping itself is measured along its smallest
+    period, so scrubbing a text costs its length times the number of values, never
+    values times every string of a document. Texts shorter than the shortest value
+    are skipped.
     """
 
-    __slots__ = ("_shortest", "_values")
+    __slots__ = ("_periods", "_shortest", "_values")
 
     def __init__(self, values: Iterable[str] = ()) -> None:
         unique = {value for value in values if value}
         self._values = tuple(sorted(unique, key=_longest_first))
+        self._periods = {value: _smallest_period(value) for value in self._values}
         self._shortest = len(self._values[-1]) if self._values else 0
 
     def __bool__(self) -> bool:
@@ -185,7 +226,7 @@ class SecretScrubber:
         A file's values are prepared once and each server adds its own few, so the
         cost per server grows with the file's values, not with their sort.
         """
-        known = set(self._values)
+        known = self._periods
         extra = sorted(
             {value for value in values if value and value not in known}, key=_longest_first
         )
@@ -193,6 +234,7 @@ class SecretScrubber:
             return self
         merged = SecretScrubber()
         merged._values = tuple(heapq.merge(self._values, extra, key=_longest_first))
+        merged._periods = {**known, **{value: _smallest_period(value) for value in extra}}
         merged._shortest = len(merged._values[-1])
         return merged
 
@@ -201,13 +243,28 @@ class SecretScrubber:
             return False
         return any(value in text for value in self._values)
 
-    def scrub(self, text: str) -> str:
+    def spans(self, text: str) -> list[Span]:
+        """Where known values occur in ``text``, one span per run of overlapping occurrences."""
+        found: list[Span] = []
         if not self._values or len(text) < self._shortest:
-            return text
+            return found
         for value in self._values:
-            if value in text:
-                text = text.replace(value, REDACTED)
-        return text
+            size = len(value)
+            period = self._periods[value]
+            # An occurrence overlapping a run at a shift that is not a multiple of the
+            # period starts past both the period and size - period (Fine and Wilf).
+            resume = min(size, max(period, size - period) + 1)
+            start = text.find(value)
+            while start >= 0:
+                end = _periodic_end(text, start + size, period)
+                last = start + (end - size - start) // period * period
+                found.append((start, last + size))
+                start = text.find(value, last + resume)
+        return found
+
+    def scrub(self, text: str) -> str:
+        spans = self.spans(text)
+        return _apply(text, _merged(spans), []) if spans else text
 
 
 def _scrubber(secrets: Iterable[str] | SecretScrubber) -> SecretScrubber:
@@ -231,23 +288,20 @@ def _credential_like(token: str, scheme: str) -> bool:
     )
 
 
-def _auth_replacement(match: re.Match[str]) -> str:
-    scheme, space, token = match.groups()
+def _authorization_scheme_credential(match: re.Match[str]) -> bool:
+    scheme, _space, token = match.groups()
     start = match.start()
     header = _AUTHORIZATION_HEADER.search(
         match.string, max(0, start - _AUTHORIZATION_LOOKBACK), start
     )
-    if header is not None or _credential_like(token, scheme):
-        return scheme + space + REDACTED
-    return match.group()
+    return header is not None or _credential_like(token, scheme)
 
 
-def _redact_private_keys(value: str) -> str:
-    """Replace PEM private key blocks, including unterminated ones, in one pass."""
+def _private_key_spans(value: str) -> Iterable[Span]:
+    """PEM private key blocks, including unterminated ones, in one pass."""
     if "-----BEGIN" not in value:
-        return value
-    parts: list[str] = []
-    copied = search = 0
+        return
+    search = 0
     while (start := value.find("-----BEGIN", search)) >= 0:
         label_end = value.find("-----", start + 10)
         if label_end < 0:
@@ -258,34 +312,151 @@ def _redact_private_keys(value: str) -> str:
             continue
         end = value.find("-----END", label_end + 5)
         close = -1 if end < 0 else value.find("-----", end + 8)
-        stop = len(value) if close < 0 else close + 5
-        parts.extend((value[copied:start], REDACTED))
-        copied = search = stop
-    parts.append(value[copied:])
-    return "".join(parts)
+        search = len(value) if close < 0 else close + 5
+        yield start, search
 
 
-def _raw_auth_replacement(match: re.Match[str]) -> str:
-    prefix, scheme, space, _credential, token = match.groups()
+def _raw_auth_span(match: re.Match[str]) -> Span | None:
+    _prefix, scheme, _space, _credential, token = match.groups()
     if scheme is not None:
-        return prefix + scheme + space + REDACTED
+        return match.span(4)
     if token.lower() in _AUTH_SCHEMES or not _credential_like(token, "token"):
-        return match.group()
-    return prefix + REDACTED
+        return None
+    return match.span(5)
+
+
+def _cookie_pair_secret(match: re.Match[str]) -> bool:
+    name_eq, val = match.groups()
+    if name_eq[:-1].lower() in _COOKIE_ATTRS:
+        return False
+    return len(val) >= MIN_SECRET_LENGTH or _credential_like(val, "token")
 
 
 def _cookie_pair_replacement(match: re.Match[str]) -> str:
-    name_eq, val = match.groups()
-    if name_eq[:-1].lower() in _COOKIE_ATTRS:
-        return match.group()
-    if len(val) >= MIN_SECRET_LENGTH or _credential_like(val, "token"):
-        return name_eq + REDACTED
-    return match.group()
+    return match.group(1) + REDACTED if _cookie_pair_secret(match) else match.group()
 
 
-def _cookie_header_replacement(match: re.Match[str]) -> str:
-    prefix, raw_cookies = match.groups()
-    return prefix + _COOKIE_PAIR.sub(_cookie_pair_replacement, raw_cookies)
+def _cookie_spans(value: str, start: int = 0, end: int | None = None) -> Iterable[Span]:
+    stop = len(value) if end is None else end
+    for pair in _COOKIE_PAIR.finditer(value, start, stop):
+        if _cookie_pair_secret(pair):
+            yield pair.span(2)
+
+
+class _Rewrite:
+    """A URL shown as its origin; ``revealed`` ends the source text the origin repeats."""
+
+    __slots__ = ("end", "replacement", "revealed", "start")
+
+    def __init__(self, start: int, end: int, replacement: str, revealed: int) -> None:
+        self.start, self.end = start, end
+        self.replacement, self.revealed = replacement, revealed
+
+
+def _url_rewrite(match: re.Match[str]) -> _Rewrite | None:
+    url = match.group()
+    shown = redact_url(url)
+    if shown == url:
+        return None
+    start = match.start()
+    revealed = start
+    if shown != "[redacted-url]":
+        scheme_end = url.index("://") + 3
+        netloc = _NETLOC.match(url, scheme_end)
+        revealed = start + (netloc.end() if netloc else scheme_end)
+    return _Rewrite(start, match.end(), shown, revealed)
+
+
+def _merged(spans: list[Span]) -> list[Span]:
+    """Sorted, disjoint spans; touching spans become one."""
+    spans.sort()
+    merged: list[Span] = []
+    for start, end in spans:
+        if merged and start <= merged[-1][1]:
+            if end > merged[-1][1]:
+                merged[-1] = (merged[-1][0], end)
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _apply(value: str, spans: list[Span], rewrites: list[_Rewrite]) -> str:
+    """Replace each maximal union of ``spans`` and ``rewrites`` in one pass.
+
+    ``spans`` are disjoint and sorted. A rewrite whose revealed origin no span touches,
+    and which no span extends past, is shown as rewritten; any other union of a
+    rewrite and spans is redacted as a whole, so a rewrite never shows a known value.
+    """
+    items: list[tuple[int, int, _Rewrite | None]] = [(start, end, None) for start, end in spans]
+    for rewrite in rewrites:
+        # The last span starting inside the revealed origin is the only one that can
+        # reach into it: the spans are disjoint and sorted.
+        index = bisect.bisect_left(spans, (rewrite.revealed, -1))
+        touched = (
+            rewrite.revealed > rewrite.start and index > 0 and spans[index - 1][1] > rewrite.start
+        )
+        items.append((rewrite.start, rewrite.end, None if touched else rewrite))
+    items.sort(key=lambda item: (item[0], -item[1]))
+    parts: list[str] = []
+    copied = 0
+    group_start = group_end = -1
+    shown: list[_Rewrite] = []
+
+    def flush() -> None:
+        if len(shown) == 1 and (group_start, group_end) == (shown[0].start, shown[0].end):
+            parts.append(shown[0].replacement)
+        else:
+            parts.append(REDACTED)
+
+    for start, end, shape in items:
+        if group_end >= 0 and (
+            start < group_end or (start == group_end and shape is None and not shown)
+        ):
+            group_end = max(group_end, end)
+        else:
+            if group_end >= 0:
+                flush()
+                copied = group_end
+            parts.append(value[copied:start])
+            group_start, group_end = start, end
+            shown = []
+        if shape is not None:
+            shown.append(shape)
+    if group_end < 0:
+        return value
+    flush()
+    parts.append(value[group_end:])
+    return "".join(parts)
+
+
+def _redaction(
+    value: str, scrubber: SecretScrubber, *, identifier: bool
+) -> tuple[list[Span], list[_Rewrite]]:
+    """Every rule's and every known value's match in ``value``, found in the original."""
+    spans = scrubber.spans(value)
+    rewrites = [
+        rewrite for match in _URL.finditer(value) if (rewrite := _url_rewrite(match)) is not None
+    ]
+    if not identifier:
+        spans.extend(_private_key_spans(value))
+    spans.extend(match.span(2) for match in _ASSIGNMENT.finditer(value))
+    spans.extend(
+        match.span(3) for match in _AUTH.finditer(value) if _authorization_scheme_credential(match)
+    )
+    if identifier:
+        spans.extend(match.span() for match in _NAMED_TOKEN.finditer(value))
+        return spans, rewrites
+    for match in _RAW_AUTH_HEADER.finditer(value):
+        if (span := _raw_auth_span(match)) is not None:
+            spans.append(span)
+    for match in _COOKIE_HEADER.finditer(value):
+        spans.extend(_cookie_spans(value, *match.span(2)))
+    spans.extend(match.span() for match in TOKEN_SHAPE.finditer(value))
+    return spans, rewrites
+
+
+def _redact(value: str, spans: list[Span], rewrites: list[_Rewrite]) -> str:
+    return _apply(value, _merged(spans), rewrites) if spans or rewrites else value
 
 
 def redact_text(
@@ -296,23 +467,19 @@ def redact_text(
 ) -> str:
     """Remove known secret values and common URL/auth/assignment/token encodings.
 
+    Every rule and every known value is matched in the original text, and each union
+    of their matches is replaced at once: a known value cannot erase the context a
+    rule needs, such as the name before ``=`` or an ``Authorization`` header, nor can
+    a rule's rewrite hide part of a known value from the scrubber.
+
     ``identifier`` keeps names that are matched against other evidence, such as tool
     names, free of the private key rule and of the token formats that ordinary names
     take: an innocuous name like ``sk-learn-classifier`` must keep matching the name a
     live server reports. A name holding a distinctive token such as ``ghp_...`` is
     still redacted.
     """
-    value = _scrubber(secrets).scrub(value)
-    value = _URL.sub(lambda match: redact_url(match.group()), value)
-    if not identifier:
-        value = _redact_private_keys(value)
-    value = _ASSIGNMENT.sub(lambda match: match.group(1) + REDACTED, value)
-    value = _AUTH.sub(_auth_replacement, value)
-    if identifier:
-        return _NAMED_TOKEN.sub(REDACTED, value)
-    value = _RAW_AUTH_HEADER.sub(_raw_auth_replacement, value)
-    value = _COOKIE_HEADER.sub(_cookie_header_replacement, value)
-    return TOKEN_SHAPE.sub(REDACTED, value)
+    spans, rewrites = _redaction(value, _scrubber(secrets), identifier=identifier)
+    return _redact(value, spans, rewrites)
 
 
 def redact_keyed_text(
@@ -333,17 +500,26 @@ def redact_keyed_text(
     locators. ``redacted`` is the value as the caller already redacted it, when that
     is not ``redact_text(value, secrets)``.
     """
-    safe = redact_text(value, secrets) if redacted is None else redacted
     if not value:
-        return safe
+        return redact_text(value, secrets) if redacted is None else redacted
+    cookie = _COOKIE_KEY.fullmatch(key) is not None
+    if redacted is not None:
+        safe = redacted
+    else:
+        spans, rewrites = _redaction(value, _scrubber(secrets), identifier=False)
+        if cookie:
+            # The pairs are read in the original value: a known value redacted first
+            # could hide the name that marks the pair after it.
+            spans.extend(_cookie_spans(value))
+        safe = _redact(value, spans, rewrites)
     if _AUTHORIZATION_KEY.fullmatch(key):
         parts = _SCHEME_AND_VALUE.fullmatch(value)
         if parts is not None and parts.group(1).lower() in _AUTH_SCHEMES:
             scheme, space, credential = parts.groups()
             return safe if _REFERENCE.fullmatch(credential) else scheme + space + REDACTED
         return safe if _REFERENCE.fullmatch(value) else REDACTED
-    if _COOKIE_KEY.fullmatch(key):
-        return _COOKIE_PAIR.sub(_cookie_pair_replacement, safe)
+    if cookie:
+        return safe if redacted is None else _COOKIE_PAIR.sub(_cookie_pair_replacement, safe)
     if _CREDENTIAL_KEY.search(key):
         return safe if _REFERENCE.fullmatch(value) or _PLAIN_URL.fullmatch(safe) else REDACTED
     return safe
