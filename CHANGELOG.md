@@ -40,6 +40,8 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 - The GitHub Action's risk gate reconciles against the project and uses the caller's `signature-policy` when `validate` is `'false'` too. It ran `risk` without either, so a ShadowScan report that the policy verifies was treated as unsigned and failed the gate in CI, and the only way through was `allow-unsigned-discovery: 'true'`. The Action refuses a `scanners` subset unless `validate` and `risk-check` are both `'false'`: with `risk-check` on, such a run collected, wrote its exports and then always failed the risk gate on partial coverage.
 - No Python file holds a literal bidirectional control or invisible character, tests included: the remaining literals in test modules and three regular expressions are escapes with the same value, and Ruff's `PLE2502` and `PLE2510` to `PLE2515` rules refuse a literal one wherever the linter runs.
 
+- The model collector detects dunder names built from adjacent constant strings in Jinja templates. Template findings describe a potential access pattern, not an established sandbox escape. The changed finding detail changes its suppression fingerprint; review and recreate any affected suppressions.
+
 ### Changed
 
 - The pre-commit hook description states that `language: python` installs from `pyproject.toml` ranges without the hash lock, and how to run the command from a lock-installed environment with `language: system`.

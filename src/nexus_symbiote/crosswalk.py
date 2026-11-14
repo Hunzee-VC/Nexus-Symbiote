@@ -1001,7 +1001,8 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
             CWE,
             "CWE-1336",
             "Kept on high findings, where the earlier SARIF rules put it: a chat template that "
-            "reaches Python internals is a template engine weakness, but the collectors record "
+            "matches a potential Python-internals access pattern; this does not establish a "
+            "template engine weakness. The collectors record "
             "this category only at critical.",
             RiskSeverity.HIGH,
         ),

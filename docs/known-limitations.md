@@ -350,7 +350,9 @@ A way around a limit that its entry does not describe is worth a
   are rated `unsafe-code-execution` because `np.load(allow_pickle=True)` unpickles
   them.
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat
-  templates are checked only for known sandbox-escape shapes. A template file larger
+  templates are checked for potential Python-internals access patterns, not evaluated;
+  computed names can evade the heuristic, and a match does not establish a sandbox
+  escape or execution. A template file larger
   than the `file-bytes` limit is digested but not checked, and is a coverage gap.
   SafeTensors tensor bytes are hashed but not inspected. See
   [what this does not establish](model-integrity.md#what-this-does-not-establish).
