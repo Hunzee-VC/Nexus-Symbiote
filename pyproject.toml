@@ -122,7 +122,27 @@ target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "S", "B", "A", "C4", "SIM"]
+# PLE25xx: no literal bidirectional or invisible control character in source; write the
+# escape. scripts/check_repository_hygiene.py covers the characters these rules do not.
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "N",
+    "UP",
+    "S",
+    "B",
+    "A",
+    "C4",
+    "SIM",
+    "PLE2502",
+    "PLE2510",
+    "PLE2512",
+    "PLE2513",
+    "PLE2514",
+    "PLE2515",
+]
 ignore = ["S101", "UP042", "E501", "SIM102", "SIM105"]
 
 [tool.mypy]

@@ -46,6 +46,7 @@ from nexus_symbiote.otlp import (
     Unreadable,
     file_name,
 )
+from nexus_symbiote.risk_classes import plain_authority
 
 FORMAT = "nexus-symbiote/trace-evidence/v1"
 ASSURANCE = "reported"
@@ -324,12 +325,19 @@ def _trimmed(value: str | None) -> str | None:
 
 
 def _endpoint(url: str | None) -> tuple[str, int | None] | None:
+    """The host and port a declared URL names, when every URL parser reads them alike.
+
+    An inventory is supplied, so its URL may be one that Python and the client that
+    connects read differently, such as ``https://approved\\@other.example``; such a URL
+    declares no host for a span to match. A URL that states no port and has no default
+    one declares its host only.
+    """
     try:
         parts = urlsplit(url or "")
         host, port = parts.hostname, parts.port
     except ValueError:
         return None
-    if not host:
+    if not host or not plain_authority(parts.netloc) or port == 0:
         return None
     return host, port if port is not None else _DEFAULT_PORTS.get(parts.scheme.lower())
 

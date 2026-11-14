@@ -19,12 +19,23 @@ _URL = re.compile(r"(?<![a-zA-Z0-9+.-])[a-zA-Z0-9+.-]+://[^\s\"'<>]+")
 # digits (token2=) may follow the keyword; "max_tokens" and "tokenizer" may not.
 # A backslash escapes the next character of a quoted value, as JSON reads it.
 # Possessive and bounded quantifiers keep every attempt linear.
-_ASSIGNMENT = re.compile(
-    r"(?i)((?:api[-_]?key|access[-_]?key|secret[-_]?key|private[-_]?key|account[-_]?key"
+_CREDENTIAL_KEYWORD = (
+    r"(?:api[-_]?key|access[-_]?key|secret[-_]?key|private[-_]?key|account[-_]?key"
     r"|token|password|passwd|passphrase|pwd|secret|credentials?|sig)"
-    r"(?:\d{1,4})?(?:[-_.][a-z0-9]{1,32}){0,4}[\"']?\s*+[:=]\s*+)"
+    r"(?:\d{1,4})?(?:[-_.][a-z0-9]{1,32}){0,4}"
+)
+_ASSIGNMENT = re.compile(
+    rf"(?i)({_CREDENTIAL_KEYWORD}[\"']?\s*+[:=]\s*+)"
     r"(\"(?:[^\"\\\n]|\\.){0,256}\"|'(?:[^'\\\n]|\\.){0,256}'|[^\s,;]++)"
 )
+# A mapping key that _ASSIGNMENT would read as the name in `name: value`.
+_CREDENTIAL_KEY = re.compile(rf"(?i){_CREDENTIAL_KEYWORD}\Z")
+_AUTHORIZATION_KEY = re.compile(r"(?i)(?:proxy-)?authorization")
+_COOKIE_KEY = re.compile(r"(?i)(?:set-)?cookie")
+_SCHEME_AND_VALUE = re.compile(r"([A-Za-z0-9-]{1,32})(\s++)(\S.*+)", re.DOTALL)
+# A reference names where a credential comes from and holds none. Only the braced and
+# the upper-case forms count: a password may itself begin with "$".
+_REFERENCE = re.compile(r"\$\{[^{}\s]{1,128}\}|\$[A-Z][A-Z0-9_]{1,127}")
 _AUTH = re.compile(r"(?i)\b(Bearer|Basic|Token|Bot|ApiKey|Api-Key)(\s++)([A-Za-z0-9_+/=.~-]{6,}+)")
 # After an Authorization or Proxy-Authorization header name the scheme's value is a
 # credential whatever its shape; the shape checks only tell prose from credentials.
@@ -271,6 +282,40 @@ def redact_text(
     return TOKEN_SHAPE.sub(REDACTED, value)
 
 
+def redact_keyed_text(
+    key: str,
+    value: str,
+    secrets: Iterable[str] | SecretScrubber = (),
+    *,
+    redacted: str | None = None,
+) -> str:
+    """Redact a mapping's text value as ``redact_text`` redacts ``key: value``.
+
+    Parsed JSON or TOML hands a header or an assignment over as a key and a value, so
+    the rules of ``redact_text`` that read both in one string never see them. The value
+    of an ``Authorization`` or ``Proxy-Authorization`` key is a credential after any
+    scheme word, the pairs of a ``Cookie`` or ``Set-Cookie`` key are cookies, and the
+    value of a key that names a credential, such as ``password`` or ``X-Api-Key``, is
+    one whatever its shape. A reference to a variable and a plain URL stay, as
+    locators. ``redacted`` is the value as the caller already redacted it, when that
+    is not ``redact_text(value, secrets)``.
+    """
+    safe = redact_text(value, secrets) if redacted is None else redacted
+    if not value:
+        return safe
+    if _AUTHORIZATION_KEY.fullmatch(key):
+        parts = _SCHEME_AND_VALUE.fullmatch(value)
+        if parts is not None and parts.group(1).lower() in _AUTH_SCHEMES:
+            scheme, space, credential = parts.groups()
+            return safe if _REFERENCE.fullmatch(credential) else scheme + space + REDACTED
+        return safe if _REFERENCE.fullmatch(value) else REDACTED
+    if _COOKIE_KEY.fullmatch(key):
+        return _COOKIE_PAIR.sub(_cookie_pair_replacement, safe)
+    if _CREDENTIAL_KEY.search(key):
+        return safe if _REFERENCE.fullmatch(value) or _PLAIN_URL.fullmatch(safe) else REDACTED
+    return safe
+
+
 def redact_metadata(value: Any, secrets: Iterable[str] | SecretScrubber = ()) -> Any:
     """Redact textual metadata while retaining its JSON structure."""
     return _redact_metadata(value, _scrubber(secrets))
@@ -281,7 +326,11 @@ def _redact_metadata(value: Any, scrubber: SecretScrubber) -> Any:
         return redact_text(value, scrubber)
     if isinstance(value, dict):
         return {
-            redact_text(str(key), scrubber): _redact_metadata(item, scrubber)
+            redact_text(str(key), scrubber): (
+                redact_keyed_text(str(key), item, scrubber)
+                if isinstance(item, str)
+                else _redact_metadata(item, scrubber)
+            )
             for key, item in value.items()
         }
     if isinstance(value, list):
