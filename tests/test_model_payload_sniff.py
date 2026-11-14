@@ -281,6 +281,7 @@ def _names_a_callable(data: bytes) -> bool:
             for opcode, _, _ in pickletools.genops(stream):
                 names.add(opcode.name)
     except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
+        # Malformed or truncated bytes end the walk; the opcodes read before them count.
         pass
     return bool(names & _CODE_OPCODES)
 
@@ -1168,6 +1169,9 @@ def _changes_what_it_resolved(data: bytes) -> bool:
         def __hash__(self) -> int:
             target["hashed"] = True
             return 0
+
+        def __eq__(self, other: object) -> bool:
+            return list.__eq__(self, other)
 
     resolved = _Target()
 
