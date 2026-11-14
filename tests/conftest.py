@@ -210,11 +210,13 @@ def _isolated_environment(
             host = bytes(host).decode("ascii", "replace")
         if not isinstance(host, str):
             return False
-        name = host.lower().rstrip(".")
+        name = host.lower()
         if name == "localhost":
             return True
         try:
-            return ipaddress.ip_address(name.split("%", 1)[0]).is_loopback
+            # Do not strip suffixes that the real resolver will still receive.
+            # Scoped IPv6 and dotted DNS spellings need an explicit test stub.
+            return "%" not in name and ipaddress.ip_address(name).is_loopback
         except ValueError:
             return False
 
