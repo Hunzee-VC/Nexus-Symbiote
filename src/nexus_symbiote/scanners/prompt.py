@@ -381,30 +381,56 @@ def _hidden_character_risks(
     return risks
 
 
+_HIDDEN_INSTRUCTION = re.compile(
+    r"https?://|~/"
+    r"|\b(?:ignore|disregard|exfiltrate|execute|download|upload|send|steal|override|"
+    r"bypass|curl|wget|fetch|eval|install|run)\b",
+    re.IGNORECASE,
+)
+
+
+def _comment_is_instruction(text: str) -> bool:
+    """An imperative, a URL, or a home-directory path inside hidden text."""
+    return _HIDDEN_INSTRUCTION.search(text) is not None
+
+
 def detect_hidden_markup(content: str, source_name: str) -> list[RiskAssessment]:
     """Report HTML and Markdown comments, which renderers hide but agents read.
 
-    Only counts and lengths are reported, never the hidden text.
+    Only counts and lengths are reported, never the hidden text. A comment that
+    carries an imperative, a URL or a path under ``~/`` is high; other comments
+    stay low.
     """
     count = length = 0
+    instructive = False
     position = 0
     while (start := content.find("<!--", position)) != -1:
         end = content.find("-->", start + 4)
         stop = len(content) if end == -1 else end + 3
         count += 1
         length += stop - start
+        instructive = instructive or _comment_is_instruction(content[start:stop])
         position = stop
-    references = _MARKDOWN_COMMENT.findall(content)
-    count += len(references)
+    for line in content.splitlines():
+        if _MARKDOWN_COMMENT.match(line):
+            count += 1
+            instructive = instructive or _comment_is_instruction(line)
     if not count:
         return []
+    severity = RiskSeverity.HIGH if instructive else RiskSeverity.LOW
+    qualifier = (
+        " At least one comment contains an instruction, a URL or a home-directory path."
+        if instructive
+        else ""
+    )
     return [
         RiskAssessment(
-            severity=RiskSeverity.LOW,
+            severity=severity,
             category="hidden_markup",
             detail=(
                 f"'{neutralize(source_name)}' contains {count} HTML or Markdown comment(s) "
                 f"({length} characters of HTML comments) that rendered views hide and agents read."
+                f"{qualifier}"
             ),
             recommendation="Review comment text in the raw file; move notes out of agent instructions.",
         )

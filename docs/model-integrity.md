@@ -25,9 +25,9 @@ The serialization rating is:
 
 | Rating | When |
 | --- | --- |
-| `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or content recognized as a binary or text-protocol pickle, or a ZIP archive whose central directory names a pickle-family member (`.pkl`, `.pickle`, and the other pickle suffixes, wherever the member sits), under any other model suffix |
-| `safe` | A SafeTensors file whose header is UTF-8 JSON with string metadata, known dtypes and tensor spans that index the whole data region, in a directory that configures no chat template that reaches Python internals; the scan and `validate` check the header with the same validator, and `validate` compares the templates only through its completeness check |
-| `unsafe-template-injection` | A GGUF file whose embedded chat template reaches Python internals through dunder attributes or the `attr` filter, as Jinja2 sandbox escapes such as CVE-2024-34359 do, or a SafeTensors file that would be `safe` in a directory whose Hugging Face chat template does |
+| `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or content recognized as a binary or text-protocol pickle, or a ZIP archive with a `.pkl` member (as `torch.save` writes `data.pkl`), under any other model suffix. A binary pickle is recognized by its PROTO opcode and at least 16 well-formed opcodes in its first 64 KiB, whatever follows them; a text-protocol one by a consistent opcode stream of at most 4,096 opcodes; a ZIP member by the archive's first local header or by its central directory, read from the end of the archive up to 1 MiB |
+| `safe` | A SafeTensors file whose header is UTF-8 JSON with string metadata, known dtypes and tensor spans that index the whole data region, with no configured chat template matching the access-pattern heuristic. The rating is not a guarantee that the template is safe; `validate` compares templates only through its completeness check |
+| `unsafe-template-injection` | A GGUF file whose embedded chat template matches the access-pattern heuristic, or a SafeTensors file that would be `safe` in a directory whose Hugging Face chat template matches it. A match does not establish that the renderer executes the pattern or that its sandbox is bypassed |
 | `unknown` | Everything else, including ONNX, GGUF, Keras, HDF5, SavedModel, TFLite, Core ML and ExecuTorch files, and a SafeTensors header over the 1 MiB inspection limit |
 
 ## Files bound to the weights
@@ -130,12 +130,14 @@ In `diff`, a change to `tokenizer_hash` or `chat_template_hash` is a high alert,
 and a change to a bound weight file, a configuration file or custom code is a
 high alert naming the property that records its digest.
 
-Every chat template that `properties.chat_templates` lists is checked for the
-attribute access that Jinja2 sandbox escapes use: a dunder attribute, named or
-subscripted, a dunder name as a string such as an `attribute=` argument, or the
-`attr` filter. The template is matched as Jinja reads it, with Unicode whitespace
-between tokens and string escapes such as `\x5f` decoded, and a backslash before a
-line break in a string removed. A Hugging Face template
+Every chat template that `properties.chat_templates` lists is checked for potential
+Python-internals access patterns: a dunder attribute, named or subscripted, a
+dunder name as a string such as an `attribute=` argument, or the `attr` filter.
+The heuristic decodes string escapes such as `\x5f`, removes a backslash before a
+line break, and folds adjacent constant strings joined with `~` or `+`, or written
+next to each other, inside Jinja expressions. It does not evaluate templates.
+Matches may be harmless in the actual context; a correctly configured sandbox can
+deny the access. Other ways to construct names may not match. A Hugging Face template
 that matches gives every
 model in its directory a critical `serialization_format` finding that names up to
 three matching templates and counts the rest, and a model that would otherwise be
@@ -263,8 +265,8 @@ those listed above, or an object-dtype NumPy `.npy` or `.npz` array, is inventor
 when its content is recognized in the first 64 KiB of a candidate file; a numeric
 NumPy array and a pickle whose content is not recognized are not. SafeTensors
 tensor bytes are hashed but not inspected, so a payload that also parses as
-another format is not flagged. The chat template check is a heuristic for known
-sandbox-escape shapes, not a template analysis: a template that escapes the
-sandbox another way, such as a dunder name whose leading and trailing underscores
-are each split across string pieces or that a filter such as `format` builds, or
-that instructs the model, passes it.
+another format is not flagged. The chat template check is a heuristic, not template
+analysis: a name assembled through variables, formatting, filters, nested expressions
+or other operations can pass it, as can a template that instructs the model. The
+heuristic does not establish whether a renderer is vulnerable or a sandbox escape
+exists. Review templates and use an appropriately sandboxed renderer.

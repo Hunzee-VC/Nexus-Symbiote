@@ -45,6 +45,7 @@ from nexus_symbiote.core.hashing import (
     hash_tool_definition,
     tool_definition_extensions,
 )
+from nexus_symbiote.modes import OfflineViolation
 from nexus_symbiote.runtime_validation import MAX_SCHEMA_BYTES, check_json_budget
 from nexus_symbiote.utils.secrets import redact_descriptor, redact_metadata, redact_text
 
@@ -321,6 +322,10 @@ def _endpoint(value: str, *, origin_only: bool = False) -> tuple[str, str, int, 
             )
         host = parsed.hostname.lower()
         port = 443 if parsed.port is None else parsed.port
+    except DiscoveryError:
+        # The refusal above; DiscoveryError is a ValueError, which the next clause would
+        # otherwise replace with the generic text.
+        raise
     except ValueError as exc:
         raise DiscoveryError("invalid endpoint") from exc
     if host.endswith(".") or not 1 <= port <= 65535:
@@ -373,6 +378,10 @@ def _resolve_public(host: str, port: int, timeout: float) -> tuple[int, str]:
             )
         except OSError:
             answers.put(None)
+        except OfflineViolation as exc:
+            # The guard's violation is a BaseException by design; handed to the caller,
+            # it is raised there at once instead of dying with this thread at the timeout.
+            answers.put(exc)
         finally:
             _RESOLVER_SLOTS.release()
 
@@ -381,6 +390,8 @@ def _resolve_public(host: str, port: int, timeout: float) -> tuple[int, str]:
         records = answers.get(timeout=timeout)
     except queue.Empty as exc:
         raise DiscoveryError("DNS resolution timed out") from exc
+    if isinstance(records, OfflineViolation):
+        raise records
     if not records or len(records) > 64:
         raise DiscoveryError("DNS resolution failed or exceeded limits")
     candidates: set[tuple[int, str]] = set()
@@ -617,6 +628,10 @@ def _json(raw: bytes) -> dict[str, Any]:
             object_pairs_hook=unique,
             parse_constant=lambda _: (_ for _ in ()).throw(DiscoveryError("nonfinite JSON")),
         )
+    except DiscoveryError:
+        # The hooks' own diagnostics; DiscoveryError is a ValueError, which the next
+        # clause would otherwise replace with the generic text.
+        raise
     except (UnicodeError, ValueError, RecursionError) as exc:
         raise DiscoveryError("invalid JSON response") from exc
     if not isinstance(value, dict):
@@ -799,6 +814,7 @@ def check_served_tool(raw: Any, secrets: Iterable[str] = ()) -> CheckedDescripto
     ``hash_tool_definition``; members outside ``FINGERPRINT_FIELDS`` are reported
     and digested separately for the server declaration.
     """
+    secrets = tuple(secrets)
     if not isinstance(raw, dict) or not isinstance(raw.get("name"), str) or not raw["name"]:
         raise DiscoveryError("invalid MCP tool identity")
     name = raw["name"]
@@ -845,7 +861,10 @@ def check_served_tool(raw: Any, secrets: Iterable[str] = ()) -> CheckedDescripto
         fingerprint=fingerprint,
         observed_hash=observed,
         display=display,
-        unprofiled_fields=unprofiled,
+        # Field names are controlled by the server too. Keep the original names
+        # only in the digest above; reporting them verbatim can disclose a bearer
+        # token or session ID echoed as an extension key.
+        unprofiled_fields=tuple(redact_text(key, secrets) for key in unprofiled),
         unprofiled_hash=unprofiled_hash,
         display_differs=display != raw,
     )
