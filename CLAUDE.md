@@ -12,7 +12,7 @@ src/nexus_symbiote/
   validators/  — Completeness, integrity, and risk scoring
   diff/        — AIBOM version comparison and the snapshot alert gate
   live/        — Opt-in observations and pinned stdio execution (`inventory.py`, `session.py`, `stdio.py`, `verify.py`)
-  utils/       — Confined `openat` reads (`confined.py`), Sigstore/Ed25519 verification (`crypto.py`), safe output writes (`files.py`), JSONC/model-header parsers, secret redaction, terminal neutralization
+  utils/       — Confined `openat` reads (`confined.py`), Sigstore/Ed25519 verification (`crypto.py`), safe output writes (`files.py`), JSONC/model-header parsers, the CommonMark reader for `@path` imports (`markdown.py`), secret redaction, terminal neutralization
   runtime.py   — Signed, operation-bound authorization gateway (`canonical_arguments=True` by default)
   runtime_validation.py, runtime_cli.py — Isolated offline schema validation worker; `runtime` commands
   policy.py, signature_policy.py       — Caller-selected policy and operator signer policy
