@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import re
+import shlex
 import shutil
 import stat
 from datetime import UTC, datetime, timedelta
@@ -844,3 +845,38 @@ def test_documented_output_matches_the_commands(runner, setup):
     assert "attestation was signed for another purpose" in failed(wrong, "purpose-mismatch")
     for key in ("subject_sha256", "attested_sha256", "content_profile", "source_revision"):
         assert f"`{key}`" in DOCUMENT
+
+
+def test_documented_reviewer_steps_run_on_a_first_and_a_later_review(
+    runner, setup, tmp_path, monkeypatch
+):
+    section = DOCUMENT.split("## Gate a pull request on an attested baseline", 1)[1]
+    block = re.search(r"^```bash\n(.*?)^```$", section, re.M | re.S)
+    assert block, "the guide no longer shows the reviewer's commands"
+    private, public, _ = setup["a"]
+    revision = "0123456789abcdef0123456789abcdef01234567"
+    text = block.group(1).replace("\\\n", " ").replace('"$(git rev-parse HEAD)"', revision)
+    text = text.replace("~/keys/reviewer.pem", shlex.quote(str(private)))
+    commands = [shlex.split(line) for line in text.splitlines() if line.strip()]
+    repo = tmp_path / "repo"
+    shutil.copytree(ROOT / "examples" / "demo-agent", repo)
+    monkeypatch.chdir(repo)
+    for _ in range(2):
+        for command in commands:
+            if command[:2] == ["mkdir", "-p"]:
+                Path(command[2]).mkdir(parents=True, exist_ok=True)
+            elif command[:2] == ["rm", "-f"]:
+                Path(command[2]).unlink(missing_ok=True)
+            else:
+                assert command[0] == "nexus-symbiote", command
+                result = invoke(runner, *command[1:])
+                assert result.exit_code == 0, result.output
+        checked = verify(
+            runner,
+            ".nexus-symbiote/reviewed.json",
+            ".nexus-symbiote/reviewed.json.att",
+            public,
+            extra=["--json-output"],
+        )
+        assert checked.exit_code == 0, checked.output
+        assert json.loads(checked.stdout)["source_revision"] == revision

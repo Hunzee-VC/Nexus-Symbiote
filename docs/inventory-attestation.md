@@ -169,7 +169,9 @@ with a key that never reaches CI, then commits both files through a reviewed pul
 request:
 
 ```bash
+mkdir -p .nexus-symbiote
 nexus-symbiote baseline . --no-project-policy -o .nexus-symbiote/reviewed.json
+rm -f .nexus-symbiote/reviewed.json.att
 nexus-symbiote attest .nexus-symbiote/reviewed.json --key ~/keys/reviewer.pem --purpose reviewed \
   --source-revision "$(git rev-parse HEAD)" --out .nexus-symbiote/reviewed.json.att
 ```
