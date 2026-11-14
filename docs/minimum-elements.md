@@ -243,7 +243,7 @@ catalog.
 
 ## Example: the demo agent
 
-```text
+```bash
 nexus-symbiote scan examples/demo-agent -o demo.aibom.json
 nexus-symbiote minimum-elements demo.aibom.json
 ```

@@ -150,9 +150,9 @@ An inventory a command reads rather than collects. With `--project`, `validate` 
 `risk` collect the checkout again and reconcile the two; the result's
 `assessment_basis` is `project-reconciled`, `project-reconciled-with-supplier-claims`
 or `project-reconciliation-failed`; `validate` reports `project-not-reconciled` when
-the project policy skips the completeness check. Without it, the basis is `supplied-bom` (the
-completeness check calls it `supplied-claims`): only the inventory's own claims were
-checked.
+the project policy skips the completeness check. Without `--project`, the basis is
+`supplied-bom` (the completeness check calls it `supplied-claims`): only the
+inventory's own claims were checked.
 
 ## Gates and policy
 
@@ -194,11 +194,11 @@ incomplete coverage, and the drift gate fails when coverage regresses.
 
 A baseline is a reviewed snapshot that later snapshots, the candidates, are compared
 with by `diff`. The `baseline` command writes one only when the scan gate passes,
-under the built-in policy too. A baseline is written unsigned and `diff` checks no
-signature, so the gate is only as strong as the place the baseline is read from
-([trust anchor](drift-gate.md#the-trust-anchor-is-the-baseline)). Verifying an
-[inventory attestation](#inventory-attestation) of it first shows that trusted keys
-signed exactly that file, not that it is the newest one they signed.
+and the built-in gate too, which a project policy cannot relax. A baseline is written
+unsigned and `diff` checks no signature, so the gate is only as strong as the place
+the baseline is read from ([trust anchor](drift-gate.md#the-trust-anchor-is-the-baseline)).
+Verifying an [inventory attestation](#inventory-attestation) of it first shows that
+trusted keys signed exactly that file, not that it is the newest one they signed.
 
 ### Policy kinds
 

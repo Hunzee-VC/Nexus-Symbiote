@@ -18,8 +18,8 @@ URL names the registry with a `repository_url` qualifier when the record resolve
 from a host other than `registry.npmjs.org` and `registry.yarnpkg.com`. A record is
 checked before it is taken:
 
-- A `resolved` value that is not an `https` URL with a host, or that holds white
-  space, a control character, a backslash, a non-ASCII character or a percent sign
+- A `resolved` value that is not an `https` URL with a host, or that holds
+  whitespace, a control character, a backslash, a non-ASCII character or a percent sign
   in the host, is a collection failure. A WHATWG URL parser, which npm uses, can read
   such a value as another host than Python does.
 - A version that is not an exact SemVer version, an integrity value that does not

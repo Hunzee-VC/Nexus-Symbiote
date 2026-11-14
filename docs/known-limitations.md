@@ -152,7 +152,7 @@ A way around a limit that its entry does not describe is worth a
   absolute, has a `..` segment, or lies under `/proc` or `/dev/fd`. An absolute
   `BASH_ENV`, `ENV` for a shell that is not interactive, and `SHELLOPTS`, `BASHOPTS`
   or `PS4` otherwise stay a medium code-loading finding; an absolute path that happens
-  to lead into the checkout through another link is not recognised.
+  to lead into the checkout through another link is not recognized.
 - **A runner named by a path is classified by its name.** `./tools/npx`,
   `${workspaceFolder}/tools/npx` or a `PATH` entry in the project can run checkout
   code that the record attributes to the registry package. On Windows, an
@@ -420,7 +420,7 @@ A way around a limit that its entry does not describe is worth a
   such a record carries a low `completeness` finding. The redaction ends a URL or
   an assigned value at a shell operator (`;`, `|`, `&`, `$`, `` ` ``, parentheses,
   braces, `<`, `>` or a line break), and starts a new URL at each later scheme
-  such as `https://`, so a command or operator glued to one without white space, and
+  such as `https://`, so a command or operator glued to one without whitespace, and
   a host glued to one after an operator or a scheme, as in
   `--webhooks=https://a.example/n,https://b.example`, do alert. Other text glued
   to a URL without an operator or another scheme stays part of its redacted path;
@@ -819,8 +819,8 @@ A way around a limit that its entry does not describe is worth a
 - **Exposure paths show potential reach.** A path is the shortest chain of recorded
   associations from an agent or IDE agent to a risky component. It does not show that
   the agent can invoke the component, that a credential reaches it or that an exploit
-  is possible. At most 200 agents are searched and 200 paths kept, and the view
-  reports how many were left out.
+  is possible. At most 200 agents and IDE agents are searched and 200 paths kept, and
+  the view reports how many were left out.
 - **Large inventories make large pages.** `--max-nodes` bounds components, not edges,
   and the HTML page renders every detail when it is written, so a large or dense
   inventory gives a page that a browser opens slowly. Use `--focus` or

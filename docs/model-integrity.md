@@ -1,9 +1,9 @@
 # Model integrity
 
-What the `model` collector records for model files, which other files it binds
-to them by digest, and how an operator signature policy verifies model weights.
-Collection is static: no model file is loaded, no template is rendered and no
-repository code is imported.
+This page describes what the `model` collector records for model files, which other
+files it binds to them by digest, and how an operator signature policy verifies
+model weights. Collection is static: no model file is loaded, no template is
+rendered and no repository code is imported.
 
 ## Model files and references
 
