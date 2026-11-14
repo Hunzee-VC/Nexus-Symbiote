@@ -262,8 +262,10 @@ not make a verified model look mismatched or changed.
 A pin or a signature shows that the bytes are the ones the operator or signer
 approved, not that the model is benign. Formats rated `unknown` have no
 structural validator: Keras Lambda layers, SavedModel operations and custom
-TensorRT or TFLite operators are not inspected. Pickles under names other than
-those listed above, and NumPy `.npy` and `.npz` arrays, are not inventoried. SafeTensors
+TensorRT or TFLite operators are not inspected. A pickle under a name other than
+those listed above, or an object-dtype NumPy `.npy` or `.npz` array, is inventoried only
+when its content is recognized in the first 64 KiB of a candidate file; a numeric
+NumPy array and a pickle whose content is not recognized are not. SafeTensors
 tensor bytes are hashed but not inspected, so a payload that also parses as
 another format is not flagged. The chat template check is a heuristic, not template
 analysis: a name assembled through variables, formatting, filters, nested expressions
