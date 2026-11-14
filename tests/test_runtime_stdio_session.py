@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-import nexus_symbiote.live.session as live_session
+from nexus_symbiote.live import session as live_session
 from nexus_symbiote.live.session import (
     MAX_REQUEST_BYTES,
     ExecutionOutcomeUnknown,
