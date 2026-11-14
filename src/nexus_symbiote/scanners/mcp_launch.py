@@ -1790,6 +1790,10 @@ def _start(words: list[str], launch: Launch, *, package_entry: bool = False) -> 
             reason = "runner command is a path, not a package entry point"
         elif family is not None:
             reason = f"runner starts {family} instead of a package entry point"
+        elif launch.executable in (
+            _SHELLS | _INJECTORS | _WRAPPERS | frozenset({"csh", "tcsh", "busybox", "toybox"})
+        ):
+            reason = f"runner starts {launch.executable} instead of a package entry point"
     if reason is not None:
         launch.fail(reason)
 
@@ -2400,6 +2404,8 @@ def _python_options(options: list[tuple[str, str | None]], launch: Launch) -> No
             launch.sources.append((option, value))
         elif option in _UV_LOCATION:
             launch.relocated = launch.relocated or _moves(value)
+        elif option == "--env-file":
+            launch.injected_environment = True
         elif option in {"--python", "-p"} and re.search(r"[\\/]", value):
             # An interpreter path runs local code in place of a managed Python.
             launch.mark("code_loading_option")

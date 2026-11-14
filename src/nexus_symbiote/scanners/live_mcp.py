@@ -527,8 +527,11 @@ class PinnedHTTPTransport:
             if normalized.get("content-encoding", "identity").lower() != "identity":
                 raise DiscoveryError("compressed HTTP response refused")
             if "content-length" in normalized:
-                length = int(normalized["content-length"])
-                if length < 0 or length > max_bytes or "transfer-encoding" in normalized:
+                raw_length = normalized["content-length"].strip()
+                if not raw_length.isascii() or not raw_length.isdigit():
+                    raise DiscoveryError("HTTP body length refused")
+                length = int(raw_length)
+                if length > max_bytes or "transfer-encoding" in normalized:
                     raise DiscoveryError("HTTP body length refused")
             if normalized.get("content-type", "").split(";", 1)[0].lower() == "text/event-stream":
                 payload = self._read_sse(response, body, max_bytes)
@@ -779,9 +782,61 @@ def _standalone_schema(schema: dict[str, Any]) -> bool:
     return True
 
 
+_ALLOWED_VOCABULARIES = frozenset(
+    {
+        "core",
+        "applicator",
+        "validation",
+        "meta-data",
+        "unevaluated",
+        "format-annotation",
+    }
+)
+
+
+def _check_tool_schema_dialect(schema: dict[str, Any]) -> None:
+    pending: list[tuple[dict[str, Any], int]] = [(schema, 0)]
+    while pending:
+        node, depth = pending.pop()
+        for ref_key in ("$ref", "$dynamicRef", "$recursiveRef"):
+            if ref_key in node:
+                target = node[ref_key]
+                if not isinstance(target, str) or (target != "#" and not target.startswith("#/")):
+                    raise DiscoveryError("external JSON Schema reference refused")
+        if depth > 0:
+            for meta_key in ("$schema", "$id", "$vocabulary"):
+                if meta_key in node:
+                    raise DiscoveryError("subschema dialect or base URI override refused")
+        else:
+            if "$id" in node:
+                root_id = node["$id"]
+                if not isinstance(root_id, str) or "://" in root_id or root_id.startswith("//"):
+                    raise DiscoveryError("external JSON Schema $id refused")
+            if "$vocabulary" in node:
+                vocab = node["$vocabulary"]
+                if not isinstance(vocab, dict) or not all(
+                    isinstance(k, str) and isinstance(v, bool) for k, v in vocab.items()
+                ):
+                    raise DiscoveryError("invalid JSON Schema $vocabulary")
+                for uri, required in vocab.items():
+                    parts = uri.rstrip("/").rsplit("/vocab/", 1)
+                    if required and (len(parts) != 2 or parts[1] not in _ALLOWED_VOCABULARIES):
+                        raise DiscoveryError("unsupported JSON Schema vocabulary")
+        for key, value in node.items():
+            if key in (_SUBSCHEMA_KEYWORDS | {"additionalItems"}) and isinstance(value, dict):
+                pending.append((value, depth + 1))
+            elif key in (_SUBSCHEMA_LISTS | {"items"}) and isinstance(value, list):
+                pending.extend((item, depth + 1) for item in value if isinstance(item, dict))
+            elif key in (_SUBSCHEMA_MAPS | {"dependencies"}) and isinstance(value, dict):
+                pending.extend(
+                    (item, depth + 1) for item in value.values() if isinstance(item, dict)
+                )
+
+
 def _check_schema(schema: Any) -> None:
     if not isinstance(schema, dict) or schema.get("type") != "object":
         raise DiscoveryError("tool schemas must declare object type")
+    _check_tool_schema_dialect(schema)
     _bounded_unique_items(schema)
     try:
         Draft202012Validator.check_schema(_checked_dependency_schemas(schema))

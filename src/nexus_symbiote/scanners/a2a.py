@@ -994,9 +994,23 @@ class A2AScanner(Scanner):
         ] + security.unbound
         risks: list[RiskAssessment] = []
         # A2A 1.0 clients use the first supported interface even when `url` is present.
-        if any(
-            url and not url.lower().startswith("https://")
-            for url in (endpoint, *aliases, *supported_urls[:1])
+        secondary_insecure = any(
+            url.lower().startswith(("http://", "ws://")) or url.startswith("//")
+            for url in (*interface_urls, *supported_urls[1:])
+            if url
+        ) or any(
+            entry.get("url")
+            and str(entry.get("protocolBinding", "")).upper() != "GRPC"
+            and not str(entry["url"]).lower().startswith("https://")
+            and not str(entry["url"]).startswith("/")
+            for entry in supported[1:]
+        )
+        if (
+            any(
+                url and not url.lower().startswith("https://")
+                for url in (endpoint, *aliases, *supported_urls[:1])
+            )
+            or secondary_insecure
         ):
             risks.append(
                 RiskAssessment(

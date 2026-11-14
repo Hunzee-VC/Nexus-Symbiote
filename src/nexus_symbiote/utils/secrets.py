@@ -23,7 +23,7 @@ _ASSIGNMENT = re.compile(
     r"(?i)((?:api[-_]?key|access[-_]?key|secret[-_]?key|private[-_]?key|account[-_]?key"
     r"|token|password|passwd|passphrase|pwd|secret|credentials?|sig)"
     r"(?:\d{1,4})?(?:[-_.][a-z0-9]{1,32}){0,4}[\"']?\s*+[:=]\s*+)"
-    r"(\"(?:[^\"\\\n]|\\.){0,256}\"|'(?:[^'\\\n]|\\.){0,256}'|[^\s,;]++)"
+    r"(\"(?:[^\"\\\n]|\\.){0,8192}\"|'(?:[^'\\\n]|\\.){0,8192}'|[^\s,;]++)"
 )
 _AUTH = re.compile(r"(?i)\b(Bearer|Basic|Token|Bot|ApiKey|Api-Key)(\s++)([A-Za-z0-9_+/=.~-]{6,}+)")
 # After an Authorization or Proxy-Authorization header name the scheme's value is a
@@ -95,8 +95,14 @@ def redact_url(value: str) -> str:
     """
     try:
         parts = urlsplit(value)
+        raw_host = parts.netloc.rpartition("@")[2]
         # WHATWG parsers, as browsers use, end the host at a backslash; urlsplit does not.
-        if not parts.scheme or not parts.hostname or "\\" in parts.netloc:
+        if (
+            not parts.scheme
+            or not parts.hostname
+            or "\\" in parts.netloc
+            or TOKEN_SHAPE.search(raw_host)
+        ):
             return "[redacted-url]"
         host = parts.hostname
         if ":" in host:
@@ -271,6 +277,32 @@ def redact_text(
     return TOKEN_SHAPE.sub(REDACTED, value)
 
 
+_JWK_PRIVATE_FIELDS = frozenset({"d", "p", "q", "dp", "dq", "qi", "oth", "k", "priv"})
+_SECRET_METADATA_KEYS = frozenset(
+    {
+        "client_secret",
+        "clientsecret",
+        "api_key",
+        "apikey",
+        "access_token",
+        "accesstoken",
+        "refresh_token",
+        "refreshtoken",
+        "private_key",
+        "privatekey",
+        "secret_key",
+        "secretkey",
+        "password",
+        "passwd",
+        "passphrase",
+        "bearer_token",
+        "auth_token",
+        "session_token",
+        "connection_string",
+    }
+)
+
+
 def redact_metadata(value: Any, secrets: Iterable[str] | SecretScrubber = ()) -> Any:
     """Redact textual metadata while retaining its JSON structure."""
     return _redact_metadata(value, _scrubber(secrets))
@@ -280,10 +312,27 @@ def _redact_metadata(value: Any, scrubber: SecretScrubber) -> Any:
     if isinstance(value, str):
         return redact_text(value, scrubber)
     if isinstance(value, dict):
-        return {
-            redact_text(str(key), scrubber): _redact_metadata(item, scrubber)
-            for key, item in value.items()
-        }
+        is_jwk = isinstance(value.get("kty"), str)
+        out: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            redacted_key = redact_text(key_text, scrubber)
+            normalized_key = key_text.lower().replace("-", "_")
+            jwk_secret = (
+                is_jwk and key_text in _JWK_PRIVATE_FIELDS and item not in (None, "", [], {})
+            )
+            named_secret = (
+                isinstance(item, str)
+                and normalized_key in _SECRET_METADATA_KEYS
+                and len(item) >= MIN_SECRET_LENGTH
+                and item != REDACTED
+                and not _PLAIN_URL.fullmatch(item)
+            )
+            if jwk_secret or named_secret:
+                out[redacted_key] = REDACTED
+            else:
+                out[redacted_key] = _redact_metadata(item, scrubber)
+        return out
     if isinstance(value, list):
         return [_redact_metadata(item, scrubber) for item in value]
     return value

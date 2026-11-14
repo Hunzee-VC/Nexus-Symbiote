@@ -472,6 +472,7 @@ def gguf_metadata(read: Read, budget: InspectionBudget | None = None) -> GGUFMet
 # joined from two string literals is matched by either half.
 _TEMPLATE_ESCAPE = re.compile(
     r"\.\s*__[A-Za-z0-9_]+__|['\"]__[A-Za-z0-9_]+__['\"]|(?<![A-Za-z0-9_])attr\s*\("
+    r"|\|\s*attr\b|\.\s*_(?:globals|builtins|subclasses|init|code|func|self|module|loader|spec)\b"
     r"|['\"]__[A-Za-z0-9_]*['\"]\s*[~+]|[~+]\s*['\"][A-Za-z0-9_]*__['\"]"
 )
 # The escapes Jinja decodes in a string literal, with an escaped backslash first so

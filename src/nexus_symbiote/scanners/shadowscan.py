@@ -704,14 +704,26 @@ class ShadowScanImporter(Scanner):
         )
         ids: set[str] = set()
         mapped_refs: dict[str, str] = {}
-        entries = []
+        entries: list[Any] = []
+        pending_lists: list[tuple[Any, int]] = []
         for key in ("components", "services"):
             items = data.get(key, [])
             if not isinstance(items, list):
                 raise ValueError("invalid CycloneDX component list")
-            entries.extend(items)
-        if len(entries) > MAX_FINDINGS:
-            raise ValueError("too many CycloneDX entries")
+            pending_lists.append((items, 0))
+        while pending_lists:
+            current_items, depth = pending_lists.pop(0)
+            if depth > 16:
+                raise ValueError("CycloneDX component nesting limit exceeded")
+            for item in current_items:
+                entries.append(item)
+                if len(entries) > MAX_FINDINGS:
+                    raise ValueError("too many CycloneDX entries")
+                if isinstance(item, dict) and "components" in item:
+                    nested_items = item["components"]
+                    if not isinstance(nested_items, list):
+                        raise ValueError("invalid CycloneDX component list")
+                    pending_lists.append((nested_items, depth + 1))
         for index, entry in enumerate(entries):
             if (
                 not isinstance(entry, dict)

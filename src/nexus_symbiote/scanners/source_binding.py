@@ -46,7 +46,10 @@ def value_binding(profile: str, declaration: dict[str, Any]) -> dict[str, str]:
             f"{SOURCE_BINDING_KEY_ENV} binding needs RFC 8785 JSON values (quote YAML "
             "dates; avoid lone surrogates and integers beyond 2**53)"
         ) from exc
-    material = key.encode()
+    try:
+        material = key.encode("utf-8")
+    except UnicodeError:
+        raise BindingError(f"{SOURCE_BINDING_KEY_ENV} must be valid UTF-8 text") from None
     key_id = hmac.new(material, b"nexus-symbiote/source-binding-key-id", "sha256").hexdigest()
     return {
         "static_value_binding": "hmac-sha256:"
@@ -71,6 +74,8 @@ def authority(url: str) -> str:
 
 def origin(url: str) -> str:
     """Export scheme, host and port; a URL without a scheme keeps "//host:port"."""
+    from nexus_symbiote.utils.secrets import TOKEN_SHAPE
+
     url = authority(url)
     if odd_host(url):
         return "[redacted]"
@@ -78,10 +83,11 @@ def origin(url: str) -> str:
         return sanitized_origin(url)
     try:
         parsed = urlsplit(url)
+        raw_host = parsed.netloc.rpartition("@")[2]
         host, port = parsed.hostname, parsed.port
     except ValueError:
         return "[redacted]"
-    if not host:
+    if not host or TOKEN_SHAPE.search(raw_host):
         return "[redacted]"
     host = f"[{host}]" if ":" in host else host
     return f"//{host}" + (f":{port}" if port is not None else "")
