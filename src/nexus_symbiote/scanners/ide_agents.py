@@ -301,12 +301,19 @@ def _projection(value: Any, depth: int = 0, *, env: bool = False, unkeyed: bool 
     if isinstance(value, dict):
         if env:
             return sorted(_projected_text(str(key), unkeyed=unkeyed) for key in value)
-        return {
-            _projected_text(str(key), unkeyed=unkeyed): _projection(
-                item, depth + 1, env=key == "env", unkeyed=unkeyed
-            )
-            for key, item in value.items()
-        }
+        projected: dict[str, Any] = {}
+        merged: dict[str, list[Any]] = {}
+        for key, item in value.items():
+            text = _projected_text(str(key), unkeyed=unkeyed)
+            entry = _projection(item, depth + 1, env=key == "env", unkeyed=unkeyed)
+            merged.setdefault(text, []).append(entry)
+            projected[text] = entry
+        # Keys the redaction makes equal keep every value, in canonical order, so no
+        # value the redaction leaves in place drops out of the digest.
+        for text, entries in merged.items():
+            if len(entries) > 1:
+                projected[text] = sorted(entries, key=canonical_json)
+        return projected
     if isinstance(value, list):
         return [_projection(item, depth + 1, unkeyed=unkeyed) for item in value]
     if isinstance(value, str):

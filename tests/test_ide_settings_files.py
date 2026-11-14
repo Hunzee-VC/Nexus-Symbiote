@@ -763,3 +763,12 @@ def test_a_short_binding_key_is_a_failure_and_binds_nothing(tmp_path, monkeypatc
         f".cursor/cli.json: {SOURCE_BINDING_KEY_ENV} must contain at least 32 characters"
     ]
     assert "static_value_binding" not in _record(result, "cursor").properties
+
+
+def test_keys_the_redaction_makes_equal_keep_every_value_in_the_digest(runner, tmp_path):
+    before = json.dumps({"profiles": {"token=abc": "safe", "token=def": "kept"}})
+    after = before.replace("safe", "changed")
+    assert _projection(json.loads(before)) != _projection(json.loads(after))
+    run = _drift(runner, tmp_path, ".cursor/cli.json", before, after, "ide_agents")
+    assert run.exit_code == 1, run.output
+    assert _high_settings_alert("cursor", run.output), run.output
