@@ -43,6 +43,35 @@ def test_explicit_operator_policy_outside_project_loads_without_trusting_bundle(
     assert load_signature_policies(policy, project) == loaded
 
 
+@pytest.mark.parametrize("marker", ["directory", "file"])
+def test_a_policy_in_the_repository_that_holds_the_project_is_refused(tmp_path, marker):
+    # A pull request can edit any file of the repository, not only the scanned directory.
+    repository = tmp_path / "repository"
+    project = repository / "services" / "agent"
+    project.mkdir(parents=True)
+    (project / "model.bin").write_bytes(b"artifact")
+    if marker == "directory":
+        (repository / ".git").mkdir()
+    else:
+        # A worktree or submodule checkout holds a .git file.
+        (repository / ".git").write_text("gitdir: elsewhere\n")
+    record = {"kind": "digest-pin", "artifact_path": "model.bin", "expected_sha256": "0" * 64}
+    document = json.dumps({"version": 2, "artifacts": [record]})
+    inside = repository / "ci" / "signers.json"
+    inside.parent.mkdir()
+    inside.write_text(document)
+    with pytest.raises(SignaturePolicyError, match="outside the repository that holds it"):
+        load_signature_policies(inside, project)
+    # Another name for the repository directory does not hide it.
+    alias = tmp_path / "alias"
+    alias.symlink_to(repository, target_is_directory=True)
+    with pytest.raises(SignaturePolicyError):
+        load_signature_policies(alias / "ci" / "signers.json", project)
+    outside = tmp_path / "signers.json"
+    outside.write_text(document)
+    assert len(load_signature_policies(outside, project).digest_pins) == 1
+
+
 @pytest.mark.parametrize(
     "change", ["extra_record", "missing", "blank", "wrong_type", "extra_root", "empty", "version"]
 )
