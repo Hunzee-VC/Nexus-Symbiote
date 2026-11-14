@@ -50,10 +50,12 @@ as described below.
    high/critical and dependency-advisory acceptance, and, once a second
    authorized reviewer exists, reviewed changes, following the configurations in
    [repository controls](repository-controls.md). The workflow cannot create these
-   controls itself. Apply the release-tag ruleset described there before creating the
+   controls itself. Apply both release-tag rulesets described there before creating the
    first `v*` tag: the README's verified-release install trusts the tag to stay on the
    published commit. Turn off administrator bypass on both environments. The
-   preflight of every `testpypi` and `pypi` run checks the ruleset and the
+   creation-only rule allows repository administrators to create tags; the separate
+   update/deletion rule allows nobody to move or delete them. The preflight of every
+   `testpypi` and `pypi` run checks the immutable-tag ruleset and the
    environment and refuses to publish while either is missing. It cannot see who may
    bypass the ruleset, which GitHub shows only to administrators; the administrator
    check in [repository controls](repository-controls.md#apply-the-outstanding-controls)
@@ -89,15 +91,39 @@ as described below.
    `--extra-index-url`):
 
    ```bash
-   python3 -m venv /tmp/rehearsal && . /tmp/rehearsal/bin/activate
-   pip download --no-deps --index-url https://test.pypi.org/simple/ \
-     nexus-symbiote==<version> -d /tmp/rehearsal-dist
-   cd /tmp/rehearsal-dist
-   sed 's#  dist/#  #' /path/to/run/SHA256SUMS | grep -F "$(ls ./*.whl | xargs -n1 basename)" \
-     | sha256sum --strict -c -
-   pip install /tmp/rehearsal-dist/*.whl
-   nexus-symbiote --version
+   (
+     set -euo pipefail
+     version='REPLACE_WITH_VERSION'
+     run_checksums='/path/to/run/SHA256SUMS'
+     [[ "$version" =~ ^[0-9][0-9A-Za-z.!+_-]*$ ]]
+     rehearsal="$(mktemp -d)"
+     wheel_dir="$(mktemp -d)"
+     python3 -m venv "$rehearsal"
+     wheel="nexus_symbiote-${version}-py3-none-any.whl"
+     "$rehearsal/bin/python" -m pip download --no-deps --only-binary=:all: \
+       --index-url https://test.pypi.org/simple/ "nexus-symbiote==$version" -d "$wheel_dir"
+     shopt -s nullglob dotglob
+     downloaded=("$wheel_dir"/*)
+     test "${#downloaded[@]}" -eq 1
+     test "${downloaded[0]}" = "$wheel_dir/$wheel"
+     test -f "$wheel_dir/$wheel"
+     test ! -L "$wheel_dir/$wheel"
+     expected_sha="$(awk -v file="dist/$wheel" \
+       '$2 == file { n++; print $1 } END { if (n != 1) exit 1 }' "$run_checksums")"
+     [[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]]
+     (cd "$wheel_dir" && printf '%s  %s\n' "$expected_sha" "$wheel" | sha256sum --strict -c -)
+     "$rehearsal/bin/python" -m pip install --index-url https://pypi.org/simple/ "$wheel_dir/$wheel"
+     "$rehearsal/bin/nexus-symbiote" --version
+   )
    ```
+
+   Replace the version and checksum-file placeholders, using the independently
+   reviewed run's manifest, and paste the whole block. It requires exactly one
+   downloaded wheel and one exact manifest entry, stops on every failed step,
+   and installs only that verified path. The installer selects PyPI for dependencies;
+   use pip configuration that does not add extra indexes. The two fresh temporary directories remain available for inspection;
+   remove them after the rehearsal. The checksum check does not protect against
+   another process running as your account replacing the wheel after verification.
 
    Confirm the PEP 740 provenance the index itself publishes: the file page must
    show a verified provenance entry naming this repository and `release.yml`.
@@ -113,8 +139,8 @@ as described below.
    successor: it sorts before `0.1.0` and would not satisfy `nexus-symbiote==0.1.0`.
    Bump to the next patch version, rehearse it, and publish that version.
 4. Tag the release commit before publishing, so that the README's verified install
-   works from the moment the package appears. Create a signed, annotated tag and push
-   it:
+   works from the moment the package appears. A repository administrator creates a
+   signed, annotated tag and pushes it using their own authenticated identity:
 
    ```bash
    git tag -s v<version> -m "nexus-symbiote <version>" <release commit SHA>

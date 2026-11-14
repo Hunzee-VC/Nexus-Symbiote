@@ -55,6 +55,10 @@ REASONS: dict[str, str] = {
     ),
     "launcher-digest-mismatch": "The launcher bytes differ from the SHA-256 pin in the policy.",
     "launcher-start-failed": "The pinned launcher could not be started.",
+    "isolation-unavailable": (
+        "Kernel PID containment is unavailable; the pinned launcher was not executed. "
+        "Use an independently isolated worker or explicitly accept --no-isolation."
+    ),
     "deadline": (
         "The pinned server's bounded MCP exchange and the checks of its descriptors did "
         "not finish before the deadline."
@@ -509,7 +513,20 @@ def record_candidate(bom: AIBOM, report: LiveVerifyReport) -> None:
             tool.redacted_definition_hash = (
                 display_hash if display_hash != finding.definition_hash else None
             )
-            for stale in ("previous_definition_hash", "displayed_descriptor_differs"):
+            # Members the server no longer serves must not stay displayed: the digest
+            # check binds every displayed extension, under either property spelling.
+            for stale in (
+                "previous_definition_hash",
+                "displayed_descriptor_differs",
+                "mcp_title",
+                "title",
+                "mcp_output_schema",
+                "output_schema",
+                "mcp_meta",
+                "meta",
+                "observed_descriptor_hash",
+                "descriptor_fields_outside_profile",
+            ):
                 tool.properties.pop(stale, None)
             tool.properties.update(
                 observed_tool_properties(
@@ -538,6 +555,9 @@ def record_candidate(bom: AIBOM, report: LiveVerifyReport) -> None:
                 and component.mcp_server_ref == result.server_ref
             ]
             server.tool_count = len(server.tool_refs)
+            # Instructions, prompts and templates the server stopped serving go too.
+            for stale in _OBSERVED_SERVER_PROPERTIES:
+                server.properties.pop(stale, None)
             server.properties.update(
                 observed_server_properties(
                     result.declaration or {}, result.declaration_hash, result.identity_hash
@@ -578,6 +598,24 @@ def observed_tool_properties(
     return shown
 
 
+_SHOWN_DECLARATION_KEYS = (
+    "protocol_version",
+    "server_info",
+    "capabilities",
+    "instructions",
+    "instructions_hash",
+    "prompts",
+    "resource_templates",
+)
+_OBSERVED_SERVER_PROPERTIES = (
+    "observed_declaration_hash",
+    "observed_declaration_hash_profile",
+    "observed_identity_hash",
+    "observed_identity_hash_profile",
+    *(f"observed_{key}" for key in _SHOWN_DECLARATION_KEYS),
+)
+
+
 def observed_server_properties(
     shown: dict[str, Any], digest: str | None, identity: str | None
 ) -> dict[str, Any]:
@@ -588,15 +626,7 @@ def observed_server_properties(
         "observed_identity_hash": identity,
         "observed_identity_hash_profile": IDENTITY_PROFILE,
     }
-    for key in (
-        "protocol_version",
-        "server_info",
-        "capabilities",
-        "instructions",
-        "instructions_hash",
-        "prompts",
-        "resource_templates",
-    ):
+    for key in _SHOWN_DECLARATION_KEYS:
         if key in shown:
             properties[f"observed_{key}"] = shown[key]
     return properties

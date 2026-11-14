@@ -465,11 +465,8 @@ def gguf_metadata(read: Read, budget: InspectionBudget | None = None) -> GGUFMet
 
 # Chat templates ----------------------------------------------------------------
 
-# Jinja sandbox escapes reach Python internals through dunder attributes: by name,
-# by a string that a subscript or an attribute argument looks up, or through the
-# attr filter. Ordinary chat templates do none of these. Jinja skips Unicode
-# whitespace between tokens, so the pattern matches text, not bytes. A dunder name
-# joined from two string literals is matched by either half.
+# These patterns can indicate an attempt to access Python internals. A match is
+# not evidence that a template escapes the renderer's sandbox.
 _TEMPLATE_ESCAPE = re.compile(
     r"\.\s*__[A-Za-z0-9_]+__|['\"]__[A-Za-z0-9_]+__['\"]|(?<![A-Za-z0-9_])attr\s*\("
     r"|['\"]__[A-Za-z0-9_]*['\"]\s*[~+]|[~+]\s*['\"][A-Za-z0-9_]*__['\"]"
@@ -492,15 +489,100 @@ def _unescaped(match: re.Match[str]) -> str:
         return match.group()
 
 
+def _joined_literal_marker(text: str) -> bool:
+    """Find dunder names made by joining constant Jinja string literals.
+
+    This is deliberately a bounded lexical heuristic, not a Jinja evaluator.
+    Only adjacent quoted strings joined by ``~`` or ``+`` (or juxtaposed as
+    Jinja permits) are folded. Other expressions and variables are not resolved.
+    Work is linear in the input, including a long or unterminated literal, and
+    the matcher keeps constant auxiliary state even for a long literal chain.
+    """
+    position = 0
+    size = len(text)
+    inside = False
+    while position < size:
+        if not inside:
+            if text.startswith(("{{", "{%"), position):
+                inside = True
+                position += 2
+            elif text.startswith("{#", position):
+                end = text.find("#}", position + 2)
+                position = size if end < 0 else end + 2
+            else:
+                position += 1
+            continue
+        if text.startswith(("}}", "%}"), position):
+            inside = False
+            position += 2
+            continue
+        if text[position] not in "\"'":
+            position += 1
+            continue
+
+        pieces = 0
+        # State for the substring pattern __[A-Za-z0-9_]+__: zero, one
+        # underscore, two underscores, body, one possible closing underscore,
+        # or a match. This avoids collecting every decoded string in the chain.
+        state = 0
+        while position < size and text[position] in "\"'":
+            quote = text[position]
+            pieces += 1
+            position += 1
+            while position < size and text[position] != quote:
+                if text[position] == "\\":
+                    escape = _STRING_ESCAPE.match(text, position)
+                    if escape is not None:
+                        decoded = _unescaped(escape)
+                        position = escape.end()
+                    else:
+                        decoded = text[position : position + 2]
+                        position += 2
+                else:
+                    decoded = text[position]
+                    position += 1
+                for char in decoded:
+                    if state == 5:
+                        continue
+                    if state == 0:
+                        state = 1 if char == "_" else 0
+                    elif state == 1:
+                        state = 2 if char == "_" else 0
+                    elif state == 2:
+                        state = 3 if char.isascii() and (char.isalnum() or char == "_") else 0
+                    elif state == 3:
+                        state = 4 if char == "_" else 3 if char.isascii() and char.isalnum() else 0
+                    else:
+                        state = 5 if char == "_" else 3 if char.isascii() and char.isalnum() else 0
+            if position >= size:
+                return False
+            position += 1
+            after_string = position
+            while position < size and text[position].isspace():
+                position += 1
+            if position < size and text[position] in "~+":
+                position += 1
+                while position < size and text[position].isspace():
+                    position += 1
+            if position >= size or text[position] not in "\"'":
+                # Let the outer loop process the operator or expression boundary.
+                position = after_string
+                break
+        if pieces > 1 and state == 5:
+            return True
+    return False
+
+
 def template_escape_markers(template: bytes) -> bool:
-    """Whether a template carries the attribute access that Jinja sandbox escapes use.
+    """Whether a template contains a potential Python-internals access pattern.
 
     The template is matched as Jinja reads it: as text, with string-literal escapes
     decoded, so ``\\x5f`` spells an underscore. Escapes outside a literal are decoded
     too, and the text is also matched as written, so decoding can only add a match.
     """
     text = template.decode("utf-8", "replace")
-    return any(
-        _TEMPLATE_ESCAPE.search(form) is not None
-        for form in (text, _STRING_ESCAPE.sub(_unescaped, text))
-    )
+    if _TEMPLATE_ESCAPE.search(text) or _TEMPLATE_ESCAPE.search(
+        _STRING_ESCAPE.sub(_unescaped, text)
+    ):
+        return True
+    return _joined_literal_marker(text)

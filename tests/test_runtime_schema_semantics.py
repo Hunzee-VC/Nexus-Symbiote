@@ -36,9 +36,9 @@ def string_schema(pattern):
         (r"^\d+$", "٣٤", "arguments-invalid"),
         (r"^\w+$", "café", "arguments-invalid"),
         # "." excludes all ECMA-262 line terminators, including U+2028.
-        ("^.+$", "a b", "arguments-invalid"),
+        ("^.+$", "a\u2028b", "arguments-invalid"),
         # \s includes NO-BREAK SPACE in ECMA-262, so \S must not match it.
-        (r"^\S+$", "a b", "arguments-invalid"),
+        (r"^\S+$", "a\xa0b", "arguments-invalid"),
         (r"^[\d-]+$", "12-34", "valid"),
         (r"^[\d-]+$", "١-2", "arguments-invalid"),
         (r"^(?<year>\d{4})-\k<year>$", "2026-2026", "valid"),

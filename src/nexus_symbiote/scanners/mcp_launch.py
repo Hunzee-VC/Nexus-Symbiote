@@ -610,6 +610,19 @@ _NPM_EXEC = _table(
     " --loglevel -w --workspace --prefix -C --tag --before --script-shell --shell",
     value_patterns=(_SCOPED_REGISTRY,),
 )
+# npx (npm 7 and later, bin/npx-cli.js) removes -n, --node-arg and --npm together with the
+# word that follows each, where npm exec reads -n as --no. Read as a flag, "-n decoy@1.0.0
+# other" would record the decoy as the package while npx runs the other.
+_NPX = _table(
+    "-y --yes --no --no-yes -q --quiet -s --silent --ignore-existing --prefer-online"
+    " --prefer-offline --offline --no-install --legacy-peer-deps --foreground-scripts"
+    " --include-workspace-root --workspaces -ws --no-update-notifier --no-audit --no-fund"
+    " --verbose -d -dd -ddd",
+    "-p --package -c --call --registry --cache --userconfig --globalconfig --node-options"
+    " --loglevel -w --workspace --prefix -C --tag --before --script-shell --shell"
+    " -n --node-arg --npm",
+    value_patterns=(_SCOPED_REGISTRY,),
+)
 _PNPM_DLX = _table(
     "-s --silent --reporter-hide-prefix",
     "--package --allow-build --reporter --registry --store-dir --cache-dir",
@@ -2256,7 +2269,7 @@ def _package_runner(
 
 def _npx(name: str, rest: list[str], launch: Launch) -> None:
     launch.launcher, launch.family = "npx", "npm"
-    _package_runner(rest, launch, _NPM_EXEC, {"-p", "--package"})
+    _package_runner(rest, launch, _NPX, {"-p", "--package"})
 
 
 def _subcommand(
@@ -2612,6 +2625,11 @@ def _host_source(spec: str, *, mount: bool) -> str | None:
 
 
 def _container_context(options: list[tuple[str, str | None]], launch: Launch) -> None:
+    # Docker forwards both the engine socket and client credentials; the last flag wins.
+    api_socket = dict(options).get("--use-api-socket", "false")
+    if api_socket is None or api_socket.lower() in {"true", "1"}:
+        launch.mark("runtime_socket_mount")
+        launch.mark("runtime_credentials_forwarded")
     for option, value in options:
         text = (value or "").strip().lower()
         if option == "--privileged" and text in {"", "true", "1"}:
@@ -2743,13 +2761,23 @@ def _deno(name: str, rest: list[str], launch: Launch) -> None:
         launch.fail("unrecognised deno run option")
         return
     options, position = scanned
+    if position and rest[position - 1] == "--lock":
+        # Deno may take the next word as the lock file, which would make the word after
+        # it the script: the recorded package could be a decoy.
+        launch.fail("deno --lock is followed by a word that may be its file; write --lock=FILE")
+        return
     for option, value in options:
-        if option in {"-c", "--config"}:
+        if option in {"-c", "--config", "--no-config"}:
+            # The fixed root resolver view does not resolve an explicitly selected
+            # file's precedence or dependencies; a keyed binding cannot cover it.
+            launch.fail("explicit Deno configuration selection is not collected")
             # Deno reads .npmrc next to its configuration file.
             directory = re.split(r"[\\/]", value or "")[:-1]
             launch.relocated = launch.relocated or _moves("/".join(directory))
         elif option in _DENO_SOURCES and value is not None:
             launch.sources.append((option, value))
+            if option == "--import-map":
+                launch.fail("explicit Deno import-map selection is not collected")
         elif option in {"--preload", "--require"}:
             launch.mark("preload_module")
     script = rest[position]
@@ -2838,6 +2866,8 @@ _RUNNERS: dict[str, Callable[[str, list[str], Launch], None]] = {
     "pnpm": _pnpm,
     "pnpx": _pnpm,
     "yarn": _yarn,
+    # Yarn 1 and corepack install the same program under this name.
+    "yarnpkg": _yarn,
     "bunx": _bun,
     "bun": _bun,
     "uvx": _uvx,
@@ -3028,6 +3058,10 @@ _STARTS: dict[str, _Starts] = {
         (_PNPM_FETCHES | _PNPM_NESTED).__contains__,
     ),
     "yarn": _Starts(
+        _table("-s --silent --verbose --offline --prefer-offline", "--cwd"),
+        (_YARN_FETCHES | _YARN_NESTED).__contains__,
+    ),
+    "yarnpkg": _Starts(
         _table("-s --silent --verbose --offline --prefer-offline", "--cwd"),
         (_YARN_FETCHES | _YARN_NESTED).__contains__,
     ),

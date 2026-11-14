@@ -22,6 +22,7 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.core.hashing import hash_canonical
 from nexus_symbiote.core.models import IDEAgentComponent
 from nexus_symbiote.scanners.ide_agents import (
+    GEMINI_SETTINGS,
     IDE_AGENT_CONFIGS,
     SETTINGS_VALUE_BINDING_PROFILE,
     IDEAgentScanner,
@@ -148,6 +149,28 @@ def _drift(
         outputs.append(tmp_path / f"{index}.json")
         _scan(runner, project, outputs[-1], *scanners)
     return runner.invoke(main, ["diff", *map(str, outputs), "--fail-on-alert"])
+
+
+UNBOUND_ALERT = (
+    "Values are unbound in one snapshot without the binding key; a change to them is "
+    "undetectable and no value is recorded."
+)
+
+
+def _assert_only_unbound(ide_type: str, run) -> None:
+    """Without the key the digest stays the same, and the gate still fails on the
+    medium alert that the record's values are unbound."""
+    assert run.exit_code == 1, run.output
+    alerts = [
+        line.strip()
+        for line in run.output.splitlines()
+        if line.lstrip().startswith("[") and not line.lstrip().startswith("[NOTE]")
+    ]
+    assert alerts == [
+        f"[MEDIUM] Medium change in '{ide_type}': {UNBOUND_ALERT} Set "
+        "NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections."
+    ], run.output
+    assert not _high_settings_alert(ide_type, run.output), run.output
 
 
 def _high_settings_alert(ide_type: str, output: str) -> bool:
@@ -357,8 +380,7 @@ def test_a_change_only_to_a_withheld_value_alerts_only_with_the_key(
         expected = "[HIGH] High change in 'codex': properties.static_value_binding changed."
         assert expected in run.output
     else:
-        assert run.exit_code == 0, run.output
-        assert "No changes detected" in run.output
+        _assert_only_unbound("codex", run)
     for path in (tmp_path / "0.json", tmp_path / "1.json"):
         text = path.read_text(encoding="utf-8")
         assert "cdn.example" not in text and "TOKEN" not in text and "LOG_LEVEL" not in text
@@ -399,8 +421,7 @@ def test_a_redacted_value_beside_an_operator_is_still_withheld(runner, tmp_path,
     assert GLUED_NOTIFY.count(old) == 1, change
     after = GLUED_NOTIFY.replace(old, new)
     run = _drift(runner, tmp_path, ".codex/config.toml", GLUED_NOTIFY, after, "ide_agents")
-    assert run.exit_code == 0, run.output
-    assert "No changes detected" in run.output
+    _assert_only_unbound("codex", run)
 
 
 LISTED_WEBHOOKS = 'notify = ["notifier", "--webhooks=https://hooks.example.com/notify"]\n'
@@ -450,8 +471,7 @@ def test_a_path_change_on_the_same_hosts_is_still_withheld(runner, tmp_path, old
     before = LISTED_WEBHOOKS.replace("/notify", old)
     after = LISTED_WEBHOOKS.replace("/notify", new)
     run = _drift(runner, tmp_path, ".codex/config.toml", before, after, "ide_agents")
-    assert run.exit_code == 0, run.output
-    assert "No changes detected" in run.output
+    _assert_only_unbound("codex", run)
 
 
 def test_the_cut_parts_keep_their_hosts_apart():
@@ -767,3 +787,59 @@ def test_keys_the_redaction_makes_equal_keep_every_value_in_the_digest(runner, t
     run = _drift(runner, tmp_path, ".cursor/cli.json", before, after, "ide_agents")
     assert run.exit_code == 1, run.output
     assert _high_settings_alert("cursor", run.output), run.output
+
+
+INSTRUCTION_MARKERS = [
+    "CLAUDE.md",
+    ".claude/CLAUDE.md",
+    "CLAUDE.local.md",
+    "codex.md",
+    "CODEX.md",
+    ".codex/instructions.md",
+    ".cursorrules",
+    ".windsurfrules",
+    ".clinerules",
+    "GEMINI.md",
+    ".github/copilot-instructions.md",
+]
+
+
+def test_marker_existence_checks_spend_no_byte_budget(tmp_path):
+    # Eleven markers at the file limit exceed the 32 MiB collection budget when each
+    # existence check reads the file; the prompt collector reads them under its own.
+    project = tmp_path / "project"
+    for marker in INSTRUCTION_MARKERS:
+        _write(project, marker, b"#" * limits.DEFAULTS.file_bytes)
+    result = IDEAgentScanner().scan(project)
+    assert result.scan_failures == []
+    assert {c.ide_type for c in result.components} == {
+        "claude-code",
+        "codex",
+        "cursor",
+        "windsurf",
+        "cline",
+        "gemini",
+        "copilot",
+    }
+    assert set(INSTRUCTION_MARKERS) <= set(result.surfaces_scanned)
+
+
+def test_a_root_marker_spelled_otherwise_is_still_reported(tmp_path):
+    project = tmp_path / "project"
+    _write(project, "Claude.md", "# not the file a host reads\n")
+    result = IDEAgentScanner().scan(project)
+    assert result.components == []
+    assert result.scan_failures == [
+        "Claude.md: case variant of CLAUDE.md is the active file on case-insensitive file "
+        "systems and is not inventoried"
+    ]
+
+
+def test_a_settings_file_within_a_raised_file_limit_is_read_whole(tmp_path):
+    project = tmp_path / "project"
+    settings = json.dumps({"padding": "x" * (5 * 1024 * 1024), "mcpServers": {}})
+    _write(project, GEMINI_SETTINGS, settings)
+    with limits.applied(limits.resolve(["file-bytes=8MiB"], {})):
+        result = IDEAgentScanner().scan(project)
+    assert result.scan_failures == []
+    assert GEMINI_SETTINGS in _record(result, "gemini").properties["settings_hashes"]

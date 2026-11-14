@@ -115,7 +115,7 @@ def _check_trust_anchors(keys: tuple[Path, ...], inputs: tuple[Path, ...]) -> No
     multiple=True,
     required=True,
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
-    help="Ed25519 private key PEM that only its owner can read; repeat for each signer.",
+    help="Ed25519 private key PEM that you own and that gives group and others no permission; repeat for each signer.",
 )
 @click.option(
     "--purpose",
@@ -133,7 +133,7 @@ def _check_trust_anchors(keys: tuple[Path, ...], inputs: tuple[Path, ...]) -> No
     "--passphrase-file",
     type=click.Path(path_type=Path),
     help="Passphrase for encrypted private keys, on the first line of this file, "
-    "which only its owner may read.",
+    "which you own and which gives group and others no permission.",
 )
 @click.option(
     "--source-revision",

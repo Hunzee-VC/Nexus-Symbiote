@@ -31,7 +31,7 @@ jobs:
           python -m pip check
       - name: Run the signature-gate, discovery and confinement tests
         run: >-
-          python -m pytest -vv -rs
+          python -m pytest -vv -rs --strict-skips
           tests/test_action_signature_policy.py
           tests/test_discovery_signature_gate.py
           tests/test_confined_integrity.py

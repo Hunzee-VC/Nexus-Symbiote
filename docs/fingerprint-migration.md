@@ -24,11 +24,25 @@ a tool whose descriptor declares one of them gets a new fingerprint once, and
 its baseline needs one re-approval. Exported schemas omit literal defaults,
 examples, constants and enumeration values, which can contain credentials. When
 the displayed definition differs, `redacted_definition_hash` binds that view.
-The inventory displays only the name, description, input schema and
-annotations, so a tool that declares `title`, `outputSchema` or `_meta` always
-has a `redacted_definition_hash`, and `validate` reports its fingerprint as
-`unknown` (`descriptor_source_unavailable`) until source evidence corroborates
-it. The source fingerprint is an unkeyed digest of the original, so anyone
+Static MCP configuration inventories display the name, description, input
+schema and annotations; they omit `title`, `outputSchema` and `_meta`, so a
+static tool that declares any of these has a `redacted_definition_hash`.
+Current live observation inventories retain the safe extension values in
+`mcp_title`, `mcp_output_schema` and `mcp_meta`. They have a
+`redacted_definition_hash` only when their displayed descriptor differs from
+the original. `validate` reports either kind as `unknown`
+(`descriptor_source_unavailable`) until source evidence corroborates it.
+Every displayed extension participates in the digest check. If both property
+spellings are present (`mcp_title` and `title`, `mcp_output_schema` and
+`output_schema`, or `mcp_meta` and `meta`), they must have equivalent JSON
+values; a null value cannot hide a non-null alias. A historical
+observation with an extension-free display hash still passes this consistency
+check when its full displayed descriptor matches its original definition
+hash. If redaction prevents that match, recollect it; an extension-free hash
+cannot corroborate displayed extension values. The fingerprint profile and
+digests of unchanged descriptors stay the same.
+
+The source fingerprint is an unkeyed digest of the original, so anyone
 holding the BOM who knows the rest of a descriptor can confirm a guess of an
 omitted low-entropy literal or of scrubbed text; keep credentials out of tool
 descriptors and treat exported BOMs as sensitive. For a static MCP
@@ -72,6 +86,20 @@ conditional relationships remain in the native extension, and the
 `nexus-symbiote:dependency:relationship` property of a conditional edge carries
 `"conditional": true`. CycloneDX and SPDX recovery check the standard projection
 against the embedded document.
+
+## MCP resolver binding v3
+
+`nexus-symbiote/mcp-static-values/v3` retains the complete Deno import-name-to-target
+and scope associations in the private keyed preimage. Version 2 could keep the
+same binding when two import targets were swapped. Recollect and review keyed
+MCP baselines and candidates under v3; v2 records fail project reconciliation.
+Do not relabel an old digest or compare the profiles as if they authenticated the
+same preimage. The exported-structure profile remains `mcp-static-config/v3`.
+
+Explicit Deno `--config`/`-c`/`--no-config` and `--import-map` selection, referenced
+`importMap` files and unsupported import/scopes shapes now produce coverage gaps.
+Review and replace those launch forms or resolve them outside this collector;
+do not approve their partial inventories as trusted baselines.
 
 ## SARIF rule identifiers
 
@@ -124,11 +152,25 @@ those exports have no marker and still recover. Projection 2
 A document with an unknown marker, or one whose standard fields match a
 projection other than the one it declares, is rejected. Recovery returns the
 embedded inventory unchanged; re-export it to give standard-only consumers the
-projection 2 fields. Only projection 1 recovery accepts the undefined license
+current projection's fields. Only projection 1 recovery accepts the undefined license
 IRI. Recovery compares standard fields with the embedded document text, so
 fields that the native model gains in a later release do not make earlier
 exports unrecoverable. See [standard exports](standard-exports.md) for every
 field.
+
+SPDX projection 3 (`spdx-3.0.1/3`) neutralizes the native text in relationship
+comments: a tab becomes a space, a `##name[` CI log command is broken, and C0
+and C1 controls, line and paragraph separators, format, bidirectional and other
+default-ignorable characters and the noncharacters U+FFFE and U+FFFF become
+U+FFFD. The projection fixes this character set rather than following terminal
+output, whose set grows as new disguising characters are found, so later
+releases render and recover projection 3 comments alike. The embedded native
+conditions remain unchanged. Recovery continues to accept projection 2 with its
+original comment rendering, including ordinary multiline conditions; it does not
+silently reinterpret that marker as projection 3. To obtain the neutralized
+display, recover an older export and re-export it. Do not change its projection
+marker by hand. CycloneDX remains at projection 2, and neither native content
+digests nor tool fingerprints change.
 
 For historical CycloneDX exports that flattened all relationships into
 `dependsOn` and wrote no `conditional` flag, the Python API accepts
@@ -141,7 +183,7 @@ Re-export the recovered inventory to give standard consumers the corrected
 graph and flags.
 
 Exports written by builds before 0.1.0 can fail recovery, because their
-standard fields match neither projection.
+standard fields match none of the supported projections.
 Legacy mode, which only CycloneDX recovery has, does not help with:
 
 - a CycloneDX export whose `dependsOn` already lists only unconditional

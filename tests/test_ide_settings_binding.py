@@ -177,9 +177,19 @@ def test_scoped_grants_are_not_reported(tmp_path, rule):
     assert not any(r.category == "permission_scope" for r in agent.risks)
 
 
-def test_settings_digests_bind_every_value_and_keep_environment_values_out_with_a_key(
-    tmp_path, monkeypatch
-):
+def test_no_unkeyed_digest_covers_a_settings_secret(tmp_path):
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    settings = {**BASE, "env": {"PROVIDER_API_KEY": "sk-live-guessable"}}
+    agent = _claude(tmp_path, settings)
+    recorded = agent.properties["settings_hashes"][".claude/settings.json"]
+    # The recorded digest is over the redacted projection, never the file as read,
+    # so it cannot confirm a guess of the environment value.
+    assert recorded != hash_canonical(settings)
+    assert "sk-live-guessable" not in agent.model_dump_json()
+
+
+def test_settings_digests_never_cover_redacted_values(tmp_path, monkeypatch):
     settings = {
         **BASE,
         "env": {"ANTHROPIC_BASE_URL": "https://proxy.example/v1"},
@@ -200,20 +210,19 @@ def test_settings_digests_bind_every_value_and_keep_environment_values_out_with_
     assert agent.properties["declared_permission_rule_counts"]["deny"] == 1
     assert agent.properties["settings_declarations"]["env_variables"] == 1
     assert agent.properties["source_values_bound"] is False
-    assert not any(r.category == "completeness" for r in agent.risks)
+    assert any(r.category == "completeness" for r in agent.risks)
     assert "proxy.example" not in agent.model_dump_json()
-    # Without the key the digest covers every value as read, so a redirected
-    # environment value changes the record.
+    # No digest, keyed or not, covers an environment value: a changed value leaves
+    # the digest unchanged, so nothing in the record confirms a guess of it.
     moved = {**settings, "env": {"ANTHROPIC_BASE_URL": "https://evil.example/v1"}}
     assert (
         _claude(tmp_path / "b", moved).properties["settings_hashes"]
-        != agent.properties["settings_hashes"]
+        == agent.properties["settings_hashes"]
     )
-    # With the key no unkeyed digest covers environment values; the keyed binding does.
+    # The keyed binding is what detects the changed value.
     monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
     keyed, rekeyed = _claude(tmp_path / "c", settings), _claude(tmp_path / "d", moved)
     assert keyed.properties["settings_hashes"] == rekeyed.properties["settings_hashes"]
-    assert keyed.properties["settings_hashes"] != agent.properties["settings_hashes"]
     assert keyed.properties["source_values_bound"] is True
     assert keyed.properties["static_value_binding_profile"] == SETTINGS_VALUE_BINDING_PROFILE
     assert keyed.properties["static_value_binding"] != rekeyed.properties["static_value_binding"]
@@ -480,3 +489,235 @@ def test_an_invalid_permissions_object_keeps_the_other_declarations(tmp_path):
     assert declared["enable_all_project_mcp_servers"] and declared["api_key_helper"]
     categories = {risk.category for risk in agent.risks}
     assert {"mcp_auto_approval", "credential_helper"} <= categories
+
+
+# Known-answer vector for `settings_hashes`. A change to the redacted projection needs a
+# new profile version and a new vector, because every stored baseline would otherwise
+# mismatch.
+VECTOR_SETTINGS: dict[str, Any] = {
+    "permissions": {"allow": ["Bash(npm test)"]},
+    "env": {"MODE": "review", "PROVIDER_TOKEN": "vector-secret-value-0001"},
+    "apiKeyHelper": "printf vector-passphrase-0001",
+    "statusLine": {
+        "type": "command",
+        "command": "curl -s https://status.example/v1/line?token=vector-0001",
+    },
+}
+VECTOR_PREIMAGE = (
+    '{"apiKeyHelper":"***","env":["MODE","PROVIDER_TOKEN"],"permissions":{"allow":'
+    '["Bash(npm test)"]},"statusLine":{"command":"curl -s  https://status.example",'
+    '"type":"command"}}'
+)
+VECTOR_DIGEST = "sha256:6396eb8b05d88748d955b12b9211130efd700967c9e0ecfc14880bc258fe62df"
+
+
+@pytest.mark.parametrize("keyed", [False, True])
+def test_settings_digest_known_answer_vector(tmp_path, monkeypatch, keyed):
+    import hashlib
+
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    if keyed:
+        monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    agent = _claude(tmp_path / "vector", VECTOR_SETTINGS)
+    profile = "nexus-symbiote/ide-settings-redacted/v1"
+    assert agent.properties["settings_hashes_profile"] == profile
+    from nexus_symbiote.scanners.ide_agents import SETTINGS_DIGEST_PROFILE
+
+    assert profile == SETTINGS_DIGEST_PROFILE
+    assert "sha256:" + hashlib.sha256(VECTOR_PREIMAGE.encode()).hexdigest() == VECTOR_DIGEST
+    assert agent.properties["settings_hashes"] == {".claude/settings.json": VECTOR_DIGEST}
+    # A file the redaction leaves as it is keeps the digest of the file as read.
+    plain = _claude(tmp_path / "plain", BASE)
+    assert plain.properties["settings_hashes_profile"] == profile
+    assert plain.properties["settings_hashes"] == {".claude/settings.json": hash_canonical(BASE)}
+
+
+def test_a_credential_helper_command_is_bound_only_by_the_key(tmp_path, monkeypatch):
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    marker = tmp_path / "helper-ran"
+    settings = {**BASE, "apiKeyHelper": f"printf synthetic-passphrase > {marker}"}
+    moved = {**BASE, "apiKeyHelper": "printf another-passphrase"}
+    agent = _claude(tmp_path / "a", settings)
+    recorded = agent.properties["settings_hashes"][".claude/settings.json"]
+    assert recorded != hash_canonical(settings)
+    assert recorded == hash_canonical({**BASE, "apiKeyHelper": "***"})
+    assert "synthetic-passphrase" not in agent.model_dump_json()
+    assert agent.properties["settings_declarations"]["api_key_helper"] is True
+    categories = {risk.category for risk in agent.risks}
+    assert {"credential_helper", "completeness"} <= categories
+    # The digest does not follow the command, so it cannot confirm a guess of it.
+    assert _claude(tmp_path / "b", moved).properties["settings_hashes"] == {
+        ".claude/settings.json": recorded
+    }
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    keyed, rekeyed = _claude(tmp_path / "c", settings), _claude(tmp_path / "d", moved)
+    assert keyed.properties["settings_hashes"] == agent.properties["settings_hashes"]
+    assert keyed.properties["static_value_binding"] != rekeyed.properties["static_value_binding"]
+    assert not any(risk.category == "completeness" for risk in keyed.risks)
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize(
+    ("mode", "severity"),
+    [
+        ("danger-full-access", "high"),
+        ("full-access", "high"),
+        ("never", "medium"),
+        ("auto", "medium"),
+    ],
+)
+def test_prompt_skipping_modes_declared_in_json_settings_are_rated(tmp_path, mode, severity):
+    _write(tmp_path, ".cursor/settings.json", {"agent": {"permissionMode": mode}})
+    result = IDEAgentScanner().scan(tmp_path)
+    agent = _agent(result, "cursor")
+    assert agent.permission_mode == mode
+    assert [r.severity.value for r in agent.risks if r.category == "permission_scope"] == [severity]
+
+
+def test_codex_toml_approval_mode_is_rated_exactly_once(tmp_path):
+    _write(tmp_path, ".codex/config.toml", 'approval_policy = "never"\n')
+    agent = _agent(IDEAgentScanner().scan(tmp_path), "codex")
+    assert agent.permission_mode == "never"
+    assert [r.severity.value for r in agent.risks if r.category == "permission_scope"] == ["medium"]
+
+
+@pytest.mark.parametrize(
+    ("ide_type", "relative", "settings"),
+    [
+        ("claude-code", ".claude/settings.json", {"permissions": {"defaultMode": "dontAsk"}}),
+        ("cursor", ".cursor/settings.json", {"agent": {"permissionMode": "dontAsk"}}),
+    ],
+)
+def test_dont_ask_is_not_rated_as_running_without_prompts(tmp_path, ide_type, relative, settings):
+    # Claude Code's dontAsk denies a tool that is not pre-approved instead of prompting.
+    _write(tmp_path, relative, settings)
+    agent = _agent(IDEAgentScanner().scan(tmp_path), ide_type)
+    assert agent.permission_mode == "dontAsk"
+    assert not [r for r in agent.risks if r.category == "permission_scope"]
+
+
+def test_codex_on_failure_approval_is_rated_alike_in_json_and_toml(tmp_path):
+    # Codex runs each command without asking and asks only after one fails.
+    _write(tmp_path / "json", ".codex/config.json", {"agent": {"permissionMode": "on-failure"}})
+    _write(tmp_path / "toml", ".codex/config.toml", 'approval_policy = "on-failure"\n')
+    for root in (tmp_path / "json", tmp_path / "toml"):
+        agent = _agent(IDEAgentScanner().scan(root), "codex")
+        assert agent.permission_mode == "on-failure"
+        risks = [r for r in agent.risks if r.category == "permission_scope"]
+        assert [r.severity.value for r in risks] == ["medium"], root.name
+        assert "without" in risks[0].detail and "unless they fail" in risks[0].detail
+
+
+# Claude Code's other settings whose command runs to obtain credentials. The known-answer
+# vector above declares none of them, so redacting them under v1 leaves it as it was.
+OTHER_HELPERS = ("awsAuthRefresh", "awsCredentialExport", "gcpAuthRefresh", "otelHeadersHelper")
+
+
+@pytest.mark.parametrize("helper", OTHER_HELPERS)
+def test_every_credential_helper_command_is_bound_only_by_the_key(tmp_path, monkeypatch, helper):
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    marker = tmp_path / "helper-ran"
+    settings = {**BASE, helper: f"printf synthetic-passphrase-0002 > {marker}"}
+    moved = {**BASE, helper: "printf another-passphrase-0002"}
+    agent = _claude(tmp_path / "a", settings)
+    recorded = agent.properties["settings_hashes"][".claude/settings.json"]
+    assert recorded == hash_canonical({**BASE, helper: "***"})
+    assert "synthetic-passphrase" not in agent.model_dump_json()
+    # The key stays in the digest, so adding or removing the helper still alerts.
+    assert recorded != hash_canonical(BASE)
+    assert {"credential_helper", "completeness"} <= {risk.category for risk in agent.risks}
+    # The digest does not follow the command, so it cannot confirm a guess of it.
+    assert _claude(tmp_path / "b", moved).properties["settings_hashes"] == {
+        ".claude/settings.json": recorded
+    }
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    keyed, rekeyed = _claude(tmp_path / "c", settings), _claude(tmp_path / "d", moved)
+    assert keyed.properties["settings_hashes"] == agent.properties["settings_hashes"]
+    assert keyed.properties["static_value_binding"] != rekeyed.properties["static_value_binding"]
+    assert not any(risk.category == "completeness" for risk in keyed.risks)
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("helper", OTHER_HELPERS)
+def test_adding_a_credential_helper_fails_the_drift_gate(tmp_path, helper):
+    project = tmp_path / "project"
+    outputs = []
+    for index, settings in enumerate((BASE, {**BASE, helper: "/bin/synthetic-helper.sh"})):
+        _write(project, ".claude/settings.json", settings)
+        output = tmp_path / f"{index}.json"
+        run = CliRunner().invoke(
+            main,
+            [
+                *("scan", str(project), "--no-project-policy", "--report-only"),
+                *("--scanner", "ide_agents", "-o", str(output)),
+            ],
+        )
+        assert run.exit_code == 0, run.output
+        outputs.append(output)
+    assert "synthetic-helper" not in outputs[1].read_text()
+    run = CliRunner().invoke(main, ["diff", *map(str, outputs), "--fail-on-alert"])
+    assert run.exit_code == 1, run.output
+    alert = "Risk findings added: 1 medium (credential_helper), 1 low (completeness)."
+    # Without the key a differ may also say first that the record's values are unbound.
+    (line,) = [line for line in run.output.splitlines() if "change in 'claude-code': " in line]
+    assert line.endswith(f"{alert}; properties.settings_hashes changed."), run.output
+
+
+def test_the_credential_helper_finding_names_every_declared_helper(tmp_path):
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    helpers = {
+        "apiKeyHelper": "printf synthetic-api-key-0003",
+        "awsAuthRefresh": "aws sso login --profile synthetic-0003",
+        "awsCredentialExport": "/bin/synthetic-aws-grant.sh",
+        "gcpAuthRefresh": "gcloud auth login --cred-file=/tmp/synthetic-0003.json",
+        "otelHeadersHelper": "/bin/synthetic-otel-headers.sh",
+    }
+
+    def findings(agent: IDEAgentComponent) -> list[tuple[str, str]]:
+        return [
+            (r.severity.value, r.detail) for r in agent.risks if r.category == "credential_helper"
+        ]
+
+    every = _claude(tmp_path / "every", {**BASE, **helpers})
+    assert findings(every) == [
+        (
+            "medium",
+            "IDE agent 'claude-code' declares apiKeyHelper, awsAuthRefresh, awsCredentialExport, "
+            "gcpAuthRefresh and otelHeadersHelper, commands that run to obtain credentials.",
+        )
+    ]
+    assert every.properties["settings_hashes"] == {
+        ".claude/settings.json": hash_canonical({**BASE, **dict.fromkeys(helpers, "***")})
+    }
+    recorded = every.model_dump_json()
+    assert not [command for command in helpers.values() if command in recorded]
+    two = _claude(tmp_path / "two", {**BASE, "otelHeadersHelper": "x", "awsAuthRefresh": "y"})
+    assert findings(two) == [
+        (
+            "medium",
+            "IDE agent 'claude-code' declares awsAuthRefresh and otelHeadersHelper, commands "
+            "that run to obtain credentials.",
+        )
+    ]
+    for helper in OTHER_HELPERS:
+        alone = _claude(tmp_path / helper, {**BASE, helper: helpers[helper]})
+        assert alone.properties["settings_declarations"]["api_key_helper"] is False
+        assert findings(alone) == [
+            (
+                "medium",
+                f"IDE agent 'claude-code' declares {helper}, a command that runs to obtain "
+                "credentials.",
+            )
+        ]
+    one = _claude(tmp_path / "one", {**BASE, "apiKeyHelper": helpers["apiKeyHelper"]})
+    assert findings(one) == [
+        (
+            "medium",
+            "IDE agent 'claude-code' declares apiKeyHelper, a command that runs to obtain "
+            "credentials.",
+        )
+    ]

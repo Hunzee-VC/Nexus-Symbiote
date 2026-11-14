@@ -91,7 +91,8 @@ def review_notice(names: list[str]) -> None:
     help=(
         "Also write the unredacted server info, capabilities, instructions, tool "
         "descriptors, prompts and resource templates to this new file (mode 0600) for "
-        "review; only the bearer token and session ID are masked."
+        "review; only the bearer token is masked, and a server whose declarations "
+        "repeat its own session ID (of eight or more characters) ends the observation."
     ),
 )
 def discover_mcp(

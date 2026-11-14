@@ -31,7 +31,7 @@ The three live commands, and what each one contacts:
 |---|---|---|
 | `discover-mcp` | The HTTPS MCP endpoint you name | Exact `--allowed-origin` match; HTTPS only; destination pinned to one public IP address (private, loopback, link-local, site-local, NAT64, 6to4, Teredo, documentation and other special-purpose addresses are refused by an explicit list, whatever the Python version's address tables say); no proxies or redirects; `SSLKEYLOGFILE` is ignored, so no TLS session secrets are written; bounded size and time; never calls a tool; the bearer token is read from `--token-env` and never written to evidence |
 | `advisories` | `https://api.osv.dev/v1/querybatch` | Same pinned HTTPS transport; exact `pkg:pypi`/`pkg:npm` package URLs only; sends each package's ecosystem, normalized name and exact version and nothing else, including packages resolved from a private registry unless you exclude them: `--exclude` withholds names, `--exclude-private-origins` sends only packages whose lockfile records a public registry (the PyPI origin of a Python package that no `uv.lock` or `poetry.lock` resolves is assumed, not recorded, so it withholds every such package; to keep public packages checked, withhold private names with `--exclude` instead), `--dry-run` previews; at most 500 packages, 10,000 advisories per package and 20,000 in total, and a 120-second total budget that is also checked while a reply is read; no response text copied into the report |
-| `verify-live` | The operator-pinned stdio launchers in `--launch-policy` | The policy file must live outside the project and outside the repository that holds the project or the inventory, be a single-link file owned by you or root that only its owner can write; each launcher is an absolute path with a SHA-256 pin; a private copy is executed with an environment that holds only a default `PATH`, no project arguments and no project working directory; 20-second deadline; never calls a tool; servers reached over HTTP are reported as not verifiable here |
+| `verify-live` | The operator-pinned stdio launchers in `--launch-policy` | The policy file must live outside the project and outside every repository that encloses the project or the inventory, including the repository around a nested checkout such as a submodule, be a single-link file owned by you or root that only its owner can write, in directories up to the file system root owned by you or root that others cannot write unless they are sticky ([launch policy](cli-reference.md#launch-policy)); each launcher is an absolute path with a SHA-256 pin; a private copy is executed with an environment that holds only a default `PATH`, no project arguments and no project working directory; 20-second deadline; never calls a tool; servers reached over HTTP are reported as not verifiable here |
 
 **Mode selection.** A `--offline` or `--live` flag (placed before the command) wins;
 otherwise `NEXUS_SYMBIOTE_MODE` decides; otherwise the mode is offline. An
@@ -114,9 +114,13 @@ fingerprint covers, the command names the tool on standard error: inspect the
 server's original descriptor before you approve that baseline.
 `--raw-descriptors review.json` writes that original content (server info,
 capabilities, instructions, tool descriptors, prompts and resource templates, with
-only the bearer token and session ID masked) to a new file readable only by you; it
+only the bearer token masked) to a new file readable only by you; it
 can hold credentials the server embeds, so keep it out of the baseline and delete it
-after review. A scheduled GitHub Actions job is a `schedule:` workflow that runs the
+after review. The server chooses its session ID, so the ID is never masked: a
+declaration that repeats a session ID of eight or more characters ends the
+observation, while a shorter session ID that the server repeats is exported in the
+inventory and in the review copy. The check matches exact text, so the ID repeated in
+another case or as a JSON number is not caught. A scheduled GitHub Actions job is a `schedule:` workflow that runs the
 two commands above against a baseline committed after review, with the token in a
 repository secret.
 
@@ -141,7 +145,7 @@ names it; one that the launch policy names is verified through its pinned launch
 server with any other transport label fails with reason `unsupported-transport`. A
 run with no stdio server verifies nothing and exits 1. Each failed server carries a
 reason: `missing-launch-policy`, `invalid-launch-policy`, `launcher-unavailable`,
-`launcher-digest-mismatch`, `launcher-start-failed`, `deadline`,
+`launcher-digest-mismatch`, `launcher-start-failed`, `isolation-unavailable`, `deadline`,
 `unsupported-protocol-version`, `protocol`, `invalid-descriptor`,
 `ambiguous-approved-tools`, `ambiguous-transport`, `unsupported-transport` or
 `internal-error`. The 20-second deadline covers each server's MCP exchange and the

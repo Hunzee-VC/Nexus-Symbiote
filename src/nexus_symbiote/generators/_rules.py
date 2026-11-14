@@ -29,6 +29,11 @@ RULES: dict[str, RuleInfo] = {
         "A dependency, MCP server package or container image is declared without an exact "
         "version or digest, so what runs can change without a change to the repository.",
     ),
+    "transitive_resolution": RuleInfo(
+        "Dependencies resolved at launch",
+        "An MCP server pins its package version, but the package runner resolves that "
+        "package's dependencies when the server starts, without a lockfile.",
+    ),
     "mutable_image_tag": RuleInfo(
         "Mutable image tag",
         "A container image is referenced by a tag rather than a digest; the tag can be "
@@ -138,7 +143,9 @@ RULES: dict[str, RuleInfo] = {
     ),
     "credential_helper": RuleInfo(
         "Credential helper command",
-        "Claude Code settings declare apiKeyHelper, a command that runs to obtain credentials.",
+        "Claude Code settings declare a credential helper, a command that runs to obtain "
+        "credentials: apiKeyHelper, awsAuthRefresh, awsCredentialExport, gcpAuthRefresh or "
+        "otelHeadersHelper. The finding names each one declared.",
     ),
     "custom_code": RuleInfo(
         "Custom model code",
@@ -159,6 +166,10 @@ RULES: dict[str, RuleInfo] = {
         "Comments in instructions",
         "An instruction file contains HTML or Markdown comments, which rendered views hide "
         "and agents read.",
+    ),
+    "line_separators": RuleInfo(
+        "Line or paragraph separators",
+        "An instruction file contains U+2028 or U+2029, which can split a line in some renderers.",
     ),
     "hook_commands": RuleInfo(
         "Hook commands",

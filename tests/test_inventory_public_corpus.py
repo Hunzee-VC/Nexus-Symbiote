@@ -31,6 +31,12 @@ def test_public_inventory_corpus_has_honest_denominators():
         "lower": 7 / 12,
         "upper": 1.0,
     }
+    # MarkItDown passes its server to a same-file helper that only builds its apps.
+    markitdown = next(row for row in report["cases"] if row["case"] == "microsoft-markitdown")
+    assert markitdown["passed"] and not markitdown["coverage_incomplete"]
+    assert markitdown["tool_counts"] == {"tp": 1, "fp": 0, "fn": 0, "tn": 3}
+    assert markitdown["unknown_negative_labels"] == 0
+    assert markitdown["relevant_mcp_exclusions"] == []
 
 
 def test_label_bounds_keep_unknowns_and_empty_denominators_visible():

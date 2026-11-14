@@ -16,10 +16,10 @@ from __future__ import annotations
 import hmac
 import ipaddress
 import json
+import math
 import os
 import posixpath
 import re
-import tomllib
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -42,6 +42,7 @@ from nexus_symbiote.core.hashing import (
     tool_definition_extensions,
 )
 from nexus_symbiote.core.models import (
+    UNBOUND_VALUES_DETAIL,
     CapabilityDeclaration,
     MCPClientComponent,
     MCPServerComponent,
@@ -73,8 +74,11 @@ from nexus_symbiote.utils.secrets import (
     SecretScrubber,
     redact_descriptor,
     redact_text,
+    secret_like,
     secret_values,
 )
+from nexus_symbiote.utils.terminal import neutralize
+from nexus_symbiote.utils.toml import loads as load_toml
 
 
 @dataclass(frozen=True)
@@ -248,6 +252,8 @@ UNPARSED_CLIENT_FILES = (
 UNPARSED_CLIENT_DIRECTORIES = (".continue/mcpServers",)
 
 MAX_SERVERS_PER_FILE = 1000
+# Credential values of all servers in one file, each scrubbed from every server's text.
+MAX_SECRETS_PER_FILE = 4096
 MAX_TOOLS_PER_SERVER = 1000
 MAX_TOOLS_PER_FILE = 5000
 MAX_ARGUMENTS = 1024
@@ -257,6 +263,21 @@ MAX_LIST_ENTRIES = 1000
 MAX_TOOL_NODES = 20_000
 MAX_TOOL_DEPTH = 64
 MAX_FILE_NODES = 200_000
+# These runners install the named package, then resolve its dependencies from the
+# network at launch. An exact top-level version does not pin that tree.
+_TRANSITIVE_RUNNERS = frozenset(
+    {
+        "npx",
+        "npm exec",
+        "bunx",
+        "bun x",
+        "pnpm dlx",
+        "yarn dlx",
+        "uvx",
+        "uv tool run",
+        "pipx run",
+    }
+)
 
 # Exported bindings must not be computable from secret values: an unkeyed digest
 # over credentials lets anyone holding the BOM confirm guesses offline. The
@@ -264,7 +285,7 @@ MAX_FILE_NODES = 200_000
 # Values are bound by an HMAC under an operator key that never enters the BOM.
 # A change to either preimage requires a new profile and new test vectors.
 STATIC_CONFIG_HASH_PROFILE = "nexus-symbiote/mcp-static-config/v3"
-STATIC_VALUE_BINDING_PROFILE = "nexus-symbiote/mcp-static-values/v2"
+STATIC_VALUE_BINDING_PROFILE = "nexus-symbiote/mcp-static-values/v3"
 SOURCE_BINDING_KEY_ENV = "NEXUS_SYMBIOTE_SOURCE_BINDING_KEY"
 _MIN_SOURCE_BINDING_KEY_LENGTH = 32
 
@@ -288,6 +309,28 @@ def source_binding_key() -> bytes | None:
             f"{_MIN_SOURCE_BINDING_KEY_LENGTH} characters"
         )
     return key.encode()
+
+
+def _launch_secrets(launch: Launch) -> list[str]:
+    # Earlier assignments remain private even when a later value shadows them.
+    return [value for name, value in launch.environment if secret_like(name, value)]
+
+
+def _server_launch(config: dict[str, Any]) -> Launch:
+    """The server's launcher as analyze reads it; raises as analyze does."""
+    command = config.get("command", "")
+    return analyze(command, config.get("args", [])) if command else Launch()
+
+
+def _server_secrets(config: dict[str, Any], launch: Launch) -> list[str]:
+    """Credential values one server declares: environment, headers and inline launcher."""
+    values: list[str] = []
+    for field in ("env", "headers", "http_headers"):
+        mapping = config.get(field)
+        if isinstance(mapping, dict):
+            values.extend(secret_values(mapping))
+    values.extend(_launch_secrets(launch))
+    return values
 
 
 def _value_binding(
@@ -512,6 +555,7 @@ _NPM_PURL_NAME = re.compile(r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*")
 _CONTEXT_HIGH = {
     "privileged": "privileged mode",
     "runtime_socket_mount": "a container runtime socket mount",
+    "runtime_credentials_forwarded": "forwarded client credentials",
     "host_root_mount": "a host root mount",
     "security_options_disabled": "disabled confinement",
     "dangerous_capabilities": "a host-level capability",
@@ -651,9 +695,20 @@ def _reject_constant(value: str) -> Any:
     raise ValueError("nonfinite JSON")
 
 
+def _finite_float(text: str) -> float:
+    # json.loads and tomllib read 1e400 and inf as infinity, which no export can carry.
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError("nonfinite number")
+    return value
+
+
 def _load_jsonc(text: str) -> Any:
     return json.loads(
-        strip_jsonc(text), object_pairs_hook=_unique_pairs, parse_constant=_reject_constant
+        strip_jsonc(text),
+        object_pairs_hook=_unique_pairs,
+        parse_constant=_reject_constant,
+        parse_float=_finite_float,
     )
 
 
@@ -1020,7 +1075,9 @@ def _ini_text(raw: str) -> str:
         inner = text[1:-1] if text[0] == "'" else text
         try:
             decoded = json.loads(inner)
-        except ValueError:
+        except (ValueError, RecursionError):
+            # A value nested beyond the parser's limit is text, as any other that is
+            # not JSON; it must not escape as an error attributed to every server.
             return inner if text[0] == "'" else text
         return decoded if isinstance(decoded, str) else json.dumps(decoded)
     kept: list[str] = []
@@ -1046,6 +1103,7 @@ class _ResolverFile:
 
     settings: tuple[tuple[str, str], ...] = ()
     unresolved: bool = False
+    binding_settings: tuple[tuple[str, str], ...] | None = None
 
 
 def _npmrc(text: str) -> _ResolverFile:
@@ -1140,8 +1198,8 @@ class _Resolvers:
         if text is None:
             return {}
         try:
-            return tomllib.loads(text)
-        except (tomllib.TOMLDecodeError, RecursionError):
+            return load_toml(text)
+        except (ValueError, RecursionError, MemoryError):
             self._result.scan_failures.append(f"{path}: invalid TOML")
             return {}
 
@@ -1175,6 +1233,33 @@ class _Resolvers:
                 self._result.scan_failures.append(f"{path}: invalid JSON or duplicate keys")
                 return _ResolverFile()
             if not isinstance(data, dict):
+                self._result.scan_failures.append(f"{path}: expected a JSON object")
+                return _ResolverFile()
+            if "importMap" in data:
+                self._result.surfaces_excluded.append(
+                    f"{path}: referenced Deno import map is not collected"
+                )
+            imports = data.get("imports", {})
+            scopes = data.get("scopes", {})
+            if (
+                not isinstance(imports, dict)
+                or any(not isinstance(target, str) for target in imports.values())
+                or not isinstance(scopes, dict)
+                or any(
+                    not isinstance(mapping, dict)
+                    or any(not isinstance(target, str) for target in mapping.values())
+                    for mapping in scopes.values()
+                )
+            ):
+                self._result.surfaces_excluded.append(f"{path}: unsupported Deno import-map shape")
+            try:
+                binding = tuple(
+                    (key, canonical_json(data[key]))
+                    for key in sorted(_DENO_SOURCE_SETTINGS)
+                    if key in data
+                )
+            except (TypeError, ValueError, RecursionError):
+                self._result.scan_failures.append(f"{path}: invalid JSON values")
                 return _ResolverFile()
             deno_entries: list[tuple[str, str]] = []
             import_map = data.get("importMap")
@@ -1195,7 +1280,9 @@ class _Resolvers:
             scopes = data.get("scopes")
             if isinstance(scopes, dict) and scopes:
                 deno_entries.append(("scopes", json.dumps(scopes, sort_keys=True, default=str)))
-            return _ResolverFile(tuple(deno_entries))
+            # Source labels intentionally omit import specifiers. The private HMAC
+            # must retain their associations, including scopes and fallback order.
+            return _ResolverFile(tuple(deno_entries), binding_settings=binding)
         settings = self._toml(path)
         if path == "bunfig.toml":
             install = settings.get("install")
@@ -1376,6 +1463,9 @@ class MCPScanner(Scanner):
     ) -> bool:
         """Read each client file in ``paths``; whether any of them was present."""
         found_any = False
+        # Server references per host, sorted once at the end: sorting the union after
+        # every file would cost the square of the number of nested client files.
+        pending_refs: dict[str, set[str]] = {}
         for path in paths:
             dialect = _dialect(path)
             data = self._read_dialect(files, dialect, result)
@@ -1392,6 +1482,14 @@ class MCPScanner(Scanner):
             if key_error is not None and entries:
                 result.scan_failures.append(f"{dialect.path}: {key_error}")
                 continue
+            # Prepared once per file and reused for every server and diagnostic.
+            file_secrets = SecretScrubber(self._file_secrets(entries))
+            if len(file_secrets) > MAX_SECRETS_PER_FILE:
+                result.scan_failures.append(
+                    f"{dialect.path}: more than {MAX_SECRETS_PER_FILE} credential values in one "
+                    "file; not collected"
+                )
+                continue
             server_refs: list[str] = []
             for server_name, server_config in entries:
                 problem = (
@@ -1404,13 +1502,19 @@ class MCPScanner(Scanner):
                     continue
                 try:
                     mcp_comp, tool_comps = self._parse_server(
-                        server_name, server_config, dialect, key, result
+                        server_name, server_config, dialect, key, result, file_secrets
                     )
                 except SourceBindingKeyError as exc:
                     result.scan_failures.append(f"{dialect.path}: {exc}")
                     continue
                 except (TypeError, ValueError, RecursionError):
-                    result.scan_failures.append(f"{dialect.path}: invalid tool definition")
+                    # The whole server record is dropped with its risk findings, so the
+                    # failure must say which server a reviewer no longer sees.
+                    shown = self._diagnostic_server_name(server_name, server_config, file_secrets)
+                    result.scan_failures.append(
+                        f"{dialect.path}: invalid tool definition for server '{shown}'; "
+                        "the server and its risks are not inventoried"
+                    )
                     continue
                 result.components.append(mcp_comp)
                 result.components.extend(tool_comps)
@@ -1429,9 +1533,54 @@ class MCPScanner(Scanner):
                         properties={"collection_mode": "static-config", "config_paths": []},
                     )
                 client = clients[host]
-                client.server_refs = sorted({*client.server_refs, *server_refs})
+                pending_refs.setdefault(host, set(client.server_refs)).update(server_refs)
                 client.properties["config_paths"].append(dialect.path)
+        for host, refs in pending_refs.items():
+            clients[host].server_refs = sorted(refs)
         return found_any
+
+    @classmethod
+    def _file_secrets(cls, entries: list[tuple[str, Any]]) -> list[str]:
+        """Credential values of every server in a file, inline launcher values included.
+
+        One server's tool text or name may repeat a value that another server's
+        environment, headers or launcher holds, so the file's values are scrubbed
+        from each. Only servers that _server_problem admits count: a refused server
+        is never parsed, so its values must not push the file over the limit.
+        """
+        values: list[str] = []
+        for _, config in entries:
+            if not isinstance(config, dict) or cls._server_problem(config) is not None:
+                continue
+            try:
+                launch = _server_launch(config)
+            except (TypeError, ValueError, RecursionError):
+                # The server's normal parsing path reports this failure.
+                launch = Launch()
+            values.extend(_server_secrets(config, launch))
+        return values
+
+    @staticmethod
+    def _diagnostic_server_name(
+        name: str, config: dict[str, Any], file_secrets: SecretScrubber | None = None
+    ) -> str:
+        """The server's name for a failure, redacted as a parsed server's name is.
+
+        The file's prepared values hold this server's own values too; without a file
+        context the server's environment, header and inline launcher values are
+        collected as _parse_server collects them.
+        """
+        try:
+            launch = _server_launch(config)
+        except (TypeError, ValueError, RecursionError):
+            return "[withheld]"
+        scrubber = (
+            file_secrets
+            if file_secrets is not None
+            else SecretScrubber(_server_secrets(config, launch))
+        )
+        # Clipping first can truncate a token so its recognizable shape is lost.
+        return neutralize(redact_text(name, scrubber)[:256])
 
     @staticmethod
     def _read_dialect(files: ConfinedCollection, dialect: McpDialect, result: ScanResult) -> Any:
@@ -1441,8 +1590,10 @@ class MCPScanner(Scanner):
         if text is None:
             return None
         try:
-            return tomllib.loads(text) if dialect.syntax == "toml" else _load_jsonc(text)
-        except (ValueError, RecursionError):
+            if dialect.syntax == "toml":
+                return load_toml(text, parse_float=_finite_float)
+            return _load_jsonc(text)
+        except (ValueError, RecursionError, MemoryError):
             syntax = "TOML" if dialect.syntax == "toml" else "JSON or duplicate keys"
             result.scan_failures.append(f"{dialect.path}: invalid {syntax}")
             return None
@@ -1545,6 +1696,7 @@ class MCPScanner(Scanner):
         dialect: McpDialect,
         key: bytes | None,
         result: ScanResult,
+        file_secrets: SecretScrubber | None = None,
     ) -> tuple[MCPServerComponent, list[ToolComponent]]:
         config_scope = dialect.path
         command = config.get("command", "")
@@ -1554,22 +1706,20 @@ class MCPScanner(Scanner):
         header_names = sorted({*headers, *config.get("env_http_headers", {})})
         endpoints = [config[field] for field in _ENDPOINT_FIELDS if config.get(field)]
         endpoint_url = endpoints[0] if endpoints else None
-        launch = analyze(command, args) if command else Launch()
+        launch = _server_launch(config)
         transport, transport_gap = self._transport(config, dialect, bool(command))
         server_ref = (
             "mcp-server:" + hash_canonical({"config": config_scope, "name": name}).split(":", 1)[1]
         )
         # Launch arguments are opaque executable inputs. Only the launcher's own
         # grammar is read; argument and environment values never leave.
-        # Each header map on its own: a name in both keeps both of its values secret.
-        scrubber = SecretScrubber(
-            [
-                *secret_values(env),
-                *secret_values(config.get("headers", {})),
-                *secret_values(config.get("http_headers", {})),
-                *secret_values(dict(launch.environment)),
-            ]
-        )
+        # The file's prepared values cover this server and its siblings, inline launcher
+        # values included: this server's free text may repeat a value one of them holds.
+        # Without a file context, _server_secrets collects them as _file_secrets does,
+        # shadowed inline assignments included.
+        scrubber = file_secrets
+        if scrubber is None:
+            scrubber = SecretScrubber(_server_secrets(config, launch))
         cwd = config.get("cwd")
         relocated = (
             launch.relocated
@@ -1690,10 +1840,7 @@ class MCPScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.LOW,
                     category="completeness",
-                    detail=(
-                        f"MCP server '{name}' values not bound in this inventory: "
-                        f"{'; '.join(unbound)}."
-                    ),
+                    detail=f"MCP server '{name}' {UNBOUND_VALUES_DETAIL}: {'; '.join(unbound)}.",
                     recommendation=(
                         f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes to "
                         "these values."
@@ -1798,9 +1945,9 @@ class MCPScanner(Scanner):
     ) -> _Identity:
         """Compute identity fields from raw values; withhold one that holds a secret value."""
         withheld: list[str] = []
-        shown_name = redact_text(name, identifier=True)
+        # Known values and the identifier rules are matched in the same raw name.
+        shown_name = redact_text(name, scrubber, identifier=True)
         if scrubber.contains(name):
-            shown_name = scrubber.scrub(shown_name)
             withheld.append("name")
         command = self._safe_name(launch.command)
         if launch.command and scrubber.contains(launch.command):
@@ -1818,7 +1965,11 @@ class MCPScanner(Scanner):
         packages: list[dict[str, Any]] = []
         identities: list[str] = []
         for package in launch.packages:
-            hidden = scrubber.contains(package.spec)
+            # A credential in the package position is withheld as _safe_name withholds
+            # a token-shaped command; the name may be a normalised form of the spec.
+            hidden = scrubber.contains(package.spec) or any(
+                TOKEN_SHAPE.search(text) for text in (package.spec, package.name) if text
+            )
             if hidden:
                 withheld.append("launcher package")
             entry_identity = "[withheld]" if hidden else package.identity
@@ -1950,8 +2101,9 @@ class MCPScanner(Scanner):
             if file.unresolved:
                 view.unresolved.append(f"{path}:key")
             settings = dict(file.settings)
+            binding = file.settings if file.binding_settings is None else file.binding_settings
+            view.binding.extend([f"{path}:{key}", value] for key, value in binding)
             for key, value in file.settings:
-                view.binding.append([f"{path}:{key}", value])
                 label = f"{path}:{_setting_name(key, launched)}"
                 view.names.append(label)
                 kind = _file_setting(path, family, key, value, launched)
@@ -2014,8 +2166,7 @@ class MCPScanner(Scanner):
 
     @staticmethod
     def _tool_name(name: str, scrubber: SecretScrubber) -> str:
-        shown = redact_text(name, identifier=True)
-        return scrubber.scrub(shown) if scrubber.contains(name) else shown
+        return redact_text(name, scrubber, identifier=True)
 
     def _transport(
         self, config: dict[str, Any], dialect: McpDialect, has_command: bool
@@ -2170,6 +2321,23 @@ class MCPScanner(Scanner):
                 "version_pinning",
                 f"MCP server '{name}' container image has neither a digest nor a release tag.",
                 "Pin to a SHA256 artifact digest and verify its provenance.",
+            )
+        if (
+            launch.unknown is None
+            and launch.launcher in _TRANSITIVE_RUNNERS
+            and any(
+                package.pinned and package.pin == "version" and package.registry
+                for package in launch.packages
+            )
+        ):
+            add(
+                RiskSeverity.MEDIUM,
+                "transitive_resolution",
+                (
+                    f"MCP server '{name}' pins its package but resolves dependencies at launch "
+                    "without a lockfile."
+                ),
+                "Vendor a lockfile-installed server, or launch an image by digest.",
             )
         if any(p.ecosystem == "oci" and p.pin == "tag" for p in floating):
             add(
@@ -2333,7 +2501,7 @@ class MCPScanner(Scanner):
     ) -> list[ToolComponent]:
         tools_config = config.get("tools", [])
         tool_comps = []
-        scrubber = secrets or SecretScrubber()
+        scrubber = secrets if secrets is not None else SecretScrubber()
 
         if isinstance(tools_config, list):
             for tool_def in tools_config:

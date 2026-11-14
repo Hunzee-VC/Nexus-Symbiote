@@ -1,8 +1,10 @@
 """Suite-wide isolation, a per-test time limit, skip accounting and Hypothesis profiles.
 
 Every test starts without the ambient variables that the tool, the Action runner and the gate
-scripts read, with HOME and the XDG directories in a private temporary directory and the
-default collection limits, and must leave no operating mode enforced and no other limits. A
+scripts read, with HOME, the XDG directories and TMPDIR in a private temporary directory and
+the default collection limits, and must leave no operating mode enforced and no other limits.
+Python-level connects, datagrams and name resolution to anywhere but loopback fail the test
+(subprocesses and native code are not covered). A
 test that runs longer than ``test_timeout`` seconds fails with its traceback. Every skip is listed with its reason; with ``--strict-skips`` (CI) a skip
 for any reason other than the host's file system, or, outside CI, a missing pip, fails the run.
 """
@@ -14,6 +16,7 @@ import os
 import re
 import signal
 import socket
+import tempfile
 import threading
 from collections.abc import Callable, Iterator
 from types import FrameType, ModuleType
@@ -57,11 +60,31 @@ ISOLATED_NAMES = frozenset(
 PRIVATE_DIRECTORIES = ("XDG_CACHE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME")
 # Skips that depend only on the host: a case-insensitive alias exists only on a
 # case-insensitive file system, and some file systems refuse unusual names.
-EXPECTED_SKIP_REASONS = (re.compile(r"case-sensitive"), re.compile(r"file system rejects"))
+# Only these exact reason texts pass a strict run: a reason that merely starts with or
+# contains the words could disable any test.
+EXPECTED_SKIP_REASONS = (
+    re.compile(
+        r"\Afile system rejects (?:the name|distinct case spellings|names that are not UTF-8)\Z"
+    ),
+    re.compile(r"\Aneeds a case-sensitive file system to hold (?:both|distinct) spellings\Z"),
+    re.compile(r"\Athe file system is case-sensitive, so the alias does not exist\Z"),
+)
 # Expected only outside CI: an environment that uv created has no pip, while CI always
 # installs with pip, so there the differential against pip's own reader has to run.
-LOCAL_SKIP_REASONS = (re.compile(r"pip is not importable"),)
+LOCAL_SKIP_REASONS = (
+    re.compile(r"\Apip is not importable here; CI, which installs with pip, runs this test\Z"),
+)
 DEFAULT_TIMEOUT_SECONDS = 300
+
+
+@pytest.fixture
+def nonisolated_pinned_fixtures() -> Iterator[None]:
+    """Protocol fixtures opt out explicitly; containment has separate default-denial tests."""
+    from nexus_symbiote.live.pinned_process import isolation_off
+
+    with isolation_off():
+        yield
+
 
 settings.register_profile(
     "repository",
@@ -170,42 +193,127 @@ def _isolated_environment(
     monkeypatch.setenv("HOME", str(home))
     for name in PRIVATE_DIRECTORIES:
         monkeypatch.setenv(name, str(home / name.lower()))
+    private_tmp = home / "tmp"
+    private_tmp.mkdir()
+    monkeypatch.setenv("TMPDIR", str(private_tmp))
+    # tempfile caches the directory on first use; the cache must follow TMPDIR.
+    tempfile.tempdir = None
 
-    def _is_loopback_target(address: Any) -> bool:
-        if not isinstance(address, tuple) or not address:
-            return True
-        host = address[0]
+    # The suite's own tripwire against a test that reaches the network: connecting,
+    # sending a datagram or resolving a name anywhere but the loopback interface or
+    # exact localhost fails the test. Reserved suffixes still may reach a resolver and
+    # are not a network boundary. The product's offline
+    # guard (modes.enforce) replaces the same entry points while it is installed, so the
+    # tripwire stands down only then and never masks an OfflineViolation a test expects.
+    # _socket.socket, the C type, is immutable: the product's audit hook is its only guard.
+    def _is_loopback_name(host: Any) -> bool:
         if isinstance(host, (bytes, bytearray)):
             host = bytes(host).decode("ascii", "replace")
         if not isinstance(host, str):
-            return True
-        if host.lower() == "localhost":
+            return False
+        name = host.lower()
+        if name == "localhost":
             return True
         try:
-            return ipaddress.ip_address(host.split("%", 1)[0]).is_loopback
+            # Do not strip suffixes that the real resolver will still receive.
+            # Scoped IPv6 and dotted DNS spellings need an explicit test stub.
+            return "%" not in name and ipaddress.ip_address(name).is_loopback
         except ValueError:
             return False
 
+    def _is_loopback_target(address: Any) -> bool:
+        if not isinstance(address, tuple):
+            return True  # Unix-domain addresses have no Internet host to resolve.
+        return bool(address) and _is_loopback_name(address[0])
+
+    def _refuse(what: str) -> OSError:
+        return OSError(f"test suite blocked outbound non-loopback {what}")
+
+    def _guarded() -> bool:
+        return not modes._patches
+
     orig_connect = socket.socket.connect
     orig_connect_ex = socket.socket.connect_ex
+    orig_sendto = socket.socket.sendto
+    orig_sendmsg = socket.socket.sendmsg
+    orig_getaddrinfo = socket.getaddrinfo
+    orig_gethostbyname = socket.gethostbyname
+    orig_gethostbyname_ex = socket.gethostbyname_ex
+    orig_gethostbyaddr = socket.gethostbyaddr
+    orig_getnameinfo = socket.getnameinfo
+    orig_create_connection = socket.create_connection
 
     def _guarded_connect(sock: socket.socket, address: Any) -> Any:
-        if modes.current() != modes.Mode.OFFLINE and not _is_loopback_target(address):
-            raise OSError("test suite blocked outbound non-loopback socket connection")
+        if _guarded() and not _is_loopback_target(address):
+            raise _refuse("socket connection")
         return orig_connect(sock, address)
 
     def _guarded_connect_ex(sock: socket.socket, address: Any) -> int:
-        if modes.current() != modes.Mode.OFFLINE and not _is_loopback_target(address):
-            raise OSError("test suite blocked outbound non-loopback socket connection")
+        if _guarded() and not _is_loopback_target(address):
+            raise _refuse("socket connection")
         return orig_connect_ex(sock, address)
+
+    def _guarded_sendto(sock: socket.socket, data: Any, *rest: Any) -> int:
+        # sendto(data, address) or sendto(data, flags, address).
+        if _guarded() and rest and not _is_loopback_target(rest[-1]):
+            raise _refuse("datagram (sendto)")
+        return orig_sendto(sock, data, *rest)
+
+    def _guarded_sendmsg(sock: socket.socket, buffers: Any, *rest: Any) -> int:
+        # sendmsg(buffers[, ancdata[, flags[, address]]]).
+        if _guarded() and len(rest) >= 3 and not _is_loopback_target(rest[2]):
+            raise _refuse("datagram (sendmsg)")
+        return orig_sendmsg(sock, buffers, *rest)
+
+    def _guarded_getaddrinfo(host: Any, *args: Any, **kwargs: Any) -> Any:
+        # None requests a local passive/unspecified address without DNS.
+        if _guarded() and host is not None and not _is_loopback_name(host):
+            raise _refuse("name resolution (getaddrinfo)")
+        return orig_getaddrinfo(host, *args, **kwargs)
+
+    def _guarded_gethostbyname(host: Any) -> Any:
+        if _guarded() and not _is_loopback_name(host):
+            raise _refuse("name resolution (gethostbyname)")
+        return orig_gethostbyname(host)
+
+    def _guarded_gethostbyname_ex(host: Any) -> Any:
+        if _guarded() and not _is_loopback_name(host):
+            raise _refuse("name resolution (gethostbyname_ex)")
+        return orig_gethostbyname_ex(host)
+
+    def _guarded_gethostbyaddr(host: Any) -> Any:
+        if _guarded() and not _is_loopback_name(host):
+            raise _refuse("name resolution (gethostbyaddr)")
+        return orig_gethostbyaddr(host)
+
+    def _guarded_getnameinfo(address: Any, flags: Any) -> Any:
+        if _guarded() and (not isinstance(address, tuple) or not _is_loopback_target(address)):
+            raise _refuse("name resolution (getnameinfo)")
+        return orig_getnameinfo(address, flags)
+
+    def _guarded_create_connection(address: Any, *args: Any, **kwargs: Any) -> Any:
+        if _guarded() and not _is_loopback_target(address):
+            raise _refuse("socket connection (create_connection)")
+        return orig_create_connection(address, *args, **kwargs)
 
     monkeypatch.setattr(socket.socket, "connect", _guarded_connect)
     monkeypatch.setattr(socket.socket, "connect_ex", _guarded_connect_ex)
+    monkeypatch.setattr(socket.socket, "sendto", _guarded_sendto)
+    monkeypatch.setattr(socket.socket, "sendmsg", _guarded_sendmsg)
+    monkeypatch.setattr(socket, "getaddrinfo", _guarded_getaddrinfo)
+    monkeypatch.setattr(socket, "gethostbyname", _guarded_gethostbyname)
+    monkeypatch.setattr(socket, "gethostbyname_ex", _guarded_gethostbyname_ex)
+    monkeypatch.setattr(socket, "gethostbyaddr", _guarded_gethostbyaddr)
+    monkeypatch.setattr(socket, "getnameinfo", _guarded_getnameinfo)
+    monkeypatch.setattr(socket, "create_connection", _guarded_create_connection)
     # Collection limits are process state (the root --limit option sets them): every test
     # starts at the defaults, and what a test leaves in force never reaches the next one.
-    with limits.applied(limits.DEFAULTS):
-        yield
-        limits_left = limits.current() != limits.DEFAULTS
+    try:
+        with limits.applied(limits.DEFAULTS):
+            yield
+            limits_left = limits.current() != limits.DEFAULTS
+    finally:
+        tempfile.tempdir = None
     leaked = modes.current()
     if leaked is not None:
         pytest.fail(f"the test left the {leaked.value} mode enforced", pytrace=False)

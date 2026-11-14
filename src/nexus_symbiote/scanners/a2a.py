@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import canonical_json, hash_canonical
 from nexus_symbiote.core.models import (
+    UNBOUND_VALUES_DETAIL,
     A2AClientComponent,
     A2AServerComponent,
     CapabilityDeclaration,
@@ -89,7 +90,7 @@ A2A_CONFIG_FILES = ["a2a.json", "a2a.yaml", "a2a.yml", "a2a_config.json"]
 # also cover the requirement values of schemes other than OAuth 2.0 and OpenID Connect,
 # which are not exported, so a BOM holder can confirm guesses of those values. Other
 # values are bound only by an HMAC under the operator key, as for MCP.
-CARD_STRUCTURE_PROFILE = "nexus-symbiote/a2a-card-structure/v3"
+CARD_STRUCTURE_PROFILE = "nexus-symbiote/a2a-card-structure/v4"
 CARD_VALUE_BINDING_PROFILE = "nexus-symbiote/a2a-card-values/v1"
 CLIENT_STRUCTURE_PROFILE = "nexus-symbiote/a2a-client-structure/v1"
 CLIENT_VALUE_BINDING_PROFILE = "nexus-symbiote/a2a-client-values/v1"
@@ -116,6 +117,14 @@ _ANONYMOUS = frozenset({"none", "noauth", "no-auth", "anonymous", "public", "una
 _MAX_ENTRIES = 1000
 _MAX_DEPTH = 8
 _MAX_NAME = 256
+
+
+class _BoundError(ValueError):
+    """A card reached a collection bound; the failure names the bound, not a field type."""
+
+
+TOO_DEEP = "A2A card nests too deeply"
+TOO_MANY_ENTRIES = "A2A card has too many entries"
 # OAuth scopes are short public identifiers; a longer value is withheld unmatched,
 # which also keeps the token-shape search linear.
 _MAX_SCOPE = 512
@@ -277,11 +286,11 @@ class _Security(NamedTuple):
 def _string_list(value: Any) -> list[str]:
     if isinstance(value, str):
         value = [value]
-    if (
-        not isinstance(value, list)
-        or len(value) > _MAX_ENTRIES
-        or not all(isinstance(item, str) for item in value)
-    ):
+    if not isinstance(value, list):
+        raise ValueError("invalid string-list declaration")
+    if len(value) > _MAX_ENTRIES:
+        raise _BoundError(TOO_MANY_ENTRIES)
+    if not all(isinstance(item, str) for item in value):
         raise ValueError("invalid string-list declaration")
     return value
 
@@ -292,7 +301,7 @@ def _strings(value: Any) -> list[str]:
 
 def _fields(declaration: dict[str, Any]) -> list[str]:
     if len(declaration) > _MAX_ENTRIES:
-        raise ValueError("oversized declaration")
+        raise _BoundError(TOO_MANY_ENTRIES)
     return sorted(redact_text(key) for key in declaration)
 
 
@@ -323,14 +332,14 @@ def _scope(value: str) -> str:
 def _declared_urls(value: Any, depth: int = 0) -> list[str]:
     """Collect URL fields, such as tokenUrl, wherever a declaration nests them."""
     if depth > _MAX_DEPTH:
-        raise ValueError("declaration nested too deeply")
+        raise _BoundError(TOO_DEEP)
     if isinstance(value, list):
         if len(value) > _MAX_ENTRIES:
-            raise ValueError("oversized declaration")
+            raise _BoundError(TOO_MANY_ENTRIES)
         urls = [url for item in value for url in _declared_urls(item, depth + 1)]
     elif isinstance(value, dict):
         if len(value) > _MAX_ENTRIES:
-            raise ValueError("oversized declaration")
+            raise _BoundError(TOO_MANY_ENTRIES)
         urls = []
         for key, item in value.items():
             if isinstance(item, str) and key.lower().endswith(("url", "uri")):
@@ -340,7 +349,7 @@ def _declared_urls(value: Any, depth: int = 0) -> list[str]:
     else:
         return []
     if len(urls) > _MAX_ENTRIES:
-        raise ValueError("oversized declaration")
+        raise _BoundError(TOO_MANY_ENTRIES)
     return urls
 
 
@@ -433,8 +442,21 @@ def _requires_authentication(alternatives: list[dict[str, list[str]]], typed: se
     return all(alternative and set(alternative) <= typed for alternative in alternatives)
 
 
+def _scheme_label(name: str, seen: dict[str, str]) -> str:
+    label = redact_text(name)
+    if label in seen and seen[label] != name:
+        # Hashing original names would expose guesses of withheld credentials;
+        # keeping only projected names would erase scheme-to-value associations.
+        raise _BindingError(
+            "security scheme names collide after redaction; "
+            "use distinct non-secret scheme identifiers"
+        )
+    seen[label] = name
+    return label
+
+
 def _digested(
-    alternatives: list[dict[str, list[str]]], kinds: dict[str, str]
+    alternatives: list[dict[str, list[str]]], kinds: dict[str, str], names: dict[str, str]
 ) -> tuple[list[dict[str, list[str]]], set[str], bool]:
     """Return the digested alternatives, the exported scopes and whether one was redacted."""
     digested: list[dict[str, list[str]]] = []
@@ -443,15 +465,16 @@ def _digested(
     for alternative in alternatives:
         values: dict[str, list[str]] = {}
         for scheme_name, named in alternative.items():
+            label = _scheme_label(scheme_name, names)
             if kinds.get(scheme_name) in SCOPED_SCHEME_TYPES:
                 exported = {scope: _scope(scope) for scope in named}
                 redacted |= any(scope != kept for scope, kept in exported.items())
-                values[redact_text(scheme_name)] = sorted(set(exported.values()))
+                values[label] = sorted(set(exported.values()))
                 scopes.update(exported.values())
             else:
                 # Role names may be anything, even a pasted credential, so they stay
                 # out of the export; only the digest covers them.
-                values[redact_text(scheme_name)] = sorted(set(named))
+                values[label] = sorted(set(named))
         digested.append(values)
     return sorted(digested, key=canonical_json), scopes, redacted
 
@@ -481,7 +504,9 @@ def _security(data: dict[str, Any], skills: list[tuple[str, dict[str, Any]]]) ->
         raise ValueError("invalid security schemes")
     kinds: dict[str, str] = {}
     typed: set[str] = set()
+    names: dict[str, str] = {}
     for scheme_name, scheme in schemes.items():
+        _scheme_label(scheme_name, names)
         kinds[scheme_name], stated = _scheme_type(scheme)
         # A type such as "none" or an unknown extension shows no authentication.
         if stated and kinds[scheme_name] != "other":
@@ -496,7 +521,7 @@ def _security(data: dict[str, Any], skills: list[tuple[str, dict[str, Any]]]) ->
             forms[form] = None
             continue
         alternatives = _alternatives(requirements, wrapped=form == "security_requirements")
-        forms[form], named_scopes, redacted = _digested(alternatives, kinds)
+        forms[form], named_scopes, redacted = _digested(alternatives, kinds, names)
         scopes |= named_scopes
         redacted_scopes |= redacted
         decisions.append(bool(alternatives) and _requires_authentication(alternatives, typed))
@@ -511,7 +536,7 @@ def _security(data: dict[str, Any], skills: list[tuple[str, dict[str, Any]]]) ->
             entries += sum(1 + len(alt) + sum(map(len, alt.values())) for alt in alternatives)
             if entries > _MAX_ENTRIES:
                 raise ValueError("oversized skill security requirements")
-            declared[form], named_scopes, redacted = _digested(alternatives, kinds)
+            declared[form], named_scopes, redacted = _digested(alternatives, kinds, names)
             scopes |= named_scopes
             redacted_scopes |= redacted
             # The specifications leave open how a skill's requirements combine with the
@@ -714,6 +739,17 @@ def _card_preference(path: str) -> tuple[bool, int, bool, str]:
 
 def _calls(tree: ast.Module) -> tuple[set[str], bool, bool]:
     """Names of called SDK constructors, and whether AgentCard is built from literals."""
+    card_names = {"AgentCard"}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.level == 0
+            and node.module is not None
+            and node.module.split(".")[0] == "a2a"
+        ):
+            card_names.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "AgentCard"
+            )
     called: set[str] = set()
     literal_card = mapping_card = False
     for node in ast.walk(tree):
@@ -722,12 +758,12 @@ def _calls(tree: ast.Module) -> tuple[set[str], bool, bool]:
         func = node.func
         loaded = False
         if isinstance(func, ast.Name):
-            name = func.id
+            name = "AgentCard" if func.id in card_names else func.id
         elif isinstance(func, ast.Attribute):
             name = func.attr
             owner = func.value
             if (
-                (isinstance(owner, ast.Name) and owner.id == "AgentCard")
+                (isinstance(owner, ast.Name) and owner.id in card_names)
                 or (isinstance(owner, ast.Attribute) and owner.attr == "AgentCard")
             ) and name in _CARD_LOADERS | _CARD_CONSTRUCTORS:
                 name, loaded = "AgentCard", name in _CARD_LOADERS
@@ -854,7 +890,7 @@ class A2AScanner(Scanner):
         for relative, data in parsed:
             try:
                 component = self._parse_agent_card(data, relative, relative)
-            except _BindingError as exc:
+            except (_BindingError, _BoundError) as exc:
                 result.scan_failures.append(f"{relative}: {exc}")
                 continue
             except (TypeError, ValueError, RecursionError):
@@ -891,7 +927,7 @@ class A2AScanner(Scanner):
                 if not isinstance(client, dict):
                     raise ValueError("invalid client")
                 result.components.append(self._parse_a2a_client(client, relative))
-            except _BindingError as exc:
+            except (_BindingError, _BoundError) as exc:
                 result.scan_failures.append(f"{relative}: {exc}")
             except (TypeError, ValueError, RecursionError):
                 result.scan_failures.append(f"{relative}: invalid A2A client field types")
@@ -993,11 +1029,15 @@ class A2AScanner(Scanner):
             if gap
         ] + security.unbound
         risks: list[RiskAssessment] = []
-        # A2A 1.0 clients use the first supported interface even when `url` is present.
+        # A2A 1.0 clients use the first supported interface even when `url` is
+        # present, and may send credentials to any declared alternative interface.
+        # An alternative counts only with an explicit non-HTTPS scheme: 1.0 gRPC
+        # interfaces give host:port without one, which declares no cleartext.
+        alternatives = (*supported_urls[1:], *interface_urls)
         if any(
             url and not url.lower().startswith("https://")
             for url in (endpoint, *aliases, *supported_urls[:1])
-        ):
+        ) or any("://" in url and not url.lower().startswith("https://") for url in alternatives):
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.HIGH,
@@ -1125,7 +1165,10 @@ class A2AScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.LOW,
                     category="completeness",
-                    detail=f"A2A client '{shown}' agent card URL beyond its exported origin is not bound in this inventory.",
+                    detail=(
+                        f"A2A client '{shown}' {UNBOUND_VALUES_DETAIL}: "
+                        "agent card URL beyond its exported origin."
+                    ),
                     recommendation=f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect same-origin card changes.",
                 )
             )

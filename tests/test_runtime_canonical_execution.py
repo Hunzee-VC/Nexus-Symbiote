@@ -30,6 +30,9 @@ from nexus_symbiote.runtime import (
 )
 from tests.test_runtime_authorization import fixture
 
+pytestmark = pytest.mark.usefixtures("nonisolated_pinned_fixtures")
+
+
 DRAFT_04 = "http://json-schema.org/draft-04/schema#"
 ROUTES = ("invoke", "pinned-stdio")
 VALIDATE = runtime.validate_arguments

@@ -57,39 +57,39 @@ def _refuse_source_overwrite(output: Path | None, source: Path) -> None:
         raise click.BadParameter("output must not overwrite the source inventory")
 
 
-def _repository_root(path: Path) -> Path | None:
-    """The nearest directory at or above ``path`` that holds a ``.git`` entry."""
-    for candidate in (path, *path.parents):
-        if os.path.lexists(candidate / ".git"):
-            return candidate
-    return None
+def _repository_roots(path: Path) -> list[Path]:
+    """Every directory at or above ``path`` that holds a ``.git`` entry."""
+    return [candidate for candidate in (path, *path.parents) if os.path.lexists(candidate / ".git")]
 
 
 def _check_launch_policy(policy: Path, project: Path, inventory: Path) -> None:
     """Refuse a launch policy that the change under review could have written.
 
-    The policy must lie outside the project, outside the repositories that hold the
-    project and the inventory, be a single-link regular file owned by the caller or
-    root that only its owner can write, in a directory owned by you or root that
-    others cannot write unless it is sticky. This catches misplacement; it does not
-    authenticate the policy.
+    The policy must lie outside the project, outside every repository that encloses
+    the project or the inventory, be a single-link regular file owned by the caller or
+    root that only its owner can write, in directories owned by you or root that others
+    cannot write unless they are sticky, up to the file system root. This catches
+    misplacement; it does not authenticate the policy.
     """
     resolved = policy.resolve()
     untrusted = [project.resolve()]
     for start in (project.resolve(), inventory.resolve().parent):
-        root = _repository_root(start)
-        if root is not None:
-            untrusted.append(root)
+        # A nested checkout (a submodule or vendored repository) has its own .git, but
+        # the change under review can still edit the repository around it.
+        untrusted.extend(_repository_roots(start))
     if any(resolved.is_relative_to(root) for root in untrusted):
         raise click.UsageError(
             "launch policy must be provisioned outside the untrusted project and outside "
-            "the repository that holds the project or the inventory"
+            "the repository that holds the project or the inventory, and any repository "
+            "enclosing either"
         )
     if os.name != "posix":
         return
     try:
         info = resolved.lstat()
-        parent = resolved.parent.stat()
+        # Whoever can write any directory above the policy can rename the one below it
+        # away and put another policy in its place, so every ancestor is checked.
+        directories = [path.stat() for path in resolved.parents]
     except OSError as exc:
         raise click.UsageError("launch policy cannot be inspected") from exc
     owners = {0, os.geteuid()}
@@ -98,13 +98,16 @@ def _check_launch_policy(policy: Path, project: Path, inventory: Path) -> None:
         or info.st_nlink != 1
         or info.st_uid not in owners
         or info.st_mode & 0o022
-        or parent.st_uid not in owners
-        or (parent.st_mode & 0o022 and not parent.st_mode & stat.S_ISVTX)
+        or any(
+            directory.st_uid not in owners
+            or (directory.st_mode & 0o022 and not directory.st_mode & stat.S_ISVTX)
+            for directory in directories
+        )
     ):
         raise click.UsageError(
             "launch policy must be a single-link regular file owned by you or root and "
-            "writable only by its owner, in a directory owned by you or root that others "
-            "cannot write unless it is sticky"
+            "writable only by its owner, in directories owned by you or root that others "
+            "cannot write unless they are sticky, up to the file system root"
         )
 
 
@@ -133,7 +136,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         required=True,
         help=(
             "Untrusted project root; the launch policy must be outside it and outside "
-            "the repository that holds the project or the inventory."
+            "every repository that encloses the project or the inventory."
         ),
     )
     @click.option(
@@ -160,6 +163,17 @@ def register_supply_chain_commands(main: click.Group) -> None:
             "identity were recorded."
         ),
     )
+    @click.option(
+        "--no-isolation",
+        is_flag=True,
+        help=(
+            "Explicitly allow execution without a PID namespace; printed as a warning. On "
+            "Linux the launcher is made a child subreaper and is stopped before cleanup, so "
+            "its descendants are killed with the session while it is alive; a descendant "
+            "that outlives the launcher can escape, as can one that deliberately evades "
+            "cleanup. Elsewhere cleanup is best effort. This is not a namespace or sandbox."
+        ),
+    )
     def verify_live(
         aibom_path: str,
         project: str,
@@ -167,6 +181,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         json_output: bool,
         record: bool,
         accept_drift: bool,
+        no_isolation: bool,
     ) -> None:
         """Live: observe independently pinned stdio launchers; optionally emit an unsigned candidate.
 
@@ -179,6 +194,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         """
         modes.require_live("verify-live")
         from nexus_symbiote.core.hashing import hash_bytes, open_regular_file, parse_json_strict
+        from nexus_symbiote.live.pinned_process import isolation_off
         from nexus_symbiote.live.verify import record_candidate, verify_mcp_servers
 
         if record and json_output:
@@ -200,7 +216,17 @@ def register_supply_chain_commands(main: click.Group) -> None:
             bom = AIBOM.from_document(document)
         except (OSError, ValueError, TypeError, RecursionError):
             raise click.ClickException("invalid BOM or operator launch policy") from None
-        report = verify_mcp_servers(bom, trusted_launchers=policy)
+        if no_isolation:
+            click.echo(
+                "warning: --no-isolation: kernel PID containment is disabled. On Linux the "
+                "launcher is a child subreaper and is stopped before cleanup, so its "
+                "descendants are killed with the session while it is alive; a descendant "
+                "that outlives the launcher can escape, as can one that deliberately evades "
+                "cleanup. Elsewhere cleanup is best effort. This is not a namespace or sandbox.",
+                err=True,
+            )
+        with isolation_off() if no_isolation else contextlib.nullcontext():
+            report = verify_mcp_servers(bom, trusted_launchers=policy)
         report.inputs = {
             "inventory_sha256": hash_bytes(inventory_bytes),
             "launch_policy_sha256": hash_bytes(policy_bytes),
@@ -264,6 +290,15 @@ def register_supply_chain_commands(main: click.Group) -> None:
         help="Use built-in policy without reading configuration from the target, as scan does.",
     )
     @click.option(
+        "--accept-project-policy",
+        is_flag=True,
+        help=(
+            "In CI, accept a project policy that weakens the built-in gates explicitly for "
+            "collection, as scan does; the staged inventory is still re-gated by the built-in "
+            "policy."
+        ),
+    )
+    @click.option(
         "--signature-policy",
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
         help="Explicit operator signer policy JSON, kept outside the project, as for scan.",
@@ -274,6 +309,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         project_path: str,
         baseline_path: Path,
         no_project_policy: bool = False,
+        accept_project_policy: bool = False,
         signature_policy: Path | None = None,
     ) -> None:
         """Stage a static snapshot for review; publish it only after the scan gate passes.
@@ -313,6 +349,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 report_only=False,
                 signature_policy=signature_policy,
                 no_project_policy=no_project_policy,
+                accept_project_policy=accept_project_policy,
             )
             # A project policy may select report-only mode; it cannot authorize
             # promotion of incomplete evidence into an approved baseline.

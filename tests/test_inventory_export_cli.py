@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from nexus_symbiote.cli import main
+from nexus_symbiote.core.aibom import MAX_NATIVE_NESTING
 from nexus_symbiote.utils.terminal import LOG_COMMAND, safe_line
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -257,7 +258,10 @@ def test_an_output_link_is_replaced_never_written_through(runner, tmp_path):
     target.write_text("{}")
     link = tmp_path / "approved.json"
     link.symlink_to(target)
-    result = runner.invoke(main, _args(INVENTORY / "declared-agent.aibom.json", link))
+    refused = runner.invoke(main, _args(INVENTORY / "declared-agent.aibom.json", link))
+    assert refused.exit_code == 1, refused.output
+    assert link.is_symlink() and target.read_text() == "{}"
+    result = runner.invoke(main, _args(INVENTORY / "declared-agent.aibom.json", link, "--force"))
     assert result.exit_code == 0, result.output
     assert target.read_text() == "{}"
     assert not link.is_symlink()
@@ -313,15 +317,22 @@ def _nested(tmp_path: Path, depth: int) -> Path:
 
 
 def test_nesting_at_the_depth_limit_gets_the_fixed_refusal(runner, tmp_path):
-    # The strict parse refuses at the boundary, so export ends there with the fixed refusal and
-    # never with "internal error (RecursionError)". Bisection probes the depth where it ends.
+    # Export ends at the native nesting bound with its fixed refusal, and far beyond any
+    # bound with the strict parser's, never with "internal error (RecursionError)".
+    # Bisection probes the depth where it ends.
     def exported(depth: int) -> bool:
         output = tmp_path / f"approved-{depth}.json"
         result = runner.invoke(main, _args(_nested(tmp_path, depth), output))
         if result.exit_code == 0:
             return True
         assert result.exit_code == 1
-        assert "is not a valid native AIBOM file. It is not strict UTF-8 JSON" in result.output
+        assert "internal error" not in result.output
+        assert (
+            f"is not a valid native AIBOM file. inventory nests deeper than {MAX_NATIVE_NESTING} "
+            "levels"
+            in result.output
+            or "is not a valid native AIBOM file. It is not strict UTF-8 JSON" in result.output
+        )
         assert not output.exists()
         return False
 
@@ -331,6 +342,8 @@ def test_nesting_at_the_depth_limit_gets_the_fixed_refusal(runner, tmp_path):
         middle = (accepted + refused) // 2
         accepted, refused = (middle, refused) if exported(middle) else (accepted, middle)
     assert not exported(refused)
+    # The lists sit below the root, the components list, the agent and its properties.
+    assert accepted + 4 == MAX_NATIVE_NESTING
 
 
 @pytest.mark.parametrize(
@@ -425,3 +438,20 @@ def test_the_documented_example_is_what_the_command_prints(runner, tmp_path, mon
     assert (tmp_path / "approved.json").read_text(encoding="utf-8") in page
     unnamed = json.loads((INVENTORY / "simple-list-unnamed.json").read_text(encoding="utf-8"))
     assert json.dumps(unnamed["agents"][0]["names"][0]) in page
+
+
+def test_an_existing_output_is_not_replaced_without_force(runner, tmp_path):
+    project = _project(tmp_path / "project")
+    inventory = _scan(runner, project, tmp_path / "inventory.json")
+    output = tmp_path / "approved.json"
+    first = runner.invoke(main, _args(inventory, output))
+    assert first.exit_code == 0, first.output
+    approved = output.read_bytes()
+    output.write_bytes(approved + b"\n")
+    again = runner.invoke(main, _args(inventory, output))
+    assert again.exit_code == 1, again.output
+    assert "Pass --force to replace it" in again.output
+    assert output.read_bytes() == approved + b"\n"
+    forced = runner.invoke(main, _args(inventory, output, "--force"))
+    assert forced.exit_code == 0, forced.output
+    assert output.read_bytes() == approved

@@ -343,3 +343,80 @@ def test_worker_sets_its_limits_through_the_darwin_tolerant_helper(platform, rep
     with pytest.raises(validation.ValidationBudgetError) as denied:
         validation.validate_arguments({"type": "object"}, {})
     assert denied.value.reason == reply
+
+
+@pytest.mark.parametrize(
+    ("value", "message", "reason"),
+    [
+        ({1: "a"}, "invalid JSON object key", "json-invalid"),
+        ({("a",): 1}, "invalid JSON object key", "json-invalid"),
+        ({"k": {None: 1}}, "invalid JSON object key", "json-invalid"),
+        ({"a" * 11: 1}, "oversized JSON object key", "json-budget-exceeded"),
+        ({"k": {"b" * 11: 1}}, "oversized JSON object key", "json-budget-exceeded"),
+        (float("nan"), "value is outside the JSON domain", "json-invalid"),
+        (float("inf"), "value is outside the JSON domain", "json-invalid"),
+        ({"k": [float("-inf")]}, "value is outside the JSON domain", "json-invalid"),
+        (object(), "value is outside the JSON domain", "json-invalid"),
+        (b"bytes", "value is outside the JSON domain", "json-invalid"),
+        ({"k": {1, 2}}, "value is outside the JSON domain", "json-invalid"),
+        (2**53, "integer outside the I-JSON range", "json-number-out-of-range"),
+        (-(2**53), "integer outside the I-JSON range", "json-number-out-of-range"),
+        ({"k": [2**63]}, "integer outside the I-JSON range", "json-number-out-of-range"),
+        ("a" * 11, "JSON exceeds validation byte budget", "json-budget-exceeded"),
+        (["abc"] * 5, "JSON exceeds validation budget", "json-budget-exceeded"),
+    ],
+    ids=[
+        "int-key",
+        "tuple-key",
+        "nested-none-key",
+        "long-key",
+        "nested-long-key",
+        "nan",
+        "inf",
+        "nested-neg-inf",
+        "object",
+        "bytes",
+        "set",
+        "2^53",
+        "-2^53",
+        "nested-2^63",
+        "long-string",
+        "total-size",
+    ],
+)
+def test_check_json_budget_refuses_keys_and_values_outside_i_json(value, message, reason):
+    with pytest.raises(validation.ValidationBudgetError) as denied:
+        validation.check_json_budget(value, maximum=10)
+    assert str(denied.value) == message
+    assert denied.value.reason == reason
+
+
+def test_check_json_budget_counts_container_lengths_against_the_node_budget():
+    with pytest.raises(validation.ValidationBudgetError, match="complexity") as denied:
+        validation.check_json_budget([0] * 11, maximum=1000, max_nodes=10)
+    assert denied.value.reason == "json-budget-exceeded"
+    with pytest.raises(validation.ValidationBudgetError, match="complexity"):
+        validation.check_json_budget({f"k{i}": 0 for i in range(11)}, maximum=1000, max_nodes=10)
+    # Nodes still pending count too: two lists of five are 13 nodes, two of three are 9.
+    with pytest.raises(validation.ValidationBudgetError, match="JSON exceeds validation budget"):
+        validation.check_json_budget([[0] * 5, [0] * 5], maximum=1000, max_nodes=10)
+    assert validation.check_json_budget([[0] * 3, [0] * 3], maximum=1000, max_nodes=10) is None
+
+
+def test_check_json_budget_accepts_i_json_and_integral_floats_only_when_asked():
+    accepted = {"k": [1, 2.5, True, False, None, "x", {"n": -(2**53 - 1)}, (2**53 - 1,)]}
+    assert validation.check_json_budget(accepted, maximum=200) is None
+    assert validation.check_json_budget(2.0**53, maximum=100) is None
+    with pytest.raises(validation.ValidationBudgetError) as denied:
+        validation.check_json_budget(2.0**53, maximum=100, strict_integral_floats=True)
+    assert str(denied.value) == "integral float outside the I-JSON range"
+    assert denied.value.reason == "json-number-out-of-range"
+    assert validation.check_json_budget(2.5, maximum=100, strict_integral_floats=True) is None
+
+
+def test_cyclic_ref_schema_is_refused_as_schema_invalid():
+    from nexus_symbiote.runtime_validation import ValidationBudgetError, validate_arguments
+
+    with pytest.raises(ValidationBudgetError) as failure:
+        validate_arguments({"$ref": "#"}, {})
+    assert failure.value.reason == "schema-invalid"

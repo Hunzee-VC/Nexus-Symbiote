@@ -28,7 +28,11 @@ SUBJECT_SHA256 = "c4e92e9ecc828bef2aa7dba1de8ac983511f7532a0df11c770d39099a25cf2
 SIGNER = "https://github.com/trailofbits/rfc8785.py/.github/workflows/release.yml@refs/tags/v0.1.2"
 ISSUER = "https://token.actions.githubusercontent.com"
 UNTRUSTED = "No trusted artifact-bound signer policy was supplied"
-STAND_IN_FORMAT = "No bounded structural validator for this format/loader"
+# The signed stand-in is a wheel, so the model collector rates it as a ZIP archive.
+STAND_IN_FORMAT = (
+    "ZIP archive whose directory lists no pickle member; no bounded structural validator "
+    "for this format/loader"
+)
 
 
 def policy_document(identity: str = SIGNER) -> str:
@@ -480,3 +484,40 @@ def test_entry_point_reaches_its_scratch_without_symlinks(tmp_path: Path) -> Non
     assert "Selected signature policy is unavailable" not in result.stderr
     assert _model(workspace / "result.json")["signing_status"] == "sigstore-signed"
     assert not any(real.iterdir())
+
+
+@pytest.mark.parametrize("runner_temp", [True, False])
+def test_policy_snapshot_lives_in_runner_temp_when_tmpdir_is_in_the_checkout(
+    tmp_path: Path, runner_temp: bool
+) -> None:
+    pytest.importorskip("sigstore")
+    workspace = _signed_workspace(tmp_path)
+    (workspace / ".git").mkdir()
+    checkout_tmp = workspace / "tmp"
+    checkout_tmp.mkdir()
+    overrides = {"TMPDIR": str(checkout_tmp)}
+    if runner_temp:
+        (tmp_path / "runner-temp").mkdir()
+        overrides["RUNNER_TEMP"] = str(tmp_path / "runner-temp")
+    result = _entry_point(tmp_path, workspace, _caller_policy(tmp_path), **overrides)
+    if runner_temp:
+        assert "outside every repository that holds it" not in result.stderr
+        assert _model(workspace / "result.json")["signing_status"] == "sigstore-signed"
+        assert not any((tmp_path / "runner-temp").iterdir())
+    else:
+        # Without RUNNER_TEMP the snapshot falls back to TMPDIR, inside the repository.
+        assert result.returncode != 0
+        assert "outside every repository that holds it" in result.stderr
+    assert not any(checkout_tmp.iterdir())
+
+
+def test_runner_temp_must_be_an_existing_absolute_directory(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    base = {"GITHUB_WORKSPACE": str(workspace)}
+    assert runner.Config.from_env(base).scratch_parent is None
+    for value in ("relative", str(tmp_path / "missing")):
+        assert runner.Config.from_env({**base, "RUNNER_TEMP": value}).scratch_parent is None
+    assert runner.Config.from_env({**base, "RUNNER_TEMP": str(tmp_path)}).scratch_parent == (
+        tmp_path
+    )

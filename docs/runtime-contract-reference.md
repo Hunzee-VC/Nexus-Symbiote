@@ -331,15 +331,23 @@ flag.
 ## Verification order
 
 `ReferenceGateway.invoke(call, snapshot=..., trust=..., bom=..., approval=...)`
-checks evidence in this order and stops at the first failure. Every denial raises
-`AuthorizationError`, whose `reason` is a code from the table below. Exceptions
+checks evidence in this order and stops at the first failure. Every authorization
+denial raises `AuthorizationError`, whose `reason` is a code from the table below. Exceptions
 raised by the integrator's adapters (`authenticate`, `describe`, `resolve_scope`,
-`execute`) propagate unchanged; treat every exception from `invoke` as a denial.
+`execute`) propagate unchanged. A failure before admission prevents the gateway
+from calling `execute`.
+After admission, `execute` may have performed an external action before raising;
+the result is an admitted attempt whose execution outcome needs reconciliation.
+Neither an exception nor its type proves that no action occurred. Keep the
+admission decision and the executor's outcome separate, and use the executor's
+idempotency or reconciliation mechanism before retrying. The approval remains
+consumed; a fresh approval does not establish that a retry is safe.
 
 1. Copy the call and check its arguments against the budget and the I-JSON
    domain (`arguments-too-large`, `arguments-number-out-of-range`,
-   `arguments-not-json`). The clock is read once here for every validity check up
-   to step 12, which reads it again.
+   `arguments-not-json`). The initial clock reading applies to the initial checks;
+   the clock is read again before each trust or snapshot state transition and at
+   final admission.
 2. Authenticate the workload (`authenticate()`).
 3. Trust status: verify signatures with the trust ring and quorum
    (`signers-insufficient` and the envelope and statement codes), the validity
@@ -348,7 +356,8 @@ raised by the integrator's adapters (`authenticate`, `describe`, `resolve_scope`
    (`signers-out-of-scope`), and the transition from the recorded status
    (`trust-signer-revoked` for a signer that the recorded status revokes,
    `trust-rollback`, `trust-fork`, `trust-restore-required`). An accepted newer
-   status is recorded even if the call is denied later.
+   status is recorded even if the call is denied later. A new status's validity
+   and scoped signer quorum are rechecked under the state lock before it is recorded.
 4. Snapshot: signatures with the snapshot ring and quorum, validity window
    (`snapshot-*`), equality with the authenticated context (`context-mismatch`),
    revocation of the snapshot and of its signers (`snapshot-revoked`,
@@ -356,7 +365,8 @@ raised by the integrator's adapters (`authenticate`, `describe`, `resolve_scope`
    becomes the agent's current one: a lower serial for the same tenant,
    deployment and agent is denied from then on (`snapshot-superseded`), and the
    same serial with other content is a fork (`snapshot-fork`). This happens even
-   if the call is denied later.
+   if the call is denied later. Advancing the snapshot atomically checks that the
+   trust head remains the checked one and rechecks both contracts and signer scopes.
 5. Companion BOM digest (`bom-too-large`, `bom-mismatch`).
 6. Scope: the resolver gets an independent copy of the call; a resolver that
    modifies it is refused (`resolver-modified-request`), and the derived action
@@ -367,7 +377,8 @@ raised by the integrator's adapters (`authenticate`, `describe`, `resolve_scope`
 8. Descriptor: `describe(server_id, tool_name)` must report the granted endpoint
    (`endpoint-mismatch`) and tool name (`descriptor-name-mismatch`), and the
    descriptor's digest must equal the grant's (`descriptor-unsupported`,
-   `descriptor-too-large`, `descriptor-not-json`, `descriptor-changed`).
+   `descriptor-too-large`, `descriptor-not-json`, `descriptor-changed`). The
+   bounded descriptor is copied once; hashing and schema validation use that copy.
 9. Approval, when the grant requires one (`approval-required`): signatures with
    the approval ring and quorum, validity window (`approval-*`), revoked approvers
    (`approver-revoked`), signer scopes, approvers (`approval-actor-unbound`,
@@ -380,8 +391,9 @@ raised by the integrator's adapters (`authenticate`, `describe`, `resolve_scope`
 11. Authenticate again; the context must be unchanged (`identity-changed`).
 12. In one state transaction: the recorded trust status and snapshot must still
     be the ones checked (`trust-superseded`, `snapshot-superseded`), the approval
-    nonce is consumed (`approval-replayed`), and every validity window is checked
-    against the clock again. The commit admits the call.
+    nonce is consumed (`approval-replayed`), and every contract and signer scope
+    is checked against the clock again, including the distinct approver quorum.
+    The commit admits the call.
 13. Report the decision to `on_decision`, then call `execute(call)`.
 
 `ReferenceGateway.register_snapshot(snapshot, trust=...)` runs steps 3 and 4 for
@@ -488,7 +500,7 @@ other code is permanent for the evidence presented.
 | `state-missing` | State database does not exist or is not initialized |
 | `state-invalid` | State database path is unsafe or already exists |
 | `state-unavailable` | State database is unavailable or locked |
-| `adapter-error` | An adapter raised an exception other than `AuthorizationError` (decision records only) |
+| `adapter-error` | An adapter raised an exception other than `AuthorizationError` before admission (decision records only) |
 
 `invoke_pinned_stdio`'s pinned session raises its refusals without a code, so they
 are recorded as `denied`. A session deadline or protocol error before `tools/call` is
@@ -550,9 +562,17 @@ the call's `server_id`, `tool_name`, `action` and `resource`, the context fields
 `request_digest`, the trust status and snapshot serials and digests, the
 approval digest and actor, the key IDs that signed each contract, and the state
 store's `store_id`. It never holds argument values. The call labels come from the
-caller, so treat them as untrusted text. An exception raised by `on_decision`
+caller, so treat them as untrusted text. On an admitted call each list of key IDs
+names the signers whose authority counted: unrevoked, within their scope and, for an
+approval, bound to an actor. An extra signature by a revoked or out-of-scope key does
+not stop a valid quorum and is not listed. A denial may list every verified signature
+of the contract it refused. An exception raised by `on_decision`
 propagates; after admission it prevents execution and the approval stays
 consumed.
+
+An `admitted` decision records authorization, not successful execution. An
+exception from `execute` leaves that decision intact and the approval consumed;
+the gateway does not emit a second denial or an execution-outcome record.
 
 `ReferenceGateway.registrar(...)` takes the rings, quorums, signer scopes,
 `allow_shared_keys`, `clock` and `state` above, without adapters, and returns a
@@ -599,9 +619,13 @@ fresh snapshot before restarting.
 - **Generate** one key pair per purpose: `runtime keygen` writes both files with
   mode 0600 and, with `--passphrase-file`, encrypts the private key with the
   file's first line, at most 1,023 bytes. `runtime sign` refuses a private key
-  file, and both commands refuse a passphrase file, that its group or others can
-  read. A key held in a KMS, an HSM or an agent can sign through `sign_contract`
-  by implementing `ContractSigner`: `sign(data) -> bytes` and `public_key()`.
+  file, and both commands refuse a passphrase file, that the user running the
+  command does not own or that gives its group or others any permission. Root is no
+  exception: a job that runs as root, such as a container job, cannot use a key
+  mounted from the host and owned by another user; give the file to the user
+  that runs the command. A key held in a KMS, an HSM or an agent can sign
+  through `sign_contract` by implementing `ContractSigner`: `sign(data) -> bytes`
+  and `public_key()`.
 - **Distribute** public keys to every gateway's rings and give each approval key
   its holder in `approval_actors`. Trust statuses expire after an hour and
   snapshots after a day, so their signing keys must be available to automation;
@@ -665,7 +689,9 @@ engine, which then has to reproduce the checks above.
 
 This example runs as written; a test executes it. It keeps keys in memory and
 the state store in a temporary directory; a deployment keeps keys in a KMS or
-HSM and the store at a persistent, protected path.
+HSM and the store at a persistent, protected path. The executor below only
+records a synthetic action in a list; it sends no messages. Its timeout shows why
+an execution error cannot be treated as an authorization denial.
 
 ```python
 import secrets
@@ -788,6 +814,41 @@ try:
     gateway.invoke(call, **evidence)
 except AuthorizationError as denied:
     assert denied.reason == "approval-replayed"
+else:
+    raise AssertionError("The consumed approval was accepted")
+
+execution_attempts = []
+
+
+def execute_then_timeout(admitted: ToolCall) -> None:
+    execution_attempts.append({"sent_to": admitted.arguments["to"]})
+    raise TimeoutError("The remote outcome must be reconciled")
+
+
+failing_gateway = gateway.bind_adapters(
+    describe=gateway.describe, execute=execute_then_timeout
+)
+fresh_approval = approval.model_copy(update={"nonce": secrets.token_hex(16)})
+fresh_evidence = {
+    **evidence,
+    "approval": sign_contract(fresh_approval, "approval", (approver,)),
+}
+try:
+    failing_gateway.invoke(call, **fresh_evidence)
+except TimeoutError:
+    assert decisions[-1].admitted
+    assert decisions[-1].reason == "admitted"
+    assert execution_attempts == [{"sent_to": "team@example.test"}]
+else:
+    raise AssertionError("The executor's timeout did not propagate")
+
+try:
+    failing_gateway.invoke(call, **fresh_evidence)
+except AuthorizationError as denied:
+    assert denied.reason == "approval-replayed"
+    assert execution_attempts == [{"sent_to": "team@example.test"}]
+else:
+    raise AssertionError("The failed execution's approval was accepted again")
 
 newer = snapshot.model_copy(update={"serial": 2})
 gateway.register_snapshot(sign_contract(newer, "snapshot", (release,)), trust=evidence["trust"])
@@ -795,8 +856,12 @@ try:
     gateway.invoke(call, **evidence)
 except AuthorizationError as denied:
     assert denied.reason == "snapshot-superseded"
+else:
+    raise AssertionError("The superseded snapshot was accepted")
 
 assert [decision.reason for decision in decisions] == [
+    "admitted",
+    "approval-replayed",
     "admitted",
     "approval-replayed",
     "snapshot-superseded",

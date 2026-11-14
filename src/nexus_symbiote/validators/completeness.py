@@ -29,6 +29,7 @@ from nexus_symbiote.core.models import (
     CompletenessClaim,
     MCPServerComponent,
     ModelComponent,
+    PromptComponent,
     RegistryEntryComponent,
     RiskAssessment,
     ToolComponent,
@@ -258,6 +259,7 @@ class CompletenessValidator:
 
     def _validate_claims(self, bom: AIBOM) -> CompletenessReport:
         from nexus_symbiote.graph import validate_graph
+        from nexus_symbiote.scanners.prompt import withholds_content_hash
 
         report = CompletenessReport()
         report.total_components = len(bom.components)
@@ -287,7 +289,11 @@ class CompletenessValidator:
                 ComponentType.PROMPT_TEMPLATE,
             ):
                 if not (hasattr(c, "content_hash") and c.content_hash):
-                    if not (hasattr(c, "definition_hash") and c.definition_hash):
+                    # An imported file that is not Markdown is bound only by the operator
+                    # key; integrity verifies that binding or counts it as unbound.
+                    if not (hasattr(c, "definition_hash") and c.definition_hash) and not (
+                        isinstance(c, PromptComponent) and withholds_content_hash(c)
+                    ):
                         report.add_issue(
                             c.bom_ref, f"Component '{c.name}' has no integrity hash.", "warning"
                         )

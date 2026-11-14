@@ -32,7 +32,7 @@ from packaging.version import InvalidVersion, Version
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM, NO_CONTENT_SERIAL
-from nexus_symbiote.diff.differ import AIBOMDiffer
+from nexus_symbiote.diff.differ import AIBOMDiffer, _values_unbound
 from nexus_symbiote.scanners.base import sanitized_origin
 from nexus_symbiote.scanners.registry import RegistryScanner
 from nexus_symbiote.utils.secrets import redact_descriptor, redact_text, redact_url
@@ -509,8 +509,14 @@ def test_any_content_in_a_collected_file_yields_an_inventory_not_a_crash(name, d
         # An inventory without a content digest is never written, so what is written reads.
         inventory = AIBOM.load(output)
         report = AIBOMDiffer().diff(inventory, AIBOM.load(output))
-        assert not report.has_changes and report.total_changes == 0
-        assert report.security_alerts == []
+        # A record whose values are unbound without the key alerts even against itself.
+        unbound = {c.bom_ref for c in inventory.components if _values_unbound(c)}
+        assert not report.components_added and not report.components_removed
+        assert {change.bom_ref for change in report.components_modified} == unbound
+        assert all(
+            alert["severity"] == "medium" and alert["component"] in unbound
+            for alert in report.security_alerts
+        )
 
 
 NESTING = 1_000

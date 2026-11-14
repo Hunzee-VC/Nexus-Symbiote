@@ -15,6 +15,9 @@ from nexus_symbiote.runtime import AuthorizationError
 from tests.test_runtime_authorization import DEFINITION, fixture
 from tests.test_runtime_stdio_session import signed_inputs
 
+pytestmark = pytest.mark.usefixtures("nonisolated_pinned_fixtures")
+
+
 NOTE = {"jsonrpc": "2.0", "method": "notifications/message", "params": {"level": "info"}}
 
 

@@ -379,7 +379,10 @@ def validation_report_lines(
         lines.append((f"  Status: {status}", status_color.get(status)))
         verified = _shown(integrity.get("hashes_verified"))
         failed = _shown(integrity.get("hashes_failed"))
-        lines.append((f"  Hashes verified: {verified}, failed: {failed}", None))
+        summary = f"  Hashes verified: {verified}, failed: {failed}"
+        if _number(integrity.get("hashes_unbound")) > 0:
+            summary += f", unbound: {_shown(integrity.get('hashes_unbound'))}"
+        lines.append((summary, None))
         issues(integrity, "component_ref", "detail")
         lines.extend(_omitted(integrity))
         explained = any(

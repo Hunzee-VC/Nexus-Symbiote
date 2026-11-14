@@ -104,11 +104,20 @@ def _safe_error(exc: BaseException, operation: str) -> str:
 
 
 def _read(path: Path, maximum: int = MAX_INPUT_BYTES, *, owner_only: str = "") -> bytes:
-    """Read a bounded regular file; with ``owner_only``, refuse one others can access."""
+    """Read a bounded regular file.
+
+    With ``owner_only``, refuse a file that the effective user does not own or that its
+    group or others can access.
+    """
     with open_regular_file(path) as stream:
         info = os.fstat(stream.fileno())
-        if owner_only and os.name == "posix" and stat.S_IMODE(info.st_mode) & 0o077:
-            raise _KeyFileError(f"{owner_only} must not be accessible to group or others")
+        if owner_only and os.name == "posix":
+            if stat.S_IMODE(info.st_mode) & 0o077:
+                raise _KeyFileError(f"{owner_only} must not be accessible to group or others")
+            # Mode bits alone do not say whose file this is: run as root, an
+            # attacker-owned 0600 file in a shared directory would pass.
+            if info.st_uid != os.geteuid():
+                raise _KeyFileError(f"{owner_only} must be owned by the user running the command")
         if info.st_size > maximum:
             raise _InputTooLargeError
         raw = stream.read(maximum + 1)
@@ -260,7 +269,7 @@ def runtime_group() -> None:
     "--passphrase-file",
     type=click.Path(path_type=Path),
     help="Encrypt the private key with the passphrase on the first line of this file, "
-    "which only its owner may read.",
+    "which you own and which gives group and others no permission.",
 )
 def keygen(private_key: Path, public_key: Path, passphrase_file: Path | None) -> None:
     """Create an Ed25519 key pair without overwriting existing files.
@@ -314,7 +323,8 @@ def keygen(private_key: Path, public_key: Path, passphrase_file: Path | None) ->
     multiple=True,
     required=True,
     type=click.Path(exists=True, path_type=Path),
-    help="Ed25519 private key PEM that only its owner can access; repeat for multiple signers.",
+    help="Ed25519 private key PEM that you own and only you can access; "
+    "repeat for multiple signers.",
 )
 @click.option(
     "--out",
@@ -326,7 +336,7 @@ def keygen(private_key: Path, public_key: Path, passphrase_file: Path | None) ->
     "--passphrase-file",
     type=click.Path(path_type=Path),
     help="Passphrase for encrypted private keys, on the first line of this file, "
-    "which only its owner may read.",
+    "which you own and which gives group and others no permission.",
 )
 def sign(
     contract_path: Path,

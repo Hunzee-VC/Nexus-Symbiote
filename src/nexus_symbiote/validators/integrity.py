@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -15,6 +16,7 @@ from nexus_symbiote.core.collection import is_imported
 from nexus_symbiote.core.enums import SerializationSafety
 from nexus_symbiote.core.hashing import (
     TOOL_DEFINITION_HASH_VERSION,
+    canonical_json,
     descriptor_binding,
     hash_tool_definition,
     normalize_digest,
@@ -29,7 +31,7 @@ from nexus_symbiote.core.models import (
     PromptComponent,
     ToolComponent,
 )
-from nexus_symbiote.scanners.mcp import MCPScanner
+from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV, MCPScanner
 from nexus_symbiote.scanners.model import (
     ModelPackages,
     memoized,
@@ -37,6 +39,8 @@ from nexus_symbiote.scanners.model import (
     unused_policy_entries,
     verify_weight_files,
 )
+from nexus_symbiote.scanners.prompt import IMPORT_CONTENT_BINDING_PROFILE, withholds_content_hash
+from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.crypto import (
     MAX_BUNDLE_BYTES,
@@ -90,6 +94,7 @@ class IntegrityReport:
     components_checked: int = 0
     hashes_verified: int = 0
     hashes_failed: int = 0
+    hashes_unbound: int = 0
     signatures_checked: int = 0
     signatures_verified: int = 0
     issues: list[IntegrityIssue] = field(default_factory=list)
@@ -132,6 +137,7 @@ class IntegrityReport:
             "components_checked": self.components_checked,
             "hashes_verified": self.hashes_verified,
             "hashes_failed": self.hashes_failed,
+            "hashes_unbound": self.hashes_unbound,
             "signatures_checked": self.signatures_checked,
             "signatures_verified": self.signatures_verified,
             "bytes_charged": self.bytes_charged,
@@ -197,6 +203,27 @@ class _ArtifactDigests:
         value = f"{algorithm}:{digest.hexdigest()}"
         self._digests[key] = value
         return value
+
+    def read(self, path: Path) -> bytes | None:
+        """Return the bytes of ``path``, at most the ``file-bytes`` limit that bounded its
+        collection, or None when it cannot be read safely."""
+        try:
+            with open_regular_file(path) as stream:
+                before = os.fstat(stream.fileno())
+                if before.st_size > limits.current().file_bytes:
+                    return None
+                self.charge(before.st_size)
+                content = stream.read(before.st_size + 1)
+                after = os.fstat(stream.fileno())
+                if (
+                    len(content) != before.st_size
+                    or descriptor_binding(before) != descriptor_binding(after)
+                    or pathname_identity(path) != (after.st_dev, after.st_ino)
+                ):
+                    return None
+        except (OSError, ValueError):
+            return None
+        return content
 
 
 def _locate_artifact(project_root: Path, source_path: str) -> Path | str:
@@ -525,6 +552,18 @@ class IntegrityValidator:
             return
         try:
             algorithm, expected = normalize_digest(comp.definition_hash, "sha256")
+            # Both property spellings are supported. Never let a preferred alias
+            # hide another displayed value, including a value behind explicit null.
+            for primary, alias in (
+                ("mcp_title", "title"),
+                ("mcp_output_schema", "output_schema"),
+                ("mcp_meta", "meta"),
+            ):
+                if primary in comp.properties and alias in comp.properties:
+                    if canonical_json({"value": comp.properties[primary]}) != canonical_json(
+                        {"value": comp.properties[alias]}
+                    ):
+                        raise ValueError("Conflicting tool descriptor extension aliases")
             extensions = tool_definition_extensions(
                 {
                     "title": comp.properties.get("mcp_title", comp.properties.get("title")),
@@ -541,23 +580,16 @@ class IntegrityValidator:
                 comp.annotations,
                 **extensions,
             )
-            # Pre-0.2.0 observation inventories stored the display hash without
-            # title/outputSchema/_meta while the fingerprint already bound them,
-            # so a legacy BOM's redacted hash is the extension-free digest and
-            # its definition hash is the extended one. Accept either
-            # computation against either stored digest; a descriptor that
-            # matches neither is still a mismatch.
-            legacy_recomputed = hash_tool_definition(
-                comp.name,
-                comp.description_text,
-                comp.input_schema,
-                comp.annotations,
-            )
+            # Every displayed extension must be bound by the matching digest.
+            # Historical observation inventories may have an extension-free
+            # redacted hash, but their full descriptor must still match the
+            # original hash. Omitting extensions here would let changed metadata
+            # pass by matching only the unchanged base fields.
             raw_hash = f"{algorithm}:{expected}"
             accepted = {raw_hash}
             if comp.redacted_definition_hash is not None:
                 accepted.add(comp.redacted_definition_hash)
-            if recomputed not in accepted and legacy_recomputed not in accepted:
+            if recomputed not in accepted:
                 raise ValueError("Tool definition differs from its declared digest")
             if comp.bom_ref in local_tools:
                 local = local_tools[comp.bom_ref]
@@ -823,6 +855,9 @@ class IntegrityValidator:
         self, comp: PromptComponent, project_root: Path | None, report: IntegrityReport
     ) -> None:
         if not comp.content_hash:
+            if withholds_content_hash(comp):
+                self._check_import_binding(comp, project_root, report)
+                return
             report.issues.append(
                 IntegrityIssue(
                     comp.bom_ref, "missing_hash", "Prompt content digest is unavailable", "unknown"
@@ -834,6 +869,102 @@ class IntegrityValidator:
             report.hashes_failed += 1
             return
         self._verify_digest(comp, path, comp.content_hash, None, report, "hash_mismatch")
+
+    def _check_import_binding(
+        self, comp: PromptComponent, project_root: Path | None, report: IntegrityReport
+    ) -> None:
+        """Verify the keyed binding of an import whose unkeyed content hash is withheld.
+
+        The collector withholds the hash of an imported file that is not Markdown, so
+        its absence is not missing evidence. With the operator key the HMAC is
+        recomputed from the file; without the key, or for an inventory collected
+        without it, nothing binds the content and the component is counted as unbound.
+        A binding under another profile or key cannot be checked and is unknown.
+        """
+        recorded = comp.properties.get("static_value_binding")
+        if not os.environ.get(SOURCE_BINDING_KEY_ENV) or recorded is None:
+            report.hashes_unbound += 1
+            report.issues.append(
+                IntegrityIssue(
+                    comp.bom_ref,
+                    "unbound_content",
+                    "Imported file carries no unkeyed content digest by design; collect and "
+                    f"validate with {SOURCE_BINDING_KEY_ENV} to verify its keyed binding",
+                    "info",
+                )
+            )
+            return
+        if comp.properties.get("static_value_binding_profile") != IMPORT_CONTENT_BINDING_PROFILE:
+            report.issues.append(
+                IntegrityIssue(
+                    comp.bom_ref,
+                    "binding_profile_unknown",
+                    "Imported file content binding has an unknown profile; re-collect it",
+                    "unknown",
+                )
+            )
+            return
+        path = self._artifact_path(comp, project_root, report)
+        if path is None:
+            report.hashes_failed += 1
+            return
+        try:
+            content = self._digests.read(path)
+        except _BudgetExhaustedError:
+            report.issues.append(_budget_issue(comp.bom_ref, self.byte_budget))
+            return
+        if content is None:
+            report.hashes_failed += 1
+            report.issues.append(
+                IntegrityIssue(
+                    comp.bom_ref, "hash_mismatch", "Failed to read a regular artifact file"
+                )
+            )
+            return
+        try:
+            binding = value_binding(
+                IMPORT_CONTENT_BINDING_PROFILE,
+                {"path": comp.source_path, "content": content.decode("utf-8")},
+            )
+        except BindingError as exc:
+            report.issues.append(
+                IntegrityIssue(comp.bom_ref, "binding_unavailable", str(exc), "unknown")
+            )
+            return
+        except UnicodeDecodeError:
+            # Only UTF-8 text is collected and bound, so this file is no longer what was.
+            binding = {}
+        if binding and binding["static_value_binding_key_id"] != comp.properties.get(
+            "static_value_binding_key_id"
+        ):
+            report.issues.append(
+                IntegrityIssue(
+                    comp.bom_ref,
+                    "binding_key_unknown",
+                    "Imported file content was bound under another key; validate with the "
+                    "key it was collected with",
+                    "unknown",
+                )
+            )
+            return
+        if (
+            binding
+            and isinstance(recorded, str)
+            and hmac.compare_digest(
+                binding["static_value_binding"].encode(),
+                recorded.encode("utf-8", "surrogatepass"),
+            )
+        ):
+            report.hashes_verified += 1
+            return
+        report.hashes_failed += 1
+        report.issues.append(
+            IntegrityIssue(
+                comp.bom_ref,
+                "hash_mismatch",
+                "Keyed content binding mismatch against the imported file",
+            )
+        )
 
     def _verify_digest(
         self,

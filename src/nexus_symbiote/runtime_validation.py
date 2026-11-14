@@ -216,6 +216,8 @@ def _run_worker(wire: bytes) -> bytes:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             env={"PATH": os.defpath},
+            close_fds=True,
+            start_new_session=True,
         )
     except OSError as exc:
         raise ValidationBudgetError(
@@ -1021,6 +1023,11 @@ def _evaluate(dialects: dict[str, Any], schema: dict[str, Any], arguments: Any) 
         return _INVALID
     except (SchemaError, Unresolvable, re.error):
         return _SCHEMA
+    except RecursionError:
+        # Cyclic references can exhaust Python recursion within the worker's
+        # existing CPU, memory and wall-time limits. Report an invalid schema
+        # when that exception arrives before a resource limit ends the worker.
+        return _SCHEMA
     return _VALID
 
 
@@ -1028,7 +1035,7 @@ def _worker() -> int:
     """Internal fixed-protocol worker; failure details never echo input values."""
     try:
         if os.name != "posix":
-            return 1
+            return 2
         import resource
 
         _apply_worker_limits()

@@ -21,6 +21,9 @@ from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
 from nexus_symbiote.live import stdio, verify
 from nexus_symbiote.live.verify import record_candidate, verify_mcp_servers
 
+pytestmark = pytest.mark.usefixtures("nonisolated_pinned_fixtures")
+
+
 TOOL = {"name": "weather", "description": "Read weather", "inputSchema": {"type": "object"}}
 HELLO = {
     "protocolVersion": "2025-06-18",
@@ -280,6 +283,8 @@ def test_failures_carry_distinct_reasons(tmp_path, monkeypatch):
     binary = tmp_path / "not-a-program"
     binary.write_bytes(b"\x00\x01\x02")
     pin = "sha256:" + hashlib.sha256(binary.read_bytes()).hexdigest()
+    # The bytes are not an ELF image or a shebang script, so the launch fails before
+    # any MCP session. That stays an exec failure whether or not a PID namespace is available.
     assert _reason(tmp_path, {"mcp:weather": {"command": str(binary), "sha256": pin}}) == (
         "launcher-start-failed"
     )
@@ -362,6 +367,33 @@ def test_policy_inside_the_repository_that_holds_the_project_is_refused(tmp_path
     assert _policy_cli(tmp_path, project, outside, bom).exit_code == 0
 
 
+@pytest.mark.parametrize("inner_marker", ["directory", "file"])
+def test_policy_in_a_repository_enclosing_a_nested_checkout_is_refused(tmp_path, inner_marker):
+    # A submodule or vendored checkout has its own .git (a directory, or a file that
+    # names the gitdir). The pull request under review can still edit the outer
+    # repository, so a policy kept there is as untrusted as one beside the project.
+    outer = tmp_path / "outer"
+    project = outer / "vendor" / "agent"
+    project.mkdir(parents=True)
+    (outer / ".git").mkdir()
+    if inner_marker == "directory":
+        (project / ".git").mkdir()
+    else:
+        (project / ".git").write_text("gitdir: ../../.git/modules/agent\n")
+    bom = tmp_path / "bom.json"
+    inventory().save(bom)
+    inside = outer / "ci" / "launch-policy.json"
+    inside.parent.mkdir()
+    inside.write_text(json.dumps(launcher(tmp_path)))
+    refused = _policy_cli(tmp_path, project, inside, bom)
+    assert refused.exit_code == 2
+    assert "outside the repository" in refused.output
+    outside = tmp_path / "ops" / "launch-policy.json"
+    outside.parent.mkdir()
+    outside.write_text(inside.read_text())
+    assert _policy_cli(tmp_path, project, outside, bom).exit_code == 0
+
+
 def test_inventory_repository_is_untrusted_too(tmp_path):
     project = tmp_path / "project"
     project.mkdir()
@@ -376,13 +408,19 @@ def test_inventory_repository_is_untrusted_too(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX ownership and link checks")
-@pytest.mark.parametrize("problem", ["hard-link", "group-writable", "open-directory"])
+@pytest.mark.parametrize(
+    "problem", ["hard-link", "group-writable", "open-directory", "open-ancestor"]
+)
 def test_policy_that_others_could_rewrite_is_refused(tmp_path, problem):
     project = tmp_path / "project"
     project.mkdir()
     bom = project / "bom.json"
     inventory().save(bom)
-    operator = tmp_path / "operator"
+    # A user who can write any directory above the policy can rename the operator's
+    # directory away and put another policy in its place.
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    operator = shared / "operator"
     operator.mkdir()
     policy = operator / "launch.json"
     policy.write_text(json.dumps(launcher(tmp_path)))
@@ -390,11 +428,29 @@ def test_policy_that_others_could_rewrite_is_refused(tmp_path, problem):
         os.link(policy, tmp_path / "second-name.json")
     elif problem == "group-writable":
         policy.chmod(0o664)
-    else:
+    elif problem == "open-directory":
         operator.chmod(0o777)
+    else:
+        shared.chmod(0o777)
     result = _policy_cli(tmp_path, project, policy, bom)
     assert result.exit_code == 2
     assert "single-link regular file" in result.output
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX ownership and link checks")
+def test_a_sticky_shared_ancestor_is_accepted(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    bom = project / "bom.json"
+    inventory().save(bom)
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    shared.chmod(0o1777)
+    operator = shared / "operator"
+    operator.mkdir()
+    policy = operator / "launch.json"
+    policy.write_text(json.dumps(launcher(tmp_path)))
+    assert _policy_cli(tmp_path, project, policy, bom).exit_code == 0
 
 
 def test_project_must_be_named(tmp_path):

@@ -36,6 +36,9 @@ from tests.test_live_mcp import (
 )
 from tests.test_verify_live_scope import launcher
 
+pytestmark = pytest.mark.usefixtures("nonisolated_pinned_fixtures")
+
+
 MARKUP = "[link=https://attacker.example/approve]docs[/link][conceal]"
 CONTROLS = "\x1b]8;;https://attacker.example\x07x\x1b]8;;\x07\x1b[1A\x1b[2K\rfake\u202egpj.exe"
 
@@ -232,13 +235,23 @@ def test_click_errors_worded_by_code_or_input_stay_one_neutralized_line(error):
 
 def test_every_format_control_and_line_break_character_is_neutralized():
     # Every such character in this Python's Unicode database, not a sample: a later
-    # Unicode version that adds one makes this fail until UNSAFE_TEXT covers it.
+    # Unicode version that adds one makes this fail until UNSAFE_TEXT covers it. A tab
+    # becomes one space, which keeps a file name readable; every other one is replaced.
     characters = "".join(
         chr(code)
         for code in range(0x110000)
-        if unicodedata.category(chr(code)) in {"Cf", "Cc", "Zl", "Zp"} and chr(code) != "\t"
+        if unicodedata.category(chr(code)) in {"Cf", "Cc", "Zl", "Zp"}
     )
-    assert neutralize(characters) == "\ufffd" * len(characters)
+    assert "\t" in characters
+    assert neutralize(characters) == "".join(
+        " " if character == "\t" else "\ufffd" for character in characters
+    )
+
+
+def test_a_tab_cannot_line_text_up_under_a_column_and_noncharacters_are_replaced():
+    assert neutralize("ok\t\t\tGate: PASSED") == "ok   Gate: PASSED"
+    assert "\t" not in safe_line("  - ", "a\tb")
+    assert neutralize("a\ufffeb\uffffc") == "a\ufffdb\ufffdc"
 
 
 @pytest.mark.parametrize(
@@ -512,3 +525,9 @@ def test_long_inventory_names_print_in_linear_time(tmp_path, name):
         result = runner.invoke(main, args)
         assert time.perf_counter() - started < 10, args
         assert name in result.output
+
+
+def test_a_tab_is_replaced_with_a_space_in_neutralized_text():
+    from nexus_symbiote.utils.terminal import neutralize
+
+    assert neutralize("name\tvalue") == "name value"

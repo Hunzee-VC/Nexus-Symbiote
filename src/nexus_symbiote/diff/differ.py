@@ -19,6 +19,7 @@ from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import ComponentType, SerializationSafety, TrustTier
 from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION, canonical_json
 from nexus_symbiote.core.models import (
+    UNBOUND_VALUES_DETAIL,
     AnyComponent,
     CompletenessClaim,
     MCPServerComponent,
@@ -31,6 +32,24 @@ from nexus_symbiote.utils.crypto import (
 )
 
 SEVERITIES = ("info", "low", "medium", "high", "critical")
+
+
+def _values_unbound(component: AnyComponent) -> bool:
+    """True when this snapshot left values out of the keyed binding.
+
+    The collector records that as a low completeness finding naming
+    ``UNBOUND_VALUES_DETAIL``: MCP launch values, IDE settings values, RAG and A2A
+    values, or the content of an imported file that is not Markdown. Nothing else in
+    the record changes when one of those values does, so diff cannot see the change
+    and must not report the snapshots as equal.
+    """
+    if component.properties.get("static_value_binding"):
+        return False
+    return any(
+        risk.category == "completeness" and UNBOUND_VALUES_DETAIL in risk.detail
+        for risk in getattr(component, "risks", ())
+    )
+
 
 TRUST_TIER_ORDER = {
     TrustTier.INTERNAL_VERIFIED: 0,
@@ -191,7 +210,7 @@ def _json_text(value: Any) -> str:
     try:
         return canonical_json(value)
     except (TypeError, ValueError, OverflowError):
-        return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 def _readable_spec_version(version: object) -> bool:
@@ -585,6 +604,34 @@ class AIBOMDiffer:
                         "severity": "critical",
                     }
                 )
+            elif _values_unbound(old) or _values_unbound(new):
+                # Redacted arguments, environment values and endpoint paths are not in the
+                # structural hash. Without the keyed binding a widened filesystem root
+                # compares equal, so the comparison itself is the alert.
+                modifications.append(
+                    {
+                        "detail": (
+                            "MCP server launch values are unbound in one snapshot; argument, "
+                            "environment and endpoint-path drift is undetectable. Set "
+                            "NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections."
+                        ),
+                        "severity": "medium",
+                    }
+                )
+
+        elif _values_unbound(old) or _values_unbound(new):
+            # The values themselves are left out of the record, so the alert names
+            # none of them.
+            modifications.append(
+                {
+                    "detail": (
+                        "Values are unbound in one snapshot without the binding key; a change "
+                        "to them is undetectable and no value is recorded. Set "
+                        "NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections."
+                    ),
+                    "severity": "medium",
+                }
+            )
 
         if old.trust_tier != new.trust_tier:
             old_rank = TRUST_TIER_ORDER.get(old.trust_tier, 5)
@@ -652,8 +699,14 @@ class AIBOMDiffer:
                 }
             )
         elif not old_hash and new_hash:
+            # The first binding of content the baseline never pinned is itself a
+            # reviewable change: nothing shows the content predates this revision.
             modifications.append(
-                {"detail": "Tool definition hash became available.", "severity": "info"}
+                {
+                    "detail": "Tool definition hash became available — first binding of "
+                    "content the baseline never pinned.",
+                    "severity": "medium",
+                }
             )
 
         old_content = getattr(old, "content_hash", None)
@@ -665,8 +718,9 @@ class AIBOMDiffer:
                     if old_content and not new_content
                     else "Content hash changed."
                     if old_content
-                    else "Content hash became available.",
-                    "severity": "high" if old_content else "info",
+                    else "Content hash became available — first binding of content the "
+                    "baseline never pinned.",
+                    "severity": "high" if old_content else "medium",
                 }
             )
 
@@ -679,11 +733,13 @@ class AIBOMDiffer:
                 elif old_h:
                     outcome = "changed."
                 else:
-                    outcome = "became available."
+                    outcome = (
+                        "became available — first binding of content the baseline never pinned."
+                    )
                 modifications.append(
                     {
                         "detail": f"File hash ({_clip(hash_key)}) {outcome}",
-                        "severity": "high" if old_h else "info",
+                        "severity": "high" if old_h else "medium",
                     }
                 )
 
@@ -931,7 +987,16 @@ class AIBOMDiffer:
                     label, f"Collector '{_clip(name)}' is no longer recorded (was {_clip(before)})."
                 )
             elif before is None:
-                improvement(label, f"Collector '{_clip(name)}' is now recorded as {_clip(after)}.")
+                if after == "complete":
+                    improvement(label, f"Collector '{_clip(name)}' is now recorded as complete.")
+                else:
+                    # The baseline recorded nothing for this collector, so nothing shows
+                    # the gap the candidate now states predates the change under review.
+                    regression(
+                        label,
+                        f"Collector '{_clip(name)}' is now recorded as {_clip(after)}; the "
+                        "baseline does not show this gap predates the change.",
+                    )
             elif _STATUS_RANK.get(after, 3) < _STATUS_RANK.get(before, 3):
                 improvement(
                     label,
@@ -977,23 +1042,23 @@ class AIBOMDiffer:
 
         handled.add("surfaces_scanned")
         scanned_before, scanned_after = set(old.surfaces_scanned), set(new.surfaces_scanned)
-        if scanned_before != scanned_after:
-            parts = []
-            if scanned_after - scanned_before:
-                parts.append(
-                    f"{len(scanned_after - scanned_before)} added "
-                    f"({_listing(scanned_after - scanned_before)})"
-                )
-            if scanned_before - scanned_after:
-                parts.append(
-                    f"{len(scanned_before - scanned_after)} removed "
-                    f"({_listing(scanned_before - scanned_after)})"
-                )
+        lost_surfaces = scanned_before - scanned_after
+        gained_surfaces = scanned_after - scanned_before
+        if lost_surfaces:
+            # A surface that is no longer scanned is narrowed coverage: components
+            # found there can disappear without a removal alert of their own.
+            noun = "surface" if len(lost_surfaces) == 1 else "surfaces"
+            regression(
+                "surfaces_scanned",
+                f"{len(lost_surfaces)} scanned {noun} removed ({_listing(lost_surfaces)}): "
+                "coverage narrowed; components found there are no longer compared.",
+            )
+        if gained_surfaces:
+            noun = "surface" if len(gained_surfaces) == 1 else "surfaces"
             improvement(
                 "surfaces_scanned",
-                "Scanned surfaces changed: "
-                + ", ".join(parts)
-                + ". Components found there are compared separately.",
+                f"{len(gained_surfaces)} scanned {noun} added ({_listing(gained_surfaces)}). "
+                "Components found there are compared separately.",
             )
 
         handled.add("assurance_level")
@@ -1379,7 +1444,8 @@ class AIBOMDiffer:
                         "severity": change.severity,
                         "component": change.bom_ref,
                         "alert": (
-                            f"{change.severity.capitalize()} change in '{change.name}': {'; '.join(change.details)}"
+                            f"{change.severity.capitalize()} change in '{_clip(change.name)}': "
+                            f"{'; '.join(change.details)}"
                         ),
                     }
                 )
@@ -1390,7 +1456,7 @@ class AIBOMDiffer:
                     "severity": change.severity,
                     "component": change.bom_ref,
                     "alert": (
-                        f"New component '{change.name}' "
+                        f"New component '{_clip(change.name)}' "
                         f"({change.component_type}) added to supply chain."
                     ),
                 }
@@ -1404,7 +1470,7 @@ class AIBOMDiffer:
                     "severity": change.severity,
                     "component": change.bom_ref,
                     "alert": (
-                        f"Component '{change.name}' ({change.component_type}) is no longer in "
+                        f"Component '{_clip(change.name)}' ({change.component_type}) is no longer in "
                         "the inventory: confirm it was deleted, not moved out of collector scope."
                     ),
                 }

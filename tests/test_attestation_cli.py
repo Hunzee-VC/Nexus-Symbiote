@@ -518,6 +518,18 @@ def test_signing_keys_are_checked(runner, setup, tmp_path):
     )
 
 
+def test_a_root_run_attest_refuses_a_key_another_user_owns(runner, setup, monkeypatch):
+    private, _, _ = setup["a"]
+    # Run as root with a 0600 key that another uid owns, such as a host-mounted key.
+    if os.geteuid() == 0:
+        os.chown(private, 4242, 4242)
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    out = setup["work"] / "x.att"
+    line = failed(attest(runner, setup["subject"], out, private), "key-invalid", "signing")
+    assert "private key file must be owned by the user running the command" in line
+    assert not out.exists()
+
+
 def test_more_signing_keys_than_an_envelope_holds_are_refused(runner, setup):
     keys = [keypair(setup["keys"], f"k{index}")[0] for index in range(33)]
     out = setup["work"] / "many.att"

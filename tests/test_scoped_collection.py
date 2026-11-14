@@ -124,11 +124,22 @@ def test_complete_producer_report_preserves_partial_projection(tmp_path):
 def test_repository_baseline_refuses_actual_collection_gaps(tmp_path, gap):
     root = tmp_path / "project"
     root.mkdir()
+    (root / "agent.yaml").write_text("name: Local agent\ninstructions: [protocol.txt]\n")
+    (root / "protocol.txt").write_text("Use the declared tools.")
     raw = json.loads(REPORT.read_bytes())
+    report = root / "shadowscan.json"
+    report.write_text(json.dumps(raw))
+    runner = CliRunner()
+    control = tmp_path / "control.json"
+    result = runner.invoke(main, ["baseline", str(root), "-o", str(control)])
+    assert result.exit_code == 0, result.output
+    claim = AIBOM.load(control).metadata.completeness
+    assert not claim.scan_failures and not claim.surfaces_excluded
     if gap == "incomplete":
         raw["stats"][0]["incomplete"] = True
     elif gap == "unmapped":
         raw["findings"][0]["kind"] = "runtime-process"
+        raw["summary"]["by_kind"] = {"runtime-process": 1, "agent": 1}
     elif gap == "cyclonedx":
         raw = {
             "bomFormat": "CycloneDX",
@@ -139,8 +150,33 @@ def test_repository_baseline_refuses_actual_collection_gaps(tmp_path, gap):
         (root / ".nexus-symbiote.yaml").write_text("scan: {exclude_paths: [hidden]}")
         (root / "hidden").mkdir()
         (root / "hidden/weights.pkl").write_bytes(b"unexamined")
-    (root / "shadowscan.json").write_text(json.dumps(raw))
+    report.write_text(json.dumps(raw))
+    observed = tmp_path / "observed.json"
+    result = runner.invoke(main, ["scan", str(root), "--report-only", "-o", str(observed)])
+    assert result.exit_code == 0, result.output
+    bom = AIBOM.load(observed)
+    claim = bom.metadata.completeness
+    passed, risk = RiskScorer().passes_gate(bom)
+    assert not passed
+    assert (
+        "no agent manifest or supported local inventory evidence was found" not in risk.gate_reasons
+    )
+    if gap == "incomplete":
+        assert claim.source_report_status == "incomplete"
+        assert "ShadowScan source report is incomplete or has unknown status" in claim.scan_failures
+    elif gap == "unmapped":
+        assert claim.source_unmapped_count == 1
+        assert claim.source_unmapped_indexes == [0]
+        assert "ShadowScan report contains unmapped entries" in claim.surfaces_excluded
+    elif gap == "cyclonedx":
+        assert "ShadowScan CycloneDX source is a lossy projection" in claim.surfaces_excluded
+    else:
+        assert "hidden" in claim.exclusions
+        assert "hidden: excluded by collection policy" in claim.surfaces_excluded
+    if gap != "incomplete":
+        assert claim.source_report_status == "complete"
+        assert not claim.scan_failures
     destination = tmp_path / "baseline.json"
-    result = CliRunner().invoke(main, ["baseline", str(root), "-o", str(destination)])
+    result = runner.invoke(main, ["baseline", str(root), "-o", str(destination)])
     assert result.exit_code == 1, result.output
     assert not destination.exists()
