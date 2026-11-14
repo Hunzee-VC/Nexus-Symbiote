@@ -13,7 +13,12 @@ from pathlib import Path, PurePosixPath
 from nexus_symbiote import limits
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import hash_bytes
-from nexus_symbiote.core.models import PromptComponent, RiskAssessment, SkillPackageComponent
+from nexus_symbiote.core.models import (
+    UNBOUND_VALUES_DETAIL,
+    PromptComponent,
+    RiskAssessment,
+    SkillPackageComponent,
+)
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 from nexus_symbiote.scanners.source_binding import BindingError, value_binding
@@ -429,10 +434,32 @@ def _hidden_character_risks(
     return risks
 
 
+# Notes say `run` too (`Run make docs`, `dry-run`, `last run:`), so it counts only when
+# the next word names what to run: a path, a script or executable file, or a shell. Any
+# punctuation that a path cannot contain may come first, so `Run: ./x.sh`, `run (bash)`
+# and `run **./x.sh**` count, as do an arrow or a bullet (`->`, `- `), a prompt (`$ `), an
+# HTML tag, a code fence's language and `_` emphasis. A hyphen joined to a word before it
+# (`dry-run`) makes a noun, except in `re-run`; `<!--run` does not. A separator is never a
+# path character, so a path's scan stops at the next `run`'s separator and stays linear.
+_PATH_CHARACTER = r"[\w.~$%+@-]"
+_PUNCTUATION = r"[^\w.~$%+@/\\-]"
+_RUN_SEPARATOR = (
+    rf"(?:{_PUNCTUATION}|[-$]++(?={_PUNCTUATION})|<[a-z]++>|(?<=```)[\w+-]++(?=[ \t]*\n))"
+)
+# A name ends where a word does, or where underscores close emphasis (`_bash_`).
+_NAME_END = r"(?:\b|(?=_+(?!\w)))"
+_RUN_TARGET = (
+    r"(?<!\w)(?:(?<=\bre-)|(?<!\w-))run"
+    rf"{_RUN_SEPARATOR}+_{{0,2}}(?:"
+    r"[/\\]\S"
+    rf"|(?:[a-z_.~$%]{_PATH_CHARACTER}*|[a-z]:|\$env:\w+|\$\{{[\w:]+\}})[/\\]"
+    rf"|{_PATH_CHARACTER}+\.(?:sh|bash|zsh|ps1|bat|cmd|exe|py){_NAME_END}"
+    rf"|(?:(?:ba|z|da)?sh|pwsh|powershell){_NAME_END})"
+)
 _HIDDEN_INSTRUCTION = re.compile(
     r"https?://|~/"
     r"|\b(?:ignore|disregard|exfiltrate|execute|download|upload|send|steal|override|"
-    r"bypass|curl|wget|fetch|eval|install|run)\b",
+    rf"bypass|curl|wget|fetch|eval|install)\b|{_RUN_TARGET}",
     re.IGNORECASE,
 )
 
@@ -446,8 +473,9 @@ def detect_hidden_markup(content: str, source_name: str) -> list[RiskAssessment]
     """Report HTML and Markdown comments, which renderers hide but agents read.
 
     Only counts and lengths are reported, never the hidden text. A comment that
-    carries an imperative, a URL or a path under ``~/`` is high; other comments
-    stay low.
+    carries an imperative (``run`` only when a path, a script or a shell follows,
+    possibly after punctuation or markup), a URL or a path under ``~/`` is high; other
+    comments stay low.
     """
     count = length = 0
     instructive = False
@@ -560,13 +588,19 @@ _IMPORTING_NAMES = frozenset({"CLAUDE.md", "CLAUDE.local.md", "GEMINI.md"})
 _MAX_IMPORT_DEPTH = 5
 _MAX_IMPORTS = 1000
 # Names that hold credentials wherever they appear. A memory file names what to
-# import, so a checked-in `@.env` would otherwise direct an unkeyed digest of the
-# file into the inventory, which anyone holding it could confirm guesses against.
+# import, and a checked-in symlink what an instruction or skill file holds, so `@.env`
+# or `CLAUDE.md -> .env` would otherwise direct an unkeyed digest of the file into the
+# inventory, which anyone holding it could confirm guesses against.
 _CREDENTIAL_SUFFIXES = frozenset(
     {".pem", ".key", ".p12", ".pfx", ".der", ".jks", ".keystore", ".token"}
 )
 _CREDENTIAL_MARKERS = ("secret", "credential", "password", "apikey", "api_key", "api-key")
 _CREDENTIAL_NAMES = frozenset({".netrc", ".npmrc", ".pypirc", "id_rsa", "id_ecdsa", "id_ed25519"})
+# Directories named for what the files in them hold, such as `secrets/`. Only a whole
+# name counts, so a skill named `secret-scanner` keeps its scripts.
+_CREDENTIAL_DIRECTORIES = frozenset(
+    marker + plural for marker in _CREDENTIAL_MARKERS for plural in ("", "s")
+)
 # The keyed binding that covers an imported file the unkeyed content hash must not.
 IMPORT_CONTENT_BINDING_PROFILE = "nexus-symbiote/prompt-import-content/v1"
 
@@ -576,19 +610,67 @@ def _markdown(path: str) -> bool:
 
 
 def _credential_shaped(path: str) -> bool:
-    """Whether a file that is not Markdown is named as one that holds credentials.
+    """Whether a file that is not Markdown is named as one that holds credentials, by its
+    own name or by a directory on its path, such as ``secrets/token.txt``.
 
     A Markdown file is an instruction surface whatever its name, such as
     ``docs/secrets-handling.md``.
     """
     if _markdown(path):
         return False
+    directories = PurePosixPath(path).parts[:-1]
+    if any(part.lower().lstrip(".") in _CREDENTIAL_DIRECTORIES for part in directories):
+        return True
     name = PurePosixPath(path).name.lower()
     if name in _CREDENTIAL_NAMES or name.startswith(".env"):
         return True
     if PurePosixPath(name).suffix in _CREDENTIAL_SUFFIXES:
         return True
     return any(marker in name for marker in _CREDENTIAL_MARKERS)
+
+
+def _credential_gap(path: str, target: str | None) -> str | None:
+    """Why the file at ``path`` is not read, or None: its name, or the name of
+    ``target``, the in-root file a symlink at ``path`` leads to, says it holds
+    credentials."""
+    if _credential_shaped(path):
+        return "its name says it holds credentials"
+    if target is not None and _credential_shaped(target):
+        return f"a symlink leads to {target}, whose name says it holds credentials"
+    return None
+
+
+def _read_unless_credential(
+    path: str,
+    files: ConfinedCollection,
+    result: ScanResult | None,
+    *,
+    context: str = "",
+    missing_ok: bool = False,
+    variants_read: Collection[str] = (),
+) -> bytes | None:
+    """The bytes of the file at ``path``, or None when it is absent, unreadable or a gap.
+
+    A file that ``_credential_gap`` names is a gap and is not read, so no unkeyed digest
+    of it can reach the inventory, and a symlink replaced between that check and the
+    read, so that the read followed it to such a file, is a failure. ``context`` goes
+    before the reason for the gap. Without ``result`` neither is recorded: a walk that
+    inventories the file records it.
+    """
+    linked = None if _credential_shaped(path) else files.in_root_target(path)
+    reason = _credential_gap(path, None if linked is None else linked.as_posix())
+    if reason is not None:
+        if result is not None:
+            result.surfaces_excluded.append(f"{path}: {context}{reason}; not read or inventoried")
+        return None
+    content = files.read_bytes(path, missing_ok=missing_ok, variants_read=variants_read)
+    followed = files.link_target(path)
+    if content is None or followed is None or not _credential_shaped(followed):
+        return content
+    # The symlink was replaced after the check above.
+    if result is not None:
+        result.scan_failures.append(f"{path}: file changed during collection")
+    return None
 
 
 def _instruction_import(path: str, link_target: object) -> bool:
@@ -769,7 +851,9 @@ class PromptScanner(Scanner):
                 if rel_path in INSTRUCTION_DIRECTORIES and files.is_directory(rel_path):
                     continue
                 spellings = _CODEX_SPELLINGS if rel_path in _CODEX_SPELLINGS else ()
-                content = files.read_bytes(rel_path, missing_ok=True, variants_read=spellings)
+                content = _read_unless_credential(
+                    rel_path, files, result, missing_ok=True, variants_read=spellings
+                )
                 if content is None:
                     continue
                 # A case-insensitive checkout holds one file for the name and another
@@ -804,7 +888,7 @@ class PromptScanner(Scanner):
                     or relative in recorded
                 ):
                     continue
-                content = files.read_bytes(path)
+                content = _read_unless_credential(relative, files, result)
                 if content is None:
                     continue
                 component = self._record(relative, nested_type, content, files, result)
@@ -823,7 +907,7 @@ class PromptScanner(Scanner):
                     relative = path.as_posix()
                     if relative in recorded:
                         continue
-                    content = files.read_bytes(path)
+                    content = _read_unless_credential(relative, files, result)
                     if content is None:
                         continue
                     component = self._record(relative, prompt_type, content, files, result)
@@ -869,7 +953,7 @@ class PromptScanner(Scanner):
             if relative not in texts:
                 if not any(variant.parts[: len(parts)] == parts for parts in _SKILL_PARTS):
                     continue
-                content = files.read_bytes(variant)
+                content = _read_unless_credential(relative, files, None)
                 if content is None:
                     continue
                 try:
@@ -887,6 +971,17 @@ class PromptScanner(Scanner):
         files: ConfinedCollection,
         result: ScanResult,
     ) -> PromptComponent | None:
+        """Record the instruction file read from ``rel_path``, or None.
+
+        Every walk reads through ``_read_unless_credential``; the check is repeated on
+        the symlink the read followed, so no walk, and no import of a file a walk
+        recorded, can bring an unkeyed digest of a credential file into the inventory.
+        """
+        target = files.link_target(rel_path)
+        reason = _credential_gap(rel_path, target)
+        if reason is not None:
+            result.surfaces_excluded.append(f"{rel_path}: {reason}; not read or inventoried")
+            return None
         try:
             text = content.decode("utf-8")
         except UnicodeDecodeError:
@@ -896,7 +991,6 @@ class PromptScanner(Scanner):
         component = self._scan_instruction_file(
             Path(rel_path), rel_path, prompt_type, content, text
         )
-        target = files.link_target(rel_path)
         if target is not None:
             component.properties["symlink_target"] = target
         result.components.append(component)
@@ -1052,8 +1146,8 @@ class PromptScanner(Scanner):
                 severity=RiskSeverity.LOW,
                 category="completeness",
                 detail=(
-                    f"Imported file '{neutralize(target)}' is not bound in this inventory: "
-                    "its content is not an instruction file and carries no unkeyed digest."
+                    f"Imported file '{neutralize(target)}' {UNBOUND_VALUES_DETAIL}: its "
+                    "content, which is not an instruction file and carries no unkeyed digest."
                 ),
                 recommendation=(
                     f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes to "
@@ -1070,7 +1164,7 @@ class PromptScanner(Scanner):
 
         A symlink that leads to a file named as one that holds credentials is a gap
         whatever name imports it, so a Markdown name cannot bring the content hash of
-        such a file into the inventory.
+        such a file into the inventory (see ``_read_unless_credential``).
         """
         if len(PurePosixPath(target).parts) > files.max_depth + 1:
             result.surfaces_excluded.append(
@@ -1086,20 +1180,9 @@ class PromptScanner(Scanner):
             return None
         if files.is_directory(target):
             return None
-        linked = files.in_root_target(target)
-        if linked is not None and _credential_shaped(linked.as_posix()):
-            result.surfaces_excluded.append(
-                f"{target}: imported by {importer} but a symlink leads to {linked.as_posix()}, "
-                "whose name says it holds credentials; not read or inventoried"
-            )
-            return None
-        content = files.read_bytes(target, missing_ok=True)
-        followed = files.link_target(target)
-        if content is not None and followed is not None and _credential_shaped(followed):
-            # The symlink was replaced after the check above.
-            result.scan_failures.append(f"{target}: file changed during collection")
-            return None
-        return content
+        return _read_unless_credential(
+            target, files, result, context=f"imported by {importer} but ", missing_ok=True
+        )
 
     def _scan_skills(
         self, files: ConfinedCollection, result: ScanResult, reported: set[Path]
@@ -1140,17 +1223,34 @@ class PromptScanner(Scanner):
     def _skill_file(
         path: Path, files: ConfinedCollection, result: ScanResult
     ) -> tuple[str, list[RiskAssessment]] | None:
-        """A bundle file's digest and the hidden-character findings of its text."""
+        """A bundle file's digest and the hidden-character findings of its text.
+
+        A file that ``_credential_gap`` names, by its own name or the name of the in-root
+        file a symlink there leads to, is a gap and is not read, so the inventory carries
+        no unkeyed digest of it; the bundle's other files are inventoried as usual. A
+        symlink replaced after that check, so that the read followed it to such a file,
+        is a failure.
+        """
         relative = path.as_posix()
         text_file = path.suffix.lower() in _DECLARATION_SUFFIXES
-        found = files.regular_file(path)
+        found = None if _credential_shaped(relative) else files.regular_file(path)
+        reason = _credential_gap(relative, None if found is None else found[0].as_posix())
+        if reason is not None:
+            result.surfaces_excluded.append(f"{relative}: {reason}; not read or inventoried")
+            return None
         if found is not None and found[1] > files.max_file_bytes and not text_file:
             # A large asset, such as a sample PDF, is streamed within the collection's
             # byte budget instead of being read whole: digested, and checked for hidden
             # characters when it is UTF-8 text, such as instructions SKILL.md points to.
+            # The stream opens the file checked above, without following a symlink.
             return PromptScanner._stream_skill_file(found[0], relative, files)
         content = files.read_bytes(path)
         if content is None:
+            return None
+        followed = files.link_target(path)
+        if followed is not None and _credential_shaped(followed):
+            # The symlink was replaced after the check above.
+            result.scan_failures.append(f"{relative}: file changed during collection")
             return None
         try:
             text = content.decode("utf-8")

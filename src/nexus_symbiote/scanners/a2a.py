@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import canonical_json, hash_canonical
 from nexus_symbiote.core.models import (
+    UNBOUND_VALUES_DETAIL,
     A2AClientComponent,
     A2AServerComponent,
     CapabilityDeclaration,
@@ -1164,7 +1165,10 @@ class A2AScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.LOW,
                     category="completeness",
-                    detail=f"A2A client '{shown}' agent card URL beyond its exported origin is not bound in this inventory.",
+                    detail=(
+                        f"A2A client '{shown}' {UNBOUND_VALUES_DETAIL}: "
+                        "agent card URL beyond its exported origin."
+                    ),
                     recommendation=f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect same-origin card changes.",
                 )
             )

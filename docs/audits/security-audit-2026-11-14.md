@@ -218,10 +218,15 @@ contains the change and a regression test that failed before it.
   settings digest, but names nothing.
 - Evidence: reproduced: `_broad_grants(["Bash(sh:*)"]) == []` before the fix;
   `Bash(*)` gave `["shell commands"]`.
-- Fix: a Bash rule whose command word is a shell, an interpreter or a launcher and that
-  contains a wildcard is conservatively reported as an unscoped shell grant; a fixed
-  script with wildcard arguments, such as `Bash(python3 scripts/report.py:*)`, also
-  matches. The heuristic and its limits (that over-match, and a program such as
+- Fix: a Bash rule that contains a wildcard and whose command word, after any
+  directory and in any case, is on a fixed list of names is conservatively reported as
+  an unscoped shell grant. The list (`_COMMAND_RUNNERS` in `ide_agents.py`) names
+  shells such as `sh`, `bash` and `zsh`, interpreters such as `node`, `perl` and
+  `ruby`, launchers such as `env`, `sudo`, `xargs`, `docker`, `npx` and `uvx`, and
+  `python`, `pypy`, `ruby`, `php`, `perl` or `node` with or without a version suffix; a shell,
+  interpreter or launcher not on it, such as `mksh`, `tclsh`, `awk` or `java`, stays
+  scoped. A fixed script with wildcard arguments, such as
+  `Bash(python3 scripts/report.py:*)`, also matches. The heuristic and its limits (that over-match, and a program such as
   `npm run` that runs project code staying scoped) are documented in the
   [known limitations](../known-limitations.md#instructions-and-ide-settings).
   `tests/test_ide_interpreter_prefix_grants.py` fails on the old code.
@@ -336,7 +341,9 @@ fails on the old code. Maps to CWE-59.
 **[Low | High] L12. Quadratic merge of client server references across nested config files** (fixed here).
 `mcp.py` re-sorted the union of a host's server references once per client file. Measured
 0.7 s for 2,000 nested files, 33 s for 16,000; under raised `entries` limits, hours. Now
-merged once per host. `tests/test_mcp_client_refs_scaling.py` fails on the old code.
+merged once per host. `tests/test_mcp_client_refs_scaling.py` checks the merge at 400
+and 1,600 files but passes on the old code (`4aaf727`) too, so it does not
+reproduce this finding.
 Maps to CWE-407.
 
 **[Low | High] L13. A quoted `.npmrc` value nested beyond the JSON parser's limit escaped as a `RecursionError`** (fixed here).
@@ -644,7 +651,7 @@ fixtures hold no real credential: token-shaped strings are assembled at run time
 published examples, and the attestation vectors use a documented test seed.
 
 The regression tests added with this report cover M2, M3, L4, L5, L9, L11, L12 and
-L13; each failed on the unfixed tree.
+L13; each failed on the unfixed tree except L12's scaling test, which passes there too.
 
 ## Supply-chain posture
 

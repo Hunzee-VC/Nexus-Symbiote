@@ -958,7 +958,7 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 | `--json-output` | Output the verification report as JSON. |
 | `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools, declarations or the server identity drifted, unless `--accept-drift`. |
 | `--accept-drift` | With `--record`, exit 0 although changed or new tools, declarations or server identity were recorded. |
-| `--no-isolation` | Explicitly allow execution without a PID namespace. On Linux the launcher is a child subreaper, so a double-fork is killed with the session; elsewhere cleanup is best effort. Printed as a warning. |
+| `--no-isolation` | Explicitly allow execution without a PID namespace; printed as a warning. On Linux the launcher is made a child subreaper and is stopped before cleanup, so its descendants are killed with the session while it is alive; a descendant that outlives the launcher can escape, as can one that deliberately evades cleanup. Elsewhere cleanup is best effort. This is not a namespace or sandbox. |
 
 By default the launcher must run as pid 1 of a new user and PID namespace
 (`unshare --user --map-root-user --pid --fork --kill-child`), so the kernel ends its
@@ -971,10 +971,19 @@ supplementary groups or changes file ownership behaves differently than under di
 execution. A host that refuses the namespace fails with `isolation-unavailable`
 before executing the pinned launcher. Only the explicit operator option
 `--no-isolation` permits a launch without this boundary. On that path, on Linux,
-the launcher is a child subreaper, so a `setsid` child that double-forks is
-reparented to the launcher and killed with the session; on other systems that
-cleanup is best effort. It is not a PID namespace. Neither form is a
-filesystem or network sandbox.
+a short exec wrapper (the running interpreter with `-I -S`) sets
+`PR_SET_CHILD_SUBREAPER` and then executes the staged launcher with the same
+argument, environment and working directory. While the launcher is alive, its
+descendants stay in its process tree, including a `setsid` child that
+double-forks. Cleanup stops the launcher before it kills them, so the launcher
+cannot start another process, such as a helper that a watchdog restarts, and then
+kills the launcher's process group. A descendant that outlives the launcher,
+because the launcher exited or was killed before the session ended, is adopted
+outside that tree and can escape. So can a launcher or descendant that deliberately
+evades cleanup, for example by clearing the subreaper flag or forking faster than
+the tree is scanned, and a descendant running as another user cannot be signalled.
+On other systems that cleanup is best effort. The option is not a PID namespace,
+and neither form is a filesystem or network sandbox.
 
 Servers whose transport is `sse`, `streamable-http` or `http` and that record no
 launch command are reported as not verifiable by `verify-live` (reason

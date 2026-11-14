@@ -13,7 +13,7 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.core.enums import RiskSeverity
 from nexus_symbiote.core.models import UNBOUND_VALUES_DETAIL, MCPServerComponent, RiskAssessment
 from nexus_symbiote.diff import differ
-from nexus_symbiote.diff.differ import _launch_values_unbound
+from nexus_symbiote.diff.differ import _values_unbound
 from nexus_symbiote.scanners import mcp
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 from tests.support import load_script
@@ -107,17 +107,17 @@ def test_the_collector_and_the_differ_share_the_unbound_values_phrase(tmp_path, 
 
     server = collected()
     assert any(UNBOUND_VALUES_DETAIL in detail for detail in completeness(server))
-    assert _launch_values_unbound(server)
+    assert _values_unbound(server)
     phrased = f"MCP server 'fs' {UNBOUND_VALUES_DETAIL}: launch arguments."
-    assert _launch_values_unbound(finding(phrased))
-    assert not _launch_values_unbound(finding("MCP server 'fs' launch arguments were redacted."))
+    assert _values_unbound(finding(phrased))
+    assert not _values_unbound(finding("MCP server 'fs' launch arguments were redacted."))
 
     renamed = "values recorded without a binding key"
     monkeypatch.setattr(mcp, "UNBOUND_VALUES_DETAIL", renamed)
     monkeypatch.setattr(differ, "UNBOUND_VALUES_DETAIL", renamed)
     assert any(renamed in detail for detail in completeness(collected()))
-    assert _launch_values_unbound(collected())
-    assert not _launch_values_unbound(finding(phrased))
+    assert _values_unbound(collected())
+    assert not _values_unbound(finding(phrased))
 
 
 def test_reviewed_baseline_requires_a_binding_key(tmp_path):

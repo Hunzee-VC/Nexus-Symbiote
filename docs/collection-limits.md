@@ -240,7 +240,7 @@ shorten lists whose content is recorded or bound anyway.
 | TypeScript native parse time per file | 250 ms, in proportion to `syntax-bytes` above its default |
 | TypeScript analysis time per file | 2 s, in proportion to `ts-nodes` above its default |
 | Native inventories and ShadowScan reports read by any command | 16 MiB |
-| Nesting levels of arrays and objects in a native inventory read by any command, the root counted | 128 |
+| Nesting levels of arrays and objects in a native inventory read through the shared reader, the root counted (`verify-discovery` and `verify-live` stop at the recursion limit instead; `attest` records a deeper subject, up to 256 levels, as native) | 128 |
 | `agent.yaml` and `.nexus-symbiote.yaml` | 1 MiB each |
 | Operator signature policy | 4 MiB |
 | Model artifact named in an operator signature policy | 5 GiB |

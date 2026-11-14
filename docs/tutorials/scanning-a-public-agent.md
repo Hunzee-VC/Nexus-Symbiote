@@ -129,7 +129,8 @@ nexus-symbiote diff reviewed.aibom.json current.aibom.json --fail-on-alert
 
 When nothing changed, `diff` prints `No changes detected.` and exits 0. Without
 a key, `diff --fail-on-alert` exits 1 with a medium alert for every MCP server
-whose launch arguments, environment values or endpoint path were left unbound,
+whose launch arguments, environment values or endpoint path were left unbound, and
+for every IDE settings, RAG, A2A or imported-file record whose values were,
 even when the two inventories are identical, because redacted values cannot be
 shown to have stayed the same.
 
