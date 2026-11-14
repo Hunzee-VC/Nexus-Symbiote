@@ -292,6 +292,11 @@ class AIBOM(BaseModel):
             raise NativeFormatError(
                 f"It fails the native JSON export's consistency checks: {exc}."
             ) from exc
+        if _nested_deeper_than(payload, MAX_NATIVE_NESTING):
+            raise NativeFormatError(
+                f"The inventory nests deeper than {MAX_NATIVE_NESTING} levels, which native "
+                "readers refuse."
+            )
         try:
             canonical_json(payload)
         except (TypeError, ValueError) as exc:

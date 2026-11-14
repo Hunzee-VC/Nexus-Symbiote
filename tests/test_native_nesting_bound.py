@@ -17,6 +17,7 @@ from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM, MAX_NATIVE_NESTING, NativeFormatError
+from nexus_symbiote.core.models import ModelComponent
 from nexus_symbiote.runtime import MAX_BOM_DEPTH
 
 REFUSED = f"inventory nests deeper than {MAX_NATIVE_NESTING} levels"
@@ -119,3 +120,25 @@ def test_every_reader_reads_an_inventory_at_the_bound(tmp_path, command):
     result = CliRunner().invoke(main, COMMANDS[command](path))
     assert "internal error" not in result.output
     assert NOT_VALID not in result.output
+
+
+def _deep_inventory(levels: int) -> AIBOM:
+    nested: object = "leaf"
+    for _ in range(levels):
+        nested = {"k": nested}
+    return AIBOM(
+        components=[ModelComponent(bom_ref="model:m", name="m", properties={"deep": nested})]
+    )
+
+
+def test_the_writer_refuses_what_the_reader_refuses(tmp_path):
+    # The component's properties sit four levels below the root, so a property
+    # nested MAX_NATIVE_NESTING - 4 deep is the deepest document either side accepts.
+    accepted = tmp_path / "accepted.json"
+    _deep_inventory(MAX_NATIVE_NESTING - 4).save(accepted)
+    assert AIBOM.load(accepted).components[0].properties["deep"]
+
+    refused = tmp_path / "refused.json"
+    with pytest.raises(NativeFormatError, match=f"nests deeper than {MAX_NATIVE_NESTING} levels"):
+        _deep_inventory(MAX_NATIVE_NESTING - 3).save(refused)
+    assert not refused.exists()
