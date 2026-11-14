@@ -199,7 +199,7 @@ A way around a limit that its entry does not describe is worth a
   alerts on any change to a server's command, arguments, environment or header
   values. Without it, `diff` still alerts on a changed command basename, launcher,
   package or version, on added or removed arguments, variables or headers, and on a
-  change to which named tools are auto-approved or filtered, and a server whose
+  change to which named tools each field auto-approves or filters, and a server whose
   remaining values (including `cwd`, `envFile`, `watchPaths`, `oauth`, `auth`, `dev`
   and the Codex environment-name settings) are unbound is a medium alert: argument,
   environment and endpoint-path drift is undetectable. That alert does not say

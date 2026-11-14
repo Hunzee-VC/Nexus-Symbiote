@@ -295,7 +295,7 @@ VECTOR_SERVER = {
 }
 VECTOR_KEY = "nexus-symbiote-mcp-test-vector-key-0001"
 VECTOR_STRUCTURE = (
-    '{"profile":"nexus-symbiote/mcp-static-config/v3","structure":{"argument_count":4,'
+    '{"profile":"nexus-symbiote/mcp-static-config/v4","structure":{"argument_count":4,'
     '"client_settings":{},"command":"npx","endpoint":null,"environment_names":["ACME_TOKEN",'
     '"LOG_LEVEL"],"fields":["args","command","env","tools"],"header_names":[],'
     '"launch_context":{},"launcher":"npx","launcher_command":"npx","launcher_wrappers":[],'
@@ -303,7 +303,7 @@ VECTOR_STRUCTURE = (
     '"pinned":true,"version":"1.2.3"}],"resolver_settings":[],"tool_names":["read_file"],'
     '"transport":"stdio"}}'
 )
-VECTOR_HASH = "sha256:8842529f58e69fae0d25b70d3b715a9e17c7ceb76acdf485fe6a5119f8ac760b"
+VECTOR_HASH = "sha256:ced79275436c5dcf00bcf40adcbc14fdae53a19f78cb541878e3ed6acf9a548b"
 VECTOR_BINDING = "hmac-sha256:ab2510900cd4305b4edfdc611aab1bfa0987c3a4a9d633c0afe1f9a3b3720e56"
 VECTOR_KEY_ID = "12ff5c60eb4e7e21ba266464e71ccbcd"
 
@@ -315,7 +315,7 @@ def test_static_config_hash_known_answer_vector(tmp_path, monkeypatch):
 
     monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
     server = _server(tmp_path, VECTOR_SERVER)
-    assert STATIC_CONFIG_HASH_PROFILE == "nexus-symbiote/mcp-static-config/v3"
+    assert STATIC_CONFIG_HASH_PROFILE == "nexus-symbiote/mcp-static-config/v4"
     assert "sha256:" + hashlib.sha256(VECTOR_STRUCTURE.encode()).hexdigest() == VECTOR_HASH
     assert server.properties["static_config_hash"] == VECTOR_HASH
     assert server.properties["source_values_bound"] is False
@@ -347,7 +347,7 @@ def test_previous_static_profile_is_reported_as_recollect(tmp_path):
     root, output, _ = _baseline(tmp_path)
     bom = AIBOM.load(output)
     server = next(c for c in bom.components if isinstance(c, MCPServerComponent))
-    server.properties["static_config_hash_profile"] = "nexus-symbiote/mcp-static-config/v2"
+    server.properties["static_config_hash_profile"] = "nexus-symbiote/mcp-static-config/v3"
     report = CompletenessValidator().validate_against_project(bom, root)
     assert not report.is_complete
     assert any(i.severity == "unknown" and "re-collect" in i.description for i in report.issues)
@@ -1148,6 +1148,8 @@ def _client_file(path: str, first: str, first_names: list[str], second: str, nam
         (".cursor/mcp.json", "alwaysAllow", "includeTools"),
         (".gemini/settings.json", "includeTools", "excludeTools"),
         (".codex/config.toml", "enabled_tools", "disabled_tools"),
+        (".roo/mcp.json", "alwaysAllow", "autoApprove"),
+        (".kiro/settings/mcp.json", "autoApprove", "alwaysAllow"),
     ],
 )
 def test_swapping_named_tools_with_the_same_count_fails_the_keyless_diff(
@@ -1168,7 +1170,7 @@ def test_swapping_named_tools_with_the_same_count_fails_the_keyless_diff(
 
     run = CliRunner().invoke(main, ["diff", *boms, "--fail-on-alert"])
     assert run.exit_code == 1, run.output
-    assert "No changes detected" not in run.output
+    assert "[CRITICAL]" in run.output and "static source binding changed" in run.output
 
 
 def test_named_tool_lists_are_exported_sorted_and_redacted(tmp_path, monkeypatch):
@@ -1187,7 +1189,10 @@ def test_named_tool_lists_are_exported_sorted_and_redacted(tmp_path, monkeypatch
     )
     settings = server.properties["client_settings"]
     assert settings["auto_approve"] == 3
-    assert settings["auto_approved_tools"] == ["git_diff", "git_log", "git_status"]
+    assert settings["auto_approved_tools"] == {
+        "alwaysAllow": ["git_diff"],
+        "autoApprove": ["git_log", "git_status"],
+    }
     assert settings["tool_filters"] == 3
     names = settings["tool_filter_names"]["disabledTools"]
     assert "git_reset" in names and len(names) == 3

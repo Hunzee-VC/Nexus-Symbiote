@@ -208,7 +208,7 @@ def test_other_project_client_files_are_inventoried(tmp_path, path, host):
     assert server.source_path == path
     assert server.properties["client_settings"] == {
         "auto_approve": 1,
-        "auto_approved_tools": ["search"],
+        "auto_approved_tools": {"autoApprove": ["search"]},
         "disabled": True,
     }
     assert any(r.category == "version_pinning" for r in server.risks)

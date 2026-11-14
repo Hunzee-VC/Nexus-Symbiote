@@ -3,7 +3,7 @@
 `validate --project` checks a supplied inventory against freshly collected local
 evidence. Static MCP server records carry two kinds of source binding.
 
-`static_config_hash` (profile `nexus-symbiote/mcp-static-config/v3`) is an RFC 8785
+`static_config_hash` (profile `nexus-symbiote/mcp-static-config/v4`) is an RFC 8785
 digest of the server's exported structure: configuration field names, the displayed
 command basename, the classified launcher with its wrappers and effective command,
 the identity, version and pin of every package it launches, package source origins,
@@ -11,11 +11,13 @@ the names of the project resolver settings that apply to it, launch context flag
 counts, transport, endpoint origin, argument count, environment variable and header
 names, client settings (auto-approval, disabled, tool filters, with the sorted, redacted
 names of the tools that `alwaysAllow`, `autoApprove`, `includeTools`, `excludeTools`,
-`enabled_tools`, `disabled_tools` and `disabledTools` list) and declared tool names.
+`enabled_tools`, `disabled_tools` and `disabledTools` list, one list per field because
+each client reads only some of them) and declared tool names.
 It covers only information the record exports in clear, so it reveals nothing about
 secret values. It detects added or removed arguments, environment variables, headers,
 fields, resolver settings and tools, a tool swapped into or out of an auto-approval
-or tool filter list at the same count, and changed launchers, package identities and
+or tool filter list at the same count or moved between `alwaysAllow` and
+`autoApprove`, and changed launchers, package identities and
 versions (including dependencies added with `--with`), package source origins, launch
 context and endpoint origins.
 

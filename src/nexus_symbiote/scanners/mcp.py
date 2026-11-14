@@ -284,7 +284,7 @@ _TRANSITIVE_RUNNERS = frozenset(
 # structure digest covers only fields the inventory already exports in clear.
 # Values are bound by an HMAC under an operator key that never enters the BOM.
 # A change to either preimage requires a new profile and new test vectors.
-STATIC_CONFIG_HASH_PROFILE = "nexus-symbiote/mcp-static-config/v3"
+STATIC_CONFIG_HASH_PROFILE = "nexus-symbiote/mcp-static-config/v4"
 STATIC_VALUE_BINDING_PROFILE = "nexus-symbiote/mcp-static-values/v3"
 SOURCE_BINDING_KEY_ENV = "NEXUS_SYMBIOTE_SOURCE_BINDING_KEY"
 _MIN_SOURCE_BINDING_KEY_LENGTH = 32
@@ -2227,15 +2227,17 @@ class MCPScanner(Scanner):
         filtered keeps every count, so the names must be exported for diff to see it.
         """
         settings: dict[str, Any] = {}
-        approved = sorted(
-            cls._tool_name(tool, scrubber)
+        # Clients read only one of these fields, so a tool moved between them changes
+        # what is approved without changing the merged list.
+        approved = {
+            field: sorted(cls._tool_name(tool, scrubber) for tool in config[field])
             for field in ("alwaysAllow", "autoApprove")
-            for tool in config.get(field, [])
-        )
+            if config.get(field)
+        }
         if config.get("trust") is True:
             settings["auto_approve"] = "all"
         elif approved:
-            settings["auto_approve"] = len(approved)
+            settings["auto_approve"] = sum(len(names) for names in approved.values())
         if approved:
             settings["auto_approved_tools"] = approved
         if config.get("disabled") is True or config.get("enabled") is False:

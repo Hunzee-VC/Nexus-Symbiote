@@ -94,12 +94,26 @@ and scope associations in the private keyed preimage. Version 2 could keep the
 same binding when two import targets were swapped. Recollect and review keyed
 MCP baselines and candidates under v3; v2 records fail project reconciliation.
 Do not relabel an old digest or compare the profiles as if they authenticated the
-same preimage. The exported-structure profile remains `mcp-static-config/v3`.
+same preimage. That change left the exported-structure profile at
+`mcp-static-config/v3`; see [MCP static structure v4](#mcp-static-structure-v4).
 
 Explicit Deno `--config`/`-c`/`--no-config` and `--import-map` selection, referenced
 `importMap` files and unsupported import/scopes shapes now produce coverage gaps.
 Review and replace those launch forms or resolve them outside this collector;
 do not approve their partial inventories as trusted baselines.
+
+## MCP static structure v4
+
+`nexus-symbiote/mcp-static-config/v4` adds the sorted, redacted names of the
+tools in each auto-approval and tool filter field to the exported structure
+(`client_settings.auto_approved_tools` and `client_settings.tool_filter_names`,
+one list per field). Under v3 only their counts were digested, so swapping which
+tool is auto-approved or filtered, or moving a tool between `alwaysAllow` and
+`autoApprove`, kept the digest. Every static MCP record's `static_config_hash`
+changes once: `diff` against a v3 baseline reports a critical static source
+binding change with `properties.static_config_hash_profile changed`, and
+`validate --project` reports v3 records as unknown. Recollect and review the
+baseline, including the exported tool names, before approving it.
 
 ## SARIF rule identifiers
 
