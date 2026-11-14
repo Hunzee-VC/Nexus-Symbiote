@@ -170,6 +170,38 @@ def test_opt_out_kills_a_double_fork_and_a_refused_namespace_never_starts_it(
     assert not blocked.exists()
 
 
+class _NoPrctl:
+    """A C library without prctl, as on macOS."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        pass
+
+    def __getattr__(self, name: str) -> object:
+        raise AttributeError(name)
+
+
+def test_subreaper_hook_needs_linux_and_prctl(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert pinned_process._subreaper_hook() is not None
+    monkeypatch.setattr(pinned_process.ctypes, "CDLL", _NoPrctl)
+    assert pinned_process._subreaper_hook() is None
+    monkeypatch.undo()
+    monkeypatch.setattr(pinned_process.sys, "platform", "darwin")
+    assert pinned_process._subreaper_hook() is None
+
+
+def test_opt_out_without_prctl_still_launches_and_cleans_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # prctl is looked up before the fork, so a C library without it never makes the
+    # child fail between fork and exec; the launch keeps best-effort cleanup.
+    monkeypatch.setattr(pinned_process.ctypes, "CDLL", _NoPrctl)
+    marker = tmp_path / "pid"
+    command, digest = _launcher(tmp_path, marker)
+    with isolation_off():
+        observe_pinned(str(command), digest)
+    _assert_dead(_host_pid(marker))
+
+
 def test_cli_requires_an_explicit_opt_out_when_the_namespace_is_unavailable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

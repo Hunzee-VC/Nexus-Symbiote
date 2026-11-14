@@ -4,9 +4,10 @@
 private copy. One helper keeps the copy, the digest check and the termination from
 drifting apart. When the kernel allows a user and PID namespace, the launcher is
 pid 1 of that namespace and dies with every descendant. If the kernel refuses the
-namespace, launch fails before executing the pinned program. ``--no-isolation``
-still runs the launcher as a child subreaper, so a double-fork is killed with
-the session. That is not a PID or filesystem namespace.
+namespace, launch fails before executing the pinned program. On Linux,
+``--no-isolation`` still runs the launcher as a child subreaper, so a double-fork is
+killed with the session; elsewhere that cleanup is best effort. Neither is a PID or
+filesystem namespace.
 """
 
 from __future__ import annotations
@@ -19,7 +20,8 @@ import re
 import shutil
 import signal
 import subprocess
-from collections.abc import Iterator
+import sys
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -213,17 +215,31 @@ def _kill_descendants(root: int) -> None:
                 pass
 
 
-def _mark_child_subreaper() -> None:
-    """Become the reaper for this process's descendants. Runs in the child, before exec.
+def _subreaper_hook() -> Callable[[], None] | None:
+    """A pre-exec hook that makes the launcher a child subreaper, or None without one.
 
     A double-fork calls ``setsid`` and then exits the intermediate process, so the
     grandchild's parent would otherwise become pid 1 and leave the descendant tree.
-    The flag is kept across exec, so the pinned launcher reaps that grandchild and
-    the tree sweep still finds it. The pytest process is never marked.
+    The flag is kept across exec, so the pinned launcher adopts that grandchild and
+    the tree sweep still finds it. ``prctl`` is looked up here, in the parent, so the
+    child only makes the call between fork and exec. Only Linux has
+    ``PR_SET_CHILD_SUBREAPER``; elsewhere an opted-out launch keeps best-effort
+    cleanup. The calling process is never marked.
     """
-    libc = ctypes.CDLL(None, use_errno=True)
-    if libc.prctl(_PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
-        os._exit(127)
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        prctl = ctypes.CDLL(None, use_errno=True).prctl
+    except (OSError, AttributeError):
+        return None
+    prctl.argtypes = [ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
+    prctl.restype = ctypes.c_int
+
+    def mark() -> None:
+        if prctl(_PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+            os._exit(127)
+
+    return mark
 
 
 def _executable_image(staged: Path) -> bool:
@@ -257,7 +273,7 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
             env={"PATH": os.defpath},
             start_new_session=True,
             # Outside a PID namespace the launcher itself must reap a double-fork.
-            preexec_fn=None if namespaced else _mark_child_subreaper,
+            preexec_fn=None if namespaced else _subreaper_hook(),
             bufsize=0,
         )
     except PinnedProcessError:
@@ -272,9 +288,9 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
 def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
     """Kill the session and, outside a PID namespace, every descendant of the launcher.
 
-    The launcher is a child subreaper on that path, so a double-fork is reparented to
-    it instead of pid 1 and the tree sweep still finds it. Descendants are killed
-    first, while that parent is alive.
+    On Linux the launcher is a child subreaper on that path, so a double-fork is
+    reparented to it instead of pid 1 and the tree sweep still finds it. Descendants
+    are killed first, while that parent is alive.
     """
     try:
         namespaced = proc.pid in _NAMESPACED
