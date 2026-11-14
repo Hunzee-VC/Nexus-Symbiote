@@ -39,6 +39,7 @@ from nexus_symbiote.core.hashing import (
 )
 from nexus_symbiote.core.models import ClaimEvidence, ModelComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.scanners.credential_files import credential_gap, credential_shaped
 from nexus_symbiote.scanners.shadowscan import REPORT_PATHS
 from nexus_symbiote.utils.confined import MAX_ENTRIES, ConfinedCollection
 from nexus_symbiote.utils.crypto import (
@@ -1256,6 +1257,7 @@ class ModelScanner(Scanner):
         self._tree = ModelTree(())
         self._digests: dict[Path, str | None] = {}
         self._read: set[Path] = set()
+        self._gaps: list[str] = []
         self._budget = InspectionBudget()
         self._bindings = BindingBudget()
         self._shared = BindingBudget(reason=SHARED_DIGESTS_EXHAUSTED)
@@ -1270,6 +1272,7 @@ class ModelScanner(Scanner):
         ) as files:
             self._tree = tree = ModelTree(files.iter_files())
             self._digests, self._read, self._budget = {}, set(), InspectionBudget()
+            self._gaps = []
             self._bindings, self._verified = BindingBudget(), {}
             self._shared = BindingBudget(reason=SHARED_DIGESTS_EXHAUSTED)
             model_dirs = sorted(
@@ -1296,6 +1299,7 @@ class ModelScanner(Scanner):
             for label, reason in unused_policy_entries(files, self._policies, covered):
                 files._fail(label, reason)
             result.surfaces_scanned.extend(sorted(path.as_posix() for path in self._read))
+            result.surfaces_excluded.extend(self._gaps)
         return result
 
     def _digest(self, files: ConfinedCollection, path: Path) -> str | None:
@@ -1303,6 +1307,17 @@ class ModelScanner(Scanner):
             self._read.add(path)
             self._digests[path] = files.hash_file(path, max_bytes=limits.bound("model-bytes"))
         return self._digests[path]
+
+    def _credential_file(self, files: ConfinedCollection, path: Path) -> bool:
+        """Whether ``path``, or the in-root file a symlink there leads to, is named as
+        holding credentials, such as ``config.json -> ../.env``; it is then a recorded gap
+        and is not read, so no unkeyed digest of it reaches the inventory."""
+        linked = files.in_root_target(path)
+        reason = credential_gap(path.as_posix(), None if linked is None else linked.as_posix())
+        if reason is None:
+            return False
+        self._gaps.append(f"{path.as_posix()}: {reason}; not read or inventoried")
+        return True
 
     def _directory_context(self, files: ConfinedCollection, model_dir: Path) -> _DirectoryContext:
         tree = self._tree
@@ -1313,9 +1328,15 @@ class ModelScanner(Scanner):
             if path not in tree.paths:
                 _report_variants(files, path)
                 continue
+            if self._credential_file(files, path):
+                continue
             self._read.add(path)
             raw = files.read_bytes(path)
             if raw is None:
+                continue
+            if (followed := files.link_target(path)) is not None and credential_shaped(followed):
+                # The symlink was replaced after the check above.
+                files._fail(path, "file changed during collection")
                 continue
             config_files.append((path, hash_bytes(raw)))
             try:
@@ -1373,6 +1394,8 @@ class ModelScanner(Scanner):
             path = model_dir / name
             if path not in tree.paths:
                 _report_variants(files, path)
+            elif self._credential_file(files, path):
+                continue
             elif (digest := self._digest(files, path)) is not None:
                 tokenizer_files.append((path, digest))
         custom_code = None
@@ -1461,6 +1484,8 @@ class ModelScanner(Scanner):
         for its digest only, and is a coverage gap because its text was not checked.
         """
         source = path.as_posix()
+        if self._credential_file(files, path):
+            return
         found = files.regular_file(path)
         if found is not None and found[1] <= files.max_file_bytes:
             self._read.add(path)

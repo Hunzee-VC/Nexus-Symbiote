@@ -1,0 +1,53 @@
+"""File names that say a file holds credentials, which no collector reads or digests."""
+
+from __future__ import annotations
+
+from pathlib import PurePosixPath
+
+MARKDOWN_SUFFIXES = frozenset({".md", ".mdc", ".markdown"})
+# Names that hold credentials wherever they appear. A memory file names what to
+# import, and a checked-in symlink what an instruction, skill or model configuration
+# file holds, so `@.env`
+# or `CLAUDE.md -> .env` would otherwise direct an unkeyed digest of the file into the
+# inventory, which anyone holding it could confirm guesses against.
+_CREDENTIAL_SUFFIXES = frozenset(
+    {".pem", ".key", ".p12", ".pfx", ".der", ".jks", ".keystore", ".token"}
+)
+_CREDENTIAL_MARKERS = ("secret", "credential", "password", "apikey", "api_key", "api-key")
+_CREDENTIAL_NAMES = frozenset({".netrc", ".npmrc", ".pypirc", "id_rsa", "id_ecdsa", "id_ed25519"})
+# Directories named for what the files in them hold, such as `secrets/`. Only a whole
+# name counts, so a skill named `secret-scanner` keeps its scripts.
+_CREDENTIAL_DIRECTORIES = frozenset(
+    marker + plural for marker in _CREDENTIAL_MARKERS for plural in ("", "s")
+)
+
+
+def credential_shaped(path: str) -> bool:
+    """Whether a file that is not Markdown is named as one that holds credentials, by its
+    own name or by a directory on its path, such as ``secrets/token.txt``.
+
+    A Markdown file is an instruction surface whatever its name, such as
+    ``docs/secrets-handling.md``.
+    """
+    if PurePosixPath(path).suffix.lower() in MARKDOWN_SUFFIXES:
+        return False
+    directories = PurePosixPath(path).parts[:-1]
+    if any(part.lower().lstrip(".") in _CREDENTIAL_DIRECTORIES for part in directories):
+        return True
+    name = PurePosixPath(path).name.lower()
+    if name in _CREDENTIAL_NAMES or name.startswith(".env"):
+        return True
+    if PurePosixPath(name).suffix in _CREDENTIAL_SUFFIXES:
+        return True
+    return any(marker in name for marker in _CREDENTIAL_MARKERS)
+
+
+def credential_gap(path: str, target: str | None) -> str | None:
+    """Why the file at ``path`` is not read, or None: its name, or the name of
+    ``target``, the in-root file a symlink at ``path`` leads to, says it holds
+    credentials."""
+    if credential_shaped(path):
+        return "its name says it holds credentials"
+    if target is not None and credential_shaped(target):
+        return f"a symlink leads to {target}, whose name says it holds credentials"
+    return None

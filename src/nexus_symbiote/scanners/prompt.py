@@ -20,6 +20,9 @@ from nexus_symbiote.core.models import (
     SkillPackageComponent,
 )
 from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.scanners.credential_files import MARKDOWN_SUFFIXES as _MARKUP_SUFFIXES
+from nexus_symbiote.scanners.credential_files import credential_gap as _credential_gap
+from nexus_symbiote.scanners.credential_files import credential_shaped as _credential_shaped
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection, fold_name
@@ -633,6 +636,10 @@ INSTRUCTION_DIRECTORIES: dict[str, str] = {
     ".github/agents": "subagent",
 }
 
+_INSTRUCTION_DIRECTORY_PARTS = tuple(
+    PurePosixPath(directory).parts for directory in INSTRUCTION_DIRECTORIES
+)
+
 SKILL_DIRECTORIES = [
     ".claude/skills",
     ".claude/commands",
@@ -651,62 +658,17 @@ _SKILL_PARTS = tuple(PurePosixPath(directory).parts for directory in SKILL_DIREC
 _DECLARATION_SUFFIXES = frozenset(
     {".md", ".mdc", ".markdown", ".txt", ".yaml", ".yml", ".json", ".toml"}
 )
-_MARKUP_SUFFIXES = frozenset({".md", ".mdc", ".markdown"})
 # Claude Code memory files and Gemini CLI context files import others with @path.
 _IMPORTING_NAMES = frozenset({"CLAUDE.md", "CLAUDE.local.md", "GEMINI.md"})
 _MAX_IMPORT_DEPTH = 5
 _MAX_IMPORTS = 1000
-# Names that hold credentials wherever they appear. A memory file names what to
-# import, and a checked-in symlink what an instruction or skill file holds, so `@.env`
-# or `CLAUDE.md -> .env` would otherwise direct an unkeyed digest of the file into the
-# inventory, which anyone holding it could confirm guesses against.
-_CREDENTIAL_SUFFIXES = frozenset(
-    {".pem", ".key", ".p12", ".pfx", ".der", ".jks", ".keystore", ".token"}
-)
-_CREDENTIAL_MARKERS = ("secret", "credential", "password", "apikey", "api_key", "api-key")
-_CREDENTIAL_NAMES = frozenset({".netrc", ".npmrc", ".pypirc", "id_rsa", "id_ecdsa", "id_ed25519"})
-# Directories named for what the files in them hold, such as `secrets/`. Only a whole
-# name counts, so a skill named `secret-scanner` keeps its scripts.
-_CREDENTIAL_DIRECTORIES = frozenset(
-    marker + plural for marker in _CREDENTIAL_MARKERS for plural in ("", "s")
-)
-# The keyed binding that covers an imported file the unkeyed content hash must not.
+# The keyed binding that covers a recorded file, imported or found by a walk, that the
+# unkeyed content hash must not.
 IMPORT_CONTENT_BINDING_PROFILE = "nexus-symbiote/prompt-import-content/v1"
 
 
 def _markdown(path: str) -> bool:
     return PurePosixPath(path).suffix.lower() in _MARKUP_SUFFIXES
-
-
-def _credential_shaped(path: str) -> bool:
-    """Whether a file that is not Markdown is named as one that holds credentials, by its
-    own name or by a directory on its path, such as ``secrets/token.txt``.
-
-    A Markdown file is an instruction surface whatever its name, such as
-    ``docs/secrets-handling.md``.
-    """
-    if _markdown(path):
-        return False
-    directories = PurePosixPath(path).parts[:-1]
-    if any(part.lower().lstrip(".") in _CREDENTIAL_DIRECTORIES for part in directories):
-        return True
-    name = PurePosixPath(path).name.lower()
-    if name in _CREDENTIAL_NAMES or name.startswith(".env"):
-        return True
-    if PurePosixPath(name).suffix in _CREDENTIAL_SUFFIXES:
-        return True
-    return any(marker in name for marker in _CREDENTIAL_MARKERS)
-
-
-def _credential_gap(path: str, target: str | None) -> str | None:
-    """Why the file at ``path`` is not read, or None: its name, or the name of
-    ``target``, the in-root file a symlink at ``path`` leads to, says it holds
-    credentials."""
-    if _credential_shaped(path):
-        return "its name says it holds credentials"
-    if target is not None and _credential_shaped(target):
-        return f"a symlink leads to {target}, whose name says it holds credentials"
-    return None
 
 
 def _read_unless_credential(
@@ -742,10 +704,43 @@ def _read_unless_credential(
     return None
 
 
-def _instruction_import(path: str, link_target: object) -> bool:
-    """Whether an imported file keeps an unkeyed content hash: the path imported and the
-    file a symlink there leads to, if any, are both Markdown."""
-    return _markdown(path) and (
+def _found_by_name(path: str, prompt_type: str | None, directory: object = None) -> bool:
+    """Whether a walk recorded ``path`` because a host loads a file of that name, or a rule,
+    prompt or subagent file of that directory whose name has no suffix at all, such as
+    ``.clinerules/style``, which the collector reads as Markdown.
+
+    ``directory`` names the rule, prompt or subagent directory whose walk reached
+    ``path`` through a directory symlink, such as ``.cursor/rules`` linked to
+    ``shared/r``, where the file is recorded under the path it resolves to.
+    """
+    if prompt_type == "imported-instruction":
+        return False
+    parts = PurePosixPath(path).parts
+    if path in INSTRUCTION_FILES or (len(parts) > 1 and parts[-1] in NESTED_INSTRUCTION_NAMES):
+        return True
+    if directory in INSTRUCTION_DIRECTORIES and "." not in parts[-1]:
+        return True
+    return "." not in parts[-1] and any(
+        parts[: len(directory)] == directory and len(parts) > len(directory)
+        for directory in _INSTRUCTION_DIRECTORY_PARTS
+    )
+
+
+def _instruction_content(
+    path: str, prompt_type: str | None, link_target: object, directory: object = None
+) -> bool:
+    """Whether a recorded file keeps an unkeyed content hash: the bytes read are those of
+    an instruction file.
+
+    The path must be Markdown, or an instruction file a walk found by its name, such as
+    ``.cursorrules`` or a rule file without a suffix; and the file a symlink there leads
+    to, if any, must be Markdown, the one test an @import of that target passes. Any other
+    file, such as an import of ``config/app.json``, a rule directory's ``x.json``, or
+    ``AGENTS.md`` linked to ``config/app.json`` or ``config/.windsurfrules``, is named by
+    the checkout, not by a host, so its exact bytes may hold configuration or secrets.
+    """
+    named = _markdown(path) or _found_by_name(path, prompt_type, directory)
+    return named and (
         link_target is None or (isinstance(link_target, str) and _markdown(link_target))
     )
 
@@ -753,14 +748,15 @@ def _instruction_import(path: str, link_target: object) -> bool:
 def withholds_content_hash(component: PromptComponent) -> bool:
     """Whether the collector withholds the unkeyed content hash of ``component`` by design.
 
-    Such an import is bound only by the operator key, so validation verifies that
-    binding, or counts the component as unbound, instead of reporting a missing hash.
+    Such a file is bound only by the operator key, so validation verifies that binding,
+    or counts the component as unbound, instead of reporting a missing hash.
     """
-    return (
-        component.prompt_type == "imported-instruction"
-        and bool(component.properties.get("content_hash_withheld"))
-        and not _instruction_import(
-            component.source_path or "", component.properties.get("symlink_target")
+    return bool(component.properties.get("content_hash_withheld")) and not (
+        _instruction_content(
+            component.source_path or "",
+            component.prompt_type,
+            component.properties.get("symlink_target"),
+            component.properties.get("instruction_directory"),
         )
     )
 
@@ -979,7 +975,16 @@ class PromptScanner(Scanner):
                     content = _read_unless_credential(relative, files, result)
                     if content is None:
                         continue
-                    component = self._record(relative, prompt_type, content, files, result)
+                    # A directory symlink there leads the walk to the path it resolves to.
+                    inside = path.parts[: len(Path(directory).parts)] == Path(directory).parts
+                    component = self._record(
+                        relative,
+                        prompt_type,
+                        content,
+                        files,
+                        result,
+                        directory=None if inside else directory,
+                    )
                     if component is not None:
                         recorded[relative] = component
                         texts[relative] = content.decode("utf-8")
@@ -1039,8 +1044,12 @@ class PromptScanner(Scanner):
         content: bytes,
         files: ConfinedCollection,
         result: ScanResult,
+        directory: str | None = None,
     ) -> PromptComponent | None:
         """Record the instruction file read from ``rel_path``, or None.
+
+        ``directory`` names the rule, prompt or subagent directory whose walk reached the
+        file through a directory symlink; the record keeps it.
 
         Every walk reads through ``_read_unless_credential``; the check is repeated on
         the symlink the read followed, so no walk, and no import of a file a walk
@@ -1062,6 +1071,10 @@ class PromptScanner(Scanner):
         )
         if target is not None:
             component.properties["symlink_target"] = target
+        if directory is not None:
+            component.properties["instruction_directory"] = directory
+        if not _instruction_content(rel_path, prompt_type, target, directory):
+            self._bind_content(rel_path, prompt_type, content, component, result)
         result.components.append(component)
         return component
 
@@ -1156,7 +1169,6 @@ class PromptScanner(Scanner):
                 if component is None:
                     continue
                 component.bom_ref = f"prompt:import:{target}"
-                self._bind_import_content(target, content, component, result)
                 recorded[target] = component
                 paths[target] = target
                 texts[target] = content.decode("utf-8")
@@ -1179,33 +1191,40 @@ class PromptScanner(Scanner):
         listing.finish(recorded)
 
     @staticmethod
-    def _bind_import_content(
-        target: str, content: bytes, component: PromptComponent, result: ScanResult
+    def _bind_content(
+        path: str,
+        prompt_type: str,
+        content: bytes,
+        component: PromptComponent,
+        result: ScanResult,
     ) -> None:
-        """Bind a non-instruction import's content with the key, never an unkeyed digest.
+        """Bind the content of a file that is not an instruction file with the key, never
+        an unkeyed digest.
 
-        An imported Markdown file is an instruction surface and keeps the unkeyed
-        ``content_hash`` every instruction file carries, unless a symlink there leads to
-        a file that is not Markdown. Any other imported file is named by the checkout,
+        A Markdown file, or an instruction file a walk found by its name, is an
+        instruction surface and keeps the unkeyed ``content_hash`` every instruction file
+        carries, unless a symlink there leads to a file that is not Markdown (see
+        ``_instruction_content``). Any other file, imported with @path, found in a rule,
+        prompt or subagent directory, or behind such a symlink, is named by the checkout,
         so its exact bytes may hold configuration or secrets: an unkeyed digest of them
         would let anyone holding the inventory confirm guesses offline (see
         ``source_binding``). Its hash is withheld; with the operator key an HMAC binds
         the content, and without one the component says the content is unbound.
         """
-        if _instruction_import(target, component.properties.get("symlink_target")):
-            return
+        imported = prompt_type == "imported-instruction"
+        subject = "Imported file" if imported else "File"
         component.content_hash = None
         component.properties["content_hash_withheld"] = (
-            "imported file is not a Markdown instruction file; an unkeyed digest of its "
+            f"{subject.lower()} is not a Markdown instruction file; an unkeyed digest of its "
             "exact bytes could confirm guesses of secret values offline"
         )
         try:
             binding = value_binding(
                 IMPORT_CONTENT_BINDING_PROFILE,
-                {"path": target, "content": content.decode("utf-8")},
+                {"path": path, "content": content.decode("utf-8")},
             )
         except BindingError as exc:
-            result.scan_failures.append(f"{target}: {exc}")
+            result.scan_failures.append(f"{path}: {exc}")
             return
         if binding:
             component.properties.update(binding)
@@ -1215,8 +1234,8 @@ class PromptScanner(Scanner):
                 severity=RiskSeverity.LOW,
                 category="completeness",
                 detail=(
-                    f"Imported file '{neutralize(target)}' {UNBOUND_VALUES_DETAIL}: its "
-                    "content, which is not an instruction file and carries no unkeyed digest."
+                    f"{subject} '{neutralize(path)}' {UNBOUND_VALUES_DETAIL}: its content, "
+                    "which is not an instruction file and carries no unkeyed digest."
                 ),
                 recommendation=(
                     f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes to "

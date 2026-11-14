@@ -13,9 +13,11 @@ argument other than the launcher package, a changed environment or header value,
 endpoint or package index path changed on the same host, a changed value of a project
 resolver setting such as an `.npmrc` entry, an A2A or RAG URL path changed on the same
 host that keeps its depth, changed inline RAG document content at the same count,
-the content of an `@path` import that is not a Markdown file, or a value the redaction
-removes from an IDE agent's settings file, such as an `env` value in
-`.claude/settings.json`, a token, or a URL path in a hook or `notify` command; see
+the content of a prompt file whose content hash is withheld, such as an `@path` import
+that is not a Markdown file, or a value the settings digest of an IDE agent does not
+keep, such as an `env` value in `.claude/settings.json`, a token, a URL path in a hook
+or `notify` command, or the arguments of a command, an HTTP header value or the words
+of a permission rule, which it keeps by shape only; see
 [source binding](verification-source-binding.md). None of those changes alters the
 record, so a record that holds such values without the key carries a low `completeness`
 finding saying its values are not bound in this inventory, and `diff` raises a medium
@@ -86,16 +88,20 @@ request with itself, and that gate can never fail.
   checkout from narrowing either snapshot. `baseline` accepts it, and
   `--signature-policy`, like `scan`.
 - **Use the same binding key for both.** Set one `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`
-  of 32 or more characters for the baseline and every candidate scan. Without it,
-  `diff --fail-on-alert` fails on an MCP server whose launch arguments, environment
-  values or endpoint path were not bound, instead of reporting no change; the alert
-  does not name the value. With a different key, every MCP, A2A, RAG and IDE settings
-  binding changes and alerts, and the digests of the IDE settings files digested as
-  read differ between a keyed and an unkeyed scan. The Action refuses
-  `reviewed-baseline` unless that key is set on the step or passed as
+  of 32 or more characters for the baseline and every candidate scan. Without it, the
+  values described above cannot alert on a change: every record that carries the low
+  `completeness` finding for unbound values, whether an MCP server, an IDE agent, a RAG
+  source, an A2A agent or client, or a prompt file whose content hash is withheld,
+  raises a medium alert on every comparison instead, so `diff --fail-on-alert` fails on
+  it rather than reporting no change; the alert does not name the value. The same
+  alert is raised when only one of the two scans has the key, and the digests of the
+  IDE settings files digested as read then differ. With a different key, every MCP,
+  A2A, RAG, IDE settings and prompt file binding changes and alerts. The Action
+  refuses `reviewed-baseline` unless that key is set on the step or passed as
   `source-binding-key`. Fork `pull_request` jobs receive no secrets, so they cannot
   satisfy that input; run the keyed drift gate on same-repository pull requests and
-  trusted branches. See [source binding](verification-source-binding.md).
+  trusted branches, as the example under [Protect the gate](#protect-the-gate) does.
+  See [source binding](verification-source-binding.md).
 - **Recollect v1 RAG baselines once.** Under RAG structure profile v2, every RAG
   source's `static_config_hash` changes once, not only sources with inline
   documents: the profile name is part of the digested structure, and an absent
@@ -142,7 +148,7 @@ then notes, then the added, removed and modified components and relationships.
 | Trust tier or signing status raised | medium: a snapshot is written unsigned, so a raised label is a claim to review |
 | Risk findings added | the highest added severity, at least medium |
 | Risk findings removed; any other field changed, including snapshot metadata such as the producer's `tool_name` or `tool_vendor` | medium |
-| Values unbound in either snapshot: the record has no keyed binding (`static_value_binding`) and carries a `completeness` finding saying its values are not bound in this inventory, as MCP launch values, IDE agent settings values, RAG and A2A values and the content of an `@path` import that is not Markdown do without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`. Raised on every comparison, changed or not, and names no value: `MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections.` for an MCP server, `Values are unbound in one snapshot without the binding key; a change to them is undetectable and no value is recorded. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections.` for any other record | medium |
+| Values unbound in either snapshot: the record has no keyed binding (`static_value_binding`) and carries a `completeness` finding saying its values are not bound in this inventory, as MCP launch values, IDE agent settings values, RAG and A2A values and the content of a prompt file whose content hash is withheld, such as an `@path` import that is not Markdown, do without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`. Raised on every comparison, changed or not, and names no value: `MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections.` for an MCP server, `Values are unbound in one snapshot without the binding key; a change to them is undetectable and no value is recorded. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections.` for any other record | medium |
 | Relationship added | medium; high for `invokes`, `delegates-to` and `acts-as-identity` |
 | Relationship removed | medium; high for `uses-guardrail` and `approved-under` |
 | Relationship kept but its assurance or conditions changed | high |
@@ -181,7 +187,7 @@ invalid input is an error (exit 1); a missing file is a usage error (exit 2).
 On `pull_request`, GitHub runs the workflow file of the pull request's merge commit, so the pull request under review can change these inputs, switch a gate off or delete the step unless workflow edits are restricted. Make the gate one the pull request cannot weaken:
 
 1. **In a GitHub organization (recommended):** require the workflow through an organization ruleset (*Require workflows to pass before merging*), which pins the gate to a reusable workflow file and ref outside the pull request's reach.
-2. **In any repository:** run on `pull_request` with read-only permissions, stage the baseline from `github.event.pull_request.base.sha` into `$RUNNER_TEMP`, require a mandatory `CODEOWNERS` review from security owners for `.github/` and `.nexus-symbiote/reviewed.json`, and configure branch protection to require that check to pass:
+2. **In any repository:** run on `pull_request` with read-only permissions, stage the baseline from `github.event.pull_request.base.sha` into `$RUNNER_TEMP`, pass the binding key the baseline was recorded with from a repository secret, require a mandatory `CODEOWNERS` review from security owners for `.github/` and `.nexus-symbiote/reviewed.json`, and configure branch protection to require that check to pass. The job below skips pull requests from forks, which receive no secrets; see the note after it:
 
 ```yaml
 name: Agent inventory gate
@@ -190,6 +196,9 @@ permissions:
   contents: read
 jobs:
   inventory:
+    # Fork pull requests receive no secrets, so the keyed comparison runs only for
+    # pull requests from this repository.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -205,9 +214,11 @@ jobs:
           "repos/$GITHUB_REPOSITORY/contents/.nexus-symbiote/reviewed.json?ref=$BASE_SHA"
           > "$RUNNER_TEMP/reviewed.json"
       - uses: Hunzee-VC/Nexus-Symbiote@<reviewed-40-character-commit-sha>
+        env:
+          NEXUS_SYMBIOTE_SOURCE_BINDING_KEY: ${{ secrets.AGENTBOM_BINDING_KEY }}
         with:
           scan-path: .
           reviewed-baseline: ${{ runner.temp }}/reviewed.json
 ```
 
-Avoid checking out `github.event.pull_request.head.sha` inside a `pull_request_target` workflow ("pwn request" hazard): `pull_request_target` runs in the base repository's security context, where adding any build, test, cache or secret step later turns an untrusted fork checkout into secret exfiltration or repository compromise. On `pull_request`, same-repository pull requests can supply `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` from repository secrets. Fork pull requests receive no secrets, and the Action refuses `reviewed-baseline` without the key. An unkeyed `diff --fail-on-alert` fails closed on unbound values, such as MCP launch values, IDE settings values or the content of an `@path` import that is not Markdown, instead of comparing them, so run keyed comparisons only for same-repository pull requests and trusted branches.
+Avoid checking out `github.event.pull_request.head.sha` inside a `pull_request_target` workflow ("pwn request" hazard): `pull_request_target` runs in the base repository's security context, where adding any build, test, cache or secret step later turns an untrusted fork checkout into secret exfiltration or repository compromise. On `pull_request`, same-repository pull requests can supply `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` from repository secrets. Fork pull requests receive no secrets: the Action refuses `reviewed-baseline` without the key, and an unkeyed `diff --fail-on-alert` fails closed on unbound values, such as MCP launch values, IDE settings values or the content of a prompt file whose content hash is withheld, such as an `@path` import that is not Markdown, instead of comparing them, so run keyed comparisons only for same-repository pull requests and trusted branches. A job that `if:` skips counts as passed for a required check, so in a repository that accepts fork pull requests, also run the keyed gate on a trusted event before merging, such as `merge_group` with a merge queue. A second, keyless job for forks, comparing with a baseline recorded without the key, passes only while no record carries unbound values.

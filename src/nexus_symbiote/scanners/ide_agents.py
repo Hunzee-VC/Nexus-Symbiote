@@ -319,24 +319,102 @@ def _projected_text(value: str, *, unkeyed: bool) -> str:
     return "".join(pieces)
 
 
+# Free text that settings pass to a program: a command, its arguments or an HTTP header
+# value. The redaction does not recognise a credential written there as an ordinary
+# word, such as `--password 482913` or `X-Pin: 482913`, so the digest keeps only its
+# shape: the program each command runs and the origin of each URL.
+_COMMAND_KEYS = frozenset({"command", "args", "notify", "headershelper"})
+_COMMAND_STARTS = frozenset(";|&(`\n")
+_HEADER_MAPS = frozenset({"headers", "httpheaders", "http_headers", "env_http_headers"})
+
+
+def _free_text(value: str, *, program: bool, unkeyed: bool) -> str:
+    """``value`` by shape: every URL origin and, when ``program``, the first word of each
+    command that a shell operator starts; operators are kept, other words are not."""
+    pieces = _SHELL_OPERATORS.split(value)
+    for index in range(0, len(pieces), 2):
+        starts = program and (not index or pieces[index - 1][-1] in _COMMAND_STARTS)
+        parts = _url_pieces(pieces[index])
+        if unkeyed and any(_ambiguous_authority(part) for part in parts):
+            raise AmbiguousURLError("a URL authority is ambiguous")
+        kept: list[str] = []
+        for number, part in enumerate(parts):
+            words = redact_text(part).split()
+            if "://" in part[:64] and _URL_AUTHORITY.match(part) and words:
+                kept.append(words[0])
+            elif starts and number == 0:
+                # A leading assignment such as `PIN=482913 run.sh` is not the program.
+                kept.extend([word for word in words if "=" not in word][:1])
+        pieces[index] = " ".join(kept) if kept else (REDACTED if pieces[index].strip() else "")
+    return "".join(pieces)
+
+
+# Lists of permission rules such as `Bash(mysql -p482913 db:*)`, by the key that holds
+# them and, where the name alone is too common, the key above it. A rule keeps its tool
+# name and the shape of its specifier, so the words of a command it names stay out of
+# the digest; a hook `matcher` is read the same way.
+_RULE_LISTS = frozenset({"excludetools", "coretools", "allowedtools"})
+_NESTED_RULE_LISTS = {
+    "permissions": frozenset({"allow", "ask", "deny"}),
+    "tools": frozenset({"exclude", "core", "allowed"}),
+}
+# Maps whose values are environment variable values or URL parameters: they keep their
+# names only, as `env` does. Codex sets a command's environment in
+# `shell_environment_policy.set` and a provider's query parameters in `query_params`.
+_NAMES_ONLY_MAPS = frozenset({"env", "query_params"})
+_NESTED_NAMES_ONLY_MAPS = {"shell_environment_policy": frozenset({"set"})}
+# Values that hold a credential under their own name, withheld like a credential helper.
+_CREDENTIAL_VALUE_KEYS = frozenset({"experimental_bearer_token", "clientsecret"})
+_RULE = re.compile(r"([^()]*)\((.*)\)", re.DOTALL)
+
+
+def _rule_text(value: str, *, unkeyed: bool) -> str:
+    """A permission rule or hook matcher with its specifier reduced to its shape."""
+    match = _RULE.fullmatch(value)
+    if match is None:
+        return _projected_text(value, unkeyed=unkeyed)
+    tool, specifier = match.groups()
+    shape = _free_text(specifier, program=True, unkeyed=unkeyed)
+    return f"{_projected_text(tool, unkeyed=unkeyed)}({shape})"
+
+
+def _command_projection(value: Any, depth: int, *, unkeyed: bool, program: bool) -> Any:
+    if depth > _MAX_SETTINGS_DEPTH:
+        raise ValueError("settings nested too deeply")
+    if isinstance(value, str):
+        return _free_text(value, program=program, unkeyed=unkeyed)
+    if isinstance(value, list):
+        return [
+            _command_projection(item, depth + 1, unkeyed=unkeyed, program=program and not index)
+            for index, item in enumerate(value)
+        ]
+    return _projection(value, depth + 1, unkeyed=unkeyed)
+
+
 def _projection(
     value: Any,
     depth: int = 0,
     *,
     env: bool = False,
+    headers: bool = False,
     unkeyed: bool = True,
+    parent: str = "",
     key: str | None = None,
 ) -> Any:
     """Settings as a redacted `settings_hashes` digest covers them.
 
     The standard redaction is applied to the text between shell operators, cut again
     before each URL scheme, a text value is also redacted by the ``key`` it is held
-    under, as a header or an assignment in one string would be, environment
-    variables keep their names only, and each credential helper of
-    ``_CREDENTIAL_HELPER_KEYS``, such as `apiKeyHelper`, keeps its key but not its
-    command, so the digest cannot confirm a guess of a value the redaction removes, and
-    does not change with one; only the keyed binding covers those values. ``unkeyed``
-    raises ``AmbiguousURLError`` for a URL whose authority URL parsers read
+    under, as a header or an assignment in one string would be, environment variables
+    keep their names only, and each credential helper of ``_CREDENTIAL_HELPER_KEYS``,
+    such as `apiKeyHelper`, keeps its key but not its command, so the digest cannot
+    confirm a guess of a value the redaction removes, and does not change with one; only
+    the keyed binding covers those values. A command, its arguments, the value of an HTTP
+    header and the specifier of a permission rule or hook matcher keep only their shape
+    (``_free_text``), since they can hold a credential the redaction does not recognise.
+    Maps of environment values or URL parameters keep their names only, and a value named
+    as a credential, such as Codex's `experimental_bearer_token`, is withheld.
+    ``unkeyed`` raises ``AmbiguousURLError`` for a URL whose authority URL parsers read
     differently, since its redacted origin could hide a change of host that no keyed
     binding covers.
     """
@@ -344,16 +422,43 @@ def _projection(
         raise ValueError("settings nested too deeply")
     if isinstance(value, dict):
         if env:
-            return sorted(_projected_text(str(key), unkeyed=unkeyed) for key in value)
+            return sorted(_projected_text(str(field), unkeyed=unkeyed) for field in value)
         projected: dict[str, Any] = {}
         merged: dict[str, list[Any]] = {}
-        for name, item in value.items():
-            text = _projected_text(str(name), unkeyed=unkeyed)
-            entry = (
-                REDACTED
-                if name in _CREDENTIAL_HELPER_KEYS
-                else _projection(item, depth + 1, env=name == "env", unkeyed=unkeyed, key=str(name))
-            )
+        for field, item in value.items():
+            text = _projected_text(str(field), unkeyed=unkeyed)
+            name = str(field).lower()
+            entry: Any
+            rules = name in _RULE_LISTS or name in _NESTED_RULE_LISTS.get(parent, ())
+            if (
+                field in _CREDENTIAL_HELPER_KEYS
+                or name in _CREDENTIAL_VALUE_KEYS
+                or (headers and isinstance(item, str))
+            ):
+                entry = REDACTED
+            elif headers or name in _COMMAND_KEYS or name.endswith("command"):
+                entry = _command_projection(
+                    item, depth + 1, unkeyed=unkeyed, program=not headers and name != "args"
+                )
+            elif name == "matcher" and isinstance(item, str):
+                entry = _rule_text(item, unkeyed=unkeyed)
+            elif rules and isinstance(item, list):
+                entry = [
+                    _rule_text(rule, unkeyed=unkeyed)
+                    if isinstance(rule, str)
+                    else _projection(rule, depth + 2, unkeyed=unkeyed)
+                    for rule in item
+                ]
+            else:
+                entry = _projection(
+                    item,
+                    depth + 1,
+                    env=name in _NAMES_ONLY_MAPS or name in _NESTED_NAMES_ONLY_MAPS.get(parent, ()),
+                    headers=name in _HEADER_MAPS,
+                    unkeyed=unkeyed,
+                    parent=name,
+                    key=str(field),
+                )
             merged.setdefault(text, []).append(entry)
             projected[text] = entry
         # Keys the redaction makes equal keep every value, in canonical order, so no
@@ -363,11 +468,24 @@ def _projection(
                 projected[text] = sorted(entries, key=canonical_json)
         return projected
     if isinstance(value, list):
+        if headers:
+            # A header list such as `["X-Pin: 482913"]` keeps each header's name.
+            return [
+                _header_line(item, unkeyed=unkeyed)
+                if isinstance(item, str)
+                else _projection(item, depth + 1, unkeyed=unkeyed)
+                for item in value
+            ]
         return [_projection(item, depth + 1, unkeyed=unkeyed) for item in value]
     if isinstance(value, str):
         text = _projected_text(value, unkeyed=unkeyed)
         return text if key is None else redact_keyed_text(key, value, redacted=text)
     return value
+
+
+def _header_line(value: str, *, unkeyed: bool) -> str:
+    name, colon, _ = value.partition(":")
+    return f"{_projected_text(name, unkeyed=unkeyed)}: {REDACTED}" if colon else REDACTED
 
 
 # sh, bash, zsh, dash, including /bin/sh, /usr/bin/bash and `/usr/bin/env bash`. The

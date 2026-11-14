@@ -102,21 +102,21 @@ def test_a_credential_named_file_in_a_rule_directory_is_a_gap(tmp_path, name):
 def test_instruction_links_to_other_files_keep_their_content_hash(tmp_path):
     files = {
         "AGENTS.md": "# Shared instructions\n",
-        "docs/cursor-rules.txt": "Prefer small diffs.\n",
+        "docs/cursor-rules.md": "Prefer small diffs.\n",
         "docs/secrets/README.md": "# How this project stores secrets\n",
     }
     for name, text in files.items():
         _write(tmp_path, name, text)
     _write(tmp_path, ".env", SYNTHETIC_CREDENTIAL)
     _link(tmp_path, "CLAUDE.md", "AGENTS.md")
-    _link(tmp_path, ".cursorrules", "docs/cursor-rules.txt")
+    _link(tmp_path, ".cursorrules", "docs/cursor-rules.md")
     _link(tmp_path, "GEMINI.md", "docs/secrets/README.md")
     _link(tmp_path, "AGENTS.override.md", ".env")
     result = PromptScanner().scan(tmp_path)
     components = _components(result)
     for name, target in (
         ("CLAUDE.md", "AGENTS.md"),
-        (".cursorrules", "docs/cursor-rules.txt"),
+        (".cursorrules", "docs/cursor-rules.md"),
         ("GEMINI.md", "docs/secrets/README.md"),
     ):
         linked = components[f"prompt:{name}"]
