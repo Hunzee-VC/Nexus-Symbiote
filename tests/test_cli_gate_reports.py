@@ -788,10 +788,13 @@ def test_a_checkout_report_only_policy_cannot_pass_a_failed_gate_in_ci(tmp_path,
     monkeypatch.setenv("CI", "1")
     gated = CliRunner().invoke(main, args)
     assert gated.exit_code == 1, gated.output
-    assert "cannot convert a failed gate to exit 0 in CI" in gated.stderr
+    assert "project policy weakens the built-in gates" in gated.stderr
     accepted = CliRunner().invoke(main, [*args, "--accept-project-policy"])
     assert accepted.exit_code == 0, accepted.output
-    operator = CliRunner().invoke(main, [*args, "--report-only"])
+    still_unaccepted = CliRunner().invoke(main, [*args, "--report-only"])
+    assert still_unaccepted.exit_code == 1, still_unaccepted.output
+    assert "project policy weakens the built-in gates" in still_unaccepted.stderr
+    operator = CliRunner().invoke(main, [*args, "--no-project-policy", "--report-only"])
     assert operator.exit_code == 0, operator.output
 
 
