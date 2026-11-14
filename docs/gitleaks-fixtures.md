@@ -3,6 +3,8 @@
 The repository's `.gitleaks.toml` extends Gitleaks's built-in rules. It requires
 version 8.30.1 or later for the rule-targeted allowlists. These exceptions were
 checked with the official 8.30.1 Linux binary against its published checksum.
+The `minVersion` field produces a warning rather than refusing older binaries;
+operators must verify the scanner version themselves.
 Gitleaks is an optional local or external scan; no repository workflow currently
 invokes it, and these checks are not part of `Verified CI`.
 
