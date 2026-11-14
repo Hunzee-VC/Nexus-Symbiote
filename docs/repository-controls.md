@@ -70,7 +70,10 @@ preflight.
 
 With `--publish testpypi` or `--publish pypi`, as the release workflow passes, it
 also requires an active ruleset that stops `refs/tags/v*` from being updated or
-deleted and that the checking token itself cannot bypass, and requires the named
+deleted and that the checking token itself cannot bypass, refuses such a ruleset that
+also restricts tag creation (no one could then create a release tag; creation belongs
+to the separate creation-only ruleset described [below](#apply-the-outstanding-controls)),
+and requires the named
 environment to have a required reviewer, administrator bypass turned off and
 deployments limited to `main` by a single branch policy (the *Protected branches*
 option admits every protected branch, so it is refused). GitHub returns a ruleset's
@@ -208,8 +211,8 @@ Status of the controls tracked in
 [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74), as observed
 through the GitHub API on 2026-11-06, with what the 0.1.0 publication on 2026-11-08
 established. Re-check live settings before relying on any row; this table is a
-dated record, not enforcement. The publication preflight now checks the tag ruleset
-and the environments at every `testpypi` and `pypi` run, so the rows marked
+dated record, not enforcement. The publication preflight now checks the immutable tag
+ruleset and the environments at every `testpypi` and `pypi` run, so the rows marked
 "checked at publication" are verified, or the publication refused, each time; the
 ruleset's bypass list is the exception, which only the administrator check can read.
 
@@ -222,7 +225,7 @@ ruleset's bypass list is the exception, which only the administrator check can r
 | Secret scanning and push protection | Enabled | None |
 | `testpypi` and `pypi` environments | Both exist with @aisecnomad as the required reviewer, *Prevent self-review* off because there is a single maintainer (see [releasing](releasing.md)), and deployments limited to `main`. On 2026-11-06 administrators could bypass the protection rules; whether that was turned off before 0.1.0 was not recorded. Checked at publication | Turn off administrator bypass before the next publication, which is refused otherwise; turn on *Prevent self-review* once a second reviewer exists |
 | Trusted publishers | Confirmed by the 0.1.0 uploads on 2026-11-08: the OIDC uploads to TestPyPI (01:04 UTC) and PyPI (01:28 UTC) succeeded, and the PyPI files carry provenance naming `release.yml` and the `pypi` environment | None |
-| Release tags `v*` | `v0.1.0` (signed, annotated, on `d8c54e4`) was created on 2026-11-09, after publication. Whether the release-tag ruleset was applied first was not recorded; without it, anyone with write access can move or delete the tag. The README's verified-release install requires the wheel's attestation to name the commit the tag points at. That stops a plain tag move, but not a move to a second commit that differs only in its lock file: candidate runs are attested without approval. Only the ruleset keeps the tag on the published commit. Checked at publication, except who may bypass it | Confirm with `gh api repos/Hunzee-VC/Nexus-Symbiote/rulesets`; apply [the release-tag ruleset](../config/github-release-tag-ruleset.json) if it is missing, which the next publication otherwise refuses |
+| Release tags `v*` | `v0.1.0` (signed, annotated, on `d8c54e4`) was created on 2026-11-09, after publication. Whether the release-tag ruleset was applied first was not recorded; without it, anyone with write access can move or delete the tag. The README's verified-release install requires the wheel's attestation to name the commit the tag points at. That stops a plain tag move, but not a move to a second commit that differs only in its lock file: candidate runs are attested without approval. Only the immutable-tag ruleset keeps the tag on the published commit. Checked at publication, except who may bypass it | Confirm with `gh api repos/Hunzee-VC/Nexus-Symbiote/rulesets`; apply the [immutable-tag rule](../config/github-release-tag-ruleset.json) if it is missing, which the next publication otherwise refuses, and the [creation-only rule](../config/github-release-tag-creation-ruleset.json), which limits who may create a `v*` tag; see [apply the outstanding controls](#apply-the-outstanding-controls) |
 
 The repository is public, so branch protection, rulesets, artifact attestations
 and environment protection are available on every GitHub plan; the
