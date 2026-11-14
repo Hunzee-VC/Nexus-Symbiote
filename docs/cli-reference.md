@@ -298,7 +298,7 @@ nexus-symbiote advisories [OPTIONS] AIBOM_PATH
 |---|---|
 | `-o`, `--output` `PATH` | Write the advisory report to this file instead of standard output. |
 | `--fail-on-advisory` / `--no-fail-on-advisory` | Exit with status 1 when an advisory is found (default: fail). |
-| `--exclude` `NAME` | Never send this package name to OSV; a trailing `*` matches a prefix (repeatable). |
+| `--exclude` `NAME` | Never send this package name to OSV; a trailing `*` matches a prefix, and a `*` anywhere else is refused. Names are compared as PyPI normalizes them, and in any case (repeatable). |
 | `--exclude-private-origins` | Send only packages whose lockfile resolution records the public PyPI or npm registry. A Python package that no `uv.lock` or `poetry.lock` resolves has no recorded origin, so it is withheld; withhold private names with `--exclude` instead to keep public ones checked. |
 | `--dry-run` | List the package identities that would be sent, without contacting OSV (works offline). |
 
