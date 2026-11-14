@@ -205,3 +205,32 @@ def test_a_header_value_shadowed_by_http_headers_is_still_scrubbed(tmp_path):
     assert record.endpoint_url == "https://x.example"
     assert "plainsecretvalue1" not in tool.model_dump_json()
     assert "othervalue12345" not in tool.model_dump_json()
+
+
+@pytest.mark.parametrize("fmt", ["json", "cyclonedx", "spdx", "sarif"])
+def test_a_server_name_repeating_a_shadowed_inline_value_reaches_no_export(tmp_path, fmt):
+    # The launcher runs with the later assignment; the earlier value is still a credential.
+    shadowed, later = "ShadowedKnownSource42", "KnownOnlyFromSource42"
+    args = [f"API_TOKEN={shadowed}", f"API_TOKEN={later}", "node", "server.js"]
+    project = tmp_path / "p"
+    project.mkdir()
+    servers = {f"agent-{shadowed}": {"command": "env", "args": args}}
+    (project / ".mcp.json").write_text(json.dumps({"mcpServers": servers}))
+    output = tmp_path / f"out.{fmt}.json"
+    result = CliRunner().invoke(
+        main,
+        [
+            "scan",
+            str(project),
+            "--no-project-policy",
+            "--report-only",
+            "-f",
+            fmt,
+            "-o",
+            str(output),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    text = result.output + output.read_text()
+    assert "agent-***" in text
+    assert shadowed not in text and later not in text
