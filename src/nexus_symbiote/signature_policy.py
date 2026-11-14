@@ -137,9 +137,27 @@ def _identity(path: Path) -> tuple[int, int]:
     return info.st_dev, info.st_ino
 
 
+def _repository_root(path: Path) -> Path | None:
+    """The nearest directory at or above ``path`` that holds a ``.git`` entry."""
+    for candidate in (path, *path.parents):
+        if os.path.lexists(candidate / ".git"):
+            return candidate
+    return None
+
+
 def _read_policy(policy_path: Path, root: Path) -> tuple[bytes, str]:
-    inside = "Signature policy must be provisioned outside the scanned project"
-    if policy_path.resolve().is_relative_to(root):
+    inside = (
+        "Signature policy must be provisioned outside the scanned project and outside "
+        "the repository that holds it"
+    )
+    # A change under review can edit any file of the repository that holds the project,
+    # not only the scanned directory, so a policy there would gate itself.
+    untrusted = [root]
+    repository = _repository_root(root)
+    if repository is not None:
+        untrusted.append(repository)
+    resolved = policy_path.resolve()
+    if any(resolved.is_relative_to(directory) for directory in untrusted):
         raise SignaturePolicyError(inside)
     try:
         with open_regular_file(policy_path) as stream:
@@ -159,10 +177,10 @@ def _read_policy(policy_path: Path, root: Path) -> tuple[bytes, str]:
             "Selected signature policy is unavailable or invalid strict JSON"
         ) from None
     try:
-        project = _identity(root)
+        project = {_identity(directory) for directory in untrusted}
     except OSError:
         raise SignaturePolicyError("Project root is unavailable") from None
-    if project in ancestors:
+    if project & ancestors:
         raise SignaturePolicyError(inside)
     if len(raw) > MAX_POLICY_BYTES:
         raise SignaturePolicyError("Signature policy exceeds the byte limit")
@@ -174,7 +192,8 @@ def load_signature_policies(policy_path: Path, project_root: Path) -> SignatureP
 
     Each artifact has one entry. Unknown fields and kinds, duplicate object keys,
     duplicate artifacts, missing files and symlinks are rejected, as is a policy
-    stored inside the project or hard-linked from elsewhere. No ambient policy,
+    stored inside the project, inside the repository that holds the project, or
+    hard-linked from elsewhere. No ambient policy,
     repository configuration, signer hint or adjacent signature is trusted. The
     project root is resolved first, so every command accepts the same path.
     """

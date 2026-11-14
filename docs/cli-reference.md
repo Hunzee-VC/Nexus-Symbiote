@@ -184,9 +184,9 @@ the same run counts as verification; the outcome recorded in the BOM is not trus
 
 `--signature-policy` (`scan`, `validate`, `risk`, `baseline`) and the Action's
 `signature-policy` input take a strict JSON file, at most 4 MiB and 1,000 artifacts,
-written by the operator, never by the checkout. A policy inside the scanned project,
-also under another name for the project directory, or one with other hard links is
-refused:
+written by the operator, never by the checkout. A policy inside the scanned project
+or inside the git working tree that holds it, also under another name for either
+directory, or one with other hard links is refused:
 
 ```json
 {
