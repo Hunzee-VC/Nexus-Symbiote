@@ -19,6 +19,8 @@ from tests.test_runtime_authorization import NOW, fixture, invoke
 from tests.test_runtime_quorums import configured_gateway
 from tests.test_runtime_stdio_session import launcher, signed_inputs
 
+pytestmark = pytest.mark.usefixtures("nonisolated_pinned_fixtures")
+
 
 def ring(*keys):
     return {key_id(key.public_key()): key.public_key() for key in keys}
@@ -240,3 +242,44 @@ def test_pinned_stdio_keeps_signer_scopes_and_decision_reports(tmp_path):
 
 def test_validation_worker_self_check_passes(tmp_path):
     fixture(tmp_path)[0].check_validation_worker()
+
+
+@pytest.mark.parametrize("excluded", ["revoked", "out-of-scope"])
+def test_an_admitted_decision_credits_only_the_snapshot_signers_that_counted(tmp_path, excluded):
+    # An extra signature by a revoked key, or by a key scoped to another tenant, does not
+    # stop a valid quorum. The audit record must not name that key as having granted it.
+    values = list(fixture(tmp_path))
+    release, other = values[6], Ed25519PrivateKey.generate()
+    other_id = key_id(other.public_key())
+    decisions = []
+    scopes = {other_id: SignerScope(tenants=frozenset({"globex"}))} if excluded != "revoked" else {}
+    values[0] = configured_gateway(
+        values[0],
+        snapshot_keys=ring(release, other),
+        signer_scopes=scopes,
+        on_decision=decisions.append,
+    )
+    if excluded == "revoked":
+        values[4] = values[4].model_copy(update={"revoked_signers": (other_id,)})
+    snapshot = sign_contract(values[3], "snapshot", (release, other))
+    assert invoke(values, snapshot=snapshot) == "executed"
+    [admitted] = decisions
+    assert admitted.admitted
+    assert admitted.snapshot_signers == (key_id(release.public_key()),)
+
+
+def test_a_denied_decision_names_every_verified_signer_of_the_refused_snapshot(tmp_path):
+    values = list(fixture(tmp_path))
+    release, other = values[6], Ed25519PrivateKey.generate()
+    other_id = key_id(other.public_key())
+    decisions = []
+    values[0] = configured_gateway(
+        values[0], snapshot_keys=ring(release, other), on_decision=decisions.append
+    )
+    values[4] = values[4].model_copy(update={"revoked_signers": (other_id,)})
+    snapshot = sign_contract(values[3], "snapshot", (other,))
+    with pytest.raises(AuthorizationError) as denied:
+        invoke(values, snapshot=snapshot)
+    assert denied.value.reason == "signer-revoked"
+    [refused] = decisions
+    assert not refused.admitted and refused.snapshot_signers == (other_id,)

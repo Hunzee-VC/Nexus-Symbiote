@@ -1,0 +1,6 @@
+title = "Nexus SymBiote"
+
+# A custom configuration replaces the built-in rules unless it extends them.
+# Test paths have the same detection coverage as production paths.
+[extend]
+useDefault = true

@@ -102,13 +102,30 @@ A way around a limit that its entry does not describe is worth a
 
 ## MCP servers and tools
 
+- **Deno resolver selection is deliberately bounded.** Implicit project-root
+  `deno.json` and `deno.jsonc` import/scopes mappings are bound only when the
+  operator supplies the source-binding key. Explicit `--config`/`-c`, disabled
+  configuration (`--no-config`), explicit `--import-map`, referenced `importMap`
+  files and unsupported import/scopes shapes produce coverage gaps, including
+  an explicit selector for an otherwise supported root filename. Selected-file
+  precedence and external mapping-file contents are not resolved. A key does
+  not turn such a partial inventory into an acceptable baseline. Import targets
+  and specifier-to-target associations are not bound without that key.
 - **Launcher classification covers named shapes.** The collector classifies `npx`,
-  `npm`, `pnpm`, `yarn`, `bun`, `bunx`, `uv`, `uvx`, `pipx`, `docker`, `podman`,
-  `nerdctl`, `deno` and `go`, also behind `env`, a shell with `-c`, `cmd /c`,
-  `powershell` or `pwsh`, `wsl`, `exec`, `nohup`, and `op`, `doppler`,
-  `infisical`, `dotenvx`, `aws-vault` or `with-secrets` with `--`. Any other
-  command is recorded as a local program by its basename, without a gap, unless it
-  is one of the runners or launches below that are gaps.
+  `npm`, `pnpm`, `yarn` (also as `yarnpkg`), `bun`, `bunx`, `uv`, `uvx`, `pipx`,
+  `docker`, `podman`, `nerdctl`, `deno` and `go`, also behind `env`, a shell with
+  `-c`, `cmd /c`, `powershell` or `pwsh`, `wsl`, `exec`, `nohup`, and `op`,
+  `doppler`, `infisical`, `dotenvx`, `aws-vault` or `with-secrets` with `--`. Any
+  other command is recorded as a local program by its basename, without a gap,
+  unless it is one of the runners or launches below that are gaps. Deno reads a
+  word after a bare `--lock` as the lock file, so `deno run --lock` followed by a
+  word is a `launcher_identity` gap even when that word is the package; write
+  `--lock=FILE` to keep the launch classified.
+- **Docker API delegation is a high launch risk.** An enabled `--use-api-socket`
+  forwards the engine socket and client credentials, even when the image is pinned
+  by digest. The collector records both in `launch_context`; explicit `false` or
+  `0` disables the flag, and the last occurrence wins. This describes the declared
+  launch, without contacting the engine or checking its permissions.
 - **What a local program or project script runs is not read.** `./start.sh`,
   `make serve`, `npm run mcp`, `uv run server.py` or a program that installs
   packages can start an unpinned package the inventory does not show. Review what
@@ -169,18 +186,26 @@ A way around a limit that its entry does not describe is worth a
   unknown. Other locations and the runner's own namespace (`UV_*`, `PIP_*`,
   `YARN_*`, `BUN_*`, `DOCKER_*` and similar) are a medium `package_source`
   finding, and the package URL is withheld. Configuration names that look like
-  tokens or hold one after a prefix (`AWS_AKIA...`) are exported as `[redacted]`.
+  tokens or hold one after a prefix (`AWS_AKIA...`) are exported as `[redacted]`,
+  and a launcher package whose name or specifier looks like a token is withheld
+  (`[withheld]`, no package URL) with a medium `completeness` finding.
 - **Changed values need the binding key.** Launch arguments, environment and header
   values are exported only as redacted positions and names, and endpoint and
   package index URLs as origins. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, `diff`
   alerts on any change to a server's command, arguments, environment or header
-  values. Without it, `diff` alerts on a changed command basename, launcher,
-  package or version, and on added or removed arguments, variables or headers; see
-  [source binding](verification-source-binding.md).
-- **Without the key, changed values pass.** A served directory widened from
-  `./notes` to `/`, a changed flag, environment or header value, an endpoint or
+  values. Without it, `diff` still alerts on a changed command basename, launcher,
+  package or version, and on added or removed arguments, variables or headers, and
+  a server whose remaining values are unbound is a medium alert: argument,
+  environment and endpoint-path drift is undetectable. That alert does not say
+  which value changed. See [source binding](verification-source-binding.md).
+- **Without the key, the value itself is not compared.** A served directory widened
+  from `./notes` to `/`, a changed flag, environment or header value, an endpoint or
   index path changed on the same host, a project resolver setting value, and the
-  directory of a command raise no alert.
+  directory of a command do not produce an alert that names the new value. For an
+  MCP server that recorded those values as unbound, `diff --fail-on-alert` still
+  fails, because the comparison cannot show that they stayed the same; so it does for
+  any other record that recorded its values as unbound (see
+  [drift gate](drift-gate.md#what-the-alerts-mean)).
 - **Unbound values add to the score.** Each server with such values carries a low
   `completeness` risk that names the key. It is not a gap, but it adds 1 to the
   risk score, so about ten such servers add 10 points toward the default fail
@@ -207,14 +232,15 @@ A way around a limit that its entry does not describe is worth a
   `websocket_client` of the MCP SDK, `MCPServerStdio`, `MCPServerSse` and
   `MCPServerStreamableHttp` of the OpenAI Agents SDK, `MCPServerStdio`,
   `MCPServerSSE`, `MCPServerHTTP` and `MCPServerStreamableHTTP` of PydanticAI, and
-  LangChain's `MultiServerMCPClient`, used outside an annotation; a class among
+  LangChain's `MultiServerMCPClient`, used other than as a type in an annotation,
+  as **Python server forms** defines it; a class among
   them also as an attribute of any value, such as a module a parameter or another
   name holds, and a function as an attribute of any name the file imports; in
   TypeScript and
   JavaScript, the SDK's `StdioClientTransport`, `SSEClientTransport`,
   `StreamableHTTPClientTransport` and `WebSocketClientTransport`. A Python file that
-  imports one of these by name from its package and does not use it outside an
-  annotation is a gap too, because another module can import it from that file,
+  imports one of these by name from its package and does not use it other than as
+  such a type is a gap too, because another module can import it from that file,
   as from a package `__init__.py` that re-exports it. A Python file that imports
   one by name from any other module, its own project's included, or uses its name
   after a star import of another module, is a gap whether or not it uses it, so a
@@ -239,18 +265,61 @@ A way around a limit that its entry does not describe is worth a
   `fastmcp.server` or `fastmcp.server.server`, and from `MCPServer` imported from
   `mcp.server.mcpserver`. Forms the collector recognizes but cannot follow are
   gaps: the low-level `Server`, a constructor given `tools=` or `**` arguments, a
-  server passed to a helper, an aliased or subclassed factory,
+  server passed to a helper other than the same-file helper described below, an
+  aliased or subclassed factory,
   `FastMCP.from_openapi`, decorators on a server imported from another module, a
   qualified, module-alias or star import, an import spelled only with
   compatibility characters, a server class imported by name and not used
-  outside an annotation, which another module can import from that file, a
+  other than as a type in an annotation, which another module can import from that file, a
   `FastMCP` or `MCPServer` imported by name from any other module, another
   submodule of `mcp` or `fastmcp` and its own project's included, or used by its
   name after a star import of one, whether or not it is used, and a `FastMCP` or
   `MCPServer` attribute of any value. `MCPServer` imported from `agents.mcp` or
   `pydantic_ai.mcp`, a client base class there, is not a gap. So a
   server built from a class a project module re-exports is a gap on the file that
-  builds it, even when the re-exporting module's own server is inventoried. Any
+  builds it, even when the re-exporting module's own server is inventoried.
+  Besides its `tool` decorator on a module-level function, which is inventoried, a
+  server may be used without a gap only in these ways: reading its `name`,
+  `instructions` or `settings`, as in `server.settings.port = 8000`; calling a run
+  method or app factory (`run`, `run_async`, `run_stdio_async`, `run_sse_async`,
+  `run_streamable_http_async`, `run_http_async`, `sse_app`, `streamable_http_app`
+  or `http_app`) and using the result anywhere, as in
+  `app = server.streamable_http_app()` or `asyncio.run(server.run_stdio_async())`,
+  also inside a `try` statement; applying its `resource`, `prompt` or
+  `custom_route` decorator directly to a function; reading one of these methods
+  in a statement of its own, which discards it; and passing it to a function of
+  the same file, undecorated and bound once, that uses that parameter only in
+  these ways and not inside a nested function, lambda, class or comprehension.
+  Any other use is a gap, such as saving, passing or dereferencing a bound method
+  (`method = server.run`, `anyio.run(server.run_stdio_async)`), keeping a
+  decorator, or naming the server in an annotation. An app or run coroutine still
+  holds the server, so code that digs it back out of one other than by the
+  reflection below is not seen. A type in an annotation is the whole annotation,
+  a member of a `|` union, or an argument of a generic of `typing`,
+  `typing_extensions` or `collections.abc`, such as `Optional[FastMCP]`, or of a
+  built-in generic such as `list[FastMCP]`. Any other part of an annotation, such
+  as a call or another subscript, is analyzed as code, because annotations are
+  evaluated. In a file with a recognized server or PydanticAI agent, this
+  reflection is a gap even when harmless: a call by name of `locals`, `globals`,
+  `vars`, `eval` or `exec`; `__builtins__` or an import of the `builtins` module;
+  a call by name of `getattr`, `setattr` or `delattr`, unless the object is a
+  literal or a name, or attribute of a name, that the file binds only by import
+  and the attribute is a literal name other than `modules` and those listed next, so
+  `getattr(os, "environ")` is accepted and `getattr(self, "name")` is a gap; the
+  attributes `__self__`, `__closure__`, `__globals__`, `__builtins__`, `__dict__`,
+  `__annotations__`, `__traceback__`, `__getattribute__`, `tb_frame`, `tb_next`,
+  `f_back`, `f_locals`, `f_globals`, `f_builtins`, `gi_frame`, `cr_frame`,
+  `ag_frame`, `_getframe`, `currentframe`, `getouterframes`, `getinnerframes`,
+  `getargvalues` and `getclosurevars`, also imported by name; and a `modules`
+  attribute that is not called, as in `sys.modules[__name__]`, or `modules`
+  imported from `sys`. A method that only shares a name, such as `model.eval()`
+  or `model.modules()`, is not reflection. Other reflection is not recognized,
+  such as a reflective builtin under another name,
+  `importlib.import_module(__name__)`, a module that imports itself, `gc`, or
+  reflection in another file, including on the traceback of an exception that
+  propagated out of a server's run, so a completed scan cannot prove that a
+  server or agent never escaped.
+  Any
   call whose first argument, or `name` keyword, is a literal that names `mcp`,
   `mcp.server` or `fastmcp`, or a submodule of the last two, is a gap whatever the
   callee, so a loader passed as an argument, bound by a `match` capture, read from
@@ -305,8 +374,15 @@ A way around a limit that its entry does not describe is worth a
   not. A decorated function that is not at module level, a rebound decorator, a
   qualified import and a star import are gaps. So is a PydanticAI agent given `tools=`,
   `toolsets=`, `builtin_tools=`, `mcp_servers=` or `*` or `**` arguments, or used
-  other than through an attribute or a `with` statement, such as passed to a
-  function or held in a list. Each agent's tools are named per agent, so two agents
+  other than through its `tool` and `tool_plain` decorators, reading its `name`,
+  calling `run`, `run_sync`, `run_stream` or `iter` and using the result anywhere,
+  also inside a `try` statement, applying its `system_prompt`, `instructions` or
+  `output_validator` decorator directly to a function, reading one of these
+  methods in a statement of its own, or a `with` statement without `as`. So an
+  agent passed to a function or held in a list, a saved,
+  passed or dereferenced bound method such as `method = agent.run_sync`,
+  `with agent as alias`, and the reflection listed under **Python server forms**
+  are gaps. Each agent's tools are named per agent, so two agents
   of a file can each have a tool of the same name. Class-based tools, such as
   `BaseTool` subclasses and `StructuredTool.from_function`, are neither collected
   nor reported.
@@ -319,6 +395,11 @@ A way around a limit that its entry does not describe is worth a
 - **Tool digests are unkeyed.** A tool's `definition_hash` covers the declared
   descriptor, including text the exported descriptor omits, so anyone holding the
   inventory can confirm a guess of a low-entropy value withheld there.
+- **Loopback endpoints raise no finding.** An MCP server declared with a `url` on
+  `localhost` or a loopback address over plain `http`, and no `command`, is recorded
+  without a transport or local-program finding: the endpoint is treated as secure
+  because it does not leave the host, and nothing records which process serves it.
+  Review such servers by other means.
 
 ## Models
 
@@ -340,8 +421,17 @@ A way around a limit that its entry does not describe is worth a
 - **Some files are not inventoried.** Pickles under names other than the
   [listed suffixes](model-integrity.md#model-files-and-references), NumPy `.npy` and
   `.npz` arrays, and `.pb` files other than `saved_model.pb` produce no component.
+- **Pickle recognition under another suffix is bounded.** A binary pickle is
+  recognized by its PROTO opcode and 16 well-formed opcodes in the first 64 KiB, a
+  text-protocol pickle by a consistent stream of at most 4,096 opcodes, and a ZIP
+  archive by a `.pkl` member in its first local header or in a central directory of
+  at most 1 MiB, read from the end of the archive. A pickle hidden otherwise under
+  `.onnx`, `.gguf` or another suffix is rated `unknown`, a high finding, and
+  `validate --project` still refuses it as unverified.
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat
-  templates are checked only for known sandbox-escape shapes. A template file larger
+  templates are checked for potential Python-internals access patterns, not evaluated;
+  computed names can evade the heuristic, and a match does not establish a sandbox
+  escape or execution. A template file larger
   than the `file-bytes` limit is digested but not checked, and is a coverage gap.
   SafeTensors tensor bytes are hashed but not inspected. See
   [what this does not establish](model-integrity.md#what-this-does-not-establish).
@@ -351,7 +441,8 @@ A way around a limit that its entry does not describe is worth a
 - **Instruction files under other names are not recorded.** The `prompt` collector
   reads the fixed files the [collector reference lists](collectors.md#what-each-collector-reads),
   `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` and `.cursorrules` in any subdirectory, and
-  every file in the rule, prompt and subagent directories. Another spelling of a
+  every file in the rule, prompt and subagent directories, apart from files named as
+  holding credentials (see below). Another spelling of a
   nested name, such as `claude.md` in a subdirectory, is a
   [failure](#every-collector), not a file that is read, unless one of those
   directories, or a skill or command directory, holds it. `CLAUDE.local.md`,
@@ -371,20 +462,54 @@ A way around a limit that its entry does not describe is worth a
   otherwise, such as with GitHub's table or autolink extensions, can still import a
   file from text read here as code.
   An import that leaves the project root, names an excluded path or lies deeper than
-  the `depth` limit is a gap, so write a path alias such as `@/components` as code. A
-  project with more than the [`import-lookups`](collection-limits.md#limits) limit of
-  memory files and import targets fails until the limit is raised. Past 262,144
-  characters of listed paths, an `imports` list is replaced by `imports_count` and
-  `imports_digest`, and an `imported_by` list by `imported_by_count`; every file is
-  still inventoried.
+  the `depth` limit is a gap, so write a path alias such as `@/components` as code. An
+  import of a file named as holding credentials, as the next entry lists them, is a
+  gap and is not read, and so is an import, whatever its name, that a symlink
+  resolves to such a file, such as `docs/guide.md` linked to `.env`. An imported file is
+  inventoried without a content hash unless both the path imported and the file a
+  symlink there leads to, if any, have a Markdown suffix: its exact bytes may hold
+  configuration or secrets, and an unkeyed digest of them could be confirmed by
+  guessing. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` a keyed binding covers the
+  content, which `validate --project` with the same key verifies; without the key the
+  component carries a low `completeness` finding saying its values are not bound in
+  this inventory, validation counts it as unbound, and a change to the file fails no
+  validation. `diff` cannot see the change either, so it raises a medium alert that
+  the record's values are unbound on every comparison, changed or not, and a keyless
+  `diff --fail-on-alert` fails. A project with more
+  than the [`import-lookups`](collection-limits.md#limits) limit of memory files and
+  import targets fails until the limit is raised. Past 262,144 characters of listed
+  paths, an `imports` list is replaced by `imports_count` and `imports_digest`, and an
+  `imported_by` list by `imported_by_count`; every file is still inventoried.
+- **Files named as holding credentials are not read.** The `prompt` collector does not
+  read a file without a Markdown suffix whose name says it holds credentials (`.env*`,
+  `.netrc`, `.npmrc`, `.pypirc`, `id_rsa`, `id_ecdsa`, `id_ed25519`, the suffixes
+  `.pem`, `.key`, `.p12`, `.pfx`, `.der`, `.jks`, `.keystore` and `.token`, or a name
+  containing `secret`, `credential`, `password` or an `api key` spelling: `apikey`,
+  `api_key` or `api-key`), or that lies in a directory named exactly one of those words,
+  singular or plural, with or without a leading dot, such as `secrets/token.txt`. Such a
+  file is a gap when a memory file imports it, when an instruction file such as
+  `CLAUDE.md` or `.cursorrules`, a rule, prompt or subagent file, an import or a file of
+  a skill or command directory is a symlink to it, and when a rule, prompt, subagent,
+  skill or command directory holds it; the directory's other files are inventoried. A
+  script whose name contains one of those words, such as `scripts/rotate_password.py`,
+  is therefore a gap too, and so is every file without a Markdown suffix in a skill
+  directory named exactly one of them, such as `.claude/skills/secrets/`. A Markdown
+  file is read whatever its name or directory, such as `docs/secrets-handling.md`, so a
+  credential kept in one, or in any other file the collector digests whose name does not
+  say it holds credentials, such as a skill's `token.txt` outside such a directory, is
+  covered by an unkeyed digest that can confirm a guess of it. So is a file that an
+  [`agent.yaml`](agent-manifest.md) declares as an instruction, which is read and hashed
+  whatever its name, through an in-root symlink too: declare only instruction files
+  there.
 - **Fixtures count.** A nested `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` or `.cursorrules`
   in test fixtures or vendored code is inventoried, and its findings count, like any
   other.
 - **Skill front matter is not interpreted.** Every file in the skill and command
-  directories is bound by digest, but settings such as `allowed-tools` are not
-  read. A skill declaration (`.md`, `.mdc`, `.markdown`, `.txt`, `.yaml`, `.yml`,
-  `.json`, `.toml`) above the `file-bytes` limit is a failure; a larger script or
-  other resource is streamed and digested.
+  directories, apart from files named as holding credentials, is bound by digest,
+  but settings such as `allowed-tools` are not read. A skill declaration (`.md`,
+  `.mdc`, `.markdown`, `.txt`, `.yaml`, `.yml`, `.json`, `.toml`) above the
+  `file-bytes` limit is a failure; a larger script or other resource is streamed and
+  digested.
 - **Binary skill resources are checked only for runs and clusters of hidden
   characters.** A skill or command resource that is not UTF-8 is checked as an
   agent's reader decodes it: as UTF-16 or UTF-32 after that byte-order mark,
@@ -410,37 +535,47 @@ A way around a limit that its entry does not describe is worth a
   `properties.settings_hashes changed` alert that names the agent, not the setting.
 - **Effective permissions are not resolved.** User and managed settings, workspace
   trust and session flags are not read, and deny and ask rules are counted, not
-  applied to the allow list.
-- **Settings digests can confirm guesses.** Without
-  `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, the digests of the Claude Code settings,
-  plugin manifests and plugin hooks, the Gemini CLI, Windsurf and Cline settings,
-  `.cursor/settings.json`, `.cursor/hooks.json` and `.codex/config.json` cover the
-  file as read, including the environment values of the MCP servers that
-  `.gemini/settings.json` declares, which the `mcp` records bind only with the key,
-  so anyone holding the inventory can confirm a guess of a whole file. With the key,
-  and for the other settings files without it, a value the redaction leaves in
-  place, such as a password pasted into a hook command, can still be confirmed. Keep
-  credentials out of settings files; see
-  [IDE agent settings](verification-source-binding.md#ide-agent-settings).
-- **Some settings changes alert only with the key.** `.codex/config.toml`,
-  `.cursor/cli.json` and the Antigravity, xAI and Copilot settings files are
-  digested after the redaction, so that their digests cannot confirm a guess either.
-  Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a change only to a value the
-  redaction removes, such as an MCP server's environment value, a token, or a URL
-  path, query or userinfo on the same host in a `notify` command, raises no alert;
-  such a record carries a low `completeness` finding. The redaction ends a URL or
-  an assigned value at a shell operator (`;`, `|`, `&`, `$`, `` ` ``, parentheses,
-  braces, `<`, `>` or a line break), and starts a new URL at each later scheme
-  such as `https://`, so a command or operator glued to one without whitespace, and
-  a host glued to one after an operator or a scheme, as in
-  `--webhooks=https://a.example/n,https://b.example`, do alert. Other text glued
-  to a URL without an operator or another scheme stays part of its redacted path;
-  without the key a URL whose authority
-  parsers read differently, such as one with a backslash, is a failure.
+  applied to the allow list. A Claude Code allow rule whose command word is a shell,
+  an interpreter or a launcher and that contains a wildcard, such as `Bash(sh:*)`,
+  `Bash(python3 -c:*)` or `Bash(sudo:*)`, is conservatively reported as an unscoped
+  shell grant. This heuristic also flags a fixed script with wildcard arguments,
+  such as `Bash(python3 scripts/report.py:*)`; it does not establish that every
+  matching rule permits arbitrary commands. A rule that names another program, such as
+  `Bash(npm run build:*)`, is read as scoped even where that program runs project code.
+- **Settings digests can confirm guesses of what the redaction keeps.** Every digest
+  in `settings_hashes` covers its file after the redaction, with or without
+  `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, so it cannot confirm a guess of an `env` value,
+  such as the environment of an MCP server that `.gemini/settings.json` declares, of
+  the command of a credential helper (`apiKeyHelper`, `awsAuthRefresh`,
+  `awsCredentialExport`, `gcpAuthRefresh` or `otelHeadersHelper`), of the value of an `Authorization`, `Cookie` or
+  credential-named key, or of a credential the redaction recognises. A value the
+  redaction leaves in place, such as a password pasted into a hook command, stored
+  under a key whose name does not mark a credential or passed to a command under any
+  setting other than those helpers, can still be confirmed. Keep credentials out of
+  settings files; see [IDE agent settings](verification-source-binding.md#ide-agent-settings).
+- **Some settings changes alert only with the key.** Every settings file is digested
+  after the redaction, so that its digest cannot confirm a guess. Without
+  `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a change only to a value the redaction removes,
+  such as an `env` value, including an MCP server's environment value, the command of
+  a credential helper, a token, the value of an `Authorization`, `Cookie` or credential-named
+  key such as `password` or `X-Api-Key`, or a URL path, query or userinfo on the same
+  host in a `notify` or hook command, changes no digest; such a record carries a low
+  `completeness` finding, so `diff` raises a medium alert that its values are unbound
+  on every comparison, changed or not, without naming a value, and a keyless
+  `diff --fail-on-alert` fails on that alert rather than on the change. Adding or
+  removing an `env` name or a credential helper still alerts as a settings change. The redaction ends a URL or an assigned value at a shell operator (`;`, `|`,
+  `&`, `$`, `` ` ``, parentheses, braces, `<`, `>` or a line break), and starts a new
+  URL at each later scheme such as `https://`, so a command or operator glued to one
+  without whitespace, and a host glued to one after an operator or a scheme, as in
+  `--webhooks=https://a.example/n,https://b.example`, do alert. Other text glued to a
+  URL without an operator or another scheme stays part of its redacted path; without
+  the key a URL whose authority parsers read differently, such as one with a
+  backslash, is a failure.
 - **Codex settings are interpreted in part.** `.codex/config.toml` is digested
   whole after the redaction, so a new `notify` command or another changed setting
   raises an alert, unless only a value the redaction removes changed and the scans
-  ran without the key (see the previous entry). Only `approval_policy`,
+  ran without the key: then only the medium alert that the values are unbound is
+  raised (see the previous entry). Only `approval_policy`,
   `sandbox_mode` and the `mcp_servers` table are interpreted. A value that the
   digest or the keyed binding covers and that RFC 8785 JSON cannot represent, such
   as a TOML date or time, `nan`, `inf` or an integer of magnitude 2^53 or more, is a
@@ -483,7 +618,12 @@ A way around a limit that its entry does not describe is worth a
 - **Lockfiles are claims.** Versions, integrity values and origins in a lockfile are
   recorded as declared; nothing is fetched or verified. Python lockfiles give the
   version and index origin, not artifact digests, and Yarn Berry `checksum` values
-  are not recorded. Lockfiles of more than one npm package manager, or both
+  are not recorded. A Python lockfile record whose index is not a plain `http(s)` URL
+  with a lower-case scheme (a path, a `file://` URL, an authority holding a backslash
+  or a percent-escape) is a gap and binds no package URL; the host is recorded in
+  lower case. The `wheels` and `sdist` URLs of a
+  `uv.lock` record are not read, so the recorded origin is the index, not where each
+  artifact is downloaded from. Lockfiles of more than one npm package manager, or both
   `uv.lock` and `poetry.lock`, are a gap and bind no lockfile evidence.
 - **Some lockfiles are not read.** `Pipfile.lock`, `pdm.lock`, `bun.lock` and
   `bun.lockb` give each package they may resolve a low `lockfile_unread` finding,
@@ -505,18 +645,37 @@ A way around a limit that its entry does not describe is worth a
 
 - **Same-host URL changes need the binding key.** A2A and RAG records export URLs as
   origins. Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a path or query change on the
-  same host that keeps the path depth raises no alert, and neither does a changed
+  same host that keeps the path depth changes no digest, and neither does a changed
   A2A interface `tenant` or a changed scope that was redacted. Such records carry a
-  low `completeness` risk that names the key. See
+  low `completeness` risk that names the key, so `diff` raises a medium alert that
+  their values are unbound on every comparison, changed or not, and a keyless
+  `diff --fail-on-alert` fails on that alert. See
   [A2A agent cards](verification-source-binding.md#a2a-agent-cards-and-client-entries)
   and [RAG sources](verification-source-binding.md#rag-sources).
 - **Some A2A values are bound only by the key.** Values the record neither exports
   nor digests, such as descriptions, a skill's tags, examples and modes, security
   scheme fields other than their types and URLs, and `protocolVersion`, raise no
-  alert without the key and add no `completeness` risk.
+  alert of their own without the key and add no `completeness` risk.
 - **RAG values that are not exported enter the digest only as their type.** Without
   the key, a content filter written as `"strict"` and changed to `"off"` raises no
   alert. A boolean control is compared.
+- **Inline document contents need the binding key.** RAG source structure v2 records
+  their presence and count without hashing their contents. Without
+  `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a same-count content change changes no digest;
+  a nonempty document list carries a low `completeness` finding, so `diff` raises a
+  medium alert that the source's values are unbound on every comparison, and a keyless
+  `diff --fail-on-alert` fails on that alert. The old
+  v1 structure and `inline_documents_hash` allowed offline guesses of content; older
+  inventories and exports remain sensitive and need recollection.
+- **Every v1 RAG record drifts once under v2.** The profile name is part of the
+  digested structure, and an absent `documents` key is digested as
+  `{"present": false}` where v1 digested `null`, so every RAG source's
+  `static_config_hash` changes once, not only sources with inline documents. On an
+  unchanged project, `diff --fail-on-alert` against a v1 baseline fails with a high
+  `properties.static_config_hash changed` alert for every RAG source, and
+  `validate --project` fails reconciliation on every v1 inventory that records a
+  RAG source, until both are recollected; see
+  [RAG sources](verification-source-binding.md#rag-sources).
 - **RAG transport is read from the locator's scheme.** A `source_uris` entry with a
   clear-text scheme such as `http`, with or without `//`, is a high finding. One with
   another scheme that is neither encrypted nor local, a `host:port`, a connection
@@ -547,7 +706,10 @@ A way around a limit that its entry does not describe is worth a
   Connect, including a credential pasted there by mistake.
 - **Cards built in code are gaps.** A card built in Python is a gap. Cards are read
   only from `.well-known` directories and from `agent.json`, `agent-card.json` and
-  `a2a/agent.json` in the root.
+  `a2a/agent.json` in the root. Direct calls to `AgentCard`, its recognized class
+  methods, and aliases imported by name from `a2a` modules are recognized. The
+  alias check is syntactic and can report a gap even when a name is later rebound;
+  assignment aliases, re-exports under other names and dynamic lookup are not resolved.
 - **Python import heuristics are shallow.** The a2a and rag collectors read only
   Python files that name the SDK or a vector-store library. The rag collector skips
   one it cannot read or parse or that exceeds 262,144 characters. The a2a
@@ -732,8 +894,10 @@ A way around a limit that its entry does not describe is worth a
   with `--project`, apply the checkout's `.nexus-symbiote.yaml`, including
   suppressions, ignored categories and raised thresholds. Each relaxation is listed
   in `policy_weakened`, in the inventory's metadata and in `risk --json-output`, and
-  printed as a warning. Pass `--no-project-policy` in CI; there is no
-  operator-owned policy file. See
+  printed as a warning. When a CI variable such as `CI` or `GITHUB_ACTIONS` is set, a
+  policy that weakens a gate fails the command unless `--no-project-policy` ignores it
+  or `--accept-project-policy` accepts it explicitly; interactive runs only warn. There
+  is no operator-owned policy file. See
   [what `policy_weakened` reports](policy-reference.md#what-policy_weakened-reports).
 - **A suppressed chat template finding is bound to the model file.** A suppression
   names the [fingerprint](policy-reference.md#suppressions) of the finding, which
@@ -757,6 +921,13 @@ A way around a limit that its entry does not describe is worth a
   and critical alerts, and `validate --project` asks for recollection. Take a new
   baseline with this release at the commit the old one was reviewed at; see
   [take both snapshots the same way](drift-gate.md#take-both-snapshots-the-same-way).
+- **Inventories from 0.2.0 that record a RAG source need a new baseline.** They
+  carry the superseded `nexus-symbiote/rag-source-structure/v1` profile, and every
+  RAG source's `static_config_hash` changes once under v2, whether or not the source
+  declares inline documents. On an unchanged project, `diff --fail-on-alert` against
+  such a baseline fails with a high alert for every RAG source, and
+  `validate --project` asks for recollection; see
+  [every v1 RAG record drifts once under v2](#a2a-and-rag).
 - **Both snapshots need the same binding key.** With a different key, every MCP,
   A2A, RAG and IDE settings binding changes and alerts, and the digests of the IDE
   settings files digested as read differ between a keyed and an unkeyed scan.
@@ -771,6 +942,20 @@ A way around a limit that its entry does not describe is worth a
   list has no content digest, and one larger or deeper than
   a runtime snapshot binds has no canonical digest; `digest` prints `unavailable`
   for the missing one and exits 1.
+- **An inventory nested deeper than 128 levels is not read.** Every command that
+  reads a native inventory through the shared reader, `diff`, `validate`, `risk`,
+  `graph`, `summary`, `digest`, `export-inventory` and the rest, refuses one whose
+  arrays and objects nest more than 128 levels, the root counted, with "inventory
+  nests deeper than 128 levels" and exit 1, or, past the interpreter's recursion
+  limit (just under 1,000 levels by default), as not strict UTF-8 JSON. The bound is
+  fixed, not the interpreter's recursion limit, so the same file is read or refused by
+  every one of them. `verify-discovery` and `verify-live` do not apply it and read a
+  document up to the recursion limit; `attest` treats a subject nested up to 256
+  levels as a native inventory and a deeper one as `other`, with no content digest
+  for `verify-attestation --match content` to compare. A collected inventory stays
+  within it, since its deepest values, MCP tool definitions, nest at most 64 levels;
+  one edited by hand or written by another producer needs its `properties`
+  flattened.
 - **A malformed `SOURCE_DATE_EPOCH` stops collection.** `scan`, `baseline` and
   `import-shadowscan` exit 2 when it is set to anything but 1 to 12 ASCII digits
   naming an instant up to 9999-12-31T23:59:59Z, an empty value included. Unset it to
@@ -890,6 +1075,11 @@ A way around a limit that its entry does not describe is worth a
 
 ## Runtime gateway
 
+- **Lineage persistence needs trusted, current state.** The lineage helper's
+  snapshot retains ACL revision histories, but does not authenticate them or stop
+  rollback. Versions imported without their histories cannot have their ACLs
+  updated until an operator supplies complete history; see
+  [lineage persistence](runtime-assurance.md#hosted-identity-and-mutable-data).
 - **Only mediated calls are governed.** `ReferenceGateway` authorizes only calls
   routed through `invoke`. The operator builds the authentication, description,
   scope and execution adapters and must close every other path to the tools; see
@@ -927,8 +1117,8 @@ A way around a limit that its entry does not describe is worth a
   approved. Protect the gate with a workflow that an organization ruleset requires
   and `CODEOWNERS` review on `.github/`, as the [drift gate guide](drift-gate.md#protect-the-gate)
   shows, and avoid checking out untrusted pull request heads in `pull_request_target`
-  workflows. Selecting a subset of `scanners` requires `validate: 'false'`, because
-  completeness requires all built-in collectors.
+  workflows. Selecting a subset of `scanners` requires `validate: 'false'` and
+  `risk-check: 'false'`, because both gates require all built-in collectors.
 - **Earlier steps in the job are trusted.** A step that runs untrusted code before
   the Action can change the runner's Python or rewrite files under `RUNNER_TEMP`
   before the Action reads them. Write the signer policy and the reviewed baseline

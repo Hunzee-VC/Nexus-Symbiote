@@ -16,9 +16,26 @@ It does not intercept other network requests, sandbox a process, or establish
 that an unchanged tool backend is benign. Restrict bypass paths through the
 surrounding runtime, credentials, sandbox and network policy.
 
-Every denial raises `AuthorizationError` with a stable `reason` code. Exceptions
-raised by the operator's adapters propagate unchanged, so treat every exception
-from `invoke` as a denial.
+Every authorization denial raises `AuthorizationError` with a stable `reason`
+code. Exceptions raised by the operator's adapters propagate unchanged. Before
+admission, a failure prevents the gateway from calling `execute`. After admission,
+`execute` can perform an external action and then raise, for example when its response times out. That
+is an admitted attempt with an unknown execution outcome; the exception does not
+prove denial or the absence of side effects, even if its type is
+`AuthorizationError`. An `admitted` decision records authorization, not execution
+success. Record the executor's outcome separately and reconcile it before
+retrying, using executor-supported idempotency where available. The approval
+nonce remains consumed; obtaining a fresh approval alone does not make a retry
+safe. The [worked example](runtime-contract-reference.md#worked-example) shows
+this distinction with a synthetic side effect.
+
+`invoke_pinned_stdio` starts the pinned launcher and completes the MCP `initialize`
+handshake before the gateway checks the trust status, snapshot and approval, because
+the session that describes the tool is the one that executes the call. A caller that
+presents invalid evidence still makes the operator's launcher run up to its tool
+listing; nothing is called. Admit callers to the integration itself, and run launchers
+in the isolated worker the [security boundaries](../SECURITY.md#security-boundaries)
+describe.
 
 The gateway copies the request before scope resolution and rejects a resolver
 that modifies its copy during resolution. A resolver retaining that copy cannot
@@ -161,8 +178,11 @@ input-schema validity, request-bound approval and revocation before execution.
 The descriptor digest covers `name`, `description`, `inputSchema`,
 `annotations`, `title`, `outputSchema` and `_meta`; a descriptor with any other
 field, such as `icons`, fails closed until the digest profile is upgraded.
-Arguments are copied before checking; schema references cannot trigger network
-retrieval. Identities and validity are checked again immediately before execution.
+Arguments and the served descriptor are copied before checking, so validation uses
+the same descriptor that was digested; schema references cannot trigger network
+retrieval. The workload identity is checked again before admission, and contract
+and signer-scope validity and the approver quorum are rechecked in the admission
+transaction. The decision callback runs after admission and before execution.
 The executor and scope resolver receive the RFC 8785 canonical JSON value that
 the approval binds by default (`canonical_arguments=True`), with keys in RFC
 8785 order and integral floats between -(2^53 - 1) and 2^53 - 1 converted to
@@ -308,12 +328,23 @@ registration-only gateway without adapters with `ReferenceGateway.registrar(...)
 To retire a snapshot on stores you cannot reach, list its digest in
 `revoked_snapshots` of the next trust status. A superseded snapshot or an older
 trust status is refused from a read of the store, without taking its write lock.
+Before recording a new trust status or advancing a snapshot, the gateway rechecks
+contract validity and signer scopes while holding the state lock. Snapshot
+advancement also requires the checked trust status still to be the current head;
+a concurrent update makes the stale transition fail with `trust-superseded`.
+Snapshot admission takes a SQLite write lock even when the same snapshot is
+already recorded, so concurrent calls can contend on the shared store before
+reaching their final admission transaction. A lock that cannot be acquired within
+the store's timeout denies the call with `state-unavailable`. Size and monitor the
+gateway fleet for this shared-store contention, and retry only in accordance with
+the operation's idempotency and approval semantics.
 
 Fresh authenticated revocation knowledge is retained even when the current
 operation is denied. Failed signature or binding checks cannot advance snapshot
 state. After the final identity check, the gateway takes the database write lock,
-confirms the current trust head and snapshot head, and checks validity against
-its clock before committing the nonce. The commit admits the call. A newer trust
+confirms the current trust head and snapshot head, and checks contract validity,
+signer scopes and the distinct approver quorum against its clock before committing
+the nonce. The commit admits the call. A newer trust
 status or snapshot committed before admission denies the stale call and preserves
 its nonce. A later revocation applies to subsequent admissions. Cancellation of
 work already admitted requires executor support. Execution failure after
@@ -358,11 +389,46 @@ It is a library helper; no command uses it. Retrieval requires current ACL evide
 across the ancestry and records returned version identifiers, content digests,
 principal, time and read watermark. Source withdrawal cascades to derived records;
 source ACL revocation blocks subsequent retrieval of derived records. `update_acl`
-refuses a revision already used for that version, so an earlier, wider ACL cannot
-be restored under its old revision to replay retrievals approved against it.
-Connect these helpers to the actual datastore's transaction/snapshot and ACL
-enforcement APIs. They do not by themselves delete remote content or authorize
-access to a live vector database.
+refuses a revision already used for that version when its complete revision history
+is available. To retain that history across a restart, persist the whole snapshot:
+
+```python
+# initial_versions are new records with no prior ACL revisions.
+index = LineageIndex.from_new_versions("tenant-a", initial_versions)
+snapshot_json = index.snapshot().model_dump_json()
+# Persist snapshot_json through the operator's protected state store.
+# After a restart, read the latest committed snapshot as a dict:
+index = LineageIndex.from_snapshot(snapshot_dict)
+```
+
+`LineageIndex(tenant)` followed by `add` is also for genuinely new records.
+`from_new_versions` is an explicit assertion that the supplied versions have no
+prior revisions; do not use it, or `add`, to restore existing records. In contrast,
+the existing `LineageIndex(tenant, versions)` constructor imports versions with
+**unknown ACL history**: retrieval still applies each imported record's current
+ACL, but `update_acl` refuses changes to it. This is a behavior change for callers
+that previously created a graph from `versions` and then updated ACLs. Unknown
+history remains unknown after a snapshot round trip, including when the graph mixes
+imported versions and newly added records.
+
+To migrate a versions-only store, obtain every revision used for each version from
+an authoritative audit log and pass the complete mapping (including each current
+revision) to `LineageIndex.from_legacy_versions(tenant, versions,
+acl_revisions=histories)`. The method rejects missing, extra, duplicate or
+current-revision-free histories, but cannot prove that an operator's supplied
+history is complete. If the history cannot be recovered, keep updates disabled
+or create new identifiers under an independently enforced migration policy; do not
+invent a history containing only the current revision.
+
+Snapshots are data, not signatures or an anti-rollback store. An older, modified or
+forged snapshot can reinstate an old ACL and its prior state. The operator must
+authenticate and protect the full snapshot, select the latest committed state,
+and persist it atomically with the authoritative ACL update. Coordinate concurrent
+readers and writers externally; the helper is not thread-safe or a transaction
+manager. A crash between an ACL update and snapshot persistence can otherwise lose
+the update and revision history. Connect these helpers to the actual datastore's
+transaction/snapshot and ACL enforcement APIs. They do not themselves delete remote
+content or authorize access to a live vector database.
 
 ## Verification evidence
 

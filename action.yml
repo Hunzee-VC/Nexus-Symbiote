@@ -19,8 +19,8 @@ inputs:
     description: >-
       Comma-separated scanner names including shadowscan, a2a, ide_agents; empty means all.
       A list that leaves any collector out makes coverage partial, so the validate and
-      risk-check gates fail whenever they are on, and the Action refuses such a list while
-      validate is 'true'. Leave it empty in a workflow that gates
+      risk-check gates fail whenever they are on, and the Action refuses such a list unless
+      both are 'false'. Leave it empty in a workflow that gates
     default: ""
   validate:
     description: >-
@@ -63,7 +63,19 @@ inputs:
       earlier step of a trusted workflow writes under RUNNER_TEMP from the base branch or an
       artifact; never a file from the checked-out code. When set, the Action runs
       `diff <baseline> <inventory> --fail-on-alert` and fails on any drift alert. The same path
-      rules as signature-policy apply. Empty means no drift gate
+      rules as signature-policy apply. Requires source-binding-key, or
+      NEXUS_SYMBIOTE_SOURCE_BINDING_KEY of at least 32 characters in the step environment:
+      without that key, launch arguments, environment values and endpoint paths are not
+      compared. Empty means no drift gate
+    default: ""
+  source-binding-key:
+    description: >-
+      Operator secret of at least 32 characters. It keys the bindings that let drift
+      detection see MCP launch arguments, environment values and endpoint paths. Required
+      when reviewed-baseline is set. When empty, the step environment's
+      NEXUS_SYMBIOTE_SOURCE_BINDING_KEY is used instead. Prefer a repository secret. The
+      value is passed to the Action's CLI subprocesses and is not printed. Record the
+      baseline with the same secret
     default: ""
   sarif-upload:
     description: >-
@@ -88,14 +100,14 @@ inputs:
       symlinked RUNNER_TEMP or parent directory), hard links, non-regular and oversized files, and
       passes one snapshot to collection, validation and the risk gate. Signatures verify offline
       against the Sigstore trust root shipped in the Action's hash-locked sigstore package, never
-      a runner cache. Empty means no signer policy
+      a runner cache nor a trust root the job environment names. Empty means no signer policy
     default: ""
   allow-unsigned-discovery:
     description: >-
       'true' accepts ShadowScan discovery evidence whose producer signature was not verified,
       passing --allow-unsigned-discovery to validate and risk; the acceptance is printed as a
       warning. With 'false', such evidence fails the completeness and risk gates in CI, unless
-      validate is 'true' and signature-policy names the report and verifies its producer
+      signature-policy names the report and verifies its producer
     default: "false"
   limits:
     description: >-
@@ -180,6 +192,7 @@ runs:
         SYMBIOTE_RISK_THRESHOLD: ${{ inputs.risk-threshold }}
         SYMBIOTE_FAIL_ON_SEVERITY: ${{ inputs.fail-on-severity }}
         SYMBIOTE_REVIEWED_BASELINE: ${{ inputs.reviewed-baseline }}
+        SYMBIOTE_SOURCE_BINDING_KEY: ${{ inputs.source-binding-key }}
         SYMBIOTE_SARIF: ${{ inputs.sarif-upload }}
         SYMBIOTE_UPLOAD_ARTIFACT: ${{ inputs.upload-artifact }}
         SYMBIOTE_SIGNATURE_POLICY: ${{ inputs.signature-policy }}

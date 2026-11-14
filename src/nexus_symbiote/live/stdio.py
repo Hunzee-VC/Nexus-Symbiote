@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
-import re
 import selectors
-import signal
-import subprocess
 import tempfile
 import time
 from collections.abc import Callable, Iterator
@@ -16,7 +12,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from nexus_symbiote.core.hashing import open_regular_file, parse_json_strict
+from nexus_symbiote.core.hashing import parse_json_strict
+from nexus_symbiote.live.pinned_process import (
+    PinnedProcessError,
+    spawn_pinned,
+    stage_pinned_executable,
+    terminate_process_group,
+)
 from nexus_symbiote.scanners.live_mcp import (
     PROTOCOL_VERSION,
     SUPPORTED_PROTOCOL_VERSIONS,
@@ -61,15 +63,6 @@ class PinnedObservation:
     prompts: list[dict[str, Any]] | None = None
     resource_templates: list[dict[str, Any]] | None = None
     launcher_sha256: str | None = field(default=None)
-
-
-def strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate JSON key")
-        result[key] = value
-    return result
 
 
 def _ready(fd: int, event: int, deadline: float) -> None:
@@ -117,18 +110,9 @@ def _frames(fd: int, deadline: Callable[[], float]) -> Iterator[dict[str, Any]]:
 def _capture(binary: Path, work: Path) -> PinnedObservation:
     # Executable is the private copy checked against the operator digest in observe_pinned.
     try:
-        proc = subprocess.Popen(  # noqa: S603
-            [str(binary)],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            cwd=work,
-            env={"PATH": os.defpath},
-            start_new_session=True,
-            bufsize=0,
-        )
-    except OSError as exc:
-        raise LaunchPolicyError("launcher-start-failed", "launcher could not be run") from exc
+        proc = spawn_pinned(binary, work)
+    except PinnedProcessError as exc:
+        raise LaunchPolicyError(exc.reason, str(exc)) from exc
     with proc:
         assert proc.stdin is not None and proc.stdout is not None
         inbox = proc.stdin.fileno()
@@ -246,48 +230,17 @@ def _capture(binary: Path, work: Path) -> PinnedObservation:
                 )
             return observation
         finally:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            terminate_process_group(proc)
 
 
 def observe_pinned(command: str, digest: str) -> PinnedObservation:
     """Execute only a private copy of the exact bytes selected by operator policy."""
-    if (
-        os.name != "posix"
-        or not Path(command).is_absolute()
-        or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
-    ):
-        raise LaunchPolicyError(
-            "invalid-launch-policy", "expected an absolute POSIX executable and its SHA-256 pin"
-        )
     with tempfile.TemporaryDirectory(prefix="nexus-live-") as directory:
         work = Path(directory)
-        staged = work / "server"
-        hasher = hashlib.sha256()
-        budget = 128 * 1024 * 1024
         try:
-            with open_regular_file(Path(command)) as source, staged.open("xb") as out:
-                if os.fstat(source.fileno()).st_size > budget:
-                    raise LaunchPolicyError("launcher-unavailable", "launcher exceeds byte budget")
-                while chunk := source.read(1024 * 1024):
-                    budget -= len(chunk)
-                    if budget < 0:
-                        raise LaunchPolicyError(
-                            "launcher-unavailable", "launcher exceeds byte budget"
-                        )
-                    hasher.update(chunk)
-                    out.write(chunk)
-        except LaunchPolicyError:
-            raise
-        except OSError as exc:
-            raise LaunchPolicyError("launcher-unavailable", "launcher cannot be read") from exc
-        if digest != "sha256:" + hasher.hexdigest():
-            raise LaunchPolicyError(
-                "launcher-digest-mismatch", "launcher differs from approved digest"
-            )
-        staged.chmod(0o500)
+            staged = stage_pinned_executable(command, digest, work)
+        except PinnedProcessError as exc:
+            raise LaunchPolicyError(exc.reason, str(exc)) from exc
         observation = _capture(staged, work)
         observation.launcher_sha256 = digest
         return observation

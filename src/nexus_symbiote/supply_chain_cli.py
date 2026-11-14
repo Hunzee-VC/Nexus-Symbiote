@@ -160,6 +160,17 @@ def register_supply_chain_commands(main: click.Group) -> None:
             "identity were recorded."
         ),
     )
+    @click.option(
+        "--no-isolation",
+        is_flag=True,
+        help=(
+            "Explicitly allow execution without a PID namespace; printed as a warning. On "
+            "Linux the launcher is made a child subreaper and is stopped before cleanup, so "
+            "its descendants are killed with the session while it is alive; a descendant "
+            "that outlives the launcher can escape, as can one that deliberately evades "
+            "cleanup. Elsewhere cleanup is best effort. This is not a namespace or sandbox."
+        ),
+    )
     def verify_live(
         aibom_path: str,
         project: str,
@@ -167,6 +178,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         json_output: bool,
         record: bool,
         accept_drift: bool,
+        no_isolation: bool,
     ) -> None:
         """Live: observe independently pinned stdio launchers; optionally emit an unsigned candidate.
 
@@ -179,6 +191,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         """
         modes.require_live("verify-live")
         from nexus_symbiote.core.hashing import hash_bytes, open_regular_file, parse_json_strict
+        from nexus_symbiote.live.pinned_process import isolation_off
         from nexus_symbiote.live.verify import record_candidate, verify_mcp_servers
 
         if record and json_output:
@@ -200,7 +213,17 @@ def register_supply_chain_commands(main: click.Group) -> None:
             bom = AIBOM.from_document(document)
         except (OSError, ValueError, TypeError, RecursionError):
             raise click.ClickException("invalid BOM or operator launch policy") from None
-        report = verify_mcp_servers(bom, trusted_launchers=policy)
+        if no_isolation:
+            click.echo(
+                "warning: --no-isolation: kernel PID containment is disabled. On Linux the "
+                "launcher is a child subreaper and is stopped before cleanup, so its "
+                "descendants are killed with the session while it is alive; a descendant "
+                "that outlives the launcher can escape, as can one that deliberately evades "
+                "cleanup. Elsewhere cleanup is best effort. This is not a namespace or sandbox.",
+                err=True,
+            )
+        with isolation_off() if no_isolation else contextlib.nullcontext():
+            report = verify_mcp_servers(bom, trusted_launchers=policy)
         report.inputs = {
             "inventory_sha256": hash_bytes(inventory_bytes),
             "launch_policy_sha256": hash_bytes(policy_bytes),
@@ -264,6 +287,15 @@ def register_supply_chain_commands(main: click.Group) -> None:
         help="Use built-in policy without reading configuration from the target, as scan does.",
     )
     @click.option(
+        "--accept-project-policy",
+        is_flag=True,
+        help=(
+            "In CI, accept a project policy that weakens the built-in gates explicitly for "
+            "collection, as scan does; the staged inventory is still re-gated by the built-in "
+            "policy."
+        ),
+    )
+    @click.option(
         "--signature-policy",
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
         help="Explicit operator signer policy JSON, kept outside the project, as for scan.",
@@ -274,6 +306,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         project_path: str,
         baseline_path: Path,
         no_project_policy: bool = False,
+        accept_project_policy: bool = False,
         signature_policy: Path | None = None,
     ) -> None:
         """Stage a static snapshot for review; publish it only after the scan gate passes.
@@ -313,6 +346,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 report_only=False,
                 signature_policy=signature_policy,
                 no_project_policy=no_project_policy,
+                accept_project_policy=accept_project_policy,
             )
             # A project policy may select report-only mode; it cannot authorize
             # promotion of incomplete evidence into an approved baseline.

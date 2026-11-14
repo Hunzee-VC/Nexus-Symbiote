@@ -182,7 +182,14 @@ The collector reads a report at one of three paths beneath the project root:
 one may exist. When more than one does, the scan records the failure
 "ShadowScan reports found at more than one supported path (...); keep exactly one"
 and imports none, so a file committed under another name cannot silently replace
-the report a pipeline generated. The inventory lists the path it read under
+the report a pipeline generated. A report reached through a symbolic link in a parent
+directory, such as `.shadowscan/report.json` when `.shadowscan` is a link to another directory, is
+refused with the failure "ShadowScan report is reached through a symbolic link; not
+imported", and nothing is imported while one exists. A leaf link such as
+`.shadowscan/report.json -> ../vendor/report.json` can still be read when it satisfies
+the ordinary [confinement rules](known-limitations.md#every-collector),
+including a relative target inside the project reached without another symlink.
+The inventory lists the path it read under
 `surfaces_scanned`. If none exists, the inventory records that observation. A fully mapped native report
 whose source collection completed can accompany a successful repository baseline.
 The digest and `source_projection_limitations` record the external evidence
@@ -315,8 +322,8 @@ version 2 entry (`"kind": "sigstore-message-signature"`) with `expected_sha256`
 set to the report's SHA-256: the check then also fails for other report bytes,
 however they are signed. The report needs such a signature entry: a
 `digest-pin` entry for it, or an entry for a report location the collector does
-not read (it reads the first of `.shadowscan/report.json`,
-`shadowscan-report.json` and `shadowscan.json` that exists), is reported as an
+not read (it considers `.shadowscan/report.json`, `shadowscan-report.json` and
+`shadowscan.json`, and rejects multiple distinct reports), is reported as an
 unused policy entry by `scan` and `validate --project`
 ([model integrity](model-integrity.md#operator-signature-policy)).
 

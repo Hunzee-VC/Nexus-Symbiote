@@ -42,6 +42,10 @@ THRESHOLD = re.compile(r"(?:0|[1-9][0-9]{0,2})(?:\.[0-9]{1,4})?")
 MAX_BASELINE_BYTES = 16 * 1024 * 1024
 MAX_LIMITS_LENGTH = 1024
 LIMITS_ENV = "NEXUS_SYMBIOTE_LIMITS"
+TRUST_ROOT_ENVS = (
+    "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT",
+    "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256",
+)
 RELAY_PREFIX = "| "
 
 
@@ -178,6 +182,7 @@ class Config:
     baseline: bytes | None = field(default=None, repr=False)
     allow_unsigned_discovery: bool = False
     fail_on_severity: str = "high"
+    binding_key: str = field(default="", repr=False)
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
@@ -227,11 +232,36 @@ class Config:
             if reviewed
             else None
         )
-        validate = _boolean(env.get("SYMBIOTE_VALIDATE", "true"), "validate")
-        if validate and scanners and set(scanners) != SCANNERS:
+        from nexus_symbiote.scanners.mcp import (
+            _MIN_SOURCE_BINDING_KEY_LENGTH,
+            SOURCE_BINDING_KEY_ENV,
+        )
+
+        supplied_key = env.get("SYMBIOTE_SOURCE_BINDING_KEY", "")
+        inherited_key = env.get(SOURCE_BINDING_KEY_ENV, "")
+        if supplied_key and (
+            len(supplied_key) < _MIN_SOURCE_BINDING_KEY_LENGTH
+            or any(c in supplied_key for c in "\r\n\x00")
+        ):
             raise InputError(
-                "scanners subset requires validate to be false, because completeness "
-                "requires all built-in collectors"
+                "source-binding-key must be one line of at least "
+                f"{_MIN_SOURCE_BINDING_KEY_LENGTH} characters"
+            )
+        effective_key = supplied_key or inherited_key
+        if baseline is not None and len(effective_key) < _MIN_SOURCE_BINDING_KEY_LENGTH:
+            raise InputError(
+                "reviewed-baseline needs a source binding key of at least "
+                f"{_MIN_SOURCE_BINDING_KEY_LENGTH} characters (source-binding-key or "
+                f"{SOURCE_BINDING_KEY_ENV}): without it MCP launch arguments, environment "
+                "values and endpoint paths are not compared"
+            )
+        validate = _boolean(env.get("SYMBIOTE_VALIDATE", "true"), "validate")
+        risk_check = _boolean(env.get("SYMBIOTE_RISK_CHECK", "true"), "risk-check")
+        if (validate or risk_check) and scanners and set(scanners) != SCANNERS:
+            # Either gate fails on partial coverage, so the run could only fail later.
+            raise InputError(
+                "scanners subset requires validate and risk-check to be false, because "
+                "both gates require all built-in collectors"
             )
         return cls(
             workspace,
@@ -240,7 +270,7 @@ class Config:
             fmt,
             scanners,
             validate,
-            _boolean(env.get("SYMBIOTE_RISK_CHECK", "true"), "risk-check"),
+            risk_check,
             threshold,
             _boolean(env.get("SYMBIOTE_SARIF", "false"), "sarif-upload"),
             signers,
@@ -251,10 +281,13 @@ class Config:
                 env.get("SYMBIOTE_ALLOW_UNSIGNED_DISCOVERY", "false"), "allow-unsigned-discovery"
             ),
             severity,
+            supplied_key,
         )
 
 
-def _run(args: list[str], *, private: Path, limits: str = "") -> subprocess.CompletedProcess[str]:
+def _run(
+    args: list[str], *, private: Path, limits: str = "", binding_key: str = ""
+) -> subprocess.CompletedProcess[str]:
     # Offline Sigstore verification trusts any trusted_root.json in the per-user
     # cache without checking it, and an earlier job or step can plant one there.
     # An empty private home makes sigstore seed it from its hash-locked package.
@@ -264,10 +297,19 @@ def _run(args: list[str], *, private: Path, limits: str = "") -> subprocess.Comp
         "XDG_CACHE_HOME": str(private / "cache"),
         "XDG_DATA_HOME": str(private / "data"),
     }
-    # Collection limits come only from the limits input, never from the job environment.
+    # Collection limits come only from the limits input, never from the job environment,
+    # and the Sigstore trust root only from the hash-locked sigstore package: an explicit
+    # trust root in the job environment would let an earlier step choose the authorities.
     env.pop(LIMITS_ENV, None)
+    for name in TRUST_ROOT_ENVS:
+        env.pop(name, None)
     if limits:
         env[LIMITS_ENV] = limits
+    # An explicit input replaces a key inherited from the job. An empty input does not.
+    if binding_key:
+        from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
+
+        env[SOURCE_BINDING_KEY_ENV] = binding_key
     # The executable is this interpreter; arguments never pass through a shell.
     return subprocess.run(  # noqa: S603
         [sys.executable, "-I", "-m", "nexus_symbiote", *args],
@@ -427,6 +469,20 @@ def _announce(config: Config) -> None:
         _annotate("notice", "collection limits set by the limits input: " + config.limits)
     if config.baseline is None:
         _say("  drift gate: not configured (set reviewed-baseline to fail on drift)")
+        from nexus_symbiote.scanners.mcp import (
+            _MIN_SOURCE_BINDING_KEY_LENGTH,
+            SOURCE_BINDING_KEY_ENV,
+        )
+
+        inherited = os.environ.get(SOURCE_BINDING_KEY_ENV, "")
+        if len(config.binding_key or inherited) < _MIN_SOURCE_BINDING_KEY_LENGTH:
+            _annotate(
+                "warning",
+                f"{SOURCE_BINDING_KEY_ENV} is not set to at least "
+                f"{_MIN_SOURCE_BINDING_KEY_LENGTH} characters: MCP launch arguments, "
+                "environment values and endpoint paths are not bound, so a later diff "
+                "cannot see those changes",
+            )
 
 
 def _summary_text(result: str, gates: Mapping[str, str], notes: Iterable[str]) -> str:
@@ -497,7 +553,9 @@ def run(
         if command is None:
             private = scratch / "home"
             private.mkdir(mode=0o700)
-            command = functools.partial(_run, private=private, limits=config.limits)
+            command = functools.partial(
+                _run, private=private, limits=config.limits, binding_key=config.binding_key
+            )
         native = scratch / "native.json"
         signers: list[str] = []
         if config.signature_policy is not None:
@@ -600,10 +658,9 @@ def run(
             out.emit(passed="skipped")
         else:
             arguments = ["risk", "--no-project-policy", str(native), "--json-output", *unsigned]
-            if config.validate:
-                # The same reconciliation and signers as validation, so a signer policy
-                # that verifies the discovery producer counts here too.
-                arguments += ["--project", str(config.project), *signers]
+            # The same reconciliation and signers as validation, whether or not it ran,
+            # so a signer policy that verifies the discovery producer counts here too.
+            arguments += ["--project", str(config.project), *signers]
             if config.threshold == 0:
                 arguments.append("--no-score-threshold")
             else:

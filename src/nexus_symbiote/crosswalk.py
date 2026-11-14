@@ -125,7 +125,7 @@ FRAMEWORKS: tuple[Framework, ...] = (
         sarif_prefix="external/owasp-llm-top-10-2026/",
     ),
     Framework(
-        key=OWASP_ASI_2026,
+        key="owasp-asi-2026",
         name="OWASP Top 10 for Agentic Applications",
         edition="2026",
         source=(
@@ -567,6 +567,14 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
     ),
     "hidden_markup": _DISGUISED_TEXT,
+    "line_separators": (
+        _ref(
+            OWASP_LLM_2025,
+            "LLM01:2025",
+            "A line or paragraph separator can split instruction text in some renderers.",
+        ),
+        _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
+    ),
     "hook_commands": (
         _ref(OWASP_ASI_2026, "ASI05", "Commands run automatically on agent events."),
         _ref(
@@ -993,7 +1001,8 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
             CWE,
             "CWE-1336",
             "Kept on high findings, where the earlier SARIF rules put it: a chat template that "
-            "reaches Python internals is a template engine weakness, but the collectors record "
+            "matches a potential Python-internals access pattern; this does not establish a "
+            "template engine weakness. The collectors record "
             "this category only at critical.",
             RiskSeverity.HIGH,
         ),
@@ -1123,6 +1132,36 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
             MITRE_ATLAS,
             "AML.T0109",
             "An unpinned reference takes the next published version, which a rug pull relies on.",
+        ),
+        _ref(NIST_AI_RMF, "MANAGE-3.1", _THIRD_PARTY),
+        _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
+        _ref(ISO_42001, "A.10.3", _SUPPLIER),
+    ),
+    "transitive_resolution": (
+        _ref(
+            CWE,
+            "CWE-829",
+            "Dependencies of a pinned package are resolved when the server starts.",
+        ),
+        _ref(
+            OWASP_LLM_2025,
+            "LLM03:2025",
+            "A pinned MCP package whose dependencies are resolved at launch is a supply chain weakness.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI04",
+            "The agent's launched packages can change without a change to the pin.",
+        ),
+        _ref(
+            OWASP_LLM_2026,
+            "LLM04:2026",
+            "A pinned MCP package whose dependencies are resolved at launch is a supply chain weakness.",
+        ),
+        _ref(
+            MITRE_ATLAS,
+            "AML.T0109",
+            "A dependency resolved at launch can be replaced without moving the package pin.",
         ),
         _ref(NIST_AI_RMF, "MANAGE-3.1", _THIRD_PARTY),
         _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),

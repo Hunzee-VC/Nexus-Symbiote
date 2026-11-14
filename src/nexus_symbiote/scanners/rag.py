@@ -59,7 +59,7 @@ STORE_IMPORTS = {
 }
 _IMPORT_MARKERS = tuple(name.encode() for name in STORE_IMPORTS)
 ENV_FILES = {".env", ".env.example", ".env.local"}
-SOURCE_STRUCTURE_PROFILE = "nexus-symbiote/rag-source-structure/v1"
+SOURCE_STRUCTURE_PROFILE = "nexus-symbiote/rag-source-structure/v2"
 SOURCE_VALUE_BINDING_PROFILE = "nexus-symbiote/rag-source-values/v1"
 _SOURCE_FIELDS = frozenset(
     {
@@ -109,13 +109,17 @@ _MAX_URI = 4096
 _MAX_PYTHON_CHARACTERS = 262_144
 # Identifiers such as store types, embedding models and collection names; anything
 # else may be a locator with credentials and is exported only as a redaction marker.
-_IDENTIFIER = re.compile(r"[A-Za-z0-9_@][A-Za-z0-9_.:/+ ()-]{0,255}")
-_PLAIN_PATH = re.compile(r"[A-Za-z0-9_.~/-]{1,4096}")
+# A ":" is the shape of user:password and host:port, neither of which is an identifier.
+_IDENTIFIER = re.compile(r"[A-Za-z0-9_@][A-Za-z0-9_./+ ()-]{0,255}")
+# A plain path names a file or directory, so it holds a "/" or a "."; a bare run of
+# letters and digits may be a credential.
+_PLAIN_PATH = re.compile(r"[A-Za-z0-9_~-]{0,4095}[/.][A-Za-z0-9_.~/-]{0,4095}")
 _SCHEME = re.compile(r"([A-Za-z][A-Za-z0-9+.-]{0,31}):")
 _TOKEN_SHAPE = re.compile(
     r"(?<![\w-])(?:eyJ[\w-]{8,}\.[\w-]{8,}"
     r"|(?:gh[oprsu]_|github_pat_|glpat-|xox[abeoprs]-|sk-|[rs]k_live_|AKIA|ASIA|AIza)"
-    r"[\w-]{12,})"
+    r"[\w-]{12,}"
+    r"|(?:pcsk_|gsk_|r8_|pplx-|xai-|lsv2_(?:pt|sk)_|tvly-|fw_)[A-Za-z0-9_-]{20,})"
 )
 # Transports that show encryption or never leave the host.
 _PROTECTED_SCHEMES = frozenset(
@@ -160,7 +164,16 @@ def _identifier(value: Any, field: str) -> str | None:
     if isinstance(value, bool) or not isinstance(value, (str, int)):
         raise _SourceError(f"invalid RAG source {field}")
     text = str(value).strip()
-    if "://" in text or _TOKEN_SHAPE.search(text) or not _IDENTIFIER.fullmatch(text):
+    if (
+        "://" in text
+        or _TOKEN_SHAPE.search(text)
+        or not _IDENTIFIER.fullmatch(text)
+        or redact_text(text) != text
+    ):
+        return _REDACTED
+    # An identifier is compared with other evidence, so the identifier rules apply;
+    # one that any rule changes is exported only as the marker.
+    if redact_text(text, identifier=True) != text:
         return _REDACTED
     return text
 
@@ -168,9 +181,10 @@ def _identifier(value: Any, field: str) -> str | None:
 def _exported_uri(raw: str) -> tuple[str, bool]:
     """Export a source locator without credentials; say whether part of it is unbound.
 
-    A URL keeps only its scheme, host and port; a plain path is exported as written;
-    anything else, such as a key=value connection string or user:secret@host, is
-    replaced by a redaction marker.
+    A URL keeps only its scheme, host and port; a plain path, which names a file or
+    directory with a "/" or a ".", is exported as written; anything else, such as a
+    key=value connection string, user:secret@host or a bare token, is replaced by a
+    redaction marker.
     """
     value = raw.strip()
     if _SCHEME.match(value) and "://" in value:
@@ -183,7 +197,11 @@ def _exported_uri(raw: str) -> tuple[str, bool]:
         return exported, exported == "[redacted-url]" or beyond_origin(value, ORIGIN_PATHS)
     if "=" in value and (";" in value or value.split("=", 1)[0].strip().isidentifier()):
         return _CONNECTION_STRING, True
-    if _PLAIN_PATH.fullmatch(value) and not _TOKEN_SHAPE.search(value):
+    if (
+        _PLAIN_PATH.fullmatch(value)
+        and not _TOKEN_SHAPE.search(value)
+        and redact_text(value) == value
+    ):
         return value, False
     return _REDACTED, True
 
@@ -243,7 +261,13 @@ def _describe(value: Any, urls: list[str], depth: int = 0) -> tuple[Any, bool]:
         unbound = False
         for key, item in value.items():
             name = redact_text(str(key))
-            described[name], gap = _describe(item, urls, depth + 1)
+            if key == "documents":
+                # Documents are content, not endpoint configuration. Even a hash,
+                # boolean, object key or URL origin can disclose a guess about them.
+                described[name] = _documents_shape(item)
+                gap = item is not None and item != []
+            else:
+                described[name], gap = _describe(item, urls, depth + 1)
             unbound |= gap or name != key
         return described, unbound
     if isinstance(value, list):
@@ -262,6 +286,17 @@ def _describe(value: Any, urls: list[str], depth: int = 0) -> tuple[Any, bool]:
         exported, unbound = _exported_uri(value)
         return {"url": exported, "shape": url_shape(value.strip(), ORIGIN_PATHS)}, unbound
     return type(value).__name__, True
+
+
+def _documents_shape(value: Any) -> dict[str, Any]:
+    """Record only the presence and count of inline documents, never their values."""
+    if value is None:
+        return {"present": False}
+    if isinstance(value, str):
+        return {"present": True, "count": 1}
+    if isinstance(value, list):
+        return {"present": True, "count": len(value)}
+    return {"present": True, "type": type(value).__name__}
 
 
 def _transport_risks(subject: str, urls: list[str], noun: str) -> list[RiskAssessment]:
@@ -624,7 +659,6 @@ class RAGScanner(Scanner):
             documents = [documents]
         if documents is not None and not isinstance(documents, list):
             raise _SourceError("invalid RAG source documents")
-        documents_hash = hash_canonical({"documents": documents}) if documents is not None else None
         controls = {control: _control(source.get(control)) for control in _CONTROLS}
         first_url = len(file_urls)
         values, values_unbound = _describe(
@@ -659,7 +693,7 @@ class RAGScanner(Scanner):
                         {"export": value, "shape": url_shape(uri.strip(), ORIGIN_PATHS)}
                         for uri, (value, _) in zip(locators, exported, strict=True)
                     ],
-                    "documents": documents_hash,
+                    "documents": _documents_shape(documents),
                     "controls": controls,
                     "values": values,
                     "configuration": None if shared is None else shared[0],
@@ -698,6 +732,7 @@ class RAGScanner(Scanner):
                 ("source URIs beyond their exported origins", any(gap for _, gap in exported)),
                 ("values exported only as redaction markers", redacted),
                 ("field values that the record does not export", values_unbound),
+                ("inline document contents", bool(documents)),
             )
             if gap
         ]
@@ -705,8 +740,9 @@ class RAGScanner(Scanner):
             risks.append(_unbound_risk(f"RAG source '{shown}'", unbound))
         properties: dict[str, Any] = {
             "collection_mode": "static-config",
-            # URLs keep only their origin, plain paths are exported as written, and any
-            # other locator, such as a connection string, only as a redaction marker.
+            # URLs keep only their origin, plain paths (holding a "/" or ".") are exported
+            # as written, and any other locator, such as a connection string or a bare
+            # token, only as a redaction marker.
             "source_credentials_omitted": True,
             "declared_controls": controls,
             "source_values_bound": bool(binding),
@@ -718,8 +754,6 @@ class RAGScanner(Scanner):
             properties["store_type"] = store_type
         if identities:
             properties["index_identities"] = identities
-        if documents_hash is not None:
-            properties["inline_documents_hash"] = documents_hash
         if strategy is not None and chunk_size is not None:
             properties["chunk_size"] = chunk_size
         if urls:

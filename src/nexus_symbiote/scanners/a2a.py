@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import canonical_json, hash_canonical
 from nexus_symbiote.core.models import (
+    UNBOUND_VALUES_DETAIL,
     A2AClientComponent,
     A2AServerComponent,
     CapabilityDeclaration,
@@ -116,6 +117,14 @@ _ANONYMOUS = frozenset({"none", "noauth", "no-auth", "anonymous", "public", "una
 _MAX_ENTRIES = 1000
 _MAX_DEPTH = 8
 _MAX_NAME = 256
+
+
+class _BoundError(ValueError):
+    """A card reached a collection bound; the failure names the bound, not a field type."""
+
+
+TOO_DEEP = "A2A card nests too deeply"
+TOO_MANY_ENTRIES = "A2A card has too many entries"
 # OAuth scopes are short public identifiers; a longer value is withheld unmatched,
 # which also keeps the token-shape search linear.
 _MAX_SCOPE = 512
@@ -277,11 +286,11 @@ class _Security(NamedTuple):
 def _string_list(value: Any) -> list[str]:
     if isinstance(value, str):
         value = [value]
-    if (
-        not isinstance(value, list)
-        or len(value) > _MAX_ENTRIES
-        or not all(isinstance(item, str) for item in value)
-    ):
+    if not isinstance(value, list):
+        raise ValueError("invalid string-list declaration")
+    if len(value) > _MAX_ENTRIES:
+        raise _BoundError(TOO_MANY_ENTRIES)
+    if not all(isinstance(item, str) for item in value):
         raise ValueError("invalid string-list declaration")
     return value
 
@@ -292,7 +301,7 @@ def _strings(value: Any) -> list[str]:
 
 def _fields(declaration: dict[str, Any]) -> list[str]:
     if len(declaration) > _MAX_ENTRIES:
-        raise ValueError("oversized declaration")
+        raise _BoundError(TOO_MANY_ENTRIES)
     return sorted(redact_text(key) for key in declaration)
 
 
@@ -323,14 +332,14 @@ def _scope(value: str) -> str:
 def _declared_urls(value: Any, depth: int = 0) -> list[str]:
     """Collect URL fields, such as tokenUrl, wherever a declaration nests them."""
     if depth > _MAX_DEPTH:
-        raise ValueError("declaration nested too deeply")
+        raise _BoundError(TOO_DEEP)
     if isinstance(value, list):
         if len(value) > _MAX_ENTRIES:
-            raise ValueError("oversized declaration")
+            raise _BoundError(TOO_MANY_ENTRIES)
         urls = [url for item in value for url in _declared_urls(item, depth + 1)]
     elif isinstance(value, dict):
         if len(value) > _MAX_ENTRIES:
-            raise ValueError("oversized declaration")
+            raise _BoundError(TOO_MANY_ENTRIES)
         urls = []
         for key, item in value.items():
             if isinstance(item, str) and key.lower().endswith(("url", "uri")):
@@ -340,7 +349,7 @@ def _declared_urls(value: Any, depth: int = 0) -> list[str]:
     else:
         return []
     if len(urls) > _MAX_ENTRIES:
-        raise ValueError("oversized declaration")
+        raise _BoundError(TOO_MANY_ENTRIES)
     return urls
 
 
@@ -714,6 +723,17 @@ def _card_preference(path: str) -> tuple[bool, int, bool, str]:
 
 def _calls(tree: ast.Module) -> tuple[set[str], bool, bool]:
     """Names of called SDK constructors, and whether AgentCard is built from literals."""
+    card_names = {"AgentCard"}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.level == 0
+            and node.module is not None
+            and node.module.split(".")[0] == "a2a"
+        ):
+            card_names.update(
+                alias.asname or alias.name for alias in node.names if alias.name == "AgentCard"
+            )
     called: set[str] = set()
     literal_card = mapping_card = False
     for node in ast.walk(tree):
@@ -722,12 +742,12 @@ def _calls(tree: ast.Module) -> tuple[set[str], bool, bool]:
         func = node.func
         loaded = False
         if isinstance(func, ast.Name):
-            name = func.id
+            name = "AgentCard" if func.id in card_names else func.id
         elif isinstance(func, ast.Attribute):
             name = func.attr
             owner = func.value
             if (
-                (isinstance(owner, ast.Name) and owner.id == "AgentCard")
+                (isinstance(owner, ast.Name) and owner.id in card_names)
                 or (isinstance(owner, ast.Attribute) and owner.attr == "AgentCard")
             ) and name in _CARD_LOADERS | _CARD_CONSTRUCTORS:
                 name, loaded = "AgentCard", name in _CARD_LOADERS
@@ -854,7 +874,7 @@ class A2AScanner(Scanner):
         for relative, data in parsed:
             try:
                 component = self._parse_agent_card(data, relative, relative)
-            except _BindingError as exc:
+            except (_BindingError, _BoundError) as exc:
                 result.scan_failures.append(f"{relative}: {exc}")
                 continue
             except (TypeError, ValueError, RecursionError):
@@ -891,7 +911,7 @@ class A2AScanner(Scanner):
                 if not isinstance(client, dict):
                     raise ValueError("invalid client")
                 result.components.append(self._parse_a2a_client(client, relative))
-            except _BindingError as exc:
+            except (_BindingError, _BoundError) as exc:
                 result.scan_failures.append(f"{relative}: {exc}")
             except (TypeError, ValueError, RecursionError):
                 result.scan_failures.append(f"{relative}: invalid A2A client field types")
@@ -1125,7 +1145,10 @@ class A2AScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.LOW,
                     category="completeness",
-                    detail=f"A2A client '{shown}' agent card URL beyond its exported origin is not bound in this inventory.",
+                    detail=(
+                        f"A2A client '{shown}' {UNBOUND_VALUES_DETAIL}: "
+                        "agent card URL beyond its exported origin."
+                    ),
                     recommendation=f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect same-origin card changes.",
                 )
             )

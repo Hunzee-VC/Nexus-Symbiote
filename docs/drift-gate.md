@@ -12,10 +12,16 @@ local program or project script started as an MCP server runs, cannot alert. Wit
 argument other than the launcher package, a changed environment or header value, an
 endpoint or package index path changed on the same host, a changed value of a project
 resolver setting such as an `.npmrc` entry, an A2A or RAG URL path changed on the same
-host that keeps its depth, or a value the redaction removes from `.codex/config.toml`,
-`.cursor/cli.json` or the Antigravity, xAI and Copilot settings files, such as a token or
-a URL path in a `notify` command; see [source binding](verification-source-binding.md).
-The [known limitations](known-limitations.md) list those surfaces.
+host that keeps its depth, changed inline RAG document content at the same count,
+the content of an `@path` import that is not a Markdown file, or a value the redaction
+removes from an IDE agent's settings file, such as an `env` value in
+`.claude/settings.json`, a token, or a URL path in a hook or `notify` command; see
+[source binding](verification-source-binding.md). None of those changes alters the
+record, so a record that holds such values without the key carries a low `completeness`
+finding saying its values are not bound in this inventory, and `diff` raises a medium
+alert for it on every comparison, changed or not. A keyless `diff --fail-on-alert`
+therefore fails on such a record; the alert says the values are unbound and records no
+value. The [known limitations](known-limitations.md) list those surfaces.
 
 ## The trust anchor is the baseline
 
@@ -43,8 +49,8 @@ gate is only as strong as the place the baseline comes from.
   signed still verifies, so bound its age with `--max-age-days` and keep attested
   baselines where the change under review cannot choose among them.
 - **Protect the gate itself.** On the `pull_request` event the workflow file comes
-  from the pull request, so an author can edit `--fail-on-alert` away unless workflow
-  edits are gated. Require the workflow through an organization ruleset (*Require
+  from the pull request, so an author can add `--no-fail-on-alert`, or remove the diff
+  step, unless workflow edits are gated. Require the workflow through an organization ruleset (*Require
   workflows to pass before merging*), and require `CODEOWNERS` review of `.github/`
   and `.nexus-symbiote/reviewed.json`, as described in [Protect the gate](#protect-the-gate)
   below. Avoid checking out an untrusted pull request head inside a `pull_request_target`
@@ -80,13 +86,25 @@ request with itself, and that gate can never fail.
   checkout from narrowing either snapshot. `baseline` accepts it, and
   `--signature-policy`, like `scan`.
 - **Use the same binding key for both.** Set one `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`
-  of 32 or more characters for the baseline and every candidate scan. Without it, the
-  values described above cannot alert; with a different key, every MCP, A2A, RAG and
-  IDE settings binding changes and alerts, and the digests of the IDE settings files
-  digested as read differ between a keyed and an unkeyed scan. Fork `pull_request`
-  jobs receive no secrets, so collect fork baselines without the key or run keyed
-  comparisons on trusted branches. See
-  [source binding](verification-source-binding.md).
+  of 32 or more characters for the baseline and every candidate scan. Without it,
+  `diff --fail-on-alert` fails on an MCP server whose launch arguments, environment
+  values or endpoint path were not bound, instead of reporting no change; the alert
+  does not name the value. With a different key, every MCP, A2A, RAG and IDE settings
+  binding changes and alerts, and the digests of the IDE settings files digested as
+  read differ between a keyed and an unkeyed scan. The Action refuses
+  `reviewed-baseline` unless that key is set on the step or passed as
+  `source-binding-key`. Fork `pull_request` jobs receive no secrets, so they cannot
+  satisfy that input; run the keyed drift gate on same-repository pull requests and
+  trusted branches. See [source binding](verification-source-binding.md).
+- **Recollect v1 RAG baselines once.** Under RAG structure profile v2, every RAG
+  source's `static_config_hash` changes once, not only sources with inline
+  documents: the profile name is part of the digested structure, and an absent
+  `documents` key is digested as `{"present": false}` where v1 digested `null`. On
+  an unchanged project, a baseline that 0.2.0 wrote raises a high
+  `properties.static_config_hash changed` alert for every RAG source, and
+  `validate --project` fails reconciliation on every v1 inventory that records a
+  RAG source, until both are recollected. Take a new baseline at the commit the old
+  one was reviewed at; see [RAG sources](verification-source-binding.md#rag-sources).
 - **Paths are root-relative.** Recorded paths are relative to the scan root, so a
   snapshot taken in `/Users/alice/agent` compares with one taken in
   `/home/runner/work/agent/agent`. Without a manifest `id`, the repository agent is
@@ -120,25 +138,31 @@ then notes, then the added, removed and modified components and relationships.
 | MCP endpoint, transport, launch command, launcher package or static source binding changed; the served tool set, or the served instructions, prompts or resource templates, that a live observation recorded (`discover-mcp --record`, `verify-live --record`) changed | critical |
 | Tool definition, input schema, description or annotations changed; model serialization safety changed to an unsafe execution or template format; a model's `trust_remote_code` set to true | critical |
 | Security field changed (for example capabilities, authorizations, claims, endpoints, A2A card URL, package URL, provider, source URI, signing identity or key reference, permission mode, version pin), a `*_ref` or `*_refs` field changed, declared autonomy level changed, trust tier or signing status downgraded, a digest removed or changed | high |
+| Tool definition, content or file hash became available: the baseline carried no digest for content the new snapshot pins (`Tool definition hash became available — first binding of content the baseline never pinned.`, `Content hash became available — first binding of content the baseline never pinned.`, `File hash (sha256) became available — first binding of content the baseline never pinned.`). A baseline whose records carry no digest, such as a ShadowScan import or another lossy source, meets this once, when the next scan pins the content: review that snapshot and adopt it as the baseline | medium |
 | Trust tier or signing status raised | medium: a snapshot is written unsigned, so a raised label is a claim to review |
 | Risk findings added | the highest added severity, at least medium |
 | Risk findings removed; any other field changed, including snapshot metadata such as the producer's `tool_name` or `tool_vendor` | medium |
+| Values unbound in either snapshot: the record has no keyed binding (`static_value_binding`) and carries a `completeness` finding saying its values are not bound in this inventory, as MCP launch values, IDE agent settings values, RAG and A2A values and the content of an `@path` import that is not Markdown do without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`. Raised on every comparison, changed or not, and names no value: `MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections.` for an MCP server, `Values are unbound in one snapshot without the binding key; a change to them is undetectable and no value is recorded. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections.` for any other record | medium |
 | Relationship added | medium; high for `invokes`, `delegates-to` and `acts-as-identity` |
 | Relationship removed | medium; high for `uses-guardrail` and `approved-under` |
 | Relationship kept but its assurance or conditions changed | high |
 | Coverage regressed: a new scan failure, coverage gap or exclusion; a collector's status got worse or is no longer recorded; fewer collectors requested or completed; a different scope; more unobserved surfaces; lower coverage assurance; no completeness claim in the new snapshot; or a baseline without a completeness claim (such as a hand-made or supplied BOM) while the new snapshot records a scan failure, a coverage gap, a collector that did not complete or no collector at all, since nothing shows that gap predates the change | high, naming the collector or entries |
+| A scanned surface removed from the completeness claim (`1 scanned surface removed (src/old.py): coverage narrowed; components found there are no longer compared.`); an added surface is recorded as info | high |
+| A collector first recorded as anything but `complete`, such as `failed` or `partial`, when the baseline's completeness claim never recorded it (`Collector 'model' is now recorded as failed; the baseline does not show this gap predates the change.`); first recorded as `complete`, it is an improvement | high |
 | ShadowScan: report content changed; report bytes changed without comparable content digests; source status worse; more unmapped entries; new projection limitations; a lossy format | high |
 | The new snapshot has graph problems the baseline did not (dangling or mistyped references), the snapshots differ in `spec_version`, or either snapshot uses a `spec_version` this release does not support | high |
 
 A relationship to a component that was itself added or removed is listed but alerts
 through that component, unless its own rating is high.
 
-These are recorded but never alert: a changed list of scanned surfaces (the
-components found there are compared separately, so an added source file is not
-drift), a coverage improvement, a baseline without a completeness claim compared
-with a snapshot whose coverage is complete, a different Nexus SymBiote release
-(`tool_version`), a ShadowScan report regenerated with unchanged content, and
-unmapped ShadowScan entries that moved within the report.
+These are recorded but never alert: a scanned surface added to the completeness
+claim (the components found there are compared separately, so an added source
+file is not drift; a surface removed from the claim narrows coverage and alerts,
+as the table says), a coverage improvement, such as a collector first recorded as
+`complete`, a baseline without a completeness claim compared with a snapshot
+whose coverage is complete, a different Nexus SymBiote release (`tool_version`),
+a ShadowScan report regenerated with unchanged content, and unmapped ShadowScan
+entries that moved within the report.
 
 Notes describe the comparison, not a change, and are printed even when nothing
 changed: gaps both snapshots share (the baseline was already incomplete, and changes
@@ -148,8 +172,8 @@ additions as removals), and snapshots that disagree on absolute paths.
 
 ## Exit status
 
-`diff` exits 0 without `--fail-on-alert`, whatever it finds. With it, the command
-exits 1 when it reports any security alert, and 0 otherwise. An unreadable or
+`diff` exits 1 when it reports any security alert, and 0 otherwise; the gate is on
+by default, and only an explicit `--no-fail-on-alert` turns it off. An unreadable or
 invalid input is an error (exit 1); a missing file is a usage error (exit 2).
 
 ## Protect the gate
@@ -186,4 +210,4 @@ jobs:
           reviewed-baseline: ${{ runner.temp }}/reviewed.json
 ```
 
-Avoid checking out `github.event.pull_request.head.sha` inside a `pull_request_target` workflow ("pwn request" hazard): `pull_request_target` runs in the base repository's security context, where adding any build, test, cache or secret step later turns an untrusted fork checkout into secret exfiltration or repository compromise. On `pull_request`, same-repository pull requests can supply `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` from repository secrets; fork pull requests receive no secrets, so a gate that also runs for forks needs a baseline recorded without the key, which cannot alert on the values only the key binds; otherwise run keyed comparisons only for same-repository pull requests and trusted branches.
+Avoid checking out `github.event.pull_request.head.sha` inside a `pull_request_target` workflow ("pwn request" hazard): `pull_request_target` runs in the base repository's security context, where adding any build, test, cache or secret step later turns an untrusted fork checkout into secret exfiltration or repository compromise. On `pull_request`, same-repository pull requests can supply `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` from repository secrets. Fork pull requests receive no secrets, and the Action refuses `reviewed-baseline` without the key. An unkeyed `diff --fail-on-alert` fails closed on unbound values, such as MCP launch values, IDE settings values or the content of an `@path` import that is not Markdown, instead of comparing them, so run keyed comparisons only for same-repository pull requests and trusted branches.

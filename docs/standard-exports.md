@@ -119,6 +119,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `invisible_characters` | Invisible characters in instructions | CWE-451, CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
 | `launch_context` | Widened MCP launch context | none | none | none | ASI05 | none | MEASURE-2.7 |
 | `launcher_identity` | Unknown MCP launcher identity | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.005 | MEASURE-2.7 |
+| `line_separators` | Line or paragraph separators | none | LLM01:2025 | none | none | none | MEASURE-2.7 |
 | `local_process` | Local MCP server process | none | none | none | ASI07 | AML.T0010.005 | MEASURE-2.7 |
 | `lockfile_resolution_mismatch` | Lockfile resolution mismatch | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.001 | MANAGE-3.1 |
 | `lockfile_unread` | Unread lockfile | none | none | none | none | none | GOVERN-1.6 |
@@ -140,6 +141,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `shadowscan-inventory-unmatched` | Imported unmatched discovery | none | none | none | none | none | GOVERN-1.6 |
 | `signing_status` | Unsigned model artifact | CWE-345 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.003 | MANAGE-3.2 |
 | `tag_characters` | Unicode tag characters in instructions | CWE-451, CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
+| `transitive_resolution` | Dependencies resolved at launch | CWE-829 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0109 | MANAGE-3.1 |
 | `transport_ambiguity` | Ambiguous MCP transport | none | none | none | none | none | MEASURE-2.7 |
 | `transport_security` | Transport security | CWE-319 (critical and high findings) | none | none | ASI07 | none | MEASURE-2.7 |
 | `version_pinning` | Unpinned version | CWE-829 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0109 | MANAGE-3.1 |

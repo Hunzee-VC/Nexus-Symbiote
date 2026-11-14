@@ -21,11 +21,14 @@ from nexus_symbiote.utils.files import OutputRefusedError, write_output_file
 # Line breaks are included: a file name or component name containing one could
 # forge whole output lines, and in CI a line starting with "::" is a workflow command.
 # Such text must not start a line either; safe_line() gives every line a fixed prefix.
+# The noncharacters U+FFFE and U+FFFF are included: unassigned for ever, some
+# terminals drop them. A tab (U+0009) is not: it becomes one space (neutralize), so a
+# name stays readable but cannot line text up under a later column.
 UNSAFE_TEXT = re.compile(
     r"[\x00-\x08\x0a-\x1f\x7f-\x9f\xad\u034f\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891"
     r"\u08e2\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u2028\u2029\u202a-\u202e"
-    r"\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufff8\ufff9-\ufffb\U000110bd"
-    r"\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a"
+    r"\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufff8\ufff9-\ufffb\ufffe\uffff"
+    r"\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a"
     r"\U000e0000-\U000e0fff]"
 )
 
@@ -47,9 +50,10 @@ def neutralize(value: object) -> str:
     """Replace every character that can rewrite or disguise terminal and CI output.
 
     Apply it to a whole output line, not to its pieces: two harmless pieces, such as a
-    name ending in "##" and a following "[", can join into a CI log command.
+    name ending in "##" and a following "[", can join into a CI log command. A tab
+    becomes one space, every other such character U+FFFD.
     """
-    return LOG_COMMAND.sub("##\ufffd", UNSAFE_TEXT.sub("\ufffd", str(value)))
+    return LOG_COMMAND.sub("##\ufffd", UNSAFE_TEXT.sub("\ufffd", str(value).replace("\t", " ")))
 
 
 def safe_line(prefix: str, *values: object) -> str:

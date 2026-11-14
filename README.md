@@ -45,16 +45,22 @@ nexus-symbiote diff reviewed.json agentbom.json --fail-on-alert        # gate on
 Requires git and Python 3.11 to 3.14 on Linux. Install exactly the commit you reviewed, with the hash-locked runtime:
 
 ```bash
-git clone https://github.com/Hunzee-VC/Nexus-Symbiote.git
-cd Nexus-Symbiote
-git checkout --detach REVIEWED_COMMIT_SHA
-python3 -m venv .venv && . .venv/bin/activate
-python -m pip install --require-hashes --only-binary=:all: -r requirements-action.lock
-python -m pip install --no-deps --no-build-isolation .
-nexus-symbiote --version
+(
+  set -euo pipefail
+  reviewed_commit='REVIEWED_COMMIT_SHA'
+  [[ "$reviewed_commit" =~ ^[0-9a-f]{40}$ ]]
+  git clone https://github.com/Hunzee-VC/Nexus-Symbiote.git
+  cd Nexus-Symbiote
+  git checkout --detach "$reviewed_commit"
+  test "$(git rev-parse HEAD)" = "$reviewed_commit"
+  python3 -m venv --clear .venv
+  .venv/bin/python -m pip install --require-hashes --only-binary=:all: -r requirements-action.lock
+  .venv/bin/python -m pip install --no-deps --no-build-isolation .
+  .venv/bin/nexus-symbiote --version
+)
 ```
 
-Replace `REVIEWED_COMMIT_SHA` with the full commit you reviewed; right after the clone, `git rev-parse HEAD` prints the latest commit on `main`. Optional extras: `.[sigstore]` for Sigstore verification, `.[cyclonedx]` for CycloneDX cross-checks, `.[all]` for both. For development: `make install-locked` (see [CONTRIBUTING.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CONTRIBUTING.md)).
+Replace `REVIEWED_COMMIT_SHA` with the full lowercase commit SHA you reviewed, then paste the entire block. A failed checkout or mismatched HEAD stops before installation. After it succeeds, run `cd Nexus-Symbiote && . .venv/bin/activate` in your shell to use the commands below. Optional extras: `.[sigstore]` for Sigstore verification, `.[cyclonedx]` for CycloneDX cross-checks, `.[all]` for both. For development: `make install-locked` (see [CONTRIBUTING.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CONTRIBUTING.md)).
 
 ### Install a verified release
 
@@ -91,7 +97,7 @@ nexus-symbiote risk demo.aibom.json --no-project-policy
 nexus-symbiote validate demo.aibom.json --project examples/demo-agent --no-project-policy
 ```
 
-The scan records 11 components across 9 types and ten findings (risk score 37, below the default fail threshold of 50). `validate` exits 1 on purpose: completeness passes, but the model's integrity stays unknown because no signer policy was supplied. An inventory can be complete and still not be approvable.
+The scan records 11 components across 9 types and eleven findings (risk score 41, below the default fail threshold of 50). `validate` exits 1 on purpose: completeness passes, but the model's integrity stays unknown because no signer policy was supplied. An inventory can be complete and still not be approvable.
 
 To approve the model, pin its digest in a [signer policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md#operator-signature-policy) you own, kept outside the scanned project. Here the digest comes from the checkout only to show the mechanism; in real use, take it from a source you trust:
 
@@ -128,7 +134,7 @@ An agent's behavior depends on its configuration as much as its code — MCP ser
 | Endpoint repointing, scope widening | Critical or high drift alert when an MCP or A2A endpoint moves host, or an A2A card's OAuth scopes grow |
 | Executable or unsigned model files | Classifies formats without loading them and validates SafeTensors headers; integrity stays `UNKNOWN` until your [signer policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md#operator-signature-policy) verifies the weights |
 | Hidden instructions | Flags bidi and zero-width characters, and text hidden in HTML comments, in instruction files |
-| Over-broad agent permissions | Flags `bypassPermissions`, blanket grants such as `Bash(*)` and hook commands; a changed setting is a drift alert |
+| Over-broad agent permissions | Flags `bypassPermissions`, blanket grants such as `Bash(*)` and hook commands; a changed setting is a drift alert, and without the binding key a record whose setting values the redaction removes is a medium drift alert that they are unbound |
 | Credential exposure | Records variable names, never values; redacts known secret patterns |
 
 Every row has limits: [known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md). Trust model and design principles: [security model](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/security-model.md).
@@ -263,7 +269,7 @@ nexus-symbiote scan . --no-project-policy -o "$RUNNER_TEMP/agentbom.json"
 nexus-symbiote diff "$RUNNER_TEMP/reviewed.json" "$RUNNER_TEMP/agentbom.json" --fail-on-alert
 ```
 
-`--fail-on-alert` fails on any recorded change rated medium or higher, including a removed component and a coverage regression. Without the binding key, a changed MCP launch argument, environment value or same-host endpoint path passes; see [source binding](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/verification-source-binding.md). Run the comparison in a job the pull request cannot edit ([protect the gate](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/drift-gate.md#protect-the-gate)), and sign the reviewed baseline to know who approved it ([inventory attestation](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/inventory-attestation.md#gate-a-pull-request-on-an-attested-baseline)). Full guide: [Gate drift in CI](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/drift-gate.md).
+`--fail-on-alert` fails on any recorded change rated medium or higher, including a removed component and a coverage regression. Without the binding key, an MCP server whose launch arguments, environment values or endpoint path were not bound is itself a medium alert, so a widened filesystem root cannot pass silently; the alert does not name the new value. Set `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` on both snapshots to compare those values. See [source binding](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/verification-source-binding.md). Run the comparison in a job the pull request cannot edit ([protect the gate](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/drift-gate.md#protect-the-gate)), and sign the reviewed baseline to know who approved it ([inventory attestation](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/inventory-attestation.md#gate-a-pull-request-on-an-attested-baseline)). Full guide: [Gate drift in CI](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/drift-gate.md).
 
 ### Policy and live mode
 

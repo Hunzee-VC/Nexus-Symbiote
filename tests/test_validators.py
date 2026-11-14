@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import (
     AssuranceLevel,
@@ -263,6 +265,14 @@ class TestRiskScorer:
         assert "risk_level" in d
         assert "findings" in d
         assert len(d["findings"]) > 0
+
+    def test_partial_severity_weights_are_refused(self):
+        with pytest.raises(ValueError, match="every RiskSeverity"):
+            RiskScorer(severity_weights={RiskSeverity.CRITICAL: 10.0})
+        with pytest.raises(ValueError, match="every RiskSeverity"):
+            RiskScorer(severity_weights={})
+        complete = dict.fromkeys(RiskSeverity, 1.0)
+        assert RiskScorer(severity_weights=complete).score(_risky_bom()).overall_score > 0.0
 
 
 class TestAIBOMDiffer:
