@@ -841,6 +841,7 @@ PIN_COMMANDS = [
     "sudo -S apt-get update <<-'EOF'\n\t{pin}\n\tEOF\nrun.sh",
     "unlock <<< {pin}",
     "mysql -uroot \\\n -p{pin} app_db",
+    "mysql -uroot \\\r\n -p{pin} app_db",
     "mysql -uroot \\\n{pin}",
     'printf "line\n{pin}\n" | unlock',
     "printf 'a;{pin}|{pin}&{pin}' | unlock",
@@ -887,6 +888,7 @@ def test_a_pin_after_a_line_break_or_operator_cannot_be_confirmed_from_the_diges
     [
         ("sudo -S apt-get update <<EOF\n482913\nEOF", "sudo<<***"),
         ("mysql -uroot \\\n -p482913 app_db", "mysql"),
+        ("mysql -uroot \\\r\n -p482913 app_db", "mysql"),
         ("A=1 B='x y' run.sh --pin 482913", "run.sh"),
         (
             '"$CLAUDE_PROJECT_DIR"/.claude/hooks/x.sh 482913',

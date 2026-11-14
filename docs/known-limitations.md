@@ -473,8 +473,11 @@ A way around a limit that its entry does not describe is worth a
   `X-Pin: 482913`, nor of the words inside a permission rule or hook matcher, such as
   `Bash(mysql -uroot -p482913 db:*)`, which the digest covers by shape only (tool
   names, program words and URL origins), including a PIN in a here document or on a
-  continued line. A word that a shell runs as a command, such as `482913` alone on a
-  line of a hook command, is a program word and stays. A value the redaction leaves in place
+  line continued with a backslash (before LF or CRLF). A word that a shell runs as a
+  command, such as `-p482913` at the start of a line of a hook command, is a program
+  word and stays; an all-digit program word is redacted. A line continued in another
+  shell's syntax, such as a Windows `cmd` caret or a PowerShell backtick, is read as a
+  new line, so the word after it stays too. A value the redaction leaves in place
   elsewhere, such as a password stored under another key name, a `cwd` path or a
   `model` name, can still be confirmed. Keep credentials out of settings
   files; see

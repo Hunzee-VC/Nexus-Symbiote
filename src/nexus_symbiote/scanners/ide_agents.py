@@ -403,10 +403,13 @@ class _CommandShape:
                 self.run.append(char)
                 index += 1
             elif char == "\\":
-                if following != "\n":
-                    self.word.append(value[index : index + 2])
-                self.run.append(value[index : index + 2])
-                index += 2
+                # A backslash before LF or CRLF continues the line, as a shell reads it
+                # whichever line ending the settings file was saved with.
+                width = 3 if value[index + 1 : index + 3] == "\r\n" else 2
+                if value[index + 1 : index + width] not in ("\n", "\r\n"):
+                    self.word.append(value[index : index + width])
+                self.run.append(value[index : index + width])
+                index += width
             elif char == "'":
                 index = self._quoted(index, "'", escapes=False)
             elif char == '"':
