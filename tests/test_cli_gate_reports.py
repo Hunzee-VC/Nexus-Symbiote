@@ -776,3 +776,20 @@ def test_inventory_loaders_name_an_unsupported_native_version(tmp_path, command)
     result = CliRunner().invoke(main, [command, str(path), *extra])
     assert result.exit_code == 1
     assert "supported: 1.0.x, 1.1.x" in result.output
+
+
+def test_a_checkout_report_only_policy_cannot_pass_a_failed_gate_in_ci(tmp_path, monkeypatch):
+    project = _agent(tmp_path / "project", pickle=True)
+    (project / ".nexus-symbiote.yaml").write_text("scan: {failure_mode: report-only}\n")
+    args = ["scan", str(project), "--check"]
+    local = CliRunner().invoke(main, args)
+    assert local.exit_code == 0, local.output
+    assert "report only" in local.stderr
+    monkeypatch.setenv("CI", "1")
+    gated = CliRunner().invoke(main, args)
+    assert gated.exit_code == 1, gated.output
+    assert "cannot convert a failed gate to exit 0 in CI" in gated.stderr
+    accepted = CliRunner().invoke(main, [*args, "--accept-project-policy"])
+    assert accepted.exit_code == 0, accepted.output
+    operator = CliRunner().invoke(main, [*args, "--report-only"])
+    assert operator.exit_code == 0, operator.output
