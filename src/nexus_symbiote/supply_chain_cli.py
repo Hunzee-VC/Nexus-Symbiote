@@ -164,9 +164,10 @@ def register_supply_chain_commands(main: click.Group) -> None:
         "--no-isolation",
         is_flag=True,
         help=(
-            "Explicitly allow execution without a PID namespace. On Linux the launcher is "
-            "still a child subreaper, so a double-fork is killed with the session; elsewhere "
-            "cleanup is best effort. Printed as a warning."
+            "Explicitly allow execution without a PID namespace; printed as a warning. On "
+            "Linux the launcher is made a child subreaper, so its descendants are killed "
+            "with the session while it is alive; a descendant that outlives the launcher "
+            "can escape. Elsewhere cleanup is best effort. This is not a namespace or sandbox."
         ),
     )
     def verify_live(
@@ -213,9 +214,10 @@ def register_supply_chain_commands(main: click.Group) -> None:
             raise click.ClickException("invalid BOM or operator launch policy") from None
         if no_isolation:
             click.echo(
-                "warning: --no-isolation: kernel PID containment is disabled; on Linux the "
-                "launcher is a child subreaper, so a double-fork is still killed with the "
-                "session, and elsewhere a daemonized child can outlive cleanup.",
+                "warning: --no-isolation: kernel PID containment is disabled. On Linux the "
+                "launcher is a child subreaper, so its descendants are killed with the "
+                "session while it is alive; a descendant that outlives the launcher can "
+                "escape. Elsewhere cleanup is best effort. This is not a namespace or sandbox.",
                 err=True,
             )
         with isolation_off() if no_isolation else contextlib.nullcontext():

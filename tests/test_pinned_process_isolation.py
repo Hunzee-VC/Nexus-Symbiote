@@ -5,19 +5,28 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import shlex
+import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
-from nexus_symbiote.live import pinned_process
+from nexus_symbiote.live import pinned_process, stdio
 from nexus_symbiote.live.pinned_process import isolation_off
 from nexus_symbiote.live.session import PinnedStdioSession
-from nexus_symbiote.live.stdio import LaunchPolicyError, observe_pinned
+from nexus_symbiote.live.stdio import (
+    LaunchPolicyError,
+    SessionDeadlineError,
+    StdioProtocolError,
+    observe_pinned,
+)
 from nexus_symbiote.runtime import AuthorizationError
 from tests.test_pinned_stdio import command, inventory, launcher
 
@@ -69,12 +78,21 @@ def _host_pid(marker: Path) -> int:
 
 
 def _assert_dead(pid: int) -> None:
-    """The namespace teardown follows the supervisor's death by a short interval."""
+    """Wait for ``pid`` to exit; a running, sleeping or stopped process still fails.
+
+    The namespace teardown follows the supervisor's death by a short interval. A
+    killed orphan stays a zombie until its new parent waits, and a pid 1 that does
+    not reap never does, so state Z (or X) counts as dead. ``kill(pid, 0)`` succeeds
+    for a zombie and cannot tell the two apart.
+    """
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
+            with open(f"/proc/{pid}/stat", encoding="utf-8") as stat:
+                state = stat.read().rpartition(")")[2].split()[0]
+        except (FileNotFoundError, ProcessLookupError):
+            return
+        if state in {"Z", "X"}:
             return
         time.sleep(0.05)
     raise AssertionError(f"process {pid} was still running")
@@ -180,20 +198,40 @@ class _NoPrctl:
         raise AttributeError(name)
 
 
-def test_subreaper_hook_needs_linux_and_prctl(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert pinned_process._subreaper_hook() is not None
-    monkeypatch.setattr(pinned_process.ctypes, "CDLL", _NoPrctl)
-    assert pinned_process._subreaper_hook() is None
-    monkeypatch.undo()
-    monkeypatch.setattr(pinned_process.sys, "platform", "darwin")
-    assert pinned_process._subreaper_hook() is None
+@pytest.mark.parametrize(
+    ("attribute", "value"),
+    [
+        ("CDLL", _NoPrctl),
+        ("platform", "darwin"),
+        ("frozen", True),
+        ("executable", ""),
+        ("executable", "python3"),
+    ],
+)
+def test_subreaper_wrapper_needs_linux_prctl_and_an_interpreter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, attribute: str, value: object
+) -> None:
+    staged = tmp_path / "server"
+    assert pinned_process._subreaper_argv(staged) == [
+        sys.executable,
+        "-I",
+        "-S",
+        "-B",
+        "-c",
+        pinned_process._SUBREAPER_EXEC,
+        str(staged),
+    ]
+    owner = pinned_process.ctypes if attribute == "CDLL" else pinned_process.sys
+    monkeypatch.setattr(owner, attribute, value, raising=False)
+    assert pinned_process._subreaper_argv(staged) is None
+    with isolation_off():
+        assert pinned_process.isolated_argv(staged) == [str(staged)]
 
 
 def test_opt_out_without_prctl_still_launches_and_cleans_up(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # prctl is looked up before the fork, so a C library without it never makes the
-    # child fail between fork and exec; the launch keeps best-effort cleanup.
+    # Without prctl the launch skips the subreaper wrapper and keeps best-effort cleanup.
     monkeypatch.setattr(pinned_process.ctypes, "CDLL", _NoPrctl)
     marker = tmp_path / "pid"
     command, digest = _launcher(tmp_path, marker)
@@ -213,3 +251,118 @@ def test_cli_requires_an_explicit_opt_out_when_the_namespace_is_unavailable(
     allowed = CliRunner().invoke(main, [*arguments, "--json-output", "--no-isolation"])
     assert allowed.exit_code == 0, allowed.output
     assert "kernel PID containment is disabled" in allowed.stderr
+    usage = " ".join(CliRunner().invoke(main, ["verify-live", "--help"]).output.split())
+    for text in (" ".join(allowed.stderr.split()), usage):
+        assert "killed with the session while it is alive" in text
+        assert "a descendant that outlives the launcher can escape" in text
+        assert "not a namespace or sandbox" in text
+
+
+def test_a_descendant_that_cannot_be_signalled_does_not_abort_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = tmp_path / "pid"
+    command, digest = _launcher(tmp_path, marker)
+    kill, killpg = os.kill, os.killpg
+    groups: list[int] = []
+
+    def refuse(pid: int, sig: int) -> None:
+        if marker.exists() and pid == _host_pid(marker):
+            raise PermissionError(1, "Operation not permitted")
+        kill(pid, sig)
+
+    def record(pgid: int, sig: int) -> None:
+        groups.append(pgid)
+        killpg(pgid, sig)
+
+    monkeypatch.setattr(pinned_process.os, "kill", refuse)
+    monkeypatch.setattr(pinned_process.os, "killpg", record)
+    try:
+        with isolation_off():
+            observe_pinned(str(command), digest)
+    finally:
+        monkeypatch.undo()
+        kill(_host_pid(marker), signal.SIGKILL)
+    assert len(groups) == 1
+    _assert_dead(groups[0])
+
+
+def test_no_launch_runs_python_between_fork_and_exec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # preexec_fn is unsafe in a threaded caller, and Popen waits for it before any
+    # protocol deadline exists. The opt-out instead executes a fixed wrapper.
+    launches: list[tuple[list[str], dict[str, Any]]] = []
+    popen = subprocess.Popen
+
+    def record(argv: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:
+        launches.append((argv, kwargs))
+        return popen(argv, **kwargs)
+
+    monkeypatch.setattr(pinned_process.subprocess, "Popen", record)
+    marker = tmp_path / "pid"
+    command, digest = _launcher(tmp_path, marker, detached=True)
+    with isolation_off():
+        observe_pinned(str(command), digest)
+    _assert_dead(_host_pid(marker))
+    argv, kwargs = launches[-1]
+    if pinned_process.namespace_available():
+        observe_pinned(str(command), digest)
+    assert all(options.get("preexec_fn") is None for _, options in launches)
+    wrapper = [sys.executable, "-I", "-S", "-B", "-c", pinned_process._SUBREAPER_EXEC]
+    assert argv == [*wrapper, str(Path(kwargs["cwd"]) / "server")]
+    assert kwargs["env"] == {"PATH": os.defpath}
+    assert kwargs["start_new_session"] is True
+
+
+# The shell applies a redirection to itself while the command runs, so the
+# descriptors are read in a command substitution before any redirection.
+STATE = r"""#!/bin/sh
+fds=$(readlink /proc/$$/cwd /proc/$$/fd/0 /proc/$$/fd/1 /proc/$$/fd/2)
+tr '\0' '\n' < /proc/$$/environ >> OUT
+grep -E '^Sig(Ign|Blk):' /proc/$$/status >> OUT
+tr '\0' '\n' < /proc/$$/cmdline >> OUT
+printf '%s\n' "$fds" >> OUT
+cat /proc/$$/stat >> OUT
+"""
+
+
+def _launch_state(tmp_path: Path, name: str) -> list[str]:
+    out = tmp_path / f"{name}.state"
+    script = tmp_path / name
+    script.write_text(STATE.replace("OUT", shlex.quote(str(out))))
+    script.chmod(0o700)
+    pin = "sha256:" + hashlib.sha256(script.read_bytes()).hexdigest()
+    with isolation_off(), pytest.raises(StdioProtocolError):
+        observe_pinned(str(script), pin)
+    *lines, stat = out.read_text().splitlines()
+    pid = stat.split()[0]
+    assert stat.rpartition(")")[2].split()[2:4] == [pid, pid]
+    work = re.compile(r"\S*/nexus-live-\w+")
+    return [re.sub(r"pipe:\[\d+\]", "pipe", work.sub("WORK", line)) for line in lines]
+
+
+def test_the_subreaper_wrapper_hands_over_the_state_of_a_direct_exec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wrapped = _launch_state(tmp_path, "wrapped")
+    monkeypatch.setattr(pinned_process, "_subreaper_argv", lambda staged: None)
+    direct = _launch_state(tmp_path, "direct")
+    assert wrapped == direct
+    assert wrapped[0] == f"PATH={os.defpath}"
+    assert [line.split(":")[0] for line in wrapped[1:3]] == ["SigBlk", "SigIgn"]
+    assert wrapped[3:] == ["/bin/sh", "WORK/server", "WORK", "pipe", "pipe", "/dev/null"]
+
+
+def test_a_stalled_subreaper_wrapper_is_bounded_by_the_protocol_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pinned_process, "_SUBREAPER_EXEC", "import time; time.sleep(60)")
+    monkeypatch.setattr(stdio, "DEADLINE_SECONDS", 1.0)
+    marker = tmp_path / "pid"
+    command, digest = _launcher(tmp_path, marker)
+    started = time.monotonic()
+    with isolation_off(), pytest.raises(SessionDeadlineError):
+        observe_pinned(str(command), digest)
+    assert time.monotonic() - started < 10
+    assert not marker.exists()
