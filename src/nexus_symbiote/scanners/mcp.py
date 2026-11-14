@@ -1406,7 +1406,7 @@ class MCPScanner(Scanner):
                     continue
                 try:
                     mcp_comp, tool_comps = self._parse_server(
-                        server_name, server_config, dialect, key, result
+                        server_name, server_config, dialect, key, result, file_secrets
                     )
                 except SourceBindingKeyError as exc:
                     result.scan_failures.append(f"{dialect.path}: {exc}")
@@ -1443,7 +1443,11 @@ class MCPScanner(Scanner):
 
     @staticmethod
     def _file_secrets(entries: list[tuple[str, Any]]) -> list[str]:
-        """Credential values in a source file, shared by its failure diagnostics."""
+        """Credential values of every server in a file.
+
+        One server's tool text or name may repeat a value that another server's
+        environment or headers hold, so the file's values are scrubbed from each.
+        """
         values: list[str] = []
         for _, config in entries:
             if not isinstance(config, dict):
@@ -1576,6 +1580,7 @@ class MCPScanner(Scanner):
         dialect: McpDialect,
         key: bytes | None,
         result: ScanResult,
+        file_secrets: list[str] | None = None,
     ) -> tuple[MCPServerComponent, list[ToolComponent]]:
         config_scope = dialect.path
         command = config.get("command", "")
@@ -1593,8 +1598,11 @@ class MCPScanner(Scanner):
         # Launch arguments are opaque executable inputs. Only the launcher's own
         # grammar is read; argument and environment values never leave.
         # Each header map on its own: a name in both keeps both of its values secret.
+        # The file's other servers contribute too: this server's free text may repeat
+        # a value that one of them holds.
         scrubber = SecretScrubber(
             [
+                *(file_secrets or []),
                 *secret_values(env),
                 *secret_values(config.get("headers", {})),
                 *secret_values(config.get("http_headers", {})),
@@ -1849,7 +1857,11 @@ class MCPScanner(Scanner):
         packages: list[dict[str, Any]] = []
         identities: list[str] = []
         for package in launch.packages:
-            hidden = scrubber.contains(package.spec)
+            # A credential in the package position is withheld as _safe_name withholds
+            # a token-shaped command; the name may be a normalised form of the spec.
+            hidden = scrubber.contains(package.spec) or any(
+                TOKEN_SHAPE.search(text) for text in (package.spec, package.name) if text
+            )
             if hidden:
                 withheld.append("launcher package")
             entry_identity = "[withheld]" if hidden else package.identity
