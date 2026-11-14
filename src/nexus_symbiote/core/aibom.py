@@ -141,7 +141,10 @@ class DependencyEdge(BaseModel):
 
 
 class AIBOM(BaseModel):
-    """Agent Bill of Materials — the complete supply chain inventory."""
+    """Agent Bill of Materials — a supply chain inventory.
+
+    Its metadata.completeness claim says what it covers.
+    """
 
     model_config = ConfigDict(
         extra="forbid",
