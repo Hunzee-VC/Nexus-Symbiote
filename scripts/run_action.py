@@ -190,6 +190,7 @@ class Config:
     limits: str = ""
     baseline: bytes | None = field(default=None, repr=False)
     allow_unsigned_discovery: bool = False
+    fail_on_severity: str = "high"
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
@@ -216,6 +217,9 @@ class Config:
         if not THRESHOLD.fullmatch(raw) or float(raw) > 100:
             raise InputError("risk-threshold must be a decimal number from 0 to 100, such as 50")
         threshold = float(raw)
+        severity = env.get("SYMBIOTE_FAIL_ON_SEVERITY", "high")
+        if severity not in {"critical", "high", "medium", "low", "info", "none"}:
+            raise InputError("fail-on-severity must be critical, high, medium, low, info or none")
         limits = env.get("SYMBIOTE_LIMITS", "")
         if len(limits) > MAX_LIMITS_LENGTH or any(c in limits for c in "\r\n\x00"):
             raise InputError("limits must be one line of NAME=VALUE pairs separated by commas")
@@ -259,6 +263,7 @@ class Config:
             _boolean(
                 env.get("SYMBIOTE_ALLOW_UNSIGNED_DISCOVERY", "false"), "allow-unsigned-discovery"
             ),
+            severity,
         )
 
 
@@ -421,8 +426,14 @@ def _announce(config: Config) -> None:
     elif config.threshold == 0:
         _annotate(
             "notice",
-            "risk-threshold is 0: the aggregate score does not fail this run; critical "
-            "findings, unverified SafeTensors, incomplete coverage and missing evidence still do",
+            "risk-threshold is 0: the aggregate score does not fail this run; findings at or "
+            f"above fail-on-severity ({config.fail_on_severity}), unverified SafeTensors, "
+            "incomplete coverage and missing evidence still do",
+        )
+    if config.risk_check and config.fail_on_severity == "none":
+        _annotate(
+            "warning",
+            "fail-on-severity is 'none': no finding fails this run by severity",
         )
     if config.allow_unsigned_discovery:
         _annotate(
@@ -615,6 +626,7 @@ def run(
                 arguments.append("--no-score-threshold")
             else:
                 arguments += ["--threshold", str(config.threshold)]
+            arguments += ["--fail-on-severity", config.fail_on_severity]
             scored = command(arguments)
             if scored.returncode not in {0, 1}:
                 _relay("nexus-symbiote risk", _process_lines(scored.stderr))
