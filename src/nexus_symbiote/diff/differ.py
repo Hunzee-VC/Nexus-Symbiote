@@ -39,7 +39,7 @@ def _values_unbound(component: AnyComponent) -> bool:
 
     The collector records that as a low completeness finding naming
     ``UNBOUND_VALUES_DETAIL``: MCP launch values, IDE settings values, RAG and A2A
-    values, or the content of an imported file that is not Markdown. Nothing else in
+    values, or the content of a prompt file whose digest is withheld. Nothing else in
     the record changes when one of those values does, so diff cannot see the change
     and must not report the snapshots as equal.
     """
