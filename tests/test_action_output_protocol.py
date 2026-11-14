@@ -467,3 +467,24 @@ def test_ci_runs_the_composite_action_end_to_end():
     assert jobs["action"]["strategy"]["matrix"]["python"] == ["3.11", "3.12", "3.13", "3.14"]
     assert jobs["action-annotations"]["needs"] == "action"
     assert {"action", "action-annotations"} <= set(jobs["verified"]["needs"])
+
+
+def test_job_environment_cannot_replace_the_trust_root_or_the_mode(tmp_path, monkeypatch):
+    # An earlier step can write these through GITHUB_ENV; the private HOME alone would
+    # leave the packaged trust root replaceable.
+    for name in runner.IGNORED_ENV:
+        monkeypatch.setenv(name, "/planted/value")
+    monkeypatch.setenv("NEXUS_SYMBIOTE_SOURCE_BINDING_KEY", "k" * 40)
+    seen: list[dict[str, str]] = []
+
+    def invoke(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen.append(kwargs["env"])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(runner.subprocess, "run", invoke)
+    runner._run(["scan"], private=tmp_path)
+    assert not set(runner.IGNORED_ENV) & set(seen[0])
+    assert "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT" in runner.IGNORED_ENV
+    assert "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256" in runner.IGNORED_ENV
+    # The operator's binding key is an input the Action documents; it stays.
+    assert seen[0]["NEXUS_SYMBIOTE_SOURCE_BINDING_KEY"] == "k" * 40
