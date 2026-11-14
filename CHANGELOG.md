@@ -6,6 +6,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- `verify-live` refuses a launch policy below any directory that another user can write and that is not sticky, not only when its own directory is: such a user could rename a directory on the path away and put another policy in its place.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
 - The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.
