@@ -322,20 +322,57 @@ def _projection(value: Any, depth: int = 0, *, env: bool = False, unkeyed: bool 
 
 
 # sh, bash, zsh, dash, including /bin/sh, /usr/bin/bash and `/usr/bin/env bash`.
-_SHELL = r"(?:[/\\]?(?:[\w.+-]+[/\\])*)?(?:env\s+)?(?:ba|z|da)?sh\b"
-_FETCH_EXEC = re.compile(
-    rf"(?:curl|wget|iwr|invoke-webrequest)\b[^|\n;]*\|\s*{_SHELL}"
-    rf"|base64\s+(?:-d|--decode)\b[^|\n]*\|\s*{_SHELL}"
-    r"|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n|;&]*\s-(?:e|en|enc|encodedcommand)\b",
-    re.IGNORECASE,
-)
+_SHELL = r"(?:[/\\]?(?:[\w.+-]+[/\\])*)?(?:env\s+)?((?:ba|z|da)?sh)\b"
+# Each matcher runs once per pipeline segment, so a command of repeated near
+# misses costs linear time whatever its length.
+_PIPE_BOUNDARY = re.compile(r"[|\n]")
+_SEGMENT_BOUNDARY = re.compile(r"[\n|;&]")
+_DOWNLOADER = re.compile(r"(?:curl|wget|iwr|invoke-webrequest)\b", re.IGNORECASE)
+_BASE64_DECODE = re.compile(r"base64\s+(?:-d|--decode)\b", re.IGNORECASE)
+_PIPE_SHELL = re.compile(rf"\s*{_SHELL}", re.IGNORECASE)
+_POWERSHELL = re.compile(r"\b(?:powershell|pwsh)(?:\.exe)?\b", re.IGNORECASE)
+_ENCODED_COMMAND = re.compile(r"\s-(?:e|en|enc|encodedcommand)\b", re.IGNORECASE)
 _HOOK_URL = re.compile(r"https?://", re.IGNORECASE)
 _SEVERITY_RANK = {severity: index for index, severity in enumerate(RiskSeverity)}
 
 
+def _fetch_exec(command: str) -> bool:
+    """Whether a pipeline feeds a download or a decoded payload into a shell.
+
+    Pipeline segments are checked one at a time, so repeated near misses never
+    make the earlier segments be rescanned.
+    """
+    start = 0
+    for boundary in _PIPE_BOUNDARY.finditer(command):
+        if command[boundary.start()] == "|":
+            shell = _PIPE_SHELL.match(command, boundary.end())
+            if shell is not None:
+                segment = command[start : boundary.start()]
+                if _DOWNLOADER.search(segment, segment.rfind(";") + 1):
+                    return True
+                if shell[1].lower() in {"sh", "bash"} and _BASE64_DECODE.search(segment):
+                    return True
+        start = boundary.end()
+    return _encoded_powershell(command)
+
+
+def _encoded_powershell(command: str) -> bool:
+    """Whether a segment runs PowerShell with an encoded command."""
+    start = 0
+    for boundary in _SEGMENT_BOUNDARY.finditer(command):
+        segment = command[start : boundary.start()]
+        host = _POWERSHELL.search(segment)
+        if host is not None and _ENCODED_COMMAND.search(segment, host.end()):
+            return True
+        start = boundary.end()
+    segment = command[start:]
+    host = _POWERSHELL.search(segment)
+    return host is not None and _ENCODED_COMMAND.search(segment, host.end()) is not None
+
+
 def _command_severity(command: str) -> RiskSeverity:
     """How dangerous a hook command is, without keeping its text."""
-    if _FETCH_EXEC.search(command):
+    if _fetch_exec(command):
         return RiskSeverity.CRITICAL
     if _HOOK_URL.search(command):
         return RiskSeverity.HIGH
