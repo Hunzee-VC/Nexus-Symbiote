@@ -707,10 +707,21 @@ class ConfinedCollection:
         stamp = (info.st_mtime_ns, info.st_ctime_ns)
         cached = self._exact_names.get(dir_key)
         if cached is None or cached[0] != stamp:
+            if self._entries_exhausted:
+                raise LimitExceededError(self._entry_bound)
             dup_fd = os.dup(directory_fd)
             try:
+                found: set[str] = set()
                 with os.scandir(dup_fd) as stream:
-                    names = frozenset(entry.name for entry in stream)
+                    for entry in stream:
+                        if self._entry_budget[0] <= 0:
+                            # Metadata-only callers also need a blocking failure; they
+                            # otherwise return no observation when opening is refused.
+                            self._entries_exceeded(Path("."))
+                            raise LimitExceededError(self._entry_bound)
+                        self._entry_budget[0] -= 1
+                        found.add(entry.name)
+                names = frozenset(found)
             finally:
                 os.close(dup_fd)
             cached = (stamp, names)
