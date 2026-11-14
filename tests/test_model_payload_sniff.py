@@ -20,6 +20,7 @@ from nexus_symbiote.scanners.model import (
     MAX_PICKLE_OPCODES,
     NUMPY_HEADER_UNREAD,
     NUMPY_OBJECT_ARRAY,
+    PICKLE_NAME_UNCALLED,
     PICKLE_UNREAD,
     ZIP_DIRECTORY_UNREAD,
     ZIP_MEMBER_UNREAD,
@@ -474,3 +475,94 @@ def test_text_cut_short_without_an_earlier_stop_is_not_inventoried(tmp_path: Pat
     (tmp_path / "models" / "notes").write_bytes(b"N.(I1\nnot a pickle at all\n")
     (tmp_path / "tail.dat").write_bytes(b"N.(I1\nI2\n")
     assert _components(tmp_path) == {}
+
+
+# A text-protocol and a binary pickle that call exec and end with no STOP: pickle.load
+# runs the REDUCE, then fails at what follows.
+_TEXT_CALL = b"c__builtin__\nexec\n(S'import builtins; builtins.HIT=1'\ntR"
+_BINARY_CALL = b"\x80\x02c__builtin__\nexec\nX\x1f\x00\x00\x00import builtins; builtins.HIT=1\x85R"
+
+
+def _header(protocol: int) -> bytes:
+    parts = [0x1950A86A20F9469CFC6C, 1001, {"protocol_version": 1001}]
+    return b"".join(pickle.dumps(part, protocol=protocol) for part in parts)
+
+
+def _runs_exec(data: bytes) -> bool:
+    import builtins
+
+    builtins.HIT = 0  # type: ignore[attr-defined]
+    stream = io.BytesIO(data)
+    try:
+        for _ in range(8):
+            pickle.load(stream)  # noqa: S301 - the test's own bytes
+    except Exception:  # noqa: BLE001, S110 - the loader fails after the call
+        pass
+    hit = getattr(builtins, "HIT", 0)
+    del builtins.HIT  # type: ignore[attr-defined]
+    return hit == 1
+
+
+_CUT_SHORT_AFTER_A_STOP = {
+    "text-eof": b"N." + _TEXT_CALL,
+    "text-invalid-opcode": b"N." + _TEXT_CALL + b"\xff\xff",
+    "text-stack-underflow": b"N." + _TEXT_CALL + b"00000.",
+    "text-header-eof": _header(0) + _TEXT_CALL,
+    "text-header-invalid-opcode": _header(0) + _TEXT_CALL + b"\xff",
+    "binary-header-eof": _header(2) + _BINARY_CALL,
+    "binary-header-invalid-opcode": _header(2) + _BINARY_CALL + b"\xff",
+    "binary-eof": b"N." + _BINARY_CALL,
+}
+
+
+@pytest.mark.parametrize("data", _CUT_SHORT_AFTER_A_STOP.values(), ids=_CUT_SHORT_AFTER_A_STOP)
+def test_a_call_after_a_stop_that_fails_later_is_critical(tmp_path: Path, data: bytes) -> None:
+    assert _runs_exec(data)
+    (tmp_path / "models").mkdir()
+    files = ["models/pytorch_model", "legacy.dat", "w.npy", "models/m.pt", "m.pkl", "m.onnx"]
+    for relative in files:
+        (tmp_path / relative).write_bytes(data)
+    found = _components(tmp_path)
+    assert sorted(found) == sorted(files)
+    for component in found.values():
+        assert component.serialization_safety is UNSAFE
+        assert _critical(component)
+
+
+@pytest.mark.parametrize("protocol", range(pickle.HIGHEST_PROTOCOL + 1))
+def test_a_reduce_pickle_with_no_stop_is_critical_under_a_model_name(
+    tmp_path: Path, protocol: int
+) -> None:
+    data = pickle.dumps(_Boom(), protocol=protocol)[:-1]
+    for name, tail in {"eof": b"", "invalid": b"\xff", "underflow": b"00000."}.items():
+        (tmp_path / f"{name}.onnx").write_bytes(data + tail)
+        (tmp_path / f"{name}.after.dat").write_bytes(b"N." + data + tail)
+    found = _components(tmp_path)
+    assert len(found) == 6
+    assert all(component.serialization_safety is UNSAFE for component in found.values())
+
+
+def test_a_binary_call_with_no_stop_is_critical_by_content(tmp_path: Path) -> None:
+    assert _runs_exec(_BINARY_CALL)
+    (tmp_path / "w.dat").write_bytes(_BINARY_CALL)
+    assert _components(tmp_path)["w.dat"].serialization_safety is UNSAFE
+
+
+def test_text_that_reads_as_a_name_without_a_call_is_not_critical(tmp_path: Path) -> None:
+    (tmp_path / "models").mkdir()
+    # Alone, a text-protocol call cut short is as likely prose.
+    (tmp_path / "models" / "readme").write_bytes(b"config\nvalues\nbuild\n")
+    (tmp_path / "text.dat").write_bytes(_TEXT_CALL)
+    # After a STOP: words that are no module name, or no call after the name.
+    (tmp_path / "models" / "notes").write_bytes(b"N.c see notes\nfor details\nb")
+    (tmp_path / "log.dat").write_bytes(b"N.bad\n")
+    (tmp_path / "list.dat").write_bytes(b"N.]\x83\x94\xf3\x81<")
+    (tmp_path / "stack.dat").write_bytes(b"\x80\x02N.J\xcaW\x22\x16\x93T\xb1")
+    assert _components(tmp_path) == {}
+
+
+def test_a_name_after_a_stop_with_no_call_is_unknown(tmp_path: Path) -> None:
+    (tmp_path / "named.dat").write_bytes(b"N.cos\nsystem\n\xff")
+    component = _components(tmp_path)["named.dat"]
+    assert component.serialization_safety is SerializationSafety.UNKNOWN
+    assert component.properties["format_inspection"] == PICKLE_NAME_UNCALLED

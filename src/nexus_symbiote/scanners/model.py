@@ -174,9 +174,19 @@ PICKLE_UNREAD = (
     "pickle opcode stream that names no callable before the inspection limits; "
     "no bounded structural validator for this format/loader"
 )
+PICKLE_NAME_UNCALLED = (
+    "pickle opcode stream after a STOP that names a callable and fails before calling it; "
+    "no bounded structural validator for this format/loader"
+)
 # Content that a bound left unread: a file no model name rates is inventoried for it.
 _CONTENT_UNREAD = frozenset(
-    {ZIP_DIRECTORY_UNREAD, ZIP_MEMBER_UNREAD, NUMPY_HEADER_UNREAD, PICKLE_UNREAD}
+    {
+        ZIP_DIRECTORY_UNREAD,
+        ZIP_MEMBER_UNREAD,
+        NUMPY_HEADER_UNREAD,
+        PICKLE_UNREAD,
+        PICKLE_NAME_UNCALLED,
+    }
 )
 _NUMPY_MAGIC = b"\x93NUMPY"
 # Dtype names that make an object dtype: the type code, with the sizes NumPy accepted,
@@ -216,6 +226,9 @@ _CODE_OPCODES = frozenset(
         "EXT4",
     }
 )
+# Opcodes that call or apply what is on the stack.
+_INVOKING_OPCODES = frozenset({"REDUCE", "INST", "OBJ", "NEWOBJ", "NEWOBJ_EX", "BUILD"})
+_DOTTED_NAME = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", re.ASCII)
 _INDEX = re.compile(r"(?P<base>.+?)\.index(?:\.[A-Za-z0-9_-]+)?\.json", re.IGNORECASE)
 # transformers reads ``repository--module.Class``; a repository need not name an owner.
 _CODE_REFERENCE = re.compile(
@@ -352,6 +365,12 @@ def _recognized_pickle(
     pickle has reached STOP, a following one cut short by the bounds before naming a
     callable is rated unknown in either protocol; a text-protocol stream cut short
     before any STOP is not a pickle, as text may read as one.
+
+    ``pickle.load`` calls what a pickle names before it meets a flaw further on, so a
+    segment that names a callable by module and name and then calls it is recognized
+    however it ends: under a model name, and by content when it is binary or follows a
+    STOP. One that follows a STOP and names such a callable without calling it before
+    the flaw is rated unknown.
     """
     binary = len(prefix) >= 2 and prefix[0] == 0x80 and 2 <= prefix[1] <= 5
     if not binary and (not prefix or prefix[0] not in _TEXT_PICKLE_START):
@@ -398,15 +417,21 @@ def _pickle_segment(
         f"Recognized {kind} pickle opcode stream; object loading can execute code",
     )
     own = 0
-    code = bounded = False
+    code = named = invoked = bounded = False
+    strings: list[str | None] = []
     opcodes = io.BytesIO(sample)
     opcodes.seek(start)
     try:
-        for opcode, _, _ in pickletools.genops(opcodes):
+        for opcode, argument, _ in pickletools.genops(opcodes):
             seen += 1
             own += 1
             marks += opcode.name == "MARK"
             code = code or opcode.name in _CODE_OPCODES
+            invoked = invoked or (named and opcode.name in _INVOKING_OPCODES)
+            named = named or _names_callable(opcode.name, argument, strings)
+            invoked = invoked or (named and opcode.name == "INST")
+            if opcode.name != "MEMOIZE":
+                strings = [*strings[-1:], argument if isinstance(argument, str) else None]
             if seen > MAX_PICKLE_OPCODES or marks > MAX_PICKLE_MARKS:
                 bounded = True
                 break
@@ -421,6 +446,13 @@ def _pickle_segment(
     except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
         # The sample ended inside an opcode, before the end of the file.
         bounded = len(sample) < size and opcodes.tell() >= len(sample)
+    # pickle.load calls what a segment names before it meets the flaw that ends it. A
+    # text-protocol one read by content counts only after an earlier STOP: alone, it is
+    # as likely prose.
+    if invoked and (binary or start > 0 or not by_content):
+        return _Segment(recognized)
+    if by_content and named and start > 0:
+        return _Segment((SerializationSafety.UNKNOWN, PICKLE_NAME_UNCALLED))
     if by_content and not code:
         # A text-protocol segment cut short is read as a pickle only after an earlier
         # one reached STOP: on its own it is as likely ordinary text.
@@ -429,6 +461,23 @@ def _pickle_segment(
     if not binary:
         return _Segment(None)
     return _Segment(recognized if own >= MIN_PICKLE_OPCODES or (code and bounded) else None)
+
+
+def _names_callable(name: str, argument: object, strings: list[str | None]) -> bool:
+    """Whether an opcode names a callable by a module and a name, as ``find_class`` reads.
+
+    GLOBAL and INST carry both; STACK_GLOBAL takes the two strings pushed just before it.
+    """
+    parts: list[str | None]
+    if name in {"GLOBAL", "INST"}:
+        parts = [*argument.split(" ")] if isinstance(argument, str) else []
+    elif name == "STACK_GLOBAL":
+        parts = strings
+    else:
+        return False
+    return len(parts) == 2 and all(
+        part is not None and _DOTTED_NAME.fullmatch(part) for part in parts
+    )
 
 
 def _pickle_member(name: bytes) -> bool:
