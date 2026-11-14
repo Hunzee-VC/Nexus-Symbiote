@@ -84,6 +84,28 @@ def test_a_launcher_package_links_its_mcp_server(tmp_path):
     assert server.bom_ref in blast_radius(bom, target)["dependent_components"]
 
 
+@pytest.mark.parametrize(
+    "image",
+    [
+        "ollama/ollama:0.3.0",
+        "ghcr.io/github/github-mcp-server:1.0.0",
+        "ghcr.io/github/github-mcp-server@sha256:" + "a" * 64,
+    ],
+)
+def test_an_image_links_the_mcp_server_that_runs_it_on_any_registry(tmp_path, image):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "Dockerfile").write_text(f"FROM {image}\n")
+    server = {"command": "docker", "args": ["run", "-i", "--rm", image]}
+    (project / ".mcp.json").write_text(json.dumps({"mcpServers": {"image": server}}))
+    output = tmp_path / "bom.json"
+    args = ["scan", str(project), "--no-project-policy", "--report-only", "-o", str(output)]
+    assert CliRunner().invoke(main, args).exit_code == 0
+    bom = AIBOM.load(output)
+    (mcp,) = (c for c in bom.components if isinstance(c, MCPServerComponent))
+    assert mcp.bom_ref in blast_radius(bom, f"registry:docker/{image}")["dependent_components"]
+
+
 def test_cli_prints_dependents(tmp_path):
     output = _scanned(tmp_path)
     result = CliRunner().invoke(main, ["blast-radius", str(output), "registry:pypi/openai"])

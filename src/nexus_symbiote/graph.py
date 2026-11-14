@@ -275,7 +275,7 @@ def _launcher_key(registry: RegistryEntryComponent) -> str | None:
     """The MCP launcher-package spelling of a manifest dependency, when one exists."""
     if registry.registry_type in {"pypi", "npm"}:
         return f"{registry.registry_type}:{registry.name}"
-    if registry.registry_type == "docker-hub":
+    if registry.registry_type in {"docker-hub", "oci"}:
         image = re.sub(r"@sha256:[0-9A-Fa-f]{64}$", "", registry.name)
         head, _, last = image.rpartition("/")
         last = last.split(":", 1)[0]
