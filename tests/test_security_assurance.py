@@ -43,9 +43,15 @@ def test_verify_requires_both_trust_constraints(
     assert "identity" in result.error and "issuer" in result.error
 
 
-def test_sigstore_verifier_applies_identity_and_checks_artifact(
+def test_verifier_with_mocked_sigstore_modules_receives_identity_policy_and_artifact_digest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The sigstore package, its TUF cache and the trust root are all stand-ins here.
+
+    This checks only what the verifier is handed and that a changed artifact is refused;
+    the tests on a real GitHub-signed bundle in tests/test_crypto_trust_root*.py are the
+    authority for cryptographic verification.
+    """
     import hashlib
 
     artifact = tmp_path / "model"
@@ -218,6 +224,17 @@ def test_removing_tool_hash_is_assurance_regression() -> None:
     assert "assurance regressed" in diff.components_modified[0].details[0]
 
 
-def test_installed_sigstore_exposes_supported_api() -> None:
+def test_installed_sigstore_verify_artifact_takes_the_arguments_the_verifier_passes() -> None:
+    # crypto.verify_sigstore_digest calls verify_artifact(Hashed, Bundle, Identity policy)
+    # positionally; a sigstore release that renames or reorders them must be reviewed here.
+    import inspect
+
     verify = pytest.importorskip("sigstore.verify")
-    assert callable(verify.Verifier.verify_artifact)
+    parameters = inspect.signature(verify.Verifier.verify_artifact).parameters
+    assert list(parameters) == ["self", "input_", "bundle", "policy"]
+    assert all(
+        parameter.default is inspect.Parameter.empty
+        and parameter.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+        for parameter in parameters.values()
+    )
+    assert "Hashed" in str(parameters["input_"].annotation)

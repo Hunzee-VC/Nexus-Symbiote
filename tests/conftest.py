@@ -181,36 +181,97 @@ def _isolated_environment(
     for name in PRIVATE_DIRECTORIES:
         monkeypatch.setenv(name, str(home / name.lower()))
 
-    def _is_loopback_target(address: Any) -> bool:
-        if not isinstance(address, tuple) or not address:
+    # The suite's own tripwire against a test that reaches the network: connecting,
+    # sending a datagram or resolving a name anywhere but the loopback interface, or a
+    # name under .localhost or the reserved .invalid, fails the test. The product's offline
+    # guard (modes.enforce) replaces the same entry points while it is installed, so the
+    # tripwire stands down only then and never masks an OfflineViolation a test expects.
+    # _socket.socket, the C type, is immutable: the product's audit hook is its only guard.
+    def _is_loopback_name(host: Any) -> bool:
+        if host is None:
             return True
-        host = address[0]
         if isinstance(host, (bytes, bytearray)):
             host = bytes(host).decode("ascii", "replace")
         if not isinstance(host, str):
             return True
-        if host.lower() == "localhost":
+        name = host.lower().rstrip(".")
+        if name in ("", "localhost") or name.endswith((".localhost", ".invalid")):
             return True
         try:
-            return ipaddress.ip_address(host.split("%", 1)[0]).is_loopback
+            return ipaddress.ip_address(name.split("%", 1)[0]).is_loopback
         except ValueError:
             return False
 
+    def _is_loopback_target(address: Any) -> bool:
+        if not isinstance(address, tuple) or not address:
+            return True
+        return _is_loopback_name(address[0])
+
+    def _refuse(what: str) -> OSError:
+        return OSError(f"test suite blocked outbound non-loopback {what}")
+
+    def _guarded() -> bool:
+        return not modes._patches
+
     orig_connect = socket.socket.connect
     orig_connect_ex = socket.socket.connect_ex
+    orig_sendto = socket.socket.sendto
+    orig_sendmsg = socket.socket.sendmsg
+    orig_getaddrinfo = socket.getaddrinfo
+    orig_gethostbyname = socket.gethostbyname
+    orig_gethostbyname_ex = socket.gethostbyname_ex
+    orig_create_connection = socket.create_connection
 
     def _guarded_connect(sock: socket.socket, address: Any) -> Any:
-        if modes.current() != modes.Mode.OFFLINE and not _is_loopback_target(address):
-            raise OSError("test suite blocked outbound non-loopback socket connection")
+        if _guarded() and not _is_loopback_target(address):
+            raise _refuse("socket connection")
         return orig_connect(sock, address)
 
     def _guarded_connect_ex(sock: socket.socket, address: Any) -> int:
-        if modes.current() != modes.Mode.OFFLINE and not _is_loopback_target(address):
-            raise OSError("test suite blocked outbound non-loopback socket connection")
+        if _guarded() and not _is_loopback_target(address):
+            raise _refuse("socket connection")
         return orig_connect_ex(sock, address)
+
+    def _guarded_sendto(sock: socket.socket, data: Any, *rest: Any) -> int:
+        # sendto(data, address) or sendto(data, flags, address).
+        if _guarded() and rest and not _is_loopback_target(rest[-1]):
+            raise _refuse("datagram (sendto)")
+        return orig_sendto(sock, data, *rest)
+
+    def _guarded_sendmsg(sock: socket.socket, buffers: Any, *rest: Any) -> int:
+        # sendmsg(buffers[, ancdata[, flags[, address]]]).
+        if _guarded() and len(rest) >= 3 and not _is_loopback_target(rest[2]):
+            raise _refuse("datagram (sendmsg)")
+        return orig_sendmsg(sock, buffers, *rest)
+
+    def _guarded_getaddrinfo(host: Any, *args: Any, **kwargs: Any) -> Any:
+        if _guarded() and not _is_loopback_name(host):
+            raise _refuse("name resolution (getaddrinfo)")
+        return orig_getaddrinfo(host, *args, **kwargs)
+
+    def _guarded_gethostbyname(host: Any) -> Any:
+        if _guarded() and not _is_loopback_name(host):
+            raise _refuse("name resolution (gethostbyname)")
+        return orig_gethostbyname(host)
+
+    def _guarded_gethostbyname_ex(host: Any) -> Any:
+        if _guarded() and not _is_loopback_name(host):
+            raise _refuse("name resolution (gethostbyname_ex)")
+        return orig_gethostbyname_ex(host)
+
+    def _guarded_create_connection(address: Any, *args: Any, **kwargs: Any) -> Any:
+        if _guarded() and not _is_loopback_target(address):
+            raise _refuse("socket connection (create_connection)")
+        return orig_create_connection(address, *args, **kwargs)
 
     monkeypatch.setattr(socket.socket, "connect", _guarded_connect)
     monkeypatch.setattr(socket.socket, "connect_ex", _guarded_connect_ex)
+    monkeypatch.setattr(socket.socket, "sendto", _guarded_sendto)
+    monkeypatch.setattr(socket.socket, "sendmsg", _guarded_sendmsg)
+    monkeypatch.setattr(socket, "getaddrinfo", _guarded_getaddrinfo)
+    monkeypatch.setattr(socket, "gethostbyname", _guarded_gethostbyname)
+    monkeypatch.setattr(socket, "gethostbyname_ex", _guarded_gethostbyname_ex)
+    monkeypatch.setattr(socket, "create_connection", _guarded_create_connection)
     # Collection limits are process state (the root --limit option sets them): every test
     # starts at the defaults, and what a test leaves in force never reaches the next one.
     with limits.applied(limits.DEFAULTS):

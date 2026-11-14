@@ -584,7 +584,7 @@ def verify_sigstore_digest(
     try:
         _, digest = normalize_digest(digest_hex, "sha256")
         if len(bundle_json) > MAX_BUNDLE_BYTES:
-            raise ValueError("bundle byte limit exceeded")
+            return VerificationResult(False, error="Sigstore bundle exceeds byte limit")
         if _carries_dsse_envelope(bundle_json):
             return VerificationResult(False, error=DSSE_UNSUPPORTED)
         from sigstore.hashes import Hashed
