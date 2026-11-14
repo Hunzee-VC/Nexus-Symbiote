@@ -176,8 +176,8 @@ PICKLE_UNREAD = (
     "no bounded structural validator for this format/loader"
 )
 PICKLE_NAME_UNCALLED = (
-    "pickle opcode stream that resolves a callable and is cut short by the inspection "
-    "limits before calling it; no bounded structural validator for this format/loader"
+    "pickle opcode stream that resolves an importable name and, within the inspection "
+    "limits, never uses it; no bounded structural validator for this format/loader"
 )
 PICKLE_FRAME_TAIL = (
     "pickle opcode stream with bytes after a STOP inside its frame, where loaders resume "
@@ -337,18 +337,20 @@ def _recognized_pickle(
     The sample is read as ``pickle.load`` reads it, in a loop, as ``torch.load`` reads
     the legacy format's header pickles before the one that rebuilds the tensors: by the
     C and the pure-Python unpicklers both (``utils.pickle_load``), within the
-    inspection bounds. A pickle that calls what it resolved is a payload, wherever it
-    starts. One that the bounds cut short before the loader's behaviour is decided is
-    rated unknown (``PICKLE_NAME_UNCALLED`` when it resolved a callable, else
-    ``PICKLE_UNREAD``); one that ends in a STOP or a flaw within them calls nothing, as
-    the loader stops at the flaw. A STOP inside a FRAME with bytes left in it is rated
-    unknown at least, and the next pickle is read both after the frame, as
-    ``io.BytesIO`` gives it, and after the STOP, as a buffered file gives it to the C
-    unpickler.
+    inspection bounds. A pickle that hands what it resolved to anything but the stack
+    and the memo (calls it, sets items on it, appends to it, hashes it...) is a
+    payload, wherever it starts. One that the bounds cut short before the loader's
+    behaviour is decided is rated unknown (``PICKLE_NAME_UNCALLED`` when it resolved an
+    importable name, else ``PICKLE_UNREAD``), and so is one that resolves an importable
+    name and ends in a STOP or a flaw without using it; one that ends before
+    ``find_class`` returns calls nothing, as the loader stops at the flaw. A STOP inside
+    a FRAME with bytes left in it is rated unknown at least, and the next pickle is read
+    both after the frame, as ``io.BytesIO`` gives it, and after the STOP, as a buffered
+    file gives it to the C unpickler.
 
     A file found ``by_content``, which no pickle-family name rates, is not rated unknown
-    by a text-protocol first pickle that the bounds cut short: on its own it is as
-    likely prose. Under a model name, a sample is also
+    by a text-protocol first pickle that the bounds cut short or that names something
+    before a flaw: on its own it is as likely prose. Under a model name, a sample is also
     recognized by its shape, as before content was read past a STOP: a binary stream
     of PROTO and ``MIN_PICKLE_OPCODES`` well-formed opcodes, or a stream that passes
     static opcode/stack checks to STOP within the limits.
@@ -407,8 +409,12 @@ def _pickle_loads(
         if segment.outcome == "called":
             return _recognized(binary)
         if segment.outcome == "unread" and (start or binary or not by_content):
-            unread = PICKLE_NAME_UNCALLED if segment.resolved else PICKLE_UNREAD
+            unread = PICKLE_NAME_UNCALLED if segment.named else PICKLE_UNREAD
             worst = _worse(worst, (SerializationSafety.UNKNOWN, unread))
+        elif segment.named and (segment.outcome == "stop" or binary or not by_content):
+            # Text found by content that names something before a flaw is as likely
+            # prose; a pickle that returns what it resolved, or a PROTO one, is not.
+            worst = _worse(worst, (SerializationSafety.UNKNOWN, PICKLE_NAME_UNCALLED))
         if len(segment.resumes) > 1:
             worst = _worse(worst, (SerializationSafety.UNKNOWN, PICKLE_FRAME_TAIL))
         pending.extend(reversed(segment.resumes))

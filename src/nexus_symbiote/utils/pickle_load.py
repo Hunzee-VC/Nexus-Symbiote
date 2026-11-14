@@ -4,11 +4,14 @@
 from ``io.BytesIO``, as the C unpickler (``"c"``) or the pure-Python one (``"py"``)
 does: the same reads and frame handling, the same stack, MARK and memo rules and the
 same errors, opcode by opcode. ``find_class`` fails for a module or name that is not a
-dotted identifier, which no import finds; otherwise it returns an opaque class, as a
-loader that records instead of importing does. Calling that class, creating an
-instance of it through ``__new__`` or setting its state through BUILD invokes it, and
-the walk stops there; anything else that needs more than a class (iterating it,
-indexing it, adding items to it) fails as it fails for a plain class.
+dotted identifier, which no import finds; otherwise it returns an opaque object, which
+a real import may make any module attribute: a class, a function, ``os.environ``,
+``builtins.__dict__``. Every opcode that hands that object to anything but the stack
+and the memo ends the walk as a call: calling it, ``__new__``, BUILD, SETITEM(S),
+APPEND(S) and ADDITEMS on it, hashing it as a key or set item, iterating or testing it
+as arguments or state, and the type checks a builtin of the right type would pass. A
+call is ``certain`` when a class that records each of its methods would record one
+there, and not certain when only an object of another type gets past the check.
 ``persistent_load``, which ``torch.load`` defines, returns an inert object, as the
 storages it returns run nothing they are given. Builtin values are modelled by what
 decides the loader's next step: their type, length, whether they hash, and the strings
@@ -43,11 +46,15 @@ class _UnreadError(Exception):
 
 
 class _CallError(Exception):
-    """The loader invokes a class that ``find_class`` returned."""
+    """The loader hands an object that ``find_class`` returned to code that uses it."""
+
+    def __init__(self, certain: bool = True) -> None:
+        super().__init__()
+        self.certain = certain
 
 
 class _Opaque:
-    """A class that ``find_class`` returned."""
+    """An object that ``find_class`` returned: any attribute of an importable module."""
 
     __slots__ = ()
 
@@ -59,11 +66,10 @@ class _Persistent:
 
 
 class _Tuple:
-    __slots__ = ("items", "hashable")
+    __slots__ = ("items",)
 
     def __init__(self, items: tuple[object, ...]) -> None:
         self.items = items
-        self.hashable = all(_hashable(item) for item in items)
 
 
 class _Sized:
@@ -77,20 +83,23 @@ class _Sized:
         self.string_keys = True
 
 
-_SCALARS = (type(None), bool, int, float, str, bytes, _Opaque, _Persistent)
+_NO_KWARGS = object()
 _ITERABLE = (str, bytes, _Tuple, _Sized)
 
 
-def _hashable(value: object) -> bool:
-    if isinstance(value, _Tuple):
-        return value.hashable
-    if isinstance(value, _Sized):
-        return value.kind in ("frozenset", "view")
-    return isinstance(value, _SCALARS)
+def _use(value: object, *, certain: bool = True) -> None:
+    """The loader hands ``value`` to code: a resolved object makes that a call."""
+    if isinstance(value, _Opaque):
+        raise _CallError(certain)
 
 
 def _hash(value: object) -> None:
-    if not _hashable(value):
+    """``hash(value)``: a tuple hashes its items in order; a resolved object runs its hash."""
+    _use(value)
+    if isinstance(value, _Tuple):
+        for item in value.items:
+            _hash(item)
+    elif isinstance(value, _Sized) and value.kind not in ("frozenset", "view"):
         raise _LoadError  # unhashable type
 
 
@@ -111,6 +120,7 @@ def _truth(value: object) -> bool:
 
 
 def _byte(value: object) -> None:
+    _use(value)  # __index__
     if not isinstance(value, int) or not 0 <= value < 256:
         raise _LoadError
 
@@ -127,15 +137,19 @@ class Budget:
 class Segment:
     """How one ``pickle.load`` ends.
 
-    ``resolved`` says whether it reached ``find_class``. After a STOP, ``resumes``
-    holds where the next ``pickle.load`` starts: where the loader left ``io.BytesIO``,
-    then, when different, right after the STOP, as the C unpickler leaves a buffered
-    file it peeked ahead in.
+    ``resolved`` says whether it reached ``find_class`` and ``named`` whether a call
+    of it returned, for a module and name that are dotted identifiers. A ``called``
+    pickle is ``certain`` unless only an object of the right type gets that far. After
+    a STOP, ``resumes`` holds where the next ``pickle.load`` starts: where the loader
+    left ``io.BytesIO``, then, when different, right after the STOP, as the C
+    unpickler leaves a buffered file it peeked ahead in.
     """
 
     outcome: Outcome
     resolved: bool
+    named: bool = False
     resumes: tuple[int, ...] = ()
+    certain: bool = True
 
 
 _C_INT = re.compile(
@@ -170,6 +184,7 @@ class _Machine:
         self.marks: list[int] = []
         self.memo: dict[int, object] = {}
         self.resolved = False
+        self.named = False
 
     # -- reads -----------------------------------------------------------------------
 
@@ -273,6 +288,7 @@ class _Machine:
         self.resolved = True
         if not all(part.isidentifier() for part in [*module.split("."), *name.split(".")]):
             raise _LoadError  # ModuleNotFoundError, or an AttributeError
+        self.named = True
         self.push(_Opaque())
 
     # -- the loop --------------------------------------------------------------------
@@ -291,14 +307,14 @@ class _Machine:
                 self.budget.opcodes -= 1
                 if handler is _Machine.op_stop:
                     self.pop()
-                    return Segment("stop", self.resolved, self._resumes())
+                    return Segment("stop", self.resolved, self.named, self._resumes())
                 handler(self)
-        except _CallError:
-            return Segment("called", self.resolved)
+        except _CallError as call:
+            return Segment("called", self.resolved, self.named, certain=call.certain)
         except _UnreadError:
-            return Segment("unread", self.resolved)
+            return Segment("unread", self.resolved, self.named)
         except (_LoadError, ValueError, UnicodeError, OverflowError, struct.error):
-            return Segment("error", self.resolved)
+            return Segment("error", self.resolved, self.named)
 
     def _resumes(self) -> tuple[int, ...]:
         if self.frame is None or self.frame <= self.pos:
@@ -329,7 +345,8 @@ class _Machine:
         self.push(_Persistent())
 
     def op_binpersid(self) -> None:
-        self.pop()
+        # torch.load's persistent_load indexes the id it is given.
+        _use(self.pop(), certain=False)
         self.push(_Persistent())
 
     def op_none(self) -> None:
@@ -446,6 +463,7 @@ class _Machine:
 
     def op_readonly_buffer(self) -> None:
         value = self.top()
+        _use(value, certain=False)  # memoryview() of an object with the buffer protocol
         if isinstance(value, _Sized) and value.kind == "bytearray":
             self.stack[-1] = _Sized("view", value.length)
         elif not isinstance(value, bytes) and not _kind(value, "view"):
@@ -510,17 +528,24 @@ class _Machine:
         target.string_keys = target.string_keys and isinstance(key, str)
 
     def _setitem(self, target: object, key: object, value: object) -> None:
-        if not isinstance(target, _Sized):
-            raise _LoadError  # no __setitem__
-        if target.kind == "dict":
-            self._key(target, key)
+        _use(target)  # target[key] = value
+        if _kind(target, "dict"):
+            self._key(cast(_Sized, target), key)
             return
-        if target.kind not in ("list", "bytearray") or not isinstance(key, int):
-            raise _LoadError
+        if not isinstance(target, (str, bytes, _Tuple, _Sized)) or _kind(target, "view"):
+            raise _LoadError  # no __setitem__, or read-only memory
+        # PyObject_SetItem takes the key's __index__ for any type with sequence methods,
+        # sets included, before it refuses one that takes no item assignment.
+        _use(key)
+        if not (_kind(target, "list") or _kind(target, "bytearray")):
+            raise _LoadError  # does not support item assignment
+        if not isinstance(key, int):
+            raise _LoadError  # indices must be integers
+        assert isinstance(target, _Sized)
+        if target.kind == "bytearray":
+            _byte(value)  # before the size check
         if not -target.length <= key < target.length:
             raise _LoadError  # assignment index out of range
-        if target.kind == "bytearray":
-            _byte(value)
 
     def op_setitem(self) -> None:
         value = self.pop()
@@ -543,6 +568,7 @@ class _Machine:
             self._setitem(target, items[index], items[index + 1])
 
     def _extend(self, target: object, items: list[object]) -> None:
+        _use(target)  # target.extend(items), or target.append(item)
         if _kind(target, "bytearray"):
             for item in items:
                 _byte(item)
@@ -565,6 +591,10 @@ class _Machine:
         if items is None:
             return
         target = self.top()
+        if items or self.c:
+            _use(target)  # target.add(item)
+        if isinstance(target, _Opaque):
+            return  # the pure-Python unpickler looks add() up and calls it for no item
         if not _kind(target, "set"):
             raise _LoadError  # no add()
         for item in items:
@@ -581,9 +611,11 @@ class _Machine:
     def op_stack_global(self) -> None:
         name = self.pop()
         module = self.pop()
-        if not isinstance(name, str) or not isinstance(module, str):
+        if not isinstance(name, (str, _Opaque)) or not isinstance(module, (str, _Opaque)):
             raise _LoadError  # STACK_GLOBAL requires str
-        self.resolve(module, name)
+        _use(name, certain=False)  # a resolved str names another global
+        _use(module, certain=False)
+        self.resolve(cast(str, module), cast(str, name))
 
     def _ext(self, width: int, form: str) -> None:
         self.number(width, form)
@@ -620,28 +652,44 @@ class _Machine:
             raise _LoadError
         self._instantiate(args[0])
 
+    def _arguments(self, args: object) -> bool:
+        """Whether ``args`` may be an argument tuple; ``*args`` iterates a resolved object."""
+        if isinstance(args, _Opaque):
+            if not self.c:
+                _use(args)
+            return True  # the C unpickler's tuple check, which a resolved tuple passes
+        if not isinstance(args, _Tuple if self.c else _ITERABLE):
+            raise _LoadError  # the argument list must be a tuple, or iterable
+        return False
+
     def op_reduce(self) -> None:
         args = self.pop()
         func = self.top()
-        if not isinstance(args, _Tuple if self.c else _ITERABLE):
-            raise _LoadError  # the argument list must be a tuple, or iterable
-        self._instantiate(func)
+        if self.c and isinstance(args, _Opaque) and not isinstance(func, _Opaque):
+            raise _LoadError  # a builtin value is not callable
+        uncertain = self._arguments(args)
+        _use(func, certain=not uncertain)
+        raise _LoadError  # a builtin value is not callable
 
-    def _new(self, kwargs: object | None) -> None:
+    def _new(self, kwargs: object) -> None:
         args = self.pop()
         klass = self.pop()
         if self.c and not isinstance(klass, _Opaque):
             raise _LoadError  # class argument must be a type
-        if not isinstance(args, _Tuple if self.c else _ITERABLE):
-            raise _LoadError
-        if kwargs is not None and not (
+        uncertain = self._arguments(args)
+        if isinstance(kwargs, _Opaque):
+            if not self.c:
+                _use(kwargs)  # **kwargs calls keys() on what is no dict
+            uncertain = True
+        elif kwargs is not _NO_KWARGS and not (
             isinstance(kwargs, _Sized) and kwargs.kind == "dict" and kwargs.string_keys
         ):
             raise _LoadError  # keywords must be strings in a dict
-        self._instantiate(klass)
+        _use(klass, certain=not uncertain)  # klass.__new__(klass, *args, **kwargs)
+        raise _LoadError  # a builtin value has no __new__ that takes itself
 
     def op_newobj(self) -> None:
-        self._new(None)
+        self._new(_NO_KWARGS)
 
     def op_newobj_ex(self) -> None:
         self._new(self.pop())
@@ -656,10 +704,14 @@ class _Machine:
         if isinstance(state, _Tuple) and split:
             state, slots = state.items
         if not self.c:
-            if _truth(state) or _truth(slots):
-                raise _LoadError  # a builtin value has no __dict__ and takes no attributes
+            for value in (state, slots):
+                _use(value)  # if state: ... if slotstate: ...
+                if _truth(value):
+                    raise _LoadError  # a builtin value has no __dict__ and takes no attributes
         elif state is not None:
             raise _LoadError  # state is not a dictionary, or a builtin value has no __dict__
+        elif split and isinstance(slots, _Opaque):
+            raise _CallError(certain=False)  # an empty resolved dict sets no attribute
         elif split and not (isinstance(slots, _Sized) and slots.kind == "dict"):
             raise _LoadError  # slot state is not a dictionary
         elif split and _truth(slots):
