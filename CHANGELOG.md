@@ -6,6 +6,10 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- Piping command output into `head` exits quietly with status 141. It used to report `internal error (BrokenPipeError)` and exit 1.
+- Instruction files that contain U+2028 or U+2029 are a low `line_separators` finding. Ordinary spaces, including NBSP and the ideographic space, are not findings.
+- The OpenSSF Scorecard workflow grants no permissions at the top level, so a job added later does not inherit `read-all`.
+- `.gitleaks.toml` extends Gitleaks' built-in rules (`[extend] useDefault = true`); a custom configuration without that line loads no detection rules. It exempts no directory, so a real credential under `tests/` is still reported. No CI job or pre-commit hook in this repository consumes the file; it only shapes a third-party or local gitleaks run.
 - **Breaking (GitHub Action):** `fail-on-severity` defaults to `high`. A finding at or above that severity fails the Action even when the aggregate score stays under `risk-threshold`. The previous Action behavior failed on severity only for critical findings, so a pull request that granted `bypassPermissions` and `Bash(*)`, added an automatic hook and launched unpinned `npx -y` servers could pass every default gate with a score under 50. Set `fail-on-severity: critical` to keep that behavior. `none` disables the severity check and is printed as a warning. The CLI and the built-in project policy still default to `critical`. The aggregate score is the uncapped sum of finding weights; `risk --json-output` records `gate.score_scale` as `unbounded-sum`, and a score equal to `fail_threshold` is reported as at or above the threshold.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
@@ -16,6 +20,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Changed
 
+- The pre-commit hook description states that `language: python` installs from `pyproject.toml` ranges without the hash lock, and how to run the command from a lock-installed environment with `language: system`.
 - **Breaking:** a policy file accepts only the documented `validate` key, and an unlistable root is an error. `verify-artifact` and `verify-discovery` reject `--trust-root` or `--trust-root-sha256` without `--bundle`.
 - `risk` prints an unscored run as unscored, labels a failed discovery-producer check as such rather than as a failed project reconciliation, and, like `summary`, orders severity breakdowns from critical to info. `vex` and `advisories` print why an inventory could not be read.
 - PydanticAI tool references include the agent name, so tools of two agents with the same name no longer collide, and agent tools registered outside the decorator form are reported as gaps.

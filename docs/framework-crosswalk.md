@@ -561,6 +561,13 @@ every rule.
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
 | `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 
+### `line_separators`
+
+| Framework | Entry | Severities | Rationale |
+| --- | --- | --- | --- |
+| `owasp-llm-2025` | LLM01:2025 Prompt Injection | all | A line or paragraph separator can split instruction text in some renderers. |
+| `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
+
 ### `local_process`
 
 | Framework | Entry | Severities | Rationale |

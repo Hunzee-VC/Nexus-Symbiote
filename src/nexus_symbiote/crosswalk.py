@@ -125,7 +125,7 @@ FRAMEWORKS: tuple[Framework, ...] = (
         sarif_prefix="external/owasp-llm-top-10-2026/",
     ),
     Framework(
-        key=OWASP_ASI_2026,
+        key="owasp-asi-2026",
         name="OWASP Top 10 for Agentic Applications",
         edition="2026",
         source=(
@@ -567,6 +567,14 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
     ),
     "hidden_markup": _DISGUISED_TEXT,
+    "line_separators": (
+        _ref(
+            OWASP_LLM_2025,
+            "LLM01:2025",
+            "A line or paragraph separator can split instruction text in some renderers.",
+        ),
+        _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
+    ),
     "hook_commands": (
         _ref(OWASP_ASI_2026, "ASI05", "Commands run automatically on agent events."),
         _ref(
