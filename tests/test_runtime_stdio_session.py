@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from nexus_symbiote.live.pinned_process import isolation_off
 from nexus_symbiote.live import session as live_session
+from nexus_symbiote.live.pinned_process import isolation_off
 from nexus_symbiote.live.session import (
     MAX_REQUEST_BYTES,
     ExecutionOutcomeUnknown,
