@@ -18,6 +18,8 @@ from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 from nexus_symbiote.scanners.rag import SOURCE_STRUCTURE_PROFILE, RAGScanner
 
 KEY = "rag-binding-key-" + "0123456789abcdef" * 2
+FIXTURES = Path(__file__).parent / "fixtures"
+V1_FIXTURE_SOURCE = {"name": "kb", "documents": ["yes"], "sanitization": True}
 
 
 @pytest.fixture(autouse=True)
@@ -173,16 +175,14 @@ def test_v1_rag_inventory_requires_recollection_and_reports_drift(tmp_path):
 
     project = tmp_path / "project"
     project.mkdir()
-    (project / "rag_config.json").write_text(
-        json.dumps({"sources": [{"name": "kb", "documents": ["yes"], "sanitization": True}]})
-    )
+    (project / "rag_config.json").write_text(json.dumps({"sources": [V1_FIXTURE_SOURCE]}))
     output = tmp_path / "inventory.json"
     run = CliRunner().invoke(main, ["scan", str(project), "--report-only", "-o", str(output)])
     assert run.exit_code == 0, run.output
     current = AIBOM.load(output)
     # Captured by scanning the same project with commit 4aaf727 (profile v1),
     # not by constructing or editing a current-format record.
-    legacy = AIBOM.load(Path(__file__).parent / "fixtures/rag-source-structure-v1.json")
+    legacy = AIBOM.load(FIXTURES / "rag-source-structure-v1.json")
     rag = next(c for c in legacy.components if c.bom_ref == "rag:kb")
     assert rag.properties["static_config_hash_profile"] == "nexus-symbiote/rag-source-structure/v1"
     assert rag.properties["inline_documents_hash"] == hash_canonical({"documents": ["yes"]})
@@ -192,6 +192,46 @@ def test_v1_rag_inventory_requires_recollection_and_reports_drift(tmp_path):
     assert not report.is_complete
     assert any(issue.surface == "rag:kb" for issue in report.issues)
     assert CompletenessValidator().validate_against_project(current, project).is_complete
+
+
+def test_v2_rag_structure_digest_matches_its_published_vector(tmp_path):
+    from nexus_symbiote.core.aibom import AIBOM
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    # Known-answer vector for the same source the v1 capture was taken from. A change
+    # to the digested structure needs a new profile version and a new vector, because
+    # every stored baseline would otherwise mismatch.
+    vector = json.loads((FIXTURES / "rag-source-structure-v2.json").read_text())
+    assert vector["profile"] == SOURCE_STRUCTURE_PROFILE
+    assert vector["source"] == V1_FIXTURE_SOURCE
+    digest_input = vector["digest_input"]
+    assert digest_input["profile"] == SOURCE_STRUCTURE_PROFILE
+    assert digest_input["structure"]["documents"] == {"present": True, "count": 1}
+    assert hash_canonical(digest_input) == vector["static_config_hash"]
+    component = _source(tmp_path, vector["source"])
+    assert component.properties["static_config_hash"] == vector["static_config_hash"]
+    assert component.properties["static_config_hash_profile"] == vector["profile"]
+    legacy = AIBOM.load(FIXTURES / "rag-source-structure-v1.json")
+    rag = next(c for c in legacy.components if c.bom_ref == "rag:kb")
+    assert rag.properties["static_config_hash"] != vector["static_config_hash"]
+
+
+def test_absent_documents_are_digested_as_not_present_under_v2(tmp_path):
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    vector = json.loads((FIXTURES / "rag-source-structure-v2.json").read_text())
+    without = {k: v for k, v in vector["source"].items() if k != "documents"}
+    structure = {
+        **vector["digest_input"]["structure"],
+        "fields": sorted(without),
+        "documents": {"present": False},
+    }
+    expected = hash_canonical({"profile": SOURCE_STRUCTURE_PROFILE, "structure": structure})
+    component = _source(tmp_path, without)
+    assert component.document_count is None
+    assert component.properties["static_config_hash"] == expected
+    assert component.properties["static_config_hash"] != vector["static_config_hash"]
+    assert not any(risk.category == "completeness" for risk in component.risks)
 
 
 def test_shared_nested_documents_do_not_leak_contents_into_unkeyed_structure(tmp_path, monkeypatch):

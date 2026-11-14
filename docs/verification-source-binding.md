@@ -318,11 +318,21 @@ empty but which declares other fields is read as one source.
 
 The previous v1 structure profile and `inline_documents_hash` used unkeyed digests
 of inline content, so holders of those inventories can confirm guesses of low-entropy
-documents. Treat earlier inventories and exports as sensitive. Recollect both the
-reviewed baseline and candidate with v2, using the same binding key when content
-drift must be detected. A v1 baseline compared with v2 alerts, and a v1 inventory
-does not reconcile with a fresh v2 collection; review the migration before adopting
-the new baseline. Recollection does not revoke copies of earlier inventories.
+documents. Treat earlier inventories and exports as sensitive. Under v2, every RAG
+source's `static_config_hash` changes once, not only sources with inline documents:
+the profile name is part of the digested structure, and an absent `documents` key is
+digested as `{"present": false}` where v1 digested `null`. On an unchanged project,
+`diff` between a v1 baseline and a v2 collection therefore raises a high
+`properties.static_config_hash changed` alert for every RAG source, and
+`validate --project` on a v1 inventory that records a RAG source fails
+reconciliation, reporting the source as a missing or mismatched local component,
+until it is recollected. Recollect both the reviewed baseline and candidate with
+v2, using the same binding key when content drift must be detected, and review the
+migration before adopting the new baseline. `tests/fixtures/rag-source-structure-v1.json`
+is a v1 capture of one source, and `tests/fixtures/rag-source-structure-v2.json` the
+v2 known-answer vector for the same source: its digested structure and the
+`static_config_hash` it must produce. Recollection does not revoke copies of
+earlier inventories.
 
 ## IDE agent settings
 
@@ -403,7 +413,8 @@ commands of `.cursor/hooks.json` in `properties.hook_commands`.
 Older static MCP snapshots lack the source binding and configured tool locators,
 and older A2A snapshots lack the structure digests or carry the superseded
 `nexus-symbiote/a2a-card-structure/v1` or `v2` profile; older RAG records carry no
-structure digest, and older IDE agent records no keyed settings binding. They cannot establish this
+structure digest or the superseded `nexus-symbiote/rag-source-structure/v1` profile,
+and older IDE agent records no keyed settings binding. They cannot establish this
 stronger reconciliation contract. Missing or unknown binding profiles fail
 validation and require recollection; copying a newly calculated digest into an
 old approved snapshot is not a migration.
