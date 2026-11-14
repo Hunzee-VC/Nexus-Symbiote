@@ -506,6 +506,12 @@ A way around a limit that its entry does not describe is worth a
 - **RAG values that are not exported enter the digest only as their type.** Without
   the key, a content filter written as `"strict"` and changed to `"off"` raises no
   alert. A boolean control is compared.
+- **RAG transport is read from the locator's scheme.** A `source_uris` entry with a
+  clear-text scheme such as `http`, with or without `//`, is a high finding. One with
+  another scheme that is neither encrypted nor local, a `host:port`, a connection
+  string or a `user@host` form is low, whatever TLS setting a connection string
+  states. An entry without `:`, `@` or `=`, such as a bare host name, is read as a
+  path and raises none.
 - **Moved credential endpoints raise at most a medium alert.** A token endpoint or
   interface moved to another host raises a medium `properties changed` alert, and
   none when the card already uses the new host for such a URL or the URL is

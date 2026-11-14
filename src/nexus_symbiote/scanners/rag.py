@@ -193,6 +193,21 @@ def _scheme(raw: str) -> str | None:
     return match.group(1).lower() if match and "://" in raw else None
 
 
+def _transport(raw: str) -> str | None:
+    """The scheme a locator connects with: ``""`` when it shows none, ``None`` for a path.
+
+    WHATWG parsers read ``http:\\host`` and ``http:host`` as ``http://host``, so a
+    leading scheme counts without ``//``; in ``redis:6379`` the name is a host. Other
+    text with ``:``, ``@`` or ``=``, such as a connection string, shows no scheme; text
+    without them is a path.
+    """
+    value = raw.strip()
+    match = _SCHEME.match(value)
+    if match:
+        return "" if value[match.end() : match.end() + 1].isdigit() else match.group(1).lower()
+    return "" if any(mark in value for mark in ":@=") else None
+
+
 def _control(value: Any) -> str:
     """Only a boolean, or an object whose ``enabled`` is a boolean, states a control."""
     if value is None:
@@ -254,7 +269,7 @@ def _transport_risks(subject: str, urls: list[str], noun: str) -> list[RiskAsses
     risks = []
     article = "an" if noun == "endpoint" else "a"
     for uri in urls:
-        scheme = _scheme(uri)
+        scheme = _transport(uri)
         shown = neutralize(_exported_uri(uri)[0])
         if scheme in _CLEAR_TEXT_SCHEMES:
             risks.append(

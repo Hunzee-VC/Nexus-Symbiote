@@ -232,6 +232,29 @@ def test_transport_check_reads_the_scheme(tmp_path, uri, severity):
     assert all("kb.example/" not in r.detail for r in component.risks)
 
 
+@pytest.mark.parametrize(
+    ("uri", "severity"),
+    [
+        ("milvus.example:19530", "low"),
+        ("redis:6379", "low"),
+        ("Host=pg.example;Port=5432;SSL Mode=Disable", "low"),
+        ("rag@db.internal/vectors", "low"),
+        ("http:\\\\kb.example\\docs", "high"),
+        ("http:kb.example/docs", "high"),
+        ("https:\\\\kb.example\\docs", None),
+        ("docs/handbook/", None),
+        ("docs/product notes/", None),
+    ],
+)
+def test_locators_written_without_a_url_are_transport_checked(tmp_path, monkeypatch, uri, severity):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    component = _source(tmp_path, {**BASE, "source_uris": [uri]})
+    assert [r.severity.value for r in component.risks] == ([] if severity is None else [severity])
+    assert all(
+        "kb.example" not in r.detail and "pg.example" not in r.detail for r in component.risks
+    )
+
+
 def test_data_file_named_like_a_knowledge_base_is_not_a_configuration(tmp_path):
     (tmp_path / "data").mkdir()
     (tmp_path / "data" / "knowledge_base.json").write_text(json.dumps([{"title": "x"}]))
