@@ -22,6 +22,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Fixed
 
+- The known limitations state what the default exclusions, the `@path` import reader, the chat-template check and the Action's packaged Sigstore trust root leave undetected; the threat model says that the release soak and signed tag apply from 0.2.0; and the README says that its walkthrough needs the source install.
 - TypeScript collection records SDK uses hidden by `eval` wrappers, URL queries and fragments, and method names, and records nothing from ambient declarations. Python collection judges a helper only when a call must reach its definition, reads git revisions where pip and uv read them, and counts module literals behind `*` and `**`.
 - Claude settings with an invalid `permissions` value keep their other declarations, and keys the redaction makes equal keep every value in the drift digest.
 - Lockfile collection binds pnpm and Yarn records only to what they resolve and checks Python lock versions against every declaration; a private Python index is named in the package URL.
