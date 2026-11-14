@@ -230,8 +230,10 @@ entry is not started.
 The file must lie outside the project and outside the repository (the nearest
 directory with a `.git` entry) that holds the project or the inventory. On POSIX
 systems it must also be a single-link regular file owned by you or root that only its
-owner can write, in a directory owned by you or root that others cannot write unless
-it is sticky. A policy that breaks these rules is a usage error (exit 2). The checks
+owner can write, and every directory above it, up to the file system root, must be
+owned by you or root and not writable by others unless it is sticky: whoever can write
+an ancestor can rename the directory below it and put another policy in its place. A
+policy that breaks these rules is a usage error (exit 2). The checks
 catch a misplaced policy; they do not authenticate it.
 
 ### JSON documents

@@ -70,8 +70,9 @@ def _check_launch_policy(policy: Path, project: Path, inventory: Path) -> None:
 
     The policy must lie outside the project, outside the repositories that hold the
     project and the inventory, be a single-link regular file owned by the caller or
-    root that only its owner can write, in a directory owned by you or root that
-    others cannot write unless it is sticky. This catches misplacement; it does not
+    root that only its owner can write, in directories owned by you or root that others
+    cannot write unless they are sticky, up to the file system root. This catches
+    misplacement; it does not
     authenticate the policy.
     """
     resolved = policy.resolve()
@@ -89,7 +90,9 @@ def _check_launch_policy(policy: Path, project: Path, inventory: Path) -> None:
         return
     try:
         info = resolved.lstat()
-        parent = resolved.parent.stat()
+        # Whoever can write any directory above the policy can rename the one below it
+        # away and put another policy in its place, so every ancestor is checked.
+        directories = [path.stat() for path in resolved.parents]
     except OSError as exc:
         raise click.UsageError("launch policy cannot be inspected") from exc
     owners = {0, os.geteuid()}
@@ -98,13 +101,16 @@ def _check_launch_policy(policy: Path, project: Path, inventory: Path) -> None:
         or info.st_nlink != 1
         or info.st_uid not in owners
         or info.st_mode & 0o022
-        or parent.st_uid not in owners
-        or (parent.st_mode & 0o022 and not parent.st_mode & stat.S_ISVTX)
+        or any(
+            directory.st_uid not in owners
+            or (directory.st_mode & 0o022 and not directory.st_mode & stat.S_ISVTX)
+            for directory in directories
+        )
     ):
         raise click.UsageError(
             "launch policy must be a single-link regular file owned by you or root and "
-            "writable only by its owner, in a directory owned by you or root that others "
-            "cannot write unless it is sticky"
+            "writable only by its owner, in directories owned by you or root that others "
+            "cannot write unless they are sticky, up to the file system root"
         )
 
 
