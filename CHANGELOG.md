@@ -6,6 +6,8 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- Hook commands are rated by what they run. A hook that downloads and pipes a script to a shell is critical, and a hook that contains a URL is high; other hook commands stay medium. The command text is still not recorded. An HTML or Markdown comment in an instruction file is high when it contains an imperative, a URL or a path under `~/`, and low otherwise. The comment text is still not recorded.
+- An exact top-level pin of an `npx`, `npm exec`, `bunx`, `bun x`, `pnpm dlx`, `yarn dlx`, `uvx`, `uv tool run` or `pipx run` package is a medium `transitive_resolution` finding. Those runners resolve the package's dependencies at launch, and a project lockfile does not cover that install.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
 - The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.
