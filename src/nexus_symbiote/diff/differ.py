@@ -207,7 +207,7 @@ def _json_text(value: Any) -> str:
     try:
         return canonical_json(value)
     except (TypeError, ValueError, OverflowError):
-        return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 def _readable_spec_version(version: object) -> bool:

@@ -33,7 +33,7 @@ class Generator(ABC):
         """
         import json
 
-        return json.dumps(self.generate(bom), indent=indent, default=str, allow_nan=False)
+        return json.dumps(self.generate(bom), indent=indent, allow_nan=False)
 
     def generate_with_report(self, bom: AIBOM) -> ExportResult:
         from nexus_symbiote.generators._common import loss_report
