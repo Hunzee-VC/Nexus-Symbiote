@@ -10,6 +10,7 @@ from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.models import NATIVE_SPEC_VERSION
+from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 
 DEMO = Path(__file__).resolve().parents[1] / "examples" / "demo-agent"
 
@@ -38,7 +39,9 @@ def test_inventory_records_no_checkout_path(tmp_path):
     assert all(not Path(source).is_absolute() for source in sources if "://" not in source)
 
 
-def test_same_project_in_another_directory_is_not_drift(tmp_path):
+def test_same_project_in_another_directory_is_not_drift(tmp_path, monkeypatch):
+    # Unbound launch values are an alert of their own. The key makes this about the checkout path.
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, "k" * 32)
     first, other = _checkouts(tmp_path, "demo-agent")
     _scan(first, tmp_path / "baseline.json")
     _scan(other, tmp_path / "current.json")
@@ -55,7 +58,8 @@ def test_same_project_in_another_directory_is_not_drift(tmp_path):
     assert "No changes detected" in result.output
 
 
-def test_renamed_checkout_is_not_drift(tmp_path):
+def test_renamed_checkout_is_not_drift(tmp_path, monkeypatch):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, "k" * 32)
     first, other = _checkouts(tmp_path, "renamed")
     _scan(first, tmp_path / "baseline.json")
     _scan(other, tmp_path / "current.json")
