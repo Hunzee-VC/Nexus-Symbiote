@@ -1,0 +1,8 @@
+title = "Nexus SymBiote"
+
+# Test fixtures contain synthetic tokens (fake ghp_, AKIA, JWT and key material).
+# A real secret does not belong under tests/. This allowlist exists so a scan of
+# history can show a genuine leak instead of those fixtures.
+[allowlist]
+description = "Synthetic credentials committed as test fixtures"
+paths = ['''(?:^|/)tests/''']
