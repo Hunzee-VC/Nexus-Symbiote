@@ -316,6 +316,23 @@ def _launch_secrets(launch: Launch) -> list[str]:
     return [value for name, value in launch.environment if secret_like(name, value)]
 
 
+def _server_launch(config: dict[str, Any]) -> Launch:
+    """The server's launcher as analyze reads it; raises as analyze does."""
+    command = config.get("command", "")
+    return analyze(command, config.get("args", [])) if command else Launch()
+
+
+def _server_secrets(config: dict[str, Any], launch: Launch) -> list[str]:
+    """Credential values one server declares: environment, headers and inline launcher."""
+    values: list[str] = []
+    for field in ("env", "headers", "http_headers"):
+        mapping = config.get(field)
+        if isinstance(mapping, dict):
+            values.extend(secret_values(mapping))
+    values.extend(_launch_secrets(launch))
+    return values
+
+
 def _value_binding(
     config: dict[str, Any], resolver: list[list[str]] | None = None
 ) -> tuple[str, str] | None:
@@ -1522,47 +1539,45 @@ class MCPScanner(Scanner):
             clients[host].server_refs = sorted(refs)
         return found_any
 
-    @staticmethod
-    def _file_secrets(entries: list[tuple[str, Any]]) -> list[str]:
+    @classmethod
+    def _file_secrets(cls, entries: list[tuple[str, Any]]) -> list[str]:
         """Credential values of every server in a file, inline launcher values included.
 
         One server's tool text or name may repeat a value that another server's
         environment, headers or launcher holds, so the file's values are scrubbed
-        from each. A server whose launcher this skips is refused before parsing.
+        from each. Only servers that _server_problem admits count: a refused server
+        is never parsed, so its values must not push the file over the limit.
         """
         values: list[str] = []
         for _, config in entries:
-            if not isinstance(config, dict):
+            if not isinstance(config, dict) or cls._server_problem(config) is not None:
                 continue
-            for field in ("env", "headers", "http_headers"):
-                mapping = config.get(field)
-                if isinstance(mapping, dict):
-                    values.extend(secret_values(mapping))
-            command, args = config.get("command", ""), config.get("args", [])
-            if (
-                isinstance(command, str)
-                and isinstance(args, list)
-                and len(args) <= MAX_ARGUMENTS
-                and all(isinstance(arg, str) for arg in args)
-            ):
-                try:
-                    values.extend(_launch_secrets(analyze(command, args)))
-                except (TypeError, ValueError, RecursionError):
-                    # The server's normal parsing path reports this failure.
-                    continue
+            try:
+                launch = _server_launch(config)
+            except (TypeError, ValueError, RecursionError):
+                # The server's normal parsing path reports this failure.
+                launch = Launch()
+            values.extend(_server_secrets(config, launch))
         return values
 
     @staticmethod
     def _diagnostic_server_name(
         name: str, config: dict[str, Any], file_secrets: SecretScrubber | None = None
     ) -> str:
+        """The server's name for a failure, redacted as a parsed server's name is.
+
+        The file's prepared values hold this server's own values too; without a file
+        context the server's environment, header and inline launcher values are
+        collected as _parse_server collects them.
+        """
         try:
-            launch = analyze(config.get("command", ""), config.get("args", []))
+            launch = _server_launch(config)
         except (TypeError, ValueError, RecursionError):
             return "[withheld]"
-        # The file's prepared values hold this server's own inline values too.
         scrubber = (
-            file_secrets if file_secrets is not None else SecretScrubber(_launch_secrets(launch))
+            file_secrets
+            if file_secrets is not None
+            else SecretScrubber(_server_secrets(config, launch))
         )
         # Clipping first can truncate a token so its recognizable shape is lost.
         return neutralize(redact_text(name, scrubber)[:256])
@@ -1691,7 +1706,7 @@ class MCPScanner(Scanner):
         header_names = sorted({*headers, *config.get("env_http_headers", {})})
         endpoints = [config[field] for field in _ENDPOINT_FIELDS if config.get(field)]
         endpoint_url = endpoints[0] if endpoints else None
-        launch = analyze(command, args) if command else Launch()
+        launch = _server_launch(config)
         transport, transport_gap = self._transport(config, dialect, bool(command))
         server_ref = (
             "mcp-server:" + hash_canonical({"config": config_scope, "name": name}).split(":", 1)[1]
@@ -1700,18 +1715,11 @@ class MCPScanner(Scanner):
         # grammar is read; argument and environment values never leave.
         # The file's prepared values cover this server and its siblings, inline launcher
         # values included: this server's free text may repeat a value one of them holds.
-        # Without a file context, collect each header map and every inline assignment,
-        # shadowed ones included.
+        # Without a file context, _server_secrets collects them as _file_secrets does,
+        # shadowed inline assignments included.
         scrubber = file_secrets
         if scrubber is None:
-            scrubber = SecretScrubber(
-                [
-                    *secret_values(env),
-                    *secret_values(config.get("headers", {})),
-                    *secret_values(config.get("http_headers", {})),
-                    *_launch_secrets(launch),
-                ]
-            )
+            scrubber = SecretScrubber(_server_secrets(config, launch))
         cwd = config.get("cwd")
         relocated = (
             launch.relocated
@@ -1937,9 +1945,9 @@ class MCPScanner(Scanner):
     ) -> _Identity:
         """Compute identity fields from raw values; withhold one that holds a secret value."""
         withheld: list[str] = []
-        shown_name = redact_text(name, identifier=True)
+        # Known values and the identifier rules are matched in the same raw name.
+        shown_name = redact_text(name, scrubber, identifier=True)
         if scrubber.contains(name):
-            shown_name = scrubber.scrub(shown_name)
             withheld.append("name")
         command = self._safe_name(launch.command)
         if launch.command and scrubber.contains(launch.command):
@@ -2158,8 +2166,7 @@ class MCPScanner(Scanner):
 
     @staticmethod
     def _tool_name(name: str, scrubber: SecretScrubber) -> str:
-        shown = redact_text(name, identifier=True)
-        return scrubber.scrub(shown) if scrubber.contains(name) else shown
+        return redact_text(name, scrubber, identifier=True)
 
     def _transport(
         self, config: dict[str, Any], dialect: McpDialect, has_command: bool

@@ -116,3 +116,30 @@ def test_standalone_parsing_still_prepares_its_own_secret_values(field):
     assert secret not in exported and shadowed not in exported
     assert server.name == ("agent-***-***" if field == "inline" else "agent-***")
     assert tools[0].name == "read-***"
+
+
+def test_parsing_reuses_the_file_scrubber_without_extending_it(tmp_path, monkeypatch):
+    # extended() returns the same scrubber when nothing is new, so counting
+    # constructions alone misses a per-server extension.
+    extended = []
+    original = SecretScrubber.extended
+
+    def recording(self, values):
+        values = tuple(values)
+        extended.append(values)
+        return original(self, values)
+
+    monkeypatch.setattr(SecretScrubber, "extended", recording)
+    servers = {
+        f"s{index}": {
+            "command": "env",
+            "args": [f"API_TOKEN=InlineValue{index:04d}xyz", "node"],
+            "env": {"API_KEY": f"EnvValue{index:04d}xyzw"},
+            "headers": {"Authorization": f"HeaderValue{index:04d}"},
+        }
+        for index in range(8)
+    }
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": servers}))
+    result = mcp.MCPScanner().scan(tmp_path, config_only=True)
+    assert not result.scan_failures
+    assert extended == []
