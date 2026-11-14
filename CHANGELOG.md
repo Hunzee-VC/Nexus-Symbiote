@@ -6,7 +6,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
-- Tool integrity checks bind every displayed `title`, `outputSchema` and `_meta` value to the matching descriptor digest. An extension-free historical display hash no longer hides added or changed extension values; recollect historical observations whose redacted full descriptor cannot match either stored digest. The fingerprint profile is unchanged.
+- Tool integrity checks bind every displayed `title`, `outputSchema` and `_meta` value to the matching descriptor digest and refuse conflicting property aliases. An extension-free historical display hash no longer hides added or changed extension values; recollect historical observations whose redacted full descriptor cannot match either stored digest. The fingerprint profile is unchanged.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
 - The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.

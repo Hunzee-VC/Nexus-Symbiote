@@ -15,6 +15,7 @@ from nexus_symbiote.core.collection import is_imported
 from nexus_symbiote.core.enums import SerializationSafety
 from nexus_symbiote.core.hashing import (
     TOOL_DEFINITION_HASH_VERSION,
+    canonical_json,
     descriptor_binding,
     hash_tool_definition,
     normalize_digest,
@@ -525,6 +526,18 @@ class IntegrityValidator:
             return
         try:
             algorithm, expected = normalize_digest(comp.definition_hash, "sha256")
+            # Both property spellings are supported. Never let a preferred alias
+            # hide another displayed value, including a value behind explicit null.
+            for primary, alias in (
+                ("mcp_title", "title"),
+                ("mcp_output_schema", "output_schema"),
+                ("mcp_meta", "meta"),
+            ):
+                if primary in comp.properties and alias in comp.properties:
+                    if canonical_json({"value": comp.properties[primary]}) != canonical_json(
+                        {"value": comp.properties[alias]}
+                    ):
+                        raise ValueError("Conflicting tool descriptor extension aliases")
             extensions = tool_definition_extensions(
                 {
                     "title": comp.properties.get("mcp_title", comp.properties.get("title")),

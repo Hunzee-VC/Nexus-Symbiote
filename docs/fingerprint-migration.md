@@ -32,7 +32,10 @@ Current live observation inventories retain the safe extension values in
 `redacted_definition_hash` only when their displayed descriptor differs from
 the original. `validate` reports either kind as `unknown`
 (`descriptor_source_unavailable`) until source evidence corroborates it.
-Every displayed extension participates in the digest check. A historical
+Every displayed extension participates in the digest check. If both property
+spellings are present (`mcp_title` and `title`, `mcp_output_schema` and
+`output_schema`, or `mcp_meta` and `meta`), they must have equivalent JSON
+values; a null value cannot hide a non-null alias. A historical
 observation with an extension-free display hash still passes this consistency
 check when its full displayed descriptor matches its original definition
 hash. If redaction prevents that match, recollect it; an extension-free hash
