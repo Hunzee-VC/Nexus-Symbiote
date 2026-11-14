@@ -20,6 +20,10 @@ CONFTEST = (Path(__file__).parent / "conftest.py").read_text(encoding="utf-8")
         ("getaddrinfo", ("fixture.invalid", 80), (None, 80)),
         ("gethostbyname", ("fixture.localhost",), ("localhost",)),
         ("gethostbyname_ex", (1234,), ("127.0.0.1",)),
+        ("getaddrinfo", ("127.0.0.1.", 80), ("127.0.0.1", 80)),
+        ("gethostbyname", ("localhost.",), ("localhost",)),
+        ("gethostbyname", ("127.0.0.1%fixture.invalid",), ("127.0.0.1",)),
+        ("getaddrinfo", ("::1%fixture.invalid", 80), ("::1", 80)),
     ],
 )
 def test_resolver_guard_rejects_before_the_underlying_function(
