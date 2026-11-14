@@ -389,7 +389,9 @@ A way around a limit that its entry does not describe is worth a
   opcode stream, a numeric NumPy `.npy` or `.npz` array, and `.pb` files other than
   `saved_model.pb` produce no component. A pickle opcode stream, a ZIP with a
   pickle-family member name in a local header or central directory contained in
-  the first 64 KiB, or an object-dtype NumPy array is inventoried wherever it is
+  the first 64 KiB, or an object-dtype NumPy array whose `.npy` header completes
+  within the first 64 KiB (for `.npz`, across checked members starting within that
+  prefix up to 256 KiB total decompressed header bytes) is inventoried wherever it is
   named `.npy`, `.npz` or `.dat`, and under a directory named `model`, `models`,
   `weights`, `checkpoint` or `checkpoints` whatever its name is. Object-dtype arrays
   are rated `unsafe-code-execution` because `np.load(allow_pickle=True)` unpickles

@@ -9,6 +9,7 @@ code. Weight files count as signed only under an operator signature policy.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import hmac
 import io
@@ -217,7 +218,10 @@ Verify = Callable[[Path, Path, str | None, str | None], VerificationResult]
 _MODEL_DIR_NAMES = frozenset({"models", "model", "weights", "checkpoints", "checkpoint"})
 _SNIFF_SUFFIXES = frozenset({".dat", ".npy", ".npz"})
 _SNIFF_BYTES = 65536
-_NPY_OBJECT = re.compile(rb"""['"]descr['"]\s*:\s*(?:['"][|<>]?O['"]|\[[^\]]*?['"][|<>]?O['"])""")
+_MAX_ZIP_SNIFF_ENTRIES = 4096
+_MAX_NPZ_DECOMPRESSED_BYTES = 4 * _SNIFF_BYTES
+_MAX_NPY_AST_NODES = 16384
+_OBJECT_DTYPE = re.compile(r"^(?:[|<>=]?O(?:\d+|_)?|object(?:_|0|\d+)?)$")
 
 
 def _pickle_family(path: Path) -> bool:
@@ -244,33 +248,345 @@ def _sniff_candidate(path: Path) -> bool:
     return any(part.lower() in _MODEL_DIR_NAMES for part in path.parts[:-1])
 
 
+def _eval_ast_literal(node: ast.AST) -> Any:
+    """Evaluate a literal Python AST node without recursion."""
+    work: list[tuple[ast.AST, bool]] = [(node, False)]
+    values: list[Any] = []
+    visited = 0
+    while work:
+        current, ready = work.pop()
+        if not ready:
+            visited += 1
+            if visited > _MAX_NPY_AST_NODES:
+                raise ValueError("AST node budget exceeded")
+            if isinstance(current, ast.Expression):
+                work.append((current.body, False))
+            elif isinstance(current, ast.Constant):
+                if not isinstance(current.value, (str, int, float, bool, type(None))):
+                    raise ValueError("unsupported literal constant")
+                values.append(current.value)
+            elif isinstance(current, ast.UnaryOp) and isinstance(current.op, (ast.UAdd, ast.USub)):
+                work.append((current, True))
+                work.append((current.operand, False))
+            elif isinstance(current, (ast.Tuple, ast.List)):
+                work.append((current, True))
+                for elt in reversed(current.elts):
+                    work.append((elt, False))
+            elif isinstance(current, ast.Dict):
+                if any(key is None for key in current.keys):
+                    raise ValueError("dict unpacking not permitted")
+                work.append((current, True))
+                for key, val in reversed(list(zip(current.keys, current.values, strict=True))):
+                    if key is None:
+                        raise ValueError("dict unpacking not permitted")
+                    work.append((val, False))
+                    work.append((key, False))
+            else:
+                raise ValueError("unsupported AST node")
+        elif isinstance(current, ast.UnaryOp):
+            operand = values.pop()
+            if isinstance(operand, bool) or not isinstance(operand, (int, float)):
+                raise ValueError("unary operand must be numeric")
+            values.append(-operand if isinstance(current.op, ast.USub) else +operand)
+        elif isinstance(current, ast.Tuple):
+            count = len(current.elts)
+            items = values[-count:] if count else []
+            if count:
+                del values[-count:]
+            values.append(tuple(items))
+        elif isinstance(current, ast.List):
+            count = len(current.elts)
+            items = values[-count:] if count else []
+            if count:
+                del values[-count:]
+            values.append(items)
+        elif isinstance(current, ast.Dict):
+            count = len(current.keys)
+            flat = values[-2 * count :] if count else []
+            if count:
+                del values[-2 * count :]
+            parsed: dict[Any, Any] = {}
+            for idx in range(0, 2 * count, 2):
+                parsed[flat[idx]] = flat[idx + 1]
+            values.append(parsed)
+    if len(values) != 1:
+        raise ValueError("malformed literal evaluation")
+    return values[0]
+
+
+def _split_dtype_csv(spec: str) -> list[str]:
+    """Split a NumPy string dtype specification outside nested delimiters."""
+    parts: list[str] = []
+    depth = 0
+    start = 0
+    for idx, ch in enumerate(spec):
+        if ch in "([":
+            depth += 1
+        elif ch in ")]" and depth > 0:
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append(spec[start:idx])
+            start = idx + 1
+    parts.append(spec[start:])
+    return parts
+
+
+def _is_object_dtype_spec(part: str) -> bool:
+    token = part.strip()
+    while token.startswith("("):
+        depth = 0
+        close = -1
+        for idx, ch in enumerate(token):
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    close = idx
+                    break
+        if close < 0:
+            break
+        rest = token[close + 1 :].strip()
+        if not rest:
+            break
+        token = rest
+    token = token.lstrip("0123456789").strip()
+    return _OBJECT_DTYPE.fullmatch(token) is not None
+
+
+def _dtype_has_object(descr: Any) -> bool:
+    """True when a NumPy ``descr`` specification includes any object dtype field."""
+    stack: list[Any] = [descr]
+    seen = 0
+    while stack:
+        seen += 1
+        if seen > _MAX_NPY_AST_NODES:
+            return False
+        item = stack.pop()
+        if isinstance(item, str):
+            for part in _split_dtype_csv(item):
+                if _is_object_dtype_spec(part):
+                    return True
+        elif isinstance(item, list):
+            for field_spec in item:
+                if isinstance(field_spec, (tuple, list)) and len(field_spec) >= 2:
+                    stack.append(field_spec[1])
+        elif isinstance(item, tuple):
+            if len(item) >= 1:
+                stack.append(item[0])
+            if len(item) >= 2 and isinstance(item[1], (dict, list)):
+                stack.append(item[1])
+        elif isinstance(item, dict):
+            formats = item.get("formats")
+            if "names" in item and isinstance(formats, (list, tuple)):
+                stack.extend(formats)
+            else:
+                for spec in item.values():
+                    if isinstance(spec, (tuple, list)) and len(spec) >= 1:
+                        stack.append(spec[0])
+    return False
+
+
+def _npy_header_span(prefix: bytes) -> tuple[int, int, str] | None:
+    if not prefix.startswith(b"\x93NUMPY") or len(prefix) < 10:
+        return None
+    major = prefix[6]
+    if major == 1:
+        header_len = _little(prefix, 8, 2)
+        return (10, header_len, "latin-1") if header_len > 0 else None
+    if major in (2, 3):
+        if len(prefix) < 12:
+            return None
+        header_len = _little(prefix, 8, 4)
+        encoding = "latin-1" if major == 2 else "utf-8"
+        return (12, header_len, encoding) if header_len > 0 else None
+    return None
+
+
+def _npy_bytes_have_object(sample: bytes) -> bool:
+    span = _npy_header_span(sample)
+    if span is None:
+        return False
+    header_start, header_len, encoding = span
+    if header_start + header_len > len(sample):
+        return False
+    try:
+        text = (
+            sample[header_start : header_start + header_len].decode(encoding).rstrip("\x00 \t\r\n")
+        )
+        parsed = _eval_ast_literal(ast.parse(text.strip(), mode="eval"))
+    except (UnicodeDecodeError, SyntaxError, ValueError, TypeError, RecursionError, MemoryError):
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    return _dtype_has_object(parsed.get("descr"))
+
+
+def _zip64_member_sizes(
+    extra: bytes, uncomp_size: int, comp_size: int, local_offset: int
+) -> tuple[int, int]:
+    pos = 0
+    while pos + 4 <= len(extra):
+        tag = _little(extra, pos, 2)
+        size = _little(extra, pos + 2, 2)
+        payload = extra[pos + 4 : pos + 4 + size]
+        if len(payload) < size:
+            break
+        if tag == 0x0001:
+            cursor = 0
+            if uncomp_size == 0xFFFFFFFF and cursor + 8 <= size:
+                cursor += 8
+            if comp_size == 0xFFFFFFFF and cursor + 8 <= size:
+                comp_size = _little(payload, cursor, 8)
+                cursor += 8
+            if local_offset == 0xFFFFFFFF and cursor + 8 <= size:
+                local_offset = _little(payload, cursor, 8)
+            break
+        pos += 4 + size
+    return comp_size, local_offset
+
+
+def _zip_cd_entries(blob: bytes) -> list[tuple[int, int, int]] | None:
+    window = min(len(blob), 22 + 65535)
+    end_record = blob.rfind(b"PK\x05\x06", len(blob) - window)
+    if end_record < 0 or end_record + 22 > len(blob):
+        return None
+    comment_length = _little(blob, end_record + 20, 2)
+    if end_record + 22 + comment_length > len(blob):
+        return None
+    directory_end = end_record
+    directory_size = _little(blob, end_record + 12, 4)
+    directory_offset = _little(blob, end_record + 16, 4)
+    if _little(blob, end_record + 10, 2) == 0xFFFF or 0xFFFFFFFF in (
+        directory_size,
+        directory_offset,
+    ):
+        locator = end_record - 20
+        if locator < 0 or blob[locator : locator + 4] != b"PK\x06\x07":
+            return None
+        record = _little(blob, locator + 8, 8)
+        if record < 0 or record + 56 > locator or blob[record : record + 4] != b"PK\x06\x06":
+            return None
+        directory_end = record
+        directory_size = _little(blob, record + 40, 8)
+        directory_offset = _little(blob, record + 48, 8)
+    if (
+        directory_size < 0
+        or directory_size > MAX_ZIP_DIRECTORY_BYTES
+        or directory_offset < 0
+        or directory_offset + directory_size > directory_end
+    ):
+        return None
+    entries: list[tuple[int, int, int]] = []
+    pos = directory_offset
+    end = directory_offset + directory_size
+    while pos < end:
+        if len(entries) >= _MAX_ZIP_SNIFF_ENTRIES:
+            break
+        if pos + 46 > end or blob[pos : pos + 4] != b"PK\x01\x02":
+            return None
+        method = _little(blob, pos + 10, 2)
+        comp_size = _little(blob, pos + 20, 4)
+        uncomp_size = _little(blob, pos + 24, 4)
+        name_len = _little(blob, pos + 28, 2)
+        extra_len = _little(blob, pos + 30, 2)
+        comment_len = _little(blob, pos + 32, 2)
+        local_offset = _little(blob, pos + 42, 4)
+        record_end = pos + 46 + name_len + extra_len + comment_len
+        if record_end > end:
+            return None
+        if 0xFFFFFFFF in (uncomp_size, comp_size, local_offset):
+            extra = blob[pos + 46 + name_len : pos + 46 + name_len + extra_len]
+            comp_size, local_offset = _zip64_member_sizes(
+                extra, uncomp_size, comp_size, local_offset
+            )
+        entries.append((local_offset, method, comp_size))
+        pos = record_end
+    return entries
+
+
+def _zip_member_numpy_object(
+    blob: bytes, offset: int, method: int, comp_limit: int | None, budget: list[int]
+) -> bool:
+    if offset < 0 or offset + 30 > len(blob) or blob[offset : offset + 4] != b"PK\x03\x04":
+        return False
+    name_len = _little(blob, offset + 26, 2)
+    extra_len = _little(blob, offset + 28, 2)
+    data_start = offset + 30 + name_len + extra_len
+    if name_len <= 0 or name_len > 4096 or data_start >= len(blob):
+        return False
+    data_end = len(blob) if comp_limit is None else min(len(blob), data_start + comp_limit)
+    if data_end <= data_start:
+        return False
+    payload = blob[data_start:data_end]
+    if method == 0:
+        return _npy_bytes_have_object(payload)
+    if method != 8 or budget[0] < 12:
+        return False
+    try:
+        decomp = zlib.decompressobj(wbits=-zlib.MAX_WBITS)
+        sample = decomp.decompress(payload, max_length=min(12, budget[0]))
+        budget[0] -= len(sample)
+        span = _npy_header_span(sample)
+        if span is None:
+            return False
+        header_start, header_len, _ = span
+        needed = header_start + header_len
+        if needed > _SNIFF_BYTES or needed - len(sample) > budget[0]:
+            return False
+        out = bytearray(sample)
+        while len(out) < needed:
+            part = decomp.decompress(decomp.unconsumed_tail, max_length=needed - len(out))
+            if not part:
+                break
+            budget[0] -= len(part)
+            out.extend(part)
+        return _npy_bytes_have_object(bytes(out))
+    except zlib.error:
+        return False
+
+
 def _numpy_object_header(blob: bytes) -> bool:
     """True when ``blob`` starts a NumPy object array or an ``.npz`` holding one.
 
-    Object dtype is unpickled by ``np.load(allow_pickle=True)``. The header is
-    ASCII and is matched without decoding the array.
+    Object dtype is unpickled by ``np.load(allow_pickle=True)``. Only the
+    bounded prefix is parsed as a literal header dict without executing code.
     """
     if blob.startswith(b"\x93NUMPY"):
-        return _NPY_OBJECT.search(blob[:1024]) is not None
+        return _npy_bytes_have_object(blob)
     if not blob.startswith(b"PK\x03\x04") or len(blob) < 30:
         return False
-    name_len = int.from_bytes(blob[26:28], "little")
-    extra_len = int.from_bytes(blob[28:30], "little")
-    start = 30 + name_len + extra_len
-    if name_len <= 0 or name_len > 4096 or start > len(blob):
-        return False
-    method = int.from_bytes(blob[8:10], "little")
-    data = blob[start : start + 1024]
-    if method == 0:
-        sample = data
-    elif method == 8:
-        try:
-            sample = zlib.decompressobj(wbits=-zlib.MAX_WBITS).decompress(data, max_length=512)
-        except zlib.error:
-            return False
-    else:
-        return False
-    return sample.startswith(b"\x93NUMPY") and _NPY_OBJECT.search(sample[:512]) is not None
+    budget = [_MAX_NPZ_DECOMPRESSED_BYTES]
+    cd_entries = _zip_cd_entries(blob)
+    if cd_entries is not None:
+        return any(
+            _zip_member_numpy_object(blob, offset, method, comp_size, budget)
+            for offset, method, comp_size in cd_entries
+        )
+    position = 0
+    for _ in range(_MAX_ZIP_SNIFF_ENTRIES):
+        if position + 30 > len(blob) or blob[position : position + 4] != b"PK\x03\x04":
+            break
+        flags = _little(blob, position + 6, 2)
+        method = _little(blob, position + 8, 2)
+        compressed = _little(blob, position + 18, 4)
+        name_length = _little(blob, position + 26, 2)
+        extra_length = _little(blob, position + 28, 2)
+        name_at = position + 30
+        if not 0 < name_length <= 4096 or name_at + name_length + extra_length > len(blob):
+            break
+        unknown_size = bool(flags & 0x08) or compressed == 0xFFFFFFFF
+        if _zip_member_numpy_object(
+            blob, position, method, None if unknown_size else compressed, budget
+        ):
+            return True
+        if unknown_size:
+            break
+        nxt = name_at + name_length + extra_length + compressed
+        if nxt <= position:
+            break
+        position = nxt
+    return False
 
 
 def _zip_pickle_member(blob: bytes) -> bool:
@@ -300,17 +616,8 @@ def _zip_pickle_member(blob: bytes) -> bool:
 
 
 def _prefix_is_pickle(blob: bytes) -> bool:
-    """A complete opcode stream, or a valid prefix that runs past PROTO."""
-    if _recognized_pickle(io.BytesIO(blob), blob[:8], len(blob)):
-        return True
-    binary = len(blob) >= 2 and blob[0] == 0x80 and 2 <= blob[1] <= 5
-    if not binary and (not blob or blob[0] not in _TEXT_PICKLE_START):
-        return False
-    try:
-        opcodes = [opcode.name for opcode, _, _ in pickletools.genops(blob)]
-    except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
-        return False
-    return len(opcodes) >= 2 and (not binary or opcodes[0] == "PROTO")
+    """A complete or bounded binary pickle stream within the sniffed prefix."""
+    return _recognized_pickle(io.BytesIO(blob[8:]), blob[:8], len(blob)) is not None
 
 
 def sniffed_payload(blob: bytes) -> str | None:
