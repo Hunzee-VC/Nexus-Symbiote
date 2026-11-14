@@ -177,7 +177,7 @@ _REPORT_ONLY_WEAKENING_PREFIXES = ("output.",)
 
 
 def _gate_weakenings(weaker: list[str]) -> list[str]:
-    """The relaxations that can turn a failing gate into a passing one."""
+    """Every relaxation but those that change only what is reported (``output.*``)."""
     return [entry for entry in weaker if not entry.startswith(_REPORT_ONLY_WEAKENING_PREFIXES)]
 
 

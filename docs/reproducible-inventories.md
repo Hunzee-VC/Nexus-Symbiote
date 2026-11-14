@@ -201,10 +201,20 @@ against the current tree.
   than its sorted rewrite, although it records the same inventory; its serial number,
   if it has one, may not be the one this build would derive.
 - **SARIF locations depend on the working directory**, as described above.
-- **A document nested deeper than 128 levels is not read.** Every command refuses a
-  native inventory whose arrays and objects nest more than 128 levels, the root
-  counted, with "inventory nests deeper than 128 levels"; the bound is fixed, so what
-  one caller reads, every caller reads. A collected inventory nests far less.
+- **A document nested deeper than 128 levels is not read by the shared reader.**
+  `diff`, `validate`, `risk`, `summary`, `graph`, `digest`, `export-inventory` and the
+  other commands that read a native inventory through `AIBOM.load` refuse one whose
+  arrays and objects nest more than 128 levels, the root counted, with "inventory
+  nests deeper than 128 levels"; the bound is fixed, so what one of them reads, every
+  one of them reads. Past the interpreter's recursion limit, just under 1,000 levels
+  by default, the refusal says the file is not strict UTF-8 JSON instead. Four
+  commands do not apply the bound. `verify-discovery` and `verify-live` read the
+  inventory with the strict JSON parser and the schema alone, so they read a document
+  at 129 or 257 levels and refuse one at 1,000. `attest` records a subject nested up
+  to 256 levels as a native inventory with a content digest, and a deeper one as
+  `other` without one, which `verify-attestation` then verifies only by its bytes
+  (`--match content` exits with `content-digest-unavailable`). A collected inventory
+  nests far less.
 - **A readable inventory can lack a digest.** A document without a `components` list
   has no content digest. A runtime snapshot binds a document only
   when its compact JSON, with every character outside ASCII escaped and each number
