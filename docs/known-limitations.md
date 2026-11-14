@@ -103,12 +103,15 @@ A way around a limit that its entry does not describe is worth a
 ## MCP servers and tools
 
 - **Launcher classification covers named shapes.** The collector classifies `npx`,
-  `npm`, `pnpm`, `yarn`, `bun`, `bunx`, `uv`, `uvx`, `pipx`, `docker`, `podman`,
-  `nerdctl`, `deno` and `go`, also behind `env`, a shell with `-c`, `cmd /c`,
-  `powershell` or `pwsh`, `wsl`, `exec`, `nohup`, and `op`, `doppler`,
-  `infisical`, `dotenvx`, `aws-vault` or `with-secrets` with `--`. Any other
-  command is recorded as a local program by its basename, without a gap, unless it
-  is one of the runners or launches below that are gaps.
+  `npm`, `pnpm`, `yarn` (also as `yarnpkg`), `bun`, `bunx`, `uv`, `uvx`, `pipx`,
+  `docker`, `podman`, `nerdctl`, `deno` and `go`, also behind `env`, a shell with
+  `-c`, `cmd /c`, `powershell` or `pwsh`, `wsl`, `exec`, `nohup`, and `op`,
+  `doppler`, `infisical`, `dotenvx`, `aws-vault` or `with-secrets` with `--`. Any
+  other command is recorded as a local program by its basename, without a gap,
+  unless it is one of the runners or launches below that are gaps. Deno reads a
+  word after a bare `--lock` as the lock file, so `deno run --lock` followed by a
+  word is a `launcher_identity` gap even when that word is the package; write
+  `--lock=FILE` to keep the launch classified.
 - **What a local program or project script runs is not read.** `./start.sh`,
   `make serve`, `npm run mcp`, `uv run server.py` or a program that installs
   packages can start an unpinned package the inventory does not show. Review what
