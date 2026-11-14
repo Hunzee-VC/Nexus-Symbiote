@@ -60,7 +60,7 @@ def test_a_policy_in_the_repository_that_holds_the_project_is_refused(tmp_path, 
     inside = repository / "ci" / "signers.json"
     inside.parent.mkdir()
     inside.write_text(document)
-    with pytest.raises(SignaturePolicyError, match="outside the repository that holds it"):
+    with pytest.raises(SignaturePolicyError, match="outside every repository that holds it"):
         load_signature_policies(inside, project)
     # Another name for the repository directory does not hide it.
     alias = tmp_path / "alias"
