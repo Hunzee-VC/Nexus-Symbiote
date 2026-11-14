@@ -359,3 +359,29 @@ def test_long_or_shaped_scheme_values_are_redacted_whatever_their_letters(text, 
 )
 def test_capitalised_prose_after_a_scheme_word_survives(text):
     assert redact_text(text) == text
+
+
+# Vendor formats with a fixed prefix, assembled at run time like the tokens above.
+VENDOR_TOKENS = {
+    "sendgrid": "".join(("S", "G.", "a" * 22, ".", "b" * 43)),
+    "databricks": "".join(("da", "pi", "0123456789abcdef" * 2)),
+    "slack-app": "".join(("xa", "pp-", "1-A0B1C2D3E4-1234567890-", "c" * 24)),
+    "shopify": "".join(("sh", "pat_", "0123456789abcdef" * 2)),
+    "postman": "".join(("PM", "AK-", "a" * 24, "-", "b" * 34)),
+    "doppler": "".join(("dp", ".pt.", "D" * 43)),
+}
+
+
+@pytest.mark.parametrize("token", VENDOR_TOKENS.values(), ids=VENDOR_TOKENS.keys())
+@pytest.mark.parametrize("identifier", [False, True])
+def test_vendor_token_formats_are_redacted(token, identifier):
+    redacted = redact_text(f"call with {token} inside", identifier=identifier)
+    assert token not in redacted and redacted == f"call with {REDACTED} inside"
+
+
+@pytest.mark.parametrize(
+    "name", ["SG.config", "dapi-client", "xapp-bot", "shpat_rotation", "PMAK-docs", "dp.pt.cfg"]
+)
+@pytest.mark.parametrize("identifier", [False, True])
+def test_ordinary_names_near_vendor_token_formats_are_kept(name, identifier):
+    assert redact_text(name, identifier=identifier) == name

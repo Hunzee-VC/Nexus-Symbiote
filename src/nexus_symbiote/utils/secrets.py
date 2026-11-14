@@ -55,8 +55,9 @@ _DISTINCT_SHAPES = (
     r"|xox[abeoprs]-[\w-]{10,}+|[rs]k_(?:live|test)_[A-Za-z0-9]{16,}+"
     r"|(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])|AIza[\w-]{35}|ya29\.[\w-]{20,}+"
     r"|npm_[A-Za-z0-9]{36}|pypi-[\w-]{50,}+|hf_[A-Za-z0-9]{30,}+"
-    r"|SG\.[\w-]{16,}+\.[\w-]{16,}+|dckr_pat_[\w-]{20,}+|shp(?:at|ss|ca)_[0-9a-fA-F]{32}"
-    r"|SK[0-9a-f]{32}(?![A-Za-z0-9])"
+    r"|SG\.[\w-]{16,}+\.[\w-]{16,}+|dckr_pat_[\w-]{20,}+|shp(?:at|ss|ca|pa)_[0-9a-fA-F]{32}"
+    r"|SK[0-9a-f]{32}(?![A-Za-z0-9])|dapi[0-9a-f]{32}|xapp-[\w-]{20,}+"
+    r"|PMAK-[0-9a-f]{24}-[0-9a-f]{34}|dp\.pt\.\w{40,}+"
 )
 # A JWT can fail only at its first dot, so it starts only at a word boundary: started
 # after every "_" its first segment would be rescanned once per position.
