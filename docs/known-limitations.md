@@ -775,10 +775,11 @@ A way around a limit that its entry does not describe is worth a
   agent name, a server address or a port reports less, without failing the gate; a
   span that reports a server address is compared only with the tools served there,
   even when it leaves out its transport. A tool, model, agent or endpoint identifier,
-  an operation name, an MCP method or an MCP transport that is present but cannot be
-  read fails the gate. A trace cannot attribute pipe or unix-socket MCP activity to a
-  configured server, and skills, data sources, memory stores and prompts are listed
-  for information only.
+  an operation name, an MCP method, or the transport of a tool call or of an MCP client
+  span that reports a server address, that is present but cannot be read fails the
+  gate. A trace cannot attribute pipe or unix-socket MCP activity to a configured
+  server, and skills, data sources, memory stores and prompts are listed for
+  information only.
 - **Remote tools are undeclared until recorded.** A static scan records only the
   tools that a client configuration declares for a remote MCP server, not the tools
   the server serves, so calls to its other tools are undeclared until an inventory
