@@ -690,10 +690,14 @@ def test_credential_shaped_imports_are_never_read_or_hashed(tmp_path):
     assert "prompt:import:.env" not in refs
     assert "prompt:import:config/secrets.json" not in refs
     assert sorted(result.surfaces_excluded) == [
-        ".env: imported by CLAUDE.md but its name says it holds credentials; "
-        "not read or inventoried",
-        "config/secrets.json: imported by CLAUDE.md but its name says it holds "
-        "credentials; not read or inventoried",
+        (
+            ".env: imported by CLAUDE.md but its name says it holds credentials; "
+            "not read or inventoried"
+        ),
+        (
+            "config/secrets.json: imported by CLAUDE.md but its name says it holds "
+            "credentials; not read or inventoried"
+        ),
     ]
     run = _scan(project, tmp_path / "bom.json")
     assert run.exit_code == 1, run.output
