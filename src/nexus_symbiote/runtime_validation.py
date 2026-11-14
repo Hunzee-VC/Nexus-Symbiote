@@ -216,6 +216,7 @@ def _run_worker(wire: bytes) -> bytes:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             env={"PATH": os.defpath},
+            close_fds=True,
         )
     except OSError as exc:
         raise ValidationBudgetError(
@@ -1028,7 +1029,7 @@ def _worker() -> int:
     """Internal fixed-protocol worker; failure details never echo input values."""
     try:
         if os.name != "posix":
-            return 1
+            return 2
         import resource
 
         _apply_worker_limits()
