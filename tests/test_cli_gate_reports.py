@@ -706,3 +706,73 @@ def test_a_command_group_without_arguments_still_prints_its_help():
     result = CliRunner().invoke(main, ["runtime"], prog_name="nexus-symbiote")
     assert result.output.startswith("Usage: nexus-symbiote runtime")
     assert "Commands:" in result.output and "\ufffd" not in result.output
+
+
+def test_risk_report_lists_severities_from_critical_down():
+    from nexus_symbiote.reporting import risk_report_lines
+
+    document = {
+        "overall_score": 5.0,
+        "risk_level": "high",
+        "severity_counts": {"info": 1, "low": 1, "medium": 1, "critical": 1, "high": 1},
+    }
+    shown = [text.strip(" -").split(":")[0] for text, _ in risk_report_lines(document)]
+    start = shown.index("Severity breakdown:".rstrip(":")) + 1
+    assert shown[start : start + 5] == ["critical", "high", "medium", "low", "info"]
+
+
+def test_unscored_risk_report_does_not_claim_components_or_coverage():
+    from nexus_symbiote.reporting import risk_report_lines
+
+    document = {
+        "passed": False,
+        "overall_score": None,
+        "assessment_basis": "unsigned-discovery-evidence",
+        "discovery_producer": "not-verified",
+        "gate_reasons": ["Unsigned evidence."],
+    }
+    text = "\n".join(line for line, _ in risk_report_lines(document))
+    assert "Risk unknown (unsigned-discovery-evidence): not scored." in text
+    assert "Discovery producer: not verified (unsigned)" in text
+    assert "with risks" not in text and "Coverage" not in text
+
+
+def test_accepted_unsigned_evidence_is_said_so_when_the_gate_fails_otherwise():
+    from nexus_symbiote.reporting import risk_report_lines
+
+    document = {
+        "passed": False,
+        "overall_score": 80.0,
+        "assessment_basis": "supplied-bom",
+        "discovery_producer": "not-verified",
+    }
+    text = "\n".join(line for line, _ in risk_report_lines(document))
+    assert "not verified (unsigned evidence accepted)" in text
+
+
+@pytest.mark.parametrize("command", ["verify-artifact", "verify-discovery"])
+@pytest.mark.parametrize("option", ["--trust-root-sha256", "--trust-root"])
+def test_a_trust_root_pin_without_a_bundle_is_a_usage_error(tmp_path, command, option):
+    (tmp_path / "a.bin").write_bytes(b"x")
+    digest = "sha256:" + "0" * 64
+    if command == "verify-artifact":
+        args = ["a.bin", "--project", str(tmp_path), "--sha256", digest]
+    else:
+        (tmp_path / "bom.json").write_text(AIBOM().to_json())
+        args = [str(tmp_path / "bom.json"), str(tmp_path / "a.bin")]
+    value = str(tmp_path / "a.bin") if option == "--trust-root" else "not-a-digest"
+    result = CliRunner().invoke(main, [command, *args, option, value])
+    assert result.exit_code == 2
+    assert "require --bundle" in result.output
+
+
+@pytest.mark.parametrize("command", ["vex", "advisories"])
+def test_inventory_loaders_name_an_unsupported_native_version(tmp_path, command):
+    document = AIBOM().to_dict()
+    document["metadata"]["spec_version"] = "99.0.0"
+    path = tmp_path / "bom.json"
+    path.write_text(json.dumps(document))
+    extra = ["--dry-run"] if command == "advisories" else []
+    result = CliRunner().invoke(main, [command, str(path), *extra])
+    assert result.exit_code == 1
+    assert "supported: 1.0.x, 1.1.x" in result.output

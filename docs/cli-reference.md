@@ -239,7 +239,7 @@ catch a misplaced policy; they do not authenticate it.
 | Command | Document |
 |---|---|
 | `validate --json-output` | `passed`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `project-not-reconciled` when the project policy skips the completeness check); `policy_source` and `policy_weakened`; `completeness` and `integrity`, each with a `status` (`pass`, `fail`, `unknown` for integrity, or `skipped` with `skipped_by`) and the validator's report (its own `assessment_basis`, issues, `issues_omitted`; for completeness `supplier_claims` and `supplier_claims_omitted`; for integrity `bytes_charged`); `discovery_producer` (`null` without discovery evidence or a producer check, otherwise a `status` of `verified`, `failed`, `not-applicable` or `not-verified`, with `problems`); `unsigned_discovery` (`null`, or why unverified discovery evidence failed the run); `minimum_assurance_level`, `assurance_errors` and `graph_issues`. |
-| `risk --json-output` | `passed`; `overall_score` (`null` when `--project` reconciliation failed); `risk_level`; `coverage_status` and `coverage_gaps`; `gate_reasons`; `gate` (the effective thresholds, cutoff, ignored categories and suppression count, each with a `*_source` of `cli`, `project policy` or `built-in`); `findings`, each with its `fingerprint`; `severity_counts`; `category_scores`; `ignored_findings`; `suppressed_findings`, `suppressions_expired`, `suppressions_unused` and `suppressions_stale`; `total_components` and `components_with_risks`; `warning_threshold_exceeded`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `unsigned-discovery-evidence` when unverified discovery evidence fails the run); `supplier_claims` and `supplier_claims_omitted`; `discovery_producer` (`verified`, `failed`, `not-verified` or `not-applicable`); `score_threshold` (`null` with `--no-score-threshold`); `fail_on_severity`; `policy_source` and `policy_weakened`. A failed reconciliation has the same keys, with empty findings. |
+| `risk --json-output` | `passed`; `overall_score` (`null` when the run is not scored: `--project` reconciliation or the discovery producer check failed, or unverified discovery evidence was gated); `risk_level`; `coverage_status` and `coverage_gaps`; `gate_reasons`; `gate` (the effective thresholds, cutoff, ignored categories and suppression count, each with a `*_source` of `cli`, `project policy` or `built-in`); `findings`, each with its `fingerprint`; `severity_counts`; `category_scores`; `ignored_findings`; `suppressed_findings`, `suppressions_expired`, `suppressions_unused` and `suppressions_stale`; `total_components` and `components_with_risks`; `warning_threshold_exceeded`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `unsigned-discovery-evidence` when unverified discovery evidence fails the run); `supplier_claims` and `supplier_claims_omitted`; `discovery_producer` (`verified`, `failed`, `not-verified` or `not-applicable`); `score_threshold` (`null` with `--no-score-threshold`); `fail_on_severity`; `policy_source` and `policy_weakened`. A failed reconciliation has the same keys, with empty findings. |
 | `diff --json-output` | `has_changes`, `total_changes`, `components_added`, `components_removed`, `components_modified`, `dependencies_added`, `dependencies_removed` (each with its `severity` and `conditions`), `security_alerts`, `metadata_changes` and `notes`. |
 | `summary --json-output` | `total_components`, `component_types`, `total_dependencies`, `total_risks`, `risk_breakdown` and the inventory's `completeness` claim. |
 | `minimum-elements --format json` | `format` (`nexus-symbiote/minimum-elements/v1`), `edition`, `guidance`, `statement`, `evaluated` (the standard, the projection and the tool version), `subjects`, `coverage` (`present`, `assessable` and `percent`), `counts` per status, `gate` (`null` without `--fail-under`), `clusters` and `elements`; see [G7 AI SBOM minimum elements](minimum-elements.md#running-the-command). |
@@ -553,7 +553,7 @@ nexus-symbiote init [OPTIONS]
 | Option | Description |
 |---|---|
 | `--force` | Overwrite the existing project policy file (`.nexus-symbiote.yaml`, or `.nexus-symbiote.yml` when that is the only one); refused when both exist |
-| `--path` `PATH` | Directory to create .nexus-symbiote.yaml in |
+| `--path` `PATH` | Directory to create the project policy file in |
 
 ### `minimum-elements`
 
@@ -858,8 +858,8 @@ nexus-symbiote verify-artifact [OPTIONS] ARTIFACT_PATH
 | `--bundle` `FILE` | Optional Sigstore bundle |
 | `--signer-identity` `TEXT` | Expected Sigstore signing identity |
 | `--issuer` `TEXT` | Expected Sigstore OIDC issuer |
-| `--trust-root` `PATH` | Explicit Sigstore trusted_root.json file (or directory holding one); overrides `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` and the user cache |
-| `--trust-root-sha256` `TEXT` | Pinned SHA-256 (sha256:\<hex\>) the explicit trust root must match |
+| `--trust-root` `PATH` | Explicit Sigstore trusted_root.json file (or directory holding one); overrides `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` and the user cache; requires `--bundle` |
+| `--trust-root-sha256` `TEXT` | Pinned SHA-256 (sha256:\<hex\>) the explicit trust root must match; requires `--bundle` |
 
 A malformed `--sha256`, or a `--bundle`, `--signer-identity` and `--issuer` set that
 is incomplete, is a usage error (exit 2).
@@ -911,8 +911,8 @@ nexus-symbiote verify-discovery [OPTIONS] AIBOM_PATH REPORT_PATH
 | `--bundle` `FILE` | Verify the report producer's Sigstore bundle and the direct native projection. |
 | `--signer-identity` `TEXT` | Expected report signer from operator policy. |
 | `--issuer` `TEXT` | Expected OIDC issuer from operator policy. |
-| `--trust-root` `PATH` | Explicit Sigstore trusted_root.json file (or directory holding one); overrides `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` and the user cache |
-| `--trust-root-sha256` `TEXT` | Pinned SHA-256 (sha256:\<hex\>) the explicit trust root must match |
+| `--trust-root` `PATH` | Explicit Sigstore trusted_root.json file (or directory holding one); overrides `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` and the user cache; requires `--bundle` |
+| `--trust-root-sha256` `TEXT` | Pinned SHA-256 (sha256:\<hex\>) the explicit trust root must match; requires `--bundle` |
 
 ### `verify-live`
 
