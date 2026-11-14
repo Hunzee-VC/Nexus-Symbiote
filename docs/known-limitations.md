@@ -519,6 +519,11 @@ A way around a limit that its entry does not describe is worth a
 
 ## A2A and RAG
 
+- **Ambiguous redacted A2A scheme identifiers are refused.** Distinct scheme names
+  that redact to the same label anywhere in a card, including skill requirements,
+  cause collection failure even with the binding key. Rename them to distinct
+  non-secret identifiers and recollect/review the inventory. Card structure v4
+  supersedes v3; see [snapshot migration](verification-source-binding.md#upgrade-existing-snapshots).
 - **Same-host URL changes need the binding key.** A2A and RAG records export URLs as
   origins. Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a path or query change on the
   same host that keeps the path depth raises no alert, and neither does a changed
