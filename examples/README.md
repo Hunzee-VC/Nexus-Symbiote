@@ -83,12 +83,14 @@ nexus-symbiote diff before.json after.json --fail-on-alert
 
 `diff` reports exactly two changes, both critical, and exits 1: the changed
 `tickets` endpoint, and the floated `notes` package, whose static source binding
-records its version and pin and which also names the removed version pin:
+records its version and pin and which also names the removed version pin, the
+new `version_pinning` finding and the `transitive_resolution` finding that a
+floating version no longer carries:
 
 ```text
 Security Alerts:
   [CRITICAL] Critical change in 'tickets': MCP server endpoint changed. Review before execution.; MCP server static source binding changed: launcher, arguments, environment, endpoint or declared tools differ, or the binding key changed. Review before execution.; properties.static_config_hash changed.; endpoint_url changed.
-  [CRITICAL] Critical change in 'notes': MCP server static source binding changed: launcher, arguments, environment, endpoint or declared tools differ, or the binding key changed. Review before execution.; Version changed: 2025.8.21 → None; Version pin removed — now floating or unknown.; Risk findings added: 1 high (version_pinning).; properties.static_config_hash changed.; properties.packages changed.; package_url changed.
+  [CRITICAL] Critical change in 'notes': MCP server static source binding changed: launcher, arguments, environment, endpoint or declared tools differ, or the binding key changed. Review before execution.; Version changed: 2025.8.21 → None; Version pin removed — now floating or unknown.; Risk findings added: 1 high (version_pinning).; Risk findings removed: 1 medium (transitive_resolution).; properties.static_config_hash changed.; properties.packages changed.; package_url changed.
 ```
 
 An inventory records paths relative to the project, so a snapshot of one checkout

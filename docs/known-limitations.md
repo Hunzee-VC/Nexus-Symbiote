@@ -911,11 +911,16 @@ A way around a limit that its entry does not describe is worth a
   a runtime snapshot binds has no canonical digest; `digest` prints `unavailable`
   for the missing one and exits 1.
 - **An inventory nested deeper than 128 levels is not read.** Every command that
-  reads a native inventory, `diff`, `validate`, `risk`, `graph`, `summary`,
-  `digest`, `export-inventory` and the rest, refuses one whose arrays and objects
-  nest more than 128 levels, the root counted, with "inventory nests deeper than 128
-  levels" and exit 1. The bound is fixed, not the interpreter's recursion limit, so
-  the same file is read or refused by every caller. A collected inventory stays
+  reads a native inventory through the shared reader, `diff`, `validate`, `risk`,
+  `graph`, `summary`, `digest`, `export-inventory` and the rest, refuses one whose
+  arrays and objects nest more than 128 levels, the root counted, with "inventory
+  nests deeper than 128 levels" and exit 1, or, past the interpreter's recursion
+  limit (just under 1,000 levels by default), as not strict UTF-8 JSON. The bound is
+  fixed, not the interpreter's recursion limit, so the same file is read or refused by
+  every one of them. `verify-discovery` and `verify-live` do not apply it and read a
+  document up to the recursion limit; `attest` treats a subject nested up to 256
+  levels as a native inventory and a deeper one as `other`, with no content digest
+  for `verify-attestation --match content` to compare. A collected inventory stays
   within it, since its deepest values, MCP tool definitions, nest at most 64 levels;
   one edited by hand or written by another producer needs its `properties`
   flattened.

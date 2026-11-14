@@ -362,8 +362,13 @@ def _projection(
     return value
 
 
-# sh, bash, zsh, dash, including /bin/sh, /usr/bin/bash and `/usr/bin/env bash`.
-_SHELL = r"(?:[/\\]?(?:[\w.+-]+[/\\])*)?(?:env\s+)?(?:ba|z|da)?sh\b"
+# sh, bash, zsh, dash, including /bin/sh, /usr/bin/bash and `/usr/bin/env bash`. The
+# name must end its path: in `./bash/process.py` or `tools/sh/lint` it is a directory.
+# An expansion after the name, such as `bash${IFS}/dev/stdin`, may split the word there.
+_SHELL = (
+    r"(?:[/\\]?(?:[\w.+-]+[/\\])*)?(?:env\s+)?(?:ba|z|da)?sh\b"
+    r"(?![^\s/\\|;&<>()$`]*(?:/|\\(?=\S)))"
+)
 # Each matcher runs once per pipeline segment, so a command of repeated near
 # misses costs linear time whatever its length.
 _PIPE_BOUNDARY = re.compile(r"[|\n]")
@@ -372,7 +377,46 @@ _DOWNLOADER = re.compile(r"(?:curl|wget|iwr|invoke-webrequest)\b", re.IGNORECASE
 _BASE64_DECODE = re.compile(r"base64\s+(?:-d|--decode)\b", re.IGNORECASE)
 _PIPE_SHELL = re.compile(rf"\s*{_SHELL}", re.IGNORECASE)
 _POWERSHELL = re.compile(r"\b(?:powershell|pwsh)(?:\.exe)?\b", re.IGNORECASE)
-_ENCODED_COMMAND = re.compile(r"\s-(?:e|en|enc|encodedcommand)\b", re.IGNORECASE)
+# PowerShell takes -, en dash, em dash or horizontal bar before a parameter name. A shell
+# removes quotes and escapes before PowerShell reads the argument.
+_ENCODED_COMMAND = re.compile(
+    r"(?<!\S)[\"'\u2018-\u201e\\^`]*[-\u2013\u2014\u2015](?:e|en|enc|encodedcommand)\b",
+    re.IGNORECASE,
+)
+_ARGUMENT = re.compile(r"\S+")
+# Letters, digits and punctuation that sh, bash, zsh, cmd and PowerShell all pass on as
+# written, as one argument, with a backslash only between them. Any other argument may
+# be expanded, unquoted, joined to the next one or dropped, as a redirection is.
+_PLAIN = re.compile(r"[\w.+:=#~/\u2013\u2014\u2015-]+(?:\\+[\w.+:=#~/\u2013\u2014\u2015-]+)*")
+# A shell or PowerShell expansion, which may be empty or `-`. One left open runs to the
+# end of the argument, so each `$` is matched once.
+_EXPANSION = re.compile(
+    r"\$(?:\{[^}]*\}?|\([^)]*\)?|'[^']*'?|\w+(?::\w+)?|.?)|`[^`]*`|%[^%]*%|![^!]*!"
+)
+_SCRIPT_CHARACTER = re.compile(r"[\w/.]")
+_REDIRECTION = re.compile(r"[<>]")
+
+
+def _abbreviations(*parameters: tuple[str, int]) -> frozenset[str]:
+    """Each parameter name and its abbreviations down to the shortest one accepted."""
+    return frozenset(
+        name[:end] for name, shortest in parameters for end in range(shortest, len(name) + 1)
+    )
+
+
+# PowerShell passes every argument after -Command or -CommandWithArgs to the command, and
+# every argument after -File <script> to the script, as it does after a first positional
+# argument, which pwsh reads as -File and Windows PowerShell as -Command. -File - reads
+# commands from standard input and goes on reading parameters. Only abbreviations both
+# editions accept count: `-c` and `-com` to `-command`, but not `-co`, which may be
+# -ConfigurationName.
+_POWERSHELL_COMMAND = _abbreviations(("c", 1), ("command", 3), ("commandwithargs", 15), ("cwa", 3))
+_POWERSHELL_FILE = _abbreviations(("file", 1))
+# Switches that take no value in either edition. Any other parameter may take the next
+# argument as its value, even one that starts with `-`.
+_POWERSHELL_SWITCHES = _abbreviations(
+    ("noprofile", 3), ("nologo", 3), ("noninteractive", 4), ("noexit", 3), ("sta", 3), ("mta", 3)
+)
 _HOOK_URL = re.compile(r"https?://", re.IGNORECASE)
 _SEVERITY_RANK = {severity: index for index, severity in enumerate(RiskSeverity)}
 
@@ -398,17 +442,93 @@ def _fetch_exec(command: str) -> bool:
 
 
 def _encoded_powershell(command: str) -> bool:
-    """Whether a segment runs PowerShell with an encoded command."""
+    """Whether a segment passes PowerShell an encoded command as its own parameter."""
     start = 0
     for boundary in _SEGMENT_BOUNDARY.finditer(command):
-        segment = command[start : boundary.start()]
-        host = _POWERSHELL.search(segment)
-        if host is not None and _ENCODED_COMMAND.search(segment, host.end()):
+        if _encoded_segment(command[start : boundary.start()]):
             return True
         start = boundary.end()
-    segment = command[start:]
-    host = _POWERSHELL.search(segment)
-    return host is not None and _ENCODED_COMMAND.search(segment, host.end()) is not None
+    return _encoded_segment(command[start:])
+
+
+def _encoded_segment(segment: str) -> bool:
+    """Read the arguments after each PowerShell name the way PowerShell reads its own.
+
+    The name may follow any wrapper, such as `cmd /c` or `start`. An `-e` after the
+    script or command that PowerShell runs is that script's or command's argument, and
+    when the name is itself an argument, as in `grep -rn pwsh . -e foo`, the plain
+    argument after it ends what PowerShell would read as its parameters. Where an
+    argument may be either a parameter or the previous parameter's value, both readings
+    are kept. Only a plain argument can end the parameters: after one that the shell may
+    rewrite while they are read, every later encoded flag in the segment counts.
+    """
+    first = _POWERSHELL.search(segment)
+    if first is None:
+        return False
+    # parameter: the next argument is read as a parameter, or else as the script or
+    # command. value: the next argument may instead be the previous parameter's value.
+    # script: the next argument may be -File's script, and `-` continues the parameters.
+    # Nothing before the first PowerShell name can be its parameter.
+    parameter = value = script = False
+    for argument in _ARGUMENT.finditer(segment, first.start()):
+        word = argument.group()
+        plain = _PLAIN.fullmatch(word) is not None
+        if parameter or value or script:
+            if _ENCODED_COMMAND.match(segment, argument.start()):
+                return True
+            if not plain and (parameter or value or not _script_path(word)):
+                return _ENCODED_COMMAND.search(segment, argument.end()) is not None
+        if _powershell_name(word, plain):
+            parameter, value, script = True, False, False
+            continue
+        name = _parameter_name(word) if plain else None
+        if name is None:
+            parameter, value, script = value, False, False
+        elif parameter or value or script:
+            # -File always takes the next argument as its script.
+            option = parameter or value
+            switch = name in _POWERSHELL_SWITCHES
+            file = name in _POWERSHELL_FILE
+            last = switch or file or name in _POWERSHELL_COMMAND
+            parameter, value, script = (
+                (option and switch) or value or (script and word == "-"),
+                option and not last,
+                option and file,
+            )
+    return False
+
+
+def _script_path(token: str) -> bool:
+    """Whether an argument the shell may rewrite still names a script, never `-`.
+
+    A letter, digit, `/` or `.` outside an expansion stays in the word, as in
+    `"$CLAUDE_PROJECT_DIR/x.ps1"` or `"My Scripts\\x.ps1"`; a redirection is not one.
+    """
+    if _REDIRECTION.search(token):
+        return False
+    return _SCRIPT_CHARACTER.search(_EXPANSION.sub("", token)) is not None
+
+
+def _powershell_name(token: str, plain: bool) -> bool:
+    """Whether a token names PowerShell: in its last path component when it is plain.
+
+    The shell may rewrite any other token, so PowerShell's name anywhere in it counts.
+    """
+    start = max(token.rfind("/"), token.rfind("\\")) + 1 if plain else 0
+    return _POWERSHELL.search(token, start) is not None
+
+
+def _parameter_name(token: str) -> str | None:
+    """A PowerShell parameter's lowercase name without its dash or `/`; else None.
+
+    A dash may be doubled, as in `--noprofile`, and an en dash, em dash or horizontal
+    bar counts as one.
+    """
+    if token[0] in "-\u2013\u2014\u2015":
+        return token[2 if token[1:2] == token[0] else 1 :].lower()
+    if token.startswith("/") and token[1:].isalpha():
+        return token[1:].lower()
+    return None
 
 
 def _command_severity(command: str) -> RiskSeverity:
