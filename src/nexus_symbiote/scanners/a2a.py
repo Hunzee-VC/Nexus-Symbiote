@@ -134,6 +134,12 @@ _SERVER_CALLS = frozenset(
     {"AgentCard", "A2AStarletteApplication", "A2AFastAPIApplication", "A2ARESTFastAPIApplication"}
 )
 _CLIENT_CALLS = frozenset({"A2AClient", "A2ACardResolver", "ClientFactory"})
+# Pydantic class methods that build an AgentCard: the loaders read a mapping or JSON, and
+# the constructors take fields as the class does.
+_CARD_LOADERS = frozenset(
+    {"model_validate", "model_validate_json", "model_validate_strings", "parse_obj", "parse_raw"}
+)
+_CARD_CONSTRUCTORS = frozenset({"model_construct", "construct"})
 _MAX_PYTHON_CHARACTERS = 262_144
 # No character of an encoding the search follows takes more than four bytes, so a longer
 # source holds more characters than are parsed.
@@ -593,7 +599,7 @@ def _signatures(data: dict[str, Any]) -> list[dict[str, Any]]:
         records.append(
             {
                 "alg": alg
-                if isinstance(alg, str) and _JWS_ALGORITHM.fullmatch(alg)
+                if isinstance(alg, str) and _JWS_ALGORITHM.fullmatch(alg) and not _secret(alg)
                 else (None if alg is None else "[redacted]"),
                 "kid": _key_id(kid),
                 "header": "read",
@@ -609,7 +615,12 @@ def _key_id(value: Any) -> str | None:
         return "[redacted]"
     if "://" in value:
         return _origin(value)
-    return value if _KEY_ID.fullmatch(value) else "[redacted]"
+    return value if _KEY_ID.fullmatch(value) and not _secret(value) else "[redacted]"
+
+
+def _secret(value: str) -> bool:
+    """Whether a short header value takes the form of a credential pasted in by mistake."""
+    return bool(_TOKEN_SHAPE.search(value)) or redact_text(value) != value
 
 
 def _capabilities(data: dict[str, Any]) -> tuple[dict[str, bool], list[dict[str, Any]], list[str]]:
@@ -672,6 +683,15 @@ def _client_methods(declared: Any) -> list[str]:
     return _strings(declared)
 
 
+def _same_declaration(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    """Whether two cards hold the same JSON values of the same types, whatever the key
+    order; unlike ``==``, ``true`` and ``1`` differ."""
+    try:
+        return json.dumps(left, sort_keys=True) == json.dumps(right, sort_keys=True)
+    except RecursionError:
+        return False
+
+
 def _card_location(path: Path) -> tuple[str, bool] | None:
     """The supported card path a walked file spells, and whether it spells it exactly."""
     parts = path.parts
@@ -686,7 +706,8 @@ def _card_location(path: Path) -> tuple[str, bool] | None:
 
 
 def _card_preference(path: str) -> tuple[bool, int, bool, str]:
-    # The 0.3 well-known name first, then the earlier one, then other locations.
+    # Well-known locations first, shallower before deeper, then the 0.3 name
+    # (agent-card.json) before the earlier agent.json.
     parts = path.split("/")
     return (parts[-2:-1] != [".well-known"], len(parts), not path.endswith("card.json"), path)
 
@@ -699,15 +720,24 @@ def _calls(tree: ast.Module) -> tuple[set[str], bool, bool]:
         if not isinstance(node, ast.Call):
             continue
         func = node.func
+        loaded = False
         if isinstance(func, ast.Name):
             name = func.id
         elif isinstance(func, ast.Attribute):
             name = func.attr
+            owner = func.value
+            if (
+                (isinstance(owner, ast.Name) and owner.id == "AgentCard")
+                or (isinstance(owner, ast.Attribute) and owner.attr == "AgentCard")
+            ) and name in _CARD_LOADERS | _CARD_CONSTRUCTORS:
+                name, loaded = "AgentCard", name in _CARD_LOADERS
         else:
             continue
         called.add(name)
         if name == "AgentCard":
-            if node.args or any(keyword.arg is not None for keyword in node.keywords):
+            if not loaded and (
+                node.args or any(keyword.arg is not None for keyword in node.keywords)
+            ):
                 literal_card = True
             else:
                 mapping_card = True
@@ -819,7 +849,7 @@ class A2AScanner(Scanner):
         return data is None or (isinstance(data, dict) and bool(_CARD_MARKERS & set(data)))
 
     def _record_cards(self, parsed: list[tuple[str, dict[str, Any]]], result: ScanResult) -> None:
-        """One record per card; byte-identical declarations at several paths are merged."""
+        """One record per card; equal declarations at several paths are merged."""
         recorded: dict[str, tuple[dict[str, Any], A2AServerComponent]] = {}
         for relative, data in parsed:
             try:
@@ -834,7 +864,7 @@ class A2AScanner(Scanner):
             if previous is None:
                 recorded[component.bom_ref] = (data, component)
                 result.components.append(component)
-            elif previous[0] == data:
+            elif _same_declaration(previous[0], data):
                 paths = previous[1].properties["agent_card_paths"]
                 paths.append(relative)
                 paths.sort()
@@ -887,7 +917,7 @@ class A2AScanner(Scanner):
         shown = neutralize(name)
         protocols = _strings(data.get("protocols", []))
         declared_skills = data.get("skills", [])
-        if not isinstance(declared_skills, list) or len(declared_skills) > 1000:
+        if not isinstance(declared_skills, list) or len(declared_skills) > _MAX_ENTRIES:
             raise ValueError("invalid skills")
         skills, skill_declarations = [], []
         for skill in declared_skills:

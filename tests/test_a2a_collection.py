@@ -118,6 +118,18 @@ def test_different_cards_for_one_agent_name_fail_closed(tmp_path):
     assert any("different content" in failure for failure in result.scan_failures)
 
 
+def test_a_number_where_the_other_card_declares_a_flag_is_different_content(tmp_path):
+    _write(tmp_path, ".well-known/agent-card.json", {**CARD, "capabilities": {"streaming": True}})
+    _write(tmp_path, ".well-known/agent.json", {**CARD, "capabilities": {"streaming": 1}})
+    result = A2AScanner().scan(tmp_path)
+    assert result.scan_failures == [
+        ".well-known/agent.json: declares the same agent as .well-known/agent-card.json "
+        "with different content"
+    ]
+    (server,) = _servers(result)
+    assert server.properties["agent_card_paths"] == [".well-known/agent-card.json"]
+
+
 def test_unnamed_cards_in_two_places_do_not_collide(tmp_path):
     unnamed = {key: value for key, value in CARD.items() if key != "name"}
     _write(tmp_path, "a/.well-known/agent.json", unnamed)
@@ -164,6 +176,37 @@ def test_signatures_and_capabilities_are_recorded_without_verification(tmp_path)
     (unsigned,) = _servers(A2AScanner().scan(tmp_path / "b"))
     assert unsigned.properties["card_signatures"] == []
     assert unsigned.properties["static_card_hash"] != server.properties["static_card_hash"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8",
+        "AKIAIOSFODNN7EXAMPLE",
+        "api_key=s3cr3tvalue123",
+        "sk-abcdefghijklmnopqrstuvwx",
+    ],
+)
+def test_a_credential_in_a_signature_header_is_not_exported(tmp_path, value):
+    header = {"alg": value, "kid": value}
+    card = {**CARD, "signatures": [{"protected": _jws_header(header), "signature": "c2ln"}]}
+    _write(tmp_path, ".well-known/agent.json", card)
+    (server,) = _servers(A2AScanner().scan(tmp_path))
+    assert server.properties["card_signatures"] == [
+        {"alg": "[redacted]", "header": "read", "kid": "[redacted]"}
+    ]
+    assert value not in json.dumps(server.model_dump(mode="json"))
+
+
+@pytest.mark.parametrize(
+    "kid", ["key-1", "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs", "did:web:example.com#key-1"]
+)
+def test_an_ordinary_key_id_is_exported(tmp_path, kid):
+    header = {"alg": "EdDSA", "kid": kid}
+    card = {**CARD, "signatures": [{"protected": _jws_header(header), "signature": "c2ln"}]}
+    _write(tmp_path, ".well-known/agent.json", card)
+    (server,) = _servers(A2AScanner().scan(tmp_path))
+    assert server.properties["card_signatures"] == [{"alg": "EdDSA", "header": "read", "kid": kid}]
 
 
 def _drift(tmp_path: Path, before: dict[str, Any], after: dict[str, Any]):
@@ -248,6 +291,33 @@ def test_card_loaded_from_data_is_covered_by_a_static_card(tmp_path):
     _write(tmp_path, ".well-known/agent-card.json", CARD)
     result = A2AScanner().scan(tmp_path)
     assert not result.surfaces_excluded and not result.scan_failures
+
+
+@pytest.mark.parametrize(
+    ("source", "gap"),
+    [
+        (
+            "from a2a.types import AgentCard\ncard = AgentCard.model_validate(json.load(f))\n",
+            "loaded",
+        ),
+        ("from a2a import types\ncard = types.AgentCard.model_validate_json(raw)\n", "loaded"),
+        ("from a2a.types import AgentCard\ncard = AgentCard.parse_obj(data)\n", "loaded"),
+        (
+            "from a2a.types import AgentCard\n"
+            "card = AgentCard.model_construct(name='x', url='http://evil.example')\n",
+            "built",
+        ),
+    ],
+    ids=["model_validate", "model_validate_json", "parse_obj", "model_construct"],
+)
+def test_a_card_made_by_a_class_method_is_a_gap_and_a_server(tmp_path, source, gap):
+    _write(tmp_path, "server.py", source)
+    result = A2AScanner().scan(tmp_path)
+    assert result.surfaces_excluded == [
+        f"server.py: A2A agent card {gap} in Python code is not inventoried"
+    ]
+    (server,) = _servers(result)
+    assert server.bom_ref == "a2a-server:code-detected"
 
 
 def test_unparsable_source_naming_agent_card_is_a_gap(tmp_path):
