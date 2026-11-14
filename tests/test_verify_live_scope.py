@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -481,6 +482,13 @@ def test_a_remote_label_with_a_launch_command_and_no_pin_fails_the_run(tmp_path,
     assert "Server mcp:sneaky: ambiguous-transport" in result.stderr
     recorded, _, _ = invoke(tmp_path, bom, policy, "--record")
     assert recorded.exit_code == 1
+
+
+def test_the_modes_guide_lists_every_reason_a_server_can_fail_with():
+    guide = Path(__file__).parents[1] / "docs" / "offline-and-live-modes.md"
+    text = " ".join(guide.read_text(encoding="utf-8").split())
+    listed = text.split("Each failed server carries a reason:", 1)[1].split(". ", 1)[0]
+    assert set(re.findall(r"`([a-z-]+)`", listed)) == set(verify.REASONS) - {"remote-transport"}
 
 
 def test_a_relabelled_server_cannot_hide_a_rug_pull(tmp_path):
