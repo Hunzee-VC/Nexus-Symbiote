@@ -172,7 +172,7 @@ def test_the_0_1_0_license_iri_is_accepted_only_when_recovering_0_1_0_exports():
     for node in current["@graph"]:
         if node.get("relationshipType") == "hasDeclaredLicense":
             node["to"] = ["https://spdx.org/rdf/3.0.1/terms/Licensing/NoAssertion"]
-    with pytest.raises(ValueError, match="unresolved"):
+    with pytest.raises(ValueError, match="projection conflicts"):
         SPDXGenerator.recover(current)
 
 
@@ -230,9 +230,9 @@ def test_deeply_nested_public_documents_fail_with_value_errors(generator):
         document["components"] = [nested]
     else:
         document["@graph"].append(nested)
-    # Python 3.14 has no C recursion limit, so SPDX schema validation can refuse the nested
-    # node for its shape before any depth bound is reached; either way it is a ValueError.
-    match = "nested too deeply" if generator is CycloneDXGenerator else "invalid spdx export"
+    # SPDX rejects an unsupported projection before entering its general schema validator.
+    # Deep Python values may also hit the comparison's recursion bound first.
+    match = "nested too deeply" if generator is CycloneDXGenerator else "cannot be recovered"
     with pytest.raises(ValueError, match=match):
         generator.recover(document)
 
