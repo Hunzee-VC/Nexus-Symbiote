@@ -1,4 +1,4 @@
-"""AIBOM output generators — CycloneDX, SPDX, SARIF, and native JSON."""
+"""AIBOM output generators — CycloneDX, SPDX, SARIF and VEX."""
 
 from nexus_symbiote.generators.base import Generator
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
