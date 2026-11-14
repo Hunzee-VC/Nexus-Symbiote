@@ -237,6 +237,12 @@ an ancestor can rename the directory below it and put another policy in its plac
 policy that breaks these rules is a usage error (exit 2). The checks
 catch a misplaced policy; they do not authenticate it.
 
+The ownership rule includes `/`. Inside a user namespace that does not map host root
+and keeps the host's file system, such as one made with `unshare -r`, `/` and `/tmp`
+appear owned by the overflow user (usually uid 65534), so every launch policy is
+refused, and no option overrides the check. Run `verify-live` where `/` and every
+directory above the policy are owned by root or by you.
+
 ### JSON documents
 
 | Command | Document |

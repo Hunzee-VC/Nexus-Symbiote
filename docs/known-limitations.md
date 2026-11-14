@@ -876,6 +876,14 @@ A way around a limit that its entry does not describe is worth a
 - **Launcher pins cover the launcher only.** They do not authenticate the operating
   system, interpreter or libraries. Run launchers in an isolated worker, as
   [security boundaries](../SECURITY.md#security-boundaries) describe.
+- **Inside some user namespaces, every launch policy is refused.** `verify-live`
+  accepts a launch policy only when `/` and every directory above it are owned by root
+  or by you. Inside a user namespace that does not map host root and keeps the host's
+  file system, such as one made with `unshare -r`, `/` and `/tmp` appear owned by the
+  overflow user (usually uid 65534), so every policy is refused, and no option
+  overrides the check. In a sandbox that binds host directories into such a
+  namespace, such as bubblewrap, a policy below any of them is refused. Isolate the
+  worker in a way that keeps those owners; see [launch policy](cli-reference.md#launch-policy).
 - **The offline guard is a tripwire, not a sandbox.** Native code can bypass it, a
   process `verify-live` starts is not covered, and live mode removes it for the
   three live commands. Add an operating-system network boundary where you need one;
