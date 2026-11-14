@@ -454,6 +454,12 @@ between that check and the read, so that the read follows it to such a file, is 
 collection failure, and nothing read is kept. A symlink to any other in-root file, such
 as `CLAUDE.md` to `AGENTS.md`, is read through its target.
 
+The `model` collector applies the same rule to a model directory's configuration,
+tokenizer and chat template files: one whose name, or the name of the in-root file a
+symlink there leads to, says it holds credentials, such as `config.json` linked to
+`../.env`, is a coverage gap that names it, and no `config_files`, `tokenizer_files`
+or chat template digest covers it.
+
 ## Upgrade existing snapshots
 
 Older static MCP snapshots lack the source binding and configured tool locators,

@@ -15,6 +15,9 @@ from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import PromptComponent, RiskAssessment, SkillPackageComponent
 from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.scanners.credential_files import MARKDOWN_SUFFIXES as _MARKUP_SUFFIXES
+from nexus_symbiote.scanners.credential_files import credential_gap as _credential_gap
+from nexus_symbiote.scanners.credential_files import credential_shaped as _credential_shaped
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection, fold_name
@@ -486,25 +489,10 @@ _SKILL_PARTS = tuple(PurePosixPath(directory).parts for directory in SKILL_DIREC
 _DECLARATION_SUFFIXES = frozenset(
     {".md", ".mdc", ".markdown", ".txt", ".yaml", ".yml", ".json", ".toml"}
 )
-_MARKUP_SUFFIXES = frozenset({".md", ".mdc", ".markdown"})
 # Claude Code memory files and Gemini CLI context files import others with @path.
 _IMPORTING_NAMES = frozenset({"CLAUDE.md", "CLAUDE.local.md", "GEMINI.md"})
 _MAX_IMPORT_DEPTH = 5
 _MAX_IMPORTS = 1000
-# Names that hold credentials wherever they appear. A memory file names what to
-# import, and a checked-in symlink what an instruction or skill file holds, so `@.env`
-# or `CLAUDE.md -> .env` would otherwise direct an unkeyed digest of the file into the
-# inventory, which anyone holding it could confirm guesses against.
-_CREDENTIAL_SUFFIXES = frozenset(
-    {".pem", ".key", ".p12", ".pfx", ".der", ".jks", ".keystore", ".token"}
-)
-_CREDENTIAL_MARKERS = ("secret", "credential", "password", "apikey", "api_key", "api-key")
-_CREDENTIAL_NAMES = frozenset({".netrc", ".npmrc", ".pypirc", "id_rsa", "id_ecdsa", "id_ed25519"})
-# Directories named for what the files in them hold, such as `secrets/`. Only a whole
-# name counts, so a skill named `secret-scanner` keeps its scripts.
-_CREDENTIAL_DIRECTORIES = frozenset(
-    marker + plural for marker in _CREDENTIAL_MARKERS for plural in ("", "s")
-)
 # The keyed binding that covers a recorded file, imported or found by a walk, that the
 # unkeyed content hash must not.
 IMPORT_CONTENT_BINDING_PROFILE = "nexus-symbiote/prompt-import-content/v1"
@@ -512,37 +500,6 @@ IMPORT_CONTENT_BINDING_PROFILE = "nexus-symbiote/prompt-import-content/v1"
 
 def _markdown(path: str) -> bool:
     return PurePosixPath(path).suffix.lower() in _MARKUP_SUFFIXES
-
-
-def _credential_shaped(path: str) -> bool:
-    """Whether a file that is not Markdown is named as one that holds credentials, by its
-    own name or by a directory on its path, such as ``secrets/token.txt``.
-
-    A Markdown file is an instruction surface whatever its name, such as
-    ``docs/secrets-handling.md``.
-    """
-    if _markdown(path):
-        return False
-    directories = PurePosixPath(path).parts[:-1]
-    if any(part.lower().lstrip(".") in _CREDENTIAL_DIRECTORIES for part in directories):
-        return True
-    name = PurePosixPath(path).name.lower()
-    if name in _CREDENTIAL_NAMES or name.startswith(".env"):
-        return True
-    if PurePosixPath(name).suffix in _CREDENTIAL_SUFFIXES:
-        return True
-    return any(marker in name for marker in _CREDENTIAL_MARKERS)
-
-
-def _credential_gap(path: str, target: str | None) -> str | None:
-    """Why the file at ``path`` is not read, or None: its name, or the name of
-    ``target``, the in-root file a symlink at ``path`` leads to, says it holds
-    credentials."""
-    if _credential_shaped(path):
-        return "its name says it holds credentials"
-    if target is not None and _credential_shaped(target):
-        return f"a symlink leads to {target}, whose name says it holds credentials"
-    return None
 
 
 def _read_unless_credential(

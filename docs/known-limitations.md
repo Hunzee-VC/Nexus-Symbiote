@@ -406,7 +406,10 @@ A way around a limit that its entry does not describe is worth a
   file is a gap when a memory file imports it, when an instruction file such as
   `CLAUDE.md` or `.cursorrules`, a rule, prompt or subagent file, an import or a file of
   a skill or command directory is a symlink to it, and when a rule, prompt, subagent,
-  skill or command directory holds it; the directory's other files are inventoried. A
+  skill or command directory holds it; the directory's other files are inventoried. The
+  `model` collector does not read a model directory's configuration, tokenizer or chat
+  template file that is, or is a symlink to, such a file, such as `config.json` linked
+  to `../.env`; it is a gap too. A
   script whose name contains one of those words, such as `scripts/rotate_password.py`,
   is therefore a gap too, and so is every file without a Markdown suffix in a skill
   directory named exactly one of them, such as `.claude/skills/secrets/`. A Markdown
