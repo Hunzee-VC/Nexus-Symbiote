@@ -17,8 +17,9 @@ inside an archive or compression suffix, such as `checkpoint.pth.tar` or
 
 A file that no name above rates is inventoried by its content when it is named
 `.npy`, `.npz` or `.dat`, or has any name below a directory named `model`, `models`,
-`weights`, `checkpoint` or `checkpoints`. A model directory's configuration,
-tokenizer and chat template files, and Python and Jinja sources, are not checked
+`weights`, `checkpoint` or `checkpoints`. A file named as the configuration,
+tokenizer and chat template files that a model directory's readers open are, such
+as `config.json` or `tokenizer.json`, and Python and Jinja sources are not checked
 this way. Such a file is a component when its content is rated
 `unsafe-code-execution` by the checks in the table below, or when the content is a
 NumPy array or a ZIP archive that those checks' bounds left unread, which is rated

@@ -348,10 +348,11 @@ A way around a limit that its entry does not describe is worth a
   [listed names](model-integrity.md#model-files-and-references) is inventoried by
   its content only when it is named `.npy`, `.npz` or `.dat` or has any name below a
   directory named `model`, `models`, `weights`, `checkpoint` or `checkpoints`, and it
-  is not a model directory's configuration, tokenizer or chat template file or a
-  Python or Jinja source. There, a recognized pickle, a NumPy array with an object
-  dtype (which `np.load(allow_pickle=True)` unpickles) and a ZIP archive with a
-  pickle-family member or such an array as a member are rated
+  does not have the name of a model directory's configuration, tokenizer or chat
+  template file, such as `config.json`, and is not a Python or Jinja source. There, a
+  recognized pickle, a NumPy array with an object dtype (which
+  `np.load(allow_pickle=True)` unpickles) and a ZIP archive with a pickle-family
+  member or such an array as a member are rated
   `unsafe-code-execution`, and a NumPy header or ZIP archive left unread at the
   bounds below is rated `unknown`. A pickle renamed anywhere else, an unrecognized
   pickle, a numeric NumPy array, a ZIP archive with neither kind of member, and `.pb`
