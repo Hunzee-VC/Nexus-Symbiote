@@ -246,6 +246,7 @@ def _silence_broken_pipe() -> None:
     try:
         os.dup2(null, 1)
     except OSError:
+        # Descriptor 1 is already gone; the interpreter then has nothing left to flush.
         pass
     finally:
         os.close(null)
