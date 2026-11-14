@@ -483,7 +483,12 @@ A way around a limit that its entry does not describe is worth a
 - **Lockfiles are claims.** Versions, integrity values and origins in a lockfile are
   recorded as declared; nothing is fetched or verified. Python lockfiles give the
   version and index origin, not artifact digests, and Yarn Berry `checksum` values
-  are not recorded. Lockfiles of more than one npm package manager, or both
+  are not recorded. A Python lockfile record whose index is not a plain `http(s)` URL
+  with a lower-case scheme (a path, a `file://` URL, an authority holding a backslash
+  or a percent-escape) is a gap and binds no package URL; the host is recorded in
+  lower case. The `wheels` and `sdist` URLs of a
+  `uv.lock` record are not read, so the recorded origin is the index, not where each
+  artifact is downloaded from. Lockfiles of more than one npm package manager, or both
   `uv.lock` and `poetry.lock`, are a gap and bind no lockfile evidence.
 - **Some lockfiles are not read.** `Pipfile.lock`, `pdm.lock`, `bun.lock` and
   `bun.lockb` give each package they may resolve a low `lockfile_unread` finding,

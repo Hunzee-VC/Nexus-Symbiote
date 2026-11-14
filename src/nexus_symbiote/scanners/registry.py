@@ -30,7 +30,7 @@ from packaging.version import InvalidVersion, Version
 from nexus_symbiote.core.enums import AssuranceLevel, RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import extract_version_pin, hash_bytes, parse_json_strict
 from nexus_symbiote.core.models import ClaimEvidence, RegistryEntryComponent, RiskAssessment
-from nexus_symbiote.scanners.base import Scanner, ScanResult, sanitized_origin
+from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.scanners.mcp import (
     _npmrc,
     _origin_label,
@@ -313,6 +313,36 @@ def parse_image_reference(text: str) -> ImageReference | None:
     if domain == "docker.io" and len(path) == 1:
         path = ["library", *path]
     return ImageReference(domain, "/".join(path), tag, digest if at else None)
+
+
+_INDEX_HOST = re.compile(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?|\[[0-9a-f:.]{2,45}\]")
+
+
+def _index_origin(value: object) -> str | None:
+    """The origin of a lockfile's package index, or None when it cannot be established.
+
+    Only a URL with a lower-case ``http://`` or ``https://`` scheme whose authority every
+    URL parser reads the same way has one: no backslash, percent-escape, control character
+    or text outside ASCII. The host is compared and recorded in lower case. urlsplit takes the host after the last ``@``, while WHATWG parsers,
+    which uv uses, end the authority at a backslash. User information is dropped.
+    """
+    if not isinstance(value, str) or not value.isascii() or len(value) > 4096:
+        return None
+    if not value.startswith(("https://", "http://")):
+        return None
+    if any(c <= " " or c in "\\\x7f" for c in value):
+        return None
+    try:
+        parts = urlsplit(value)
+        port = parts.port
+    except ValueError:
+        return None
+    netloc = parts.netloc.rpartition("@")[2]
+    # Host names are case-insensitive, and Poetry writes a configured URL as typed.
+    host = (netloc.rsplit(":", 1)[0] if port is not None else netloc).lower()
+    if "%" in netloc or not _INDEX_HOST.fullmatch(host):
+        return None
+    return f"{parts.scheme}://{host}" + (f":{port}" if port is not None else "")
 
 
 def _url_origin(url: str) -> str:
@@ -2731,10 +2761,19 @@ class RegistryScanner(Scanner):
                 continue
             registry_origin: str | None = "https://pypi.org"
             if isinstance(source, dict):
-                raw_url = source.get("registry") if method == "uv-lockfile" else source.get("url")
-                if isinstance(raw_url, str) and raw_url.startswith(("https://", "http://")):
-                    origin = sanitized_origin(raw_url)
-                    registry_origin = origin if origin != "[redacted]" else None
+                # A source the collector cannot read as one index origin is not PyPI:
+                # a directory of wheels, an upper-case scheme or an authority that URL
+                # parsers split differently names somewhere else.
+                registry_origin = _index_origin(
+                    source.get("registry") if method == "uv-lockfile" else source.get("url")
+                )
+                if registry_origin is None:
+                    comp.package_url = comp.registry_uri = None
+                    result.surfaces_excluded.append(
+                        f"{lock_name}: package index of the selected record is not a plain "
+                        "http(s) URL; its origin is unverified"
+                    )
+                    continue
             locator = f"{lock_name}#/package/{index}"
             comp.version = resolved_version
             comp.package_url = (
