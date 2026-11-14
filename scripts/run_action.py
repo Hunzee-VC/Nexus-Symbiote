@@ -46,8 +46,20 @@ TRUST_ROOT_ENVS = (
     "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT",
     "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256",
 )
-# Retain every fixed Action setting, including the offline mode.
-IGNORED_ENV = (*TRUST_ROOT_ENVS, "NEXUS_SYMBIOTE_MODE")
+WITHHELD_ENV = (
+    "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT",
+    "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256",
+    "NEXUS_SYMBIOTE_MODE",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_URL",
+    "ACTIONS_RUNTIME_TOKEN",
+    "ACTIONS_RUNTIME_URL",
+    "ACTIONS_RESULTS_URL",
+    "ACTIONS_CACHE_URL",
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+)
+IGNORED_ENV = WITHHELD_ENV
 RELAY_PREFIX = "| "
 
 
@@ -303,7 +315,10 @@ def _run(
     # and the Sigstore trust root only from the hash-locked sigstore package: an explicit
     # trust root in the job environment would let an earlier step choose the authorities.
     env.pop(LIMITS_ENV, None)
-    for name in IGNORED_ENV:
+    # The trust root is the one in the Action's hash-locked sigstore package, and these
+    # commands never run live, whatever the job sets. Collection needs no runner or
+    # OIDC token, so a defect in native parsing code could not use one.
+    for name in WITHHELD_ENV:
         env.pop(name, None)
     if limits:
         env[LIMITS_ENV] = limits
