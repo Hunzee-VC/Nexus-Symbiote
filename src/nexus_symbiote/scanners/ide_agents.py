@@ -292,7 +292,57 @@ def _projected_text(value: str, *, unkeyed: bool) -> str:
     return "".join(pieces)
 
 
-def _projection(value: Any, depth: int = 0, *, env: bool = False, unkeyed: bool = True) -> Any:
+# Free text that settings pass to a program: a command, its arguments or an HTTP header
+# value. The redaction does not recognise a credential written there as an ordinary
+# word, such as `--password 482913` or `X-Pin: 482913`, so the digest keeps only its
+# shape: the program each command runs and the origin of each URL.
+_COMMAND_KEYS = frozenset({"command", "args", "notify"})
+_COMMAND_STARTS = frozenset(";|&(`\n")
+_HEADER_MAPS = frozenset({"headers", "httpheaders", "http_headers", "env_http_headers"})
+
+
+def _free_text(value: str, *, program: bool, unkeyed: bool) -> str:
+    """``value`` by shape: every URL origin and, when ``program``, the first word of each
+    command that a shell operator starts; operators are kept, other words are not."""
+    pieces = _SHELL_OPERATORS.split(value)
+    for index in range(0, len(pieces), 2):
+        starts = program and (not index or pieces[index - 1][-1] in _COMMAND_STARTS)
+        parts = _url_pieces(pieces[index])
+        if unkeyed and any(_ambiguous_authority(part) for part in parts):
+            raise AmbiguousURLError("a URL authority is ambiguous")
+        kept: list[str] = []
+        for number, part in enumerate(parts):
+            words = redact_text(part).split()
+            if "://" in part[:64] and _URL_AUTHORITY.match(part) and words:
+                kept.append(words[0])
+            elif starts and number == 0:
+                # A leading assignment such as `PIN=482913 run.sh` is not the program.
+                kept.extend([word for word in words if "=" not in word][:1])
+        pieces[index] = " ".join(kept) if kept else (REDACTED if pieces[index].strip() else "")
+    return "".join(pieces)
+
+
+def _command_projection(value: Any, depth: int, *, unkeyed: bool, program: bool) -> Any:
+    if depth > _MAX_SETTINGS_DEPTH:
+        raise ValueError("settings nested too deeply")
+    if isinstance(value, str):
+        return _free_text(value, program=program, unkeyed=unkeyed)
+    if isinstance(value, list):
+        return [
+            _command_projection(item, depth + 1, unkeyed=unkeyed, program=program and not index)
+            for index, item in enumerate(value)
+        ]
+    return _projection(value, depth + 1, unkeyed=unkeyed)
+
+
+def _projection(
+    value: Any,
+    depth: int = 0,
+    *,
+    env: bool = False,
+    headers: bool = False,
+    unkeyed: bool = True,
+) -> Any:
     """Settings as a redacted `settings_hashes` digest covers them.
 
     The standard redaction is applied to the text between shell operators, cut again
@@ -300,7 +350,9 @@ def _projection(value: Any, depth: int = 0, *, env: bool = False, unkeyed: bool 
     credential helper of ``_CREDENTIAL_HELPER_KEYS``, such as `apiKeyHelper`, keeps its
     key but not its command, so the digest cannot confirm a guess of a value the
     redaction removes, and does not change with one; only the keyed binding covers those
-    values. ``unkeyed`` raises ``AmbiguousURLError`` for a URL whose authority URL
+    values. A command, its arguments and the value of an HTTP header keep only their
+    shape (``_free_text``), since they can hold a credential the redaction does not
+    recognise. ``unkeyed`` raises ``AmbiguousURLError`` for a URL whose authority URL
     parsers read differently, since its redacted origin could hide a change of host that
     no keyed binding covers.
     """
@@ -313,11 +365,22 @@ def _projection(value: Any, depth: int = 0, *, env: bool = False, unkeyed: bool 
         merged: dict[str, list[Any]] = {}
         for key, item in value.items():
             text = _projected_text(str(key), unkeyed=unkeyed)
-            entry = (
-                REDACTED
-                if key in _CREDENTIAL_HELPER_KEYS
-                else _projection(item, depth + 1, env=key == "env", unkeyed=unkeyed)
-            )
+            name = str(key).lower()
+            entry: Any
+            if key in _CREDENTIAL_HELPER_KEYS or (headers and isinstance(item, str)):
+                entry = REDACTED
+            elif headers or name in _COMMAND_KEYS or name.endswith("command"):
+                entry = _command_projection(
+                    item, depth + 1, unkeyed=unkeyed, program=not headers and name != "args"
+                )
+            else:
+                entry = _projection(
+                    item,
+                    depth + 1,
+                    env=key == "env",
+                    headers=name in _HEADER_MAPS,
+                    unkeyed=unkeyed,
+                )
             merged.setdefault(text, []).append(entry)
             projected[text] = entry
         # Keys the redaction makes equal keep every value, in canonical order, so no

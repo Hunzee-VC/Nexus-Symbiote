@@ -458,17 +458,20 @@ A way around a limit that its entry does not describe is worth a
   such as the environment of an MCP server that `.gemini/settings.json` declares, of
   the command of a credential helper (`apiKeyHelper`, `awsAuthRefresh`,
   `awsCredentialExport`, `gcpAuthRefresh` or `otelHeadersHelper`), or of a credential the redaction
-  recognises. A value the redaction leaves in place, such as a password pasted into a
-  hook command, stored under a key name or passed to a command under any setting
-  other than those helpers, can still be confirmed. Keep credentials out of settings
+  recognises, nor of the words of a command, its arguments or an HTTP header value,
+  such as a PIN passed to a hook as `--password 482913` or sent as `X-Pin: 482913`,
+  which the digest covers by shape only (program words and URL origins). A value the
+  redaction leaves in place elsewhere, such as a password stored under a key name, can
+  still be confirmed. Keep credentials out of settings
   files; see
   [IDE agent settings](verification-source-binding.md#ide-agent-settings).
 - **Some settings changes alert only with the key.** Every settings file is digested
   after the redaction, so that its digest cannot confirm a guess. Without
   `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a change only to a value the redaction removes,
   such as an `env` value, including an MCP server's environment value, the command of
-  a credential helper, a token, or a URL path, query or userinfo on the same host in a
-  `notify` command, raises no alert; such a record carries a low `completeness`
+  a credential helper, a token, a URL path, query or userinfo on the same host in a
+  `notify` command, an argument of a command, such as an MCP server's pinned version
+  in `args` or an option of a hook command, or an HTTP header value, raises no alert; such a record carries a low `completeness`
   finding. Adding or removing an `env` name or a credential helper still alerts. The
   redaction ends a URL or an assigned value at a shell operator (`;`, `|`, `&`, `$`,
   `` ` ``, parentheses, braces, `<`, `>` or a line break), and starts a new URL at

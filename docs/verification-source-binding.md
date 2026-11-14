@@ -339,7 +339,15 @@ and the keys of the Claude Code credential helpers `apiKeyHelper`, `awsAuthRefre
 `awsCredentialExport`, `gcpAuthRefresh` and `otelHeadersHelper`, wherever a settings file names one, but
 not their commands: each becomes `***` whatever it is, since a helper command such as
 `printf passphrase` can hold a credential the redaction does not recognise. No helper
-is run. A URL keeps only its scheme, host and
+is run. For the same reason a command, its arguments and the value of an HTTP header
+keep only their shape: the value of every key named `command`, ending in `Command`
+(such as Gemini CLI's `toolDiscoveryCommand`), `args` or `notify`, such as a hook
+command, a `statusLine` command or an MCP server's arguments, keeps the URL origins it
+names and the first word of each command a shell operator starts, without a leading
+`NAME=value` assignment, and no other word, so `check.sh --password 482913` is digested
+as `check.sh`; an argument list keeps only URL origins, and each value under
+`headers`, `httpHeaders`, `http_headers` or `env_http_headers`, such as `X-Pin: 482913`,
+becomes `***` while its header name stays. A URL keeps only its scheme, host and
 port, and a credential in an assignment, after an authorization scheme or in a known
 token format is removed. The redaction is applied separately to the text between
 the shell operators `;`, `|`, `&`, `$`, `` ` ``, `(`, `)`, `{`, `}`, `<`, `>` and line breaks,
@@ -375,9 +383,12 @@ whitespace change no digest. With the key, `static_value_binding` is an HMAC-SHA
 under the key over every file as read
 (profile `nexus-symbiote/ide-settings-values/v1`), so the record still changes with
 any value while no unkeyed digest covers environment values or text the redaction
-removes. A value the redaction leaves in place, such as a password pasted into a hook
-command or stored under a key name, can still be confirmed from the digest, so keep
-credentials out of settings files. The digests agree between a keyed and an unkeyed
+removes. A value the redaction leaves in place outside a command, an argument list or
+a header, such as a password stored under a key name, can still be confirmed from the
+digest, so keep credentials out of settings files. Without the key, a change only to a
+command's arguments, such as a new pinned version in an MCP server's `args` or a new
+option of a hook, raises no alert; a new program, host, operator, hook or header name
+does. The digests agree between a keyed and an unkeyed
 collection, except that without the key a file holding an ambiguous URL authority is
 a failure instead of a digest, so enabling the key later changes no recorded digest;
 the binding itself appears only with the key. A record from an earlier build has no
