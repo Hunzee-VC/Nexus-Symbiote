@@ -204,8 +204,25 @@ def _kill_descendants(root: int) -> None:
                 pass
 
 
+def _executable_image(staged: Path) -> bool:
+    """True when the kernel can exec the file directly: ELF or a shebang script.
+
+    A PID namespace hides an exec failure inside ``unshare``, which then looks like an
+    empty MCP session. Checking the image first keeps that failure ``launcher-start-failed``
+    on hosts that allow the namespace and on hosts that refuse it.
+    """
+    try:
+        with staged.open("rb") as handle:
+            prefix = handle.read(4)
+    except OSError:
+        return False
+    return prefix.startswith(b"\x7fELF") or prefix.startswith(b"#!")
+
+
 def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
     """Start the staged launcher with a private cwd, a default PATH and a new session."""
+    if not _executable_image(staged):
+        raise PinnedProcessError("launcher-start-failed", "launcher could not be run")
     try:
         argv = isolated_argv(staged)
         namespaced = isolation_enabled() and bool(argv) and argv[0] != str(staged)
