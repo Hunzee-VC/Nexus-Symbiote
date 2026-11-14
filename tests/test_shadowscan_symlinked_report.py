@@ -1,4 +1,4 @@
-"""A ShadowScan report behind a symbolic link must not replace the report a pipeline wrote.
+"""A ShadowScan report behind a directory link must not replace a pipeline's report.
 
 The collector lists the supported report paths by the identity of what each path names
 without following links, but reads a report through one in-root directory link. A
