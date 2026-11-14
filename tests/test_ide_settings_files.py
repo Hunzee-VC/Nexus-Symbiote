@@ -151,6 +151,28 @@ def _drift(
     return runner.invoke(main, ["diff", *map(str, outputs), "--fail-on-alert"])
 
 
+UNBOUND_ALERT = (
+    "Values are unbound in one snapshot without the binding key; a change to them is "
+    "undetectable and no value is recorded."
+)
+
+
+def _assert_only_unbound(ide_type: str, run) -> None:
+    """Without the key the digest stays the same, and the gate still fails on the
+    medium alert that the record's values are unbound."""
+    assert run.exit_code == 1, run.output
+    alerts = [
+        line.strip()
+        for line in run.output.splitlines()
+        if line.lstrip().startswith("[") and not line.lstrip().startswith("[NOTE]")
+    ]
+    assert alerts == [
+        f"[MEDIUM] Medium change in '{ide_type}': {UNBOUND_ALERT} Set "
+        "NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections."
+    ], run.output
+    assert not _high_settings_alert(ide_type, run.output), run.output
+
+
 def _high_settings_alert(ide_type: str, output: str) -> bool:
     """Whether ``output`` holds a high alert for the record that names its settings digest."""
     return any(
@@ -358,8 +380,7 @@ def test_a_change_only_to_a_withheld_value_alerts_only_with_the_key(
         expected = "[HIGH] High change in 'codex': properties.static_value_binding changed."
         assert expected in run.output
     else:
-        assert run.exit_code == 0, run.output
-        assert "No changes detected" in run.output
+        _assert_only_unbound("codex", run)
     for path in (tmp_path / "0.json", tmp_path / "1.json"):
         text = path.read_text(encoding="utf-8")
         assert "cdn.example" not in text and "TOKEN" not in text and "LOG_LEVEL" not in text
@@ -400,8 +421,7 @@ def test_a_redacted_value_beside_an_operator_is_still_withheld(runner, tmp_path,
     assert GLUED_NOTIFY.count(old) == 1, change
     after = GLUED_NOTIFY.replace(old, new)
     run = _drift(runner, tmp_path, ".codex/config.toml", GLUED_NOTIFY, after, "ide_agents")
-    assert run.exit_code == 0, run.output
-    assert "No changes detected" in run.output
+    _assert_only_unbound("codex", run)
 
 
 LISTED_WEBHOOKS = 'notify = ["notifier", "--webhooks=https://hooks.example.com/notify"]\n'
@@ -451,8 +471,7 @@ def test_a_path_change_on_the_same_hosts_is_still_withheld(runner, tmp_path, old
     before = LISTED_WEBHOOKS.replace("/notify", old)
     after = LISTED_WEBHOOKS.replace("/notify", new)
     run = _drift(runner, tmp_path, ".codex/config.toml", before, after, "ide_agents")
-    assert run.exit_code == 0, run.output
-    assert "No changes detected" in run.output
+    _assert_only_unbound("codex", run)
 
 
 def test_the_cut_parts_keep_their_hosts_apart():

@@ -153,7 +153,12 @@ def test_inline_document_drift_is_bound_only_with_key(tmp_path, monkeypatch):
     unkeyed, keyed = tmp_path / "unkeyed", tmp_path / "keyed"
     unkeyed.mkdir()
     keyed.mkdir()
-    assert _scan_and_diff(unkeyed, before, after).exit_code == 0
+    # Without the key nothing records the text, so the gate fails on the unbound values.
+    run = _scan_and_diff(unkeyed, before, after)
+    assert run.exit_code == 1, run.output
+    alerts = json.loads(run.stdout)["security_alerts"]
+    assert [(a["severity"], a["component"]) for a in alerts] == [("medium", "rag:kb")], alerts
+    assert alerts[0]["alert"].startswith("Medium change in 'kb': Values are unbound")
     monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
     result = _scan_and_diff(keyed, before, after)
     assert result.exit_code == 1, result.output

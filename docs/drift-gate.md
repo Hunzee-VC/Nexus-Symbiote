@@ -13,10 +13,15 @@ argument other than the launcher package, a changed environment or header value,
 endpoint or package index path changed on the same host, a changed value of a project
 resolver setting such as an `.npmrc` entry, an A2A or RAG URL path changed on the same
 host that keeps its depth, changed inline RAG document content at the same count,
-or a value the redaction removes from `.codex/config.toml`,
-`.cursor/cli.json` or the Antigravity, xAI and Copilot settings files, such as a token or
-a URL path in a `notify` command; see [source binding](verification-source-binding.md).
-The [known limitations](known-limitations.md) list those surfaces.
+the content of an `@path` import that is not a Markdown file, or a value the redaction
+removes from an IDE agent's settings file, such as an `env` value in
+`.claude/settings.json`, a token, or a URL path in a hook or `notify` command; see
+[source binding](verification-source-binding.md). None of those changes alters the
+record, so a record that holds such values without the key carries a low `completeness`
+finding saying its values are not bound in this inventory, and `diff` raises a medium
+alert for it on every comparison, changed or not. A keyless `diff --fail-on-alert`
+therefore fails on such a record; the alert says the values are unbound and records no
+value. The [known limitations](known-limitations.md) list those surfaces.
 
 ## The trust anchor is the baseline
 
@@ -137,6 +142,7 @@ then notes, then the added, removed and modified components and relationships.
 | Trust tier or signing status raised | medium: a snapshot is written unsigned, so a raised label is a claim to review |
 | Risk findings added | the highest added severity, at least medium |
 | Risk findings removed; any other field changed, including snapshot metadata such as the producer's `tool_name` or `tool_vendor` | medium |
+| Values unbound in either snapshot: the record has no keyed binding (`static_value_binding`) and carries a `completeness` finding saying its values are not bound in this inventory, as MCP launch values, IDE agent settings values, RAG and A2A values and the content of an `@path` import that is not Markdown do without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`. Raised on every comparison, changed or not, and names no value: `MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections.` for an MCP server, `Values are unbound in one snapshot without the binding key; a change to them is undetectable and no value is recorded. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections.` for any other record | medium |
 | Relationship added | medium; high for `invokes`, `delegates-to` and `acts-as-identity` |
 | Relationship removed | medium; high for `uses-guardrail` and `approved-under` |
 | Relationship kept but its assurance or conditions changed | high |
@@ -204,4 +210,4 @@ jobs:
           reviewed-baseline: ${{ runner.temp }}/reviewed.json
 ```
 
-Avoid checking out `github.event.pull_request.head.sha` inside a `pull_request_target` workflow ("pwn request" hazard): `pull_request_target` runs in the base repository's security context, where adding any build, test, cache or secret step later turns an untrusted fork checkout into secret exfiltration or repository compromise. On `pull_request`, same-repository pull requests can supply `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` from repository secrets. Fork pull requests receive no secrets, and the Action refuses `reviewed-baseline` without the key. An unkeyed `diff --fail-on-alert` fails closed on unbound MCP launch values instead of comparing them, so run keyed comparisons only for same-repository pull requests and trusted branches.
+Avoid checking out `github.event.pull_request.head.sha` inside a `pull_request_target` workflow ("pwn request" hazard): `pull_request_target` runs in the base repository's security context, where adding any build, test, cache or secret step later turns an untrusted fork checkout into secret exfiltration or repository compromise. On `pull_request`, same-repository pull requests can supply `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` from repository secrets. Fork pull requests receive no secrets, and the Action refuses `reviewed-baseline` without the key. An unkeyed `diff --fail-on-alert` fails closed on unbound values, such as MCP launch values, IDE settings values or the content of an `@path` import that is not Markdown, instead of comparing them, so run keyed comparisons only for same-repository pull requests and trusted branches.

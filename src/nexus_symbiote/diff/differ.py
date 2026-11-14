@@ -34,18 +34,20 @@ from nexus_symbiote.utils.crypto import (
 SEVERITIES = ("info", "low", "medium", "high", "critical")
 
 
-def _launch_values_unbound(component: MCPServerComponent) -> bool:
-    """True when this snapshot left launch values out of the keyed binding.
+def _values_unbound(component: AnyComponent) -> bool:
+    """True when this snapshot left values out of the keyed binding.
 
-    The collector records that as a low completeness finding. The structural hash
-    still matches after an argument or environment value changes, so diff cannot
-    see the change and must not report the snapshots as equal.
+    The collector records that as a low completeness finding naming
+    ``UNBOUND_VALUES_DETAIL``: MCP launch values, IDE settings values, RAG and A2A
+    values, or the content of an imported file that is not Markdown. Nothing else in
+    the record changes when one of those values does, so diff cannot see the change
+    and must not report the snapshots as equal.
     """
     if component.properties.get("static_value_binding"):
         return False
     return any(
         risk.category == "completeness" and UNBOUND_VALUES_DETAIL in risk.detail
-        for risk in component.risks
+        for risk in getattr(component, "risks", ())
     )
 
 
@@ -602,7 +604,7 @@ class AIBOMDiffer:
                         "severity": "critical",
                     }
                 )
-            elif _launch_values_unbound(old) or _launch_values_unbound(new):
+            elif _values_unbound(old) or _values_unbound(new):
                 # Redacted arguments, environment values and endpoint paths are not in the
                 # structural hash. Without the keyed binding a widened filesystem root
                 # compares equal, so the comparison itself is the alert.
@@ -616,6 +618,20 @@ class AIBOMDiffer:
                         "severity": "medium",
                     }
                 )
+
+        elif _values_unbound(old) or _values_unbound(new):
+            # The values themselves are left out of the record, so the alert names
+            # none of them.
+            modifications.append(
+                {
+                    "detail": (
+                        "Values are unbound in one snapshot without the binding key; a change "
+                        "to them is undetectable and no value is recorded. Set "
+                        "NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections."
+                    ),
+                    "severity": "medium",
+                }
+            )
 
         if old.trust_tier != new.trust_tier:
             old_rank = TRUST_TIER_ORDER.get(old.trust_tier, 5)

@@ -203,7 +203,9 @@ A way around a limit that its entry does not describe is worth a
   index path changed on the same host, a project resolver setting value, and the
   directory of a command do not produce an alert that names the new value. For an
   MCP server that recorded those values as unbound, `diff --fail-on-alert` still
-  fails, because the comparison cannot show that they stayed the same.
+  fails, because the comparison cannot show that they stayed the same; so it does for
+  any other record that recorded its values as unbound (see
+  [drift gate](drift-gate.md#what-the-alerts-mean)).
 - **Unbound values add to the score.** Each server with such values carries a low
   `completeness` risk that names the key. It is not a gap, but it adds 1 to the
   risk score, so about ten such servers add 10 points toward the default fail
@@ -472,8 +474,11 @@ A way around a limit that its entry does not describe is worth a
   configuration or secrets, and an unkeyed digest of them could be confirmed by
   guessing. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` a keyed binding covers the
   content, which `validate --project` with the same key verifies; without the key the
-  component carries a low `completeness` finding, validation counts it as unbound, and
-  a change to the file raises no alert and fails no validation. A project with more
+  component carries a low `completeness` finding saying its values are not bound in
+  this inventory, validation counts it as unbound, and a change to the file fails no
+  validation. `diff` cannot see the change either, so it raises a medium alert that
+  the record's values are unbound on every comparison, changed or not, and a keyless
+  `diff --fail-on-alert` fails. A project with more
   than the [`import-lookups`](collection-limits.md#limits) limit of memory files and
   import targets fails until the limit is raised. Past 262,144 characters of listed
   paths, an `imports` list is replaced by `imports_count` and `imports_digest`, and an
@@ -534,9 +539,11 @@ A way around a limit that its entry does not describe is worth a
   such as an `env` value, including an MCP server's environment value, the command of
   `apiKeyHelper`, a token, the value of an `Authorization`, `Cookie` or credential-named
   key such as `password` or `X-Api-Key`, or a URL path, query or userinfo on the same
-  host in a `notify` command, raises no alert; such a record carries a low
-  `completeness` finding. Adding or removing an `env` name or `apiKeyHelper` still
-  alerts. The redaction ends a URL or an assigned value at a shell operator (`;`, `|`,
+  host in a `notify` or hook command, changes no digest; such a record carries a low
+  `completeness` finding, so `diff` raises a medium alert that its values are unbound
+  on every comparison, changed or not, without naming a value, and a keyless
+  `diff --fail-on-alert` fails on that alert rather than on the change. Adding or
+  removing an `env` name or `apiKeyHelper` still alerts as a settings change. The redaction ends a URL or an assigned value at a shell operator (`;`, `|`,
   `&`, `$`, `` ` ``, parentheses, braces, `<`, `>` or a line break), and starts a new
   URL at each later scheme such as `https://`, so a command or operator glued to one
   without whitespace, and a host glued to one after an operator or a scheme, as in
@@ -547,7 +554,8 @@ A way around a limit that its entry does not describe is worth a
 - **Codex settings are interpreted in part.** `.codex/config.toml` is digested
   whole after the redaction, so a new `notify` command or another changed setting
   raises an alert, unless only a value the redaction removes changed and the scans
-  ran without the key (see the previous entry). Only `approval_policy`,
+  ran without the key: then only the medium alert that the values are unbound is
+  raised (see the previous entry). Only `approval_policy`,
   `sandbox_mode` and the `mcp_servers` table are interpreted. A value that the
   digest or the keyed binding covers and that RFC 8785 JSON cannot represent, such
   as a TOML date or time, `nan`, `inf` or an integer of magnitude 2^53 or more, is a
@@ -617,22 +625,26 @@ A way around a limit that its entry does not describe is worth a
 
 - **Same-host URL changes need the binding key.** A2A and RAG records export URLs as
   origins. Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a path or query change on the
-  same host that keeps the path depth raises no alert, and neither does a changed
+  same host that keeps the path depth changes no digest, and neither does a changed
   A2A interface `tenant` or a changed scope that was redacted. Such records carry a
-  low `completeness` risk that names the key. See
+  low `completeness` risk that names the key, so `diff` raises a medium alert that
+  their values are unbound on every comparison, changed or not, and a keyless
+  `diff --fail-on-alert` fails on that alert. See
   [A2A agent cards](verification-source-binding.md#a2a-agent-cards-and-client-entries)
   and [RAG sources](verification-source-binding.md#rag-sources).
 - **Some A2A values are bound only by the key.** Values the record neither exports
   nor digests, such as descriptions, a skill's tags, examples and modes, security
   scheme fields other than their types and URLs, and `protocolVersion`, raise no
-  alert without the key and add no `completeness` risk.
+  alert of their own without the key and add no `completeness` risk.
 - **RAG values that are not exported enter the digest only as their type.** Without
   the key, a content filter written as `"strict"` and changed to `"off"` raises no
   alert. A boolean control is compared.
 - **Inline document contents need the binding key.** RAG source structure v2 records
   their presence and count without hashing their contents. Without
-  `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a same-count content change raises no drift
-  alert and a nonempty document list carries a low `completeness` finding. The old
+  `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a same-count content change changes no digest;
+  a nonempty document list carries a low `completeness` finding, so `diff` raises a
+  medium alert that the source's values are unbound on every comparison, and a keyless
+  `diff --fail-on-alert` fails on that alert. The old
   v1 structure and `inline_documents_hash` allowed offline guesses of content; older
   inventories and exports remain sensitive and need recollection.
 - **Every v1 RAG record drifts once under v2.** The profile name is part of the
