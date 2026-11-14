@@ -665,3 +665,21 @@ def test_client_fields_of_other_dialects_are_interpreted(tmp_path):
         "tool_filters": 1,
     }
     assert "cursor-oauth-secret-1" not in record.model_dump_json()
+
+
+@pytest.mark.parametrize("number", ["1e400", "-1e400"])
+def test_a_nonfinite_jsonc_number_is_an_invalid_json_failure(tmp_path, number):
+    text = f'{{"servers": {{"s": {{"command": "uvx", "args": ["x"], "timeout": {number}}}}}}}'
+    result = scan(tmp_path, {".vscode/mcp.json": text})
+    assert result.scan_failures == [".vscode/mcp.json: invalid JSON or duplicate keys"]
+    assert not servers(result)
+    with pytest.raises(ValueError):
+        _load_jsonc(text)
+
+
+@pytest.mark.parametrize("number", ["inf", "-inf", "nan"])
+def test_a_nonfinite_toml_float_is_an_invalid_toml_failure(tmp_path, number):
+    text = f'[mcp_servers.s]\ncommand = "uvx"\nargs = ["x"]\ntimeout = {number}\n'
+    result = scan(tmp_path, {".codex/config.toml": text})
+    assert result.scan_failures == [".codex/config.toml: invalid TOML"]
+    assert not servers(result)

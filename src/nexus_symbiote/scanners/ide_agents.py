@@ -594,7 +594,10 @@ class IDEAgentScanner(Scanner):
                 return path.as_posix()
             return None
         variants = _CODEX_SPELLINGS if marker in _CODEX_SPELLINGS else ()
-        if files.read_bytes(marker, missing_ok=True, variants_read=variants) is None:
+        if files.regular_file(marker) is None:
+            # Existence is a stat, charged to no budget; the read records a refused link
+            # or another spelling of the name, and reads nothing when the file is absent.
+            files.read_bytes(marker, missing_ok=True, variants_read=variants)
             return None
         return marker
 
@@ -917,7 +920,7 @@ class IDEAgentScanner(Scanner):
         if text is None:
             return None
         try:
-            data = parse_json_strict(strip_jsonc(text))
+            data = parse_json_strict(strip_jsonc(text), max_bytes=files.max_file_bytes)
         except (ValueError, RecursionError):
             result.scan_failures.append(f"{relative}: invalid JSON or duplicate keys")
             return None

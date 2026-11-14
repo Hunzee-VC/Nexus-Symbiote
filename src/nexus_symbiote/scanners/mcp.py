@@ -16,6 +16,7 @@ from __future__ import annotations
 import hmac
 import ipaddress
 import json
+import math
 import os
 import posixpath
 import re
@@ -651,9 +652,20 @@ def _reject_constant(value: str) -> Any:
     raise ValueError("nonfinite JSON")
 
 
+def _finite_float(text: str) -> float:
+    # json.loads and tomllib read 1e400 and inf as infinity, which no export can carry.
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError("nonfinite number")
+    return value
+
+
 def _load_jsonc(text: str) -> Any:
     return json.loads(
-        strip_jsonc(text), object_pairs_hook=_unique_pairs, parse_constant=_reject_constant
+        strip_jsonc(text),
+        object_pairs_hook=_unique_pairs,
+        parse_constant=_reject_constant,
+        parse_float=_finite_float,
     )
 
 
@@ -1448,7 +1460,9 @@ class MCPScanner(Scanner):
         if text is None:
             return None
         try:
-            return tomllib.loads(text) if dialect.syntax == "toml" else _load_jsonc(text)
+            if dialect.syntax == "toml":
+                return tomllib.loads(text, parse_float=_finite_float)
+            return _load_jsonc(text)
         except (ValueError, RecursionError):
             syntax = "TOML" if dialect.syntax == "toml" else "JSON or duplicate keys"
             result.scan_failures.append(f"{dialect.path}: invalid {syntax}")
