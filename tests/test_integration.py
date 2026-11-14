@@ -102,9 +102,7 @@ class TestFullPipeline:
         diff_data = json.loads(diff.output)
         assert diff_data["has_changes"] is True
         modified = diff_data["components_modified"]
-        assert {
-            c["bom_ref"] for c in modified if c["bom_ref"].startswith("registry:")
-        } == {
+        assert {c["bom_ref"] for c in modified if c["bom_ref"].startswith("registry:")} == {
             "registry:pypi/langchain",
             "registry:pypi/openai",
             "registry:pypi/transformers",
