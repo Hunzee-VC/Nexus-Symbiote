@@ -513,7 +513,17 @@ def record_candidate(bom: AIBOM, report: LiveVerifyReport) -> None:
             tool.redacted_definition_hash = (
                 display_hash if display_hash != finding.definition_hash else None
             )
-            for stale in ("previous_definition_hash", "displayed_descriptor_differs"):
+            # Members the server no longer serves must not stay displayed: the digest
+            # check binds every displayed extension.
+            for stale in (
+                "previous_definition_hash",
+                "displayed_descriptor_differs",
+                "mcp_title",
+                "mcp_output_schema",
+                "mcp_meta",
+                "observed_descriptor_hash",
+                "descriptor_fields_outside_profile",
+            ):
                 tool.properties.pop(stale, None)
             tool.properties.update(
                 observed_tool_properties(
