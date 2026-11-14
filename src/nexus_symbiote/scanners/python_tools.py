@@ -59,6 +59,8 @@ _AGENT_FACTORIES = {
     ("pydantic_ai", "Agent"): "pydantic-ai",
     ("pydantic_ai.agent", "Agent"): "pydantic-ai",
 }
+# Agent constructor keywords that carry tools, or could.
+_AGENT_REGISTERING_KEYWORDS = frozenset({"tools", "toolsets", "builtin_tools", "mcp_servers"})
 
 
 def _bindings(nodes: list[ast.AST]) -> Counter[str]:
@@ -145,7 +147,9 @@ def _record_sdk_decorator(
     source_digest: str,
     seen_refs: set[str],
     result: ScanResult,
+    owner: str | None = None,
 ) -> None:
+    """Record one decorated tool; ``owner`` names the agent it is registered on."""
     lineno = getattr(deco, "lineno", 1)
     name: object = default_name
     if isinstance(deco, ast.Call):
@@ -174,7 +178,8 @@ def _record_sdk_decorator(
             f"{path.as_posix()}:{lineno}: unresolved Python SDK tool name"
         )
         return
-    ref = f"tool:python:{quote(path.as_posix(), safe='')}/{name}"
+    scope = quote(path.as_posix(), safe="") + (f"/{owner}" if owner else "")
+    ref = f"tool:python:{scope}/{name}"
     if ref in seen_refs:
         result.scan_failures.append(
             f"{path.as_posix()}:{lineno}: duplicate Python SDK tool declaration"
@@ -333,6 +338,10 @@ def _collect_agent_decorators(
                 or bindings[factory] != 1
                 or target.id in changed_receivers
                 or bindings[target.id] != 1
+                or any(isinstance(arg, ast.Starred) for arg in call.args)
+                or any(
+                    kw.arg is None or kw.arg in _AGENT_REGISTERING_KEYWORDS for kw in call.keywords
+                )
             ):
                 continue
             handled.add(call)
@@ -350,7 +359,14 @@ def _collect_agent_decorators(
                         continue
                     handled.add(deco)
                     _record_sdk_decorator(
-                        deco, stmt.name, framework, path, source_digest, seen_refs, result
+                        deco,
+                        stmt.name,
+                        framework,
+                        path,
+                        source_digest,
+                        seen_refs,
+                        result,
+                        deco.value.id,
                     )
                 elif (
                     isinstance(deco, ast.Call)
@@ -364,7 +380,14 @@ def _collect_agent_decorators(
                         continue
                     handled.add(deco.func)
                     _record_sdk_decorator(
-                        deco, stmt.name, framework, path, source_digest, seen_refs, result
+                        deco,
+                        stmt.name,
+                        framework,
+                        path,
+                        source_digest,
+                        seen_refs,
+                        result,
+                        deco.func.value.id,
                     )
     candidates: set[ast.AST] = set(calls)
     candidates.update(
@@ -375,13 +398,22 @@ def _collect_agent_decorators(
         and isinstance(node.value, ast.Name)
         and node.value.id in agents
     )
-    aliases = any(
-        isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr))
-        and isinstance(node.value, ast.Name)
-        and node.value.id in agents
+    # An agent used other than through an attribute or a `with` statement, such as
+    # aliased, passed to a function or held in a list, can be given tools elsewhere.
+    reached = _annotation_names(nodes)
+    for node in nodes:
+        if isinstance(node, ast.Attribute):
+            reached.add(node.value)
+        elif isinstance(node, ast.withitem):
+            reached.add(node.context_expr)
+    escaped = any(
+        isinstance(node, ast.Name)
+        and isinstance(node.ctx, ast.Load)
+        and node.id in agents
+        and node not in reached
         for node in nodes
     )
-    if unsupported_factory or aliases or (candidates - handled):
+    if unsupported_factory or escaped or (candidates - handled):
         result.surfaces_excluded.append(
             f"{path.as_posix()}: unsupported Python SDK tool binding or dynamic registration"
         )

@@ -303,7 +303,11 @@ A way around a limit that its entry does not describe is worth a
   decorated with `@tool` (LangChain, CrewAI, smolagents), `@function_tool` (OpenAI
   Agents SDK) or PydanticAI's `@agent.tool` are collected by name; the descriptor is
   not. A decorated function that is not at module level, a rebound decorator, a
-  qualified import and a star import are gaps. Class-based tools, such as
+  qualified import and a star import are gaps. So is a PydanticAI agent given `tools=`,
+  `toolsets=`, `builtin_tools=`, `mcp_servers=` or `*` or `**` arguments, or used
+  other than through an attribute or a `with` statement, such as passed to a
+  function or held in a list. Each agent's tools are named per agent, so two agents
+  of a file can each have a tool of the same name. Class-based tools, such as
   `BaseTool` subclasses and `StructuredTool.from_function`, are neither collected
   nor reported.
 - **Tool definitions are fingerprinted only when declared or observed.** A static

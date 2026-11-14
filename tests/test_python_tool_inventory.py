@@ -329,3 +329,40 @@ def test_a_helper_the_call_may_not_reach_is_not_judged_benign(tmp_path, helper):
     assert "pkg/server.py: unsupported Python MCP binding or dynamic registration" in (
         result.surfaces_excluded
     )
+
+
+AGENT = "from pydantic_ai import Agent\n"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        AGENT + "agent = Agent('m', tools=[search])\n",
+        AGENT + "agent = Agent('m', toolsets=[toolset])\n",
+        AGENT + "agent = Agent('m', **options)\n",
+        AGENT + "agent = Agent('m')\nregister(agent)\n",
+        AGENT + "agent = Agent('m')\nagents = [agent]\n",
+        AGENT + "agent = Agent('m')\ngetattr(agent, 'tool_plain')(search)\n",
+    ],
+)
+def test_agent_tools_outside_the_decorator_form_are_gaps(tmp_path, source):
+    result, tools = scan(tmp_path, source)
+    assert not tools
+    assert result.surfaces_excluded == [
+        "pkg/server.py: unsupported Python SDK tool binding or dynamic registration"
+    ]
+
+
+def test_agent_tools_are_named_per_agent(tmp_path):
+    result, tools = scan(
+        tmp_path,
+        AGENT + "a = Agent('m')\nb = Agent('m')\n"
+        "@a.tool_plain(name='search')\ndef one(): pass\n"
+        "@b.tool_plain(name='search')\ndef two(): pass\n"
+        "async def main():\n    async with a:\n        await a.run('q')\n",
+    )
+    assert not result.scan_failures and not result.surfaces_excluded
+    assert [tool.bom_ref for tool in tools] == [
+        "tool:python:pkg%2Fserver.py/a/search",
+        "tool:python:pkg%2Fserver.py/b/search",
+    ]
