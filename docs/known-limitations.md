@@ -102,6 +102,15 @@ A way around a limit that its entry does not describe is worth a
 
 ## MCP servers and tools
 
+- **Deno resolver selection is deliberately bounded.** Implicit project-root
+  `deno.json` and `deno.jsonc` import/scopes mappings are bound only when the
+  operator supplies the source-binding key. Explicit `--config`/`-c`, disabled
+  configuration (`--no-config`), explicit `--import-map`, referenced `importMap`
+  files and unsupported import/scopes shapes produce coverage gaps, including
+  an explicit selector for an otherwise supported root filename. Selected-file
+  precedence and external mapping-file contents are not resolved. A key does
+  not turn such a partial inventory into an acceptable baseline. Import targets
+  and specifier-to-target associations are not bound without that key.
 - **Launcher classification covers named shapes.** The collector classifies `npx`,
   `npm`, `pnpm`, `yarn` (also as `yarnpkg`), `bun`, `bunx`, `uv`, `uvx`, `pipx`,
   `docker`, `podman`, `nerdctl`, `deno` and `go`, also behind `env`, a shell with

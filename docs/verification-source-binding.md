@@ -72,6 +72,22 @@ Yarn, bun and uv settings above, a scoped registry with a well-formed scope, or 
 because a token pasted on its own `.npmrc` line is read as a setting name. Values
 enter only the keyed binding.
 
+For implicit project-root `deno.json` and `deno.jsonc`, the keyed binding retains
+each import specifier paired with its target and each scope paired with its
+import mappings. Swapping two targets, renaming a specifier or moving a mapping
+between scopes changes the binding, even when the multiset of targets is unchanged.
+Specifier names stay inside the HMAC; exported source labels do not disclose them.
+Object-key ordering and JSONC formatting do not change the binding.
+
+Explicit Deno configuration selection (`--config`, `-c`, or `--no-config`) and
+`--import-map` are unsupported coverage gaps, including selectors that name the
+usual root configuration file. A referenced `importMap` in a default configuration
+and unsupported import/scopes shapes are gaps too. The collector does not claim to
+bind selected-file precedence or uncollected resolver dependencies. A binding key
+does not resolve those gaps: collection and project reconciliation fail closed.
+An inventory with such a gap is not an acceptable baseline, even if a bare diff
+between two already-incomplete inventories reports no change.
+
 Values are bound only when the operator sets `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` to
 a secret of at least 32 characters during collection and validation. Generate it
 from a secure random source, for example with
@@ -80,7 +96,7 @@ every keyed record exports a key identifier derived from the key, so a guessable
 lets anyone holding the BOM test guesses for it offline. Records then also carry
 `static_value_binding`, an HMAC-SHA256 under that key over the original server object
 and the raw values of every project resolver setting that applies to it, auth
-settings excepted (profile `nexus-symbiote/mcp-static-values/v2`), and a key
+settings excepted (profile `nexus-symbiote/mcp-static-values/v3`), and a key
 identifier. This detects a different package with the same version, changed
 arguments, environment and header values, endpoint and index paths, opaque launchers
 and the directory of a command. The key never enters the BOM; without it, the binding
@@ -104,10 +120,15 @@ were collected from the same bytes: the redacted export cannot show that an
 argument or environment value stayed the same. Set the key on both collections to
 compare the values. The alert does not record the value.
 
-Profile v1 records (an unkeyed digest over raw configuration, including secret
+MCP keyed-value profile v3 replaces v2, which did not retain Deno import-name-to-target
+associations. Old v2 keyed records fail reconciliation and require recollection and
+review; do not copy or relabel their old binding. This keyed-value version is separate
+from the unchanged v3 exported-structure profile.
+
+Static configuration profile v1 records (an unkeyed digest over raw configuration, including secret
 values) let anyone holding the BOM confirm guesses for low-entropy secrets. They
 fail reconciliation as unknown and require recollection; treat existing v1 exports
-as sensitive and replace them. Profile v2 records (0.1.0) were digested before
+as sensitive and replace them. Static configuration profile v2 records (0.1.0) were digested before
 launchers, package sources and launch context were classified; `validate --project`
 reports them as unknown and asks for recollection, like v1. Neither binding
 authenticates a publisher, identifies the installed executable or establishes that a
