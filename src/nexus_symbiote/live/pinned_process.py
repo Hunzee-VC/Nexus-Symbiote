@@ -4,24 +4,21 @@
 private copy. One helper keeps the copy, the digest check and the termination from
 drifting apart. When the kernel allows a user and PID namespace, the launcher is
 pid 1 of that namespace and dies with every descendant. If the kernel refuses the
-namespace, launch fails before executing the pinned program. On Linux,
-``--no-isolation`` still runs the launcher as a child subreaper, so a double-fork is
-killed with the session; elsewhere that cleanup is best effort. Neither is a PID or
-filesystem namespace.
+namespace, launch fails before executing the pinned program; ``--no-isolation``
+keeps best-effort cleanup only, and detached children can outlive it. Neither form
+is a filesystem or network sandbox.
 """
 
 from __future__ import annotations
 
 import contextvars
-import ctypes
 import hashlib
 import os
 import re
 import shutil
 import signal
 import subprocess
-import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -33,7 +30,6 @@ _ISOLATION: contextvars.ContextVar[bool] = contextvars.ContextVar(
 _LAUNCHER_BUDGET = 128 * 1024 * 1024
 _NAMESPACE_OK: bool | None = None
 _NAMESPACED: set[int] = set()
-_PR_SET_CHILD_SUBREAPER = 36
 
 
 class PinnedProcessError(OSError):
@@ -212,34 +208,8 @@ def _kill_descendants(root: int) -> None:
             try:
                 os.kill(victim, signal.SIGKILL)
             except ProcessLookupError:
+                # Process exited between /proc enumeration and signal delivery.
                 pass
-
-
-def _subreaper_hook() -> Callable[[], None] | None:
-    """A pre-exec hook that makes the launcher a child subreaper, or None without one.
-
-    A double-fork calls ``setsid`` and then exits the intermediate process, so the
-    grandchild's parent would otherwise become pid 1 and leave the descendant tree.
-    The flag is kept across exec, so the pinned launcher adopts that grandchild and
-    the tree sweep still finds it. ``prctl`` is looked up here, in the parent, so the
-    child only makes the call between fork and exec. Only Linux has
-    ``PR_SET_CHILD_SUBREAPER``; elsewhere an opted-out launch keeps best-effort
-    cleanup. The calling process is never marked.
-    """
-    if not sys.platform.startswith("linux"):
-        return None
-    try:
-        prctl = ctypes.CDLL(None, use_errno=True).prctl
-    except (OSError, AttributeError):
-        return None
-    prctl.argtypes = [ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
-    prctl.restype = ctypes.c_int
-
-    def mark() -> None:
-        if prctl(_PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
-            os._exit(127)
-
-    return mark
 
 
 def _executable_image(staged: Path) -> bool:
@@ -272,8 +242,6 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
             cwd=work,
             env={"PATH": os.defpath},
             start_new_session=True,
-            # Outside a PID namespace the launcher itself must reap a double-fork.
-            preexec_fn=None if namespaced else _subreaper_hook(),
             bufsize=0,
         )
     except PinnedProcessError:
@@ -286,11 +254,11 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
 
 
 def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
-    """Kill the session and, outside a PID namespace, every descendant of the launcher.
+    """Kill the session and, outside a PID namespace, visible descendants of the launcher.
 
-    On Linux the launcher is a child subreaper on that path, so a double-fork is
-    reparented to it instead of pid 1 and the tree sweep still finds it. Descendants
-    are killed first, while that parent is alive.
+    Under ``--no-isolation`` cleanup is best effort: children that double-fork and are
+    reparented leave the launcher's ``PPid`` tree and can outlive this sweep. Visible
+    descendants are killed first while their parent is alive.
     """
     try:
         namespaced = proc.pid in _NAMESPACED
@@ -299,6 +267,7 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
+            # Session leader already exited before group signal delivery.
             pass
         if not namespaced:
             _kill_descendants(proc.pid)
