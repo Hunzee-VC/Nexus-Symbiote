@@ -1565,7 +1565,7 @@ class ModelScanner(Scanner):
                     severity=RiskSeverity.CRITICAL,
                     category="serialization_format",
                     detail=f"Model '{path.name}' embeds a chat template with a potential Python-internals access pattern; actual behavior depends on the renderer and its sandbox.",
-                    recommendation="Remove the template or replace it with a reviewed one; render templates only in a sandboxed Jinja2 environment (llama-cpp-python >= 0.2.72).",
+                    recommendation="Remove the template or replace it with a reviewed one; render templates only in a sandboxed Jinja2 environment that the loader keeps patched.",
                     references=[DOCUMENTATION],
                 )
             )
