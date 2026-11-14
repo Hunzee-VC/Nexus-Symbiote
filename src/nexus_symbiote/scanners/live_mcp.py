@@ -799,6 +799,7 @@ def check_served_tool(raw: Any, secrets: Iterable[str] = ()) -> CheckedDescripto
     ``hash_tool_definition``; members outside ``FINGERPRINT_FIELDS`` are reported
     and digested separately for the server declaration.
     """
+    secrets = tuple(secrets)
     if not isinstance(raw, dict) or not isinstance(raw.get("name"), str) or not raw["name"]:
         raise DiscoveryError("invalid MCP tool identity")
     name = raw["name"]
@@ -845,7 +846,10 @@ def check_served_tool(raw: Any, secrets: Iterable[str] = ()) -> CheckedDescripto
         fingerprint=fingerprint,
         observed_hash=observed,
         display=display,
-        unprofiled_fields=unprofiled,
+        # Field names are controlled by the server too. Keep the original names
+        # only in the digest above; reporting them verbatim can disclose a bearer
+        # token or session ID echoed as an extension key.
+        unprofiled_fields=tuple(redact_text(key, secrets) for key in unprofiled),
         unprofiled_hash=unprofiled_hash,
         display_differs=display != raw,
     )
