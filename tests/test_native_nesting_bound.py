@@ -119,3 +119,48 @@ def test_every_reader_reads_an_inventory_at_the_bound(tmp_path, command):
     result = CliRunner().invoke(main, COMMANDS[command](path))
     assert "internal error" not in result.output
     assert NOT_VALID not in result.output
+
+
+@pytest.mark.parametrize("containers", ["objects", "arrays"])
+def test_native_writer_round_trips_at_the_reader_nesting_limit(tmp_path, containers):
+    document = nested_document(MAX_NATIVE_NESTING)
+    if containers == "arrays":
+        nested: Any = "leaf"
+        for _ in range(MAX_NATIVE_NESTING - 4):
+            nested = [nested]
+        document["components"][0]["properties"] = {"n": nested}
+    assert depth(document) == MAX_NATIVE_NESTING
+    bom = AIBOM.from_document(document)
+    rendered = bom.to_native_json()
+    assert depth(json.loads(rendered)) == MAX_NATIVE_NESTING
+    destination = tmp_path / "roundtrip.json"
+    bom.save(destination)
+    assert AIBOM.load(destination).to_native_json() == rendered
+
+
+@pytest.mark.parametrize("containers", ["objects", "arrays"])
+@pytest.mark.parametrize("existing_destination", [False, True])
+def test_native_writer_refuses_deeper_inventory_before_output(
+    tmp_path, containers, existing_destination
+):
+    document = nested_document(MAX_NATIVE_NESTING + 1)
+    if containers == "arrays":
+        nested: Any = "leaf"
+        for _ in range(MAX_NATIVE_NESTING - 3):
+            nested = [nested]
+        document["components"][0]["properties"] = {"n": nested}
+    assert depth(document) == MAX_NATIVE_NESTING + 1
+    bom = AIBOM.from_document(document)
+    with pytest.raises(NativeFormatError, match=REFUSED):
+        bom.to_native_json()
+    destination = tmp_path / "inventory.json"
+    if existing_destination:
+        AIBOM().save(destination)
+        previous = destination.read_bytes()
+    with pytest.raises(NativeFormatError, match=REFUSED):
+        bom.save(destination)
+    if existing_destination:
+        assert destination.read_bytes() == previous
+        assert AIBOM.load(destination).components == []
+    else:
+        assert not destination.exists()

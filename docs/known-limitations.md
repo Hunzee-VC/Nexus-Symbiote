@@ -884,7 +884,9 @@ A way around a limit that its entry does not describe is worth a
   `digest`, `export-inventory` and the rest, refuses one whose arrays and objects
   nest more than 128 levels, the root counted, with "inventory nests deeper than 128
   levels" and exit 1. The bound is fixed, not the interpreter's recursion limit, so
-  the same file is read or refused by every caller. A collected inventory stays
+  the same file is read or refused by every caller. The native writer
+  (`AIBOM.to_native_json()` and `AIBOM.save()`) enforces the same depth bound before
+  returning output or replacing a destination. A collected inventory stays
   within it, since its deepest values, MCP tool definitions, nest at most 64 levels;
   one edited by hand or written by another producer needs its `properties`
   flattened.
