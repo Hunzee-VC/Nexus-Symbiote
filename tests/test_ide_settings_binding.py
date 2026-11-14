@@ -480,3 +480,28 @@ def test_an_invalid_permissions_object_keeps_the_other_declarations(tmp_path):
     assert declared["enable_all_project_mcp_servers"] and declared["api_key_helper"]
     categories = {risk.category for risk in agent.risks}
     assert {"mcp_auto_approval", "credential_helper"} <= categories
+
+
+@pytest.mark.parametrize(
+    ("mode", "severity"),
+    [
+        ("danger-full-access", "high"),
+        ("full-access", "high"),
+        ("dontAsk", "medium"),
+        ("never", "medium"),
+        ("auto", "medium"),
+    ],
+)
+def test_prompt_skipping_modes_declared_in_json_settings_are_rated(tmp_path, mode, severity):
+    _write(tmp_path, ".cursor/settings.json", {"agent": {"permissionMode": mode}})
+    result = IDEAgentScanner().scan(tmp_path)
+    agent = _agent(result, "cursor")
+    assert agent.permission_mode == mode
+    assert [r.severity.value for r in agent.risks if r.category == "permission_scope"] == [severity]
+
+
+def test_codex_toml_approval_mode_is_rated_exactly_once(tmp_path):
+    _write(tmp_path, ".codex/config.toml", 'approval_policy = "never"\n')
+    agent = _agent(IDEAgentScanner().scan(tmp_path), "codex")
+    assert agent.permission_mode == "never"
+    assert [r.severity.value for r in agent.risks if r.category == "permission_scope"] == ["medium"]

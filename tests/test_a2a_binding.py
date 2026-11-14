@@ -1133,3 +1133,20 @@ def test_a2a_1_0_card_matches_its_published_structure_vector(tmp_path):
     assert card.properties["security_scheme_origins"] == ["//t.example"]
     assert card.properties["security_scheme_types"] == ["apiKey", "oauth2"]
     assert card.capabilities is not None and card.capabilities.oauth_scopes == ["s", "t"]
+
+
+def test_plaintext_alternative_interfaces_fail_the_transport_check(tmp_path):
+    card = {**CARD, "url": "https://agents.example.com"}
+    insecure = {"url": "http://agents.example.net/a2a", "transport": "JSONRPC"}
+    server = _server(tmp_path / "a", {**card, "additionalInterfaces": [insecure]})
+    assert [r.severity for r in server.risks if r.category == "transport_security"] == ["high"]
+    moved = dict(CARD_1_0)
+    moved["supportedInterfaces"] = [
+        CARD_1_0["supportedInterfaces"][0],
+        {"url": "http://agents.example.net/a2a", "protocolBinding": "JSONRPC"},
+    ]
+    second = _server(tmp_path / "b", moved)
+    assert [r.severity for r in second.risks if r.category == "transport_security"] == ["high"]
+    # A 1.0 gRPC host:port interface declares no cleartext scheme and is not flagged.
+    clean = _server(tmp_path / "c", dict(CARD_1_0))
+    assert not any(r.category == "transport_security" for r in clean.risks)

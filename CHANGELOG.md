@@ -6,6 +6,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- Collectors close four risk-coverage gaps: an A2A alternative interface that declares an explicit non-HTTPS scheme fails the transport check (a 1.0 gRPC host:port form does not); prompt-skipping starting modes declared in JSON settings (`danger-full-access`, `full-access`, `dontAsk`, `never`, `auto`) are rated like their Codex TOML equivalents; a malformed MCP tool entry's failure names the server whose record and risks it withholds; and a declared RAG source named like the collector's own `import-`/`env-` evidence components is recorded as `rag:declared-…` so it cannot displace them.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
 - The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.

@@ -75,6 +75,7 @@ from nexus_symbiote.utils.secrets import (
     redact_text,
     secret_values,
 )
+from nexus_symbiote.utils.terminal import neutralize
 
 
 @dataclass(frozen=True)
@@ -1410,7 +1411,13 @@ class MCPScanner(Scanner):
                     result.scan_failures.append(f"{dialect.path}: {exc}")
                     continue
                 except (TypeError, ValueError, RecursionError):
-                    result.scan_failures.append(f"{dialect.path}: invalid tool definition")
+                    # The whole server record is dropped with its risk findings, so the
+                    # failure must say which server a reviewer no longer sees.
+                    shown = neutralize(str(server_name)[:256])
+                    result.scan_failures.append(
+                        f"{dialect.path}: invalid tool definition for server '{shown}'; "
+                        "the server and its risks are not inventoried"
+                    )
                     continue
                 result.components.append(mcp_comp)
                 result.components.extend(tool_comps)
