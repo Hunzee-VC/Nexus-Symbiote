@@ -256,18 +256,19 @@ def test_open_directory_nofollow_uses_o_path_on_execute_only_intermediate_dir(
     def _spy_open(
         path: str | os.PathLike[str],
         flags: int,
-        mode: int = 0o777,
+        mode: int = 0o600,
         *,
         dir_fd: int | None = None,
     ) -> int:
+        del mode
         name = os.fsdecode(path)
         if o_path and name.endswith("exec_only") and not (flags & o_path):
             raise PermissionError(errno.EACCES, "execute-only directory")
         if name == "workspace" or name.endswith("/workspace"):
             workspace_dir_fds.append(dir_fd)
         if dir_fd is not None:
-            return real_open(path, flags, mode, dir_fd=dir_fd)
-        return real_open(path, flags, mode)
+            return real_open(path, flags, dir_fd=dir_fd)
+        return real_open(path, flags)
 
     monkeypatch.setattr(os, "open", _spy_open)
     monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd | {_spy_open})
@@ -944,3 +945,120 @@ def test_final_time_rechecks_distinct_human_approver_quorum_and_sticky_sig_polic
     sticky_dir.chmod(0o777)
     with pytest.raises(SignaturePolicyError, match="world-writable"):
         load_signature_policies(pol, project)
+
+
+def test_crypto_ancestor_and_raw_nofollow_failure_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import stat
+
+    from nexus_symbiote.utils import crypto as crypto_mod
+
+    # 1. _trusted_ancestor_uids handles missing /proc and unmapped rootless overflowuid
+    orig_read_text = Path.read_text
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        lambda self, *a, **kw: (
+            "1000 1000 1\n"
+            if str(self) == "/proc/self/uid_map"
+            else "65534\n"
+            if str(self) == "/proc/sys/kernel/overflowuid"
+            else orig_read_text(self, *a, **kw)
+        ),
+    )
+    assert crypto_mod._trusted_ancestor_uids(1000) == {0, 1000, 65534}
+    monkeypatch.setattr(
+        Path,
+        "read_text",
+        lambda self, *a, **kw: (
+            (_ for _ in ()).throw(OSError("no proc"))
+            if str(self).startswith("/proc/")
+            else orig_read_text(self, *a, **kw)
+        ),
+    )
+    assert crypto_mod._trusted_ancestor_uids(1000) == {0, 1000}
+    monkeypatch.undo()
+
+    # 2. _ancestor_error covers darwin /var -> private/var normalization, lstat error, symlink, and foreign uid
+    leaf = tmp_path / "sub" / "cache"
+    leaf.mkdir(parents=True)
+    orig_lstat = os.lstat
+
+    monkeypatch.setattr(crypto_mod.sys, "platform", "darwin")
+    monkeypatch.setattr(os.path, "islink", lambda p: p == "/var")
+    monkeypatch.setattr(os, "readlink", lambda p: "private/var" if p == "/var" else "")
+    monkeypatch.setattr(
+        os,
+        "lstat",
+        lambda p: (
+            (_ for _ in ()).throw(OSError("denied"))
+            if str(p) == "/private/var"
+            else orig_lstat(tmp_path)
+        ),
+    )
+    err_lstat = crypto_mod._ancestor_error(
+        Path("/var/folders/xx/cache"), dir_what="Cache dir", remedy="fix"
+    )
+    assert err_lstat is not None and "cannot be inspected" in err_lstat
+    monkeypatch.undo()
+
+    sym_stat = os.stat_result((stat.S_IFLNK | 0o777, 1, 1, 1, 0, 0, 0, 0, 0, 0))
+    monkeypatch.setattr(
+        os, "lstat", lambda p: sym_stat if Path(p) == leaf.parent else orig_lstat(p)
+    )
+    err_sym = crypto_mod._ancestor_error(leaf, dir_what="Cache dir", remedy="fix")
+    assert err_sym is not None and "must not be a symlink" in err_sym
+    monkeypatch.undo()
+
+    foreign_stat = os.stat_result((stat.S_IFDIR | 0o755, 1, 1, 1, 424242, 0, 0, 0, 0, 0))
+    monkeypatch.setattr(crypto_mod, "_current_uid", lambda: 1000)
+    monkeypatch.setattr(crypto_mod, "_trusted_ancestor_uids", lambda _u: {0, 1000})
+    monkeypatch.setattr(
+        os, "lstat", lambda p: foreign_stat if Path(p) == leaf.parent else orig_lstat(p)
+    )
+    err_uid = crypto_mod._ancestor_error(leaf, dir_what="Cache dir", remedy="fix")
+    assert err_uid is not None and "not owned by the current user" in err_uid
+    monkeypatch.undo()
+
+    # 3. _write_raw_nofollow cleans up temporary file on write failure and replace failure
+    dir_fd = open_directory_nofollow(tmp_path)
+    try:
+        monkeypatch.setattr(
+            os, "write", lambda *_a, **_kw: (_ for _ in ()).throw(OSError("disk full"))
+        )
+        with pytest.raises(OSError, match="disk full"):
+            crypto_mod._write_raw_nofollow(dir_fd, "target.json", b"payload")
+        monkeypatch.undo()
+        assert [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
+
+        monkeypatch.setattr(
+            os, "replace", lambda *_a, **_kw: (_ for _ in ()).throw(OSError("replace denied"))
+        )
+        with pytest.raises(OSError, match="replace denied"):
+            crypto_mod._write_raw_nofollow(dir_fd, "target.json", b"payload")
+        monkeypatch.undo()
+        assert [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
+    finally:
+        os.close(dir_fd)
+
+    # 4. _refresh_seeded_sigstore_cache returns original bytes on symlink parent, oversized sidecar, or modified root
+    sym_parent = tmp_path / "sym_cache"
+    sym_parent.symlink_to(leaf, target_is_directory=True)
+    assert (
+        crypto_mod._refresh_seeded_sigstore_cache(sym_parent / "trusted_root.json", b"custom")
+        == b"custom"
+    )
+
+    sidecar = leaf / crypto_mod._SEEDED_ROOT_SIDECAR
+    sidecar.write_bytes(b"a" * 200)
+    assert (
+        crypto_mod._refresh_seeded_sigstore_cache(leaf / "trusted_root.json", b"custom")
+        == b"custom"
+    )
+
+    sidecar.write_text("0" * 64, encoding="ascii")
+    assert (
+        crypto_mod._refresh_seeded_sigstore_cache(leaf / "trusted_root.json", b"custom")
+        == b"custom"
+    )

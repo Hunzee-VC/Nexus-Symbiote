@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -253,13 +254,11 @@ def _private_file_info_error(
 def _trusted_ancestor_uids(uid: int) -> set[int]:
     """Caller and system UIDs, including unmapped host-root overflowuid in rootless userns."""
     allowed = {0, uid}
-    try:
+    with contextlib.suppress(OSError, ValueError):
         uid_map = Path("/proc/self/uid_map").read_text(encoding="utf-8")
         if not any(line.split()[0] == "0" for line in uid_map.splitlines() if line.split()):
             overflow = int(Path("/proc/sys/kernel/overflowuid").read_text(encoding="utf-8").strip())
             allowed.add(overflow)
-    except (OSError, ValueError):
-        pass
     return allowed
 
 
@@ -273,19 +272,12 @@ def _ancestor_error(directory: Path, *, dir_what: str, remedy: str) -> str | Non
         sys.platform == "darwin"
         and len(parts) > 1
         and parts[0] == "/"
-        and parts[1]
-        in {
-            "var",
-            "tmp",
-            "etc",
-        }
+        and parts[1] in {"var", "tmp", "etc"}
     ):
         link_path = f"/{parts[1]}"
-        try:
+        with contextlib.suppress(OSError):
             if os.path.islink(link_path) and os.readlink(link_path) == f"private/{parts[1]}":
                 abs_dir = Path("/", "private", *parts[1:])
-        except OSError:
-            pass
     for ancestor in abs_dir.parents:
         try:
             info = os.lstat(ancestor)
@@ -417,19 +409,15 @@ def _write_raw_nofollow(dir_fd: int, name: str, payload: bytes) -> None:
             written += os.write(fd, view[written:])
     except BaseException:
         os.close(fd)
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(temp_name, dir_fd=dir_fd)
-        except OSError:
-            pass
         raise
     os.close(fd)
     try:
         os.replace(temp_name, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(temp_name, dir_fd=dir_fd)
-        except OSError:
-            pass
         raise
 
 
@@ -510,11 +498,9 @@ def _seed_sigstore_cache(trusted_root: Path) -> str | None:
         except Exception:
             os.unlink(trusted_root.name, dir_fd=dir_fd)
             return failure
-        try:
+        with contextlib.suppress(OSError):
             digest_bytes = hashlib.sha256(embedded).hexdigest().encode("ascii")
             _write_raw_nofollow(dir_fd, _SEEDED_ROOT_SIDECAR, digest_bytes)
-        except OSError:
-            pass
     except OSError:
         return failure
     finally:
