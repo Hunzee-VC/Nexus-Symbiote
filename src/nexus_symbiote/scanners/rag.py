@@ -336,7 +336,7 @@ class RAGScanner(Scanner):
                 elif path.name in ENV_FILES and len(path.parts) == 1:
                     raw = files.read_bytes(path)
                     if raw is not None:
-                        # Only ASCII key names are read; values are never decoded or kept.
+                        # Only ASCII key names are read; values are never kept.
                         content = raw.decode("utf-8", errors="replace")
                         result.surfaces_scanned.append(path.as_posix())
                         result.components.extend(self._scan_env(content, path))
@@ -428,7 +428,7 @@ class RAGScanner(Scanner):
         )
 
     def _read_config(self, path: Path, files: ConfinedCollection, result: ScanResult) -> Any:
-        if path.suffix == ".json":
+        if path.suffix.lower() == ".json":
             return files.read_json(path)
         content = files.read_text(path)
         if content is None:
@@ -436,7 +436,7 @@ class RAGScanner(Scanner):
         try:
             import yaml
         except ImportError:
-            result.scan_failures.append(f"{path}: YAML parser unavailable (install yaml extra)")
+            result.scan_failures.append(f"{path.as_posix()}: YAML parser unavailable")
             return None
         try:
             # Anchors/aliases and tags are unnecessary for this static profile;
@@ -446,7 +446,7 @@ class RAGScanner(Scanner):
                     token, (yaml.AliasToken, yaml.AnchorToken, yaml.TagToken)
                 ):
                     result.scan_failures.append(
-                        f"{path}: YAML aliases, tags or token limit unsupported"
+                        f"{path.as_posix()}: YAML aliases, tags or token limit unsupported"
                     )
                     return None
 
@@ -475,7 +475,7 @@ class RAGScanner(Scanner):
                 raise ValueError("empty YAML configuration")
             return value
         except (yaml.YAMLError, TypeError, ValueError, RecursionError, OverflowError, IndexError):
-            result.scan_failures.append(f"{path}: invalid YAML")
+            result.scan_failures.append(f"{path.as_posix()}: invalid YAML")
             return None
 
     def _scan_rag_config(

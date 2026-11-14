@@ -4,6 +4,7 @@ treat Python sources as a best-effort heuristic."""
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -466,6 +467,25 @@ def test_case_variant_of_a_configuration_name_is_a_failure(tmp_path):
         "configs/Rag_Config.json: case variant of configs/rag_config.json is the active file "
         "on case-insensitive file systems and is not inventoried"
     ]
+
+
+def test_case_variant_of_a_knowledge_base_is_read_as_json(tmp_path):
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "KNOWLEDGE_BASE.JSON").write_text('[\n\t{"title": "data"}\n]\n')
+    (tmp_path / "KNOWLEDGE_BASE.JSON").write_text('{\n\t"sources": []\n}\n')
+    result = RAGScanner().scan(tmp_path)
+    assert result.scan_failures == [
+        "KNOWLEDGE_BASE.JSON: case variant of knowledge_base.json is the active file "
+        "on case-insensitive file systems and is not inventoried"
+    ]
+
+
+def test_yaml_configuration_without_a_parser_names_the_file(tmp_path, monkeypatch):
+    (tmp_path / "configs").mkdir()
+    (tmp_path / "configs" / "rag_config.yaml").write_text("name: kb\n")
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    result = RAGScanner().scan(tmp_path)
+    assert result.scan_failures == ["configs/rag_config.yaml: YAML parser unavailable"]
 
 
 def test_uri_shown_in_findings_is_neutralised(tmp_path):
