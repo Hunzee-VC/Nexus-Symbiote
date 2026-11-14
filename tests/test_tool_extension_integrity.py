@@ -11,8 +11,18 @@ from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION, hash_tool_definition
-from nexus_symbiote.core.models import ToolComponent
+from nexus_symbiote.core.hashing import (
+    TOOL_DEFINITION_HASH_VERSION,
+    hash_tool_definition,
+    tool_definition_extensions,
+)
+from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
+from nexus_symbiote.live.verify import (
+    LiveToolFinding,
+    LiveVerifyReport,
+    ServerVerifyResult,
+    record_candidate,
+)
 from nexus_symbiote.scanners.mcp import MCPScanner
 from nexus_symbiote.validators.integrity import IntegrityValidator
 
@@ -229,3 +239,41 @@ def test_alias_equality_uses_json_types(
     same_json_type = isinstance(alternate["value"], bool)
     assert report.hashes_verified == int(same_json_type)
     assert report.hashes_failed == int(not same_json_type)
+
+
+def _candidate_report(descriptor: dict[str, Any]) -> LiveVerifyReport:
+    fingerprint = hash_tool_definition(
+        descriptor["name"],
+        descriptor["description"],
+        descriptor["inputSchema"],
+        {},
+        **tool_definition_extensions(descriptor),
+    )
+    finding = LiveToolFinding(descriptor["name"], fingerprint, "changed", descriptor)
+    result = ServerVerifyResult(
+        "lookup", "mcp:lookup", reachable=True, status="verified", tool_findings=[finding]
+    )
+    return LiveVerifyReport(servers_checked=1, servers_reachable=1, results=[result])
+
+
+@pytest.mark.parametrize(
+    ("wire", "value", "shown"),
+    [
+        ("title", "Lookup", "mcp_title"),
+        ("outputSchema", {"type": "object"}, "mcp_output_schema"),
+        ("_meta", {"tier": 1}, "mcp_meta"),
+    ],
+)
+def test_a_member_the_server_stops_serving_leaves_the_recorded_candidate(
+    wire: str, value: Any, shown: str
+) -> None:
+    base = {"name": "lookup", "description": "Read a record", "inputSchema": {"type": "object"}}
+    bom = AIBOM(components=[MCPServerComponent(bom_ref="mcp:lookup", name="lookup")])
+    record_candidate(bom, _candidate_report({**base, wire: value}))
+    record_candidate(bom, _candidate_report(base))
+
+    tool = next(comp for comp in bom.components if isinstance(comp, ToolComponent))
+    assert shown not in tool.properties
+    report = IntegrityValidator().validate(AIBOM(components=list(bom.components)))
+    assert report.hashes_failed == 0
+    assert not any(issue.category == "hash_mismatch" for issue in report.issues)
