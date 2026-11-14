@@ -952,19 +952,48 @@ def _oracle_walk(flavor: str, stream: io.BufferedIOBase | io.BytesIO, size: int)
     return walk
 
 
-def _machine_walk(flavor: pickle_load.Flavor, data: bytes) -> list:
+def _machine_walks(flavor: pickle_load.Flavor, data: bytes) -> list[tuple[list, int | None]]:
+    """Each walk the interpreter may take, with the index of its first step that some
+    supported CPython takes differently (``pickle_load.VERSION_DIFFERENCES``)."""
     budget = pickle_load.Budget(10**6, 10**6)
-    walk: list[tuple[str, bool, int | None]] = []
-    start = 0
-    for _ in range(32):
-        segment = pickle_load.load_segment(data, len(data), start, flavor, budget)
-        if segment.outcome != "stop":
-            outcome = segment.outcome if segment.certain else "maybe-called"
-            walk.append((outcome, segment.resolved, None))
-            break
-        start = segment.resumes[0]
-        walk.append(("stop", segment.resolved, start))
-    return walk
+    walks: list[tuple[list, int | None]] = []
+
+    def walk(start: int, steps: list, differs: int | None) -> None:
+        if len(steps) == 32:
+            walks.append((steps, differs))
+            return
+        for segment in pickle_load.load_segments(data, len(data), start, flavor, budget):
+            first = len(steps) if differs is None and segment.differs else differs
+            if segment.outcome != "stop":
+                outcome = segment.outcome if segment.certain else "maybe-called"
+                walks.append(([*steps, (outcome, segment.resolved, None)], first))
+            else:
+                after = segment.resumes[0]
+                walk(after, [*steps, ("stop", segment.resolved, after)], first)
+
+    walk(0, [], None)
+    return walks
+
+
+def _covers(machine: list, differs: int, oracle: list) -> bool:
+    """Whether a walk is at least as permissive as the unpickler's from its first step
+    that some supported version takes differently: the same steps before it, and a call
+    after it if the unpickler calls there."""
+    if machine[:differs] != oracle[:differs]:
+        return False
+    called = ("called", "maybe-called")
+    return not any(step[0] == "called" for step in oracle[differs:]) or any(
+        step[0] in called for step in machine[differs:]
+    )
+
+
+def _agrees(flavor: pickle_load.Flavor, data: bytes, oracle: list) -> bool:
+    """The interpreter follows the unpickler where every version reads alike, and covers
+    it where versions differ."""
+    walks = _machine_walks(flavor, data)
+    if len(walks) == 1 and walks[0][1] is None:
+        return _follows(walks[0][0], oracle)
+    return any(differs is not None and _covers(steps, differs, oracle) for steps, differs in walks)
 
 
 def _follows(machine: list, oracle: list) -> bool:
@@ -1054,9 +1083,11 @@ def test_the_interpreter_ends_each_pickle_where_the_unpickler_does(flavor: str) 
     mismatched = [
         data
         for data in _PROPERTY_SAMPLES
-        if not _follows(
-            _machine_walk(flavor, data), _oracle_walk(flavor, io.BytesIO(data), len(data))
-        )  # type: ignore[arg-type]
+        if not _agrees(
+            flavor,  # type: ignore[arg-type]
+            data,
+            _oracle_walk(flavor, io.BytesIO(data), len(data)),
+        )
     ]
     assert not mismatched, mismatched[:5]
 
@@ -1095,7 +1126,7 @@ _EDGES = [
 def test_the_interpreter_follows_each_unpickler_at_its_corners(flavor: str) -> None:
     for data in _EDGES:
         walk = _oracle_walk(flavor, io.BytesIO(data), len(data))
-        assert _follows(_machine_walk(flavor, data), walk), data  # type: ignore[arg-type]
+        assert _agrees(flavor, data, walk), data  # type: ignore[arg-type]
 
 
 def _oracle(data: bytes, path: Path) -> tuple[bool, bool]:
@@ -1112,6 +1143,24 @@ def _oracle(data: bytes, path: Path) -> tuple[bool, bool]:
     return any(step[1] for step in steps), any(step[0] == "called" for step in steps)
 
 
+def _differs(data: bytes) -> bool:
+    """Whether a walk of either flavor, at any start the scanner reads, takes a step
+    that some supported version takes differently."""
+    for flavor in pickle_load.FLAVORS:
+        budget = pickle_load.Budget(10**6, 10**6)
+        pending, seen = [0], set()
+        while pending:
+            start = pending.pop()
+            if start in seen:
+                continue
+            seen.add(start)
+            for segment in pickle_load.load_segments(data, len(data), start, flavor, budget):
+                if segment.differs:
+                    return True
+                pending.extend(segment.resumes)
+    return False
+
+
 def test_content_ratings_follow_what_the_unpicklers_do(tmp_path: Path) -> None:
     from nexus_symbiote.scanners.model import inspect_model_format
 
@@ -1126,7 +1175,8 @@ def test_content_ratings_follow_what_the_unpicklers_do(tmp_path: Path) -> None:
             critical = safety is UNSAFE
             if called and not critical:
                 missed.append((data, relative, explanation))
-            if critical and not resolved:
+            if critical and not resolved and not _differs(data):
+                # Where versions differ, a call that another version reaches is rated.
                 flagged.append((data, relative))
     assert not missed, missed[:5]
     assert not flagged, flagged[:5]
@@ -1230,3 +1280,51 @@ def test_every_opcode_is_interpreted() -> None:
     # Any other byte is an invalid load key, where pickle.load stops.
     codes = {opcode.code.encode("latin-1")[0] for opcode in pickletools.opcodes}
     assert set(pickle_load._DISPATCH) == codes
+
+
+# A call that only some supported CPython reaches, whatever version runs the scan,
+# with the VERSION_DIFFERENCES entry it relies on.
+_ONE_VERSION_CALLS = {
+    # Base 10 from 3.14 only; both unpicklers fail '08' in base 0.
+    "int-base-10": (b"I08\n0cos\nsystem\n)R.", "int-base"),
+    "long-base-10": (b"L08L\n0cos\nsystem\n)R.", "int-base"),
+    # Base 0 up to 3.13 only.
+    "int-base-0": (b"I0x1f\n0cos\nsystem\n)R.", "int-base"),
+    "long-base-0": (b"L0x1f\n0cos\nsystem\n)R.", "int-base"),
+    # The C unpickler reads on past a frame's end before 3.13: from where it stands,
+    # from a buffered file, or from the frame's end, from io.BytesIO.
+    "frame-read-on": (_frame(b"I12") + b"\n0cos\nsystem\n)R.", "frame-bounds"),
+    "frame-read-at-its-end": (_frame(b"Ix") + b"5\n0cos\nsystem\n)R.", "frame-bounds"),
+    "frame-in-a-frame": (b"\x95\x0a" + _Z7 + _frame(b"N") + b"0cos\nsystem\n)R.", "frame-bounds"),
+}
+
+
+@pytest.mark.parametrize("data, difference", _ONE_VERSION_CALLS.values(), ids=_ONE_VERSION_CALLS)
+def test_a_call_that_one_supported_version_reaches_is_critical(
+    tmp_path: Path, data: bytes, difference: str
+) -> None:
+    assert difference in pickle_load.VERSION_DIFFERENCES
+    differs = {
+        key
+        for flavor in pickle_load.FLAVORS
+        for segment in pickle_load.load_segments(
+            data, len(data), 0, flavor, pickle_load.Budget(10**6, 10**6)
+        )
+        for key in segment.differs
+    }
+    assert difference in differs
+    (tmp_path / "models").mkdir()
+    for relative in ("models/x", "x.dat"):
+        (tmp_path / relative).write_bytes(data)
+    found = _components(tmp_path)
+    assert sorted(found) == ["models/x", "x.dat"]
+    assert all(component.serialization_safety is UNSAFE for component in found.values())
+
+
+def test_a_reading_every_version_shares_reports_no_difference() -> None:
+    for data in (b"I17\n.", b"L17L\n.", b"I00\n.", _frame(b"I12\n") + b".", b"I 5\n."):
+        for flavor in pickle_load.FLAVORS:
+            budget = pickle_load.Budget(10**6, 10**6)
+            (segment,) = pickle_load.load_segments(data, len(data), 0, flavor, budget)
+            assert segment.outcome == "stop", (data, flavor)
+            assert not segment.differs, (data, flavor)

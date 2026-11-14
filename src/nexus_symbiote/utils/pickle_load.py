@@ -19,6 +19,15 @@ decides the loader's next step: their type, length, whether they hash, and the s
 
 The sample may be a prefix of the file: a read past its end, or past the opcode and
 MARK budget, ends the walk as unread, since the loader's behaviour is not decided.
+
+The loader that reads the file may run on any supported CPython, 3.11 to 3.14, and the
+unpicklers differ between them (``VERSION_DIFFERENCES``). Where they do, each flavor
+takes the step that any version takes and that goes further: it accepts what one
+version accepts and another rejects, so a call that one version reaches is rated
+whatever version the scan runs on. ``Segment.differs`` names each such step a walk
+took, where the running version may stop or go on. Where the next step depends on the
+file object as well, as when the C unpickler of 3.11 or 3.12 reads past the end of a
+frame, ``load_segments`` follows each way.
 """
 
 from __future__ import annotations
@@ -27,7 +36,7 @@ import codecs
 import re
 import struct
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Literal, cast
 
@@ -35,6 +44,47 @@ Flavor = Literal["c", "py"]
 FLAVORS: tuple[Flavor, ...] = ("c", "py")
 Outcome = Literal["stop", "error", "unread", "called"]
 _HIGHEST_PROTOCOL = 5
+
+# Where the unpicklers of the supported CPython versions part, by the CPython branches'
+# Lib/pickle.py (``_Unpickler``) and Modules/_pickle.c. Each key names a step that
+# ``Segment.differs`` reports. The interpreter takes the behaviour that goes further.
+VERSION_DIFFERENCES: dict[str, str] = {
+    "int-base": (
+        "INT and LONG read their text in base 0 up to 3.13 and in base 10 from 3.14:"
+        " pickle.py load_int int(data, 0) -> int(data), load_long int(val, 0) ->"
+        " int(val); _pickle.c load_int strtol(s, &endptr, 0) and"
+        " PyLong_FromString(s, NULL, 0) -> base 10, load_long PyLong_FromString(s,"
+        " NULL, 0) -> base 10. So 'I017' fails the pure-Python unpickler up to 3.13,"
+        " is 15 to the C one up to 3.13 and 17 to both from 3.14; '0x1f' is read up to"
+        " 3.13 only. Either reading is accepted; of two values, the C one in base 0,"
+        " the smaller, passes every index and byte check the other passes."
+    ),
+    "frame-bounds": (
+        "The C unpickler of the 3.11 and 3.12 branches only reads a FRAME into its"
+        " buffer (_pickle.c load_frame: _Unpickler_Read(self, &s, frame_len), then"
+        " rewinds), and a FRAME may start inside another; a read past the buffer's"
+        " end drops what is left of it and reads on from the file"
+        " (_Unpickler_ReadImpl, _Unpickler_Readline: _Unpickler_ReadFromFile), which"
+        " is the frame's end when the file was read() (io.BytesIO) and where the"
+        " pickle stands when the frame came from peek() (a buffered file). From the"
+        " 3.13 branch it caps the input at frame_end, and a read that crosses it fails"
+        " (_Unpickler_LeaveFrame: 'pickle exhausted before end of frame'), as does a"
+        " FRAME before it ('beginning of a new frame before end of current frame')."
+        " The pure-Python _Unframer fails both in every version. The C flavor reads"
+        " on, both from the frame's end and from where it stands."
+    ),
+    "binstring-count": (
+        "The C unpickler's BINSTRING reads its count unsigned in 3.11 and 3.12"
+        " (_pickle.c load_counted_binstring: calc_binsize) and fails a negative one"
+        " from 3.13 (calc_binint: 'BINSTRING pickle has negative byte count'); the"
+        " pure-Python load_binstring fails a negative one in every version. The C"
+        " flavor reads the unsigned count."
+    ),
+}
+# Differences that change no step here: find_class resolves a dotted name through
+# _getattribute / get_dotted_path in 3.14, without the '<locals>' check of 3.11-3.13,
+# and only a dotted identifier resolves here; the C unpickler looks persistent_load up
+# once per load from 3.13 (_pickle.c load) instead of at construction.
 
 
 class _LoadError(Exception):
@@ -142,7 +192,9 @@ class Segment:
     pickle is ``certain`` unless only an object of the right type gets that far. After
     a STOP, ``resumes`` holds where the next ``pickle.load`` starts: where the loader
     left ``io.BytesIO``, then, when different, right after the STOP, as the C
-    unpickler leaves a buffered file it peeked ahead in.
+    unpickler leaves a buffered file it peeked ahead in. ``differs`` names the
+    ``VERSION_DIFFERENCES`` the walk relied on, and ``crossings`` counts the frame ends
+    the C unpickler read past, where ``load_segment``'s ``jumps`` choose how.
     """
 
     outcome: Outcome
@@ -150,11 +202,43 @@ class Segment:
     named: bool = False
     resumes: tuple[int, ...] = ()
     certain: bool = True
+    differs: frozenset[str] = frozenset()
+    crossings: int = 0
 
 
-_C_INT = re.compile(
-    rb"[ \t\n\v\f\r]*[+-]?(?:0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)(?:\x00[^\n]*)?\n"
-)
+_STRTOL = {
+    0: re.compile(rb"[ \t\n\v\f\r]*[+-]?(?:0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)"),
+    10: re.compile(rb"[ \t\n\v\f\r]*[+-]?[0-9]+"),
+}
+_LONG_MIN, _LONG_MAX = -(2**63), 2**63 - 1
+
+
+def _c_int(data: bytes, base: int) -> int | None:
+    """The C unpickler's INT: ``strtol`` up to a newline or NUL, else ``PyLong_FromString``."""
+    text = data.split(b"\x00")[0]  # a C string
+    match = _STRTOL[base].match(text)
+    end = match.end() if match else 0  # no digits: strtol stops where it started, at 0
+    value = 0
+    if match:
+        signed = match.group().strip()
+        digits = signed.lstrip(b"+-")
+        if base == 0 and digits[1:2] in (b"x", b"X"):
+            value = int(digits[2:], 16)
+        else:
+            value = int(digits, 8 if base == 0 and digits[:1] == b"0" else 10)
+        value = -value if signed[:1] == b"-" else value
+    if text[end : end + 1] in (b"", b"\n") and _LONG_MIN <= value <= _LONG_MAX:
+        return value
+    return _py_int(text, base)
+
+
+def _py_int(data: bytes, base: int) -> int | None:
+    try:
+        return int(data, base)
+    except ValueError:
+        return None
+
+
 _C_FLOAT = re.compile(
     rb"[+-]?(?:(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|inf(?:inity)?|nan)"
     rb"(?:\x00[^\n]*)?\n",
@@ -167,11 +251,18 @@ class _Machine:
 
     Both read a FRAME as a unit that ends at ``self.frame``: a read that crosses its end
     fails, and one that starts at its end reads on from the file. The C unpickler also
-    wants the whole frame, every byte a read asks for and a newline after each line.
+    wants the whole frame, every byte a read asks for and a newline after each line;
+    before 3.13 it reads on past the frame's end (``_cross_frame``).
     """
 
     def __init__(
-        self, sample: bytes, size: int, start: int, flavor: Flavor, budget: Budget
+        self,
+        sample: bytes,
+        size: int,
+        start: int,
+        flavor: Flavor,
+        budget: Budget,
+        jumps: tuple[bool, ...] = (),
     ) -> None:
         self.sample = sample
         self.whole = len(sample) >= size
@@ -185,6 +276,9 @@ class _Machine:
         self.memo: dict[int, object] = {}
         self.resolved = False
         self.named = False
+        self.differs: set[str] = set()
+        self.jumps = jumps
+        self.crossings = 0
 
     # -- reads -----------------------------------------------------------------------
 
@@ -194,13 +288,28 @@ class _Machine:
             raise _UnreadError
         return self.sample[start:end]
 
+    def _cross_frame(self) -> None:
+        """A read past the frame's end, which the C unpickler reads on from before 3.13.
+
+        The ``crossings``-th one reads on from the frame's end when ``jumps`` says so,
+        and from where it stands otherwise.
+        """
+        if not self.c:
+            raise _LoadError  # pickle exhausted before end of frame
+        self.differs.add("frame-bounds")
+        if self.crossings < len(self.jumps) and self.jumps[self.crossings]:
+            assert self.frame is not None
+            self.pos = self.frame
+        self.crossings += 1
+        self.frame = None
+
     def read(self, count: int) -> bytes:
         if self.frame is not None:
             if self.pos >= self.frame and count:
                 self.frame = None
             elif self.frame - self.pos < count:
                 self._take(self.pos, self.frame)
-                raise _LoadError  # pickle exhausted before end of frame
+                self._cross_frame()
         data = self._take(self.pos, self.pos + count)
         if self.c and len(data) < count:
             raise _LoadError  # pickle data was truncated
@@ -220,9 +329,9 @@ class _Machine:
     def readline(self) -> bytes:
         if self.frame is not None and self.pos < self.frame:
             data = self._line(self.frame)
-            if data is None:
-                raise _LoadError  # pickle exhausted before end of frame
-            return data
+            if data is not None:
+                return data
+            self._cross_frame()
         self.frame = None
         data = self._line(len(self.sample) + 1)
         if data is None:
@@ -307,14 +416,27 @@ class _Machine:
                 self.budget.opcodes -= 1
                 if handler is _Machine.op_stop:
                     self.pop()
-                    return Segment("stop", self.resolved, self.named, self._resumes())
+                    return self._segment("stop", self._resumes())
                 handler(self)
         except _CallError as call:
-            return Segment("called", self.resolved, self.named, certain=call.certain)
+            return self._segment("called", certain=call.certain)
         except _UnreadError:
-            return Segment("unread", self.resolved, self.named)
+            return self._segment("unread")
         except (_LoadError, ValueError, UnicodeError, OverflowError, struct.error):
-            return Segment("error", self.resolved, self.named)
+            return self._segment("error")
+
+    def _segment(
+        self, outcome: Outcome, resumes: tuple[int, ...] = (), certain: bool = True
+    ) -> Segment:
+        return Segment(
+            outcome,
+            self.resolved,
+            self.named,
+            resumes,
+            certain,
+            frozenset(self.differs),
+            self.crossings,
+        )
 
     def _resumes(self) -> tuple[int, ...]:
         if self.frame is None or self.frame <= self.pos:
@@ -335,7 +457,12 @@ class _Machine:
         if size > sys.maxsize:
             raise _LoadError
         if self.frame is not None and self.frame > self.pos:
-            raise _LoadError  # beginning of a new frame before end of current frame
+            # beginning of a new frame before end of current frame, from 3.13 in C;
+            # before, one that the current frame holds is read from it as it stands.
+            if self.c and self.pos + size <= self.frame:
+                self.differs.add("frame-bounds")
+                return
+            self._cross_frame()
         if self.c and self.pos + size > self.size:
             raise _LoadError  # pickle data was truncated
         self.frame = min(self.pos + size, max(self.size, len(self.sample)))
@@ -358,16 +485,24 @@ class _Machine:
     def op_false(self) -> None:
         self.push(False)
 
+    def _number_text(self, data: bytes, parse: Callable[[bytes, int], int | None]) -> int:
+        """INT or LONG text, read in base 0 (up to 3.13) or base 10 (from 3.14)."""
+        old, new = parse(data, 0), parse(data, 10)
+        if old != new:
+            self.differs.add("int-base")
+        value = old if old is not None else new
+        if value is None:
+            raise _LoadError  # invalid literal for int()
+        return value
+
     def op_int(self) -> None:
         data = self.readline()
         if self.c and len(data) < 2:
             raise _LoadError
         if data in (b"00\n", b"01\n"):
             self.push(data == b"01\n")
-        elif self.c and _C_INT.fullmatch(data):
-            self.push(int(data.split(b"\x00")[0].strip() or b"0", 8 if _octal(data) else 0))
         else:
-            self.push(int(data, 0))
+            self.push(self._number_text(data, _c_int if self.c else _py_int))
 
     def op_binint(self) -> None:
         self.push(self.number(4, "<i"))
@@ -382,7 +517,9 @@ class _Machine:
         data = self.line()
         if data.endswith(b"L"):
             data = data[:-1]
-        self.push(int(data, 0))
+        if self.c:
+            data = data.split(b"\x00")[0]  # PyLong_FromString reads a C string
+        self.push(self._number_text(data, _py_int))
 
     def op_long1(self) -> None:
         self.push(int.from_bytes(self.read(self.number(1, "<B")), "little", signed=True))
@@ -417,7 +554,10 @@ class _Machine:
     def op_binstring(self) -> None:
         count = self.number(4, "<i")
         if count < 0:
-            raise _LoadError
+            if not self.c:
+                raise _LoadError  # negative BINSTRING length
+            self.differs.add("binstring-count")
+            count += 1 << 32
         self.push(self.read(count).decode("ascii"))
 
     def op_short_binstring(self) -> None:
@@ -769,11 +909,6 @@ class _Machine:
         self.memo[len(self.memo)] = self.top()
 
 
-def _octal(data: bytes) -> bool:
-    digits = data.split(b"\x00")[0].strip().lstrip(b"+-")
-    return len(digits) > 1 and digits[:1] == b"0" and digits[1:2] not in (b"x", b"X")
-
-
 _DISPATCH: dict[int, Callable[[_Machine], None]] = {
     ord(code): handler
     for code, handler in {
@@ -849,10 +984,35 @@ _DISPATCH: dict[int, Callable[[_Machine], None]] = {
 }
 
 
-def load_segment(sample: bytes, size: int, start: int, flavor: Flavor, budget: Budget) -> Segment:
+def load_segment(
+    sample: bytes,
+    size: int,
+    start: int,
+    flavor: Flavor,
+    budget: Budget,
+    jumps: tuple[bool, ...] = (),
+) -> Segment:
     """How ``pickle.load`` ends reading the pickle at ``start`` of a file of ``size`` bytes.
 
     ``sample`` holds the file's first bytes; ``budget`` is charged for every opcode and
-    MARK read and is shared by the pickles of one sample.
+    MARK read and is shared by the pickles of one sample. ``jumps`` picks where the C
+    unpickler reads on from at each frame end it crosses (``Segment.crossings``).
     """
-    return _Machine(sample, size, start, flavor, budget).run()
+    return _Machine(sample, size, start, flavor, budget, jumps).run()
+
+
+def load_segments(
+    sample: bytes, size: int, start: int, flavor: Flavor, budget: Budget
+) -> Iterator[Segment]:
+    """Each way ``pickle.load`` may end reading the pickle at ``start``.
+
+    One for each choice of where to read on at the frame ends a walk crosses; every
+    walk is charged to ``budget``, which bounds them.
+    """
+    pending: list[tuple[bool, ...]] = [()]
+    while pending:
+        jumps = pending.pop()
+        segment = load_segment(sample, size, start, flavor, budget, jumps)
+        yield segment
+        for index in range(len(jumps), segment.crossings):
+            pending.append((*jumps, *(False,) * (index - len(jumps)), True))

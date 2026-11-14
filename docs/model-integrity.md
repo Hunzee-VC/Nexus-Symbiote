@@ -30,7 +30,12 @@ A pickle is rated by what `pickle.load` does with it. The check reads the first
 the three header pickles of `torch.save`'s legacy format before the main one: once as
 the C unpickler and once as the pure-Python one, opcode by opcode, with the same
 frame handling, stack, MARK and memo rules and the same errors, for at most 4,096
-opcodes and 64 MARKs over all the pickles read. It never imports, calls or builds an
+opcodes and 64 MARKs over all the pickles read. Where the unpicklers of CPython 3.11
+to 3.14 differ, it takes every reading one of them takes: `INT` and `LONG` text in
+base 0, as up to 3.13 (`I0x1f`), and in base 10, as from 3.14 (`I08`), and, for the C
+unpickler of 3.11 and 3.12, a read past the end of a frame, which goes on from where
+the pickle stands or from the frame's end. A call that one supported version reaches
+is rated whatever version runs the scan. It never imports, calls or builds an
 object: what `find_class` returns is a placeholder that stands for any attribute of a
 module, a class or a function as well as `os.environ`, `sys.path` or
 `builtins.__dict__`, and a module or name that is not a dotted identifier, which no

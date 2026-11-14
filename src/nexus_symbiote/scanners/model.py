@@ -336,8 +336,8 @@ def _recognized_pickle(
 
     The sample is read as ``pickle.load`` reads it, in a loop, as ``torch.load`` reads
     the legacy format's header pickles before the one that rebuilds the tensors: by the
-    C and the pure-Python unpicklers both (``utils.pickle_load``), within the
-    inspection bounds. A pickle that hands what it resolved to anything but the stack
+    C and the pure-Python unpicklers both (``utils.pickle_load``), as any supported
+    CPython reads it, within the inspection bounds. A pickle that hands what it resolved to anything but the stack
     and the memo (calls it, sets items on it, appends to it, hashes it...) is a
     payload, wherever it starts. One that the bounds cut short before the loader's
     behaviour is decided is rated unknown (``PICKLE_NAME_UNCALLED`` when it resolved an
@@ -404,20 +404,20 @@ def _pickle_loads(
     worst: tuple[SerializationSafety, str] | None = None
     while pending:
         start = pending.pop()
-        segment = pickle_load.load_segment(sample, size, start, flavor, budget)
         binary = sample[start : start + 1] == b"\x80"
-        if segment.outcome == "called":
-            return _recognized(binary)
-        if segment.outcome == "unread" and (start or binary or not by_content):
-            unread = PICKLE_NAME_UNCALLED if segment.named else PICKLE_UNREAD
-            worst = _worse(worst, (SerializationSafety.UNKNOWN, unread))
-        elif segment.named and (segment.outcome == "stop" or binary or not by_content):
-            # Text found by content that names something before a flaw is as likely
-            # prose; a pickle that returns what it resolved, or a PROTO one, is not.
-            worst = _worse(worst, (SerializationSafety.UNKNOWN, PICKLE_NAME_UNCALLED))
-        if len(segment.resumes) > 1:
-            worst = _worse(worst, (SerializationSafety.UNKNOWN, PICKLE_FRAME_TAIL))
-        pending.extend(reversed(segment.resumes))
+        for segment in pickle_load.load_segments(sample, size, start, flavor, budget):
+            if segment.outcome == "called":
+                return _recognized(binary)
+            if segment.outcome == "unread" and (start or binary or not by_content):
+                unread = PICKLE_NAME_UNCALLED if segment.named else PICKLE_UNREAD
+                worst = _worse(worst, (SerializationSafety.UNKNOWN, unread))
+            elif segment.named and (segment.outcome == "stop" or binary or not by_content):
+                # Text found by content that names something before a flaw is as likely
+                # prose; a pickle that returns what it resolved, or a PROTO one, is not.
+                worst = _worse(worst, (SerializationSafety.UNKNOWN, PICKLE_NAME_UNCALLED))
+            if len(segment.resumes) > 1:
+                worst = _worse(worst, (SerializationSafety.UNKNOWN, PICKLE_FRAME_TAIL))
+            pending.extend(reversed(segment.resumes))
     return worst
 
 
