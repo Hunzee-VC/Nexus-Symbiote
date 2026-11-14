@@ -40,10 +40,23 @@ inputs:
     default: "true"
   risk-threshold:
     description: >-
-      Aggregate score from 0 to 100 at which the risk gate fails. 0 removes only this score
-      threshold: findings at or above critical, unverified SafeTensors, incomplete coverage and
-      missing evidence still fail the gate. To skip the risk gate, set risk-check to 'false'
+      Threshold for the aggregate score, which is an unbounded sum of finding weights
+      (critical 10, high 7, medium 4, low 1, info 0), not a percentage. The Action accepts
+      a threshold from 0 to 100. 0 removes only this score check: findings at or above
+      fail-on-severity, unverified SafeTensors, incomplete coverage and missing evidence still
+      fail the gate. A large repository can pass 100 on low findings alone, and a small one
+      can stay under 50 with several high findings, so fail-on-severity is the severity gate.
+      To skip the risk gate, set risk-check to 'false'
     default: "50"
+  fail-on-severity:
+    description: >-
+      Fail the risk gate on any finding at or above this severity: critical, high, medium,
+      low, info, or none. none disables the severity check and is printed as a warning.
+      The built-in CLI policy remains critical; this input overrides it for the Action.
+      high fails permission-bypass, unpinned-launcher and other high findings even when the
+      aggregate score stays under risk-threshold. Set critical to keep the previous Action
+      behavior, which failed on severity only for critical findings
+    default: "high"
   reviewed-baseline:
     description: >-
       Absolute path to a reviewed native AgentBOM outside GITHUB_WORKSPACE, such as a file an
@@ -177,6 +190,7 @@ runs:
         SYMBIOTE_VALIDATE_INTEGRITY: ${{ inputs.validate-integrity }}
         SYMBIOTE_RISK_CHECK: ${{ inputs.risk-check }}
         SYMBIOTE_RISK_THRESHOLD: ${{ inputs.risk-threshold }}
+        SYMBIOTE_FAIL_ON_SEVERITY: ${{ inputs.fail-on-severity }}
         SYMBIOTE_REVIEWED_BASELINE: ${{ inputs.reviewed-baseline }}
         SYMBIOTE_SOURCE_BINDING_KEY: ${{ inputs.source-binding-key }}
         SYMBIOTE_SARIF: ${{ inputs.sarif-upload }}
