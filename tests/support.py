@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import importlib.util
 import sys
 import time
@@ -42,21 +43,34 @@ def scaling_ratio(run: Callable[[int], object], factor: int = 4, repeats: int = 
     Linear work grows about ``factor`` times, quadratic work about ``factor`` squared. Two
     sizes measured on the same machine cancel what an absolute bound cannot: a slow or busy
     runner and coverage tracing.
+
+    The cyclic collector is off while a run is timed, as in ``timeit``. A full collection
+    costs time in proportion to every object the test process holds, not to the work
+    measured, and starts once a run allocates enough: late in a long suite that is every
+    larger run and few smaller ones, which reads as growth the code does not have.
     """
+
+    def timed(scale: int, iterations: int) -> float:
+        gc.collect()
+        collecting = gc.isenabled()
+        gc.disable()
+        try:
+            started = time.process_time()
+            for _ in range(iterations):
+                run(scale)
+            return time.process_time() - started
+        finally:
+            if collecting:
+                gc.enable()
 
     def best(scale: int) -> float:
         timings = []
         for _ in range(repeats):
             iterations = 1
-            started = time.process_time()
-            run(scale)
-            elapsed = time.process_time() - started
+            elapsed = timed(scale, iterations)
             while elapsed < 2e-3 and iterations < 32:
                 iterations *= 2
-                started = time.process_time()
-                for _ in range(iterations):
-                    run(scale)
-                elapsed = time.process_time() - started
+                elapsed = timed(scale, iterations)
             timings.append(elapsed / iterations)
         return max(min(timings), 1e-5)
 
