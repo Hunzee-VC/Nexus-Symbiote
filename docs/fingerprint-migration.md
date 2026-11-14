@@ -113,8 +113,10 @@ those exports have no marker and still recover. Projection 2
   the document's root; `profileConformance` adds `expandedLicensing`; and the
   default identifiers are `urn:uuid` IRIs instead of IRIs under
   `https://spdx.org/spdxdocs/nexus_symbiote`.
-- Both: the loss report (profile `nexus-symbiote-export/v2`) also lists risk
-  findings and declared versions that are not exact.
+- Both: a package URL is a standard identifier only when it is a PyPI, npm or
+  OCI identity that agrees with the component, including the registry it was
+  resolved from; the loss report (profile `nexus-symbiote-export/v2`) also lists
+  risk findings and declared versions that are not exact.
 
 A document with an unknown marker, or one whose standard fields match a
 projection other than the one it declares, is rejected. Recovery returns the
@@ -147,13 +149,6 @@ Legacy mode, which only CycloneDX recovery has, does not help with:
 - any SPDX export written before the document `comment` and relationship
   `completeness` existed, with or without an unconditional relationship exported
   as `other`.
-
-A 0.1.0 export of an inventory built through the Python API does not recover
-either when one of its package URLs is of a kind this release no longer projects:
-a type other than PyPI, npm and OCI, such as a `pkg:docker` or `pkg:generic` URL,
-or a PyPI or npm URL with a qualifier other than a `repository_url` that names the
-component's own registry. Recovery reports that the projection conflicts with the
-embedded native document.
 
 Regenerate such exports from the native AIBOM or by rescanning. Keep the
 original export when a downstream consumer discards fields such as the

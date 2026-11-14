@@ -8,11 +8,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from packageurl import PackageURL
 
 from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.models import RegistryEntryComponent
 from nexus_symbiote.generators import _common
 from nexus_symbiote.generators._common import PROJECTION_PROPERTY, PROJECTION_SCANNERS
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
+from nexus_symbiote.generators.package_identifiers import package_identifier
 from nexus_symbiote.generators.spdx import SPDXGenerator
 from nexus_symbiote.generators.validation import validate_spdx
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
@@ -67,9 +70,34 @@ def test_the_0_1_0_fixtures_cover_both_formats_and_a_scan():
     assert FIXTURE_NAMES == [
         "api-inventory.cyclonedx.json",
         "api-inventory.spdx.json",
+        "api-package-urls.cyclonedx.json",
+        "api-package-urls.spdx.json",
         "demo-agent-scan.cyclonedx.json",
         "demo-agent-scan.spdx.json",
+        "private-registry-scan.cyclonedx.json",
+        "private-registry-scan.spdx.json",
     ]
+
+
+@pytest.mark.parametrize(
+    "name", [n for n in FIXTURE_NAMES if n.startswith(("api-package-urls", "private-registry"))]
+)
+def test_0_1_0_package_urls_that_the_current_rule_omits_still_recover(name):
+    # A 0.1.0 scan projected a lockfile package from a private npm registry without
+    # a repository_url qualifier, and an API inventory could carry other types and
+    # qualifiers. Projection 2 omits all of them; projection 1 recovery keeps its rule.
+    document = _load(name)
+    recovered = _generator(name).recover(deepcopy(document))
+    omitted = {
+        PackageURL.from_string(c.package_url).to_string()
+        for c in recovered.components
+        if isinstance(c, RegistryEntryComponent)
+        and c.package_url
+        and package_identifier(c).status == "unavailable-invalid"
+    }
+    public = document.get("components") or document["@graph"]
+    assert omitted
+    assert omitted <= {node.get("purl", node.get("software_packageUrl")) for node in public}
 
 
 @pytest.mark.parametrize("name", FIXTURE_NAMES)

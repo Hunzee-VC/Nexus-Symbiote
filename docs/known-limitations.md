@@ -663,11 +663,7 @@ A way around a limit that its entry does not describe is worth a
   with `"conditional": true`; the condition text and assurance level are only in the
   embedded native inventory.
 - **Some earlier exports do not recover.** CycloneDX and SPDX exports written by
-  builds before 0.1.0 can fail recovery, and so can a 0.1.0 export of an inventory
-  built through the Python API with a package URL this release does not project:
-  a type other than PyPI, npm and OCI, such as `pkg:docker` or `pkg:generic`, or a
-  PyPI or npm URL with a qualifier other than a `repository_url` that names the
-  component's own registry. Regenerate them from the native inventory; see
+  builds before 0.1.0 can fail recovery. Regenerate them from the native inventory; see
   [standard projection versions](fingerprint-migration.md#standard-projection-versions).
 - **A recorded timestamp does not change the serial.** The serial number is the
   version 5 UUID of the inventory content digest, which excludes `metadata.timestamp`,
