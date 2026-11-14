@@ -1000,56 +1000,6 @@ class ConfinedCollection:
             self._fail(relative, "hash refused (symlink, nonregular file or I/O error)")
             return None
 
-    def read_prefix(self, path: str | Path, nbytes: int) -> bytes | None:
-        """Read at most ``nbytes`` from a confined regular file.
-
-        A larger file is not a failure: only the prefix is charged to the byte budget.
-        Symlinks, non-regular files and paths outside the root are recorded failures.
-        """
-        if nbytes < 1 or nbytes > 1024 * 1024:
-            raise ValueError("prefix length must be from 1 to 1048576 bytes")
-        relative: Path | str = str(path)
-        try:
-            relative = self._relative(path)
-            if self.excluded(relative):
-                return None
-            parent = self._open_parent(relative)
-            try:
-                fd = self._open_leaf_no_follow(parent, relative.name)
-            finally:
-                os.close(parent)
-            try:
-                before = os.fstat(fd)
-                budget = self._budget
-                if not stat.S_ISREG(before.st_mode):
-                    raise CollectionError("nonregular file")
-                want = min(before.st_size, nbytes)
-                if want > budget.remaining():
-                    raise LimitExceededError(budget.bound)
-                chunks: list[bytes] = []
-                length = 0
-                while length < want:
-                    chunk = os.read(fd, min(65536, want - length))
-                    if not chunk:
-                        break
-                    length += len(chunk)
-                    budget.charge(len(chunk))
-                    chunks.append(chunk)
-                after = os.fstat(fd)
-                if descriptor_binding(before) != descriptor_binding(after) or not self._resolves_to(
-                    relative, after
-                ):
-                    raise CollectionError("file changed during collection")
-                return b"".join(chunks)
-            finally:
-                os.close(fd)
-        except LimitExceededError as exc:
-            self._fail(relative, exc.bound.exceeded())
-            return None
-        except (OSError, CollectionError):
-            self._fail(relative, "read refused (symlink, nonregular file or I/O error)")
-            return None
-
     def read_json(
         self, path: str | Path, *, missing_ok: bool = False, variants_read: Collection[str] = ()
     ) -> Any:

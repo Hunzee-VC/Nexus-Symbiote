@@ -170,6 +170,8 @@ NUMPY_HEADER_UNREAD = (
     "NumPy array whose header is over the inspection limit; no bounded structural "
     "validator for this format/loader"
 )
+# Content that a bound left unread: a file no model name rates is inventoried for it.
+_CONTENT_UNREAD = frozenset({ZIP_DIRECTORY_UNREAD, ZIP_MEMBER_UNREAD, NUMPY_HEADER_UNREAD})
 _NUMPY_MAGIC = b"\x93NUMPY"
 # Dtype names that make an object dtype: the type code, with the sizes NumPy accepted,
 # and the names that NumPy and its earlier releases accept.
@@ -235,10 +237,12 @@ SHARED_DIGESTS_EXHAUSTED = (
 Verify = Callable[[Path, Path, str | None, str | None], VerificationResult]
 
 
+# A file no model name rates is checked by its content under these names and suffixes.
 _MODEL_DIR_NAMES = frozenset({"models", "model", "weights", "checkpoints", "checkpoint"})
-_SNIFF_SUFFIXES = frozenset({".dat", ".npy", ".npz"})
-_SNIFF_BYTES = 65536
-_NPY_OBJECT = re.compile(rb"""['"]descr['"]\s*:\s*(?:['"][|<>]?O['"]|\[[^\]]*?['"][|<>]?O['"])""")
+_CONTENT_SUFFIXES = frozenset({".dat", ".npy", ".npz"})
+# A model directory's own readers open these, and no loader unpickles source code.
+_DIRECTORY_FILES = frozenset([*MODEL_CONFIG_FILES, *TOKENIZER_FILES, *CHAT_TEMPLATE_FILES])
+_SOURCE_SUFFIXES = frozenset({".py", ".jinja", ".jinja2"})
 
 
 def _pickle_family(path: PurePath) -> bool:
@@ -250,167 +254,32 @@ def _pickle_family(path: PurePath) -> bool:
     )
 
 
-def _sniff_candidate(path: Path) -> bool:
-    """A file whose name is not a known model suffix but may still be a payload.
+def _content_candidate(path: Path) -> bool:
+    """Whether a file no model name rates is inventoried when its content is a payload.
 
-    NumPy arrays are sniffed anywhere. Other names are sniffed under model-like
-    directories and when the suffix is a generic ``.dat``, which is how a pickle
-    is renamed to leave the suffix list.
+    ``.npy``, ``.npz`` and the generic ``.dat`` are candidates anywhere; any other name
+    is one below a ``model``, ``models``, ``weights``, ``checkpoint`` or ``checkpoints``
+    directory, where a pickle renamed off the suffix list is kept. A model directory's
+    configuration, tokenizer and chat template files, which its own readers open once,
+    and Python and Jinja sources, which no loader unpickles, are not candidates.
     """
-    if model_format(path) is not None or path.suffix.lower() in MODEL_EXTENSIONS:
+    if model_format(path) is not None:
         return False
     suffix = path.suffix.lower()
-    if suffix in _SNIFF_SUFFIXES:
-        return True
-    return any(part.lower() in _MODEL_DIR_NAMES for part in path.parts[:-1])
-
-
-def _numpy_object_header(blob: bytes) -> bool:
-    """True when ``blob`` starts a NumPy object array or an ``.npz`` holding one.
-
-    Object dtype is unpickled by ``np.load(allow_pickle=True)``. The header is
-    ASCII and is matched without decoding the array.
-    """
-    if blob.startswith(b"\x93NUMPY"):
-        return _NPY_OBJECT.search(blob[:1024]) is not None
-    if not blob.startswith(b"PK\x03\x04") or len(blob) < 30:
+    if path.name in _DIRECTORY_FILES or suffix in _SOURCE_SUFFIXES:
         return False
-    name_len = int.from_bytes(blob[26:28], "little")
-    extra_len = int.from_bytes(blob[28:30], "little")
-    start = 30 + name_len + extra_len
-    if name_len <= 0 or name_len > 4096 or start > len(blob):
-        return False
-    method = int.from_bytes(blob[8:10], "little")
-    data = blob[start : start + 1024]
-    if method == 0:
-        sample = data
-    elif method == 8:
-        try:
-            sample = zlib.decompressobj(wbits=-zlib.MAX_WBITS).decompress(data, max_length=512)
-        except zlib.error:
-            return False
-    else:
-        return False
-    return sample.startswith(b"\x93NUMPY") and _NPY_OBJECT.search(sample[:512]) is not None
+    return suffix in _CONTENT_SUFFIXES or any(
+        part.lower() in _MODEL_DIR_NAMES for part in path.parts[:-1]
+    )
 
 
-_ZIP_PICKLE = "ZIP archive contains a pickle member; torch.load unpickles it"
-_PICKLE_NAME_SUFFIXES = tuple(sorted(_UNSAFE_SUFFIXES))
-_PICKLE_NAME_WRAPPERS = tuple(sorted(_PICKLE_WRAPPERS))
-
-
-def _member_is_pickle(name: bytes) -> bool:
-    """A ZIP member whose name is a pickle-family file, including ``.pickle``.
-
-    The directory portion is ignored. A compression wrapper such as ``.pkl.gz``
-    still counts, matching a file of that name on disk.
-    """
-    base = name.rsplit(b"/", 1)[-1].rsplit(b"\\", 1)[-1].lower()
-    text = base.decode("ascii", "ignore")
-    if text.endswith(_PICKLE_NAME_SUFFIXES):
-        return True
-    for wrapper in _PICKLE_NAME_WRAPPERS:
-        if text.endswith(wrapper) and text[: -len(wrapper)].endswith(_PICKLE_NAME_SUFFIXES):
-            return True
-    return False
-
-
-def _central_directory_names(blob: bytes) -> list[bytes] | None:
-    """Member names from a ZIP central directory that this buffer contains.
-
-    ``None`` when the end-of-central-directory record is absent or malformed, so
-    the caller can fall back to the local headers that the buffer does hold.
-    """
-    window = min(len(blob), 22 + 65535)
-    end_record = blob.rfind(b"PK\x05\x06", len(blob) - window)
-    if end_record < 0 or end_record + 22 > len(blob):
-        return None
-    count = int.from_bytes(blob[end_record + 10 : end_record + 12], "little")
-    directory_size = int.from_bytes(blob[end_record + 12 : end_record + 16], "little")
-    directory_offset = int.from_bytes(blob[end_record + 16 : end_record + 20], "little")
-    if count == 0xFFFF or directory_size == 0xFFFFFFFF or directory_offset == 0xFFFFFFFF:
-        return None
-    if directory_offset > len(blob) or directory_size > len(blob) - directory_offset:
-        return None
-    names: list[bytes] = []
-    position = directory_offset
-    end = directory_offset + directory_size
-    while position < end and len(names) <= count and len(names) < 4096:
-        if position + 46 > end or blob[position : position + 4] != b"PK\x01\x02":
-            return None
-        name_length = int.from_bytes(blob[position + 28 : position + 30], "little")
-        extra_length = int.from_bytes(blob[position + 30 : position + 32], "little")
-        comment_length = int.from_bytes(blob[position + 32 : position + 34], "little")
-        name_at = position + 46
-        if name_length > 4096 or name_at + name_length > len(blob):
-            return None
-        names.append(blob[name_at : name_at + name_length])
-        position = name_at + name_length + extra_length + comment_length
-    return names
-
-
-def _local_header_names(blob: bytes) -> list[bytes]:
-    """Names of ZIP local headers in ``blob``, stopping when the next one is not stored."""
-    names: list[bytes] = []
-    position = 0
-    while position + 30 <= len(blob) and len(names) < 4096:
-        if blob[position : position + 4] != b"PK\x03\x04":
-            break
-        flags = int.from_bytes(blob[position + 6 : position + 8], "little")
-        compressed = int.from_bytes(blob[position + 18 : position + 22], "little")
-        name_length = int.from_bytes(blob[position + 26 : position + 28], "little")
-        extra_length = int.from_bytes(blob[position + 28 : position + 30], "little")
-        name_at = position + 30
-        if name_length <= 0 or name_length > 4096 or name_at + name_length > len(blob):
-            break
-        names.append(blob[name_at : name_at + name_length])
-        if flags & 0x08:
-            break
-        nxt = name_at + name_length + extra_length + compressed
-        if nxt <= position:
-            break
-        position = nxt
-    return names
-
-
-def _zip_pickle_member(blob: bytes) -> bool:
-    """True when any ZIP member name is a pickle-family file.
-
-    The central directory lists every member, so a first member named ``version``
-    does not hide ``archive/data.pkl`` or ``data.pickle``. Local headers cover a
-    buffer that does not hold the directory.
-    """
-    if not blob.startswith(b"PK\x03\x04") or len(blob) < 30:
-        return False
-    names = _central_directory_names(blob)
-    if names is None:
-        names = _local_header_names(blob)
-    return any(_member_is_pickle(name) for name in names)
-
-
-def _prefix_is_pickle(blob: bytes) -> bool:
-    """A complete opcode stream, or a valid prefix that runs past PROTO."""
-    if _recognized_pickle(io.BytesIO(blob), blob[:8], len(blob)):
-        return True
-    binary = len(blob) >= 2 and blob[0] == 0x80 and 2 <= blob[1] <= 5
-    if not binary and (not blob or blob[0] not in _TEXT_PICKLE_START):
-        return False
-    try:
-        opcodes = [opcode.name for opcode, _, _ in pickletools.genops(blob)]
-    except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
-        return False
-    return len(opcodes) >= 2 and (not binary or opcodes[0] == "PROTO")
-
-
-def sniffed_payload(blob: bytes) -> str | None:
-    """Why ``blob`` is an unsafe loader payload, or None when it is not one."""
-    if _numpy_object_header(blob):
-        return "NumPy object-dtype array; np.load(allow_pickle=True) unpickles it"
-    if _zip_pickle_member(blob):
-        return _ZIP_PICKLE
-    if _prefix_is_pickle(blob):
-        return "Recognized pickle opcode stream; object loading can execute code"
-    return None
+def _content_format(explanation: str) -> tuple[str, str]:
+    """The (format key, format name) of a file inventoried by what its content is."""
+    if explanation in (NUMPY_OBJECT_ARRAY, NUMPY_HEADER_UNREAD):
+        return "npy", "numpy"
+    if explanation in (ZIP_PICKLE_MEMBER, ZIP_OBJECT_ARRAY) or explanation in _ZIP_UNRATED:
+        return "zip", "zip-archive"
+    return "pickle", "pickle"
 
 
 def model_format(path: Path) -> tuple[str, str] | None:
@@ -948,11 +817,51 @@ def observe_model_artifact(
     this descriptor when the caller's read ends, so the verdict and digest are
     never attributed to a pathname that now names other bytes.
     """
+    return _complete_observation(path, stream, _inspect_opened(path, stream), budget)
+
+
+def observe_content(
+    path: Path, *, stream: BinaryIO, budget: InspectionBudget | None = None
+) -> ModelArtifactObservation | None:
+    """Observe a file that no model name rates when its content makes it a model artifact.
+
+    That content is a pickle, a NumPy array with an object dtype, a ZIP archive with a
+    pickle-family member or such an array as a member, or a NumPy array or ZIP archive
+    that a bound left unread. For other content ``None`` is returned once the inspection
+    has read what it needed, which for a ZIP archive is all of it. An artifact is
+    observed from the same stream, so every byte is read, and charged, once. The caller
+    holds a confined regular-file context, as for ``observe_model_artifact``.
+    """
+    inspected = _inspect_opened(path, stream)
+    if (
+        inspected.safety != SerializationSafety.UNSAFE_CODE_EXECUTION
+        and inspected.explanation not in _CONTENT_UNREAD
+    ):
+        return None
+    return _complete_observation(path, stream, inspected, budget)
+
+
+class _Inspected(NamedTuple):
+    before: os.stat_result
+    reader: _HashingModelReader
+    safety: SerializationSafety
+    explanation: str
+
+
+def _inspect_opened(path: Path, stream: BinaryIO) -> _Inspected:
     before = os.fstat(stream.fileno())
     if before.st_size > limits.current().model_bytes:
         raise OSError("model artifact exceeds the hash byte limit")
     observed = _HashingModelReader(stream)
     safety, explanation = inspect_model_format(path, stream=cast(BinaryIO, observed))
+    return _Inspected(before, observed, safety, explanation)
+
+
+def _complete_observation(
+    path: Path, stream: BinaryIO, inspected: _Inspected, budget: InspectionBudget | None
+) -> ModelArtifactObservation:
+    """Complete an inspection with format metadata and the SHA-256 of every byte."""
+    before, observed, safety, explanation = inspected
     detected = model_format(path)
     key = detected[0] if detected is not None else None
     extra: dict[str, Any] = {}
@@ -1735,42 +1644,51 @@ class ModelScanner(Scanner):
             self._digests, self._read, self._budget = {}, set(), InspectionBudget()
             self._bindings, self._verified = BindingBudget(), {}
             self._shared = BindingBudget(reason=SHARED_DIGESTS_EXHAUSTED)
-            sniffed: dict[Path, str] = {}
-            for path in tree.files:
-                if not _sniff_candidate(path):
-                    continue
-                blob = files.read_prefix(path, _SNIFF_BYTES)
-                if not blob:
-                    continue
-                reason = sniffed_payload(blob)
-                if reason is not None:
-                    sniffed[path] = reason
-            model_dirs = sorted(
+            named = sorted(
                 {
                     path.parent
                     for path in tree.files
-                    if model_format(path) is not None
-                    or _index_base(path) is not None
-                    or path in sniffed
+                    if model_format(path) is not None or _index_base(path) is not None
                 }
             )
-            if not model_dirs and not result.scan_failures and not result.surfaces_excluded:
-                result.surfaces_scanned.append("model-weights (no model files found)")
+            contexts: dict[Path, _DirectoryContext] = {}
             covered: set[Path] = set()
-            for model_dir in model_dirs:
-                context = self._directory_context(files, model_dir)
+            for model_dir in named:
+                context = contexts[model_dir] = self._directory_context(files, model_dir)
                 for path in tree.children.get(model_dir, ()):
                     detected = model_format(path)
-                    reason = sniffed.get(path)
-                    if detected is None and reason is not None:
-                        detected = (
-                            ("npy", "numpy-object")
-                            if reason.startswith("NumPy")
-                            else ("pickle", "pickle")
-                        )
                     if detected is not None:
                         component, weight_files = self._scan_model_file(
-                            files, path, detected, context, sniffed=reason
+                            files, path, detected, context
+                        )
+                        result.components.append(component)
+                        covered.update(weight_files)
+            # A file no name rates is a model artifact by its content. It is checked after
+            # the files that the models above bind and their directories configure, and
+            # only if none of them is it, so no byte is read twice.
+            found: dict[Path, ModelArtifactObservation] = {}
+            for path in tree.files:
+                if path not in self._read and _content_candidate(path):
+                    observation = self._content_artifact(files, path)
+                    if observation is not None:
+                        found[path] = observation
+            if not (named or found or result.scan_failures or result.surfaces_excluded):
+                result.surfaces_scanned.append("model-weights (no model files found)")
+            for model_dir in sorted({path.parent for path in found}):
+                context = (
+                    contexts[model_dir]
+                    if model_dir in contexts
+                    else self._directory_context(files, model_dir)
+                )
+                for path in tree.children.get(model_dir, ()):
+                    observation = found.get(path)
+                    if observation is not None:
+                        component, weight_files = self._scan_model_file(
+                            files,
+                            path,
+                            _content_format(observation.explanation),
+                            context,
+                            observation=observation,
                         )
                         result.components.append(component)
                         covered.update(weight_files)
@@ -1779,6 +1697,19 @@ class ModelScanner(Scanner):
                 files._fail(label, reason)
             result.surfaces_scanned.extend(sorted(path.as_posix() for path in self._read))
         return result
+
+    def _content_artifact(
+        self, files: ConfinedCollection, path: Path
+    ) -> ModelArtifactObservation | None:
+        """The observation of a file no model name rates, when its content is an artifact."""
+        try:
+            with files.open_regular(path, max_bytes=limits.bound("model-bytes")) as stream:
+                observed = observe_content(path, stream=stream, budget=self._budget)
+        except (OSError, ValueError):
+            files._fail(path, "model inspection or hashing failed")
+            return None
+        # Only now has the confined stream confirmed the pathname still names those bytes.
+        return observed
 
     def _digest(self, files: ConfinedCollection, path: Path) -> str | None:
         if path not in self._digests:
@@ -1973,30 +1904,27 @@ class ModelScanner(Scanner):
         detected: tuple[str, str],
         context: _DirectoryContext,
         *,
-        sniffed: str | None = None,
+        observation: ModelArtifactObservation | None = None,
     ) -> tuple[ModelComponent, list[Path]]:
+        """A component for ``path``; a file inventoried by content comes with its observation."""
         fmt_key, fmt_name = detected
         self._read.add(path)
-        observation: ModelArtifactObservation | None = None
-        try:
-            with files.open_regular(path, max_bytes=limits.bound("model-bytes")) as stream:
-                observed = observe_model_artifact(path, stream=stream, budget=self._budget)
-            # Commit only after the confined stream confirmed the pathname still
-            # names the bytes that were read.
-            observation = observed
-        except (OSError, ValueError):
-            files._fail(path, "model inspection or hashing failed")
+        if observation is None:
+            try:
+                with files.open_regular(path, max_bytes=limits.bound("model-bytes")) as stream:
+                    observed = observe_model_artifact(path, stream=stream, budget=self._budget)
+                # Commit only after the confined stream confirmed the pathname still
+                # names the bytes that were read.
+                observation = observed
+            except (OSError, ValueError):
+                files._fail(path, "model inspection or hashing failed")
         if observation is not None:
             safety, format_evidence = observation.safety, observation.explanation
             weight_hash: str | None = observation.digest
-            if sniffed and safety != SerializationSafety.UNSAFE_CODE_EXECUTION:
-                safety = SerializationSafety.UNSAFE_CODE_EXECUTION
-                format_evidence = sniffed
-        elif sniffed or _pickle_family(path):
-            # The name, or a sniffed payload, rates these formats even when the file
-            # cannot be hashed.
+        elif _pickle_family(path):
+            # The name alone rates these formats; an unreadable file keeps that rating.
             safety = SerializationSafety.UNSAFE_CODE_EXECUTION
-            format_evidence = sniffed or (
+            format_evidence = (
                 "Potential code-executing loader format (artifact could not be hashed)"
             )
             weight_hash = None
