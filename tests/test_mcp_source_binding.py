@@ -304,7 +304,7 @@ VECTOR_STRUCTURE = (
     '"transport":"stdio"}}'
 )
 VECTOR_HASH = "sha256:8842529f58e69fae0d25b70d3b715a9e17c7ceb76acdf485fe6a5119f8ac760b"
-VECTOR_BINDING = "hmac-sha256:d287e6feea0dfe71fc5db61c8512f468936ab8eb856905214cd32675ca1ad664"
+VECTOR_BINDING = "hmac-sha256:ab2510900cd4305b4edfdc611aab1bfa0987c3a4a9d633c0afe1f9a3b3720e56"
 VECTOR_KEY_ID = "12ff5c60eb4e7e21ba266464e71ccbcd"
 
 
@@ -334,7 +334,7 @@ def test_keyed_value_binding_known_answer_vector(tmp_path, monkeypatch):
         {"profile": STATIC_VALUE_BINDING_PROFILE, "configuration": VECTOR_SERVER, "resolver": []}
     )
     expected = hmac.new(VECTOR_KEY.encode(), message.encode(), hashlib.sha256).hexdigest()
-    assert STATIC_VALUE_BINDING_PROFILE == "nexus-symbiote/mcp-static-values/v2"
+    assert STATIC_VALUE_BINDING_PROFILE == "nexus-symbiote/mcp-static-values/v3"
     assert "hmac-sha256:" + expected == VECTOR_BINDING
     assert server.properties["static_value_binding"] == VECTOR_BINDING
     assert server.properties["static_value_binding_key_id"] == VECTOR_KEY_ID
