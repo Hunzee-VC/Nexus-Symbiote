@@ -325,6 +325,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         from nexus_symbiote.validators.completeness import (
             carries_discovery_evidence,
             discovery_producer_check,
+            discovery_signature_required,
         )
         from nexus_symbiote.validators.risk import RiskScorer
 
@@ -381,60 +382,65 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 heading = "Built-in scan gate failed; a project policy cannot relax it here:"
                 print_lines([(heading, "red"), *gate_reason_lines(document)], err=True)
                 raise click.ClickException("Baseline was not written: static scan gate failed")
-            if carries_discovery_evidence(staged_bom):
-                resolved_root = Path(project_path).resolve()
-                try:
-                    loaded_policy = None if no_project_policy else load_policy_file(resolved_root)
-                    active_policy = (
-                        loaded_policy[0] if loaded_policy is not None else default_policy()
+            resolved_root = Path(project_path).resolve()
+            try:
+                loaded_policy = None if no_project_policy else load_policy_file(resolved_root)
+                active_policy = loaded_policy[0] if loaded_policy is not None else default_policy()
+                sig_policies = (
+                    load_signature_policies(signature_policy, project_root=resolved_root)
+                    if signature_policy is not None
+                    else []
+                )
+            except (PolicyError, SignaturePolicyError) as exc:
+                raise click.ClickException(neutralize(exc)) from exc
+            producer_verified = False
+            if discovery_signature_required(
+                active_policy.validation.require_discovery_signature,
+                resolved_root,
+                sig_policies,
+            ):
+                status, problems = discovery_producer_check(
+                    staged_bom,
+                    resolved_root,
+                    sig_policies,
+                    exclude_paths=active_policy.scan.exclude_paths,
+                )
+                if status == "failed" or problems:
+                    for problem in problems:
+                        echo_line("  - ", problem, err=True)
+                    raise click.ClickException(
+                        "Baseline was not written: unverified imported discovery cannot be promoted"
                     )
-                    sig_policies = (
-                        load_signature_policies(signature_policy, project_root=resolved_root)
-                        if signature_policy is not None
-                        else []
+                producer_verified = status == "verified"
+            if carries_discovery_evidence(staged_bom) and not producer_verified:
+                echo_line(
+                    "WARNING: ShadowScan discovery evidence is UNVERIFIED; verify with "
+                    "--signature-policy before promoting.",
+                    err=True,
+                )
+                in_ci = any(
+                    os.environ.get(name) not in (None, "", "0", "false")
+                    for name in (
+                        "CI",
+                        "GITHUB_ACTIONS",
+                        "GITLAB_CI",
+                        "CIRCLECI",
+                        "TF_BUILD",
+                        "JENKINS_URL",
+                        "BUILDKITE",
+                        "DRONE",
+                        "TRAVIS",
                     )
-                except (PolicyError, SignaturePolicyError) as exc:
-                    raise click.ClickException(neutralize(exc)) from exc
-                producer_verified = False
-                if sig_policies or active_policy.validation.require_discovery_signature:
-                    status, problems = discovery_producer_check(
-                        staged_bom,
-                        resolved_root,
-                        sig_policies,
-                        exclude_paths=active_policy.scan.exclude_paths,
+                )
+                if (
+                    active_policy.validation.require_discovery_signature
+                    or fail_on_unsigned_discovery
+                    or (in_ci and not allow_unsigned_discovery)
+                ):
+                    raise click.ClickException(
+                        "Baseline was not written: unsigned ShadowScan discovery evidence; "
+                        "verify with --signature-policy or pass --allow-unsigned-discovery"
                     )
-                    if status != "verified" or problems:
-                        for problem in problems:
-                            echo_line("  - ", problem, err=True)
-                        raise click.ClickException(
-                            "Baseline was not written: unverified imported discovery cannot be promoted"
-                        )
-                    producer_verified = True
-                if not producer_verified:
-                    echo_line(
-                        "WARNING: ShadowScan discovery evidence is UNVERIFIED; verify with "
-                        "--signature-policy before promoting.",
-                        err=True,
-                    )
-                    in_ci = any(
-                        os.environ.get(name) not in (None, "", "0", "false")
-                        for name in (
-                            "CI",
-                            "GITHUB_ACTIONS",
-                            "GITLAB_CI",
-                            "CIRCLECI",
-                            "TF_BUILD",
-                            "JENKINS_URL",
-                            "BUILDKITE",
-                            "DRONE",
-                            "TRAVIS",
-                        )
-                    )
-                    if fail_on_unsigned_discovery or (in_ci and not allow_unsigned_discovery):
-                        raise click.ClickException(
-                            "Baseline was not written: unsigned ShadowScan discovery evidence; "
-                            "verify with --signature-policy or pass --allow-unsigned-discovery"
-                        )
             write_cli_output(target, staged_bytes.decode("utf-8"))
         finally:
             ctx.meta.pop(STAGED_INVENTORY, None)

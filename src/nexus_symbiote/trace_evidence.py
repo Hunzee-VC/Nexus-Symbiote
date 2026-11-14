@@ -331,7 +331,15 @@ def _endpoint(url: str | None) -> tuple[str, int | None] | None:
         host, port = parts.hostname, parts.port
     except ValueError:
         return None
-    if not host or "@" in parts.netloc or "%" in parts.netloc:
+    if (
+        not parts.scheme
+        or not host
+        or not parts.netloc.isascii()
+        or "@" in parts.netloc
+        or "%" in parts.netloc
+        or parts.netloc.endswith(":")
+        or port == 0
+    ):
         return None
     return host, port if port is not None else _DEFAULT_PORTS.get(parts.scheme.lower())
 

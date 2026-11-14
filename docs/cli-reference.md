@@ -735,6 +735,8 @@ nexus-symbiote scan [OPTIONS] [PROJECT_PATH]
 | `--check` | Collect and apply the scan gate without writing an inventory. Cannot be combined with `-o`. |
 | `--signature-policy` `PATH` | Explicit operator signer policy JSON |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target. |
+| `--fail-on-unsigned-discovery` | With `--check`, exit with status 1 when ShadowScan discovery evidence is unverified. |
+| `--allow-unsigned-discovery` | With `--check`, accept unverified ShadowScan discovery evidence explicitly (still warns); required in CI when no `--signature-policy` verifies the report. |
 
 `PROJECT_PATH` is resolved before collection, because the collectors refuse a root
 reached through a symbolic link. When it resolves through a link, `scan` names the

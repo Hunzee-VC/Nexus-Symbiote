@@ -558,7 +558,8 @@ class IntegrityValidator:
             if comp.redacted_definition_hash is not None:
                 accepted.add(comp.redacted_definition_hash)
             legacy_ok = (
-                comp.redacted_definition_hash is not None
+                comp.bom_ref not in local_tools
+                and comp.redacted_definition_hash is not None
                 and legacy_recomputed == comp.redacted_definition_hash
             )
             if recomputed not in accepted and not legacy_ok:

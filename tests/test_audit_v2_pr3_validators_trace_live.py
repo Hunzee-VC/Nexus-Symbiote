@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -60,6 +61,10 @@ SIGNER_ISSUER = "https://token.actions.githubusercontent.com"
     [
         None,
         "",
+        "//api.example.com/v1",
+        "https://\u0430pi.example.com/v1",
+        "https://api.example.com:/v1",
+        "https://api.example.com:0/v1",
         "https://api.example.com\\@evil.example/v1",
         "https://api.example.com/v1\n",
         "https://api.example.com/v1 ",
@@ -206,6 +211,51 @@ def test_integrity_validator_accepts_legacy_redacted_definition_hash() -> None:
     report = IntegrityValidator().validate(bom)
     assert report.hashes_failed == 0
     assert report.status == "unknown"
+
+
+def test_integrity_validator_rejects_forged_mcp_title_on_local_redacted_static_tool(
+    tmp_path: Path,
+) -> None:
+    from nexus_symbiote.scanners.mcp import MCPScanner
+
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "demo": {
+                        "command": "/usr/bin/true",
+                        "args": [],
+                        "tools": [
+                            {
+                                "name": "query_billing",
+                                "description": (
+                                    "Query billing with sk-proj-1234567890abcdefghijklmnop."
+                                ),
+                                "inputSchema": {"type": "object"},
+                            }
+                        ],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    scanned = MCPScanner().scan(tmp_path, config_only=True)
+    tools = [c for c in scanned.components if isinstance(c, ToolComponent)]
+    assert len(tools) == 1
+    assert tools[0].redacted_definition_hash is not None
+
+    bom = AIBOM()
+    for comp in scanned.components:
+        bom.add_component(comp)
+    target = bom.get_component(tools[0].bom_ref)
+    assert isinstance(target, ToolComponent)
+    target.properties["mcp_title"] = "INJECTED SYSTEM OVERRIDE"
+
+    report = IntegrityValidator().validate(bom, project_root=tmp_path)
+    assert report.status == "fail"
+    assert report.hashes_failed == 1
+    assert any("differs from its declared digest" in i.detail for i in report.issues)
 
 
 # ---------------------------------------------------------------------------
@@ -381,10 +431,11 @@ def test_discover_mcp_rejects_symlink_and_hardlink_raw_descriptor_aliases(
     assert "--raw-descriptors must name a different file than --output" in res_hard.output
 
 
-@pytest.mark.skipif(os.name != "posix", reason="POSIX process reaping")
 def test_observe_pinned_suppresses_wait_timeout_during_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    if os.name != "posix":
+        return
     cmd, pin = _write_stdio_server(
         tmp_path,
         [{"name": "ping", "description": "ok", "inputSchema": {"type": "object"}}],
@@ -394,9 +445,8 @@ def test_observe_pinned_suppresses_wait_timeout_during_cleanup(
     class _TimeoutWaitPopen(orig_popen):  # type: ignore[misc]
         def wait(self, timeout: float | None = None) -> int:
             super().wait(timeout=5.0)
-            if timeout == 5.0:
-                raise subprocess.TimeoutExpired(cmd="srv", timeout=5.0)
-            return 0
+            assert timeout is not None, "Popen.__exit__ called unbounded wait(timeout=None)"
+            raise subprocess.TimeoutExpired(cmd="srv", timeout=timeout)
 
     monkeypatch.setattr("nexus_symbiote.live.stdio.subprocess.Popen", _TimeoutWaitPopen)
     obs = observe_pinned(cmd, pin)
@@ -409,10 +459,11 @@ def test_observe_pinned_suppresses_wait_timeout_during_cleanup(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(os.name != "posix", reason="POSIX directory permission checks")
 def test_launch_policy_rejects_sticky_parent_and_world_writable_ancestor_and_fstat_swap(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    if os.name != "posix":
+        return
     assert _safe_stat(tmp_path / "does-not-exist") is None
 
     project = tmp_path / "project"
@@ -430,7 +481,7 @@ def test_launch_policy_rejects_sticky_parent_and_world_writable_ancestor_and_fst
     policy_in_sticky.chmod(0o600)
     sticky_dir.chmod(0o1777)
     try:
-        with pytest.raises(Exception, match="single-link regular file"):
+        with pytest.raises(click.UsageError, match="single-link regular file"):
             _check_launch_policy(policy_in_sticky, project, bom_path)
     finally:
         sticky_dir.chmod(0o700)
@@ -445,7 +496,7 @@ def test_launch_policy_rejects_sticky_parent_and_world_writable_ancestor_and_fst
     policy_under_anc.chmod(0o600)
     anc.chmod(0o777)
     try:
-        with pytest.raises(Exception, match="single-link regular file"):
+        with pytest.raises(click.UsageError, match="single-link regular file"):
             _check_launch_policy(policy_under_anc, project, bom_path)
     finally:
         anc.chmod(0o700)
@@ -469,7 +520,7 @@ def test_launch_policy_rejects_sticky_parent_and_world_writable_ancestor_and_fst
         "nexus_symbiote.supply_chain_cli._safe_stat",
         lambda p: ops_stat if p == project.resolve() else os.stat(p),
     )
-    with pytest.raises(Exception, match="outside the untrusted project"):
+    with pytest.raises(click.UsageError, match="outside the untrusted project"):
         _check_launch_policy(valid_policy, project, bom_path)
     monkeypatch.undo()
 
@@ -495,15 +546,20 @@ def test_launch_policy_rejects_sticky_parent_and_world_writable_ancestor_and_fst
     assert "invalid BOM or operator launch policy" in res.output
 
 
-def _write_sig_policy(path: Path) -> Path:
+def _write_sig_policy(
+    path: Path,
+    *,
+    artifact_path: str = ".shadowscan/report.json",
+    bundle_path: str = ".shadowscan/report.json.sigstore",
+) -> Path:
     path.write_text(
         json.dumps(
             {
                 "version": 1,
                 "artifacts": [
                     {
-                        "artifact_path": ".shadowscan/report.json",
-                        "bundle_path": ".shadowscan/report.json.sigstore",
+                        "artifact_path": artifact_path,
+                        "bundle_path": bundle_path,
                         "expected_identity": SIGNER_ID,
                         "expected_issuer": SIGNER_ISSUER,
                     }
@@ -567,6 +623,46 @@ def test_baseline_enforces_shadowscan_ci_and_signature_policy_gates(
     assert out.is_file()
     out.unlink()
 
+    # Model-only --signature-policy does NOT falsely fail discovery check when --allow-unsigned-discovery is passed
+    import struct
+
+    st_hdr = b'{"w":{"dtype":"F32","shape":[1],"data_offsets":[0,4]}}'
+    (project / "models").mkdir(exist_ok=True)
+    (project / "models/weights.safetensors").write_bytes(
+        struct.pack("<Q", len(st_hdr)) + st_hdr + b"\x00\x00\x00\x00"
+    )
+    (project / "models/weights.safetensors.sigstore").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "nexus_symbiote.utils.crypto.verify_sigstore_digest",
+        lambda digest_hex, bundle_json, identity, issuer, **kw: VerificationResult(
+            True,
+            identity=identity,
+            issuer=issuer,
+            details={"artifact_digest": digest_hex},
+        ),
+    )
+    model_sig_policy = _write_sig_policy(
+        tmp_path / "model-sig-policy.json",
+        artifact_path="models/weights.safetensors",
+        bundle_path="models/weights.safetensors.sigstore",
+    )
+    model_only_ok = runner.invoke(
+        main,
+        [
+            "baseline",
+            str(project),
+            "-o",
+            str(out),
+            "--signature-policy",
+            str(model_sig_policy),
+            "--allow-unsigned-discovery",
+        ],
+    )
+    assert model_only_ok.exit_code == 0, model_only_ok.output
+    assert out.is_file()
+    out.unlink()
+    shutil.rmtree(project / "models")
+
     # --signature-policy with failing bundle verification fails closed
     (project / ".shadowscan/report.json.sigstore").write_text("{}", encoding="utf-8")
     sig_policy = _write_sig_policy(tmp_path / "sig-policy.json")
@@ -599,6 +695,19 @@ def test_baseline_enforces_shadowscan_ci_and_signature_policy_gates(
     assert verified_sig.exit_code == 0, verified_sig.output
     assert "UNVERIFIED" not in verified_sig.output
     assert out.is_file()
+    out.unlink()
+
+    # Project excluding .shadowscan/report.json cannot bypass an operator discovery --signature-policy
+    (project / ".nexus-symbiote.yaml").write_text(
+        "version: '1.0'\nscan:\n  exclude_paths:\n    - '.shadowscan/report.json'\n",
+        encoding="utf-8",
+    )
+    excluded_bypass = runner.invoke(
+        main,
+        ["baseline", str(project), "-o", str(out), "--signature-policy", str(sig_policy)],
+    )
+    assert excluded_bypass.exit_code == 1
+    assert not out.exists()
 
 
 # ---------------------------------------------------------------------------
@@ -645,10 +754,40 @@ def test_scan_check_enforces_unsigned_discovery_gate_in_ci_and_with_signature_po
     (project / "CLAUDE.md").write_text("Follow operator instructions.\n", encoding="utf-8")
 
     runner = CliRunner()
+    # Flags require --check and cannot contradict each other
+    no_check = runner.invoke(main, ["scan", str(project), "--allow-unsigned-discovery"])
+    assert no_check.exit_code == 2
+    contradict = runner.invoke(
+        main,
+        [
+            "scan",
+            str(project),
+            "--check",
+            "--fail-on-unsigned-discovery",
+            "--allow-unsigned-discovery",
+        ],
+    )
+    assert contradict.exit_code == 2
+
+    # Interactive --fail-on-unsigned-discovery fails closed
+    monkeypatch.delenv("CI", raising=False)
+    explicit_fail = runner.invoke(
+        main,
+        ["scan", str(project), "--no-project-policy", "--check", "--fail-on-unsigned-discovery"],
+    )
+    assert explicit_fail.exit_code == 1
+
     monkeypatch.setenv("CI", "true")
     ci_check = runner.invoke(main, ["scan", str(project), "--no-project-policy", "--check"])
     assert ci_check.exit_code == 1
     assert "Unsigned ShadowScan discovery evidence in CI" in ci_check.output
+
+    # Explicit --allow-unsigned-discovery allows scan --check in CI
+    ci_allowed = runner.invoke(
+        main,
+        ["scan", str(project), "--no-project-policy", "--check", "--allow-unsigned-discovery"],
+    )
+    assert ci_allowed.exit_code == 0, ci_allowed.output
 
     (project / ".shadowscan/report.json.sigstore").write_text("{}", encoding="utf-8")
     sig_policy = _write_sig_policy(tmp_path / "sig-policy.json")
@@ -690,6 +829,23 @@ def test_scan_check_enforces_unsigned_discovery_gate_in_ci_and_with_signature_po
         ],
     )
     assert verified_check.exit_code == 0, verified_check.output
+
+    # Omitting shadowscan via --scanner cannot bypass discovery --signature-policy under scan --check
+    omitted_check = runner.invoke(
+        main,
+        [
+            "scan",
+            str(project),
+            "--no-project-policy",
+            "--scanner",
+            "prompt",
+            "--check",
+            "--signature-policy",
+            str(sig_policy),
+        ],
+    )
+    assert omitted_check.exit_code == 1
+    assert "omits the ShadowScan report" in omitted_check.output
 
 
 def test_verify_artifact_and_verify_discovery_neutralize_trust_root_path(
@@ -805,8 +961,9 @@ def test_differ_flags_stripped_mcp_observed_digests_as_critical() -> None:
     )
 
 
-@pytest.mark.skipif(os.name != "posix", reason="POSIX symlink confinement")
 def test_recovery_load_export_rejects_symlinks(tmp_path: Path) -> None:
+    if os.name != "posix":
+        return
     bom = AIBOM()
     bom.add_component(AgentComponent(bom_ref="agent:demo", name="demo"))
     real_file = tmp_path / "real.cdx.json"
@@ -824,6 +981,8 @@ def test_recovery_load_export_rejects_symlinks(tmp_path: Path) -> None:
     [
         ("pypi", "openai", "pkg:pypi/openai@1.2.3#subpath/module"),
         ("npm", "openai", "pkg:npm/openai@1.2.3#dist/index.js"),
+        ("pypi", "openai", "pkg:pypi/openai@1.2.3#"),
+        ("npm", "openai", "pkg:npm/openai@1.2.3#"),
     ],
 )
 def test_package_identifier_rejects_purl_subpaths(registry_type: str, name: str, purl: str) -> None:
