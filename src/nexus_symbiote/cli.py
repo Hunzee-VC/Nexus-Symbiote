@@ -162,13 +162,23 @@ def _policy_with_source(
         echo_line(
             "WARNING: policy ", path, " weakens the built-in gates: ", "; ".join(weaker), err=True
         )
-    if weaker and not allow_weakening and _running_in_ci():
+    if _gate_weakenings(weaker) and not allow_weakening and _running_in_ci():
         raise click.ClickException(
             "The project policy weakens the built-in gates and this run looks like CI. Pass "
             "--no-project-policy to ignore the checkout's policy, or --accept-project-policy "
             "to accept it explicitly."
         )
     return policy, f"project:{path}", weaker
+
+
+# Relaxations that change what a command reports, not whether its gate passes; they
+# are recorded and warned about like every other, but CI need not accept them.
+_REPORT_ONLY_WEAKENING_PREFIXES = ("output.",)
+
+
+def _gate_weakenings(weaker: list[str]) -> list[str]:
+    """The relaxations that can turn a failing gate into a passing one."""
+    return [entry for entry in weaker if not entry.startswith(_REPORT_ONLY_WEAKENING_PREFIXES)]
 
 
 def _inventory_policy(

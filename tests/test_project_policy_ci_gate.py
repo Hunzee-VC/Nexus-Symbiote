@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from nexus_symbiote.cli import main
+from nexus_symbiote.cli import _gate_weakenings, main
 
 REFUSAL = "weakens the built-in gates and this run looks like CI"
 
@@ -98,3 +98,13 @@ def test_a_stricter_project_policy_is_never_refused_in_ci(
     )
     assert run.exit_code == 0, run.output
     assert REFUSAL not in run.output
+
+
+def test_only_gate_affecting_relaxations_are_refused_in_ci() -> None:
+    weaker = [
+        "output.default_format=cyclonedx",
+        "risk.fail_threshold=1000000.0",
+        "scan.failure_mode=report-only",
+    ]
+    assert _gate_weakenings(weaker) == weaker[1:]
+    assert _gate_weakenings(["output.default_format=sarif"]) == []
