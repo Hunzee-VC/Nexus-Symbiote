@@ -20,6 +20,14 @@ Every denial raises `AuthorizationError` with a stable `reason` code. Exceptions
 raised by the operator's adapters propagate unchanged, so treat every exception
 from `invoke` as a denial.
 
+`invoke_pinned_stdio` starts the pinned launcher and completes the MCP `initialize`
+handshake before the gateway checks the trust status, snapshot and approval, because
+the session that describes the tool is the one that executes the call. A caller that
+presents invalid evidence still makes the operator's launcher run up to its tool
+listing; nothing is called. Admit callers to the integration itself, and run launchers
+in the isolated worker the [security boundaries](../SECURITY.md#security-boundaries)
+describe.
+
 The gateway copies the request before scope resolution and rejects a resolver
 that modifies its copy during resolution. A resolver retaining that copy cannot
 change the request subsequently submitted to the executor. The resolver remains
