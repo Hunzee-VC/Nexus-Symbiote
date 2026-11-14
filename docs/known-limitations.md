@@ -548,11 +548,12 @@ A way around a limit that its entry does not describe is worth a
 
 - **Producer verification is recorded, and unsigned evidence fails in CI.** Importing a report
   records the verification outcome in the BOM (`metadata.completeness.discovery_verification`):
-  `verified` with the signer identity and issuer when `import-shadowscan --bundle` (or a passing
-  `validate`/`risk --project` producer check) authenticated the exact report bytes, otherwise
-  `unverified`, with the report digest, the report's own run time, and the repository/commit the
-  report carries — currently both `unknown`, because the ShadowScan report format carries neither,
-  so the digest and run time are the binding, not a repository claim. Unsigned evidence warns
+  `verified` with the signer identity and issuer when `import-shadowscan --bundle` authenticated
+  the exact report bytes, otherwise `unverified`, with the report digest, the report's own run
+  time, and the repository/commit the report carries — currently both `unknown`, because the
+  ShadowScan report format carries neither, so the digest and run time are the binding, not a
+  repository claim. A passing producer check of `validate` or `risk` with
+  `--project --signature-policy` counts for that run only and writes no BOM. Unsigned evidence warns
   loudly on `import-shadowscan`, `validate` and `risk`, and fails the run in CI (or with
   `--fail-on-unsigned-discovery`) unless the operator explicitly passes `--allow-unsigned-discovery`.
   A project-policy setting can still be removed by the change it gates, and is ignored under
@@ -648,8 +649,9 @@ A way around a limit that its entry does not describe is worth a
 
 - **Coverage is coarse in standard fields.** CycloneDX `compositions` and SPDX
   relationship `completeness` say only `incomplete`, or `unknown` (`noAssertion` in
-  SPDX), never `complete`: `unknown` with only the default exclusions, `incomplete`
-  with any other exclusion entry. Which collectors ran, failed or were excluded is
+  SPDX), never `complete`: `incomplete` when a collector failed, was not run or left a
+  gap, a surface or a path beyond the default exclusions was excluded, or discovery was
+  imported, and `unknown` otherwise. Which collectors ran, failed or were excluded is
   only in the embedded native inventory. An SPDX export without native-edge
   relationships states its coverage only in the document `comment`.
 - **Rewriting tools drop the coverage warning.** cyclonedx-python-lib 11.12.0 drops

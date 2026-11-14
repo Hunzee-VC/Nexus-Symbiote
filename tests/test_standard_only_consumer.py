@@ -388,6 +388,19 @@ def test_every_imported_report_field_has_a_public_coverage_case():
         assert value != default and getattr(_claim(**{name: value}), name) == value
 
 
+def test_known_limitations_state_the_public_coverage_rule():
+    limitations = DEMO.parents[1] / "docs" / "known-limitations.md"
+    flat = " ".join(limitations.read_text(encoding="utf-8").split())
+    assert (
+        "`incomplete` when a collector failed, was not run or left a gap, a surface or a path "
+        "beyond the default exclusions was excluded, or discovery was imported, and `unknown` "
+        "otherwise"
+    ) in flat
+    failed = _claim(scan_failures=[".mcp.json: invalid JSON or duplicate keys"])
+    assert BUILTIN_EXCLUSIONS.issuperset(failed.exclusions)
+    assert coverage_aggregate(failed) == "incomplete"
+
+
 @pytest.mark.parametrize(
     "marker",
     [
