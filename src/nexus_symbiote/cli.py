@@ -644,6 +644,12 @@ def _render_aibom(aibom: AIBOM, output_format: str, root: Path) -> str:
     is_flag=True,
     help="Use built-in policy without reading configuration from the target.",
 )
+@click.option(
+    "--accept-project-policy",
+    is_flag=True,
+    help="In CI, honor a report-only failure mode set by the scanned project's policy "
+    "file; without this flag a failed gate still exits 1 there.",
+)
 def scan(
     project_path: str,
     output: str | None,
@@ -652,6 +658,7 @@ def scan(
     report_only: bool = False,
     signature_policy: Path | None = None,
     no_project_policy: bool = False,
+    accept_project_policy: bool = False,
     check_only: bool = False,
 ) -> None:
     """Scan a project and generate an AIBOM."""
@@ -837,7 +844,14 @@ def scan(
     )
     scorer = RiskScorer.from_policy(policy.risk)
     passed, risk_report = scorer.passes_gate(aibom)
-    report_mode = report_only or policy.scan.failure_mode == "report-only"
+    # The policy file lives in the checkout being inventoried, so the change under
+    # review could have written it. Locally it keeps its documented convenience; in
+    # CI, where the exit status is the gate, converting a failure to exit 0 takes an
+    # explicit operator choice on the invocation (--report-only or
+    # --accept-project-policy), which the checkout cannot supply.
+    project_report_only = not report_only and policy.scan.failure_mode == "report-only"
+    checkout_overridden = project_report_only and not accept_project_policy and _running_in_ci()
+    report_mode = report_only or (project_report_only and not checkout_overridden)
     staged = _staged_inventory()
 
     if not check_only:
@@ -882,6 +896,13 @@ def scan(
         document, failures_by, excluded_by, not_collected, recorded=not (check_only or staged)
     )
     print_lines([(heading, "yellow" if report_mode else "red"), *gate], err=True)
+    if checkout_overridden:
+        echo_line(
+            "  The project policy sets scan.failure_mode=report-only, which cannot convert "
+            "a failed gate to exit 0 in CI: pass --report-only or --accept-project-policy "
+            "to accept that explicitly, or --no-project-policy to ignore the file.",
+            err=True,
+        )
     if not report_mode:
         raise click.exceptions.Exit(1)
 

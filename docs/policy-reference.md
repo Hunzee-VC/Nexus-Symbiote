@@ -59,7 +59,7 @@ output:
 | `version` | `"1.0"` | Policy format version. Only `"1.0"` exists. |
 | `scan.scanners` | all eight collectors | Collectors `scan` runs. A collector left out is recorded as `unknown`, which leaves coverage partial, so the scan and risk gates fail; a subset is reported as weakened. `--scanner` overrides it for one run. |
 | `scan.exclude_paths` | `node_modules`, `.git`, `__pycache__`, `.venv` | Root-relative paths not collected. Directories named `.git`, `node_modules`, `__pycache__`, `.venv` or `venv` are always skipped whatever this list says, so the defaults change nothing; inside a skill, command, rule or subagent directory such a name is a coverage gap. Any other entry that matches a file is recorded under `surfaces_excluded`: coverage becomes partial and the scan, validate and risk gates fail. Extra entries are reported as weakened. Absolute paths and `..` are refused. |
-| `scan.failure_mode` | `error` | `report-only` makes `scan` exit 0 whatever its gate says, like `--report-only`. Reported as weakened. |
+| `scan.failure_mode` | `error` | `report-only` makes `scan` exit 0 whatever its gate says, like `--report-only` — except in CI, where the checkout cannot pick its own gate: there a failed gate still exits 1 unless the invocation itself passes `--report-only` or `--accept-project-policy`. Reported as weakened. |
 | `risk.fail_threshold` | `50.0` | The risk gate fails when the aggregate score is at or above it. The score is the uncapped sum of finding weights (critical 10, high 7, medium 4, low 1, info 0), not a percentage. Must be positive. A higher value is reported as weakened. `risk --threshold` overrides it. The Action's `risk-threshold` input accepts 0 to 100 and passes that value as `--threshold`, or `--no-score-threshold` when it is 0. |
 | `risk.warn_threshold` | `25.0`, or `fail_threshold` when that is lower | At or above it, `risk_level` is `high` instead of `moderate`, `warning_threshold_exceeded` is true and `scan` prints a risk warning. It never fails a gate. It may not exceed `fail_threshold`. A higher value is reported as weakened. |
 | `risk.fail_on_severity` | `critical` | The risk gate fails on any finding at or above this severity: `critical`, `high`, `medium`, `low` or `info`. `none` disables the severity check and is reported as weakened. `risk --fail-on-severity` overrides it. The GitHub Action's `fail-on-severity` input defaults to `high` and is passed as that flag, so an Action run does not use this built-in `critical` unless the workflow sets `fail-on-severity: critical`. |
@@ -125,7 +125,7 @@ How a suppression applies:
 | `risk.fail_threshold=VALUE`, `risk.warn_threshold=VALUE` | raised above the built-in value |
 | `risk.ignore_categories=NAMES` | any category is ignored |
 | `risk.suppressions: CATEGORY on REF (FINGERPRINT) until DATE (owner OWNER)` | once per suppression |
-| `scan.failure_mode=report-only` | collection failures never fail `scan` |
+| `scan.failure_mode=report-only` | collection failures never fail `scan` outside CI |
 | `scan.scanners=NAMES` | fewer collectors than the built-in set |
 | `scan.exclude_paths=PATHS` | paths beyond the four defaults |
 
