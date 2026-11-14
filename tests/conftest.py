@@ -182,13 +182,15 @@ def _isolated_environment(
         monkeypatch.setenv(name, str(home / name.lower()))
 
     def _is_loopback_target(address: Any) -> bool:
-        if not isinstance(address, tuple) or not address:
-            return True
+        if not isinstance(address, tuple):
+            return True  # AF_UNIX or other local socket type
+        if not address:
+            return False
         host = address[0]
         if isinstance(host, (bytes, bytearray)):
             host = bytes(host).decode("ascii", "replace")
         if not isinstance(host, str):
-            return True
+            return False
         if host.lower() == "localhost":
             return True
         try:
@@ -198,6 +200,7 @@ def _isolated_environment(
 
     orig_connect = socket.socket.connect
     orig_connect_ex = socket.socket.connect_ex
+    orig_sendto = socket.socket.sendto
 
     def _guarded_connect(sock: socket.socket, address: Any) -> Any:
         if modes.current() != modes.Mode.OFFLINE and not _is_loopback_target(address):
@@ -209,8 +212,38 @@ def _isolated_environment(
             raise OSError("test suite blocked outbound non-loopback socket connection")
         return orig_connect_ex(sock, address)
 
+    def _guarded_sendto(sock: socket.socket, data: Any, *args: Any) -> int:
+        address = args[-1] if args else None
+        if (
+            address is not None
+            and modes.current() != modes.Mode.OFFLINE
+            and not _is_loopback_target(address)
+        ):
+            raise OSError("test suite blocked outbound non-loopback socket send")
+        return orig_sendto(sock, data, *args)
+
     monkeypatch.setattr(socket.socket, "connect", _guarded_connect)
     monkeypatch.setattr(socket.socket, "connect_ex", _guarded_connect_ex)
+    monkeypatch.setattr(socket.socket, "sendto", _guarded_sendto)
+    if hasattr(socket.socket, "sendmsg"):
+        orig_sendmsg = socket.socket.sendmsg
+
+        def _guarded_sendmsg(
+            sock: socket.socket,
+            buffers: Any,
+            ancdata: Any = (),
+            flags: int = 0,
+            address: Any = None,
+        ) -> int:
+            if (
+                address is not None
+                and modes.current() != modes.Mode.OFFLINE
+                and not _is_loopback_target(address)
+            ):
+                raise OSError("test suite blocked outbound non-loopback socket send")
+            return orig_sendmsg(sock, buffers, ancdata, flags, address)
+
+        monkeypatch.setattr(socket.socket, "sendmsg", _guarded_sendmsg)
     # Collection limits are process state (the root --limit option sets them): every test
     # starts at the defaults, and what a test leaves in force never reaches the next one.
     with limits.applied(limits.DEFAULTS):
