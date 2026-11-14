@@ -487,6 +487,12 @@ def test_an_unreadable_or_invalid_inventory_is_refused(tmp_path, kind, reason):
     assert reason in str(refusal.value)
 
 
+def test_an_inventory_without_components_is_refused_for_that_reason(tmp_path):
+    with pytest.raises(NativeFormatError) as refusal:
+        read_native_inventory(_invalid(tmp_path, "no-components"))
+    assert str(refusal.value) == "It has no components list, so it has no content digest."
+
+
 def test_an_oversized_inventory_is_read_only_up_to_the_limit(monkeypatch):
     # An unbounded read would take all of a much larger file into memory before refusing it.
     delivered: list[int] = []
