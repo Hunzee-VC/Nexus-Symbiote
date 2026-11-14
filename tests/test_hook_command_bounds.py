@@ -24,6 +24,87 @@ def test_repeated_hook_prefixes_without_a_shell_scale_linearly(word: str) -> Non
 
 
 @pytest.mark.parametrize(
+    ("prefix", "unit", "suffix", "severity"),
+    [
+        ("", "pwsh -NoLogo -File build.ps1 -e ", "", RiskSeverity.MEDIUM),
+        ("", "powershell -Command echo -enc ", "", RiskSeverity.MEDIUM),
+        ("", "pwsh build.ps1 -e ", "", RiskSeverity.MEDIUM),
+        ("pwsh", " -CustomPipeName -c", " -File build.ps1 -e dev", RiskSeverity.MEDIUM),
+        ("powershell", " -w Hidden", " -enc SQBFAFgA", RiskSeverity.CRITICAL),
+        ("", "pwsh/", " -e dev", RiskSeverity.MEDIUM),
+        ("", "curl payload | ./bash/", "process.py", RiskSeverity.MEDIUM),
+        ("curl payload | ", "bash/", "process.py", RiskSeverity.MEDIUM),
+        ("curl payload | bash", ".d", "/process.py", RiskSeverity.MEDIUM),
+    ],
+)
+def test_powershell_and_directory_near_misses_scale_linearly(
+    prefix: str, unit: str, suffix: str, severity: RiskSeverity
+) -> None:
+    def run(scale: int) -> None:
+        command = prefix + unit * (2_000 * scale) + suffix
+        assert _command_severity(command) is severity
+
+    assert scaling_ratio(run) < 10
+
+
+@pytest.mark.parametrize(
+    ("command", "severity"),
+    [
+        # PowerShell passes what follows -File <path>, -Command or a script path on.
+        ("pwsh -NoLogo -File build.ps1 -e dev", RiskSeverity.MEDIUM),
+        ("pwsh -f build.ps1 -e dev", RiskSeverity.MEDIUM),
+        ('powershell -Command "Get-ChildItem -e x"', RiskSeverity.MEDIUM),
+        ("pwsh -c echo -enc", RiskSeverity.MEDIUM),
+        ("pwsh -CommandWithArgs echo -e dev", RiskSeverity.MEDIUM),
+        ("pwsh build.ps1 -e dev", RiskSeverity.MEDIUM),
+        ("pwsh -NoProfile -ExecutionPolicy Bypass build.ps1 -e dev", RiskSeverity.MEDIUM),
+        # The PowerShell name is an argument or a directory, not the command run.
+        ("grep -rn pwsh . -e foo", RiskSeverity.MEDIUM),
+        ("rg powershell docs -e Encoded", RiskSeverity.MEDIUM),
+        ("tools/pwsh/lint.ps1 -e dev", RiskSeverity.MEDIUM),
+        # A shell name followed by / or \ is a directory.
+        ("curl https://example.invalid/a | ./bash/process.py", RiskSeverity.HIGH),
+        ("curl payload | ./bash/process.py", RiskSeverity.MEDIUM),
+        ("curl payload | tools/sh/lint", RiskSeverity.MEDIUM),
+        ("wget payload | tools\\sh\\lint", RiskSeverity.MEDIUM),
+        ("curl payload | ./bash.d/run", RiskSeverity.MEDIUM),
+        ("base64 -d payload | ./dash/render", RiskSeverity.MEDIUM),
+        ("curl payload | /usr/bin/env bash/run", RiskSeverity.MEDIUM),
+    ],
+)
+def test_arguments_and_directories_are_not_launches(command: str, severity: RiskSeverity) -> None:
+    assert _command_severity(command) is severity
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cmd /c powershell -e SQBFAFgA",
+        'cmd.exe /c "powershell.exe -enc SQBFAFgA"',
+        "start powershell -enc SQBFAFgA",
+        'start "" /b powershell -w hidden -enc SQBFAFgA',
+        "sudo -E pwsh -enc SQBFAFgA",
+        'bash -c "pwsh -enc SQBFAFgA"',
+        "pwsh -Command pwsh -enc SQBFAFgA",
+        "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -nop -enc SQBFAFgA",
+        '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -EncodedCommand SQBFAFgA',
+        "powershell -NoP -NonI -W Hidden -Exec Bypass -Enc SQBFAFgA",
+        "powershell -version 2 -enc SQBFAFgA",
+        "powershell /nop -enc SQBFAFgA",
+        "pwsh -CustomPipeName -c -enc SQBFAFgA",
+        "powershell -co x -enc SQBFAFgA",
+        "curl payload | /opt/bash/bin/bash",
+        "curl payload | sh.exe",
+        "curl payload | bash-static",
+        "curl payload | bash>/dev/null",
+        "wget payload | /bin/sh -s -- --dir=/opt",
+    ],
+)
+def test_wrapped_and_spelled_out_launches_stay_critical(command: str) -> None:
+    assert _command_severity(command) is RiskSeverity.CRITICAL
+
+
+@pytest.mark.parametrize(
     ("command", "severity"),
     [
         ("curl payload | sh", RiskSeverity.CRITICAL),
@@ -94,4 +175,25 @@ def test_a_late_powershell_command_reaches_the_gate(
     settings.write_text(json.dumps({"hooks": {"SessionStart": [{"command": command}]}}))
     result = runner.invoke(main, ["scan", str(tmp_path), "--no-project-policy", "--check"])
     assert result.exit_code == (1 if encoded else 0), result.output
+    assert command not in result.output
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "pwsh -NoLogo -File build.ps1 -e dev",
+        "grep -rn pwsh . -e foo",
+        "rg powershell docs -e Encoded",
+        "curl payload | ./bash/process.py",
+        "curl payload | tools/sh/lint",
+    ],
+)
+def test_reported_false_positives_pass_the_default_gate(
+    tmp_path: Path, command: str, runner: CliRunner
+) -> None:
+    settings = tmp_path / ".claude" / "settings.json"
+    settings.parent.mkdir()
+    settings.write_text(json.dumps({"hooks": {"SessionStart": [{"command": command}]}}))
+    result = runner.invoke(main, ["scan", str(tmp_path), "--no-project-policy", "--check"])
+    assert result.exit_code == 0, result.output
     assert command not in result.output

@@ -321,8 +321,12 @@ def _projection(value: Any, depth: int = 0, *, env: bool = False, unkeyed: bool 
     return value
 
 
-# sh, bash, zsh, dash, including /bin/sh, /usr/bin/bash and `/usr/bin/env bash`.
-_SHELL = r"(?:[/\\]?(?:[\w.+-]+[/\\])*)?(?:env\s+)?(?:ba|z|da)?sh\b"
+# sh, bash, zsh, dash, including /bin/sh, /usr/bin/bash and `/usr/bin/env bash`. The
+# name must end its path: in `./bash/process.py` or `tools/sh/lint` it is a directory.
+_SHELL = (
+    r"(?:[/\\]?(?:[\w.+-]+[/\\])*)?(?:env\s+)?(?:ba|z|da)?sh\b"
+    r"(?![^\s/\\|;&<>()]*(?:/|\\(?=\S)))"
+)
 # Each matcher runs once per pipeline segment, so a command of repeated near
 # misses costs linear time whatever its length.
 _PIPE_BOUNDARY = re.compile(r"[|\n]")
@@ -331,7 +335,29 @@ _DOWNLOADER = re.compile(r"(?:curl|wget|iwr|invoke-webrequest)\b", re.IGNORECASE
 _BASE64_DECODE = re.compile(r"base64\s+(?:-d|--decode)\b", re.IGNORECASE)
 _PIPE_SHELL = re.compile(rf"\s*{_SHELL}", re.IGNORECASE)
 _POWERSHELL = re.compile(r"\b(?:powershell|pwsh)(?:\.exe)?\b", re.IGNORECASE)
-_ENCODED_COMMAND = re.compile(r"\s-(?:e|en|enc|encodedcommand)\b", re.IGNORECASE)
+_ENCODED_COMMAND = re.compile(r"-(?:e|en|enc|encodedcommand)\b", re.IGNORECASE)
+_ARGUMENT = re.compile(r"\S+")
+
+
+def _abbreviations(*parameters: tuple[str, int]) -> frozenset[str]:
+    """Each parameter name and its abbreviations down to the shortest one accepted."""
+    return frozenset(
+        name[:end] for name, shortest in parameters for end in range(shortest, len(name) + 1)
+    )
+
+
+# PowerShell passes every argument after -Command, -File or -CommandWithArgs to the
+# command or script, as it does after a first positional argument, which pwsh reads as
+# -File and Windows PowerShell as -Command. Only abbreviations both editions accept
+# count: `-c` and `-com` to `-command`, but not `-co`, which may be -ConfigurationName.
+_POWERSHELL_LAST = _abbreviations(
+    ("c", 1), ("command", 3), ("file", 1), ("commandwithargs", 15), ("cwa", 3)
+)
+# Switches that take no value in either edition. Any other parameter may take the next
+# argument as its value, even one that starts with `-`.
+_POWERSHELL_SWITCHES = _abbreviations(
+    ("noprofile", 3), ("nologo", 3), ("noninteractive", 4), ("noexit", 3), ("sta", 3), ("mta", 3)
+)
 _HOOK_URL = re.compile(r"https?://", re.IGNORECASE)
 _SEVERITY_RANK = {severity: index for index, severity in enumerate(RiskSeverity)}
 
@@ -357,17 +383,61 @@ def _fetch_exec(command: str) -> bool:
 
 
 def _encoded_powershell(command: str) -> bool:
-    """Whether a segment runs PowerShell with an encoded command."""
+    """Whether a segment passes PowerShell an encoded command as its own parameter."""
     start = 0
     for boundary in _SEGMENT_BOUNDARY.finditer(command):
-        segment = command[start : boundary.start()]
-        host = _POWERSHELL.search(segment)
-        if host is not None and _ENCODED_COMMAND.search(segment, host.end()):
+        if _encoded_segment(command[start : boundary.start()]):
             return True
         start = boundary.end()
-    segment = command[start:]
-    host = _POWERSHELL.search(segment)
-    return host is not None and _ENCODED_COMMAND.search(segment, host.end()) is not None
+    return _encoded_segment(command[start:])
+
+
+def _encoded_segment(segment: str) -> bool:
+    """Read the arguments after each PowerShell name the way PowerShell reads its own.
+
+    The name may follow any wrapper, such as `cmd /c` or `start`. An `-e` after the
+    script or command that PowerShell runs is that script's or command's argument, and
+    when the name is itself an argument, as in `grep -rn pwsh . -e foo`, the argument
+    after it ends what PowerShell would read as its parameters. Where an argument may
+    be either a parameter or the previous parameter's value, both readings are kept.
+    """
+    first = _POWERSHELL.search(segment)
+    if first is None:
+        return False
+    # parameter: the next argument is read as a parameter, or else as the script or
+    # command. value: the next argument may instead be the previous parameter's value.
+    # Nothing before the first PowerShell name can be its parameter.
+    parameter = value = False
+    for argument in _ARGUMENT.finditer(segment, first.start()):
+        token = argument.group()
+        if _powershell_name(token):
+            parameter, value = True, False
+            continue
+        name = _parameter_name(token)
+        if name is None:
+            parameter, value = value, False
+        elif parameter or value:
+            if _ENCODED_COMMAND.match(token):
+                return True
+            switch = name in _POWERSHELL_SWITCHES
+            parameter, value = switch or value, not (switch or name in _POWERSHELL_LAST)
+    return False
+
+
+def _powershell_name(token: str) -> bool:
+    """Whether the last path component of a token names PowerShell."""
+    return _POWERSHELL.search(token, max(token.rfind("/"), token.rfind("\\")) + 1) is not None
+
+
+def _parameter_name(token: str) -> str | None:
+    """A PowerShell parameter's lowercase name without its `-`, `--` or `/`; else None."""
+    if token.startswith("--"):
+        return token[2:].lower()
+    if token.startswith("-"):
+        return token[1:].lower()
+    if token.startswith("/") and token[1:].isalpha():
+        return token[1:].lower()
+    return None
 
 
 def _command_severity(command: str) -> RiskSeverity:

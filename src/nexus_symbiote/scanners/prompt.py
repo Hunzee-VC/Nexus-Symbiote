@@ -381,10 +381,19 @@ def _hidden_character_risks(
     return risks
 
 
+# Notes say `run` too (`Run make docs`, `dry-run`, `last run:`), so it counts only
+# when the next word names what to run: a path, a script or executable file, or a shell.
+# A hyphen joined to a word before it (`dry-run`) makes a noun; `<!--run` does not.
+_RUN_TARGET = (
+    r"(?<!\w)(?<!\w-)run\s+[\"'`]?(?:"
+    r"[/\\]\S|[a-z_.~$%][^\s/\\]*[/\\]"
+    r"|[\w.-]+\.(?:sh|bash|zsh|ps1|bat|cmd|exe|py)\b"
+    r"|(?:(?:ba|z|da)?sh|pwsh|powershell)\b)"
+)
 _HIDDEN_INSTRUCTION = re.compile(
     r"https?://|~/"
     r"|\b(?:ignore|disregard|exfiltrate|execute|download|upload|send|steal|override|"
-    r"bypass|curl|wget|fetch|eval|install|run)\b",
+    rf"bypass|curl|wget|fetch|eval|install)\b|{_RUN_TARGET}",
     re.IGNORECASE,
 )
 
@@ -398,8 +407,8 @@ def detect_hidden_markup(content: str, source_name: str) -> list[RiskAssessment]
     """Report HTML and Markdown comments, which renderers hide but agents read.
 
     Only counts and lengths are reported, never the hidden text. A comment that
-    carries an imperative, a URL or a path under ``~/`` is high; other comments
-    stay low.
+    carries an imperative (``run`` only when a path, a script or a shell follows), a
+    URL or a path under ``~/`` is high; other comments stay low.
     """
     count = length = 0
     instructive = False
