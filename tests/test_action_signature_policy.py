@@ -28,7 +28,11 @@ SUBJECT_SHA256 = "c4e92e9ecc828bef2aa7dba1de8ac983511f7532a0df11c770d39099a25cf2
 SIGNER = "https://github.com/trailofbits/rfc8785.py/.github/workflows/release.yml@refs/tags/v0.1.2"
 ISSUER = "https://token.actions.githubusercontent.com"
 UNTRUSTED = "No trusted artifact-bound signer policy was supplied"
-STAND_IN_FORMAT = "No bounded structural validator for this format/loader"
+# The signed stand-in is a wheel, so the model collector rates it as a ZIP archive.
+STAND_IN_FORMAT = (
+    "ZIP archive whose directory lists no pickle member; no bounded structural validator "
+    "for this format/loader"
+)
 
 
 def policy_document(identity: str = SIGNER) -> str:

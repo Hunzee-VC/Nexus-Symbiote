@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import tomllib
+from collections.abc import Callable
 from typing import Any
 
 # tomllib retains every dotted-key prefix, making allocation quadratic in its parts.
@@ -79,8 +80,8 @@ def _longest_dotted_key(text: str) -> int:
                 position = len(text) if newline < 0 else newline
 
 
-def loads(text: str) -> dict[str, Any]:
+def loads(text: str, *, parse_float: Callable[[str], Any] = float) -> dict[str, Any]:
     """Parse TOML only after bounding dotted keys, including quoted parts."""
     if _longest_dotted_key(text) > _MAX_DOTTED_KEY:
         raise TOMLBoundsError("dotted key exceeds the length limit")
-    return tomllib.loads(text)
+    return tomllib.loads(text, parse_float=parse_float)

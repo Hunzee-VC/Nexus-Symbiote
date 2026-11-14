@@ -1151,3 +1151,25 @@ def test_plaintext_alternative_interfaces_fail_the_transport_check(tmp_path):
     # A 1.0 gRPC host:port interface declares no cleartext scheme and is not flagged.
     clean = _server(tmp_path / "c", dict(CARD_1_0))
     assert not any(r.category == "transport_security" for r in clean.risks)
+
+
+def test_a_card_nested_beyond_the_depth_bound_names_the_bound(tmp_path):
+    nested: Any = {"tokenUrl": "https://t.example/token"}
+    for _ in range(10):
+        nested = {"flows": nested}
+    assert _failures(tmp_path, {**CARD, "additionalInterfaces": [nested]}) == [
+        ".well-known/agent.json: A2A card nests too deeply"
+    ]
+
+
+@pytest.mark.parametrize(
+    "card",
+    [
+        {**CARD, "additionalInterfaces": [{"url": "https://a.example"}] * 1001},
+        {**CARD, "additionalInterfaces": {f"u{i}": {} for i in range(1001)}},
+        {**CARD, **{f"x-{i}": "" for i in range(1001)}},
+    ],
+    ids=["list", "mapping", "card-fields"],
+)
+def test_a_card_with_too_many_entries_names_the_bound(tmp_path, card):
+    assert _failures(tmp_path, card) == [".well-known/agent.json: A2A card has too many entries"]

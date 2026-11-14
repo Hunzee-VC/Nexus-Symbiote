@@ -45,6 +45,7 @@ from nexus_symbiote.core.hashing import (
     hash_tool_definition,
     tool_definition_extensions,
 )
+from nexus_symbiote.modes import OfflineViolation
 from nexus_symbiote.runtime_validation import MAX_SCHEMA_BYTES, check_json_budget
 from nexus_symbiote.utils.secrets import redact_descriptor, redact_metadata, redact_text
 
@@ -373,6 +374,10 @@ def _resolve_public(host: str, port: int, timeout: float) -> tuple[int, str]:
             )
         except OSError:
             answers.put(None)
+        except OfflineViolation as exc:
+            # The guard's violation is a BaseException by design; handed to the caller,
+            # it is raised there at once instead of dying with this thread at the timeout.
+            answers.put(exc)
         finally:
             _RESOLVER_SLOTS.release()
 
@@ -381,6 +386,8 @@ def _resolve_public(host: str, port: int, timeout: float) -> tuple[int, str]:
         records = answers.get(timeout=timeout)
     except queue.Empty as exc:
         raise DiscoveryError("DNS resolution timed out") from exc
+    if isinstance(records, OfflineViolation):
+        raise records
     if not records or len(records) > 64:
         raise DiscoveryError("DNS resolution failed or exceeded limits")
     candidates: set[tuple[int, str]] = set()

@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from nexus_symbiote.cli import main
+from nexus_symbiote.core.aibom import MAX_NATIVE_NESTING
 from nexus_symbiote.utils.terminal import LOG_COMMAND, safe_line
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -316,15 +317,22 @@ def _nested(tmp_path: Path, depth: int) -> Path:
 
 
 def test_nesting_at_the_depth_limit_gets_the_fixed_refusal(runner, tmp_path):
-    # The strict parse refuses at the boundary, so export ends there with the fixed refusal and
-    # never with "internal error (RecursionError)". Bisection probes the depth where it ends.
+    # Export ends at the native nesting bound with its fixed refusal, and far beyond any
+    # bound with the strict parser's, never with "internal error (RecursionError)".
+    # Bisection probes the depth where it ends.
     def exported(depth: int) -> bool:
         output = tmp_path / f"approved-{depth}.json"
         result = runner.invoke(main, _args(_nested(tmp_path, depth), output))
         if result.exit_code == 0:
             return True
         assert result.exit_code == 1
-        assert "is not a valid native AIBOM file. It is not strict UTF-8 JSON" in result.output
+        assert "internal error" not in result.output
+        assert (
+            f"is not a valid native AIBOM file. inventory nests deeper than {MAX_NATIVE_NESTING} "
+            "levels"
+            in result.output
+            or "is not a valid native AIBOM file. It is not strict UTF-8 JSON" in result.output
+        )
         assert not output.exists()
         return False
 
@@ -334,6 +342,8 @@ def test_nesting_at_the_depth_limit_gets_the_fixed_refusal(runner, tmp_path):
         middle = (accepted + refused) // 2
         accepted, refused = (middle, refused) if exported(middle) else (accepted, middle)
     assert not exported(refused)
+    # The lists sit below the root, the components list, the agent and its properties.
+    assert accepted + 4 == MAX_NATIVE_NESTING
 
 
 @pytest.mark.parametrize(

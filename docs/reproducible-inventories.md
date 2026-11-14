@@ -201,6 +201,10 @@ against the current tree.
   than its sorted rewrite, although it records the same inventory; its serial number,
   if it has one, may not be the one this build would derive.
 - **SARIF locations depend on the working directory**, as described above.
+- **A document nested deeper than 128 levels is not read.** Every command refuses a
+  native inventory whose arrays and objects nest more than 128 levels, the root
+  counted, with "inventory nests deeper than 128 levels"; the bound is fixed, so what
+  one caller reads, every caller reads. A collected inventory nests far less.
 - **A readable inventory can lack a digest.** A document without a `components` list
   has no content digest. A runtime snapshot binds a document only
   when its compact JSON, with every character outside ASCII escaped and each number

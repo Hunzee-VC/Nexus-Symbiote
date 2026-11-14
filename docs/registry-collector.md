@@ -129,7 +129,7 @@ PyPI components record their hash pins as `requirement_hashes`, so a changed or 
 
 | Input | Limit | Beyond it |
 | --- | --- | --- |
-| Root `requirements*.txt` files | 4 MiB of text together | Collection failure |
+| Root `requirements*.txt` files | 4 MiB of text, and 100,000 logical lines, together | Collection failure |
 | Option text with a quote or backslash, on one requirement line | 16 KiB | `option line not parsed` gap |
 | `pyproject.toml`, `bunfig.toml` and `uv.toml` | 256 KiB each | Collection failure |
 | A dotted key or table name in `pyproject.toml`, `bunfig.toml`, `uv.toml`, `uv.lock` or `poetry.lock` | 16 dots, quoted parts included | Collection failure |

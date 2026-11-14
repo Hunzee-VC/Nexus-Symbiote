@@ -116,6 +116,14 @@ _ANONYMOUS = frozenset({"none", "noauth", "no-auth", "anonymous", "public", "una
 _MAX_ENTRIES = 1000
 _MAX_DEPTH = 8
 _MAX_NAME = 256
+
+
+class _BoundError(ValueError):
+    """A card reached a collection bound; the failure names the bound, not a field type."""
+
+
+TOO_DEEP = "A2A card nests too deeply"
+TOO_MANY_ENTRIES = "A2A card has too many entries"
 # OAuth scopes are short public identifiers; a longer value is withheld unmatched,
 # which also keeps the token-shape search linear.
 _MAX_SCOPE = 512
@@ -277,11 +285,11 @@ class _Security(NamedTuple):
 def _string_list(value: Any) -> list[str]:
     if isinstance(value, str):
         value = [value]
-    if (
-        not isinstance(value, list)
-        or len(value) > _MAX_ENTRIES
-        or not all(isinstance(item, str) for item in value)
-    ):
+    if not isinstance(value, list):
+        raise ValueError("invalid string-list declaration")
+    if len(value) > _MAX_ENTRIES:
+        raise _BoundError(TOO_MANY_ENTRIES)
+    if not all(isinstance(item, str) for item in value):
         raise ValueError("invalid string-list declaration")
     return value
 
@@ -292,7 +300,7 @@ def _strings(value: Any) -> list[str]:
 
 def _fields(declaration: dict[str, Any]) -> list[str]:
     if len(declaration) > _MAX_ENTRIES:
-        raise ValueError("oversized declaration")
+        raise _BoundError(TOO_MANY_ENTRIES)
     return sorted(redact_text(key) for key in declaration)
 
 
@@ -323,14 +331,14 @@ def _scope(value: str) -> str:
 def _declared_urls(value: Any, depth: int = 0) -> list[str]:
     """Collect URL fields, such as tokenUrl, wherever a declaration nests them."""
     if depth > _MAX_DEPTH:
-        raise ValueError("declaration nested too deeply")
+        raise _BoundError(TOO_DEEP)
     if isinstance(value, list):
         if len(value) > _MAX_ENTRIES:
-            raise ValueError("oversized declaration")
+            raise _BoundError(TOO_MANY_ENTRIES)
         urls = [url for item in value for url in _declared_urls(item, depth + 1)]
     elif isinstance(value, dict):
         if len(value) > _MAX_ENTRIES:
-            raise ValueError("oversized declaration")
+            raise _BoundError(TOO_MANY_ENTRIES)
         urls = []
         for key, item in value.items():
             if isinstance(item, str) and key.lower().endswith(("url", "uri")):
@@ -340,7 +348,7 @@ def _declared_urls(value: Any, depth: int = 0) -> list[str]:
     else:
         return []
     if len(urls) > _MAX_ENTRIES:
-        raise ValueError("oversized declaration")
+        raise _BoundError(TOO_MANY_ENTRIES)
     return urls
 
 
@@ -881,7 +889,7 @@ class A2AScanner(Scanner):
         for relative, data in parsed:
             try:
                 component = self._parse_agent_card(data, relative, relative)
-            except _BindingError as exc:
+            except (_BindingError, _BoundError) as exc:
                 result.scan_failures.append(f"{relative}: {exc}")
                 continue
             except (TypeError, ValueError, RecursionError):
@@ -918,7 +926,7 @@ class A2AScanner(Scanner):
                 if not isinstance(client, dict):
                     raise ValueError("invalid client")
                 result.components.append(self._parse_a2a_client(client, relative))
-            except _BindingError as exc:
+            except (_BindingError, _BoundError) as exc:
                 result.scan_failures.append(f"{relative}: {exc}")
             except (TypeError, ValueError, RecursionError):
                 result.scan_failures.append(f"{relative}: invalid A2A client field types")
