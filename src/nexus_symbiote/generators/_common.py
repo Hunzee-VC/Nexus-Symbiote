@@ -130,8 +130,8 @@ def standard_hashes(component: AnyComponent) -> list[tuple[str, str]]:
 
     An instruction file's content digest, a RAG index snapshot digest, a dataset
     content digest and a lockfile integrity value are promoted only when the
-    declared hashes lack that algorithm. Two different digests for one algorithm
-    fail the export.
+    declared hashes lack that algorithm and the digest is well formed. Two
+    different declared digests for one algorithm fail the export.
     """
     result: dict[str, str] = {}
     for algorithm, value in sorted(component.hashes.items()):
@@ -201,8 +201,8 @@ def loss_report(bom: AIBOM, target: str, native: dict[str, Any] | None = None) -
             if model is not None and requested_version(model) is not None:
                 add(
                     f"/components/{index}/version",
-                    "The declared version is not an exact version, so standard version "
-                    "fields omit it",
+                    "The declared version is not an exact version or is longer than "
+                    "1024 characters, so standard version fields omit it",
                 )
         for index, edge in enumerate(document["dependencies"]):
             for field in ("relationship", "assurance_level", "conditions"):
@@ -235,7 +235,8 @@ def loss_report(bom: AIBOM, target: str, native: dict[str, Any] | None = None) -
             *(
                 [
                     "valid declared package URLs canonicalized",
-                    "standard version fields carry exact versions only",
+                    "standard version fields carry exact versions of registry entries "
+                    "and the declared versions of other kinds, up to 1024 characters",
                 ]
                 if preserves_native
                 else []

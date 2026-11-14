@@ -173,6 +173,29 @@ def test_a_package_url_version_beyond_the_schema_limit_is_a_requested_version(
     assert "software_packageVersion" not in package
 
 
+def test_the_loss_report_says_that_only_registry_versions_are_made_exact():
+    bom = AIBOM(
+        components=[
+            AgentComponent(bom_ref="agent:card", name="card", version=">=2.0, latest"),
+            _registry(version="1." + "0" * 1100),
+        ]
+    )
+    document = CycloneDXGenerator().generate(bom)
+    versions = {c["bom-ref"]: c.get("version") for c in document["components"]}
+    assert versions == {"agent:card": ">=2.0, latest", "registry:package": None}
+    loss = json.loads(
+        next(
+            p["value"]
+            for p in document["metadata"]["properties"]
+            if p["name"] == "nexus-symbiote:lossReport"
+        )
+    )
+    assert not any("exact versions only" in text for text in loss["normalizations"])
+    assert any("declared versions of other kinds" in text for text in loss["normalizations"])
+    (item,) = [i for i in loss["items"] if i["path"].endswith("/version")]
+    assert item["path"] == "/components/1/version" and "1024 characters" in item["reason"]
+
+
 def test_the_repository_agent_is_the_subject_and_unconditional_edges_form_the_graph():
     bom = _inventory()
     document = CycloneDXGenerator().generate(bom)

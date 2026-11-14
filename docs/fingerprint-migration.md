@@ -98,9 +98,9 @@ those exports have no marker and still recover. Projection 2
 (`cyclonedx-1.7/2`, `spdx-3.0.1/2`) changes the standard fields as follows.
 
 - CycloneDX: the repository agent of a scan is `metadata.component` instead of a
-  component; registry entries are `library` or `container` instead of `platform`;
-  `version` carries exact versions only, and other declarations move to the
-  `nexus-symbiote:requestedVersion` property; instruction-file, RAG index,
+  component; registry entries are `library` or `container` instead of `platform`,
+  their `version` carries exact versions only, and their other declarations move
+  to the `nexus-symbiote:requestedVersion` property; instruction-file, RAG index,
   dataset and lockfile digests are `hashes`; `source_path` is
   `evidence.occurrences`; the composition names the subject; a repository scan
   has the `pre-build` lifecycle. Extension properties spell booleans `true` and

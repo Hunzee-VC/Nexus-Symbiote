@@ -24,7 +24,7 @@ CycloneDX and SPDX exports embed the native document and declare which projectio
 | Component kind | `type` | Agents, MCP servers and clients, A2A endpoints and IDE agents are `application`; models are `machine-learning-model`; prompts, memory, RAG and data sources are `data`; tools, skills, guardrails and verified extensions are `library`. Registry entries are `container` for `docker-hub`, `docker` and `oci`, and `library` otherwise. |
 | `version` | `version` | Exact versions only: a validated package URL version, an exact PyPI pin (`==`, `===` or a bare version), an exact npm version or an image version tag. Ranges, markers, URLs and tags such as `latest` go to `nexus-symbiote:requestedVersion` instead. Other component kinds export their declared version unchanged; any version longer than 1024 characters, the schema's limit, goes to the property too. |
 | `package_url` | `purl` | Only a declared package URL that agrees with the component (see the loss report for omitted ones). |
-| `hashes` and single-purpose digests | `hashes` | Declared digests, then an instruction file's `content_hash`, a RAG source's `index_snapshot_hash`, a dataset's `content_hash` and an npm lockfile integrity value when the algorithm is not already present. MD5, SHA-1, SHA-256, SHA-384, SHA-512, SHA3-256, SHA3-384, SHA3-512, BLAKE2b-256, BLAKE2b-384, BLAKE2b-512 and BLAKE3 digests are supported; an empty, malformed or conflicting digest fails the export. |
+| `hashes` and single-purpose digests | `hashes` | Declared digests, then an instruction file's `content_hash`, a RAG source's `index_snapshot_hash`, a dataset's `content_hash` and an npm lockfile integrity value when the algorithm is not already present. MD5, SHA-1, SHA-256, SHA-384, SHA-512, SHA3-256, SHA3-384, SHA3-512, BLAKE2b-256, BLAKE2b-384, BLAKE2b-512 and BLAKE3 digests are supported; an empty, malformed or conflicting declared digest fails the export, and a malformed single-purpose digest is left out. |
 | `source_path` | `evidence.occurrences[].location` | The file that declared the component. |
 | `supplier`, `description` | `supplier.name`, `description` | As declared. |
 | Unconditional `depends-on` | `dependencies[].dependsOn` | Source depends on target. |
@@ -168,7 +168,7 @@ How an export covers the minimum SBOM elements that NTIA published in 2021 and t
 | --- | --- | --- | --- |
 | Supplier name | `components[].supplier.name` | `suppliedBy` | Only when declared, such as an `agent.yaml` owner; usually unknown. |
 | Component name | `name` | `name` | Collected. |
-| Version | `version` | `software_packageVersion` | Exact versions only; ranges are in `nexus-symbiote:requestedVersion`. |
+| Version | `version` | `software_packageVersion` | Exact versions only for registry entries, whose ranges are in `nexus-symbiote:requestedVersion`; other kinds keep their declared version. |
 | Other unique identifiers | `purl`, `bom-ref`, `hashes` | `externalIdentifier`, `software_packageUrl`, `verifiedUsing` | Package URLs for exact PyPI and npm declarations; digests for files, models, prompts and lockfile entries. |
 | Dependency relationship | `dependencies`, `compositions` | `Relationship` | Unconditional relationships only; conditional ones are in the extension or SPDX `other`. |
 | Author of SBOM data | `metadata.authors`, `metadata.tools` | `CreationInfo.createdBy`, `createdUsing` | The tool is recorded; `scan` records no author. |
