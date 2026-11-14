@@ -492,3 +492,18 @@ def test_job_environment_cannot_replace_the_trust_root_or_the_mode(tmp_path, mon
     assert "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256" in runner.IGNORED_ENV
     # The operator's binding key is an input the Action documents; it stays.
     assert seen[0]["NEXUS_SYMBIOTE_SOURCE_BINDING_KEY"] == "k" * 40
+
+
+def test_the_trust_root_comes_only_from_the_locked_runtime(tmp_path, monkeypatch):
+    monkeypatch.setenv("NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT", str(tmp_path / "trusted_root.json"))
+    monkeypatch.setenv("NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256", "sha256:" + "0" * 64)
+    seen: list[dict[str, str]] = []
+
+    def invoke(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen.append(dict(kwargs["env"]))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(runner.subprocess, "run", invoke)
+    runner._run(["validate"], private=tmp_path)
+    [env] = seen
+    assert not any(name in env for name in runner.TRUST_ROOT_ENVS)

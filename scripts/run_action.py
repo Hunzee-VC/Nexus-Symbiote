@@ -42,14 +42,12 @@ THRESHOLD = re.compile(r"(?:0|[1-9][0-9]{0,2})(?:\.[0-9]{1,4})?")
 MAX_BASELINE_BYTES = 16 * 1024 * 1024
 MAX_LIMITS_LENGTH = 1024
 LIMITS_ENV = "NEXUS_SYMBIOTE_LIMITS"
-# Job-environment settings the Action's own commands never take: an earlier step can
-# write them through GITHUB_ENV, and each would replace something the Action documents
-# as fixed (the packaged Sigstore trust root, offline collection).
-IGNORED_ENV = (
+TRUST_ROOT_ENVS = (
     "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT",
     "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256",
-    "NEXUS_SYMBIOTE_MODE",
 )
+# Retain every fixed Action setting, including the offline mode.
+IGNORED_ENV = (*TRUST_ROOT_ENVS, "NEXUS_SYMBIOTE_MODE")
 RELAY_PREFIX = "| "
 
 
@@ -301,7 +299,9 @@ def _run(
         "XDG_CACHE_HOME": str(private / "cache"),
         "XDG_DATA_HOME": str(private / "data"),
     }
-    # Collection limits come only from the limits input, never from the job environment.
+    # Collection limits come only from the limits input, never from the job environment,
+    # and the Sigstore trust root only from the hash-locked sigstore package: an explicit
+    # trust root in the job environment would let an earlier step choose the authorities.
     env.pop(LIMITS_ENV, None)
     for name in IGNORED_ENV:
         env.pop(name, None)

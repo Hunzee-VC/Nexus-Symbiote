@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import click
@@ -56,8 +57,20 @@ def register_inventory_export_commands(main: click.Group) -> None:
             "derived from the inventory content digest."
         ),
     )
+    @click.option(
+        "--force",
+        is_flag=True,
+        help=(
+            "Replace an existing output file. Without it an existing approved inventory, "
+            "which may be reviewed and attested, is left as it is and the command fails."
+        ),
+    )
     def export_inventory(
-        inventory: Path, output: Path, resource_prefix: str, include_unnamed: bool
+        inventory: Path,
+        output: Path,
+        resource_prefix: str,
+        include_unnamed: bool,
+        force: bool = False,
     ) -> None:
         """Offline: write the reviewed repository agent as a ShadowScan approved inventory.
 
@@ -93,7 +106,12 @@ def register_inventory_export_commands(main: click.Group) -> None:
             )
         except InventoryExportError as exc:
             raise click.ClickException(neutralize(exc)) from exc
-        write_cli_output(output, export.text)
+        if not force and os.path.lexists(output):
+            raise click.ClickException(
+                "The output file exists and was not replaced: an approved inventory may be "
+                "reviewed and attested. Pass --force to replace it."
+            )
+        write_cli_output(output, export.text, overwrite=force)
         echo_line(
             f"Wrote a ShadowScan {SHADOWSCAN_COMMIT[:7]} simple-list inventory: ", output, err=True
         )

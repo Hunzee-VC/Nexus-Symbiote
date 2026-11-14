@@ -125,13 +125,20 @@ def _input_problem(exc: BaseException) -> str:
 
 
 def _policy_with_source(
-    root: Path, *, ignore_project: bool = False, warn: bool = True
+    root: Path,
+    *,
+    ignore_project: bool = False,
+    warn: bool = True,
+    allow_weakening: bool = False,
 ) -> tuple[Policy, str, list[str]]:
     """Load the governing policy and say where it came from and what it relaxes.
 
     A gate that a checkout-supplied file switched off must be a visible choice, so
     every relaxation is returned for machine-readable output and, unless the caller
-    emits JSON that already carries it, printed on stderr.
+    emits JSON that already carries it, printed on stderr. In CI a warning on stderr is
+    not a choice anyone made, so there a policy that weakens a gate is refused unless
+    the operator ignores it (``--no-project-policy``) or accepts it explicitly
+    (``--accept-project-policy``), as unsigned discovery evidence is.
     """
     from nexus_symbiote.policy import (
         PolicyError,
@@ -156,11 +163,32 @@ def _policy_with_source(
         echo_line(
             "WARNING: policy ", path, " weakens the built-in gates: ", "; ".join(weaker), err=True
         )
+    if _gate_weakenings(weaker) and not allow_weakening and _running_in_ci():
+        raise click.ClickException(
+            "The project policy weakens the built-in gates and this run looks like CI. Pass "
+            "--no-project-policy to ignore the checkout's policy, or --accept-project-policy "
+            "to accept it explicitly."
+        )
     return policy, f"project:{path}", weaker
 
 
+# Relaxations that change what a command reports, not whether its gate passes; they
+# are recorded and warned about like every other, but CI need not accept them.
+_REPORT_ONLY_WEAKENING_PREFIXES = ("output.",)
+
+
+def _gate_weakenings(weaker: list[str]) -> list[str]:
+    """The relaxations that can turn a failing gate into a passing one."""
+    return [entry for entry in weaker if not entry.startswith(_REPORT_ONLY_WEAKENING_PREFIXES)]
+
+
 def _inventory_policy(
-    project: Path | None, aibom_path: str, *, ignore_project: bool, warn: bool = True
+    project: Path | None,
+    aibom_path: str,
+    *,
+    ignore_project: bool,
+    warn: bool = True,
+    allow_weakening: bool = False,
 ) -> tuple[Policy, str, list[str]]:
     """Policy for a command that reads an inventory: only a named project supplies one.
 
@@ -170,7 +198,9 @@ def _inventory_policy(
     from nexus_symbiote.policy import default_policy, nearest_policy_file
 
     if project is not None:
-        return _policy_with_source(project, ignore_project=ignore_project, warn=warn)
+        return _policy_with_source(
+            project, ignore_project=ignore_project, warn=warn, allow_weakening=allow_weakening
+        )
     if not ignore_project:
         unapplied = nearest_policy_file(Path(aibom_path).resolve().parent)
         if unapplied is not None:
@@ -671,8 +701,10 @@ def _render_aibom(aibom: AIBOM, output_format: str, root: Path) -> str:
 @click.option(
     "--accept-project-policy",
     is_flag=True,
-    help="In CI, honor a report-only failure mode set by the scanned project's policy "
-    "file; without this flag a failed gate still exits 1 there.",
+    help=(
+        "In CI, accept a project policy that weakens the built-in gates explicitly; without "
+        "it such a policy fails the command there. Interactive runs only warn."
+    ),
 )
 def scan(
     project_path: str,
@@ -700,7 +732,7 @@ def scan(
     from nexus_symbiote.validators.risk import RiskScorer
 
     policy, policy_source, policy_weakened = _policy_with_source(
-        root, ignore_project=no_project_policy
+        root, ignore_project=no_project_policy, allow_weakening=accept_project_policy
     )
     signature_policies = _signer_policies(signature_policy, root)
     output_format = output_format or policy.output.default_format
@@ -1335,6 +1367,14 @@ def verify_discovery(
     help="Use built-in policy without reading configuration from the target.",
 )
 @click.option(
+    "--accept-project-policy",
+    is_flag=True,
+    help=(
+        "In CI, accept a project policy that weakens the built-in gates explicitly; without "
+        "it such a policy fails the command there. Interactive runs only warn."
+    ),
+)
+@click.option(
     "--skip-integrity",
     is_flag=True,
     help=(
@@ -1366,6 +1406,7 @@ def validate(
     project: str | None,
     signature_policy: Path | None = None,
     no_project_policy: bool = False,
+    accept_project_policy: bool = False,
     skip_integrity: bool = False,
     json_output: bool = False,
     require_discovery_signature: bool = False,
@@ -1400,7 +1441,11 @@ def validate(
         _require_binding_key()
     signature_policies = _signer_policies(signature_policy, root)
     policy, policy_source, policy_weakened = _inventory_policy(
-        root, aibom_path, ignore_project=no_project_policy, warn=not json_output
+        root,
+        aibom_path,
+        ignore_project=no_project_policy,
+        warn=not json_output,
+        allow_weakening=accept_project_policy,
     )
     minimum = policy.validation.minimum_assurance_level
     if minimum == "verified":
@@ -1528,6 +1573,14 @@ def validate(
     help="Use built-in policy without reading configuration from the target.",
 )
 @click.option(
+    "--accept-project-policy",
+    is_flag=True,
+    help=(
+        "In CI, accept a project policy that weakens the built-in gates explicitly; without "
+        "it such a policy fails the command there. Interactive runs only warn."
+    ),
+)
+@click.option(
     "--require-discovery-signature",
     is_flag=True,
     help=(
@@ -1551,6 +1604,7 @@ def risk(
     json_output: bool,
     fail_on_severity: str | None,
     no_project_policy: bool = False,
+    accept_project_policy: bool = False,
     fail_on_unsigned_discovery: bool = False,
     allow_unsigned_discovery: bool = False,
     project: Path | None = None,
@@ -1577,7 +1631,11 @@ def risk(
         _require_binding_key()
     signature_policies = _signer_policies(signature_policy, root)
     policy, policy_source, policy_weakened = _inventory_policy(
-        root, aibom_path, ignore_project=no_project_policy, warn=not json_output
+        root,
+        aibom_path,
+        ignore_project=no_project_policy,
+        warn=not json_output,
+        allow_weakening=accept_project_policy,
     )
     threshold_from_cli = threshold is not None or no_score_threshold
     threshold = threshold if threshold is not None else policy.risk.fail_threshold

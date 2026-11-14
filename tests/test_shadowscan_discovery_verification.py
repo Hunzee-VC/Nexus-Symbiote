@@ -239,12 +239,18 @@ def test_validate_warns_interactively_and_fails_in_ci(tmp_path, monkeypatch):
     assert "UNVERIFIED" in interactive.output
 
     monkeypatch.setenv("CI", "true")
-    ci = CliRunner().invoke(main, ["validate", str(bom), "--project", str(project)])
+    # The lenient project policy is itself refused in CI unless accepted explicitly;
+    # accepting it leaves the discovery gate to decide.
+    refused = CliRunner().invoke(main, ["validate", str(bom), "--project", str(project)])
+    assert refused.exit_code == 1
+    assert "--accept-project-policy" in refused.output
+    accept = ["--project", str(project), "--accept-project-policy"]
+    ci = CliRunner().invoke(main, ["validate", str(bom), *accept])
     assert ci.exit_code == 1
     assert "UNVERIFIED" in ci.output
 
     flagged = CliRunner().invoke(
-        main, ["validate", str(bom), "--project", str(project), "--fail-on-unsigned-discovery"]
+        main, ["validate", str(bom), *accept, "--fail-on-unsigned-discovery"]
     )
     assert flagged.exit_code == 1
 
