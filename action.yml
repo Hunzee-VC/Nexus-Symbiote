@@ -75,7 +75,7 @@ inputs:
       symlinked RUNNER_TEMP or parent directory), hard links, non-regular and oversized files, and
       passes one snapshot to collection, validation and the risk gate. Signatures verify offline
       against the Sigstore trust root shipped in the Action's hash-locked sigstore package, never
-      a runner cache. Empty means no signer policy
+      a runner cache nor a trust root the job environment names. Empty means no signer policy
     default: ""
   allow-unsigned-discovery:
     description: >-

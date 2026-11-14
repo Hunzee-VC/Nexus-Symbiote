@@ -206,7 +206,7 @@ untrusted: escape it before you place it in HTML, Markdown or a shell command.
 
 | `--fail-on` | Exit 1 when |
 |---|---|
-| `undeclared` (default) | A tool, model, agent or MCP endpoint is `undeclared` or `unidentified`, a span cannot be classified (`spans_unclassified`), a span or resource has more than 128 attributes (`attribute_lists_over_bound`), or no span carries a GenAI or MCP attribute of its own, so that traces from a pipeline that lost its GenAI instrumentation cannot pass |
+| `undeclared` (default) | A tool, model, agent or MCP endpoint is `undeclared` or `unidentified`, a span cannot be classified (`spans_unclassified`), a tool or agent span names no tool or agent (`spans_without_identifier`), a span or resource has more than 128 attributes (`attribute_lists_over_bound`), or no span carries a GenAI or MCP attribute of its own, so that traces from a pipeline that lost its GenAI instrumentation, or that dropped the identifiers, cannot pass |
 | `none` | Never for a gate reason; the evidence and summary still list everything |
 
 A trace file or inventory that cannot be read, a malformed structure and a bound that is

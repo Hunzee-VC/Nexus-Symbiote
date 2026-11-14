@@ -21,7 +21,7 @@ A project policy selects collectors and sets the thresholds of the `scan`, `vali
 
 A policy file in a parent directory, or beside an inventory file, is never applied; `validate` and `risk` name such a file on stderr when they did not apply it. When both `.nexus-symbiote.yaml` and `.nexus-symbiote.yml` exist, a command that reads the project policy refuses to run until one is removed, because either could silently shadow the other; `init` refuses too, and `init --force` overwrites the one file that exists. A symbolic link, a non-regular file or a file over 1 MiB is refused.
 
-The built-in policy is what you get with no file, or with `--no-project-policy`. Use `--no-project-policy` whenever the checkout must not choose your gates, for example for a pull request from an untrusted fork. The GitHub Action always passes it.
+The built-in policy is what you get with no file, or with `--no-project-policy`. Use `--no-project-policy` whenever the checkout must not choose your gates, for example for a pull request from an untrusted fork. The GitHub Action always passes it. When a CI variable such as `CI` or `GITHUB_ACTIONS` is set, `scan`, `validate` and `risk` refuse a project policy that weakens a gate (exit 1) unless `--no-project-policy` ignores it or `--accept-project-policy` accepts it explicitly, as unsigned discovery evidence needs `--allow-unsigned-discovery`; outside CI they warn.
 
 ## File format
 

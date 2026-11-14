@@ -6,6 +6,10 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- **Breaking:** in CI (a variable such as `CI` or `GITHUB_ACTIONS` is set), `scan`, `baseline`, `validate --project` and `risk --project` refuse a project policy that weakens the built-in gates (exit 1) unless `--no-project-policy` ignores it or the new `--accept-project-policy` accepts it explicitly, as unsigned discovery evidence needs `--allow-unsigned-discovery`. Interactive runs warn as before. A pull request could otherwise switch a standalone gate off with `scan.failure_mode: report-only` and a job that checks only the exit status never saw the warning.
+- `trace-diff --fail-on undeclared` fails on a tool or agent span that names no tool or agent: what such a span called cannot be compared with the inventory, so instrumentation that drops `gen_ai.tool.name` no longer passes with a note.
+- The GitHub Action clears `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` and `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256` from the job environment before every command, as it clears `NEXUS_SYMBIOTE_LIMITS`, so an earlier step cannot name the trust root that signature verification uses.
+- `export-inventory` no longer replaces an existing output file, which may be a reviewed and attested approval, unless `--force` is given.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
 - The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.
