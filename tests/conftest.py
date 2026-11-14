@@ -172,20 +172,19 @@ def _isolated_environment(
         monkeypatch.setenv(name, str(home / name.lower()))
 
     # The suite's own tripwire against a test that reaches the network: connecting,
-    # sending a datagram or resolving a name anywhere but the loopback interface, or a
-    # name under .localhost or the reserved .invalid, fails the test. The product's offline
+    # sending a datagram or resolving a name anywhere but the loopback interface or
+    # exact localhost fails the test. Reserved suffixes still may reach a resolver and
+    # are not a network boundary. The product's offline
     # guard (modes.enforce) replaces the same entry points while it is installed, so the
     # tripwire stands down only then and never masks an OfflineViolation a test expects.
     # _socket.socket, the C type, is immutable: the product's audit hook is its only guard.
     def _is_loopback_name(host: Any) -> bool:
-        if host is None:
-            return True
         if isinstance(host, (bytes, bytearray)):
             host = bytes(host).decode("ascii", "replace")
         if not isinstance(host, str):
-            return True
+            return False
         name = host.lower().rstrip(".")
-        if name in ("", "localhost") or name.endswith((".localhost", ".invalid")):
+        if name == "localhost":
             return True
         try:
             return ipaddress.ip_address(name.split("%", 1)[0]).is_loopback
@@ -193,9 +192,9 @@ def _isolated_environment(
             return False
 
     def _is_loopback_target(address: Any) -> bool:
-        if not isinstance(address, tuple) or not address:
-            return True
-        return _is_loopback_name(address[0])
+        if not isinstance(address, tuple):
+            return True  # Unix-domain addresses have no Internet host to resolve.
+        return bool(address) and _is_loopback_name(address[0])
 
     def _refuse(what: str) -> OSError:
         return OSError(f"test suite blocked outbound non-loopback {what}")
@@ -210,6 +209,8 @@ def _isolated_environment(
     orig_getaddrinfo = socket.getaddrinfo
     orig_gethostbyname = socket.gethostbyname
     orig_gethostbyname_ex = socket.gethostbyname_ex
+    orig_gethostbyaddr = socket.gethostbyaddr
+    orig_getnameinfo = socket.getnameinfo
     orig_create_connection = socket.create_connection
 
     def _guarded_connect(sock: socket.socket, address: Any) -> Any:
@@ -235,7 +236,8 @@ def _isolated_environment(
         return orig_sendmsg(sock, buffers, *rest)
 
     def _guarded_getaddrinfo(host: Any, *args: Any, **kwargs: Any) -> Any:
-        if _guarded() and not _is_loopback_name(host):
+        # None requests a local passive/unspecified address without DNS.
+        if _guarded() and host is not None and not _is_loopback_name(host):
             raise _refuse("name resolution (getaddrinfo)")
         return orig_getaddrinfo(host, *args, **kwargs)
 
@@ -249,6 +251,16 @@ def _isolated_environment(
             raise _refuse("name resolution (gethostbyname_ex)")
         return orig_gethostbyname_ex(host)
 
+    def _guarded_gethostbyaddr(host: Any) -> Any:
+        if _guarded() and not _is_loopback_name(host):
+            raise _refuse("name resolution (gethostbyaddr)")
+        return orig_gethostbyaddr(host)
+
+    def _guarded_getnameinfo(address: Any, flags: Any) -> Any:
+        if _guarded() and (not isinstance(address, tuple) or not _is_loopback_target(address)):
+            raise _refuse("name resolution (getnameinfo)")
+        return orig_getnameinfo(address, flags)
+
     def _guarded_create_connection(address: Any, *args: Any, **kwargs: Any) -> Any:
         if _guarded() and not _is_loopback_target(address):
             raise _refuse("socket connection (create_connection)")
@@ -261,6 +273,8 @@ def _isolated_environment(
     monkeypatch.setattr(socket, "getaddrinfo", _guarded_getaddrinfo)
     monkeypatch.setattr(socket, "gethostbyname", _guarded_gethostbyname)
     monkeypatch.setattr(socket, "gethostbyname_ex", _guarded_gethostbyname_ex)
+    monkeypatch.setattr(socket, "gethostbyaddr", _guarded_gethostbyaddr)
+    monkeypatch.setattr(socket, "getnameinfo", _guarded_getnameinfo)
     monkeypatch.setattr(socket, "create_connection", _guarded_create_connection)
     # Collection limits are process state (the root --limit option sets them): every test
     # starts at the defaults, and what a test leaves in force never reaches the next one.
