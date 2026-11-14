@@ -738,7 +738,7 @@ every rule.
 | `nist-ai-rmf-1.0` | MANAGE-3.2 Pre-trained models are monitored | all | Records how safely a pre-trained model loads, or whether its weights are verified. |
 | `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `cwe` | CWE-502 Deserialization of Untrusted Data | critical | Pickle-based formats run code when deserialized; kept from the earlier SARIF rules, it does not hold for chat template findings, which record a template engine weakness. |
-| `cwe` | CWE-1336 Improper Neutralization of Special Elements Used in a Template Engine | high | Kept on high findings, where the earlier SARIF rules put it: a chat template that reaches Python internals is a template engine weakness, but the collectors record this category only at critical. |
+| `cwe` | CWE-1336 Improper Neutralization of Special Elements Used in a Template Engine | high | Kept on high findings, where the earlier SARIF rules put it: a chat template that matches a potential Python-internals access pattern; this does not establish a template engine weakness. The collectors record this category only at critical. |
 
 ### `serialization_format_unknown`
 
