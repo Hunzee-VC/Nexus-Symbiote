@@ -148,12 +148,13 @@ SETTINGS_VALUE_BINDING_PROFILE = "nexus-symbiote/ide-settings-values/v1"
 # files as read, so a file the redaction changes has another digest there.
 SETTINGS_DIGEST_PROFILE = "nexus-symbiote/ide-settings-redacted/v1"
 # Claude Code settings whose value is a command that runs to obtain credentials: an API
-# key, AWS credentials or OpenTelemetry headers. The command may hold one in a form the
+# key, AWS or Google Cloud credentials or OpenTelemetry headers. The command may hold one in a form the
 # redaction does not recognise.
 _CREDENTIAL_HELPER_KEYS = (
     "apiKeyHelper",
     "awsAuthRefresh",
     "awsCredentialExport",
+    "gcpAuthRefresh",
     "otelHeadersHelper",
 )
 CODEX_CONFIG = ".codex/config.toml"

@@ -561,7 +561,7 @@ def test_a_credential_helper_command_is_bound_only_by_the_key(tmp_path, monkeypa
 
 # Claude Code's other settings whose command runs to obtain credentials. The known-answer
 # vector above declares none of them, so redacting them under v1 leaves it as it was.
-OTHER_HELPERS = ("awsAuthRefresh", "awsCredentialExport", "otelHeadersHelper")
+OTHER_HELPERS = ("awsAuthRefresh", "awsCredentialExport", "gcpAuthRefresh", "otelHeadersHelper")
 
 
 @pytest.mark.parametrize("helper", OTHER_HELPERS)
@@ -620,6 +620,7 @@ def test_the_credential_helper_finding_names_every_declared_helper(tmp_path):
         "apiKeyHelper": "printf synthetic-api-key-0003",
         "awsAuthRefresh": "aws sso login --profile synthetic-0003",
         "awsCredentialExport": "/bin/synthetic-aws-grant.sh",
+        "gcpAuthRefresh": "gcloud auth login --cred-file=/tmp/synthetic-0003.json",
         "otelHeadersHelper": "/bin/synthetic-otel-headers.sh",
     }
 
@@ -632,8 +633,8 @@ def test_the_credential_helper_finding_names_every_declared_helper(tmp_path):
     assert findings(every) == [
         (
             "medium",
-            "IDE agent 'claude-code' declares apiKeyHelper, awsAuthRefresh, awsCredentialExport "
-            "and otelHeadersHelper, commands that run to obtain credentials.",
+            "IDE agent 'claude-code' declares apiKeyHelper, awsAuthRefresh, awsCredentialExport, "
+            "gcpAuthRefresh and otelHeadersHelper, commands that run to obtain credentials.",
         )
     ]
     assert every.properties["settings_hashes"] == {

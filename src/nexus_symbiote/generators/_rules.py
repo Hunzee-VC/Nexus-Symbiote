@@ -139,8 +139,8 @@ RULES: dict[str, RuleInfo] = {
     "credential_helper": RuleInfo(
         "Credential helper command",
         "Claude Code settings declare a credential helper, a command that runs to obtain "
-        "credentials: apiKeyHelper, awsAuthRefresh, awsCredentialExport or otelHeadersHelper. "
-        "The finding names each one declared.",
+        "credentials: apiKeyHelper, awsAuthRefresh, awsCredentialExport, gcpAuthRefresh or "
+        "otelHeadersHelper. The finding names each one declared.",
     ),
     "custom_code": RuleInfo(
         "Custom model code",

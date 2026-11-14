@@ -336,7 +336,7 @@ Every digest in `settings_hashes` covers the file after the standard
 or without the key, and the record names that form in `settings_hashes_profile`,
 `nexus-symbiote/ide-settings-redacted/v1`. It keeps `env` names but not their values,
 and the keys of the Claude Code credential helpers `apiKeyHelper`, `awsAuthRefresh`,
-`awsCredentialExport` and `otelHeadersHelper`, wherever a settings file names one, but
+`awsCredentialExport`, `gcpAuthRefresh` and `otelHeadersHelper`, wherever a settings file names one, but
 not their commands: each becomes `***` whatever it is, since a helper command such as
 `printf passphrase` can hold a credential the redaction does not recognise. No helper
 is run. A URL keeps only its scheme, host and

@@ -448,7 +448,7 @@ A way around a limit that its entry does not describe is worth a
   `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, so it cannot confirm a guess of an `env` value,
   such as the environment of an MCP server that `.gemini/settings.json` declares, of
   the command of a credential helper (`apiKeyHelper`, `awsAuthRefresh`,
-  `awsCredentialExport` or `otelHeadersHelper`), or of a credential the redaction
+  `awsCredentialExport`, `gcpAuthRefresh` or `otelHeadersHelper`), or of a credential the redaction
   recognises. A value the redaction leaves in place, such as a password pasted into a
   hook command, stored under a key name or passed to a command under any setting
   other than those helpers, can still be confirmed. Keep credentials out of settings
