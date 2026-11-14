@@ -16,6 +16,7 @@ from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import PromptComponent, RiskAssessment, SkillPackageComponent
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection, fold_name
+from nexus_symbiote.utils.markdown import text_outside_code
 from nexus_symbiote.utils.terminal import neutralize
 
 INVISIBLE_CHARS: dict[str, str] = {
@@ -127,7 +128,7 @@ def _emoji_context(content: str, index: int) -> bool:
             before >= 0
             and after < len(content)
             and _pictographic(content[before])
-            and (_pictographic(content[after]))
+            and _pictographic(content[after])
         )
     if before < 0:
         return False
@@ -489,8 +490,6 @@ _MAX_IMPORTS = 1000
 # not bound the inventory.
 _MAX_LISTED_IMPORT_CHARACTERS = 256 * 1024
 _IMPORT = re.compile(r"(?<!\S)@(\S+)")
-_FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
-_CODE_SPAN = re.compile(r"`[^`\n]*`")
 _DRIVE = re.compile(r"[A-Za-z]:[\\/]")
 # Sentence punctuation after a reference; the file is inventoried without it.
 _TRAILING = ".,;:!?)]}\"'"
@@ -547,22 +546,9 @@ def _resolve_import(directory: tuple[str, ...], token: str) -> tuple[list[str], 
 
 
 def _import_tokens(text: str) -> list[str]:
-    """@path references outside fenced code blocks and code spans."""
-    tokens: list[str] = []
-    fence = ""
-    for line in text.splitlines():
-        opened = _FENCE.match(line)
-        if opened:
-            marker = opened.group(1)
-            if not fence:
-                fence = marker[0] * len(marker)
-            elif marker.startswith(fence):
-                fence = ""
-            continue
-        if fence:
-            continue
-        tokens.extend(_IMPORT.findall(_CODE_SPAN.sub(" ", line)))
-    return tokens
+    """@path references in the text of a Markdown file, outside its code as CommonMark
+    reads it."""
+    return [token for part in text_outside_code(text) for token in _IMPORT.findall(part)]
 
 
 class _ImportListing:

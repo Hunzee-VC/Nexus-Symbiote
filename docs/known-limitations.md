@@ -360,6 +360,12 @@ A way around a limit that its entry does not describe is worth a
   spelling of either that a subagent, rule, prompt, skill or command directory holds,
   resolved from that file's directory. The imports of other instruction files, such
   as `AGENTS.md` or a rule file, are followed only when a memory file imports them.
+  Imports are read from the text outside fenced code and code spans as CommonMark
+  reads it, across lines and inside block quotes and list items. Where CommonMark
+  readers disagree, as after a link reference definition or inside raw HTML, the
+  text is searched as written, so more is looked up; a host that reads Markdown
+  otherwise, such as with GitHub's table or autolink extensions, can still import a
+  file from text read here as code.
   An import that leaves the project root, names an excluded path or lies deeper than
   the `depth` limit is a gap, so write a path alias such as `@/components` as code. A
   project with more than the [`import-lookups`](collection-limits.md#limits) limit of
