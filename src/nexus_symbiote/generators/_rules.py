@@ -29,6 +29,11 @@ RULES: dict[str, RuleInfo] = {
         "A dependency, MCP server package or container image is declared without an exact "
         "version or digest, so what runs can change without a change to the repository.",
     ),
+    "transitive_resolution": RuleInfo(
+        "Dependencies resolved at launch",
+        "An MCP server pins its package version, but the package runner resolves that "
+        "package's dependencies when the server starts, without a lockfile.",
+    ),
     "mutable_image_tag": RuleInfo(
         "Mutable image tag",
         "A container image is referenced by a tag rather than a digest; the tag can be "

@@ -330,6 +330,60 @@ def _projection(
     return value
 
 
+_FETCH_EXEC = re.compile(
+    r"(?:curl|wget|iwr|invoke-webrequest)\b[^|\n;]*\|\s*(?:ba|z|da)?sh\b"
+    r"|base64\s+(?:-d|--decode)\b[^|\n]*\|\s*(?:ba)?sh\b",
+    re.IGNORECASE,
+)
+_HOOK_URL = re.compile(r"https?://", re.IGNORECASE)
+_SEVERITY_RANK = {severity: index for index, severity in enumerate(RiskSeverity)}
+
+
+def _command_severity(command: str) -> RiskSeverity:
+    """How dangerous a hook command is, without keeping its text."""
+    if _FETCH_EXEC.search(command):
+        return RiskSeverity.CRITICAL
+    if _HOOK_URL.search(command):
+        return RiskSeverity.HIGH
+    return RiskSeverity.MEDIUM
+
+
+def _worse(current: RiskSeverity | None, candidate: RiskSeverity | None) -> RiskSeverity | None:
+    if candidate is None:
+        return current
+    if current is None or _SEVERITY_RANK[candidate] < _SEVERITY_RANK[current]:
+        return candidate
+    return current
+
+
+def _hook_command_severity(value: Any, depth: int = 0) -> RiskSeverity | None:
+    """The strongest severity among hook commands. The commands themselves are not returned."""
+    if depth > _MAX_SETTINGS_DEPTH:
+        raise ValueError("settings nested too deeply")
+    found: RiskSeverity | None = None
+    if isinstance(value, dict):
+        command = value.get("command")
+        if isinstance(command, str):
+            found = _command_severity(command)
+        for item in value.values():
+            found = _worse(found, _hook_command_severity(item, depth + 1))
+    elif isinstance(value, list):
+        for item in value:
+            found = _worse(found, _hook_command_severity(item, depth + 1))
+    return found
+
+
+def _hook_detail(count: int, severity: RiskSeverity, ide: str) -> str:
+    base = (
+        f"IDE agent '{ide}' declares {count} hook command(s) that run automatically on agent events"
+    )
+    if severity is RiskSeverity.CRITICAL:
+        return base + ", including a command that downloads and executes a script."
+    if severity is RiskSeverity.HIGH:
+        return base + ", including a command that contacts a network address."
+    return base + "."
+
+
 def _hook_commands(value: Any, depth: int = 0) -> int:
     if depth > _MAX_SETTINGS_DEPTH:
         raise ValueError("settings nested too deeply")
@@ -656,11 +710,12 @@ class IDEAgentScanner(Scanner):
         if counts:
             properties["declared_permission_rule_counts"] = counts
         hook_commands = 0
+        hook_severity: RiskSeverity | None = None
         for relative, data in documents.items():
+            body = data if relative == CLAUDE_PLUGIN_HOOKS else data.get("hooks")
             try:
-                hook_commands += _hook_commands(
-                    data if relative == CLAUDE_PLUGIN_HOOKS else data.get("hooks")
-                )
+                hook_commands += _hook_commands(body)
+                hook_severity = _worse(hook_severity, _hook_command_severity(body))
             except ValueError:
                 result.scan_failures.append(f"{relative}: settings cannot be canonicalized")
         declared = {
@@ -674,13 +729,18 @@ class IDEAgentScanner(Scanner):
             "enable_all_project_mcp_servers": merged.get("enableAllProjectMcpServers") is True,
         }
         properties["settings_declarations"] = declared
+        if hook_commands:
+            risks.append(
+                RiskAssessment(
+                    severity=hook_severity or RiskSeverity.MEDIUM,
+                    category="hook_commands",
+                    detail=_hook_detail(
+                        hook_commands, hook_severity or RiskSeverity.MEDIUM, "claude-code"
+                    ),
+                    recommendation="Review this setting and approve its exact value.",
+                )
+            )
         for category, severity, present, detail in (
-            (
-                "hook_commands",
-                RiskSeverity.MEDIUM,
-                hook_commands > 0,
-                f"declares {hook_commands} hook command(s) that run automatically on agent events",
-            ),
             (
                 "mcp_auto_approval",
                 RiskSeverity.MEDIUM,
@@ -878,14 +938,15 @@ class IDEAgentScanner(Scanner):
             return
         properties["hook_commands"] = hooks
         if hooks:
+            try:
+                severity = _hook_command_severity(data.get("hooks")) or RiskSeverity.MEDIUM
+            except ValueError:
+                severity = RiskSeverity.MEDIUM
             risks.append(
                 RiskAssessment(
-                    severity=RiskSeverity.MEDIUM,
+                    severity=severity,
                     category="hook_commands",
-                    detail=(
-                        f"IDE agent 'cursor' declares {hooks} hook command(s) that run "
-                        "automatically on agent events."
-                    ),
+                    detail=_hook_detail(hooks, severity, "cursor"),
                     recommendation="Review this setting and approve its exact value.",
                 )
             )

@@ -125,7 +125,7 @@ FRAMEWORKS: tuple[Framework, ...] = (
         sarif_prefix="external/owasp-llm-top-10-2026/",
     ),
     Framework(
-        key=OWASP_ASI_2026,
+        key="owasp-asi-2026",
         name="OWASP Top 10 for Agentic Applications",
         edition="2026",
         source=(
@@ -1123,6 +1123,36 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
             MITRE_ATLAS,
             "AML.T0109",
             "An unpinned reference takes the next published version, which a rug pull relies on.",
+        ),
+        _ref(NIST_AI_RMF, "MANAGE-3.1", _THIRD_PARTY),
+        _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
+        _ref(ISO_42001, "A.10.3", _SUPPLIER),
+    ),
+    "transitive_resolution": (
+        _ref(
+            CWE,
+            "CWE-829",
+            "Dependencies of a pinned package are resolved when the server starts.",
+        ),
+        _ref(
+            OWASP_LLM_2025,
+            "LLM03:2025",
+            "A pinned MCP package whose dependencies are resolved at launch is a supply chain weakness.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI04",
+            "The agent's launched packages can change without a change to the pin.",
+        ),
+        _ref(
+            OWASP_LLM_2026,
+            "LLM04:2026",
+            "A pinned MCP package whose dependencies are resolved at launch is a supply chain weakness.",
+        ),
+        _ref(
+            MITRE_ATLAS,
+            "AML.T0109",
+            "A dependency resolved at launch can be replaced without moving the package pin.",
         ),
         _ref(NIST_AI_RMF, "MANAGE-3.1", _THIRD_PARTY),
         _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
