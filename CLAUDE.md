@@ -29,7 +29,7 @@ src/nexus_symbiote/
   modes.py                             — Offline by default; live mode is opt-in
   reporting.py                         — Neutralized text and JSON gate reporting
   scanner_catalog.py                   — Built-in collector universe for coverage checks
-  cli.py, analysis_cli.py, live_cli.py, supply_chain_cli.py — Click CLI entrypoints
+  cli.py, live_cli.py, runtime_cli.py, supply_chain_cli.py — Click CLI entrypoints
 ```
 
 ## Build and test
