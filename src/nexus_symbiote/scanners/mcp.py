@@ -512,6 +512,7 @@ _NPM_PURL_NAME = re.compile(r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*")
 _CONTEXT_HIGH = {
     "privileged": "privileged mode",
     "runtime_socket_mount": "a container runtime socket mount",
+    "runtime_credentials_forwarded": "forwarded client credentials",
     "host_root_mount": "a host root mount",
     "security_options_disabled": "disabled confinement",
     "dangerous_capabilities": "a host-level capability",

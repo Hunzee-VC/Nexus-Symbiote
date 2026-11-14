@@ -109,6 +109,11 @@ A way around a limit that its entry does not describe is worth a
   `infisical`, `dotenvx`, `aws-vault` or `with-secrets` with `--`. Any other
   command is recorded as a local program by its basename, without a gap, unless it
   is one of the runners or launches below that are gaps.
+- **Docker API delegation is a high launch risk.** An enabled `--use-api-socket`
+  forwards the engine socket and client credentials, even when the image is pinned
+  by digest. The collector records both in `launch_context`; explicit `false` or
+  `0` disables the flag, and the last occurrence wins. This describes the declared
+  launch, without contacting the engine or checking its permissions.
 - **What a local program or project script runs is not read.** `./start.sh`,
   `make serve`, `npm run mcp`, `uv run server.py` or a program that installs
   packages can start an unpinned package the inventory does not show. Review what
@@ -547,7 +552,10 @@ A way around a limit that its entry does not describe is worth a
   Connect, including a credential pasted there by mistake.
 - **Cards built in code are gaps.** A card built in Python is a gap. Cards are read
   only from `.well-known` directories and from `agent.json`, `agent-card.json` and
-  `a2a/agent.json` in the root.
+  `a2a/agent.json` in the root. Direct calls to `AgentCard`, its recognized class
+  methods, and aliases imported by name from `a2a` modules are recognized. The
+  alias check is syntactic and can report a gap even when a name is later rebound;
+  assignment aliases, re-exports under other names and dynamic lookup are not resolved.
 - **Python import heuristics are shallow.** The a2a and rag collectors read only
   Python files that name the SDK or a vector-store library. The rag collector skips
   one it cannot read or parse or that exceeds 262,144 characters. The a2a
