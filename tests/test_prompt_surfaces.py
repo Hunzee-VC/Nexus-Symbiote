@@ -529,7 +529,9 @@ def test_import_bookkeeping_counts_every_importer_once_with_large_fan_in(tmp_pat
         assert "imported_by" not in imported
     assert components["prompt:import:d/999"].properties["imports_count"] == 1000
     assert _listed_references(result) < 2 * 1_001_000
-    assert not result.scan_failures
+    # A file dropped from the scan (for example by a spurious "changed during
+    # collection" failure) must be visible here, not silent (TEST-202).
+    assert result.scan_failures == []
 
 
 def _listed_references(result) -> int:

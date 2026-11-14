@@ -100,13 +100,18 @@ def normalize_digest(expected_hash: str, algorithm: str | None = None) -> tuple[
 def descriptor_binding(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
     """Return the open-descriptor evidence that must stay fixed across one observation.
 
-    Size, mtime and ctime alone cannot detect a rename-over: when the replacement
+    Size and mtime alone cannot detect a rename-over: when the replacement
     lands within the same coarse-grained kernel timestamp tick, the unlinked
-    inode's ctime equals its previous value. The link count of the inode behind
+    inode's mtime equals its previous value. The link count of the inode behind
     the descriptor drops to zero on unlink, so it is compared as well, together
     with the device and inode identity. A replaced inode that is never unlinked,
     such as a file in an overlayfs lower layer, keeps all of these values; only
     the pathname's current identity (``pathname_identity``) reveals that swap.
+
+    Ctime also detects in-place, same-length writes followed by restoring mtime.
+    A ctime-only difference cannot establish that a change was harmless metadata:
+    invalidate cached digests and refuse a changed observation. A later stable
+    observation can succeed, but must read and charge its bytes again.
     """
     return (
         info.st_dev,

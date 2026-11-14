@@ -103,7 +103,7 @@ def test_descriptor_binding_detects_rename_over_without_timestamp_change(tmp_pat
         before = os.fstat(fd)
         replacement = tmp_path / "replacement.bin"
         replacement.write_bytes(b"replaced")
-        # Pin the replacement's timestamps to the original so size/mtime/ctime
+        # Pin the replacement's timestamps to the original so size/mtime
         # alone cannot distinguish the two inodes.
         os.utime(replacement, ns=(before.st_atime_ns, before.st_mtime_ns))
         replacement.replace(target)
@@ -123,6 +123,37 @@ def test_descriptor_binding_tracks_link_count(tmp_path: Path) -> None:
     before = os.stat(target)
     (tmp_path / "link.bin").hardlink_to(target)
     assert descriptor_binding(before) != descriptor_binding(os.stat(target))
+
+
+def test_descriptor_binding_detects_a_ctime_only_change(tmp_path: Path) -> None:
+    """Metadata activity still invalidates evidence; bytes must be observed again."""
+    target = tmp_path / "model.bin"
+    target.write_bytes(b"data")
+    before = os.stat(target)
+    os.chmod(target, 0o600)
+    after = os.stat(target)
+    assert after.st_ctime_ns != before.st_ctime_ns
+    assert after.st_mtime_ns == before.st_mtime_ns
+    assert after.st_size == before.st_size
+    assert descriptor_binding(before) != descriptor_binding(after)
+
+
+def test_large_files_read_after_the_writer_finishes_its_updates(tmp_path: Path) -> None:
+    """Finish pending writer metadata before observing a large file."""
+    failures: list[str] = []
+    with ConfinedCollection(
+        tmp_path, failures, max_file_bytes=8 * 1024 * 1024, max_total_bytes=64 * 1024 * 1024
+    ) as files:
+        for index in range(3):
+            name = f"large-{index}.bin"
+            content = bytes([index]) * (6 * 1024 * 1024)
+            with (tmp_path / name).open("wb") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            assert files.read_bytes(name) == content
+            assert files.hash_file(name) == digest(content)
+    assert failures == []
 
 
 def test_path_replacement_during_confined_read_is_refused(tmp_path: Path) -> None:
