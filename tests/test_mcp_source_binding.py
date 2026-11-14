@@ -1200,6 +1200,42 @@ def test_named_tool_lists_are_exported_sorted_and_redacted(tmp_path, monkeypatch
     assert "hunter2-git-secret" not in dumped and token not in dumped
 
 
+def test_a_credential_after_an_auth_scheme_is_scrubbed_from_named_tool_lists(tmp_path, monkeypatch):
+    # The header and environment values are "Bearer <token>"; a list naming the bare
+    # token, in the same server or a sibling, must not export it.
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+    own, sibling, env = "Zq8vLm2pXr7tKw4n", "s3cr3tval9", "envtok12345"
+    servers = {
+        "a": {
+            "type": "http",
+            "url": "https://x.example.test/mcp",
+            "headers": {"Authorization": f"Bearer {sibling}"},
+        },
+        "b": {
+            "type": "http",
+            "url": "https://y.example.test/mcp",
+            "headers": {"Authorization": f"Bearer {own}"},
+            "autoApprove": [own, sibling, "read"],
+        },
+        "c": {
+            "command": "uvx",
+            "args": ["mcp-server-git==0.6.2"],
+            "env": {"API_TOKEN": f"Token {env}"},
+            "disabledTools": [env, "git_reset"],
+        },
+    }
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": servers}))
+    result = MCPScanner().scan(tmp_path)
+    assert not result.scan_failures, result.scan_failures
+    by_name = {c.name: c for c in result.components if isinstance(c, MCPServerComponent)}
+    approved = by_name["b"].properties["client_settings"]["auto_approved_tools"]
+    assert approved == {"autoApprove": ["***", "***", "read"]}
+    filters = by_name["c"].properties["client_settings"]["tool_filter_names"]
+    assert filters == {"disabledTools": ["***", "git_reset"]}
+    dumped = json.dumps([c.model_dump(mode="json") for c in result.components])
+    assert own not in dumped and sibling not in dumped and env not in dumped
+
+
 @pytest.mark.parametrize(
     "setting,label",
     [
@@ -1211,6 +1247,7 @@ def test_named_tool_lists_are_exported_sorted_and_redacted(tmp_path, monkeypatch
         ({"dev": {"watch": "src"}}, "development settings"),
         ({"env_vars": ["GIT_TOKEN"]}, "forwarded environment variable names"),
         ({"bearer_token_env_var": "GIT_TOKEN"}, "forwarded environment variable names"),
+        ({"env_http_headers": {"X-Key": "R_KEY"}}, "forwarded environment variable names"),
     ],
 )
 def test_client_setting_values_are_named_unbound_without_the_key(

@@ -160,12 +160,28 @@ def secret_like(name: str, value: str) -> bool:
 
 
 def secret_values(variables: Mapping[str, Any]) -> list[str]:
-    """The string values of ``variables`` that ``secret_like`` selects."""
-    return [
-        value
-        for name, value in variables.items()
-        if isinstance(name, str) and isinstance(value, str) and secret_like(name, value)
-    ]
+    """The string values of ``variables`` that ``secret_like`` selects.
+
+    A value such as ``Bearer <token>`` also yields the credential after the scheme
+    word, so a text that repeats the bare token without the scheme is scrubbed too.
+    """
+    values = []
+    for name, value in variables.items():
+        if isinstance(name, str) and isinstance(value, str) and secret_like(name, value):
+            values.append(value)
+            values.extend(scheme_credentials(value))
+    return values
+
+
+def scheme_credentials(value: str) -> list[str]:
+    """The credential of ``value`` when it is an auth scheme word, whitespace and a credential."""
+    parts = _SCHEME_AND_VALUE.fullmatch(value.strip())
+    if parts is None or parts.group(1).lower() not in _AUTH_SCHEMES:
+        return []
+    credential = parts.group(3).strip()
+    if len(credential) < MIN_SECRET_LENGTH or _REFERENCE.fullmatch(credential):
+        return []
+    return [credential]
 
 
 def _longest_first(value: str) -> tuple[int, str]:
