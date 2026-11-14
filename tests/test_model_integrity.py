@@ -336,6 +336,78 @@ def test_savedmodel_variables_and_assets_are_bound(project):
     assert any(issue.category == "weight_files_mismatch" for issue in report.issues)
 
 
+def test_a_linked_savedmodel_directory_binds_its_files_and_fails_closed(tmp_path, project):
+    # A loader reads export/variables/* through the link; the walk lists shared/* only.
+    (project / "export").mkdir()
+    (project / "shared").mkdir()
+    (project / "export" / "saved_model.pb").write_bytes(b"\x08\x01")
+    (project / "shared" / "variables.index").write_bytes(b"index")
+    (project / "shared" / "variables.data-00000-of-00001").write_bytes(b"reviewed")
+    (project / "export" / "variables").symlink_to("../shared", target_is_directory=True)
+    policies = load_signature_policies(
+        write_policy(tmp_path, [pin(project, "export/saved_model.pb")]), project
+    )
+    result = ModelScanner(policies).scan(project)
+    refused = "hash refused (symlink, nonregular file or I/O error)"
+    assert result.scan_failures == [
+        f"export/variables/variables.data-00000-of-00001: {refused}",
+        f"export/variables/variables.index: {refused}",
+    ]
+    (component,) = result.components
+    assert component.signing_status == "partially-verified"
+    assert component.trust_tier == TrustTier.UNKNOWN
+    package = ModelPackages(project.resolve()).observe(Path("export/saved_model.pb"))
+    assert [path.as_posix() for path, _ in package.weight_files] == [
+        "export/saved_model.pb",
+        "export/variables/variables.data-00000-of-00001",
+        "export/variables/variables.index",
+    ]
+    assert not package.complete
+
+
+@pytest.mark.parametrize("name", ["Variables/variables.index", "Fingerprint.pb"])
+def test_a_case_variant_of_a_savedmodel_name_is_a_failure(project, name):
+    export = project / "export"
+    (export / name).parent.mkdir(parents=True, exist_ok=True)
+    (export / "saved_model.pb").write_bytes(b"\x08\x01")
+    (export / name).write_bytes(b"weights")
+    variant = name.partition("/")[0]
+    result = ModelScanner().scan(project)
+    assert result.scan_failures == [
+        f"export/{variant}: case variant of export/{variant.lower()} is the active file on "
+        "case-insensitive file systems and is not inventoried"
+    ]
+    assert not ModelPackages(project.resolve()).observe(Path("export/saved_model.pb")).complete
+
+
+def test_savedmodel_files_are_listed_once_for_every_model_in_a_directory(project, monkeypatch):
+    export = project / "export"
+    (export / "variables").mkdir(parents=True)
+    (export / "variables" / "variables.index").write_bytes(b"index")
+    (export / "saved_model.pb").write_bytes(b"\x08\x01")
+    (export / "saved_model.pbtxt").write_text("meta_graphs {}\n")
+    variables = Path("export/variables")
+    listings: list[Path] = []
+    below = model_collector.ModelTree.below
+
+    def counted(tree: model_collector.ModelTree, directory: Path) -> list[Path]:
+        if directory == variables:
+            listings.append(directory)
+        return below(tree, directory)
+
+    monkeypatch.setattr(model_collector.ModelTree, "below", counted)
+    components = ModelScanner().scan(project).components
+    assert [c.properties["weight_files"][0]["path"] for c in components] == [
+        "export/variables/variables.index"
+    ] * 2
+    assert listings == [variables]
+    listings.clear()
+    packages = ModelPackages(project.resolve())
+    for component in components:
+        assert packages.observe(Path(component.name)).complete
+    assert listings == [variables]
+
+
 def test_shard_index_is_bound_to_every_shard_it_lists(project):
     model = project / "llm"
     write_safetensors(model / "model-00001-of-00002.safetensors", b"aa")
