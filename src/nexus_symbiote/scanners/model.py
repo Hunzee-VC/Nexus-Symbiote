@@ -248,15 +248,96 @@ def _recognized_pickle(stream: BinaryIO, prefix: bytes, size: int) -> str | None
     return f"Recognized {kind} pickle opcode stream; object loading can execute code"
 
 
+_ZIP_PICKLE_SUFFIXES = (b".pkl", b".pickle")
+_MAX_ZIP_INSPECTION_ENTRIES = 512
+_MAX_ZIP_CD_READ_BYTES = 262_144
+
+
+def _read_at(stream: BinaryIO, offset: int, length: int) -> bytes | None:
+    if offset < 0 or length <= 0:
+        return b""
+    try:
+        return os.pread(stream.fileno(), length, offset)
+    except (AttributeError, OSError):
+        pass
+    if hasattr(stream, "seek") and hasattr(stream, "tell") and stream.seekable():
+        saved = stream.tell()
+        try:
+            stream.seek(offset)
+            return stream.read(length)
+        finally:
+            stream.seek(saved)
+    return None
+
+
+def _zip_cd_pickle_member(stream: BinaryIO, size: int) -> str | None:
+    if size < 22:
+        return None
+    tail_len = min(size, 65_557)
+    tail = _read_at(stream, size - tail_len, tail_len)
+    if not tail:
+        return None
+    eocd_pos = tail.rfind(b"PK\x05\x06")
+    if eocd_pos < 0 or len(tail) - eocd_pos < 22:
+        return None
+    cd_size = int.from_bytes(tail[eocd_pos + 12 : eocd_pos + 16], "little")
+    cd_offset = int.from_bytes(tail[eocd_pos + 16 : eocd_pos + 20], "little")
+    if cd_offset >= size or cd_size == 0 or cd_offset + cd_size > size:
+        return None
+    cd_buf = _read_at(stream, cd_offset, min(cd_size, _MAX_ZIP_CD_READ_BYTES))
+    if not cd_buf:
+        return None
+    pos = 0
+    for index in range(_MAX_ZIP_INSPECTION_ENTRIES):
+        if pos + 46 > len(cd_buf) or cd_buf[pos : pos + 4] != b"PK\x01\x02":
+            break
+        name_len = int.from_bytes(cd_buf[pos + 28 : pos + 30], "little")
+        extra_len = int.from_bytes(cd_buf[pos + 30 : pos + 32], "little")
+        comment_len = int.from_bytes(cd_buf[pos + 32 : pos + 34], "little")
+        name_end = pos + 46 + name_len
+        if name_end > len(cd_buf):
+            break
+        name = cd_buf[pos + 46 : name_end].lower()
+        if name.endswith(_ZIP_PICKLE_SUFFIXES):
+            if index == 0:
+                return "ZIP archive whose first member is a pickle; torch.load unpickles it"
+            return "ZIP archive containing a pickle member; torch.load unpickles it"
+        pos = name_end + extra_len + comment_len
+    return None
+
+
 def _recognized_code_container(stream: BinaryIO, prefix: bytes, size: int) -> str | None:
     if prefix[:4] == b"PK\x03\x04":
-        # torch.save writes its pickle as the first ZIP member.
+        budget = min(size, MAX_PICKLE_INSPECTION_BYTES)
+        consumed = len(prefix)
         header = prefix + stream.read(22)
-        if len(header) == 30:
+        consumed += max(0, len(header) - len(prefix))
+        for index in range(_MAX_ZIP_INSPECTION_ENTRIES):
+            if len(header) != 30 or header[:4] != b"PK\x03\x04":
+                break
+            gp_flags = int.from_bytes(header[6:8], "little")
+            comp_size = int.from_bytes(header[18:22], "little")
             name_length = int.from_bytes(header[26:28], "little")
-            if 0 < name_length <= 4096 and stream.read(name_length).lower().endswith(b".pkl"):
-                return "ZIP archive whose first member is a pickle; torch.load unpickles it"
-        return None
+            extra_length = int.from_bytes(header[28:30], "little")
+            if name_length == 0 or name_length > 4096 or consumed + name_length > budget:
+                break
+            name = stream.read(name_length)
+            consumed += len(name)
+            if len(name) != name_length:
+                break
+            if name.lower().endswith(_ZIP_PICKLE_SUFFIXES):
+                if index == 0:
+                    return "ZIP archive whose first member is a pickle; torch.load unpickles it"
+                return "ZIP archive containing a pickle member; torch.load unpickles it"
+            skip = extra_length + comp_size
+            if gp_flags & 0x08 or comp_size == 0xFFFFFFFF or consumed + skip + 30 > budget:
+                break
+            if skip and len(stream.read(skip)) != skip:
+                break
+            consumed += skip
+            header = stream.read(30)
+            consumed += len(header)
+        return _zip_cd_pickle_member(stream, size)
     return _recognized_pickle(stream, prefix, size)
 
 
@@ -1240,7 +1321,7 @@ class ModelScanner(Scanner):
             else:
                 _report_variants(files, model_dir / name)
         for path in self._template_directory(files, model_dir):
-            if path.suffix == ".jinja":
+            if path.suffix.lower() in {".jinja", ".jinja2"}:
                 self._template_file(files, path, templates, escapes)
 
         tokenizer_files: list[tuple[Path, str]] = []
@@ -1254,8 +1335,9 @@ class ModelScanner(Scanner):
         if declared_in:
             python_files = [
                 {"path": path.as_posix(), "sha256": digest}
-                for path in tree.children.get(model_dir, ())
-                if path.suffix == ".py" and (digest := self._digest(files, path)) is not None
+                for path in tree.below(model_dir)
+                if path.suffix.lower() == ".py"
+                and (digest := self._digest(files, path)) is not None
             ]
             custom_code = {
                 "declared_in": declared_in,

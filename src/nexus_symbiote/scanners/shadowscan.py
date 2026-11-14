@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections import Counter
+from collections import Counter, deque
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -704,14 +704,28 @@ class ShadowScanImporter(Scanner):
         )
         ids: set[str] = set()
         mapped_refs: dict[str, str] = {}
-        entries = []
+        entries: list[Any] = []
+        pending_lists: deque[tuple[list[Any], int]] = deque()
         for key in ("components", "services"):
             items = data.get(key, [])
             if not isinstance(items, list):
                 raise ValueError("invalid CycloneDX component list")
-            entries.extend(items)
-        if len(entries) > MAX_FINDINGS:
-            raise ValueError("too many CycloneDX entries")
+            if items:
+                pending_lists.append((items, 0))
+        while pending_lists:
+            current_items, depth = pending_lists.popleft()
+            if depth > 16:
+                raise ValueError("CycloneDX component nesting limit exceeded")
+            for item in current_items:
+                entries.append(item)
+                if len(entries) > MAX_FINDINGS:
+                    raise ValueError("too many CycloneDX entries")
+                if isinstance(item, dict) and "components" in item:
+                    nested_items = item["components"]
+                    if not isinstance(nested_items, list):
+                        raise ValueError("invalid CycloneDX component list")
+                    if nested_items:
+                        pending_lists.append((nested_items, depth + 1))
         for index, entry in enumerate(entries):
             if (
                 not isinstance(entry, dict)

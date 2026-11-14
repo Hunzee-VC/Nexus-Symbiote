@@ -188,6 +188,15 @@ _SCOPED_TOOL_CLASSES = {
 # A specifier made only of these characters names everything: Bash(*), Bash(:*),
 # Edit(//**), Read(~/**), Edit(./**).
 _WILDCARD_SPECIFIER = re.compile(r"[\s*:/~.]*")
+_SUBSHELL_SPECIFIER = re.compile(
+    r"(?i)(?:(?:(?:/[A-Za-z0-9._-]+)*/)?env(?:\s+(?:-[A-Za-z0-9-]+|[A-Za-z_][A-Za-z0-9_]*=\S*))*\s+)?"
+    r"(?:(?:/[A-Za-z0-9._-]+)*/)?"
+    r"(?:"
+    r"(?:(?:ba|z|da|k|a|c|tc)?sh|busybox|toybox)(?:\s+\*|\s*:.*|:\*|\s+-[A-Za-z]*[cs]\b.*|\s+--command\b.*)"
+    r"|(?:python[0-9.]*|node|nodejs|perl|ruby|pwsh|powershell|cmd(?:\.exe)?)"
+    r"(?:\s+\*|\s*:.*|:\*|\s+(?:-[ce]|/c|-c(?:ommand)?|-enc(?:odedcommand)?)\b.*)"
+    r")"
+)
 _EXTENSION_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z0-9][a-zA-Z0-9._-]*")
 
 
@@ -214,6 +223,8 @@ def _broad_grants(allowed: list[str]) -> list[str]:
                 classes.add("MCP server tools")
             continue
         broad = specifier is None or bool(_WILDCARD_SPECIFIER.fullmatch(specifier))
+        if key == "bash" and specifier is not None:
+            broad |= bool(_SUBSHELL_SPECIFIER.fullmatch(specifier))
         if key == "webfetch" and specifier is not None:
             broad |= specifier.replace(" ", "") in {"domain:*", "domain:"}
         if key == "read" and specifier is None:
@@ -355,13 +366,13 @@ def _count(value: Any) -> int:
 
 def _starting_mode_risk(ide_type: str, mode: str | None) -> RiskAssessment | None:
     """The finding for a declared starting mode that skips approval prompts."""
-    if mode == "bypassPermissions":
+    if mode in {"bypassPermissions", "always", "full-access", "danger-full-access"}:
         return RiskAssessment(
             severity=RiskSeverity.HIGH,
             category="permission_scope",
             detail=(
-                f"IDE agent '{ide_type}' declares a starting mode that skips "
-                "permission prompts; effective approval remains unverified."
+                f"IDE agent '{ide_type}' declares a starting mode ('{mode}') that skips "
+                "permission prompts or sandbox confinement; effective approval remains unverified."
             ),
             recommendation=(
                 "Remove the project-level bypass mode, or confine the agent to "
@@ -379,6 +390,19 @@ def _starting_mode_risk(ide_type: str, mode: str | None) -> RiskAssessment | Non
             recommendation=(
                 "Use the default or plan mode in project settings; grant narrow allow "
                 "rules instead."
+            ),
+        )
+    if mode in {"dontAsk", "auto", "never"}:
+        return RiskAssessment(
+            severity=RiskSeverity.MEDIUM,
+            category="permission_scope",
+            detail=(
+                f"IDE agent '{ide_type}' declares a non-interactive '{mode}' starting mode "
+                "that runs actions without interactive prompts; effective approval remains unverified."
+            ),
+            recommendation=(
+                "Use the default or plan mode in project settings and audit any pre-approved "
+                "allow rules."
             ),
         )
     return None
@@ -478,7 +502,11 @@ class IDEAgentScanner(Scanner):
                     ),
                 ),
             )
-        starting_mode = _starting_mode_risk(ide_type, mode)
+        starting_mode = (
+            None
+            if ide_type == "codex" and "approval_policy" in properties
+            else _starting_mode_risk(ide_type, mode)
+        )
         if starting_mode is not None:
             risks.insert(0, starting_mode)
         layered = (
@@ -814,19 +842,18 @@ class IDEAgentScanner(Scanner):
             sandbox = None
         properties["approval_policy"] = approval
         properties["sandbox_mode"] = sandbox
-        if sandbox == "danger-full-access" or approval == "never":
+        full_access = sandbox in {"danger-full-access", "full-access"} or approval == "always"
+        if full_access or approval in {"never", "auto", "dontAsk"}:
             risks.append(
                 RiskAssessment(
-                    severity=RiskSeverity.HIGH
-                    if sandbox == "danger-full-access"
-                    else RiskSeverity.MEDIUM,
+                    severity=RiskSeverity.HIGH if full_access else RiskSeverity.MEDIUM,
                     category="permission_scope",
                     detail=(
                         "IDE agent 'codex' declares "
                         + (
-                            "an unsandboxed full-access mode"
-                            if sandbox == "danger-full-access"
-                            else "that commands never ask for approval"
+                            "an unsandboxed or unrestricted approval mode"
+                            if full_access
+                            else "that commands run without interactive approval"
                         )
                         + "; effective approval remains unverified."
                     ),

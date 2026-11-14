@@ -723,7 +723,7 @@ def _use(node: Node, binding: object, index: _Index) -> str | None:
         and _same(parent.child_by_field_name("object"), node)
         else None
     )
-    name = None if member is None else _called_method(member)
+    name = None if member is None else _property(member)
     # With CommonJS interop, ``default`` can be the whole module again.
     if name is None or name == "default":
         return _NAMESPACE_USE if binding.kind in {"server", "client"} else None
@@ -783,9 +783,7 @@ def _sdk_constructor(callee: Node | None, resolver: _Resolver) -> bool:
     if callee is not None and callee.type in {"member_expression", "subscript_expression"}:
         binding = resolver.lookup(callee.child_by_field_name("object"))
         return (
-            isinstance(binding, _Namespace)
-            and binding.exact
-            and _called_method(callee) == "McpServer"
+            isinstance(binding, _Namespace) and binding.exact and _property(callee) == "McpServer"
         )
     return resolver.lookup(callee) == "sdk"
 

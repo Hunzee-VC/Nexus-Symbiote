@@ -16,6 +16,7 @@ from __future__ import annotations
 import hmac
 import ipaddress
 import json
+import math
 import os
 import posixpath
 import re
@@ -188,12 +189,73 @@ _WORD = re.compile(r"[a-z0-9]+")
 _WORD_ENDINGS = ("s", "es", "ed", "d", "ing")
 
 
+_JS_INTERESTING = re.compile(r"""["'`\n]|/[/*]""")
+
+
+def _without_js_comments_quoted(text: str) -> str:
+    kept: list[str] = []
+    size = len(text)
+    emitted = pos = 0
+    ws_start: int | None = 0
+    no_more_blocks = False
+    while pos < size:
+        if ws_start is not None:
+            indent = _SPACE.match(text, pos)
+            if indent:
+                pos = indent.end()
+                if pos >= size:
+                    break
+        ch = text[pos]
+        if ch in "\"'`":
+            ws_start = None
+            end = pos + 1
+            terminators = ("`",) if ch == "`" else (ch, "\n", "\r")
+            while end < size and text[end] not in terminators:
+                end += 2 if text[end] == "\\" else 1
+            if end < size and text[end] == ch:
+                end += 1
+            pos = end
+            continue
+        if ch == "/":
+            if text.startswith("//", pos):
+                newline = text.find("\n", pos + 2)
+                stop = size if newline < 0 else newline
+                if ws_start is not None:
+                    kept.append(text[emitted:ws_start])
+                    emitted = stop
+                pos = stop
+                ws_start = None
+                continue
+            if not no_more_blocks and text.startswith("/*", pos):
+                close = text.find("*/", pos + 2)
+                if close < 0:
+                    no_more_blocks = True
+                else:
+                    kept.append(text[emitted:pos])
+                    emitted = pos = close + 2
+                    ws_start = None
+                    continue
+        if ch == "\n":
+            pos += 1
+            ws_start = pos
+            continue
+        ws_start = None
+        nxt = _JS_INTERESTING.search(text, pos + 1)
+        pos = size if nxt is None else nxt.start()
+    kept.append(text[emitted:])
+    return "".join(kept)
+
+
 def without_js_comments(text: str) -> str:
     """Drop block comments and whole-line ``//`` comments in one linear pass.
 
     The pattern this replaces rescanned every run of blank lines from each of its
     lines, so a file of newlines within the size limit took minutes.
     """
+    if "/*" not in text and "//" not in text:
+        return text
+    if any(q in text for q in ('"', "'", "`")):
+        return _without_js_comments_quoted(text)
     kept: list[str] = []
     size = len(text)
     emitted = position = line_from = 0
@@ -287,7 +349,10 @@ def source_binding_key() -> bytes | None:
             f"{SOURCE_BINDING_KEY_ENV} must contain at least "
             f"{_MIN_SOURCE_BINDING_KEY_LENGTH} characters"
         )
-    return key.encode()
+    try:
+        return key.encode("utf-8")
+    except UnicodeError:
+        raise SourceBindingKeyError(f"{SOURCE_BINDING_KEY_ENV} must be valid UTF-8 text") from None
 
 
 def _value_binding(
@@ -647,13 +712,51 @@ def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+_MAX_JSONC_DEPTH = 256
+
+
 def _reject_constant(value: str) -> Any:
     raise ValueError("nonfinite JSON")
 
 
+def _parse_finite_float(raw: str) -> float:
+    parsed = float(raw)
+    if not math.isfinite(parsed):
+        raise ValueError("nonfinite JSON")
+    return parsed
+
+
+def _check_jsonc_depth(text: str) -> None:
+    depth = 0
+    in_string = False
+    escaped = False
+    for ch in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in "{[":
+            depth += 1
+            if depth > _MAX_JSONC_DEPTH:
+                raise RecursionError("JSONC nesting limit exceeded")
+        elif ch in "}]" and depth > 0:
+            depth -= 1
+
+
 def _load_jsonc(text: str) -> Any:
+    cleaned = strip_jsonc(text)
+    _check_jsonc_depth(cleaned)
     return json.loads(
-        strip_jsonc(text), object_pairs_hook=_unique_pairs, parse_constant=_reject_constant
+        cleaned,
+        object_pairs_hook=_unique_pairs,
+        parse_constant=_reject_constant,
+        parse_float=_parse_finite_float,
     )
 
 
@@ -1341,7 +1444,11 @@ class MCPScanner(Scanner):
         ) as files:
             sources = list(files.iter_files())
             nested = sorted(
-                {path.as_posix() for path in sources if path.name in MCP_CONFIG_NAMES}
+                {
+                    path.as_posix()
+                    for path in sources
+                    if path.name in MCP_CONFIG_NAMES or _template(path.as_posix()) is not None
+                }
                 - set(MCP_CONFIG_FILES)
             )
             try:
@@ -2333,6 +2440,7 @@ class MCPScanner(Scanner):
     ) -> list[ToolComponent]:
         tools_config = config.get("tools", [])
         tool_comps = []
+        seen_refs: set[str] = set()
         scrubber = secrets or SecretScrubber()
 
         if isinstance(tools_config, list):
@@ -2361,6 +2469,9 @@ class MCPScanner(Scanner):
                         "tool:"
                         + hash_canonical({"server": server_ref, "name": t_name}).split(":", 1)[1]
                     )
+                    if tool_ref in seen_refs:
+                        raise ValueError("duplicate tool name")
+                    seen_refs.add(tool_ref)
 
                     side_effect = self._classify_side_effects(t_annotations, t_name)
                     conflict = self._read_only_conflict(t_annotations, side_effect)
