@@ -940,6 +940,23 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 | `--json-output` | Output the verification report as JSON. |
 | `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools, declarations or the server identity drifted, unless `--accept-drift`. |
 | `--accept-drift` | With `--record`, exit 0 although changed or new tools, declarations or server identity were recorded. |
+| `--no-isolation` | Explicitly allow execution without a PID namespace. On Linux the launcher is a child subreaper, so a double-fork is killed with the session; elsewhere cleanup is best effort. Printed as a warning. |
+
+By default the launcher must run as pid 1 of a new user and PID namespace
+(`unshare --user --map-root-user --pid --fork --kill-child`), so the kernel ends its
+descendants with the session. Inside the namespace the launcher sees itself as uid 0
+and gid 0, mapped to the invoking user and group; every other uid and gid, including
+the owners of the files it reads and its own supplementary groups, appears as
+`nobody`/`nogroup` (65534), and `setgroups` is denied. That grants no privilege
+outside the namespace, but a launcher that refuses to run as root, inspects its
+supplementary groups or changes file ownership behaves differently than under direct
+execution. A host that refuses the namespace fails with `isolation-unavailable`
+before executing the pinned launcher. Only the explicit operator option
+`--no-isolation` permits a launch without this boundary. On that path, on Linux,
+the launcher is a child subreaper, so a `setsid` child that double-forks is
+reparented to the launcher and killed with the session; on other systems that
+cleanup is best effort. It is not a PID namespace. Neither form is a
+filesystem or network sandbox.
 
 Servers whose transport is `sse`, `streamable-http` or `http` and that record no
 launch command are reported as not verifiable by `verify-live` (reason

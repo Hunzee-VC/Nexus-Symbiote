@@ -160,6 +160,15 @@ def register_supply_chain_commands(main: click.Group) -> None:
             "identity were recorded."
         ),
     )
+    @click.option(
+        "--no-isolation",
+        is_flag=True,
+        help=(
+            "Explicitly allow execution without a PID namespace. On Linux the launcher is "
+            "still a child subreaper, so a double-fork is killed with the session; elsewhere "
+            "cleanup is best effort. Printed as a warning."
+        ),
+    )
     def verify_live(
         aibom_path: str,
         project: str,
@@ -167,6 +176,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         json_output: bool,
         record: bool,
         accept_drift: bool,
+        no_isolation: bool,
     ) -> None:
         """Live: observe independently pinned stdio launchers; optionally emit an unsigned candidate.
 
@@ -179,6 +189,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         """
         modes.require_live("verify-live")
         from nexus_symbiote.core.hashing import hash_bytes, open_regular_file, parse_json_strict
+        from nexus_symbiote.live.pinned_process import isolation_off
         from nexus_symbiote.live.verify import record_candidate, verify_mcp_servers
 
         if record and json_output:
@@ -200,7 +211,15 @@ def register_supply_chain_commands(main: click.Group) -> None:
             bom = AIBOM.from_document(document)
         except (OSError, ValueError, TypeError, RecursionError):
             raise click.ClickException("invalid BOM or operator launch policy") from None
-        report = verify_mcp_servers(bom, trusted_launchers=policy)
+        if no_isolation:
+            click.echo(
+                "warning: --no-isolation: kernel PID containment is disabled; on Linux the "
+                "launcher is a child subreaper, so a double-fork is still killed with the "
+                "session, and elsewhere a daemonized child can outlive cleanup.",
+                err=True,
+            )
+        with isolation_off() if no_isolation else contextlib.nullcontext():
+            report = verify_mcp_servers(bom, trusted_launchers=policy)
         report.inputs = {
             "inventory_sha256": hash_bytes(inventory_bytes),
             "launch_policy_sha256": hash_bytes(policy_bytes),

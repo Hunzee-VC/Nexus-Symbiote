@@ -63,6 +63,16 @@ EXPECTED_SKIP_REASONS = (re.compile(r"case-sensitive"), re.compile(r"file system
 LOCAL_SKIP_REASONS = (re.compile(r"pip is not importable"),)
 DEFAULT_TIMEOUT_SECONDS = 300
 
+
+@pytest.fixture
+def nonisolated_pinned_fixtures() -> Iterator[None]:
+    """Protocol fixtures opt out explicitly; containment has separate default-denial tests."""
+    from nexus_symbiote.live.pinned_process import isolation_off
+
+    with isolation_off():
+        yield
+
+
 settings.register_profile(
     "repository",
     derandomize=True,
