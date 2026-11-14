@@ -89,15 +89,39 @@ as described below.
    `--extra-index-url`):
 
    ```bash
-   python3 -m venv /tmp/rehearsal && . /tmp/rehearsal/bin/activate
-   pip download --no-deps --index-url https://test.pypi.org/simple/ \
-     nexus-symbiote==<version> -d /tmp/rehearsal-dist
-   cd /tmp/rehearsal-dist
-   sed 's#  dist/#  #' /path/to/run/SHA256SUMS | grep -F "$(ls ./*.whl | xargs -n1 basename)" \
-     | sha256sum --strict -c -
-   pip install /tmp/rehearsal-dist/*.whl
-   nexus-symbiote --version
+   (
+     set -euo pipefail
+     version='REPLACE_WITH_VERSION'
+     run_checksums='/path/to/run/SHA256SUMS'
+     [[ "$version" =~ ^[0-9][0-9A-Za-z.!+_-]*$ ]]
+     rehearsal="$(mktemp -d)"
+     wheel_dir="$(mktemp -d)"
+     python3 -m venv "$rehearsal"
+     wheel="nexus_symbiote-${version}-py3-none-any.whl"
+     "$rehearsal/bin/python" -m pip download --no-deps --only-binary=:all: \
+       --index-url https://test.pypi.org/simple/ "nexus-symbiote==$version" -d "$wheel_dir"
+     shopt -s nullglob dotglob
+     downloaded=("$wheel_dir"/*)
+     test "${#downloaded[@]}" -eq 1
+     test "${downloaded[0]}" = "$wheel_dir/$wheel"
+     test -f "$wheel_dir/$wheel"
+     test ! -L "$wheel_dir/$wheel"
+     expected_sha="$(awk -v file="dist/$wheel" \
+       '$2 == file { n++; print $1 } END { if (n != 1) exit 1 }' "$run_checksums")"
+     [[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]]
+     (cd "$wheel_dir" && printf '%s  %s\n' "$expected_sha" "$wheel" | sha256sum --strict -c -)
+     "$rehearsal/bin/python" -m pip install --index-url https://pypi.org/simple/ "$wheel_dir/$wheel"
+     "$rehearsal/bin/nexus-symbiote" --version
+   )
    ```
+
+   Replace the version and checksum-file placeholders, using the independently
+   reviewed run's manifest, and paste the whole block. It requires exactly one
+   downloaded wheel and one exact manifest entry, stops on every failed step,
+   and installs only that verified path. The installer selects PyPI for dependencies;
+   use pip configuration that does not add extra indexes. The two fresh temporary directories remain available for inspection;
+   remove them after the rehearsal. The checksum check does not protect against
+   another process running as your account replacing the wheel after verification.
 
    Confirm the PEP 740 provenance the index itself publishes: the file page must
    show a verified provenance entry naming this repository and `release.yml`.

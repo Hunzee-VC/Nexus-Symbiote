@@ -6,6 +6,8 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- Documented source installation requires the exact reviewed HEAD, and TestPyPI rehearsal installs only its exact checksum-verified regular wheel. Failed commands, missing/duplicate manifest entries and unexpected files stop before installation.
+
 - **Breaking (GitHub Action):** `fail-on-severity` defaults to `high`. A finding at or above that severity fails the Action even when the aggregate score stays under `risk-threshold`. The previous Action behavior failed on severity only for critical findings, so a pull request that granted `bypassPermissions` and `Bash(*)`, added an automatic hook and launched unpinned `npx -y` servers could pass every default gate with a score under 50. Set `fail-on-severity: critical` to keep that behavior. `none` disables the severity check and is printed as a warning. The CLI and the built-in project policy still default to `critical`. The aggregate score is the uncapped sum of finding weights; `risk --json-output` records `gate.score_scale` as `unbounded-sum`, and a score equal to `fail_threshold` is reported as at or above the threshold.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.

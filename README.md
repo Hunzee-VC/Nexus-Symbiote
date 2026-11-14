@@ -45,16 +45,22 @@ nexus-symbiote diff reviewed.json agentbom.json --fail-on-alert        # gate on
 Requires git and Python 3.11 to 3.14 on Linux. Install exactly the commit you reviewed, with the hash-locked runtime:
 
 ```bash
-git clone https://github.com/Hunzee-VC/Nexus-Symbiote.git
-cd Nexus-Symbiote
-git checkout --detach REVIEWED_COMMIT_SHA
-python3 -m venv .venv && . .venv/bin/activate
-python -m pip install --require-hashes --only-binary=:all: -r requirements-action.lock
-python -m pip install --no-deps --no-build-isolation .
-nexus-symbiote --version
+(
+  set -euo pipefail
+  reviewed_commit='REVIEWED_COMMIT_SHA'
+  [[ "$reviewed_commit" =~ ^[0-9a-f]{40}$ ]]
+  git clone https://github.com/Hunzee-VC/Nexus-Symbiote.git
+  cd Nexus-Symbiote
+  git checkout --detach "$reviewed_commit"
+  test "$(git rev-parse HEAD)" = "$reviewed_commit"
+  python3 -m venv --clear .venv
+  .venv/bin/python -m pip install --require-hashes --only-binary=:all: -r requirements-action.lock
+  .venv/bin/python -m pip install --no-deps --no-build-isolation .
+  .venv/bin/nexus-symbiote --version
+)
 ```
 
-Replace `REVIEWED_COMMIT_SHA` with the full commit you reviewed; right after the clone, `git rev-parse HEAD` prints the latest commit on `main`. Optional extras: `.[sigstore]` for Sigstore verification, `.[cyclonedx]` for CycloneDX cross-checks, `.[all]` for both. For development: `make install-locked` (see [CONTRIBUTING.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CONTRIBUTING.md)).
+Replace `REVIEWED_COMMIT_SHA` with the full lowercase commit SHA you reviewed, then paste the entire block. A failed checkout or mismatched HEAD stops before installation. After it succeeds, run `cd Nexus-Symbiote && . .venv/bin/activate` in your shell to use the commands below. Optional extras: `.[sigstore]` for Sigstore verification, `.[cyclonedx]` for CycloneDX cross-checks, `.[all]` for both. For development: `make install-locked` (see [CONTRIBUTING.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CONTRIBUTING.md)).
 
 ### Install a verified release
 
