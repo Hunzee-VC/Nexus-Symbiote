@@ -167,6 +167,18 @@ def test_a_file_that_does_not_fit_leaves_the_byte_budget_to_files_that_do(tmp_pa
     ]
 
 
+def test_read_prefix_stops_at_the_requested_length(tmp_path):
+    (tmp_path / "blob").write_bytes(b"abcdef")
+    (tmp_path / "link").symlink_to("blob")
+    failures: list[str] = []
+    with ConfinedCollection(tmp_path, failures) as files:
+        assert files.read_prefix("blob", 3) == b"abc"
+        assert files.read_prefix("link", 3) is None
+        with pytest.raises(ValueError, match="prefix length"):
+            files.read_prefix("blob", 0)
+    assert any("link" in failure for failure in failures)
+
+
 def test_overflowing_json_numbers_are_invalid_json(tmp_path):
     (tmp_path / "x.json").write_text('{"maximum": 1e400}')
     (tmp_path / "y.json").write_text('{"minimum": -1E999, "ok": 1e-400}')

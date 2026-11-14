@@ -16,6 +16,7 @@ import json
 import os
 import pickletools
 import re
+import zlib
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
@@ -190,6 +191,12 @@ SHARED_DIGESTS_EXHAUSTED = (
 Verify = Callable[[Path, Path, str | None, str | None], VerificationResult]
 
 
+_MODEL_DIR_NAMES = frozenset({"models", "model", "weights", "checkpoints", "checkpoint"})
+_SNIFF_SUFFIXES = frozenset({".dat", ".npy", ".npz"})
+_SNIFF_BYTES = 65536
+_NPY_OBJECT = re.compile(rb"""['"]descr['"]\s*:\s*(?:['"][|<>]?O['"]|\[[^\]]*?['"][|<>]?O['"])""")
+
+
 def _pickle_family(path: Path) -> bool:
     suffixes = [suffix.lower() for suffix in path.suffixes]
     if suffixes and suffixes[-1] in _UNSAFE_SUFFIXES:
@@ -197,6 +204,85 @@ def _pickle_family(path: Path) -> bool:
     return (
         len(suffixes) > 1 and suffixes[-1] in _PICKLE_WRAPPERS and suffixes[-2] in _UNSAFE_SUFFIXES
     )
+
+
+def _sniff_candidate(path: Path) -> bool:
+    """A file whose name is not a known model suffix but may still be a payload.
+
+    NumPy arrays are sniffed anywhere. Other names are sniffed under model-like
+    directories and when the suffix is a generic ``.dat``, which is how a pickle
+    is renamed to leave the suffix list.
+    """
+    if model_format(path) is not None or path.suffix.lower() in MODEL_EXTENSIONS:
+        return False
+    suffix = path.suffix.lower()
+    if suffix in _SNIFF_SUFFIXES:
+        return True
+    return any(part.lower() in _MODEL_DIR_NAMES for part in path.parts[:-1])
+
+
+def _numpy_object_header(blob: bytes) -> bool:
+    """True when ``blob`` starts a NumPy object array or an ``.npz`` holding one.
+
+    Object dtype is unpickled by ``np.load(allow_pickle=True)``. The header is
+    ASCII and is matched without decoding the array.
+    """
+    if blob.startswith(b"\x93NUMPY"):
+        return _NPY_OBJECT.search(blob[:1024]) is not None
+    if not blob.startswith(b"PK\x03\x04") or len(blob) < 30:
+        return False
+    name_len = int.from_bytes(blob[26:28], "little")
+    extra_len = int.from_bytes(blob[28:30], "little")
+    start = 30 + name_len + extra_len
+    if name_len <= 0 or name_len > 4096 or start > len(blob):
+        return False
+    method = int.from_bytes(blob[8:10], "little")
+    data = blob[start : start + 1024]
+    if method == 0:
+        sample = data
+    elif method == 8:
+        try:
+            sample = zlib.decompressobj().decompress(data, max_length=512)
+        except zlib.error:
+            return False
+    else:
+        return False
+    return sample.startswith(b"\x93NUMPY") and _NPY_OBJECT.search(sample[:512]) is not None
+
+
+def _zip_pickle_member(blob: bytes) -> bool:
+    """True when a ZIP local header's first member name ends in ``.pkl``."""
+    if not blob.startswith(b"PK\x03\x04") or len(blob) < 30:
+        return False
+    name_len = int.from_bytes(blob[26:28], "little")
+    if name_len <= 0 or name_len > 4096 or 30 + name_len > len(blob):
+        return False
+    return blob[30 : 30 + name_len].lower().endswith(b".pkl")
+
+
+def _prefix_is_pickle(blob: bytes) -> bool:
+    """A complete opcode stream, or a valid prefix that runs past PROTO."""
+    if _recognized_pickle(io.BytesIO(blob), blob[:8], len(blob)):
+        return True
+    binary = len(blob) >= 2 and blob[0] == 0x80 and 2 <= blob[1] <= 5
+    if not binary and (not blob or blob[0] not in _TEXT_PICKLE_START):
+        return False
+    try:
+        opcodes = [opcode.name for opcode, _, _ in pickletools.genops(blob)]
+    except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
+        return False
+    return len(opcodes) >= 2 and (not binary or opcodes[0] == "PROTO")
+
+
+def sniffed_payload(blob: bytes) -> str | None:
+    """Why ``blob`` is an unsafe loader payload, or None when it is not one."""
+    if _numpy_object_header(blob):
+        return "NumPy object-dtype array; np.load(allow_pickle=True) unpickles it"
+    if _zip_pickle_member(blob):
+        return "ZIP archive whose first member is a pickle; torch.load unpickles it"
+    if _prefix_is_pickle(blob):
+        return "Recognized pickle opcode stream; object loading can execute code"
+    return None
 
 
 def model_format(path: Path) -> tuple[str, str] | None:
@@ -1147,11 +1233,23 @@ class ModelScanner(Scanner):
             self._digests, self._read, self._budget = {}, set(), InspectionBudget()
             self._bindings, self._verified = BindingBudget(), {}
             self._shared = BindingBudget(reason=SHARED_DIGESTS_EXHAUSTED)
+            sniffed: dict[Path, str] = {}
+            for path in tree.files:
+                if not _sniff_candidate(path):
+                    continue
+                blob = files.read_prefix(path, _SNIFF_BYTES)
+                if not blob:
+                    continue
+                reason = sniffed_payload(blob)
+                if reason is not None:
+                    sniffed[path] = reason
             model_dirs = sorted(
                 {
                     path.parent
                     for path in tree.files
-                    if model_format(path) is not None or _index_base(path) is not None
+                    if model_format(path) is not None
+                    or _index_base(path) is not None
+                    or path in sniffed
                 }
             )
             if not model_dirs and not result.scan_failures and not result.surfaces_excluded:
@@ -1161,9 +1259,16 @@ class ModelScanner(Scanner):
                 context = self._directory_context(files, model_dir)
                 for path in tree.children.get(model_dir, ()):
                     detected = model_format(path)
+                    reason = sniffed.get(path)
+                    if detected is None and reason is not None:
+                        detected = (
+                            ("npy", "numpy-object")
+                            if reason.startswith("NumPy")
+                            else ("pickle", "pickle")
+                        )
                     if detected is not None:
                         component, weight_files = self._scan_model_file(
-                            files, path, detected, context
+                            files, path, detected, context, sniffed=reason
                         )
                         result.components.append(component)
                         covered.update(weight_files)
@@ -1365,6 +1470,8 @@ class ModelScanner(Scanner):
         path: Path,
         detected: tuple[str, str],
         context: _DirectoryContext,
+        *,
+        sniffed: str | None = None,
     ) -> tuple[ModelComponent, list[Path]]:
         fmt_key, fmt_name = detected
         self._read.add(path)
@@ -1380,10 +1487,14 @@ class ModelScanner(Scanner):
         if observation is not None:
             safety, format_evidence = observation.safety, observation.explanation
             weight_hash: str | None = observation.digest
-        elif _pickle_family(path):
-            # The name alone rates these formats; an unreadable file keeps that rating.
+            if sniffed and safety != SerializationSafety.UNSAFE_CODE_EXECUTION:
+                safety = SerializationSafety.UNSAFE_CODE_EXECUTION
+                format_evidence = sniffed
+        elif sniffed or _pickle_family(path):
+            # The name, or a sniffed payload, rates these formats even when the file
+            # cannot be hashed.
             safety = SerializationSafety.UNSAFE_CODE_EXECUTION
-            format_evidence = (
+            format_evidence = sniffed or (
                 "Potential code-executing loader format (artifact could not be hashed)"
             )
             weight_hash = None

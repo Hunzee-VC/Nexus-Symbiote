@@ -6,6 +6,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- Pickle payloads are inventoried by content, not only by suffix. A `__reduce__` pickle saved as `models/weights` or `model.dat`, a ZIP whose first member is a `.pkl`, and an object-dtype `.npy` or `.npz` (which `np.load(allow_pickle=True)` unpickles) are critical `unsafe-code-execution` findings. A numeric NumPy array is still not a component.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
 - The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.
