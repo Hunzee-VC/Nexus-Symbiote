@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import SerializationSafety
 from nexus_symbiote.core.models import (
@@ -468,3 +470,16 @@ class TestSPDXGeneratorFull:
         model = next(e for e in result["@graph"] if e.get("name") == "gpt-4o")
         assert "verifiedUsing" in model
         assert model["verifiedUsing"][0]["type"] == "Hash"
+
+
+@pytest.mark.parametrize("generator", [CycloneDXGenerator, SPDXGenerator])
+def test_save_replaces_a_link_instead_of_writing_through_it(tmp_path, generator):
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep")
+    target = tmp_path / "export.json"
+    target.symlink_to(victim)
+    bom = _sample_aibom()
+    generator().save(bom, target)
+    assert victim.read_text() == "keep"
+    assert not target.is_symlink()
+    assert json.loads(target.read_text(encoding="utf-8")) == generator().generate(bom)

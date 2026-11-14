@@ -38,5 +38,7 @@ class Generator(ABC):
         return ExportResult(document, loss_report(bom, self.format_name))
 
     def save(self, bom: AIBOM, path: Path, indent: int = 2) -> None:
-        """Write the generated AIBOM to a file."""
-        path.write_text(self.generate_json(bom, indent=indent), encoding="utf-8")
+        """Replace ``path`` atomically, never writing through a symbolic link."""
+        from nexus_symbiote.utils.files import write_output_file
+
+        write_output_file(path, self.generate_json(bom, indent=indent))
