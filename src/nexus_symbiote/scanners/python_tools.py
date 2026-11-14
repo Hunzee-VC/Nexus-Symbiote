@@ -55,15 +55,15 @@ _SERVER_DECORATORS = _names("resource prompt custom_route")
 _REFLECTIVE_BUILTINS = _names("locals globals vars eval exec")
 _ATTRIBUTE_BUILTINS = _names("getattr setattr delattr")
 # A module the file can import as itself exposes its servers, agents and helpers as
-# attributes that the analysis of names never sees.
+# attributes that the analysis of names never sees. A computed module name, such as
+# __name__, fn.__module__ or __package__ + ".server", can name the file itself.
 _IMPORTERS = _names("import_module __import__")
-_OWN_MODULE = _names("__name__ __spec__")
 _REFLECTIVE_ATTRIBUTES = _names(
     "__self__ __closure__ __globals__ __builtins__ __dict__ __annotations__ __traceback__ "
     "__code__ "
     "__getattribute__ tb_frame tb_next f_back f_locals f_globals f_builtins gi_frame "
     "cr_frame ag_frame _getframe currentframe getouterframes getinnerframes getargvalues "
-    "getclosurevars"
+    "getclosurevars getmodule"
 )
 # Generics whose subscript only records its arguments as types.
 _TYPING_MODULES = frozenset({"typing", "typing_extensions", "collections.abc"})
@@ -147,14 +147,13 @@ def _plain_attribute(call: ast.Call, imported: set[str]) -> bool:
 
 
 def _imports_own_module(call: ast.Call) -> bool:
-    """Whether ``call`` imports a module named by ``__name__`` or ``__spec__``, as
+    """Whether ``call`` imports a module whose name or package is not a literal, as
     ``importlib.import_module(__name__)`` imports the file itself."""
     func = call.func
     name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
-    return name in _IMPORTERS and any(
-        isinstance(node, ast.Name) and node.id in _OWN_MODULE
+    return name in _IMPORTERS and not all(
+        isinstance(argument, ast.Constant)
         for argument in (*call.args, *(keyword.value for keyword in call.keywords))
-        for node in ast.walk(argument)
     )
 
 

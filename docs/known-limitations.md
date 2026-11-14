@@ -324,14 +324,16 @@ A way around a limit that its entry does not describe is worth a
   `tb_next`,
   `f_back`, `f_locals`, `f_globals`, `f_builtins`, `gi_frame`, `cr_frame`,
   `ag_frame`, `_getframe`, `currentframe`, `getouterframes`, `getinnerframes`,
-  `getargvalues` and `getclosurevars`, also imported by name; and a `modules`
-  attribute that is not called, as in `sys.modules[__name__]`, or `modules`
-  imported from `sys`; a call of `import_module` or `__import__` with `__name__`
-  or `__spec__` in its arguments, as in `importlib.import_module(__name__)`; and
-  an import of `__main__`. A method that only shares a name, such as `model.eval()`
+  `getargvalues`, `getclosurevars` and `getmodule`, also imported by name; and a
+  `modules` attribute that is not called, as in `sys.modules[__name__]`, or
+  `modules` imported from `sys`; a call of `import_module` or `__import__` with
+  any argument that is not a literal, as in `importlib.import_module(__name__)`,
+  `importlib.import_module(fn.__module__)` or
+  `importlib.import_module(__package__ + ".server")`; and an import of
+  `__main__`. A method that only shares a name, such as `model.eval()`
   or `model.modules()`, is not reflection. Other reflection is not recognized,
   such as a reflective builtin under another name, a module that imports itself
-  by its own name, as `import server` does in `server.py`, `gc`, or
+  by its own literal name, as `import server` does in `server.py`, `gc`, or
   reflection in another file, including on the traceback of an exception that
   propagated out of a server's run, so a completed scan cannot prove that a
   server or agent never escaped.

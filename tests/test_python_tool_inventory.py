@@ -367,6 +367,19 @@ def test_helpers_of_the_same_file_are_judged_by_what_they_do_with_the_server(tmp
         "import importlib\nimportlib.import_module(__name__).mcp.tool()(delete_all)\n",
         "import importlib\nimportlib.import_module(name=__spec__.name).mcp.tool()(delete_all)\n",
         "__import__(__name__).mcp.tool()(delete_all)\n",
+        "import importlib\nimportlib.import_module(delete_all.__module__).mcp.tool()(delete_all)\n",
+        "import importlib\nimportlib.import_module(__package__ + '.server').mcp.tool()(delete_all)\n",
+        "import importlib\nimportlib.import_module('.server', package=__package__).mcp.tool()\n",
+        "import importlib\nimportlib.import_module(*['server']).mcp.tool()(delete_all)\n",
+        "import inspect\ninspect.getmodule(delete_all).mcp.tool()(delete_all)\n",
+        "from inspect import getmodule as find\nfind(delete_all).mcp.tool()(delete_all)\n",
+        "import importlib\ndef configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "importlib.import_module(swap.__module__).__setattr__('confi' + 'gure', swap)\n"
+        + "configure(mcp)\n",
+        "import inspect\ndef configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "inspect.getmodule(swap).__setattr__('confi' + 'gure', swap)\nconfigure(mcp)\n",
         "from __main__ import mcp as same\nsame.tool()(delete_all)\n",
         "def hidden(value: mcp.tool()(delete_all)): pass\n",
         "def hidden() -> mcp.tool()(delete_all): pass\n",
