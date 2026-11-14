@@ -929,7 +929,7 @@ def test_a_server_named_mcp_is_inventoried_without_a_gap(tmp_path):
     )
     result = _scan(tmp_path, {"pkg/server.py": source})
     assert result.surfaces_excluded == []
-    assert "hello" in str(_inventory(result))
+    assert _inventory(result) == [("mcp-server", "server"), ("tool", "hello")]
 
 
 def test_any_call_whose_first_argument_names_an_mcp_client_module_is_a_gap(tmp_path):
