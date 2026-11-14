@@ -92,7 +92,7 @@ def test_the_payload_fails_the_scan_gate(runner, tmp_path):
 @pytest.mark.parametrize(
     "data",
     [
-        b"\x89PNG\r\n\x1a\n\x00\x00\xff" + "​‮".encode() + b"\x00\xfe" * 64,
+        b"\x89PNG\r\n\x1a\n\x00\x00\xff" + "\u200b\u202e".encode() + b"\x00\xfe" * 64,
         b"%PDF-1.7\n\x00\xff" + "\U000e0041".encode() + b"\x00" + "\U000e0042".encode(),
     ],
     ids=["isolated characters", "tags apart"],
@@ -104,7 +104,7 @@ def test_isolated_hidden_characters_in_a_binary_file_are_not_findings(tmp_path, 
 
 
 def test_a_valid_utf8_file_with_a_nul_is_text(tmp_path):
-    _skill(tmp_path, b"\x00" + "Steps.‮\n".encode())
+    _skill(tmp_path, b"\x00" + "Steps.\u202e\n".encode())
     assert _risks(tmp_path) == [("bidi_override", "critical")]
 
 

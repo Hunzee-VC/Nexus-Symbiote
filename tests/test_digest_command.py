@@ -47,8 +47,8 @@ FIELDS = [
     "spec_version",
     "components",
 ]
-HOSTILE = "::error::forged ##[error]forged \x1b[31mred‮disguised​ <script>x</script>"
-HOSTILE_PIECES = ["::error::", "##[error]", "\x1b", "‮", "​", "<script>"]
+HOSTILE = "::error::forged ##[error]forged \x1b[31mred\u202edisguised\u200b <script>x</script>"
+HOSTILE_PIECES = ["::error::", "##[error]", "\x1b", "\u202e", "\u200b", "<script>"]
 
 
 def _digest(path: Path, *extra: str) -> Result:
@@ -435,12 +435,12 @@ def test_an_error_never_quotes_the_inventory(tmp_path):
 @pytest.mark.parametrize("content", ["{not json", json.dumps({"metadata": {}})])
 def test_a_hostile_file_name_is_neutralized(tmp_path, content):
     """Both errors that name the file: an invalid inventory, and one without a digest."""
-    path = tmp_path / "##[error]x\x1b[31m‮.json"
+    path = tmp_path / "##[error]x\x1b[31m\u202e.json"
     path.write_text(content)
     result = _digest(path)
     assert result.exit_code == 1
     assert result.stderr.startswith("Error: ")
-    assert "\x1b" not in result.stderr and "‮" not in result.stderr
+    assert "\x1b" not in result.stderr and "\u202e" not in result.stderr
     assert "##[error]" not in result.stderr and "##�[error]" in result.stderr
 
 

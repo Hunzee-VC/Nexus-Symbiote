@@ -26,7 +26,7 @@ from nexus_symbiote.scanners import prompt
 from nexus_symbiote.scanners.prompt import PromptScanner
 from tests.support import scaling_ratio
 
-RLO = "‮"
+RLO = "\u202e"
 OUTSIDE = "imports a file outside the project root, which is not inventoried"
 LOOKUPS = (
     "@path imports past this file are not inventoried; import-lookups limit of 40 exceeded; "
