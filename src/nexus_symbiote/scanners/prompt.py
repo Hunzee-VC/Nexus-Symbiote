@@ -149,6 +149,39 @@ def _character_name(char: str) -> str:
     return unicodedata.name(char, unnamed)
 
 
+_LINE_SEPARATORS = ("\u2028", "\u2029")
+
+
+def _line_separator_counts(content: str) -> dict[str, int]:
+    if "\u2028" not in content and "\u2029" not in content:
+        return {}
+    return {char: content.count(char) for char in _LINE_SEPARATORS if char in content}
+
+
+def _line_separator_risks(counts: dict[str, int], source_name: str) -> list[RiskAssessment]:
+    if not counts:
+        return []
+    names = {
+        "\u2028": "LINE SEPARATOR",
+        "\u2029": "PARAGRAPH SEPARATOR",
+    }
+    shown = ", ".join(
+        f"{names[char]} (U+{ord(char):04X}) x{count}"
+        for char, count in sorted(counts.items(), key=lambda item: ord(item[0]))
+    )
+    return [
+        RiskAssessment(
+            severity=RiskSeverity.LOW,
+            category="line_separators",
+            detail=(
+                f"'{neutralize(source_name)}' contains line or paragraph separators: {shown}. "
+                "They can split a line in some renderers."
+            ),
+            recommendation="Replace them with ordinary newline characters.",
+        )
+    ]
+
+
 def detect_invisible_characters(content: str, source_name: str) -> list[RiskAssessment]:
     """Detect invisible Unicode characters that could be used for prompt trojans.
 
@@ -161,7 +194,10 @@ def detect_invisible_characters(content: str, source_name: str) -> list[RiskAsse
     and the England, Scotland and Wales flag sequences are ordinary text.
     """
     counts, tags = _hidden_counts(content, at_start=True)
-    return _hidden_character_risks(counts, tags, source_name)
+    return [
+        *_hidden_character_risks(counts, tags, source_name),
+        *_line_separator_risks(_line_separator_counts(content), source_name),
+    ]
 
 
 def _hidden_counts(content: str, *, at_start: bool) -> tuple[dict[str, int], int]:
@@ -222,6 +258,7 @@ class _HiddenCharacterStream:
         self._offset = 0
         self._plane_14: deque[int] = deque(maxlen=_BINARY_PLANE_14)
         self._dense_plane_14 = False
+        self._line_seps: dict[str, int] = {}
 
     @property
     def binary(self) -> bool:
@@ -242,6 +279,13 @@ class _HiddenCharacterStream:
         if not self.binary:
             return self._tags
         return self._tags if self._dense_plane_14 else self._run_tags
+
+    @property
+    def line_separators(self) -> dict[str, int]:
+        """U+2028 and U+2029. A binary file does not report them."""
+        if self.binary:
+            return {}
+        return self._line_seps
 
     def feed(self, chunk: bytes, *, final: bool = False) -> None:
         if self._decoder is None:
@@ -269,6 +313,8 @@ class _HiddenCharacterStream:
             self._pending = text
             return
         segment = text[:end]
+        for char, count in _line_separator_counts(segment).items():
+            self._line_seps[char] = self._line_seps.get(char, 0) + count
         counts, tags = _hidden_counts(segment, at_start=self._at_start)
         self._tags += tags
         for char, count in counts.items():
@@ -986,9 +1032,10 @@ class PromptScanner(Scanner):
             # An agent's reader still decodes such a file; check the text it would read.
             stream = _HiddenCharacterStream()
             stream.feed(content, final=True)
-            return hash_bytes(content), _hidden_character_risks(
-                stream.counts, stream.tags, relative
-            )
+            return hash_bytes(content), [
+                *_hidden_character_risks(stream.counts, stream.tags, relative),
+                *_line_separator_risks(stream.line_separators, relative),
+            ]
         risks = detect_invisible_characters(text, relative)
         if path.suffix.lower() in _MARKUP_SUFFIXES:
             risks.extend(detect_hidden_markup(text, relative))
@@ -1008,9 +1055,10 @@ class PromptScanner(Scanner):
         except (OSError, CollectionError):
             return None
         text.feed(b"", final=True)
-        return f"sha256:{digest.hexdigest()}", _hidden_character_risks(
-            text.counts, text.tags, relative
-        )
+        return f"sha256:{digest.hexdigest()}", [
+            *_hidden_character_risks(text.counts, text.tags, relative),
+            *_line_separator_risks(text.line_separators, relative),
+        ]
 
     def _scan_instruction_file(
         self, path: Path, rel_path: str, prompt_type: str, raw: bytes, text: str

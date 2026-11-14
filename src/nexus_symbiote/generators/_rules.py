@@ -165,6 +165,10 @@ RULES: dict[str, RuleInfo] = {
         "An instruction file contains HTML or Markdown comments, which rendered views hide "
         "and agents read.",
     ),
+    "line_separators": RuleInfo(
+        "Line or paragraph separators",
+        "An instruction file contains U+2028 or U+2029, which can split a line in some renderers.",
+    ),
     "hook_commands": RuleInfo(
         "Hook commands",
         "IDE agent settings declare hook commands that run automatically on agent events.",

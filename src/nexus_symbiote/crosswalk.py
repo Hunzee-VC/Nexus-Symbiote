@@ -567,6 +567,14 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
     ),
     "hidden_markup": _DISGUISED_TEXT,
+    "line_separators": (
+        _ref(
+            OWASP_LLM_2025,
+            "LLM01:2025",
+            "A line or paragraph separator can split instruction text in some renderers.",
+        ),
+        _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
+    ),
     "hook_commands": (
         _ref(OWASP_ASI_2026, "ASI05", "Commands run automatically on agent events."),
         _ref(

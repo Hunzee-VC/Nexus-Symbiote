@@ -12,6 +12,10 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 - **Breaking:** `verify-live` and pinned stdio sessions require kernel PID containment by default. Hosts that refuse a user/PID namespace fail with `isolation-unavailable` before the pinned launcher executes. The trusted operator can explicitly accept `--no-isolation` (or library `isolation_off()`) only in an independently isolated worker: process-tree cleanup is best effort and daemonized children may survive. The staging and spawn path is one helper shared by `live/stdio.py` and `live/session.py`.
 - Hook commands are rated by what they run. A hook that downloads and pipes a script to a shell is critical, and a hook that contains a URL is high; other hook commands stay medium. The command text is still not recorded. An HTML or Markdown comment in an instruction file is high when it contains an imperative, a URL or a path under `~/`, and low otherwise. The comment text is still not recorded.
 - An exact top-level pin of an `npx`, `npm exec`, `bunx`, `bun x`, `pnpm dlx`, `yarn dlx`, `uvx`, `uv tool run` or `pipx run` package is a medium `transitive_resolution` finding. Those runners resolve the package's dependencies at launch, and a project lockfile does not cover that install.
+- Piping command output into `head` exits quietly with status 141. It used to report `internal error (BrokenPipeError)` and exit 1.
+- Instruction files that contain U+2028 or U+2029 are a low `line_separators` finding. Ordinary spaces, including NBSP and the ideographic space, are not findings.
+- The OpenSSF Scorecard workflow grants no permissions at the top level, so a job added later does not inherit `read-all`.
+- `.gitleaks.toml` allowlists `tests/` so synthetic fixture tokens are not mixed with a real secret. Do not put a real secret under `tests/`.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
 - The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.
@@ -27,6 +31,8 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 - No Python file holds a literal bidirectional control or invisible character, tests included: the remaining literals in test modules and three regular expressions are escapes with the same value, and Ruff's `PLE2502` and `PLE2510` to `PLE2515` rules refuse a literal one wherever the linter runs.
 
 ### Changed
+
+- The pre-commit hook description states that `language: python` installs from `pyproject.toml` ranges without the hash lock, and how to run the command from a lock-installed environment with `language: system`.
 
 - **Breaking:** a policy file accepts only the documented `validate` key, and an unlistable root is an error. `verify-artifact` and `verify-discovery` reject `--trust-root` or `--trust-root-sha256` without `--bundle`.
 - `risk` prints an unscored run as unscored, labels a failed discovery-producer check as such rather than as a failed project reconciliation, and, like `summary`, orders severity breakdowns from critical to info. `vex` and `advisories` print why an inventory could not be read.
