@@ -295,7 +295,8 @@ exported origin and shape; other text and numbers enter it only as their type. T
 URL origins are exported as `endpoint_origins` and `configuration_endpoint_origins`
 and checked for encrypted transport like `source_uris`; a finding about the shared
 fields is recorded once, on the file's first source. A file that declares more than
-1,000 such URLs is a collection failure. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`
+1,000 such URLs and `source_uris` entries together is a collection failure, since
+each may become a finding. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`
 set, `static_value_binding` is an HMAC-SHA256 (profile
 `nexus-symbiote/rag-source-values/v1`) over the source object and an HMAC of the
 shared fields. Without the key, a source whose URIs go beyond their exported origins,

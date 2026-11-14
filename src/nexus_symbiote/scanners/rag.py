@@ -528,12 +528,14 @@ class RAGScanner(Scanner):
         configuration_origins = sorted({_exported_uri(url)[0] for url in configuration_urls})
         components: list[RAGSourceComponent] = []
         target = files.link_target(path)
+        located = 0
         for index, source in enumerate(sources):
             if not isinstance(source, dict):
                 result.scan_failures.append(f"{relative}: RAG source must be an object")
                 continue
             try:
-                component = self._source(relative, index, source, shared, urls)
+                component = self._source(relative, index, source, shared, urls, located)
+                located += len(component.source_uris)
                 if target is not None:
                     component.properties["symlink_target"] = target
                 if configuration_origins:
@@ -567,11 +569,14 @@ class RAGScanner(Scanner):
         source: dict[str, Any],
         shared: tuple[str, dict[str, str]] | None,
         file_urls: list[str],
+        located: int,
     ) -> RAGSourceComponent:
         """One source's record.
 
         ``shared`` is the digest and binding of the fields beside the source lists, which
-        apply to every source. ``file_urls`` collects the URLs described in the file.
+        apply to every source. ``file_urls`` collects the URLs described in the file and
+        ``located`` counts the ``source_uris`` of its earlier sources: each may become a
+        finding, so together they are bounded as ``_describe`` bounds the URLs.
         """
         declared_name = source.get("name")
         if declared_name is None:
@@ -635,6 +640,10 @@ class RAGScanner(Scanner):
             file_urls,
         )
         urls = file_urls[first_url:]
+        if len(file_urls) + located + len(locators) > _MAX_ENTRIES:
+            raise _TooManyURLsError(
+                f"RAG configuration declares more than {_MAX_ENTRIES} endpoint URLs and source URIs"
+            )
         structure_hash = hash_canonical(
             {
                 "profile": SOURCE_STRUCTURE_PROFILE,

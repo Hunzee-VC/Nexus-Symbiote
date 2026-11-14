@@ -514,6 +514,43 @@ def test_more_endpoint_urls_than_one_file_may_describe_is_a_failure(tmp_path, co
 
 
 @pytest.mark.parametrize(
+    "config",
+    [
+        {"sources": [{"name": f"s{n}", "source_uris": ["http://a"] * 1000} for n in range(2)]},
+        {
+            "endpoints": [f"s3://b{index}" for index in range(600)],
+            "sources": [{"source_uris": [f"s3://a{index}" for index in range(600)]}],
+        },
+        {
+            "sources": [
+                {"name": "a", "source_uris": [f"docs/{index}.md" for index in range(600)]},
+                {"name": "b", "mirrors": [f"s3://b{index}" for index in range(600)]},
+            ]
+        },
+    ],
+)
+def test_source_uris_share_the_file_bound_on_endpoint_urls(tmp_path, config):
+    (tmp_path / "rag_config.json").write_text(json.dumps(config))
+    result = RAGScanner().scan(tmp_path)
+    assert result.scan_failures == [
+        "rag_config.json: RAG configuration declares more than 1000 endpoint URLs and source URIs"
+    ]
+    assert not [c for c in result.components if isinstance(c, RAGSourceComponent)]
+
+
+def test_a_file_may_declare_a_thousand_endpoint_urls_and_source_uris(tmp_path):
+    config = {
+        "endpoints": ["s3://shared"],
+        "sources": [
+            {"name": "a", "source_uris": ["http://a"] * 500},
+            {"name": "b", "source_uris": ["docs/b.md"] * 498, "mirrors": ["s3://b"]},
+        ],
+    }
+    first, second = _scan_config(tmp_path, config)
+    assert len(first.source_uris) + len(second.source_uris) == 998
+
+
+@pytest.mark.parametrize(
     ("before", "after"),
     [("strict", "off"), (1, 0), ({"enabled": "yes"}, {"enabled": "no"})],
 )
