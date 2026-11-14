@@ -361,7 +361,9 @@ def assemble_repository_agent(
         for field in ("name", "version", "framework", "owner", "purpose"):
             value = getattr(declared, field)
             if value is not None:
-                displayed[field] = redact_text(value)
+                # Names keep the token formats ordinary names take, such as
+                # ``sk-research-assistant``; the free-text purpose does not.
+                displayed[field] = redact_text(value, identifier=field != "purpose")
     agent = AgentComponent(
         bom_ref=agent_ref,
         name=displayed.get("name", INFERRED_AGENT_NAME),

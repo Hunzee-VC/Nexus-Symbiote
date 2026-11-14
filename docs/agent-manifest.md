@@ -44,10 +44,11 @@ and 20,000 YAML tokens, without anchors, aliases or tags.
 describes the structure for editors and other tools; the path and file rules below
 are checked only when a scan reads the manifest.
 
-The exported `name`, `version`, `purpose`, `framework` and `owner` use the shared
-[free-text redaction](security-model.md#known-false-positive-and-false-negative-classes).
-Recognized credentials are removed before these values enter any inventory or
-export. Redaction does not recognize every possible secret, so keep credentials
+The exported `name`, `version`, `framework` and `owner` use the name rule of the
+shared [redaction](security-model.md#known-false-positive-and-false-negative-classes),
+which keeps an ordinary name such as `sk-research-assistant`, and `purpose` uses
+free-text redaction. Recognized credentials are removed before these values enter
+any inventory or export. Redaction does not recognize every possible secret, so keep credentials
 out of these fields and review earlier exports before sharing them.
 
 ## What it changes

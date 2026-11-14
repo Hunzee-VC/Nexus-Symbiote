@@ -78,6 +78,16 @@ def test_credential_shaped_plain_path_is_redacted(tmp_path, token):
     assert any(risk.category == "completeness" for risk in component.risks)
 
 
+def test_manifest_names_keep_ordinary_token_shapes_and_purpose_does_not(tmp_path):
+    # Identity fields use the identifier rule, which keeps names such as an sk- prefix.
+    name = "sk-research-assistant-agent"
+    declaration = {"name": name, "owner": name, "purpose": f"key {name}-0123456789"}
+    (tmp_path / "agent.yaml").write_text(json.dumps(declaration))
+    agent = assemble_repository_agent(AIBOM(), tmp_path)
+    assert agent.name == name and agent.supplier == name
+    assert agent.description is not None and "***" in agent.description
+
+
 def test_ordinary_manifest_and_rag_values_are_preserved(tmp_path):
     declaration = {
         "name": "knowledge-agent",
