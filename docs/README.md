@@ -81,6 +81,7 @@ Reference material: exact behavior, fields and limits.
 | Guide | When you need to |
 | --- | --- |
 | [Contributing](../CONTRIBUTING.md) | Set up the locked environment and meet the review contract |
+| [Reviewed Gitleaks fixtures](gitleaks-fixtures.md) | Review exact synthetic-fixture exceptions without suppressing other credentials in the same files |
 | [Repository controls](repository-controls.md) | Apply branch protection, require `Verified CI`, and run the publication preflight |
 | [Releasing](releasing.md) | Build, attest, rehearse on TestPyPI and publish a release |
 | [Support](../SUPPORT.md) | Troubleshoot collection, import and validation outcomes |

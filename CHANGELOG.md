@@ -6,6 +6,8 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- Gitleaks retains upstream detection in every tree while excepting thirteen reviewed public or synthetic values only for their exact path and detection rule. Changed values and unrelated credentials in those fixture files remain detectable; the configuration requires Gitleaks 8.30.1 or later.
+
 - The pull request size gate uses immutable event base/head commits, parses NUL-delimited paths, counts whole files moved across excluded-tree boundaries and refuses unexpected binary source changes. Its workflow contract now protects the step, fixed limit and ref selection against removal or weakening.
 
 - The runtime gateway rechecks admission at the moment it records a decision: a trust status is accepted only while its signers are still in scope, a snapshot advances only against the trust head it was verified under and while its windows and quorums still hold, and a call's final admission rechecks trust-signer scope, snapshot-signer scope and the distinct-approver quorum. The served tool descriptor is budget-checked and copied before it is digested and validated, so the worker validates the bytes that were digested. Every `invoke` now takes the state store's write lock in `advance_snapshot`, even for a snapshot already recorded, so a contended store can answer `state-unavailable` where it used to proceed.
