@@ -9,6 +9,7 @@ code. Weight files count as signed only under an operator signature policy.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import hmac
 import io
@@ -16,14 +17,16 @@ import json
 import os
 import pickletools
 import re
+import tokenize
+import warnings
 import zlib
 from collections import deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from functools import partial
-from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO, cast
+from pathlib import Path, PurePath, PurePosixPath
+from typing import Any, BinaryIO, NamedTuple, cast
 
 from nexus_symbiote import limits
 from nexus_symbiote.core.enums import (
@@ -131,6 +134,8 @@ SIGNING_FILES = [
 SIGNING_SUFFIXES = [".sig", ".sigstore", ".sigstore.json"]
 
 MAX_MODEL_HEADER_BYTES = 1024 * 1024
+# The most a content check reads from where a pickle or a NumPy array header starts:
+# a pickle sample, or an array header, which no version 1 header exceeds.
 MAX_PICKLE_INSPECTION_BYTES = 65536
 # Opcodes read from a pickle sample, which bounds the work, and the well-formed
 # binary opcodes after PROTO that recognize a pickle whatever follows them.
@@ -142,6 +147,9 @@ MAX_ZIP_DIRECTORY_BYTES = MAX_MODEL_HEADER_BYTES
 _ZIP_END_RECORD_BYTES = 22 + 65_535 + 20 + 56
 _ZIP_TAIL_BYTES = MAX_ZIP_DIRECTORY_BYTES + _ZIP_END_RECORD_BYTES
 ZIP_PICKLE_MEMBER = "ZIP archive with a pickle member; torch.load unpickles it"
+ZIP_OBJECT_ARRAY = (
+    "ZIP archive with a NumPy object-dtype array member; np.load(allow_pickle=True) unpickles it"
+)
 ZIP_WITHOUT_PICKLE = (
     "ZIP archive whose directory lists no pickle member; no bounded structural validator "
     "for this format/loader"
@@ -150,7 +158,22 @@ ZIP_DIRECTORY_UNREAD = (
     "ZIP archive whose directory is malformed or over the inspection limit; no bounded "
     "structural validator for this format/loader"
 )
-_ZIP_NOT_PICKLE = frozenset({ZIP_WITHOUT_PICKLE, ZIP_DIRECTORY_UNREAD})
+ZIP_MEMBER_UNREAD = (
+    "ZIP archive with a member that could not be inspected (overlapping, compressed by "
+    "another method or with an array header over the inspection limit); no bounded "
+    "structural validator for this format/loader"
+)
+# ZIP verdicts that leave the rating unknown; each read the archive to its end.
+_ZIP_UNRATED = frozenset({ZIP_WITHOUT_PICKLE, ZIP_DIRECTORY_UNREAD, ZIP_MEMBER_UNREAD})
+NUMPY_OBJECT_ARRAY = "NumPy object-dtype array; np.load(allow_pickle=True) unpickles it"
+NUMPY_HEADER_UNREAD = (
+    "NumPy array whose header is over the inspection limit; no bounded structural "
+    "validator for this format/loader"
+)
+_NUMPY_MAGIC = b"\x93NUMPY"
+# Dtype names that make an object dtype: the type code, with the sizes NumPy accepted,
+# and the names that NumPy and its earlier releases accept.
+_OBJECT_TYPE = re.compile(r"O\d*|[Oo]bject\w*")
 ZIP_NOT_GGUF = "the file is a ZIP archive"
 # Chat templates a finding names; it counts the rest.
 _LISTED_TEMPLATES = 3
@@ -218,7 +241,7 @@ _SNIFF_BYTES = 65536
 _NPY_OBJECT = re.compile(rb"""['"]descr['"]\s*:\s*(?:['"][|<>]?O['"]|\[[^\]]*?['"][|<>]?O['"])""")
 
 
-def _pickle_family(path: Path) -> bool:
+def _pickle_family(path: PurePath) -> bool:
     suffixes = [suffix.lower() for suffix in path.suffixes]
     if suffixes and suffixes[-1] in _UNSAFE_SUFFIXES:
         return True
@@ -447,15 +470,31 @@ def _recognized_pickle(stream: BinaryIO, prefix: bytes, size: int) -> str | None
 
 
 def _pickle_member(name: bytes) -> bool:
-    return name.lower().endswith(b".pkl")
+    """A ZIP member named as a pickle-family file is, wherever it sits in the archive.
+
+    ``torch.load`` unpickles ``data.pkl``; a loader handed the archive can open any other
+    member, so a member is rated by its name, as a file on disk is.
+    """
+    return _pickle_family(PurePosixPath(name.decode("latin-1")))
 
 
 def _little(data: bytes, offset: int, width: int) -> int:
     return int.from_bytes(data[offset : offset + width], "little")
 
 
-def _zip_lists_pickle(stream: BinaryIO, consumed: int, size: int) -> bool | None:
-    """Whether the central directory at the end of a ZIP archive names a pickle member.
+class _ZipMember(NamedTuple):
+    """One central directory entry: the name, method and size a loader reads it by."""
+
+    name: bytes
+    method: int
+    size: int
+    offset: int
+
+
+def _zip_directory(
+    stream: BinaryIO, consumed: int, size: int
+) -> tuple[list[_ZipMember], int] | None:
+    """The members the central directory at the end of a ZIP archive lists, and its offset.
 
     The rest of the stream is read in bounded chunks, keeping only the tail that can
     hold the directory within ``MAX_ZIP_DIRECTORY_BYTES``, the end-of-central-directory
@@ -495,38 +534,279 @@ def _zip_lists_pickle(stream: BinaryIO, consumed: int, size: int) -> bool | None
         directory_end = record
         directory_size = _little(data, record + 40, 8)
         directory_offset = _little(data, record + 48, 8)
-    return _directory_lists_pickle(data, directory_offset - start, directory_size, directory_end)
+    members = _directory_members(data, directory_offset - start, directory_size, directory_end)
+    return None if members is None else (members, directory_offset)
 
 
-def _directory_lists_pickle(data: bytes, begin: int, size: int, end: int) -> bool | None:
+def _directory_members(data: bytes, begin: int, size: int, end: int) -> list[_ZipMember] | None:
     """Walk the central directory entries that ``data`` holds from ``begin`` to ``end``."""
     if size > MAX_ZIP_DIRECTORY_BYTES or begin < 0 or begin + size > end:
         return None
+    members: list[_ZipMember] = []
     position = begin
     while position < begin + size:
         if position + 46 > begin + size or data[position : position + 4] != b"PK\x01\x02":
             return None
         name_length = _little(data, position + 28, 2)
+        extra_length = _little(data, position + 30, 2)
         name = data[position + 46 : position + 46 + name_length]
         if len(name) < name_length:
             return None
-        if _pickle_member(name):
-            return True
-        position += (
-            46 + name_length + _little(data, position + 30, 2) + _little(data, position + 32, 2)
+        extra_at = position + 46 + name_length
+        located = _zip64_location(
+            data[extra_at : extra_at + extra_length],
+            _little(data, position + 24, 4),
+            _little(data, position + 20, 4),
+            _little(data, position + 42, 4),
         )
+        if located is None:
+            return None
+        members.append(_ZipMember(name, _little(data, position + 10, 2), *located))
+        position = extra_at + extra_length + _little(data, position + 32, 2)
+    return members
+
+
+def _zip64_location(
+    extra: bytes, uncompressed: int, compressed: int, offset: int
+) -> tuple[int, int] | None:
+    """A member's compressed size and local header offset, from ZIP64 when they overflow.
+
+    The ZIP64 extra field holds, in this order, each of the uncompressed size, the
+    compressed size and the offset whose 32-bit field is 0xFFFFFFFF. ``None`` when one
+    it must hold is missing, which ``zipfile`` refuses as a corrupt archive.
+    """
+    if 0xFFFFFFFF not in (uncompressed, compressed, offset):
+        return compressed, offset
+    position = 0
+    while position + 4 <= len(extra):
+        length = _little(extra, position + 2, 2)
+        if _little(extra, position, 2) == 1:
+            field = extra[position + 4 : position + 4 + length]
+            values = [uncompressed, compressed, offset]
+            cursor = 0
+            for index, value in enumerate(values):
+                if value == 0xFFFFFFFF:
+                    if cursor + 8 > len(field):
+                        return None
+                    values[index] = _little(field, cursor, 8)
+                    cursor += 8
+            return values[1], values[2]
+        position += 4 + length
+    return None
+
+
+def _reread(stream: BinaryIO, offset: int, size: int) -> bytes:
+    """``size`` bytes at ``offset`` of what ``stream`` has read, read again.
+
+    A confined or hashing stream re-reads from its own descriptor without charging the
+    bytes again; a plain file is read at that offset.
+    """
+    reread = getattr(stream, "reread", None)
+    if reread is not None:
+        data: bytes = reread(offset, size)
+        return data
+    return os.pread(stream.fileno(), size, offset)
+
+
+class _MemberData:
+    """The data of one ZIP member, read again from the archive, inflated if DEFLATE.
+
+    Compressed input is read again in growing chunks, so a member costs about what its
+    array header needs; it never reads past the member's compressed size.
+    """
+
+    def __init__(self, stream: BinaryIO, start: int, size: int, *, deflated: bool) -> None:
+        self._stream = stream
+        self._position = start
+        self._remaining = size
+        self._inflater = zlib.decompressobj(wbits=-zlib.MAX_WBITS) if deflated else None
+        self._pending = b""
+        self._chunk = 512
+
+    def _input(self, size: int) -> bytes:
+        data = _reread(self._stream, self._position, min(size, self._remaining))
+        self._position += len(data)
+        self._remaining -= len(data)
+        return data
+
+    def read(self, size: int) -> bytes:
+        if self._inflater is None:
+            return self._input(size)
+        out = bytearray()
+        while len(out) < size and not self._inflater.eof:
+            if not self._pending:
+                if self._remaining <= 0:
+                    break
+                self._pending = self._input(self._chunk)
+                self._chunk = min(2 * self._chunk, 65536)
+            out += self._inflater.decompress(self._pending, size - len(out))
+            self._pending = self._inflater.unconsumed_tail
+        return bytes(out)
+
+
+def _members_hold_object_array(
+    stream: BinaryIO, members: list[_ZipMember], directory: int
+) -> bool | None:
+    """Whether a member of a ZIP archive is a NumPy array with an object dtype.
+
+    ``np.load`` reads every member that starts with the NumPy magic as an array,
+    whatever its name, so every member is checked from its local header and the start
+    of its data, stored or raw DEFLATE, read again from the stream that read the
+    archive to its end. As ``zipfile`` does, members are taken in offset order and a
+    member whose data runs past the next local header or into the directory is not
+    read, so the bytes read again are at most the archive's. ``None`` when a member
+    could not be checked: its data overlaps, it is compressed by another method, or its
+    array header is longer than ``MAX_PICKLE_INSPECTION_BYTES``.
+    """
+    ordered = sorted(members, key=lambda member: member.offset)
+    unread = False
+    for index, member in enumerate(ordered):
+        end = min(ordered[index + 1].offset, directory) if index + 1 < len(ordered) else directory
+        found = _member_holds_object_array(stream, member, end)
+        if found:
+            return True
+        unread = unread or found is None
+    return None if unread else False
+
+
+def _member_holds_object_array(stream: BinaryIO, member: _ZipMember, end: int) -> bool | None:
+    if member.size == 0:
+        return False
+    if member.offset < 0 or member.offset + 30 > end:
+        return None
+    header = _reread(stream, member.offset, 30)
+    if header[:4] != b"PK\x03\x04":
+        # zipfile refuses a member without a local header; np.load cannot read it.
+        return False
+    start = member.offset + 30 + _little(header, 26, 2) + _little(header, 28, 2)
+    if start + member.size > end:
+        return None
+    if member.method not in (0, 8):
+        return None
+    data = _MemberData(stream, start, member.size, deflated=member.method == 8)
+    try:
+        return _object_array(b"", data.read)
+    except zlib.error:
+        # zipfile raises the same error when it inflates the member.
+        return False
+
+
+def _object_array(start: bytes, more: Callable[[int], bytes]) -> bool | None:
+    """Whether a NumPy array that begins with ``start``, continued by ``more``, holds objects.
+
+    ``more(n)`` returns up to the next ``n`` bytes. A version 1, 2 or 3 header is read
+    whole up to ``MAX_PICKLE_INSPECTION_BYTES``, which a version 1 header never exceeds,
+    however it is padded. ``None`` when the header is longer; ``False`` for anything
+    ``np.load`` does not read as an array.
+    """
+    if len(start) < 12:
+        start += more(12 - len(start))
+    if len(start) < 10 or start[:6] != _NUMPY_MAGIC or start[7] != 0 or start[6] not in (1, 2, 3):
+        return False
+    preamble = 10 if start[6] == 1 else 12
+    if len(start) < preamble:
+        return False
+    length = _little(start, 8, preamble - 8)
+    if length > MAX_PICKLE_INSPECTION_BYTES:
+        return None
+    header = start[preamble : preamble + length]
+    header += more(length - len(header))
+    return len(header) == length and _declares_object(header, start[6])
+
+
+def _declares_object(header: bytes, major: int) -> bool:
+    """Whether a NumPy header, a dict literal, declares a dtype with an object field.
+
+    It is parsed as ``np.load`` parses it, with ``ast.literal_eval``, and again without
+    the ``L`` that Python 2 wrote after an integer when that alone fails. Only the
+    ``descr`` value is examined, so a field name is never taken for a type.
+    """
+    try:
+        text = header.decode("utf-8" if major == 3 else "latin-1")
+    except UnicodeDecodeError:
+        return False
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", SyntaxWarning)
+        warnings.simplefilter("ignore", DeprecationWarning)
+        try:
+            try:
+                parsed = ast.literal_eval(text)
+            except SyntaxError:
+                parsed = ast.literal_eval(_without_long_suffixes(text))
+        except (
+            SyntaxError,
+            ValueError,
+            TypeError,
+            MemoryError,
+            RecursionError,
+            tokenize.TokenError,
+        ):
+            return False
+    return isinstance(parsed, dict) and _descr_has_object(parsed.get("descr"))
+
+
+def _without_long_suffixes(text: str) -> str:
+    """``text`` without an ``L`` token after a number, as NumPy filters Python 2 headers."""
+    tokens: list[tokenize.TokenInfo] = []
+    after_number = False
+    for token in tokenize.generate_tokens(io.StringIO(text).readline):
+        if after_number and token.type == tokenize.NAME and token.string == "L":
+            continue
+        tokens.append(token)
+        after_number = token.type == tokenize.NUMBER
+    return tokenize.untokenize(tokens)
+
+
+def _descr_has_object(descr: object) -> bool:
+    """Whether a NumPy ``descr`` names an object dtype anywhere, as ``np.load`` reads it.
+
+    A string is a dtype string. A tuple is a subarray of its first item. Any other
+    container lists fields, each unpacked as ``(name, descr)`` or
+    ``(name, descr, shape)``, so its second item is the field's type, nested to any
+    depth. A set field's items have no order, so each is checked.
+    """
+    pending: list[object] = [descr]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            if _object_dtype_string(item):
+                return True
+        elif isinstance(item, tuple):
+            pending.extend(item[:1])
+        elif isinstance(item, list | dict | set):
+            for entry in item:
+                if isinstance(entry, str | tuple | list | dict | set) and len(entry) in (2, 3):
+                    unpacked = list(entry)
+                    pending.extend(unpacked if isinstance(entry, set) else unpacked[1:2])
     return False
+
+
+def _object_dtype_string(text: str) -> bool:
+    """Whether a dtype string such as ``|O``, ``object`` or ``i4,(2,)O`` has an object part.
+
+    Each comma-separated part is read without its byte order and shape prefix.
+    """
+    return any(
+        _OBJECT_TYPE.fullmatch(part.strip().lstrip("<>|=()0123456789, ").strip())
+        for part in text.split(",")
+    )
 
 
 def _recognized_code_container(
     stream: BinaryIO, prefix: bytes, size: int
 ) -> tuple[SerializationSafety, str] | None:
-    """A verdict on a code-executing container, or ``None`` for content not recognized.
+    """A verdict on content a loader can run code from, or ``None`` for content not recognized.
 
-    A ZIP archive is a code container when a member is a pickle: ``torch.save`` writes
-    ``data.pkl``, usually first, so its local header is read forward before the
+    A pickle, a NumPy array with an object dtype, and a ZIP archive with a pickle-family
+    member or such an array as a member are recognized. ``torch.save`` writes
+    ``data.pkl``, usually first, so the first local header is read forward before the
     directory at the end of the archive, which lists every member, is read.
     """
+    if prefix[:6] == _NUMPY_MAGIC:
+        array = _object_array(prefix, stream.read)
+        if array is None:
+            return SerializationSafety.UNKNOWN, NUMPY_HEADER_UNREAD
+        return (SerializationSafety.UNSAFE_CODE_EXECUTION, NUMPY_OBJECT_ARRAY) if array else None
     if prefix[:4] != b"PK\x03\x04":
         pickle = _recognized_pickle(stream, prefix, size)
         return None if pickle is None else (SerializationSafety.UNSAFE_CODE_EXECUTION, pickle)
@@ -538,11 +818,18 @@ def _recognized_code_container(
         if 0 < name_length <= 4096:
             first = stream.read(name_length)
             consumed += len(first)
-    listed = True if _pickle_member(first) else _zip_lists_pickle(stream, consumed, size)
-    if listed:
+    if _pickle_member(first):
         return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_PICKLE_MEMBER
-    explanation = ZIP_WITHOUT_PICKLE if listed is False else ZIP_DIRECTORY_UNREAD
-    return SerializationSafety.UNKNOWN, explanation
+    directory = _zip_directory(stream, consumed, size)
+    if directory is None:
+        return SerializationSafety.UNKNOWN, ZIP_DIRECTORY_UNREAD
+    members, offset = directory
+    if any(_pickle_member(member.name) for member in members):
+        return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_PICKLE_MEMBER
+    arrays = _members_hold_object_array(stream, members, offset)
+    if arrays:
+        return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_OBJECT_ARRAY
+    return SerializationSafety.UNKNOWN, ZIP_WITHOUT_PICKLE if arrays is False else ZIP_MEMBER_UNREAD
 
 
 def inspect_model_format(
@@ -611,6 +898,12 @@ class _HashingModelReader:
         self.prefix.extend(content[: max(0, MAX_MODEL_HEADER_BYTES + 8 - len(self.prefix))])
         return content
 
+    def reread(self, offset: int, size: int) -> bytes:
+        """Read again bytes already hashed; the digest and the byte count are unchanged."""
+        if offset < 0 or size < 0 or offset + size > self.bytes_read:
+            raise OSError("re-read past the bytes inspected")
+        return _reread(self.stream, offset, size)
+
 
 class _ReplayReader:
     """Re-read from the start of a hashed stream: the inspected prefix, then the rest."""
@@ -669,7 +962,7 @@ def observe_model_artifact(
             artifact_size=before.st_size,
             max_header_bytes=MAX_MODEL_HEADER_BYTES,
         )
-    elif key in ("onnx", "gguf") and explanation in _ZIP_NOT_PICKLE:
+    elif key in ("onnx", "gguf") and explanation in _ZIP_UNRATED:
         # The directory was read from the archive's end, past the prefix a format
         # reader replays; an archive holds no ONNX external data and no GGUF metadata,
         # which is what the readers found before the directory was read.

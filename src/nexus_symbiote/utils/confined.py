@@ -440,6 +440,23 @@ class _BoundedReader(io.RawIOBase):
             raise
         return raw
 
+    def reread(self, offset: int, size: int) -> bytes:
+        """Read again ``size`` bytes at ``offset`` from the bytes this stream has read.
+
+        They were charged to the budget when they were first read, so reading them again
+        is not charged; a range past them is refused. The caller bounds how often it
+        reads a range again.
+        """
+        if self.closed:
+            raise ValueError("read of closed collection stream")
+        if offset < 0 or not 0 <= size <= _MAX_CHUNK_BYTES or offset + size > self._read:
+            raise CollectionError("re-read outside the bytes already read")
+        try:
+            return os.pread(self._fd, size, offset)
+        except OSError:
+            self._owner._fail(self._path, "stream read failed (I/O error)")
+            raise
+
     def close(self) -> None:
         if not self.closed:
             os.close(self._fd)
