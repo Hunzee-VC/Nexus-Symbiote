@@ -241,7 +241,7 @@ def _recognized_pickle(stream: BinaryIO, prefix: bytes, size: int) -> str | None
         # dis() only checks opcode stack/memo consistency; it never resolves
         # globals, imports artifact code, invokes reducers or constructs objects.
         pickletools.dis(sample, out=io.StringIO())
-    except (ValueError, UnicodeError, OverflowError, RecursionError):
+    except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
         return None
     kind = "binary" if binary else "text-protocol"
     return f"Recognized {kind} pickle opcode stream; object loading can execute code"

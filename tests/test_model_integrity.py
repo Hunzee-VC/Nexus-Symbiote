@@ -580,6 +580,19 @@ def test_text_protocol_pickle_behind_another_suffix_is_unsafe(project, protocol)
     assert "text-protocol pickle" in component.properties["format_inspection"]
 
 
+def test_a_malformed_pickle_behind_another_suffix_is_unknown(project):
+    # NEWOBJ pops the MARK's object, so pickletools.dis pops past the stack at APPENDS.
+    (project / "model.onnx").write_bytes(b"\x80\x02(K\x01\x81e.")
+    write_safetensors(project / "model.safetensors")
+    result = ModelScanner().scan(project)
+    assert not result.scan_failures
+    assert [c.serialization_safety for c in result.components] == [
+        SerializationSafety.UNKNOWN,
+        SerializationSafety.SAFE,
+    ]
+    assert ModelPackages(project).observe(Path("model.onnx")).complete
+
+
 def test_torch_zip_checkpoint_behind_another_suffix_is_unsafe(project):
     with zipfile.ZipFile(project / "model.gguf", "w") as archive:
         archive.writestr("archive/data.pkl", pickle.dumps({"weights": [0.0]}))
