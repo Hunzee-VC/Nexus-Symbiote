@@ -382,47 +382,68 @@ def _hidden_character_risks(
 
 
 # Notes say `run` too (`Run make docs`, `dry-run`, `last run:`), so it counts only when
-# the next word names what to run: a path, a script or executable file, or a shell. Any
-# punctuation that a path cannot contain may come first, so `Run: ./x.sh`, `run (bash)`
-# and `run **./x.sh**` count, as do an arrow or a bullet (`->`, `- `), a prompt (`$ `), an
-# HTML tag, a code fence's language and `_` emphasis. A hyphen joined to a word before it
-# (`dry-run`) makes a noun, except in `re-run`; `<!--run` does not. A separator is never a
-# path character, so a path's scan stops at the next `run`'s separator and stays linear.
+# the next word names what to run: a path, a script or executable file, a shell, or a
+# command that executes code, reads secrets or deletes files. Any punctuation that a path
+# cannot contain may come first, so `Run: ./x.sh`, `run (bash)` and `run **./x.sh**`
+# count, as do an arrow or a bullet (`->`, `- `), a prompt (`$ `), an HTML tag, a code
+# fence's language and `_` emphasis. A hyphen joined to a word before it (`dry-run`) makes
+# a noun, except in `re-run`; `<!--run` does not. A separator is never a path character,
+# so a path's scan stops at the next `run`'s separator and stays linear.
 _PATH_CHARACTER = r"[\w.~$%+@-]"
 _PUNCTUATION = r"[^\w.~$%+@/\\-]"
 _RUN_SEPARATOR = (
     rf"(?:{_PUNCTUATION}|[-$]++(?={_PUNCTUATION})|<[a-z]++>|(?<=```)[\w+-]++(?=[ \t]*\n))"
 )
+_RUN = rf"(?<!\w)(?:(?<=\bre-)|(?<!\w-))run{_RUN_SEPARATOR}+_{{0,2}}"
 # A name ends where a word does, or where underscores close emphasis (`_bash_`).
 _NAME_END = r"(?:\b|(?=_+(?!\w)))"
-_RUN_TARGET = (
-    r"(?<!\w)(?:(?<=\bre-)|(?<!\w-))run"
-    rf"{_RUN_SEPARATOR}+_{{0,2}}(?:"
+_SHELL = rf"(?:(?:ba|z|da)?sh|pwsh|powershell){_NAME_END}"
+# A command joined to a word by a hyphen (`go-live`, `cat-food`) is a different word.
+_COMMAND = (
+    r"(?:python3?|py|node|deno|bun|ruby|perl|php|java|osascript"
+    r"|npx|uvx|pipx|pip3?|npm|pnpm|yarn|uv|poetry|cargo|go|brew|apt-get|apt|gem"
+    r"|sudo|doas|su|env|exec|eval|source|curl|wget|iwr|cat|cp|mv|rm|dd|chmod|chown"
+    rf"|ssh|scp|nc|base64|xargs|docker|kubectl)(?!-\w){_NAME_END}"
+)
+_PATH_START = (
     r"[/\\]\S"
     rf"|(?:[a-z_.~$%]{_PATH_CHARACTER}*|[a-z]:|\$env:\w+|\$\{{[\w:]+\}})[/\\]"
-    rf"|{_PATH_CHARACTER}+\.(?:sh|bash|zsh|ps1|bat|cmd|exe|py){_NAME_END}"
-    rf"|(?:(?:ba|z|da)?sh|pwsh|powershell){_NAME_END})"
 )
+_SCRIPT = rf"{_PATH_CHARACTER}+\.(?:sh|bash|zsh|ps1|bat|cmd|exe|py){_NAME_END}"
+_RUN_TARGET = rf"{_RUN}(?:{_PATH_START}|{_SCRIPT}|{_SHELL}|{_COMMAND})"
 _HIDDEN_INSTRUCTION = re.compile(
     r"https?://|~/"
     r"|\b(?:ignore|disregard|exfiltrate|execute|download|upload|send|steal|override|"
     rf"bypass|curl|wget|fetch|eval|install)\b|{_RUN_TARGET}",
     re.IGNORECASE,
 )
+# `run this`, `run the following`, `run these` and `run it` point at what comes later in
+# the same comment. Each target starts where a word or path does, so the scan is linear.
+_RUN_REFERENCE = re.compile(rf"{_RUN}(?:this|these|it|the\s+following)\b", re.IGNORECASE)
+_LATER_TARGET = re.compile(
+    rf"(?<![\w.~$%+@/\\<-])(?:{_PATH_START})"
+    rf"|(?<!{_PATH_CHARACTER})(?:{_SCRIPT})"
+    rf"|(?<![\w.-])(?:{_SHELL}|{_COMMAND})",
+    re.IGNORECASE,
+)
 
 
 def _comment_is_instruction(text: str) -> bool:
     """An imperative, a URL, or a home-directory path inside hidden text."""
-    return _HIDDEN_INSTRUCTION.search(text) is not None
+    if _HIDDEN_INSTRUCTION.search(text) is not None:
+        return True
+    reference = _RUN_REFERENCE.search(text)
+    return reference is not None and _LATER_TARGET.search(text, reference.end()) is not None
 
 
 def detect_hidden_markup(content: str, source_name: str) -> list[RiskAssessment]:
     """Report HTML and Markdown comments, which renderers hide but agents read.
 
     Only counts and lengths are reported, never the hidden text. A comment that
-    carries an imperative (``run`` only when a path, a script or a shell follows,
-    possibly after punctuation or markup), a URL or a path under ``~/`` is high; other
-    comments stay low.
+    carries an imperative (``run`` only when a path, a script, a shell or a listed
+    command follows, possibly after punctuation or markup, or when ``this``, ``these``,
+    ``it`` or ``the following`` follows and one of those comes later in the comment), a
+    URL or a path under ``~/`` is high; other comments stay low.
     """
     count = length = 0
     instructive = False
