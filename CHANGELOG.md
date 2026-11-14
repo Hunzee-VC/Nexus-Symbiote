@@ -25,6 +25,8 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 - Collectors check every declared MCP endpoint for transport security, rate a PyPI package from a plain `http://` URL high, transport-check RAG locators written without a URL, recognise host-root and broad Docker mounts, and fail closed on a quoted command word glued to more text.
 - The CI, Action and floor locks pin `dnspython` 2.9.2 instead of 2.9.1, which advisory GHSA-vvf4-9x63-8xvv affects. `dnspython` is a transitive dependency of `email-validator`, and the Action installs it from `requirements-action.lock`. The locks' upload cut-off moves to 2026-11-07; every other CI and Action pin is unchanged, and the floor lock's unpinned transitive dependencies resolve again at that cut-off.
 
+- The model collector detects dunder names built from adjacent constant strings in Jinja templates. Template findings describe a potential access pattern, not an established sandbox escape. The changed finding detail changes its suppression fingerprint; review and recreate any affected suppressions.
+
 ### Changed
 
 - **Breaking:** a policy file accepts only the documented `validate` key, and an unlistable root is an error. `verify-artifact` and `verify-discovery` reject `--trust-root` or `--trust-root-sha256` without `--bundle`.

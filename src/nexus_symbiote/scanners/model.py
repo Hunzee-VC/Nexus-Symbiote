@@ -401,8 +401,8 @@ def observe_model_artifact(
             if any(template_escape_markers(text) for _, text in metadata.chat_templates):
                 safety = SerializationSafety.UNSAFE_TEMPLATE_INJECTION
                 explanation = (
-                    "Embedded chat template reaches Python internals through dunder "
-                    "attributes, as Jinja sandbox escapes do"
+                    "Embedded chat template contains a potential Python-internals "
+                    "access pattern; actual behavior depends on the renderer"
                 )
     while observed.read(65536):
         pass
@@ -1564,9 +1564,9 @@ class ModelScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.CRITICAL,
                     category="serialization_format",
-                    detail=f"Model '{path.name}' embeds a chat template that reaches Python internals, as Jinja2 sandbox escapes such as CVE-2024-34359 do.",
-                    recommendation="Remove the template or replace it with a reviewed one; render templates only in a sandboxed Jinja2 environment (llama-cpp-python >= 0.2.72).",
-                    references=["https://nvd.nist.gov/vuln/detail/CVE-2024-34359"],
+                    detail=f"Model '{path.name}' embeds a chat template with a potential Python-internals access pattern; actual behavior depends on the renderer and its sandbox.",
+                    recommendation="Remove the template or replace it with a reviewed one; render templates only in a sandboxed Jinja2 environment that the loader keeps patched.",
+                    references=[DOCUMENTATION],
                 )
             )
 
@@ -1580,17 +1580,16 @@ class ModelScanner(Scanner):
                     severity=RiskSeverity.CRITICAL,
                     category="serialization_format",
                     detail=(
-                        f"Model '{path.name}' is configured with a chat template that reaches "
-                        "Python internals through dunder attributes or the attr filter, as "
-                        f"Jinja2 sandbox escapes such as CVE-2024-34359 do: {shown}"
+                        f"Model '{path.name}' is configured with a chat template containing "
+                        f"a potential Python-internals access pattern: {shown}"
                         + (f" and {more} more" if more > 0 else "")
-                        + "."
+                        + ". Actual behavior depends on the renderer and its sandbox."
                     ),
                     recommendation=(
                         "Remove the template or replace it with a reviewed one; render chat "
                         "templates only in a sandboxed Jinja2 environment."
                     ),
-                    references=["https://nvd.nist.gov/vuln/detail/CVE-2024-34359"],
+                    references=[DOCUMENTATION],
                 )
             )
 
