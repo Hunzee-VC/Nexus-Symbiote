@@ -1020,7 +1020,9 @@ def _ini_text(raw: str) -> str:
         inner = text[1:-1] if text[0] == "'" else text
         try:
             decoded = json.loads(inner)
-        except ValueError:
+        except (ValueError, RecursionError):
+            # A value nested beyond the parser's limit is text, as any other that is
+            # not JSON; it must not escape as an error attributed to every server.
             return inner if text[0] == "'" else text
         return decoded if isinstance(decoded, str) else json.dumps(decoded)
     kept: list[str] = []
@@ -1376,6 +1378,9 @@ class MCPScanner(Scanner):
     ) -> bool:
         """Read each client file in ``paths``; whether any of them was present."""
         found_any = False
+        # Server references per host, sorted once at the end: sorting the union after
+        # every file would cost the square of the number of nested client files.
+        pending_refs: dict[str, set[str]] = {}
         for path in paths:
             dialect = _dialect(path)
             data = self._read_dialect(files, dialect, result)
@@ -1429,8 +1434,10 @@ class MCPScanner(Scanner):
                         properties={"collection_mode": "static-config", "config_paths": []},
                     )
                 client = clients[host]
-                client.server_refs = sorted({*client.server_refs, *server_refs})
+                pending_refs.setdefault(host, set(client.server_refs)).update(server_refs)
                 client.properties["config_paths"].append(dialect.path)
+        for host, refs in pending_refs.items():
+            clients[host].server_refs = sorted(refs)
         return found_any
 
     @staticmethod

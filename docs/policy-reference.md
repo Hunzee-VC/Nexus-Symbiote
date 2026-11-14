@@ -128,6 +128,7 @@ How a suppression applies:
 | `scan.failure_mode=report-only` | collection failures never fail `scan` |
 | `scan.scanners=NAMES` | fewer collectors than the built-in set |
 | `scan.exclude_paths=PATHS` | paths beyond the four defaults |
+| `output.default_format=FORMAT` | the project selects an export format other than `json`, which changes what `scan -o` writes without `-f` |
 
 Stricter values, such as a lower threshold or `fail_on_severity: high`, are not listed. Human-readable `scan`, `validate` and `risk` print the list on stderr as a warning.
 

@@ -189,6 +189,31 @@ _SCOPED_TOOL_CLASSES = {
 # Edit(//**), Read(~/**), Edit(./**).
 _WILDCARD_SPECIFIER = re.compile(r"[\s*:/~.]*")
 _EXTENSION_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z0-9][a-zA-Z0-9._-]*")
+# Programs that run whatever follows them: a Bash rule whose command word is one of these
+# and that ends in a wildcard, such as Bash(sh:*) or Bash(python3 -c:*), approves any
+# command, as Bash(*) does. An interpreter is matched by its name with any version suffix.
+_COMMAND_RUNNERS = frozenset(
+    {
+        "sh", "bash", "zsh", "dash", "fish", "ksh", "csh", "tcsh", "ash", "busybox",
+        "node", "nodejs", "deno", "bun", "perl", "ruby", "php", "lua", "osascript",
+        "pwsh", "powershell", "cmd",
+        "eval", "exec", "command", "env", "sudo", "doas", "su", "xargs", "nohup",
+        "timeout", "nice", "ionice", "setsid", "script", "watch",
+        "docker", "podman", "nerdctl", "npx", "bunx", "uvx", "uv", "pipx",
+    }
+)  # fmt: skip
+_VERSIONED_INTERPRETER = re.compile(r"(?:python|pypy|ruby|php|perl|node)[0-9.]*")
+
+
+def _runs_any_command(specifier: str) -> bool:
+    """Whether a Bash rule's specifier names a program that runs any command after it."""
+    if "*" not in specifier:
+        return False
+    words = specifier.split(":", 1)[0].split()
+    if not words:
+        return False
+    program = words[0].rsplit("/", 1)[-1].lower()
+    return program in _COMMAND_RUNNERS or _VERSIONED_INTERPRETER.fullmatch(program) is not None
 
 
 def _broad_grants(allowed: list[str]) -> list[str]:
@@ -214,6 +239,8 @@ def _broad_grants(allowed: list[str]) -> list[str]:
                 classes.add("MCP server tools")
             continue
         broad = specifier is None or bool(_WILDCARD_SPECIFIER.fullmatch(specifier))
+        if key == "bash" and specifier is not None:
+            broad |= _runs_any_command(specifier)
         if key == "webfetch" and specifier is not None:
             broad |= specifier.replace(" ", "") in {"domain:*", "domain:"}
         if key == "read" and specifier is None:
