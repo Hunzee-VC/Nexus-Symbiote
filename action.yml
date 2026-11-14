@@ -61,8 +61,8 @@ inputs:
       detection see MCP launch arguments, environment values and endpoint paths. Required
       when reviewed-baseline is set. When empty, the step environment's
       NEXUS_SYMBIOTE_SOURCE_BINDING_KEY is used instead. Prefer a repository secret. The
-      value is passed only to the scan and is not printed. Record the baseline with the
-      same secret
+      value is passed to the Action's CLI subprocesses and is not printed. Record the
+      baseline with the same secret
     default: ""
   sarif-upload:
     description: >-
