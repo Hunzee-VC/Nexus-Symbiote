@@ -345,41 +345,84 @@ def _recognized_pickle(
     when its inspected opcodes name a callable (``_CODE_OPCODES``): short text such as
     ``N.`` or ``Mar.`` is a well-formed text-protocol stream that runs nothing, and a
     loader stops at a flaw before it runs anything. A binary stream that names none
-    before the inspection bounds is rated unknown: what follows them was not read.
+    before the inspection bounds is rated unknown: what follows was not read. Such a
+    file is read past a STOP that names nothing, within the same bounds: a loader can
+    unpickle the pickles that follow, as ``torch.load`` does with the legacy format's
+    three harmless header pickles before the one that rebuilds the tensors.
     """
     binary = len(prefix) >= 2 and prefix[0] == 0x80 and 2 <= prefix[1] <= 5
     if not binary and (not prefix or prefix[0] not in _TEXT_PICKLE_START):
         return None
     sample = prefix + stream.read(max(0, min(size, MAX_PICKLE_INSPECTION_BYTES) - len(prefix)))
+    seen = marks = start = 0
+    while True:
+        segment = _pickle_segment(sample, size, start, binary, by_content, seen, marks)
+        if segment.end is None:
+            return segment.rating
+        seen, marks, start = segment.seen, segment.marks, segment.end
+        following = sample[start : start + 2]
+        if not following:
+            return (SerializationSafety.UNKNOWN, PICKLE_UNREAD) if len(sample) < size else None
+        binary = following[0] == 0x80
+        if binary and len(following) < 2:
+            return (SerializationSafety.UNKNOWN, PICKLE_UNREAD) if len(sample) < size else None
+        if binary and not 2 <= following[1] <= 5:
+            return None
+        if not binary and following[0] not in _TEXT_PICKLE_START:
+            return None
+
+
+class _Segment(NamedTuple):
+    """One pickle of a sample: its rating, or where the next begins when it ran nothing."""
+
+    rating: tuple[SerializationSafety, str] | None
+    end: int | None = None
+    seen: int = 0
+    marks: int = 0
+
+
+def _pickle_segment(
+    sample: bytes, size: int, start: int, binary: bool, by_content: bool, seen: int, marks: int
+) -> _Segment:
+    """Rate the pickle at ``start`` of ``sample``.
+
+    Only a file found ``by_content`` continues past a STOP; ``seen`` and ``marks`` are
+    the opcode and MARK counts of the pickles before it, charged to the same bounds.
+    """
     kind = "binary" if binary else "text-protocol"
     recognized = (
         SerializationSafety.UNSAFE_CODE_EXECUTION,
         f"Recognized {kind} pickle opcode stream; object loading can execute code",
     )
-    seen = marks = 0
+    own = 0
     code = bounded = False
     opcodes = io.BytesIO(sample)
+    opcodes.seek(start)
     try:
         for opcode, _, _ in pickletools.genops(opcodes):
             seen += 1
+            own += 1
             marks += opcode.name == "MARK"
             code = code or opcode.name in _CODE_OPCODES
             if seen > MAX_PICKLE_OPCODES or marks > MAX_PICKLE_MARKS:
                 bounded = True
                 break
         else:
+            end = opcodes.tell()
             # dis() only checks opcode stack/memo consistency; it never resolves
             # globals, imports artifact code, invokes reducers or constructs objects.
-            pickletools.dis(sample, out=io.StringIO())
-            return None if by_content and not code else recognized
+            pickletools.dis(sample[start:end], out=io.StringIO())
+            if by_content and not code:
+                return _Segment(None, end, seen, marks)
+            return _Segment(recognized)
     except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
         # The sample ended inside an opcode, before the end of the file.
         bounded = len(sample) < size and opcodes.tell() >= len(sample)
     if not binary:
-        return None
+        return _Segment(None)
     if by_content and not code:
-        return (SerializationSafety.UNKNOWN, PICKLE_UNREAD) if bounded else None
-    return recognized if seen >= MIN_PICKLE_OPCODES or (code and bounded) else None
+        return _Segment((SerializationSafety.UNKNOWN, PICKLE_UNREAD) if bounded else None)
+    return _Segment(recognized if own >= MIN_PICKLE_OPCODES or (code and bounded) else None)
 
 
 def _pickle_member(name: bytes) -> bool:

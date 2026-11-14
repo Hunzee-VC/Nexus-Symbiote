@@ -269,9 +269,12 @@ _CODE_OPCODES = {
 
 def _names_a_callable(data: bytes) -> bool:
     names: set[str] = set()
+    stream = io.BytesIO(data[:MAX_PICKLE_INSPECTION_BYTES])
     try:
-        for opcode, _, _ in pickletools.genops(data[:MAX_PICKLE_INSPECTION_BYTES]):
-            names.add(opcode.name)
+        # A loader can read the pickles that follow a STOP, so every one of them counts.
+        while stream.tell() < len(stream.getbuffer()):
+            for opcode, _, _ in pickletools.genops(stream):
+                names.add(opcode.name)
     except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
         pass
     return bool(names & _CODE_OPCODES)
@@ -373,3 +376,57 @@ def test_a_binary_pickle_with_no_callable_before_the_bound_is_unknown(tmp_path: 
     categories = {issue.category for issue in report.issues}
     assert "format_claim_mismatch" not in categories
     assert "format_subject_mismatch" not in categories
+
+
+def _legacy_torch(main: object) -> bytes:
+    """``torch.save``'s legacy layout: three header pickles, then the main pickle."""
+    sys_info = {
+        "protocol_version": 1001,
+        "little_endian": True,
+        "type_sizes": {"short": 2, "int": 4, "long": 4},
+    }
+    header = [0x1950A86A20F9469CFC6C, 1001, sys_info]
+    return b"".join(pickle.dumps(part, protocol=2) for part in [*header, main])
+
+
+def test_a_pickle_after_harmless_pickles_is_critical_by_content(tmp_path: Path) -> None:
+    legacy = _legacy_torch(_Boom())
+    # torch's _legacy_load unpickles the three header pickles, then the main one.
+    stream = io.BytesIO(legacy)
+    for _ in range(3):
+        pickle.load(stream)  # noqa: S301 - the test's own bytes
+    assert pickle.Unpickler(stream).load() == 2  # noqa: S301 - _Boom evaluates 1+1
+    (tmp_path / "models").mkdir()
+    files = {
+        "models/pytorch_model": legacy,
+        "weights.dat": legacy,
+        "w.npy": legacy,
+        "models/m2": b"\x80\x04N." + pickle.dumps(_Boom(), protocol=4),
+        "models/m3": b"N." + pickle.dumps(_Boom(), protocol=0),
+        "models/m4": b"N.N.(l." + pickle.dumps(_Boom(), protocol=1),
+    }
+    for relative, data in files.items():
+        (tmp_path / relative).write_bytes(data)
+    found = _components(tmp_path)
+    assert sorted(found) == sorted(files)
+    for component in found.values():
+        assert component.serialization_safety is UNSAFE
+        assert _critical(component)
+
+
+def test_harmless_pickles_in_a_row_are_not_inventoried(tmp_path: Path) -> None:
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "header").write_bytes(_legacy_torch([1, 2, 3]))
+    (tmp_path / "pairs.dat").write_bytes(b"N.N.\x80\x04N.")
+    (tmp_path / "trailer.dat").write_bytes(b"N.\x80\x09 not a pickle")
+    assert _components(tmp_path) == {}
+
+
+def test_a_pickle_past_the_bound_after_a_harmless_one_is_unknown(tmp_path: Path) -> None:
+    filler = b"\x80\x04\x8e" + (MAX_PICKLE_INSPECTION_BYTES).to_bytes(8, "little")
+    payload = b"\x80\x04N." + filler + b"x" * MAX_PICKLE_INSPECTION_BYTES + b"."
+    payload += pickle.dumps(_Boom(), protocol=4)
+    (tmp_path / "padded.dat").write_bytes(payload)
+    component = _components(tmp_path)["padded.dat"]
+    assert component.serialization_safety is SerializationSafety.UNKNOWN
+    assert component.properties["format_inspection"] == PICKLE_UNREAD

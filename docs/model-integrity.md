@@ -29,7 +29,10 @@ opcodes must include one through which unpickling reaches code (`GLOBAL`,
 `EXT2`, `EXT4`). Without one the stream runs nothing, as text that starts `N.B.` or
 `Mar.`, or 16-bit samples that start with the value 11854, are well-formed
 text-protocol pickles that load `None` or an integer, so such a file is not a
-component; a binary pickle that names none in the opcodes read before the 64 KiB or
+component. A loader can unpickle the pickles that follow a STOP, as `torch.load` does
+with the three header pickles of `torch.save`'s legacy format before the main one, so
+the check reads on past a STOP that names nothing and counts every pickle within the
+same bounds. A binary pickle that names none in the opcodes read before the 64 KiB or
 4,096-opcode bound is rated `unknown`, because what follows was not read. Any other content, such as a numeric NumPy array or a ZIP archive with
 neither a pickle-family member nor an object-dtype array as a member, is not a
 component. Each such file is opened once, after every file that the models with a
