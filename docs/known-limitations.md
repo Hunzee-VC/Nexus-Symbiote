@@ -341,9 +341,14 @@ A way around a limit that its entry does not describe is worth a
   TFLite, Core ML and ExecuTorch files are rated `unknown`: Keras Lambda layers,
   SavedModel operations and custom operators are not inspected. Each is a high
   finding, which the default gate does not fail on by severity alone.
-- **Some files are not inventoried.** Pickles under names other than the
-  [listed suffixes](model-integrity.md#model-files-and-references), NumPy `.npy` and
-  `.npz` arrays, and `.pb` files other than `saved_model.pb` produce no component.
+- **Some files are not inventoried.** A pickle whose header is not a recognized
+  opcode stream, a numeric NumPy `.npy` or `.npz` array, and `.pb` files other than
+  `saved_model.pb` produce no component. A pickle opcode stream, a ZIP whose first
+  member is a `.pkl`, or an object-dtype NumPy array is inventoried wherever it is
+  named `.npy`, `.npz` or `.dat`, and under a directory named `model`, `models`,
+  `weights`, `checkpoint` or `checkpoints` whatever its name is. Object-dtype arrays
+  are rated `unsafe-code-execution` because `np.load(allow_pickle=True)` unpickles
+  them.
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat
   templates are checked only for known sandbox-escape shapes. A template file larger
   than the `file-bytes` limit is digested but not checked, and is a coverage gap.
