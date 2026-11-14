@@ -11,10 +11,10 @@ from nexus_symbiote.scanners.shadowscan import _clean_binding
     "value",
     [
         "git\x9b31mhub.example",  # C1 control: CSI
-        "a‮b",  # right-to-left override
-        "a​b",  # zero-width space
-        "a b",  # line separator
-        "a﻿b",  # byte-order mark inside the text
+        "a\u202eb",  # right-to-left override
+        "a\u200bb",  # zero-width space
+        "a\u2028b",  # line separator
+        "a\ufeffb",  # byte-order mark inside the text
         "a\x1bb",  # C0 control: ESC
         "a\x7fb",  # DEL
         "a\tb",  # tab
