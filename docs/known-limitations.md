@@ -341,7 +341,9 @@ A way around a limit that its entry does not describe is worth a
   [listed suffixes](model-integrity.md#model-files-and-references), NumPy `.npy` and
   `.npz` arrays, and `.pb` files other than `saved_model.pb` produce no component.
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat
-  templates are checked only for known sandbox-escape shapes. A template file larger
+  templates are checked for potential Python-internals access patterns, not evaluated;
+  computed names can evade the heuristic, and a match does not establish a sandbox
+  escape or execution. A template file larger
   than the `file-bytes` limit is digested but not checked, and is a coverage gap.
   SafeTensors tensor bytes are hashed but not inspected. See
   [what this does not establish](model-integrity.md#what-this-does-not-establish).
