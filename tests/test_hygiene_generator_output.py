@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-import nexus_symbiote.generators as generators
+from nexus_symbiote import generators
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.models import PromptComponent
 from nexus_symbiote.generators import (
@@ -41,7 +41,8 @@ def test_save_does_not_write_through_a_symbolic_link(tmp_path, exporter):
     try:
         exporter().save(_bom(), output)
     except OSError:
-        pass
+        # Refusing the link is as safe as replacing it, provided the link is left as is.
+        assert output.is_symlink()
     assert kept.read_text(encoding="utf-8") == "keep me"
     if not output.is_symlink():
         assert json.loads(output.read_text(encoding="utf-8"))
