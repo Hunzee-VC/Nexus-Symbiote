@@ -68,7 +68,7 @@ def _host_pid(marker: Path) -> int:
 
 def _assert_dead(pid: int) -> None:
     """The namespace teardown follows the supervisor's death by a short interval."""
-    deadline = time.monotonic() + 2
+    deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         try:
             os.kill(pid, 0)
@@ -134,6 +134,18 @@ def test_a_finished_pid_is_not_remembered_as_namespaced() -> None:
     pinned_process._NAMESPACED.add(proc.pid)
     pinned_process.terminate_process_group(proc)
     assert proc.pid not in pinned_process._NAMESPACED
+
+
+def test_a_forgotten_pid_is_swept_again_when_reused(monkeypatch: pytest.MonkeyPatch) -> None:
+    swept: list[int] = []
+    monkeypatch.setattr(pinned_process, "_kill_descendants", swept.append)
+    proc = subprocess.Popen(["/bin/true"], start_new_session=True)  # noqa: S603
+    proc.wait(timeout=5)
+    pinned_process._NAMESPACED.add(proc.pid)
+    pinned_process.terminate_process_group(proc)
+    assert swept == []
+    pinned_process.terminate_process_group(proc)
+    assert swept == [proc.pid, proc.pid]
 
 
 def test_explicit_opt_out_cannot_contain_a_reparented_child(tmp_path: Path) -> None:

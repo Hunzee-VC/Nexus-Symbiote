@@ -929,15 +929,25 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 | `--json-output` | Output the verification report as JSON. |
 | `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools, declarations or the server identity drifted, unless `--accept-drift`. |
 | `--accept-drift` | With `--record`, exit 0 although changed or new tools, declarations or server identity were recorded. |
-| `--no-isolation` | Explicitly allow execution without kernel PID containment. Cleanup is best effort; detached children may outlive the session. Printed as a warning. |
+| `--no-isolation` | Explicitly allow execution without kernel PID containment. Cleanup is best effort; a double-forked child is reparented before the sweep and outlives the session. Printed as a warning. |
 
 By default the launcher must run as pid 1 of a new user and PID namespace
-(`unshare`), so the kernel ends its descendants with the session. A host that refuses
-the namespace fails with `isolation-unavailable` before executing the pinned launcher.
-Only the explicit operator option `--no-isolation` permits a launch without this
-boundary. Its process-tree cleanup is best effort: a daemonized child can be
-reparented and survive. Run that opt-out only in an independently isolated worker.
-Neither form is a filesystem or network sandbox.
+(`unshare --user --map-root-user --pid --fork --kill-child`), so the kernel ends its
+descendants with the session. Inside the namespace the launcher sees itself as uid 0
+and gid 0, mapped to the invoking user and group; every other uid and gid, including
+the owners of the files it reads and its own supplementary groups, appears as
+`nobody`/`nogroup` (65534), and `setgroups` is denied. That grants no privilege
+outside the namespace, but a launcher that refuses to run as root, inspects its
+supplementary groups or changes file ownership behaves differently than under direct
+execution. A host that refuses the namespace fails with `isolation-unavailable`
+before executing the pinned launcher. Only the explicit operator option
+`--no-isolation` permits a launch without this boundary. Its process-tree cleanup is
+best effort: it walks the `PPid` links in `/proc` from the launcher and kills the
+tree it finds, repeating the walk so a process that forks after the sweep starts is
+still caught; a launcher that double-forks has its grandchild reparented to init
+before the sweep runs, so that grandchild is not in the tree and survives the
+session. Run that opt-out only in an independently isolated worker. Neither form is
+a filesystem or network sandbox.
 
 Servers whose transport is `sse`, `streamable-http` or `http` and that record no
 launch command are reported as not verifiable by `verify-live` (reason

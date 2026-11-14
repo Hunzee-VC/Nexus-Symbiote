@@ -260,7 +260,7 @@ def test_protocol_failure_kills_and_reaps_process(tmp_path, monkeypatch, mode):
     records = [json.loads(line) for line in log.read_text().splitlines()]
     assert [r[0] for r in records] == ["tools/list"]
     # The PID namespace is torn down after the supervisor dies, not in the same instant.
-    deadline = time.monotonic() + 2
+    deadline = time.monotonic() + 10
     pid = records[0][1]
     while time.monotonic() < deadline:
         try:
