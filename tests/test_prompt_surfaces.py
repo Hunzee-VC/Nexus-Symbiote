@@ -40,9 +40,9 @@ def _categories(component) -> list[str]:
     return sorted(risk.category for risk in component.risks)
 
 
-def _scan_cli(project: Path, output: Path):
+def _scan_cli(project: Path, output: Path, *options: str):
     return CliRunner().invoke(
-        main, ["scan", str(project), "--no-project-policy", "-o", str(output)]
+        main, ["scan", str(project), "--no-project-policy", *options, "-o", str(output)]
     )
 
 
@@ -85,9 +85,10 @@ def test_both_codex_spellings_are_read_without_a_case_variant_failure(tmp_path):
 
 
 def test_in_root_symlinked_instruction_file_is_read_through_its_target(tmp_path):
-    _write(tmp_path, "AGENTS.md", f"Shared instructions.{RLO}")
-    (tmp_path / "CLAUDE.md").symlink_to("AGENTS.md")
-    result = PromptScanner().scan(tmp_path)
+    project = tmp_path / "project"
+    _write(project, "AGENTS.md", f"Shared instructions.{RLO}")
+    (project / "CLAUDE.md").symlink_to("AGENTS.md")
+    result = PromptScanner().scan(project)
     assert not result.scan_failures
     components = _components(result)
     linked, target = components["prompt:CLAUDE.md"], components["prompt:AGENTS.md"]
@@ -95,8 +96,9 @@ def test_in_root_symlinked_instruction_file_is_read_through_its_target(tmp_path)
     assert linked.properties["symlink_target"] == "AGENTS.md"
     assert linked.content_hash == target.content_hash
     assert "bidi_override" in _categories(linked)
-    _scan_cli(tmp_path, tmp_path.parent / "bom.json")
-    bom = json.loads((tmp_path.parent / "bom.json").read_text())
+    run = _scan_cli(project, tmp_path / "bom.json", "--report-only")
+    assert run.exit_code == 0, run.output
+    bom = json.loads((tmp_path / "bom.json").read_text())
     assert bom["metadata"]["completeness"]["scan_failures"] == []
 
 
@@ -157,14 +159,16 @@ def test_absolute_symlink_inside_the_root_stays_a_failure(tmp_path):
 
 
 def test_clinerules_directory_is_collected_not_failed(tmp_path):
-    _write(tmp_path, ".clinerules/01-style.md", "Be concise.")
-    _write(tmp_path, ".clinerules/02-hidden.md", f"Rule{RLO}")
-    result = PromptScanner().scan(tmp_path)
+    project = tmp_path / "project"
+    _write(project, ".clinerules/01-style.md", "Be concise.")
+    _write(project, ".clinerules/02-hidden.md", f"Rule{RLO}")
+    result = PromptScanner().scan(project)
     assert not result.scan_failures
     components = _components(result)
     assert components["prompt:.clinerules/01-style.md"].prompt_type == "rules-file"
     assert "bidi_override" in _categories(components["prompt:.clinerules/02-hidden.md"])
-    run = _scan_cli(tmp_path, tmp_path.parent / "bom.json")
+    run = _scan_cli(project, tmp_path / "bom.json", "--report-only")
+    assert run.exit_code == 0, run.output
     assert "read refused" not in run.output
 
 

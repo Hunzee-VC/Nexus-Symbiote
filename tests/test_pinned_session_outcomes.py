@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -21,7 +22,7 @@ def launcher(tmp_path: Path, mode: str) -> tuple[Path, str, Path]:
     log = tmp_path / "calls.jsonl"
     path = tmp_path / "launcher"
     path.write_text(
-        f"""#!/usr/bin/python3
+        f"""#!{sys.executable}
 import json, os, sys, time
 definition = {DEFINITION!r}
 note = {NOTE!r}
