@@ -29,7 +29,7 @@ class Generator(ABC):
         """Convert an AIBOM into the target format as a JSON string."""
         import json
 
-        return json.dumps(self.generate(bom), indent=indent, default=str)
+        return json.dumps(self.generate(bom), indent=indent)
 
     def generate_with_report(self, bom: AIBOM) -> ExportResult:
         from nexus_symbiote.generators._common import loss_report
