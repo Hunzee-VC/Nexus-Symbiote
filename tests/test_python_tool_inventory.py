@@ -261,7 +261,8 @@ def test_additional_sdk_import_paths_are_collected(tmp_path, module, factory):
 def test_ordinary_server_use_and_other_frameworks_are_not_gaps(tmp_path):
     result, tools = scan(
         tmp_path,
-        FASTMCP + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\nmcp.settings.port = 8000\n",
+        FASTMCP + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n"
+        "app = mcp.streamable_http_app()\nmcp.settings.port = 8000\n",
     )
     assert [tool.name for tool in tools] == ["add"] and not result.surfaces_excluded
     result, tools = scan(
@@ -292,18 +293,18 @@ def test_references_survive_inserted_lines_and_edits_change_the_digest(tmp_path)
     assert server.properties["source_sha256"] != moved_server.properties["source_sha256"]
 
 
-def test_passing_a_server_to_a_helper_is_a_gap(tmp_path):
+def test_helpers_of_the_same_file_are_judged_by_what_they_do_with_the_server(tmp_path):
     benign = (
         FASTMCP + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n"
         "def build(server: FastMCP, *, host: str) -> object:\n"
-        "    server.run()\n"
+        "    return server.streamable_http_app(host=host)\n"
         "app = build(mcp, host='127.0.0.1')\n"
     )
     result, tools = scan(tmp_path, benign)
-    assert [tool.name for tool in tools] == ["add"] and result.surfaces_excluded
+    assert [tool.name for tool in tools] == ["add"] and not result.surfaces_excluded
     registering = benign.replace(
-        "    server.run()\n",
-        "    server.add_tool(lambda: None)\n    server.run()\n",
+        "    return server.streamable_http_app(host=host)\n",
+        "    server.add_tool(lambda: None)\n    return server.streamable_http_app(host=host)\n",
     )
     result, _ = scan(tmp_path, registering)
     assert result.surfaces_excluded
@@ -317,12 +318,6 @@ def test_passing_a_server_to_a_helper_is_a_gap(tmp_path):
         "closure = mcp.resource('test://x')\n"
         "closure.__closure__[0].cell_contents.tool()(delete_all)\n",
         "mcp.resource('test://x').__closure__[0].cell_contents.tool()(delete_all)\n",
-        "app = mcp.sse_app()\n",
-        "app = mcp.streamable_http_app()\n",
-        "app = mcp.http_app()\n",
-        "send_app(mcp.sse_app())\n",
-        "async def hidden():\n    return mcp.run_stdio_async()\n",
-        "def build(server):\n    return server.sse_app()\napp = build(mcp)\n",
         "def build(server):\n    def delayed(): server.run()\n    return delayed\n"
         "handler = build(mcp)\nhandler.__closure__[0].cell_contents.tool()(delete_all)\n",
         "def build(server):\n    return locals()\n"
@@ -348,6 +343,22 @@ def test_passing_a_server_to_a_helper_is_a_gap(tmp_path):
         "delete_all.__globals__['mcp'].tool()(delete_all)\n",
         "import builtins\nbuiltins.globals()['mcp'].tool()(delete_all)\n",
         "import sys\nsys.modules[__name__].mcp.tool()(delete_all)\n",
+        "import anyio\nanyio.run(mcp.run_stdio_async)\n",
+        "decorator = mcp.prompt()\n",
+        "def hidden(value: lookup[FastMCP]): pass\n",
+        "from typing import Optional\ndef hidden(value: Optional[mcp]): pass\n",
+        "def hidden(value: mcp | None): pass\n",
+        "vars()['mcp'].tool()(delete_all)\n",
+        "for value in list(globals().values()):\n    if hasattr(value, 'tool'):\n"
+        "        value.tool()(delete_all)\n",
+        "eval('mcp').tool()(delete_all)\n",
+        "exec('mcp.tool()(delete_all)')\n",
+        "import sys\ntry:\n    mcp.run()\nexcept Exception:\n    sys.exc_info()[2].tb_frame.f_back\n",
+        "from sys import modules\nmodules[__name__].mcp.tool()(delete_all)\n",
+        "import sys\ngetattr(sys, 'modules')[__name__].mcp.tool()(delete_all)\n",
+        "import importlib\ngetattr(importlib.import_module(__name__), 'mcp').tool()(delete_all)\n",
+        "def find(value):\n    return getattr(value, 'tool')\n",
+        "__builtins__['globals']()['mcp'].tool()(delete_all)\n",
     ],
 )
 def test_escaping_bound_methods_and_executable_annotations_are_gaps(tmp_path, operation):
@@ -373,6 +384,40 @@ def test_immediately_awaited_server_run_does_not_escape(tmp_path):
     source = FASTMCP + "mcp = FastMCP('x')\nasync def start():\n    await mcp.run_stdio_async()\n"
     result, _ = scan(tmp_path, source)
     assert not result.scan_failures and not result.surfaces_excluded
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "app = mcp.streamable_http_app()\n",
+        "app = mcp.sse_app()\n",
+        "app = mcp.http_app()\n",
+        "send_app(mcp.sse_app())\n",
+        "import uvicorn\nuvicorn.run(mcp.sse_app())\n",
+        "import asyncio\nasyncio.run(mcp.run_stdio_async())\n",
+        "async def start():\n    return mcp.run_stdio_async()\n",
+        "def build(server):\n    return server.sse_app()\napp = build(mcp)\n",
+        "def start(server):\n    server.run()\nstart(mcp)\n",
+        "try:\n    mcp.run()\nexcept KeyboardInterrupt:\n    pass\n",
+        "print(mcp.name)\n",
+        "instructions = mcp.instructions\n",
+        "def configure(server: FastMCP | None): ...\n",
+        "from typing import Optional\ndef configure(server: Optional[FastMCP]): ...\n",
+        "def predict(model, x):\n    model.eval()\n    return model(x)\n",
+        "def layers(model):\n    return list(model.modules())\n",
+        "def total(df):\n    return df.eval('a + b')\n",
+        "real = getattr(7, 'real')\n",
+        "import os\nenviron = getattr(os, 'environ')\n",
+    ],
+)
+def test_ordinary_server_use_is_not_a_gap(tmp_path, operation):
+    source = FASTMCP + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n" + operation
+    result, tools = scan(tmp_path, source)
+    assert [tool.name for tool in tools] == ["add"]
+    assert not result.scan_failures and not result.surfaces_excluded
+    (tmp_path / "CLAUDE.md").write_text("Be helpful.\n")
+    checked = CliRunner().invoke(main, ["scan", "--no-project-policy", "--check", str(tmp_path)])
+    assert checked.exit_code == 0, checked.output
 
 
 @pytest.mark.parametrize(
@@ -416,11 +461,10 @@ AGENT = "from pydantic_ai import Agent\n"
         AGENT + "agent = Agent('m')\ngetattr(agent, 'tool_plain')(search)\n",
         AGENT + "agent = Agent('m')\nagent.run_sync.__self__.tool_plain(search)\n",
         AGENT + "agent = Agent('m')\nmethod = agent.run_sync\nmethod.__self__.tool_plain(search)\n",
-        AGENT + "agent = Agent('m')\nresult = agent.run_sync('query')\n",
         AGENT + "agent = Agent('m')\nasync def run():\n    async with agent as alias: pass\n",
-        AGENT + "agent = Agent('m')\ntry: agent.run_sync('query')\n"
-        "except Exception as error: pass\n",
         AGENT + "agent = Agent('m')\nglobals()['agent'].tool_plain(search)\n",
+        AGENT + "agent = Agent('m')\n@agent.toolset\ndef tools(ctx): pass\n",
+        AGENT + "agent = Agent('m')\nexecutor.submit(agent.run_sync, 'query')\n",
     ],
 )
 def test_agent_tools_outside_the_decorator_form_are_gaps(tmp_path, source):
@@ -429,6 +473,25 @@ def test_agent_tools_outside_the_decorator_form_are_gaps(tmp_path, source):
     assert result.surfaces_excluded == [
         "pkg/server.py: unsupported Python SDK tool binding or dynamic registration"
     ]
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "result = agent.run_sync('query')\n",
+        "try:\n    agent.run_sync('query')\nexcept Exception as error:\n    pass\n",
+        "async def main():\n    result = await agent.run('query')\n    return result.output\n",
+        "async def main():\n    async with agent.run_stream('query') as response:\n"
+        "        return await response.get_output()\n",
+        "print(agent.name)\n",
+        "@agent.system_prompt\ndef prompt() -> str:\n    return 'x'\n",
+    ],
+)
+def test_ordinary_agent_use_is_not_a_gap(tmp_path, operation):
+    source = AGENT + "agent = Agent('m')\n@agent.tool_plain\ndef search(): pass\n" + operation
+    result, tools = scan(tmp_path, source)
+    assert [tool.name for tool in tools] == ["search"]
+    assert not result.scan_failures and not result.surfaces_excluded
 
 
 def test_agent_tools_are_named_per_agent(tmp_path):

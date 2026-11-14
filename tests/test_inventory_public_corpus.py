@@ -13,9 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_public_inventory_corpus_has_honest_denominators():
     report = runpy.run_path(str(ROOT / "benchmarks/inventory/run_inventory.py"))["run"]()
     assert report["passed"], report
-    assert report["counts"] == {"tp": 21, "fp": 0, "fn": 0, "tn": 4}
-    assert report["denominators"] == {"expected_tools": 21, "explicit_decoys": 4}
-    assert report["unknown_negative_labels"] == 8
+    assert report["counts"] == {"tp": 21, "fp": 0, "fn": 0, "tn": 7}
+    assert report["denominators"] == {"expected_tools": 21, "explicit_decoys": 7}
+    assert report["unknown_negative_labels"] == 5
     assert report["unlabeled_predictions"] == 0
     assert report["label_bounds"]["recall"] == {
         "label_count": 21,
@@ -26,16 +26,17 @@ def test_public_inventory_corpus_has_honest_denominators():
     }
     assert report["label_bounds"]["specificity"] == {
         "label_count": 12,
-        "observed_count": 4,
-        "unknown_count": 8,
-        "lower": 4 / 12,
+        "observed_count": 7,
+        "unknown_count": 5,
+        "lower": 7 / 12,
         "upper": 1.0,
     }
+    # MarkItDown passes its server to a same-file helper that only builds its apps.
     markitdown = next(row for row in report["cases"] if row["case"] == "microsoft-markitdown")
-    assert markitdown["passed"] and markitdown["coverage_incomplete"]
-    assert markitdown["tool_counts"] == {"tp": 1, "fp": 0, "fn": 0, "tn": 0}
-    assert markitdown["unknown_negative_labels"] == 3
-    assert markitdown["relevant_mcp_exclusions"] == markitdown["expected_mcp_exclusions"]
+    assert markitdown["passed"] and not markitdown["coverage_incomplete"]
+    assert markitdown["tool_counts"] == {"tp": 1, "fp": 0, "fn": 0, "tn": 3}
+    assert markitdown["unknown_negative_labels"] == 0
+    assert markitdown["relevant_mcp_exclusions"] == []
 
 
 def test_label_bounds_keep_unknowns_and_empty_denominators_visible():
