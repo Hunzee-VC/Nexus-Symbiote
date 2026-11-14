@@ -69,8 +69,13 @@ an object opens, an indented line after an empty or comment line (Yarn 1 stops
 reading the stanza there), a whitespace-only line, a word Yarn 1 splits into a
 number or `true`/`false` and a string (such as an unquoted `4.0.0`), an invalid
 escape, more than one value, a duplicate key, a selector with surrounding spaces,
-a Berry field without a colon, and a `version`, `resolved`, `integrity`,
-`resolution`, `checksum` or `linkType` that is not a string.
+a carriage return that is not followed by a line feed (Yarn 1 ends the line there but
+reads the spaces after it as no indentation), a Berry field without a colon, and a
+`version`, `resolved`, `integrity`, `resolution`, `checksum` or `linkType` that is
+not a string. A Berry value is a JSON string or a YAML plain scalar as Berry writes
+one, inner spaces included (`react: ^16.8.0 || ^17.0.0`, `conditions: os=linux &
+cpu=x64`); a plain value that starts with a YAML indicator such as `>` or `|`, or
+contains `:`, `#`, `,`, a bracket, a brace or a quote, fails the lockfile.
 
 For Python, `uv.lock` or `poetry.lock` in the project root supplies the exact
 version and the index origin of each AI package declared in `requirements*.txt` or

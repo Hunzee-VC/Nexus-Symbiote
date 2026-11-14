@@ -125,6 +125,12 @@ def test_the_record_yarn_installs_is_the_one_bound(tmp_path, lock):
         f'openai@4.0.0:\n  version "4.0.0"\n  resolved "{EVIL}"\u2028x\n',
         f'openai@4.0.0:\n  version "4.0.0"\n  truex "{EVIL}"\n',
         f'openai@4.0.0:\n  version "4.0.0"\n  resolved:"{EVIL}"\n',
+        # Yarn 1 ends a line at a lone CR and reads the next line as a top-level key.
+        stanza("openai@4.0.0", PUBLIC)
+        + "\nzzpad@1.0.0:\r  openai@4.0.0:\n"
+        + f'  version "4.0.0"\n  resolved "{EVIL}"\n',
+        f'zzpad@1.0.0:\r  openai@4.0.0:\n  version "4.0.0"\n  resolved "{EVIL}"\n',
+        f'openai@4.0.0:\r  version "4.0.0"\r  resolved "{EVIL}"\r',
     ],
     ids=[
         "single-quote",
@@ -150,6 +156,9 @@ def test_the_record_yarn_installs_is_the_one_bound(tmp_path, lock):
         "line-separator",
         "boolean-prefix",
         "unspaced-colon",
+        "lone-cr-hides-repeat",
+        "lone-cr-hides-stanza",
+        "lone-cr-only",
     ],
 )
 def test_a_line_the_parser_does_not_understand_fails_the_lockfile(tmp_path, lock):
@@ -204,6 +213,61 @@ def test_a_berry_lockfile_with_nested_metadata_is_bound(tmp_path):
     result, comp = scan(tmp_path, lock)
     assert result.scan_failures == [] and result.surfaces_excluded == []
     assert comp.package_url == "pkg:npm/openai@4.0.0"
+
+
+BERRY_HEAD = "__metadata:\n  version: 8\n  cacheKey: 10c0\n\n"
+BERRY_OPENAI = (
+    '"openai@npm:4.0.0":\n  version: 4.0.0\n  resolution: "openai@npm:4.0.0"\n'
+    "  checksum: 10c0/abab\n  languageName: node\n  linkType: hard\n"
+)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        '"use-sync-external-store@npm:^1.2.0":\n  version: 1.2.0\n'
+        "  peerDependencies:\n    react: ^16.8.0 || ^17.0.0 || ^18.0.0\n",
+        '"@rollup/rollup-linux-x64-gnu@npm:4.24.0":\n  version: 4.24.0\n'
+        "  conditions: os=linux & cpu=x64 & libc=glibc\n",
+        '"x@npm:1.0.0":\n  version: 1.0.0\n  peerDependencies:\n    react: ">=16"\n',
+    ],
+    ids=["peer-range", "conditions", "quoted-range"],
+)
+def test_berry_plain_scalars_with_spaces_are_read(tmp_path, extra):
+    result, comp = scan(tmp_path, BERRY_HEAD + BERRY_OPENAI + "\n" + extra)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    assert comp.package_url == "pkg:npm/openai@4.0.0"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # Each is a value a YAML reader reads differently, or not as one string.
+        "    react: >=16",
+        "    react: ^16 # c",
+        "    react: a: b",
+        "    react: ^16 ",
+        "    react: [16]",
+        "    react: |16",
+        "    react: ",
+        "    react:^16",
+    ],
+    ids=[
+        "block-indicator",
+        "comment",
+        "nested-colon",
+        "trailing-space",
+        "flow",
+        "pipe",
+        "empty",
+        "unspaced",
+    ],
+)
+def test_a_berry_value_yaml_reads_otherwise_fails_the_lockfile(tmp_path, line):
+    extra = '"x@npm:1.0.0":\n  version: 1.0.0\n  peerDependencies:\n' + line + "\n"
+    result, comp = scan(tmp_path, BERRY_HEAD + BERRY_OPENAI + "\n" + extra)
+    assert result.scan_failures == UNREAD
+    assert_unbound(comp)
 
 
 @pytest.mark.parametrize(

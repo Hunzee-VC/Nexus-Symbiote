@@ -803,12 +803,18 @@ class _Resolution(NamedTuple):
 
 _YARN_LINES = 100_000
 _YARN_DEPTH = 8
-_YARN_LINE_BREAK = re.compile(r"\r\n|\r|\n")
+_YARN_LINE_BREAK = re.compile(r"\r?\n")
 # What Yarn 1's tokenizer and a YAML reader both read as one plain word.
 _YARN_WORD = re.compile(r"""[^\x00-\x20\x7f-\U0010ffff:,"'\\#]+""")
 _YARN_V1_WORD_START = re.compile(r"[A-Za-z/.-]")
 _YARN_BERRY_WORD_START = re.compile(r"[A-Za-z0-9/._~^<=-]")
 _BERRY_KEY_SEPARATOR = re.compile(r"\s*,\s*")
+# The plain scalars Berry's stringifier writes unquoted, which a YAML reader reads as
+# the same string: inner single or repeated spaces, no indicator at the start.
+_BERRY_PLAIN = re.compile(
+    r"""(?![-?:,\[\]{}#&*!|>%@`])[^\x00-\x20\x7f-\U0010ffff,\[\]{}:#'"\\]"""
+    r"""(?: *[^\x00-\x20\x7f-\U0010ffff,\[\]{}:#'"\\])*"""
+)
 # Fields a record is bound from: each must be a string Yarn reads as one.
 _YARN_SCALAR_FIELDS = frozenset(
     {"version", "resolved", "integrity", "resolution", "checksum", "linkType"}
@@ -819,6 +825,43 @@ class _YarnToken(NamedTuple):
     kind: str
     value: str
     spaced: bool
+
+
+def _yarn_string_end(line: str, start: int) -> int:
+    # Yarn's end rule: a quote ends the string unless one backslash precedes it.
+    end = start + 1
+    while True:
+        end = line.find('"', end)
+        if end < 0:
+            raise ValueError("unterminated yarn.lock string")
+        if not (line[end - 1] == "\\" and line[end - 2] != "\\"):
+            return end
+        end += 1
+
+
+def _berry_field(content: str) -> tuple[str, _YarnToken | None]:
+    """The key and value of a Berry field line: a YAML mapping entry whose value is
+    a JSON string, a plain scalar as Berry writes one, or empty for a nested map."""
+    key_end = _yarn_string_end(content, 0) + 1 if content.startswith('"') else content.find(":")
+    if key_end <= 0:
+        raise ValueError("yarn.lock field without a colon")
+    key_tokens = _yarn_tokens(content[:key_end], True)
+    if len(key_tokens) != 1 or key_tokens[0].kind != "str" or key_tokens[0].spaced:
+        raise ValueError("invalid yarn.lock key")
+    rest = content[key_end:]
+    if rest == ":":
+        return key_tokens[0].value, None
+    if not rest.startswith(": "):
+        raise ValueError("yarn.lock field without a colon")
+    value = rest[2:]
+    if value.startswith('"'):
+        value_tokens = _yarn_tokens(value, True)
+        if len(value_tokens) != 1 or value_tokens[0].kind != "str":
+            raise ValueError("invalid yarn.lock field")
+        return key_tokens[0].value, _YarnToken("str", value_tokens[0].value, True)
+    if not _BERRY_PLAIN.fullmatch(value):
+        raise ValueError("invalid yarn.lock field")
+    return key_tokens[0].value, _YarnToken("str", value, True)
 
 
 def _yarn_tokens(line: str, berry: bool) -> list[_YarnToken]:
@@ -833,15 +876,7 @@ def _yarn_tokens(line: str, berry: bool) -> list[_YarnToken]:
             i, spaced = i + 1, True
             continue
         if ch == '"':
-            # Yarn's end rule: a quote ends the string unless one backslash precedes it.
-            end = i + 1
-            while True:
-                end = line.find('"', end)
-                if end < 0:
-                    raise ValueError("unterminated yarn.lock string")
-                if not (line[end - 1] == "\\" and line[end - 2] != "\\"):
-                    break
-                end += 1
+            end = _yarn_string_end(line, i)
             value = json.loads(line[i : end + 1])
             if not isinstance(value, str):
                 raise ValueError("invalid yarn.lock string")
@@ -896,11 +931,29 @@ def _yarn_selectors(tokens: list[_YarnToken], berry: bool) -> list[str]:
     return selectors
 
 
+def _yarn_v1_field(content: str) -> tuple[str, _YarnToken | None]:
+    tokens = _yarn_tokens(content, False)
+    if not tokens or tokens[0].kind != "str":
+        raise ValueError("invalid yarn.lock key")
+    rest = tokens[1:]
+    colon = bool(rest) and rest[0].kind == ":"
+    if colon:
+        rest = rest[1:]
+    if not rest and colon:
+        return tokens[0].value, None
+    if len(rest) != 1 or not rest[0].spaced or rest[0].kind in (":", ","):
+        raise ValueError("invalid yarn.lock field")
+    return tokens[0].value, rest[0]
+
+
 def _yarn_lockfile_stanzas(text: str) -> list[tuple[list[str], dict[str, str]]]:
     """The stanzas of a Yarn v1 or Berry lockfile, each with its selectors and the
     string fields at its first level. Raises ValueError on any line that Yarn 1's
     parser, or the YAML reader Berry uses, would read differently or not at all."""
     lines = _YARN_LINE_BREAK.split(text)
+    # Yarn 1 ends a line at a lone CR but reads the spaces after it as no indentation.
+    if any("\r" in line for line in lines):
+        raise ValueError("lone carriage return in yarn.lock")
     if len(lines) > _YARN_LINES:
         raise ValueError("yarn.lock line limit exceeded")
     berry = False
@@ -921,9 +974,8 @@ def _yarn_lockfile_stanzas(text: str) -> list[tuple[list[str], dict[str, str]]]:
         level = spaces // 2
         if first_header:
             berry = level == 0 and content == "__metadata:"
-        tokens = _yarn_tokens(content, berry)
         if level == 0:
-            selectors = _yarn_selectors(tokens, berry)
+            selectors = _yarn_selectors(_yarn_tokens(content, berry), berry)
             fields = {}
             if selectors != ["__metadata"]:
                 stanzas.append((selectors, fields))
@@ -933,31 +985,23 @@ def _yarn_lockfile_stanzas(text: str) -> list[tuple[list[str], dict[str, str]]]:
             open_keys = [set()]
             continue
         del open_keys[level:]
-        if not tokens or tokens[0].kind != "str" or not tokens[0].value:
+        key, value = _berry_field(content) if berry else _yarn_v1_field(content)
+        if not key:
             raise ValueError("invalid yarn.lock key")
-        key = tokens[0].value
-        rest = tokens[1:]
-        colon = bool(rest) and rest[0].kind == ":"
-        if colon:
-            rest = rest[1:]
-        elif berry:
-            raise ValueError("yarn.lock field without a colon")
         if key in open_keys[-1]:
             raise ValueError("duplicate key in yarn.lock stanza")
         open_keys[-1].add(key)
-        if not rest and colon:
+        if value is None:
             if level == 1 and key in _YARN_SCALAR_FIELDS:
                 raise ValueError("yarn.lock field is not a string")
             if len(open_keys) >= _YARN_DEPTH:
                 raise ValueError("yarn.lock nesting limit exceeded")
             open_keys.append(set())
             continue
-        if len(rest) != 1 or not rest[0].spaced or rest[0].kind in (":", ","):
-            raise ValueError("invalid yarn.lock field")
         if level == 1 and key in _YARN_SCALAR_FIELDS:
-            if rest[0].kind != "str":
+            if value.kind != "str":
                 raise ValueError("yarn.lock field is not a string")
-            fields[key] = rest[0].value
+            fields[key] = value.value
     if not stanzas:
         raise ValueError("empty yarn.lock")
     return stanzas

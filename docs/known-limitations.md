@@ -662,7 +662,8 @@ A way around a limit that its entry does not describe is worth a
   `uv.lock` and `poetry.lock`, are a gap and bind no lockfile evidence. `yarn.lock` is
   read with a strict subset of Yarn 1's lockfile syntax, and of the YAML that Yarn
   Berry writes: a lockfile edited into another layout that Yarn still accepts, such
-  as one with indented comments, is a collection failure.
+  as one with indented comments or a carriage return without a line feed, is a
+  collection failure.
 - **Some lockfiles are not read.** `Pipfile.lock`, `pdm.lock`, `bun.lock` and
   `bun.lockb` give each package they may resolve a low `lockfile_unread` finding,
   not a gap.
