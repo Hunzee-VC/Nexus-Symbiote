@@ -7,6 +7,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 ### Security
 
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
+- A `uv.lock` or `poetry.lock` record whose package index is not a plain lower-case `http://` or `https://` URL is a coverage gap and binds no package URL. Such a source used to be recorded as `https://pypi.org`: a directory of wheels, an upper-case scheme such as `HTTPS://`, a `file://` URL, or an authority with a backslash (`https://evil.example\@pypi.org/simple`), which uv reads as another host than Python's `urlsplit` does.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
 - The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.
 - `runtime` refuses ambiguous descriptors, non-UTF-8 or BOM-prefixed JSON and patterns Python cannot compile, and removes partial key and envelope files after a failure. A policy path that is not a regular file is refused before it is opened.
