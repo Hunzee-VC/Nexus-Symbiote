@@ -244,9 +244,10 @@ jobs:
           validate: 'true'
           risk-check: 'true'
           risk-threshold: '50'
+          fail-on-severity: 'high'
 ```
 
-The Action installs its own hash-locked runtime off the job's `PATH`, ignores policy in the scanned checkout, and reports each gate in its `result` and `gates` outputs. What each gate checks, how to supply a signer policy, and SARIF upload: [GitHub Action guide](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/github-action.md). Inputs and outputs: [action.yml](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/action.yml).
+The Action installs its own hash-locked runtime off the job's `PATH`, ignores policy in the scanned checkout, and reports each gate in its `result` and `gates` outputs. `fail-on-severity` defaults to `high`, so a high finding fails the run even when the aggregate score, an unbounded sum of finding weights, stays under `risk-threshold`. Set `fail-on-severity: critical` to fail on severity only for critical findings. What each gate checks, how to supply a signer policy, and SARIF upload: [GitHub Action guide](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/github-action.md). Inputs and outputs: [action.yml](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/action.yml).
 
 ### Gate drift in CI
 
