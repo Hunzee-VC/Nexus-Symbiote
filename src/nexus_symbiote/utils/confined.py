@@ -512,7 +512,9 @@ class ConfinedCollection:
         self._root_fd: int | None = None
         self._links: dict[str, str] = {}
         self._listings: dict[Path, dict[str, list[tuple[str, str]]] | None] = {}
-        self._exact_names: dict[tuple[int, int], tuple[tuple[int, int], frozenset[str]]] = {}
+        self._exact_names: dict[
+            tuple[int, int], tuple[tuple[int, int, int, int, int, int], frozenset[str]]
+        ] = {}
         self._case_sensitive_dirs: set[tuple[int, int]] = set()
         self._root_folds = False
         self._folded_excluded: set[tuple[str, ...]] | None = None
@@ -704,7 +706,7 @@ class ConfinedCollection:
                 except OSError:
                     # Any other failure decides nothing; the listing below does.
                     pass
-        stamp = (info.st_mtime_ns, info.st_ctime_ns)
+        stamp = descriptor_binding(info)
         cached = self._exact_names.get(dir_key)
         if cached is None or cached[0] != stamp:
             if self._entries_exhausted:
