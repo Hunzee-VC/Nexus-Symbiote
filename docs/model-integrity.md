@@ -32,7 +32,9 @@ text-protocol pickles that load `None` or an integer, so such a file is not a
 component. A loader can unpickle the pickles that follow a STOP, as `torch.load` does
 with the three header pickles of `torch.save`'s legacy format before the main one, so
 the check reads on past a STOP that names nothing and counts every pickle within the
-same bounds. A binary pickle that names none in the opcodes read before the 64 KiB or
+same bounds. The next pickle may start with any opcode, as `pickle.load` reads it,
+not only with PROTO; a byte that is no opcode, or PROTO with a protocol over 5, ends
+the check. A binary pickle that names none in the opcodes read before the 64 KiB or
 4,096-opcode bound is rated `unknown`, because what follows was not read, and so is a
 text-protocol pickle cut short that way after an earlier pickle reached STOP, as a
 legacy file with protocol 0 headers and a padded `sys_info` is; a text-protocol stream
@@ -40,10 +42,15 @@ cut short before any STOP is not a component. `pickle.load` calls what a pickle 
 before it meets a flaw further on, so a pickle that names a callable by a module and a
 name (`GLOBAL` or `INST` with two identifiers, or `STACK_GLOBAL` after two such strings)
 and then calls it (`REDUCE`, `INST`, `OBJ`, `NEWOBJ`, `NEWOBJ_EX` or `BUILD`) is
-recognized however it ends, at the end of the file, at a byte that is no opcode or
-at a stack underflow: a binary one in any position, and a text-protocol one after an
+recognized however it ends, at the end of the file, at a byte that is no opcode or at
+a stack underflow: a binary one in any position, and a text-protocol one after an
 earlier pickle reached STOP. One that names such a callable after a STOP but calls
-nothing before it fails is rated `unknown`. Any other content, such as a numeric NumPy array or a ZIP archive with
+nothing before it fails is rated `unknown`. A call counts only when the unpickler's
+stack, which the check follows with its MARK fences and memo, holds what the opcode
+calls and that item is a named callable or an object a call returned: the lines
+`VERSION`, `.cache`, `build` read as a pickle, then a name and a `BUILD` with nothing to
+build, which `pickle.load` refuses at a stack underflow without calling anything, so
+such text is rated `unknown` at most. Any other content, such as a numeric NumPy array or a ZIP archive with
 neither a pickle-family member nor an object-dtype array as a member, is not a
 component. Each such file is opened once, after every file that the models with a
 name bind and their directories configure has been read, and only if it is not one

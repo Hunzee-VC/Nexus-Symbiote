@@ -566,3 +566,106 @@ def test_a_name_after_a_stop_with_no_call_is_unknown(tmp_path: Path) -> None:
     component = _components(tmp_path)["named.dat"]
     assert component.serialization_safety is SerializationSafety.UNKNOWN
     assert component.properties["format_inspection"] == PICKLE_NAME_UNCALLED
+
+
+# A STACK_GLOBAL call of exec, and a GLOBAL one, that pickle.load runs.
+_STACK_CALL = b"\x8c\x08builtins\x8c\x04exec\x93\x8c\x13builtins.HIT=1;None\x85R."
+_GLOBAL_CALL = b"cbuiltins\nexec\n\x8c\x13builtins.HIT=1;None\x85R."
+
+# After a STOP, the next pickle may start with any opcode, not only PROTO 2 to 5 or
+# a byte that starts common text-protocol pickles.
+_ANY_OPCODE_AFTER_A_STOP = {
+    "header-short-binunicode": _header(2) + _STACK_CALL,
+    "header-frame": _header(2) + b"\x95" + len(_STACK_CALL).to_bytes(8, "little") + _STACK_CALL,
+    "header-proto-1": _header(2) + b"\x80\x01" + _GLOBAL_CALL,
+    "header-proto-0": _header(2) + b"\x80\x00" + _GLOBAL_CALL,
+    "none-short-binunicode": b"N." + _STACK_CALL,
+    "none-newtrue-pop": b"N.\x880" + _GLOBAL_CALL,
+    "none-empty-set-pop": b"N.\x8f0" + _GLOBAL_CALL,
+}
+
+
+@pytest.mark.parametrize("data", _ANY_OPCODE_AFTER_A_STOP.values(), ids=_ANY_OPCODE_AFTER_A_STOP)
+def test_a_call_after_a_stop_is_critical_whatever_opcode_starts_it(
+    tmp_path: Path, data: bytes
+) -> None:
+    assert _runs_exec(data)
+    (tmp_path / "models").mkdir()
+    files = ["models/x", "x.dat", "x.npy", "legacy.tar.dat"]
+    for relative in files:
+        (tmp_path / relative).write_bytes(data)
+    found = _components(tmp_path)
+    assert sorted(found) == sorted(files)
+    for component in found.values():
+        assert component.serialization_safety is UNSAFE
+        assert _critical(component)
+
+
+def test_bytes_after_a_stop_that_start_no_opcode_are_not_inventoried(tmp_path: Path) -> None:
+    (tmp_path / "invalid.dat").write_bytes(b"N.\xff" + _GLOBAL_CALL)
+    (tmp_path / "protocol.dat").write_bytes(b"N.\x80\x06" + _GLOBAL_CALL)
+    assert _components(tmp_path) == {}
+
+
+# Text that reads as a name after a STOP and then an opcode that calls, with nothing on
+# the stack for it to call: pickle.load fails at a stack underflow and calls nothing.
+_UNCALLED_TEXT = {
+    "paths.dat": b"VERSION\n.cache\nlogs\noutputs\n",
+    "models/notes.txt": b"N.cache\nbuild\nbin\n",
+    "models/llama/MANIFEST": b"Vendored paths:\n.cache\nbuild\nREADME.md\n",
+    "models/calls-none": b"N.cos\nsystem\nN)R.",
+    "models/obj-without-mark": b"N.cos\nsystem\no.",
+}
+
+
+def _calls_anything(data: bytes) -> bool:
+    called: list[str] = []
+
+    class _Record:
+        def __init__(self, *_: object) -> None:
+            called.append("init")
+
+        def __call__(self, *_: object) -> None:
+            called.append("call")
+
+        def __setstate__(self, _: object) -> None:
+            called.append("setstate")
+
+    class _Unpickler(pickle.Unpickler):
+        def find_class(self, module: str, name: str) -> type:
+            return _Record
+
+    stream = io.BytesIO(data)
+    for _ in range(8):
+        try:
+            _Unpickler(stream).load()
+        except Exception:  # noqa: BLE001 - the stream fails where pickle.load does
+            break
+    return bool(called)
+
+
+def test_a_name_with_no_operands_for_its_call_is_not_critical(tmp_path: Path) -> None:
+    (tmp_path / "models" / "llama").mkdir(parents=True)
+    for relative, data in _UNCALLED_TEXT.items():
+        assert not _calls_anything(data)
+        (tmp_path / relative).write_bytes(data)
+    found = _components(tmp_path)
+    for relative, component in found.items():
+        assert component.serialization_safety is SerializationSafety.UNKNOWN, relative
+        assert component.properties["format_inspection"] == PICKLE_NAME_UNCALLED
+        assert not _critical(component)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"N.(cos\nsystem\nNo.",
+        b"N.cos\nsystem\n)\x81.",
+        b"N.cos\nsystem\np0\n0g0\n)R.",
+        b"N.(cos\nsystem\nN\x85R.",
+    ],
+    ids=["obj", "newobj", "memo", "inside-a-mark"],
+)
+def test_a_call_with_its_operands_after_a_stop_is_critical(tmp_path: Path, data: bytes) -> None:
+    (tmp_path / "call.dat").write_bytes(data)
+    assert _components(tmp_path)["call.dat"].serialization_safety is UNSAFE

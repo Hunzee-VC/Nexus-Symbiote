@@ -226,8 +226,8 @@ _CODE_OPCODES = frozenset(
         "EXT4",
     }
 )
-# Opcodes that call or apply what is on the stack.
-_INVOKING_OPCODES = frozenset({"REDUCE", "INST", "OBJ", "NEWOBJ", "NEWOBJ_EX", "BUILD"})
+# Bytes that start an opcode: the next pickle after a STOP may start with any of them.
+_OPCODE_BYTES = frozenset(opcode.code.encode("latin-1")[0] for opcode in pickletools.opcodes)
 _DOTTED_NAME = re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", re.ASCII)
 _INDEX = re.compile(r"(?P<base>.+?)\.index(?:\.[A-Za-z0-9_-]+)?\.json", re.IGNORECASE)
 # transformers reads ``repository--module.Class``; a repository need not name an owner.
@@ -370,7 +370,10 @@ def _recognized_pickle(
     segment that names a callable by module and name and then calls it is recognized
     however it ends: under a model name, and by content when it is binary or follows a
     STOP. One that follows a STOP and names such a callable without calling it before
-    the flaw is rated unknown.
+    the flaw is rated unknown. A pickle that follows a STOP may start with any opcode,
+    as ``pickle.load`` reads it, and a call counts only when the unpickler's stack
+    holds a named callable, or an object made from one, where the calling opcode takes
+    it (``_Stack``).
     """
     binary = len(prefix) >= 2 and prefix[0] == 0x80 and 2 <= prefix[1] <= 5
     if not binary and (not prefix or prefix[0] not in _TEXT_PICKLE_START):
@@ -385,13 +388,14 @@ def _recognized_pickle(
         following = sample[start : start + 2]
         if not following:
             return (SerializationSafety.UNKNOWN, PICKLE_UNREAD) if len(sample) < size else None
-        binary = following[0] == 0x80
-        if binary and len(following) < 2:
+        if following[0] not in _OPCODE_BYTES:
+            return None
+        if following[0] == 0x80 and len(following) < 2:
             return (SerializationSafety.UNKNOWN, PICKLE_UNREAD) if len(sample) < size else None
-        if binary and not 2 <= following[1] <= 5:
+        if following[0] == 0x80 and following[1] > 5:
             return None
-        if not binary and following[0] not in _TEXT_PICKLE_START:
-            return None
+        # Any opcode can start the next pickle; only PROTO 2 to 5 marks a binary one.
+        binary = following[0] == 0x80 and following[1] >= 2
 
 
 class _Segment(NamedTuple):
@@ -419,6 +423,7 @@ def _pickle_segment(
     own = 0
     code = named = invoked = bounded = False
     strings: list[str | None] = []
+    stack: _Stack | None = _Stack()
     opcodes = io.BytesIO(sample)
     opcodes.seek(start)
     try:
@@ -427,9 +432,15 @@ def _pickle_segment(
             own += 1
             marks += opcode.name == "MARK"
             code = code or opcode.name in _CODE_OPCODES
-            invoked = invoked or (named and opcode.name in _INVOKING_OPCODES)
-            named = named or _names_callable(opcode.name, argument, strings)
-            invoked = invoked or (named and opcode.name == "INST")
+            names = _names_callable(opcode.name, argument, strings)
+            named = named or names
+            if stack is not None:
+                calls = stack.apply(opcode, argument, names)
+                if calls is None:
+                    # pickle.load stops at a stack underflow: nothing after it runs.
+                    stack = None
+                else:
+                    invoked = invoked or (named and calls)
             if opcode.name != "MEMOIZE":
                 strings = [*strings[-1:], argument if isinstance(argument, str) else None]
             if seen > MAX_PICKLE_OPCODES or marks > MAX_PICKLE_MARKS:
@@ -461,6 +472,89 @@ def _pickle_segment(
     if not binary:
         return _Segment(None)
     return _Segment(recognized if own >= MIN_PICKLE_OPCODES or (code and bounded) else None)
+
+
+class _Stack:
+    """The unpickler's stack, MARK fences and memo, each item tagged by whether it may run code.
+
+    An item that may run code is one a callable was named by (``GLOBAL``,
+    ``STACK_GLOBAL``, ``EXT1``, ``EXT2``, ``EXT4``) or one a call returned; a memo entry
+    that was never stored may be one the same unpickler stored earlier, so it is too.
+    """
+
+    def __init__(self) -> None:
+        self.items: list[bool] = []
+        self.fences: list[int] = []
+        self.memo: dict[object, bool] = {}
+
+    def _above(self) -> int:
+        return len(self.items) - (self.fences[-1] if self.fences else 0)
+
+    def _pop(self, count: int) -> list[bool] | None:
+        if self._above() < count:
+            return None
+        popped = self.items[len(self.items) - count :]
+        del self.items[len(self.items) - count :]
+        return popped
+
+    def _pop_mark(self) -> list[bool] | None:
+        if not self.fences:
+            return None
+        fence = self.fences.pop()
+        popped = self.items[fence:]
+        del self.items[fence:]
+        return popped
+
+    def apply(self, opcode: pickletools.OpcodeInfo, argument: object, names: bool) -> bool | None:
+        """Apply one opcode: whether it calls an item that may run code, or None on underflow."""
+        name = opcode.name
+        if name == "MARK":
+            self.fences.append(len(self.items))
+            return False
+        if name == "POP" and not self._above() and self.fences:
+            self.fences.pop()
+            return False
+        if name in {"PUT", "BINPUT", "LONG_BINPUT", "MEMOIZE"}:
+            if not self._above():
+                return None
+            self.memo[len(self.memo) if name == "MEMOIZE" else argument] = self.items[-1]
+            return False
+        if name in {"GET", "BINGET", "LONG_BINGET"}:
+            self.items.append(self.memo.get(argument, True))
+            return False
+        before = [item.name for item in opcode.stack_before]
+        if "mark" in before:
+            index = before.index("mark")
+            above = self._pop_mark()
+            below = self._pop(index)
+            if above is None or below is None or len(above) < len(before) - index - 2:
+                return None
+            operands = below + above
+        else:
+            popped = self._pop(len(before))
+            if popped is None:
+                return None
+            operands = popped
+        calls = {
+            "REDUCE": operands[:1],
+            "NEWOBJ": operands[:1],
+            "NEWOBJ_EX": operands[:1],
+            "BUILD": operands[:1],
+            "OBJ": operands[:1],
+            "INST": [names],
+        }.get(name)
+        if calls is not None:
+            # What BUILD sets the state of stays what it was; a call may return code.
+            self.items.append(operands[0] if name == "BUILD" else True)
+            return any(calls)
+        if name == "DUP":
+            self.items.extend(operands * 2)
+        elif name in {"APPEND", "APPENDS", "SETITEM", "SETITEMS", "ADDITEMS", "READONLY_BUFFER"}:
+            self.items.append(operands[0])
+        else:
+            may_run = name in {"GLOBAL", "STACK_GLOBAL", "EXT1", "EXT2", "EXT4"}
+            self.items.extend([may_run] * len(opcode.stack_after))
+        return False
 
 
 def _names_callable(name: str, argument: object, strings: list[str | None]) -> bool:
