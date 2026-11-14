@@ -420,6 +420,49 @@ def test_a_direct_eval_beside_sdk_imports_is_a_gap(tmp_path):
     assert _inventory(result) == INVENTORIED
 
 
+@pytest.mark.parametrize(
+    ("name", "call", "direct"),
+    [
+        ("server.mjs", "(eval)(code);\n", True),
+        ("server.ts", "(eval as any)(code);\n", True),
+        ("server.ts", "eval!(code);\n", True),
+        ("server.mjs", "(0, eval)(code);\n", False),
+    ],
+)
+def test_a_parenthesized_or_asserted_eval_is_still_direct(tmp_path, name, call, direct):
+    result = _scan(tmp_path, {name: IMPORT + SERVER + call + TOOL})
+    reason = "direct eval can use the MCP SDK imports of the file; what it builds not inventoried"
+    assert result.surfaces_excluded == ([_gap(name, 3, reason)] if direct else [])
+    assert _inventory(result) == INVENTORIED
+
+
+@pytest.mark.parametrize(
+    ("name", "source", "reason"),
+    [
+        (
+            "server.mjs",
+            'await import("https://esm.sh/@modelcontextprotocol/server?bundle");\n',
+            LOADED,
+        ),
+        (
+            "server.ts",
+            'import { Server } from "https://esm.sh/@modelcontextprotocol/sdk/server?dev";\n',
+            LOW_LEVEL,
+        ),
+        ("client.cjs", 'require("@modelcontextprotocol/client#main");\n', CLIENT_LOADED),
+    ],
+)
+def test_a_query_or_fragment_does_not_hide_the_module_kind(tmp_path, name, source, reason):
+    result = _scan(tmp_path, {name: source})
+    assert result.surfaces_excluded == [_gap(name, 1, reason)]
+
+
+def test_a_method_named_like_the_server_class_does_not_shadow_it(tmp_path):
+    method = "export const plugin = {\n  McpServer() {\n    const Factory = McpServer;\n  },\n};\n"
+    result = _scan(tmp_path, {"server.mjs": IMPORT + method})
+    assert result.surfaces_excluded == [_gap("server.mjs", 4, BINDING)]
+
+
 def test_names_in_type_syntax_are_not_uses(tmp_path):
     types = (
         "const typed: McpServer = new McpServer({});\n"

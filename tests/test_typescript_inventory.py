@@ -195,6 +195,20 @@ def test_receiver_shadowing_in_block_does_not_use_outer_binding(tmp_path):
     assert any("unresolved MCP registration receiver" in x for x in result.surfaces_excluded)
 
 
+def test_method_names_bind_nothing_inside_the_method(tmp_path):
+    result = _scan(
+        tmp_path,
+        IMPORT
+        + "export const plugin = { Server() { const inner = new Server({}); return inner; } };\n"
+        + SERVER
+        + 'class Plugin { server() { server.tool("read", {}, handler); } }\n',
+    )
+    servers = [c for c in result.components if isinstance(c, MCPServerComponent)]
+    assert sorted(server.name for server in servers) == ["inner", "server"]
+    assert [t.name for t in _tools(result)] == ["read"]
+    assert not result.surfaces_excluded and not result.scan_failures
+
+
 @pytest.mark.parametrize(
     "import_source",
     [

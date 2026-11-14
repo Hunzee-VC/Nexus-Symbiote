@@ -35,15 +35,16 @@ A file is parsed when its text contains `@modelcontextprotocol/` together with
 contains `@modelcontextprotocol/sdk/server`, `@modelcontextprotocol/sdk/client`,
 `@modelcontextprotocol/sdk/dist` or `@modelcontextprotocol/sdk@`, or
 `@modelcontextprotocol/server` or `@modelcontextprotocol/client` followed by a quote,
-`/` or `@`. A file that mentions these only in comments, or in strings other than
+`/`, `@`, `?` or `#`. A file that mentions these only in comments, or in strings other than
 the first argument of a call, is parsed; if it parses, it produces nothing.
 
 A module specifier names the SDK wherever `@modelcontextprotocol/` appears in it,
 because a runtime or bundler can resolve it there: after `npm:` or `jsr:`, in a URL
 such as `https://esm.sh/@modelcontextprotocol/sdk/server/mcp.js`, in a path into
-`node_modules`, with a version after the package name, percent-encoded, with
-backslashes or in another letter case. The path segments after the package name
-tell a server module from a client module. `McpServer` is collected only from the
+`node_modules`, with a version after the package name, with a query or fragment
+such as `?bundle`, percent-encoded, with backslashes or in another letter case. The
+path segments after the package name, up to any query or fragment, tell a server
+module from a client module. `McpServer` is collected only from the
 two module names above; imported from any other spelling, it is a gap, and the
 other gaps below apply to every spelling.
 
@@ -103,7 +104,9 @@ its gap.
   (`SSEClientTransport`, `StreamableHTTPClientTransport`,
   `WebSocketClientTransport`), used other than in type syntax. The server it starts
   or reaches is not inventoried; a launch configuration in a client file is.
-- A direct `eval` in a file with SDK imports, because the code it runs can use them.
+- A direct `eval` in a file with SDK imports, because the code it runs can use them,
+  also parenthesized or wrapped in TypeScript syntax, as in `(eval)(code)` or
+  `eval!(code)`.
 - Dynamic method names, receiver aliases, unsupported constructor bindings and
   registration ordering.
 

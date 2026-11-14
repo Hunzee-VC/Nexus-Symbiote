@@ -77,7 +77,7 @@ _MODULE_MARKERS = (
     *(
         b"@modelcontextprotocol/" + package + end
         for package in (b"server", b"client")
-        for end in (b'"', b"'", b"`", b"/", b"@")
+        for end in (b'"', b"'", b"`", b"/", b"@", b"?", b"#")
     ),
 )
 SOURCE_MARKERS = (SDK_MARKER, *_CLASS_MARKERS, *_MODULE_MARKERS)
@@ -130,6 +130,8 @@ _WRAPPERS = frozenset(
     }
 )
 _OPERAND_FIRST = frozenset({"as_expression", "satisfies_expression", "non_null_expression"})
+# `(eval)(code)` and `eval!(code)` still call eval directly; `(0, eval)(code)` does not.
+_REFERENCE_WRAPPERS = _WRAPPERS - {"sequence_expression"}
 _UNPARSED_JAVASCRIPT = (
     "JavaScript the TypeScript grammar cannot parse; servers and tools in the file not inventoried"
 )
@@ -287,14 +289,16 @@ def _module_kind(module: str) -> str | None:
 
     The scope counts wherever it appears, since a runtime or bundler can resolve it
     there: after ``npm:`` or ``jsr:``, in a URL, in a path into ``node_modules``, with a
-    version after the package name, percent-encoded, with backslashes or in another
-    letter case. Only the exact names in ``_MODULES`` are followed.
+    version after the package name, with a query or fragment, percent-encoded, with
+    backslashes or in another letter case. Only the exact names in ``_MODULES`` are
+    followed.
     """
     text = unquote(module).replace("\\", "/").lower()
     start = text.find(_SDK)
     if start < 0:
         return None
-    package, *rest = text[start + len(_SDK) :].split("/")
+    path = re.split(r"[?#]", text[start + len(_SDK) :], maxsplit=1)[0]
+    package, *rest = path.split("/")
     segments = [package.split("@", 1)[0], *rest]
     for kind in ("server", "client"):
         if kind in segments:
@@ -542,7 +546,8 @@ def _bindings(index: _Index, root: Node) -> _Declarations:
                 found.loaders.update(_pattern_names(node.child_by_field_name("left")))
         elif node.type in _FUNCTIONS:
             name = node.child_by_field_name("name")
-            if name is not None:
+            # A method's name is a property key: `McpServer() {}` binds no McpServer.
+            if name is not None and node.type != "method_definition":
                 bind(
                     index.scope(parent) if "declaration" in node.type else node,
                     _name(name),
@@ -626,9 +631,9 @@ def _called_method(member: Node) -> str | None:
     return _value(index)[1:-1]
 
 
-def _operand(node: Node | None) -> Node | None:
+def _operand(node: Node | None, wrappers: Collection[str] = _WRAPPERS) -> Node | None:
     """The expression a wrapper such as ``(0, require)`` or ``require as Loader`` evaluates to."""
-    while node is not None and node.type in _WRAPPERS and node.named_children:
+    while node is not None and node.type in wrappers and node.named_children:
         children = node.named_children
         node = children[0] if node.type in _OPERAND_FIRST else children[-1]
     return node
@@ -752,7 +757,7 @@ def _sdk_uses(index: _Index, root: Node, found: _Declarations, resolver: _Resolv
             continue
         if node.type == "call_expression":
             function = node.child_by_field_name("function")
-            if tracked and _identifier(function) == "eval":
+            if tracked and _identifier(_operand(function, _REFERENCE_WRAPPERS)) == "eval":
                 found.gaps.append((node, _EVALUATED))
             loads, specifier = _load(node, found.loaders)
             module = _string_value(specifier)
