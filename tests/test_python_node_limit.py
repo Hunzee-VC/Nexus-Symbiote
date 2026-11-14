@@ -206,6 +206,18 @@ def test_the_analysis_of_a_large_module_is_linear(tmp_path):
         ("def wire(a, b):\n    b.run()\n    a.add_tool(f)\n", "wire(server, server)", False),
         ("def wire(a, b):\n    a.run()\n    b.add_tool(f)\n", "wire(b=other, a=server)", True),
         ("def wire(app):\n    app.run()\n", "wire(other, server)", False),
+        ("def serve(app):\n    return app.streamable_http_app()\n", "serve(server)", True),
+        ("async def serve(app):\n    await app.run_stdio_async()\n", "serve(server)", True),
+        ("def wire(app):\n    return app\n", "wire(server)", False),
+        ("def wire(app):\n    yield app\n", "wire(server)", False),
+        ("def wire(app):\n    return app.run\n", "wire(server)", False),
+        ("def wire(app):\n    return lambda: app.run()\n", "wire(server)", False),
+        (
+            "def wire(app):\n    def later():\n        app.run()\n    return later\n",
+            "wire(server)",
+            False,
+        ),
+        ("def wire(app):\n    app.run()\n    return vars()\n", "wire(server)", False),
     ],
 )
 def test_helpers_are_judged_by_how_they_use_each_parameter(tmp_path, helper, call, benign):

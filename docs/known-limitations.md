@@ -213,14 +213,15 @@ A way around a limit that its entry does not describe is worth a
   `websocket_client` of the MCP SDK, `MCPServerStdio`, `MCPServerSse` and
   `MCPServerStreamableHttp` of the OpenAI Agents SDK, `MCPServerStdio`,
   `MCPServerSSE`, `MCPServerHTTP` and `MCPServerStreamableHTTP` of PydanticAI, and
-  LangChain's `MultiServerMCPClient`, used outside an annotation; a class among
+  LangChain's `MultiServerMCPClient`, used other than as a type in an annotation,
+  as **Python server forms** defines it; a class among
   them also as an attribute of any value, such as a module a parameter or another
   name holds, and a function as an attribute of any name the file imports; in
   TypeScript and
   JavaScript, the SDK's `StdioClientTransport`, `SSEClientTransport`,
   `StreamableHTTPClientTransport` and `WebSocketClientTransport`. A Python file that
-  imports one of these by name from its package and does not use it outside an
-  annotation is a gap too, because another module can import it from that file,
+  imports one of these by name from its package and does not use it other than as
+  such a type is a gap too, because another module can import it from that file,
   as from a package `__init__.py` that re-exports it. A Python file that imports
   one by name from any other module, its own project's included, or uses its name
   after a star import of another module, is a gap whether or not it uses it, so a
@@ -245,18 +246,61 @@ A way around a limit that its entry does not describe is worth a
   `fastmcp.server` or `fastmcp.server.server`, and from `MCPServer` imported from
   `mcp.server.mcpserver`. Forms the collector recognizes but cannot follow are
   gaps: the low-level `Server`, a constructor given `tools=` or `**` arguments, a
-  server passed to a helper, an aliased or subclassed factory,
+  server passed to a helper other than the same-file helper described below, an
+  aliased or subclassed factory,
   `FastMCP.from_openapi`, decorators on a server imported from another module, a
   qualified, module-alias or star import, an import spelled only with
   compatibility characters, a server class imported by name and not used
-  outside an annotation, which another module can import from that file, a
+  other than as a type in an annotation, which another module can import from that file, a
   `FastMCP` or `MCPServer` imported by name from any other module, another
   submodule of `mcp` or `fastmcp` and its own project's included, or used by its
   name after a star import of one, whether or not it is used, and a `FastMCP` or
   `MCPServer` attribute of any value. `MCPServer` imported from `agents.mcp` or
   `pydantic_ai.mcp`, a client base class there, is not a gap. So a
   server built from a class a project module re-exports is a gap on the file that
-  builds it, even when the re-exporting module's own server is inventoried. Any
+  builds it, even when the re-exporting module's own server is inventoried.
+  Besides its `tool` decorator on a module-level function, which is inventoried, a
+  server may be used without a gap only in these ways: reading its `name`,
+  `instructions` or `settings`, as in `server.settings.port = 8000`; calling a run
+  method or app factory (`run`, `run_async`, `run_stdio_async`, `run_sse_async`,
+  `run_streamable_http_async`, `run_http_async`, `sse_app`, `streamable_http_app`
+  or `http_app`) and using the result anywhere, as in
+  `app = server.streamable_http_app()` or `asyncio.run(server.run_stdio_async())`,
+  also inside a `try` statement; applying its `resource`, `prompt` or
+  `custom_route` decorator directly to a function; reading one of these methods
+  in a statement of its own, which discards it; and passing it to a function of
+  the same file, undecorated and bound once, that uses that parameter only in
+  these ways and not inside a nested function, lambda, class or comprehension.
+  Any other use is a gap, such as saving, passing or dereferencing a bound method
+  (`method = server.run`, `anyio.run(server.run_stdio_async)`), keeping a
+  decorator, or naming the server in an annotation. An app or run coroutine still
+  holds the server, so code that digs it back out of one other than by the
+  reflection below is not seen. A type in an annotation is the whole annotation,
+  a member of a `|` union, or an argument of a generic of `typing`,
+  `typing_extensions` or `collections.abc`, such as `Optional[FastMCP]`, or of a
+  built-in generic such as `list[FastMCP]`. Any other part of an annotation, such
+  as a call or another subscript, is analyzed as code, because annotations are
+  evaluated. In a file with a recognized server or PydanticAI agent, this
+  reflection is a gap even when harmless: a call by name of `locals`, `globals`,
+  `vars`, `eval` or `exec`; `__builtins__` or an import of the `builtins` module;
+  a call by name of `getattr`, `setattr` or `delattr`, unless the object is a
+  literal or a name, or attribute of a name, that the file binds only by import
+  and the attribute is a literal name other than `modules` and those listed next, so
+  `getattr(os, "environ")` is accepted and `getattr(self, "name")` is a gap; the
+  attributes `__self__`, `__closure__`, `__globals__`, `__builtins__`, `__dict__`,
+  `__annotations__`, `__traceback__`, `__getattribute__`, `tb_frame`, `tb_next`,
+  `f_back`, `f_locals`, `f_globals`, `f_builtins`, `gi_frame`, `cr_frame`,
+  `ag_frame`, `_getframe`, `currentframe`, `getouterframes`, `getinnerframes`,
+  `getargvalues` and `getclosurevars`, also imported by name; and a `modules`
+  attribute that is not called, as in `sys.modules[__name__]`, or `modules`
+  imported from `sys`. A method that only shares a name, such as `model.eval()`
+  or `model.modules()`, is not reflection. Other reflection is not recognized,
+  such as a reflective builtin under another name,
+  `importlib.import_module(__name__)`, a module that imports itself, `gc`, or
+  reflection in another file, including on the traceback of an exception that
+  propagated out of a server's run, so a completed scan cannot prove that a
+  server or agent never escaped.
+  Any
   call whose first argument, or `name` keyword, is a literal that names `mcp`,
   `mcp.server` or `fastmcp`, or a submodule of the last two, is a gap whatever the
   callee, so a loader passed as an argument, bound by a `match` capture, read from
@@ -311,8 +355,15 @@ A way around a limit that its entry does not describe is worth a
   not. A decorated function that is not at module level, a rebound decorator, a
   qualified import and a star import are gaps. So is a PydanticAI agent given `tools=`,
   `toolsets=`, `builtin_tools=`, `mcp_servers=` or `*` or `**` arguments, or used
-  other than through an attribute or a `with` statement, such as passed to a
-  function or held in a list. Each agent's tools are named per agent, so two agents
+  other than through its `tool` and `tool_plain` decorators, reading its `name`,
+  calling `run`, `run_sync`, `run_stream` or `iter` and using the result anywhere,
+  also inside a `try` statement, applying its `system_prompt`, `instructions` or
+  `output_validator` decorator directly to a function, reading one of these
+  methods in a statement of its own, or a `with` statement without `as`. So an
+  agent passed to a function or held in a list, a saved,
+  passed or dereferenced bound method such as `method = agent.run_sync`,
+  `with agent as alias`, and the reflection listed under **Python server forms**
+  are gaps. Each agent's tools are named per agent, so two agents
   of a file can each have a tool of the same name. Class-based tools, such as
   `BaseTool` subclasses and `StructuredTool.from_function`, are neither collected
   nor reported.
