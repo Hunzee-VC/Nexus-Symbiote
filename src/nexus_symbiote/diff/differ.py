@@ -652,8 +652,14 @@ class AIBOMDiffer:
                 }
             )
         elif not old_hash and new_hash:
+            # The first binding of content the baseline never pinned is itself a
+            # reviewable change: nothing shows the content predates this revision.
             modifications.append(
-                {"detail": "Tool definition hash became available.", "severity": "info"}
+                {
+                    "detail": "Tool definition hash became available — first binding of "
+                    "content the baseline never pinned.",
+                    "severity": "medium",
+                }
             )
 
         old_content = getattr(old, "content_hash", None)
@@ -665,8 +671,9 @@ class AIBOMDiffer:
                     if old_content and not new_content
                     else "Content hash changed."
                     if old_content
-                    else "Content hash became available.",
-                    "severity": "high" if old_content else "info",
+                    else "Content hash became available — first binding of content the "
+                    "baseline never pinned.",
+                    "severity": "high" if old_content else "medium",
                 }
             )
 
@@ -679,11 +686,13 @@ class AIBOMDiffer:
                 elif old_h:
                     outcome = "changed."
                 else:
-                    outcome = "became available."
+                    outcome = (
+                        "became available — first binding of content the baseline never pinned."
+                    )
                 modifications.append(
                     {
                         "detail": f"File hash ({_clip(hash_key)}) {outcome}",
-                        "severity": "high" if old_h else "info",
+                        "severity": "high" if old_h else "medium",
                     }
                 )
 
@@ -931,7 +940,16 @@ class AIBOMDiffer:
                     label, f"Collector '{_clip(name)}' is no longer recorded (was {_clip(before)})."
                 )
             elif before is None:
-                improvement(label, f"Collector '{_clip(name)}' is now recorded as {_clip(after)}.")
+                if after == "complete":
+                    improvement(label, f"Collector '{_clip(name)}' is now recorded as complete.")
+                else:
+                    # The baseline recorded nothing for this collector, so nothing shows
+                    # the gap the candidate now states predates the change under review.
+                    regression(
+                        label,
+                        f"Collector '{_clip(name)}' is now recorded as {_clip(after)}; the "
+                        "baseline does not show this gap predates the change.",
+                    )
             elif _STATUS_RANK.get(after, 3) < _STATUS_RANK.get(before, 3):
                 improvement(
                     label,
@@ -977,23 +995,23 @@ class AIBOMDiffer:
 
         handled.add("surfaces_scanned")
         scanned_before, scanned_after = set(old.surfaces_scanned), set(new.surfaces_scanned)
-        if scanned_before != scanned_after:
-            parts = []
-            if scanned_after - scanned_before:
-                parts.append(
-                    f"{len(scanned_after - scanned_before)} added "
-                    f"({_listing(scanned_after - scanned_before)})"
-                )
-            if scanned_before - scanned_after:
-                parts.append(
-                    f"{len(scanned_before - scanned_after)} removed "
-                    f"({_listing(scanned_before - scanned_after)})"
-                )
+        lost_surfaces = scanned_before - scanned_after
+        gained_surfaces = scanned_after - scanned_before
+        if lost_surfaces:
+            # A surface that is no longer scanned is narrowed coverage: components
+            # found there can disappear without a removal alert of their own.
+            noun = "surface" if len(lost_surfaces) == 1 else "surfaces"
+            regression(
+                "surfaces_scanned",
+                f"{len(lost_surfaces)} scanned {noun} removed ({_listing(lost_surfaces)}): "
+                "coverage narrowed; components found there are no longer compared.",
+            )
+        if gained_surfaces:
+            noun = "surface" if len(gained_surfaces) == 1 else "surfaces"
             improvement(
                 "surfaces_scanned",
-                "Scanned surfaces changed: "
-                + ", ".join(parts)
-                + ". Components found there are compared separately.",
+                f"{len(gained_surfaces)} scanned {noun} added ({_listing(gained_surfaces)}). "
+                "Components found there are compared separately.",
             )
 
         handled.add("assurance_level")

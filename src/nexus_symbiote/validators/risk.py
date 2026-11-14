@@ -254,7 +254,11 @@ class RiskScorer:
             raise ValueError("fail_threshold must be positive and finite")
         if not math.isfinite(warn_threshold) or warn_threshold < 0:
             raise ValueError("warn_threshold must be finite and nonnegative")
-        self.weights = severity_weights or SEVERITY_WEIGHTS
+        # A partial map would silently weight the missing severities 0.0, so findings
+        # at those severities could never trip the score threshold.
+        if severity_weights is not None and set(severity_weights) != set(RiskSeverity):
+            raise ValueError("severity_weights must assign a weight to every RiskSeverity")
+        self.weights = dict(severity_weights) if severity_weights is not None else SEVERITY_WEIGHTS
         self.fail_threshold = fail_threshold
         self.warn_threshold = warn_threshold
         self.ignore_categories = set(ignore_categories or [])
