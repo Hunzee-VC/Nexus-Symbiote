@@ -54,9 +54,13 @@ _SERVER_DECORATORS = _names("resource prompt custom_route")
 # bound instances.
 _REFLECTIVE_BUILTINS = _names("locals globals vars eval exec")
 _ATTRIBUTE_BUILTINS = _names("getattr setattr delattr")
+# A module the file can import as itself exposes its servers, agents and helpers as
+# attributes that the analysis of names never sees.
+_IMPORTERS = _names("import_module __import__")
+_OWN_MODULE = _names("__name__ __spec__")
 _REFLECTIVE_ATTRIBUTES = _names(
     "__self__ __closure__ __globals__ __builtins__ __dict__ __annotations__ __traceback__ "
-    "__code__ __defaults__ __kwdefaults__ __wrapped__ "
+    "__code__ "
     "__getattribute__ tb_frame tb_next f_back f_locals f_globals f_builtins gi_frame "
     "cr_frame ag_frame _getframe currentframe getouterframes getinnerframes getargvalues "
     "getclosurevars"
@@ -142,6 +146,18 @@ def _plain_attribute(call: ast.Call, imported: set[str]) -> bool:
     )
 
 
+def _imports_own_module(call: ast.Call) -> bool:
+    """Whether ``call`` imports a module named by ``__name__`` or ``__spec__``, as
+    ``importlib.import_module(__name__)`` imports the file itself."""
+    func = call.func
+    name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+    return name in _IMPORTERS and any(
+        isinstance(node, ast.Name) and node.id in _OWN_MODULE
+        for argument in (*call.args, *(keyword.value for keyword in call.keywords))
+        for node in ast.walk(argument)
+    )
+
+
 def _reflective_access(
     nodes: list[ast.AST], parents: dict[ast.AST, ast.AST], bindings: Counter[str]
 ) -> bool:
@@ -157,6 +173,8 @@ def _reflective_access(
     )
     imported = {name for name, count in imports.items() if bindings[name] == count}
     for node in nodes:
+        if isinstance(node, ast.Call) and _imports_own_module(node):
+            return True
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             if node.func.id in _REFLECTIVE_BUILTINS or (
                 node.func.id in _ATTRIBUTE_BUILTINS and not _plain_attribute(node, imported)
@@ -171,10 +189,10 @@ def _reflective_access(
         elif isinstance(node, ast.Name) and node.id == "__builtins__":
             return True
         elif isinstance(node, ast.Import):
-            if any(alias.name.split(".")[0] == "builtins" for alias in node.names):
+            if any(alias.name.split(".")[0] in {"builtins", "__main__"} for alias in node.names):
                 return True
         elif isinstance(node, ast.ImportFrom) and not node.level:
-            if node.module == "builtins" or any(
+            if node.module in {"builtins", "__main__"} or any(
                 alias.name in _REFLECTIVE_ATTRIBUTES
                 or (node.module == "sys" and alias.name == "modules")
                 for alias in node.names
@@ -752,6 +770,21 @@ def _helper(
     return _Helper(positional, keywords, named, frozenset(unsafe))
 
 
+def _referenced_outside_calls(nodes: list[ast.AST], parents: dict[ast.AST, ast.AST]) -> set[str]:
+    """Names and attribute names the file uses other than as the function called."""
+    referenced: set[str] = set()
+    for node in nodes:
+        if isinstance(node, (ast.Name, ast.Attribute)) and isinstance(node.ctx, ast.Load):
+            use = parents.get(node)
+            if isinstance(use, ast.Call) and use.func is node:
+                continue
+        if isinstance(node, ast.Name):
+            referenced.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            referenced.add(node.attr)
+    return referenced
+
+
 def _benign_helper_arguments(
     tree: ast.Module,
     nodes: list[ast.AST],
@@ -768,14 +801,19 @@ def _benign_helper_arguments(
     linear in the size of the file. A positional argument at or after a ``*``
     spread binds a parameter that cannot be read from the call, so it is not judged
     benign. A ``**`` spread cannot rebind a parameter the call already binds, since
-    Python raises before the body runs, so it changes nothing here.
+    Python raises before the body runs, so it changes nothing here. A helper the file
+    names other than by calling it, by its name or as an attribute, could have its
+    code, defaults or module binding replaced, as ``object.__setattr__(configure,
+    "__code__", code)`` or ``module.configure = swap`` do, so it is not read.
     """
+    referenced = _referenced_outside_calls(nodes, parents)
     functions = {
         stmt.name: stmt
         for stmt in tree.body
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
         and not stmt.decorator_list
         and bindings[stmt.name] == 1
+        and stmt.name not in referenced
     }
     helpers: dict[str, _Helper] = {}
     benign: set[ast.AST] = set()

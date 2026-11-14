@@ -344,9 +344,30 @@ def test_helpers_of_the_same_file_are_judged_by_what_they_do_with_the_server(tmp
         "def configure(label, srv=None): pass\n"
         + "def swap(srv, label=None): srv.tool()(delete_all)\n"
         + "setattr(configure, '__code__', swap.__code__)\nconfigure(mcp)\n",
-        "def configure(label=None): pass\nconfigure.__defaults__ = (mcp,)\n",
-        "def configure(*, label=None): pass\nconfigure.__kwdefaults__ = {'label': mcp}\n",
-        "def configure(label): pass\nconfigure.__wrapped__ = mcp\n",
+        "import operator\ndef configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "object.__setattr__(configure, '__code__', operator.attrgetter('__code__')(swap))\n"
+        + "configure(mcp)\n",
+        "import operator\ndef configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "configure.__setattr__('__co' + 'de__', operator.attrgetter('__co' + 'de__')(swap))\n"
+        + "configure(mcp)\n",
+        "def configure(label, srv=None): pass\n"
+        + "code = compile('def f(srv, label=None): srv.tool()(delete_all)', 's', 'exec')\n"
+        + "object.__setattr__(configure, '__co' + 'de__', code.co_consts[0])\n"
+        + "configure(mcp)\n",
+        "def configure(srv, label=None): pass\n"
+        + "configure.__defaults__, configure.__kwdefaults__ = None, None\nconfigure(mcp)\n",
+        "import importlib\ndef configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "importlib.import_module(__name__).configure = swap\nconfigure(mcp)\n",
+        "import __main__\ndef configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "__main__.configure = swap\nconfigure(mcp)\n",
+        "import importlib\nimportlib.import_module(__name__).mcp.tool()(delete_all)\n",
+        "import importlib\nimportlib.import_module(name=__spec__.name).mcp.tool()(delete_all)\n",
+        "__import__(__name__).mcp.tool()(delete_all)\n",
+        "from __main__ import mcp as same\nsame.tool()(delete_all)\n",
         "def hidden(value: mcp.tool()(delete_all)): pass\n",
         "def hidden() -> mcp.tool()(delete_all): pass\n",
         "registered: mcp.tool()(delete_all) = None\n",
@@ -421,6 +442,12 @@ def test_immediately_awaited_server_run_does_not_escape(tmp_path):
         "def total(df):\n    return df.eval('a + b')\n",
         "real = getattr(7, 'real')\n",
         "import os\nenviron = getattr(os, 'environ')\n",
+        "import functools\ndef build(server):\n    return server.sse_app()\napp = build(mcp)\n"
+        + "def logged(fn):\n    @functools.wraps(fn)\n    def inner(*a):\n        return fn(*a)\n"
+        + "    print(inner.__wrapped__, fn.__defaults__, fn.__kwdefaults__)\n    return inner\n",
+        "import logging\nlogger = logging.getLogger(__name__)\n",
+        "import importlib\njson = importlib.import_module('json')\n",
+        "def build(server):\n    return server.sse_app()\napp = build(mcp)\napp2 = build(mcp)\n",
     ],
 )
 def test_ordinary_server_use_is_not_a_gap(tmp_path, operation):

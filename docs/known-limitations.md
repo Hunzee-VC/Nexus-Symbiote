@@ -298,7 +298,11 @@ A way around a limit that its entry does not describe is worth a
   before any `*` spread, or by the keyword of a parameter that is not
   positional-only; a `**` spread cannot rebind it. A server that may reach
   another parameter, `*args` or `**kwargs`, as in `configure(*(), server)` or
-  `configure(srv=server)` with `srv` positional-only, is a gap.
+  `configure(srv=server)` with `srv` positional-only, is a gap. So is a call to
+  a helper that the file names anywhere other than as the function called, by
+  its name or as an attribute, as in `object.__setattr__(configure, "__code__",
+  code)` or `module.configure = swap`, since that can replace the body the call
+  runs.
   Any other use is a gap, such as saving, passing or dereferencing a bound method
   (`method = server.run`, `anyio.run(server.run_stdio_async)`), keeping a
   decorator, or naming the server in an annotation. An app or run coroutine still
@@ -316,16 +320,18 @@ A way around a limit that its entry does not describe is worth a
   and the attribute is a literal name other than `modules` and those listed next, so
   `getattr(os, "environ")` is accepted and `getattr(self, "name")` is a gap; the
   attributes `__self__`, `__closure__`, `__globals__`, `__builtins__`, `__dict__`,
-  `__annotations__`, `__traceback__`, `__code__`, `__defaults__`, `__kwdefaults__`,
-  `__wrapped__`, `__getattribute__`, `tb_frame`, `tb_next`,
+  `__annotations__`, `__traceback__`, `__code__`, `__getattribute__`, `tb_frame`,
+  `tb_next`,
   `f_back`, `f_locals`, `f_globals`, `f_builtins`, `gi_frame`, `cr_frame`,
   `ag_frame`, `_getframe`, `currentframe`, `getouterframes`, `getinnerframes`,
   `getargvalues` and `getclosurevars`, also imported by name; and a `modules`
   attribute that is not called, as in `sys.modules[__name__]`, or `modules`
-  imported from `sys`. A method that only shares a name, such as `model.eval()`
+  imported from `sys`; a call of `import_module` or `__import__` with `__name__`
+  or `__spec__` in its arguments, as in `importlib.import_module(__name__)`; and
+  an import of `__main__`. A method that only shares a name, such as `model.eval()`
   or `model.modules()`, is not reflection. Other reflection is not recognized,
-  such as a reflective builtin under another name,
-  `importlib.import_module(__name__)`, a module that imports itself, `gc`, or
+  such as a reflective builtin under another name, a module that imports itself
+  by its own name, as `import server` does in `server.py`, `gc`, or
   reflection in another file, including on the traceback of an exception that
   propagated out of a server's run, so a completed scan cannot prove that a
   server or agent never escaped.
