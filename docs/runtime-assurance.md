@@ -78,9 +78,10 @@ revocation lists use, and `runtime key-id` prints a key ID. The
 The sign command accepts an explicit contract rather than granting authority
 to a scan result automatically. It refuses a contract that could never verify,
 because its validity window is longer than its purpose allows or has already
-ended, refuses a private key file that its group or others can read, and prints
+ended, refuses a private key file that its group or others can read or that the
+user running the command does not own, even when that user is root, and prints
 the contract digest. `--passphrase-file` encrypts a new private key or unlocks an
-encrypted one; a passphrase file that its group or others can read is refused, and
+encrypted one; a passphrase file is refused on the same terms, and
 `runtime keygen` keeps neither key if either cannot be written. Keys held in a
 KMS, an HSM or an agent sign through `sign_contract` with any object that has
 `sign(data)` and `public_key()`.

@@ -343,3 +343,11 @@ def test_worker_sets_its_limits_through_the_darwin_tolerant_helper(platform, rep
     with pytest.raises(validation.ValidationBudgetError) as denied:
         validation.validate_arguments({"type": "object"}, {})
     assert denied.value.reason == reply
+
+
+def test_cyclic_ref_schema_is_refused_as_schema_invalid():
+    from nexus_symbiote.runtime_validation import ValidationBudgetError, validate_arguments
+
+    with pytest.raises(ValidationBudgetError) as failure:
+        validate_arguments({"$ref": "#"}, {})
+    assert failure.value.reason == "schema-invalid"
