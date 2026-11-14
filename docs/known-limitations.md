@@ -532,6 +532,12 @@ A way around a limit that its entry does not describe is worth a
 - **RAG values that are not exported enter the digest only as their type.** Without
   the key, a content filter written as `"strict"` and changed to `"off"` raises no
   alert. A boolean control is compared.
+- **Inline document contents need the binding key.** RAG source structure v2 records
+  their presence and count without hashing their contents. Without
+  `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a same-count content change raises no drift
+  alert and a nonempty document list carries a low `completeness` finding. The old
+  v1 structure and `inline_documents_hash` allowed offline guesses of content; older
+  inventories and exports remain sensitive and need recollection.
 - **RAG transport is read from the locator's scheme.** A `source_uris` entry with a
   clear-text scheme such as `http`, with or without `//`, is a high finding. One with
   another scheme that is neither encrypted nor local, a `host:port`, a connection

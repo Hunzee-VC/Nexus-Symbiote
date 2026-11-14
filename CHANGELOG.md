@@ -20,6 +20,12 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 - The `shadowscan` collector refuses a report that only a symbolic link reaches, such as `.shadowscan/report.json` behind a linked `.shadowscan` directory, and imports nothing while one exists. Such a link let a checkout import its own report at the highest-precedence path without the "more than one supported path" refusal. Report repository and commit bindings reject C1 control, bidirectional and other format characters, as terminal output does.
 - `ide_agents` reports a Claude Code allow rule whose command word is a shell, an interpreter or a launcher and that ends in a wildcard, such as `Bash(sh:*)` or `Bash(python3 -c:*)`, as an unscoped shell grant: it approves any command, as `Bash(*)` does, but was read as a scoped command.
 - `policy_weakened` lists `output.default_format` when a project policy selects an export format other than `json`, which changes what `scan -o` writes without `-f`.
+- **Breaking:** RAG structure profile v2 no longer exports unkeyed inline-document
+  fingerprints, which let inventory holders confirm guesses of document contents.
+  Inline content drift requires `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`; without it,
+  nonempty documents add a low completeness finding and only their count is recorded.
+  Recollect and review v1 baselines, and treat prior inventories as sensitive; see
+  [RAG source binding](docs/verification-source-binding.md#rag-sources).
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
 - The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.

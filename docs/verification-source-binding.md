@@ -289,31 +289,44 @@ changes the structure digest too, so the alert is high and names
 ## RAG sources
 
 Each RAG source record carries `static_config_hash` (profile
-`nexus-symbiote/rag-source-structure/v1`), an RFC 8785 digest of the source's field
+`nexus-symbiote/rag-source-structure/v2`), an RFC 8785 digest of the source's field
 names, its exported name, type, store type, embedding model, chunking and index
-identities, the exported form and URL shape of each `source_uris` entry, the digest
-of its inline `documents`, the state of its `sanitization` and `content_filter`
+identities, the exported form and URL shape of each `source_uris` entry, the presence
+and count of its inline `documents`, the state of its `sanitization` and `content_filter`
 controls (`enabled` only for `true` or an object whose `enabled` is `true`;
 `disabled`, `absent` or `unrecognized` otherwise), and a description of every other
 value: of other fields such as `vector_store`, of the members of `embeddings` other
 than `model`, of a control other than a boolean or a boolean `enabled` member, and,
 beside a `sources` or `knowledge_bases` list, of the fields that every source of the
 file shares. The description keeps names, booleans and nulls, and each URL as its
-exported origin and shape; other text and numbers enter it only as their type. Those
-URL origins are exported as `endpoint_origins` and `configuration_endpoint_origins`
-and checked for encrypted transport like `source_uris`; a finding about the shared
+exported origin and shape; other text and numbers enter it only as their type.
+Values under a `documents` field in these other fields are treated as inline content:
+only their presence, count or type is recorded, and URLs inside them are not treated
+as endpoints. URL origins elsewhere are exported as `endpoint_origins` and
+`configuration_endpoint_origins` and checked for encrypted transport like
+`source_uris`; a finding about the shared
 fields is recorded once, on the file's first source. A file that declares more than
 1,000 such URLs and `source_uris` entries together is a collection failure, since
 each may become a finding. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`
 set, `static_value_binding` is an HMAC-SHA256 (profile
 `nexus-symbiote/rag-source-values/v1`) over the source object and an HMAC of the
 shared fields. Without the key, a source whose URIs go beyond their exported origins,
-or whose values the record exports only as redaction markers or not at all, carries a
+or whose nonempty inline document contents or other values the record exports only as
+redaction markers or not at all, carries a
 low `completeness` risk naming the key, and so does the first source for shared
 values. URLs are exported as origins; connection strings, `user:secret@host` forms
 and token-shaped values as redaction markers; inline documents only as
-`document_count` and `properties.inline_documents_hash`. A file whose source list is
+`document_count`. With the same binding key, a content change raises a drift alert;
+without it, a same-count content change cannot be detected. A file whose source list is
 empty but which declares other fields is read as one source.
+
+The previous v1 structure profile and `inline_documents_hash` used unkeyed digests
+of inline content, so holders of those inventories can confirm guesses of low-entropy
+documents. Treat earlier inventories and exports as sensitive. Recollect both the
+reviewed baseline and candidate with v2, using the same binding key when content
+drift must be detected. A v1 baseline compared with v2 alerts, and a v1 inventory
+does not reconcile with a fresh v2 collection; review the migration before adopting
+the new baseline. Recollection does not revoke copies of earlier inventories.
 
 ## IDE agent settings
 

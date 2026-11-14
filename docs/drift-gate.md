@@ -12,7 +12,8 @@ local program or project script started as an MCP server runs, cannot alert. Wit
 argument other than the launcher package, a changed environment or header value, an
 endpoint or package index path changed on the same host, a changed value of a project
 resolver setting such as an `.npmrc` entry, an A2A or RAG URL path changed on the same
-host that keeps its depth, or a value the redaction removes from `.codex/config.toml`,
+host that keeps its depth, changed inline RAG document content at the same count,
+or a value the redaction removes from `.codex/config.toml`,
 `.cursor/cli.json` or the Antigravity, xAI and Copilot settings files, such as a token or
 a URL path in a `notify` command; see [source binding](verification-source-binding.md).
 The [known limitations](known-limitations.md) list those surfaces.
