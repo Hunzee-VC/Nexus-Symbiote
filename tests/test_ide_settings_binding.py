@@ -177,9 +177,19 @@ def test_scoped_grants_are_not_reported(tmp_path, rule):
     assert not any(r.category == "permission_scope" for r in agent.risks)
 
 
-def test_settings_digests_bind_every_value_and_keep_environment_values_out_with_a_key(
-    tmp_path, monkeypatch
-):
+def test_no_unkeyed_digest_covers_a_settings_secret(tmp_path):
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    settings = {**BASE, "env": {"PROVIDER_API_KEY": "sk-live-guessable"}}
+    agent = _claude(tmp_path, settings)
+    recorded = agent.properties["settings_hashes"][".claude/settings.json"]
+    # The recorded digest is over the redacted projection, never the file as read,
+    # so it cannot confirm a guess of the environment value.
+    assert recorded != hash_canonical(settings)
+    assert "sk-live-guessable" not in agent.model_dump_json()
+
+
+def test_settings_digests_never_cover_redacted_values(tmp_path, monkeypatch):
     settings = {
         **BASE,
         "env": {"ANTHROPIC_BASE_URL": "https://proxy.example/v1"},
@@ -200,20 +210,19 @@ def test_settings_digests_bind_every_value_and_keep_environment_values_out_with_
     assert agent.properties["declared_permission_rule_counts"]["deny"] == 1
     assert agent.properties["settings_declarations"]["env_variables"] == 1
     assert agent.properties["source_values_bound"] is False
-    assert not any(r.category == "completeness" for r in agent.risks)
+    assert any(r.category == "completeness" for r in agent.risks)
     assert "proxy.example" not in agent.model_dump_json()
-    # Without the key the digest covers every value as read, so a redirected
-    # environment value changes the record.
+    # No digest, keyed or not, covers an environment value: a changed value leaves
+    # the digest unchanged, so nothing in the record confirms a guess of it.
     moved = {**settings, "env": {"ANTHROPIC_BASE_URL": "https://evil.example/v1"}}
     assert (
         _claude(tmp_path / "b", moved).properties["settings_hashes"]
-        != agent.properties["settings_hashes"]
+        == agent.properties["settings_hashes"]
     )
-    # With the key no unkeyed digest covers environment values; the keyed binding does.
+    # The keyed binding is what detects the changed value.
     monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
     keyed, rekeyed = _claude(tmp_path / "c", settings), _claude(tmp_path / "d", moved)
     assert keyed.properties["settings_hashes"] == rekeyed.properties["settings_hashes"]
-    assert keyed.properties["settings_hashes"] != agent.properties["settings_hashes"]
     assert keyed.properties["source_values_bound"] is True
     assert keyed.properties["static_value_binding_profile"] == SETTINGS_VALUE_BINDING_PROFILE
     assert keyed.properties["static_value_binding"] != rekeyed.properties["static_value_binding"]
