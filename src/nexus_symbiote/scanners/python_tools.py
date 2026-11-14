@@ -188,14 +188,21 @@ def _reflective_access(
 _REGISTERING_KEYWORDS = _names(
     "tools tool_serializer providers mount lifespan middleware tool_transformations"
 )
-# Past the name and instructions, older SDK releases take keywords such as
-# `lifespan` positionally.
+# Past the name and instructions, older `fastmcp` releases take keywords such as
+# `lifespan` positionally. The `mcp` SDK's FastMCP takes at most seven positionals,
+# none of them handed the server; `MCPServer` and later releases are unknown.
 _PLAIN_POSITIONALS = 2
+_SDK_POSITIONALS = {"mcp.server": 7, "mcp.server.fastmcp": 7, "mcp.server.fastmcp.server": 7}
 # A request context hands handler and middleware code the server: `fastmcp` on a
-# context, the context a middleware context holds, and the low-level request context.
-_SERVER_HANDLES = _names("fastmcp fastmcp_context")
+# context (`_fastmcp` in the `mcp` SDK), the context a middleware context holds, the
+# context variables the SDKs keep the current context in, and the request context.
+# Leading underscores are ignored.
+_SERVER_HANDLES = _names("fastmcp fastmcp_context current_context request_ctx")
 _REQUEST_CONTEXT = "request_context"
 _SDK_ROOTS = _names("mcp fastmcp")
+# What a handler may read from a context without calling it; any other attribute read
+# could be a bound method, which holds the context in __self__.
+_CONTEXT_DATA = _names("request_id client_id session_id session")
 
 _DECORATOR_IMPORTS = {
     ("langchain_core.tools", "tool"): "langchain",
@@ -661,7 +668,7 @@ def _server_from_assignment(
         or bindings[factory] != 1
         or target.id in changed_receivers
         or bindings[target.id] != 1
-        or len(call.args) > _PLAIN_POSITIONALS
+        or len(call.args) > _SDK_POSITIONALS.get(imported.module or "", _PLAIN_POSITIONALS)
         or any(isinstance(arg, ast.Starred) for arg in call.args)
         or any(kw.arg is None or kw.arg in _REGISTERING_KEYWORDS for kw in call.keywords)
     ):
@@ -964,29 +971,192 @@ def _report_imported_receivers(tree: ast.Module, path: Path, result: ScanResult)
         )
 
 
-def _report_context_handles(nodes: list[ast.AST], path: Path, result: ScanResult) -> None:
+def _sdk_module(module: str | None) -> bool:
+    return (module or "").split(".")[0] in _SDK_ROOTS
+
+
+def _sdk_module_names(nodes: list[ast.AST], bindings: Counter[str]) -> set[str]:
+    """Names the file binds only to a module of ``mcp`` or ``fastmcp``."""
+    imports: Counter[str] = Counter()
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if _sdk_module(a.name):
+                    imports[a.asname or a.name.split(".")[0]] += 1
+    return {name for name, count in imports.items() if bindings[name] == count}
+
+
+def _rooted_at(node: ast.Attribute, names: set[str]) -> bool:
+    chain = _chain(node)
+    return chain is not None and isinstance(chain[-1], ast.Name) and chain[-1].id in names
+
+
+def _scope(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> ast.AST | None:
+    owner = parents.get(node)
+    while owner is not None and not isinstance(
+        owner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+    ):
+        owner = parents.get(owner)
+    return owner
+
+
+def _context_types(nodes: list[ast.AST], modules: set[str]) -> set[str]:
+    """The SDK ``Context`` classes the file names, and classes it derives from them."""
+    types = {
+        a.asname or a.name
+        for node in nodes
+        if isinstance(node, ast.ImportFrom) and not node.level and _sdk_module(node.module)
+        for a in node.names
+        if a.name == "Context"
+    }
+    classes = sorted(
+        (node for node in nodes if isinstance(node, ast.ClassDef)),
+        key=lambda node: (node.lineno, node.col_offset),
+    )
+    for cls in classes:
+        if any(_names_context(base, types, modules) for base in cls.bases):
+            types.add(cls.name)
+    return types
+
+
+def _names_context(annotation: ast.expr, types: set[str], modules: set[str]) -> bool:
+    for node in ast.walk(annotation):
+        if isinstance(node, ast.Name) and node.id in types:
+            return True
+        if isinstance(node, ast.Attribute) and node.attr == "Context" and _rooted_at(node, modules):
+            return True
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            words = set(re.findall(r"[A-Za-z_]\w*", node.value))
+            if words & types or (modules and "Context" in words):
+                return True
+    return False
+
+
+def _context_bindings(
+    nodes: list[ast.AST], parents: dict[ast.AST, ast.AST], modules: set[str]
+) -> tuple[set[tuple[ast.AST | None, str]], bool]:
+    """Parameters typed as an SDK context and names bound to ``get_context()``, by scope.
+
+    The second value is whether ``get_context`` is used other than to read from its
+    result or bind it to a name.
+    """
+    types = _context_types(nodes, modules)
+    getters = {
+        a.asname or a.name
+        for node in nodes
+        if isinstance(node, ast.ImportFrom) and not node.level and _sdk_module(node.module)
+        for a in node.names
+        if a.name == "get_context"
+    }
+    bound: set[tuple[ast.AST | None, str]] = set()
+    escaped = False
+    for node in nodes:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and types:
+            arguments = node.args
+            for arg in [
+                *arguments.posonlyargs,
+                *arguments.args,
+                *arguments.kwonlyargs,
+                *(a for a in (arguments.vararg, arguments.kwarg) if a is not None),
+            ]:
+                if arg.annotation is not None and _names_context(arg.annotation, types, modules):
+                    bound.add((node, arg.arg))
+        elif (isinstance(node, ast.Name) and node.id in getters) or (
+            isinstance(node, ast.Attribute)
+            and node.attr == "get_context"
+            and _rooted_at(node, modules)
+        ):
+            call = parents.get(node)
+            use = parents.get(call) if isinstance(call, ast.Call) else None
+            if not isinstance(call, ast.Call) or call.func is not node:
+                escaped = True
+            elif isinstance(use, ast.Assign) and len(use.targets) == 1:
+                target = use.targets[0]
+                if isinstance(target, ast.Name):
+                    bound.add((_scope(use, parents), target.id))
+                else:
+                    escaped = True
+            elif not (isinstance(use, ast.Attribute) and use.value is call):
+                escaped = True
+    return bound, escaped
+
+
+def _context_escapes(
+    name: ast.Name,
+    parents: dict[ast.AST, ast.AST],
+    bound: set[tuple[ast.AST | None, str]],
+) -> bool:
+    """Whether a use of a context can hand it to code the collector does not read."""
+    scope = _scope(name, parents)
+    while (scope, name.id) not in bound:
+        if scope is None:
+            return False
+        scope = _scope(scope, parents)
+    use = parents.get(name)
+    if isinstance(use, ast.Attribute):
+        call = parents.get(use)
+        return use.attr.startswith("_") or not (
+            use.attr in _CONTEXT_DATA or (isinstance(call, ast.Call) and call.func is use)
+        )
+    if isinstance(use, ast.Compare):
+        return not all(isinstance(op, (ast.Is, ast.IsNot)) for op in use.ops)
+    test: ast.AST = name
+    while isinstance(use, ast.BoolOp) or (
+        isinstance(use, ast.UnaryOp) and isinstance(use.op, ast.Not)
+    ):
+        test, use = use, parents.get(use)
+    return not (isinstance(use, (ast.If, ast.While, ast.IfExp, ast.Assert)) and use.test is test)
+
+
+def _report_context_handles(
+    nodes: list[ast.AST],
+    parents: dict[ast.AST, ast.AST],
+    bindings: Counter[str],
+    path: Path,
+    result: ScanResult,
+) -> None:
     """A server reached through a request context can be given tools from any handler.
 
     ``request_context`` is common outside MCP, so it counts only in a file that imports
-    from ``mcp`` or ``fastmcp``.
+    from ``mcp`` or ``fastmcp``. A chain of attributes of an SDK module, such as
+    ``mcp.server.fastmcp.exceptions``, is not a context. A context typed as one, or
+    returned by ``get_context()``, that is passed on, stored or returned can reach
+    code the collector does not read.
     """
     sdk_import = any(
+        (isinstance(node, ast.Import) and any(_sdk_module(a.name) for a in node.names))
+        or (isinstance(node, ast.ImportFrom) and not node.level and _sdk_module(node.module))
+        for node in nodes
+    )
+    modules = _sdk_module_names(nodes, bindings)
+    handle = any(
         (
-            isinstance(node, ast.Import)
-            and any(a.name.split(".")[0] in _SDK_ROOTS for a in node.names)
+            isinstance(node, ast.Attribute)
+            and (
+                node.attr.lstrip("_") in _SERVER_HANDLES
+                or (sdk_import and node.attr.lstrip("_") == _REQUEST_CONTEXT)
+            )
+            and not _rooted_at(node, modules)
         )
         or (
             isinstance(node, ast.ImportFrom)
             and not node.level
-            and (node.module or "").split(".")[0] in _SDK_ROOTS
+            and _sdk_module(node.module)
+            and any(a.name.lstrip("_") in _SERVER_HANDLES for a in node.names)
         )
         for node in nodes
     )
-    if any(
-        isinstance(node, ast.Attribute)
-        and (node.attr in _SERVER_HANDLES or (sdk_import and node.attr == _REQUEST_CONTEXT))
-        for node in nodes
-    ):
+    if not handle and sdk_import:
+        bound, handle = _context_bindings(nodes, parents, modules)
+        names = {name for _, name in bound}
+        handle = handle or any(
+            isinstance(node, ast.Name)
+            and isinstance(node.ctx, ast.Load)
+            and node.id in names
+            and _context_escapes(node, parents, bound)
+            for node in nodes
+        )
+    if handle:
         result.surfaces_excluded.append(
             f"{path.as_posix()}: Python MCP server reachable through a request context"
         )
@@ -1045,8 +1215,10 @@ def collect_python_tools(
         for a in stmt.names
         if stmt.module is not None and (stmt.module, a.name) in _AGENT_FACTORIES
     }
+    bindings = _bindings(nodes)
+    parents = {child: node for node in nodes for child in ast.iter_child_nodes(node)}
     _report_import_scope(imports, nodes, path, result)
-    _report_context_handles(nodes, path, result)
+    _report_context_handles(nodes, parents, bindings, path, result)
     _report_unused_factories(nodes, factories, path, result)
     if not factories and not decorators and not agent_factories:
         _report_imported_receivers(tree, path, result)
@@ -1057,8 +1229,6 @@ def collect_python_tools(
         )
         return
 
-    bindings = _bindings(nodes)
-    parents = {child: node for node in nodes for child in ast.iter_child_nodes(node)}
     source_digest = hash_bytes(source.encode("utf-8"))
     seen_refs: set[str] = set()
     if decorators:

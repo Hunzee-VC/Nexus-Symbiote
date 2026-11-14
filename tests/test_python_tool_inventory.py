@@ -515,6 +515,11 @@ def test_agent_tools_are_named_per_agent(tmp_path):
 
 
 FASTMCP2 = "from fastmcp import FastMCP\n"
+CONTEXT_TOOL = (
+    FASTMCP
+    + "from mcp.server.fastmcp import Context\nmcp = FastMCP('x')\n"
+    + "@mcp.tool()\ndef read_note(ctx: Context):\n"
+)
 
 
 @pytest.mark.parametrize(
@@ -545,6 +550,27 @@ FASTMCP2 = "from fastmcp import FastMCP\n"
         "def register(ctx):\n    ctx.fastmcp.add_tool(delete_all)\n",
         "from mcp.types import TextContent\n"
         + "def register(ctx):\n    ctx.request_context.request.app\n",
+        CONTEXT_TOOL + "    ctx._fastmcp.add_tool(delete_all)\n",
+        CONTEXT_TOOL + "    ctx._request_context.lifespan_context\n",
+        CONTEXT_TOOL + "    wire(ctx)\n",
+        CONTEXT_TOOL + "    hold.append(ctx)\n",
+        CONTEXT_TOOL + "    wire(ctx.read_resource)\n",
+        CONTEXT_TOOL + "    c = ctx\n",
+        CONTEXT_TOOL.replace("ctx: Context", "ctx: 'Context'") + "    wire(ctx)\n",
+        CONTEXT_TOOL.replace("ctx: Context", "ctx: Context | None = None")
+        + "    wire(ctx or None)\n",
+        FASTMCP
+        + "from mcp.server.fastmcp import Context as C\nclass Mine(C):\n    pass\n"
+        + "mcp = FastMCP('x')\n@mcp.tool()\ndef read_note(ctx: Mine):\n    wire(ctx)\n",
+        FASTMCP2
+        + "from fastmcp.server.dependencies import get_context\nmcp = FastMCP('x')\n"
+        + "@mcp.tool\ndef read_note():\n    c = get_context()\n    wire(c)\n",
+        FASTMCP2
+        + "from fastmcp.server.dependencies import get_context\nmcp = FastMCP('x')\n"
+        + "@mcp.tool\ndef read_note():\n    wire(get_context())\n",
+        FASTMCP2
+        + "from fastmcp.server.context import _current_context\nmcp = FastMCP('x')\n"
+        + "@mcp.tool\ndef read_note():\n    wire(_current_context.get())\n",
     ],
 )
 def test_servers_reached_through_sdk_handles_are_gaps(tmp_path, source):
@@ -579,3 +605,51 @@ def test_context_used_for_logging_and_progress_is_not_a_gap(tmp_path, header):
     (tmp_path / "CLAUDE.md").write_text("Be helpful.\n")
     checked = CliRunner().invoke(main, ["scan", "--no-project-policy", "--check", str(tmp_path)])
     assert checked.exit_code == 0, checked.output
+
+
+def test_context_passed_to_an_unread_module_is_a_gap(tmp_path):
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "boot.py").write_text(
+        "def wire(c):\n    getattr(c, 'fast' 'm' 'cp').add_tool(print)\n"
+    )
+    result, tools = scan(
+        tmp_path,
+        CONTEXT_TOOL.replace("Context\n", "Context\nfrom boot import wire\n", 1)
+        + "    wire(ctx)\n    return 'note'\n",
+    )
+    assert [tool.name for tool in tools] == ["read_note"]
+    assert result.surfaces_excluded == [
+        "pkg/server.py: Python MCP server reachable through a request context"
+    ]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import mcp.server.fastmcp.exceptions\n"
+        + FASTMCP
+        + "server = FastMCP('x')\n@server.tool()\ndef read_note(name: str) -> str:\n"
+        + "    if not name:\n        raise mcp.server.fastmcp.exceptions.ToolError('no')\n"
+        + "    return name\n",
+        FASTMCP + "mcp = FastMCP('x', 'Notes', 'https://example.com')\n"
+        "@mcp.tool()\ndef read_note() -> str:\n    return 'x'\n",
+        FASTMCP2
+        + "from fastmcp import Context\nfrom fastmcp.server.dependencies import get_context\n"
+        + "mcp = FastMCP('x')\n@mcp.tool\nasync def read_note(ctx: Context | None = None):\n"
+        + "    if ctx is not None and not ctx:\n        return ctx.session_id\n"
+        + "    c = get_context()\n    await c.info('x')\n    return get_context().request_id\n",
+    ],
+)
+def test_sdk_module_paths_and_plain_context_use_are_not_gaps(tmp_path, source):
+    result, tools = scan(tmp_path, source)
+    assert [tool.name for tool in tools] == ["read_note"]
+    assert not result.scan_failures and not result.surfaces_excluded
+
+
+def test_fastmcp_package_positional_limit_still_applies(tmp_path):
+    result, tools = scan(
+        tmp_path,
+        FASTMCP2 + "mcp = FastMCP('x', 'Notes', startup)\n@mcp.tool\ndef read_note(): pass\n",
+    )
+    assert not tools
+    assert result.surfaces_excluded
