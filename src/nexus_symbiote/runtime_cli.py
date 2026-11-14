@@ -107,8 +107,13 @@ def _read(path: Path, maximum: int = MAX_INPUT_BYTES, *, owner_only: str = "") -
     """Read a bounded regular file; with ``owner_only``, refuse one others can access."""
     with open_regular_file(path) as stream:
         info = os.fstat(stream.fileno())
-        if owner_only and os.name == "posix" and stat.S_IMODE(info.st_mode) & 0o077:
-            raise _KeyFileError(f"{owner_only} must not be accessible to group or others")
+        if owner_only and os.name == "posix":
+            if stat.S_IMODE(info.st_mode) & 0o077:
+                raise _KeyFileError(f"{owner_only} must not be accessible to group or others")
+            # Mode bits alone do not say whose file this is: run as root, an
+            # attacker-owned 0600 file in a shared directory would pass.
+            if info.st_uid != os.geteuid():
+                raise _KeyFileError(f"{owner_only} must be owned by the user running the command")
         if info.st_size > maximum:
             raise _InputTooLargeError
         raw = stream.read(maximum + 1)

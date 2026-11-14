@@ -50,6 +50,7 @@ from nexus_symbiote.generators.validation import (
     require_valid,
     spdx_errors,
 )
+from nexus_symbiote.utils.terminal import neutralize
 
 PROJECTION = "spdx-3.0.1/2"
 SPDX_TYPE_MAP = {
@@ -396,15 +397,17 @@ class SPDXGenerator(Generator):
             ),
         }
         if edge.conditions:
-            conditions = edge.conditions
+            # SARIF and VEX neutralize inventory text in rendered messages; SPDX
+            # comments are rendered by viewers the same way.
+            conditions = neutralize(edge.conditions)
             if len(conditions) > MAX_CONDITION_COMMENT:
                 conditions = conditions[:MAX_CONDITION_COMMENT] + " [truncated]"
             relationship["comment"] = (
-                f"Conditional native relationship '{edge.relationship}' (conditions: "
+                f"Conditional native relationship '{neutralize(edge.relationship)}' (conditions: "
                 f"{conditions}). Not an unconditional {typed or 'relationship'} assertion."
             )
         elif typed is None:
-            relationship["comment"] = f"Native relationship '{edge.relationship}'."
+            relationship["comment"] = f"Native relationship '{neutralize(edge.relationship)}'."
         return relationship
 
     @staticmethod

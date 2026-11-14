@@ -29,6 +29,7 @@ from nexus_symbiote.core.models import (
 )
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.utils.terminal import UNSAFE_TEXT
 
 MAX_REPORT_BYTES = 16 * 1024 * 1024
 MAX_FINDINGS = 10_000
@@ -192,6 +193,10 @@ def _clean_binding(value: Any) -> str | None:
     if not isinstance(value, str) or not value or len(value) > 4096:
         return None
     if any(ord(char) < 0x20 or ord(char) == 0x7F for char in value):
+        return None
+    # C1 controls, line separators and bidi/format characters disguise or rewrite
+    # output just as C0 does; the registry collector applies the same gate.
+    if UNSAFE_TEXT.search(value) is not None:
         return None
     return value
 

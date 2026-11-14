@@ -49,7 +49,9 @@ def neutralize(value: object) -> str:
     Apply it to a whole output line, not to its pieces: two harmless pieces, such as a
     name ending in "##" and a following "[", can join into a CI log command.
     """
-    return LOG_COMMAND.sub("##\ufffd", UNSAFE_TEXT.sub("\ufffd", str(value)))
+    # A tab advances the cursor to the next stop, so untrusted text could misalign
+    # columns within its own line; a space keeps the separation without the movement.
+    return LOG_COMMAND.sub("##\ufffd", UNSAFE_TEXT.sub("\ufffd", str(value)).replace("\t", " "))
 
 
 def safe_line(prefix: str, *values: object) -> str:

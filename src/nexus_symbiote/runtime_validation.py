@@ -216,6 +216,7 @@ def _run_worker(wire: bytes) -> bytes:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             env={"PATH": os.defpath},
+            start_new_session=True,
         )
     except OSError as exc:
         raise ValidationBudgetError(
@@ -1020,6 +1021,10 @@ def _evaluate(dialects: dict[str, Any], schema: dict[str, Any], arguments: Any) 
     except SchemaValidationError:
         return _INVALID
     except (SchemaError, Unresolvable, re.error):
+        return _SCHEMA
+    except RecursionError:
+        # A cyclic $ref ({"$ref": "#"}) recurses in jsonschema before any budget
+        # applies; the schema, not the arguments or the worker, is at fault.
         return _SCHEMA
     return _VALID
 

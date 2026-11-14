@@ -518,3 +518,15 @@ def test_verification_for_another_digest_is_rejected():
         )
     with pytest.raises(ValueError, match="no report digest"):
         verify_discovery_report(DiscoveryVerification(), b"{}", IDENTITY, ISSUER)
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    ["https://example.test/a\x9bb", "repo name", "acme‮repo.example"],
+)
+def test_bindings_with_disguising_characters_stay_unknown(hostile):
+    data = json.loads(json.dumps(MINIMAL))
+    data["repository"] = hostile
+    record = ShadowScanImporter().parse_report(json.dumps(data)).discovery_verification
+    assert record is not None
+    assert record.repository == "unknown"

@@ -21,6 +21,7 @@ _URL = re.compile(r"(?<![a-zA-Z0-9+.-])[a-zA-Z0-9+.-]+://[^\s\"'<>]+")
 # Possessive and bounded quantifiers keep every attempt linear.
 _ASSIGNMENT = re.compile(
     r"(?i)((?:api[-_]?key|access[-_]?key|secret[-_]?key|private[-_]?key|account[-_]?key"
+    r"|[a-z0-9]{2,24}[-_]key"
     r"|token|password|passwd|passphrase|pwd|secret|credentials?|sig)"
     r"(?:\d{1,4})?(?:[-_.][a-z0-9]{1,32}){0,4}[\"']?\s*+[:=]\s*+)"
     r"(\"(?:[^\"\\\n]|\\.){0,256}\"|'(?:[^'\\\n]|\\.){0,256}'|[^\s,;]++)"
@@ -43,6 +44,8 @@ _DISTINCT_SHAPES = (
     r"|xox[abeoprs]-[\w-]{10,}+|[rs]k_(?:live|test)_[A-Za-z0-9]{16,}+"
     r"|(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])|AIza[\w-]{35}|ya29\.[\w-]{20,}+"
     r"|npm_[A-Za-z0-9]{36}|pypi-[\w-]{50,}+|hf_[A-Za-z0-9]{30,}+"
+    r"|SG\.[\w-]{16,}+\.[\w-]{16,}+|dckr_pat_[\w-]{20,}+|shp(?:at|ss|ca)_[0-9a-fA-F]{32}"
+    r"|SK[0-9a-f]{32}(?![A-Za-z0-9])"
 )
 # A JWT can fail only at its first dot, so it starts only at a word boundary: started
 # after every "_" its first segment would be rescanned once per position.
