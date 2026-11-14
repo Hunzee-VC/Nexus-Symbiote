@@ -673,6 +673,72 @@ def _globals_package(node: ast.expr | None) -> str | None:
     return name.rpartition(".")[0]
 
 
+def _spread(call: ast.Call) -> tuple[list[ast.expr], dict[str, ast.expr]]:
+    """A call's arguments by position and by keyword, with ``*`` and ``**`` displays spread.
+
+    A ``*`` argument that is not a list or tuple display ends the known positions.
+    """
+    positional: list[ast.expr] = []
+    for value in call.args:
+        if not isinstance(value, ast.Starred):
+            positional.append(value)
+        elif isinstance(value.value, ast.List | ast.Tuple) and not any(
+            isinstance(item, ast.Starred) for item in value.value.elts
+        ):
+            positional.extend(value.value.elts)
+        else:
+            break
+    keywords: dict[str, ast.expr] = {}
+    for keyword in call.keywords:
+        if keyword.arg:
+            keywords[keyword.arg] = keyword.value
+        elif isinstance(keyword.value, ast.Dict):
+            for key, item in zip(keyword.value.keys, keyword.value.values, strict=True):
+                if (name := _literal(key)) is not None:
+                    keywords[name] = item
+    return positional, keywords
+
+
+def _arguments(call: ast.Call) -> list[ast.expr]:
+    """A call's arguments and keyword values, with ``*`` and ``**`` displays spread."""
+    values: list[ast.expr] = []
+    for value in call.args:
+        if isinstance(value, ast.Starred) and isinstance(
+            value.value, ast.List | ast.Tuple | ast.Set
+        ):
+            values.extend(value.value.elts)
+        else:
+            values.append(value)
+    for keyword in call.keywords:
+        if keyword.arg is None and isinstance(keyword.value, ast.Dict):
+            values.extend(keyword.value.values)
+        else:
+            values.append(keyword.value)
+    return values
+
+
+def _argument_literals(call: ast.Call, *, containers: bool) -> set[str]:
+    """Every literal a call is given as an argument, each up to its first colon.
+
+    ``*`` and ``**`` displays are spread into arguments first. With ``containers``, an
+    element of a list, tuple, set or dict argument counts too.
+    """
+    found: set[str] = set()
+    for value in _arguments(call):
+        if isinstance(value, ast.Starred):
+            value = value.value
+        items: list[ast.expr] = [value]
+        if containers and isinstance(value, ast.List | ast.Tuple | ast.Set):
+            items = value.elts
+        elif containers and isinstance(value, ast.Dict):
+            items = value.values
+        for item in items:
+            text = _literal(item.value if isinstance(item, ast.Starred) else item)
+            if text:
+                found.add(text.partition(":")[0])
+    return found
+
+
 def _loaded_names(call: ast.Call) -> set[str]:
     """Every module name a dynamic import call can load, as its literal arguments say.
 
@@ -680,19 +746,20 @@ def _loaded_names(call: ast.Call) -> set[str]:
     locals, fromlist, level)`` or ``pkgutil.resolve_name("module:attribute")``, so each
     reading applies; a relative name counts once resolved against a literal package.
     """
-    keywords = {keyword.arg: keyword.value for keyword in call.keywords if keyword.arg}
+    positional, keywords = _spread(call)
 
     def argument(position: int, keyword: str) -> ast.expr | None:
-        return call.args[position] if position < len(call.args) else keywords.get(keyword)
+        return positional[position] if position < len(positional) else keywords.get(keyword)
 
-    texts = [_literal(value) for value in (*call.args, *keywords.values())]
+    found = _argument_literals(call, containers=False)
     name = _literal(argument(0, "name"))
     if name is not None:
-        texts.append(_absolute(name, _literal(argument(1, "package"))))
+        texts = [_absolute(name, _literal(argument(1, "package")))]
         level = argument(4, "level")
         if isinstance(level, ast.Constant) and type(level.value) is int and level.value > 0:
             texts.append(_absolute(name, _globals_package(argument(1, "globals")), level.value))
-    return {text.partition(":")[0] for text in texts if text}
+        found.update(text.partition(":")[0] for text in texts if text)
+    return found
 
 
 def _binding_names(node: ast.expr) -> list[ast.expr]:
@@ -791,20 +858,12 @@ def _owned(name: str, module: str | None) -> bool:
 def _named_module(call: ast.Call) -> set[str]:
     """Every module a call's arguments name as a literal, in any position.
 
-    Any callee counts, and so does a literal inside a list, tuple or set argument, so a
-    loader that reaches the call under a name no binding shows (an argument, a match
-    capture, a return value, ``functools.partial``, ``map`` or a thread target) still
-    leaves a gap.
+    Any callee counts, and so does a literal inside a list, tuple, set or dict argument,
+    also behind ``*`` or ``**``, so a loader that reaches the call under a name no
+    binding shows (an argument, a match capture, a return value, ``functools.partial``,
+    ``map`` or a thread target's ``args`` or ``kwargs``) still leaves a gap.
     """
-    values: list[ast.expr] = [*call.args, *(k.value for k in call.keywords)]
-    found: set[str] = set()
-    for value in values:
-        items = value.elts if isinstance(value, ast.List | ast.Tuple | ast.Set) else [value]
-        for item in items:
-            text = _literal(item.value if isinstance(item, ast.Starred) else item)
-            if text:
-                found.add(text.partition(":")[0])
-    return found
+    return _argument_literals(call, containers=True)
 
 
 def _exempt_call(func: ast.expr, owned: set[str], loggers: set[str]) -> bool:
@@ -838,8 +897,9 @@ def _python_launches(tree: ast.Module) -> list[str]:
     a star import of one, is a gap, and so is a server class reached as an attribute:
     the tool collector inventories only servers built from the SDK's own import. A
     dynamic import counts when a literal argument names an MCP server or client
-    module, through a loader or a name bound to one, and so does any call whose first
-    argument or ``name`` keyword is such a literal, whatever the callee; a computed
+    module, through a loader or a name bound to one, and so does any call given such a
+    literal in any argument position or keyword, or as an element of a list, tuple, set
+    or dict argument, also behind ``*`` or ``**``, whatever the callee; a computed
     name is not followed.
     """
     nodes = list(ast.walk(tree))

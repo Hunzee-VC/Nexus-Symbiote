@@ -257,8 +257,9 @@ A way around a limit that its entry does not describe is worth a
   a container or returned by a function is covered, and so is one that names a
   client module: `mcp.client`, `agents.mcp`, `pydantic_ai.mcp`,
   `langchain_mcp_adapters` or a submodule. The literal may be in any argument
-  position, a keyword or an element of a list, tuple or set argument, so
-  `functools.partial`, `map` and a thread target are covered too. A call to another
+  position, a keyword or an element of a list, tuple, set or dict argument, also
+  behind `*` or `**`, so `functools.partial`, `map` and a thread target's `args` or
+  `kwargs` are covered too. A call to another
   function with such a literal is a gap as well, except `logging.getLogger` and a
   server class imported from its own module, such as `FastMCP("mcp")`. A literal is a string or an
   f-string without placeholders. A dynamic import (`importlib.import_module`,

@@ -839,8 +839,27 @@ def test_any_call_whose_first_argument_names_an_mcp_server_module_is_a_gap(tmp_p
         "threading.Thread(target=importlib.import_module, args=('mcp.server.fastmcp',))\n",
         "import importlib\nFastMCP = importlib.import_module\nFastMCP('mcp.server.fastmcp')\n",
         'import importlib\nimportlib.reload(mcp_module)\nprint("x", "mcp.server")\n',
+        "import importlib, threading\n"
+        "threading.Thread(target=importlib.import_module, kwargs={'name': 'fastmcp'})\n",
+        "import importlib\nimportlib.import_module(*['mcp.server.fastmcp'])\n",
+        "import importlib\nimportlib.import_module(**{'name': 'mcp.server'})\n",
+        "run(*('fastmcp.server',))\n",
+        "__import__(*['server', {'__package__': 'mcp'}, None, None, 1])\n",
+        "__import__(**{'name': 'server', 'globals': {'__package__': 'mcp'}, 'level': 1})\n",
     ],
-    ids=["partial", "map", "thread-target", "loader-named-like-a-server-class", "later-argument"],
+    ids=[
+        "partial",
+        "map",
+        "thread-target",
+        "loader-named-like-a-server-class",
+        "later-argument",
+        "thread-target-keywords",
+        "starred-argument",
+        "double-starred-argument",
+        "starred-argument-of-another-callee",
+        "starred-relative-name",
+        "double-starred-relative-name",
+    ],
 )
 def test_a_literal_in_any_argument_position_is_a_gap(tmp_path, source):
     result = _scan(tmp_path, {"pkg/server.py": source + "mcp_note = 1\n"})
