@@ -232,10 +232,12 @@ class Config:
             else None
         )
         validate = _boolean(env.get("SYMBIOTE_VALIDATE", "true"), "validate")
-        if validate and scanners and set(scanners) != SCANNERS:
+        risk_check = _boolean(env.get("SYMBIOTE_RISK_CHECK", "true"), "risk-check")
+        if (validate or risk_check) and scanners and set(scanners) != SCANNERS:
+            # Either gate fails on partial coverage, so the run could only fail later.
             raise InputError(
-                "scanners subset requires validate to be false, because completeness "
-                "requires all built-in collectors"
+                "scanners subset requires validate and risk-check to be false, because "
+                "both gates require all built-in collectors"
             )
         return cls(
             workspace,
@@ -244,7 +246,7 @@ class Config:
             fmt,
             scanners,
             validate,
-            _boolean(env.get("SYMBIOTE_RISK_CHECK", "true"), "risk-check"),
+            risk_check,
             threshold,
             _boolean(env.get("SYMBIOTE_SARIF", "false"), "sarif-upload"),
             signers,
@@ -608,10 +610,9 @@ def run(
             out.emit(passed="skipped")
         else:
             arguments = ["risk", "--no-project-policy", str(native), "--json-output", *unsigned]
-            if config.validate:
-                # The same reconciliation and signers as validation, so a signer policy
-                # that verifies the discovery producer counts here too.
-                arguments += ["--project", str(config.project), *signers]
+            # The same reconciliation and signers as validation, whether or not it ran,
+            # so a signer policy that verifies the discovery producer counts here too.
+            arguments += ["--project", str(config.project), *signers]
             if config.threshold == 0:
                 arguments.append("--no-score-threshold")
             else:

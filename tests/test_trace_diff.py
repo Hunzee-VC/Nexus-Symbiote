@@ -197,7 +197,7 @@ def test_content_never_reaches_any_output(tmp_path, runner):
 HOSTILE = [
     "x\n::error title=Spoofed::All checks passed",
     "##[error]forged ##vso[task.complete result=Succeeded]",
-    "evil\x1b[2K\rfake‮gpj.exe​",
+    "evil\x1b[2K\rfake\u202egpj.exe\u200b",
     "<script>alert(1)</script> [link](https://attacker.example) www.attacker.example",
 ]
 
@@ -214,7 +214,7 @@ def test_hostile_identifiers_print_inert_in_every_output(tmp_path, runner, name)
     for line in result.stdout.splitlines():
         assert not line.lstrip().startswith("::")
         assert not LOG_COMMAND.search(line)
-        for character in ("\x1b", "\r", "‮", "​"):
+        for character in ("\x1b", "\r", "\u202e", "\u200b"):
             assert character not in line
     assert any(line.startswith("  Undeclared: tool '") for line in result.stdout.splitlines())
     as_json = runner.invoke(main, ["trace-diff", str(inventory), str(trace), "--json-output"])

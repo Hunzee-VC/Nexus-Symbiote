@@ -555,7 +555,11 @@ the call's `server_id`, `tool_name`, `action` and `resource`, the context fields
 `request_digest`, the trust status and snapshot serials and digests, the
 approval digest and actor, the key IDs that signed each contract, and the state
 store's `store_id`. It never holds argument values. The call labels come from the
-caller, so treat them as untrusted text. An exception raised by `on_decision`
+caller, so treat them as untrusted text. On an admitted call each list of key IDs
+names the signers whose authority counted: unrevoked, within their scope and, for an
+approval, bound to an actor. An extra signature by a revoked or out-of-scope key does
+not stop a valid quorum and is not listed. A denial may list every verified signature
+of the contract it refused. An exception raised by `on_decision`
 propagates; after admission it prevents execution and the approval stays
 consumed.
 

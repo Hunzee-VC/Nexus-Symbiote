@@ -42,7 +42,7 @@ HOSTILE = [
     "``code`` and `tick` and ```fence```",
     "[click](https://evil.example) ![img](https://evil.example/x.png) <https://evil.example>",
     "https://evil.example/a www.evil.example user@evil.example",
-    "\x1b[31mred\x1b[0m ‮evil‬ zero​width ﻿bom",
+    "\x1b[31mred\x1b[0m \u202eevil\u202c zero\u200bwidth \ufeffbom",
     "line\n::error::forged\n##[error]legacy ::warning::x ##vso[task.setvariable]y",
     "*em* _em_ **strong** ~~strike~~ $math$ &lt;entity&gt; \\ backslash",
     "# heading - list > quote 1. ordered",
@@ -336,12 +336,12 @@ def test_inventory_text_renders_literally_and_forms_no_markup(runner, tmp_path, 
     for line in text.splitlines():
         assert not line.lstrip().startswith("::")
         assert not re.search(r"##[A-Za-z]*\[", line)
-        assert not re.search(r"[\x00-\x08\x0a-\x1f\x7f​‪-‮﻿]", line)
+        assert not re.search(r"[\x00-\x08\x0a-\x1f\x7f\u200b\u202a-\u202e\ufeff]", line)
         assert "://" not in line.replace("<https://", "") and "www." not in line
 
 
 def test_json_neutralizes_details_and_keeps_identifiers_exact(runner, tmp_path):
-    hostile = "\x1b[31m‮::error::x ##[error]y"
+    hostile = "\x1b[31m\u202e::error::x ##[error]y"
     inventory = _write(
         tmp_path / "bom.json",
         MCPServerComponent(

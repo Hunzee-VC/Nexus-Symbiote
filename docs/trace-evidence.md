@@ -177,6 +177,12 @@ and the basis, `host` for the endpoint and `name-and-host` for its tools, says t
 port was compared. The same holds for a server whose `endpoint_url` states no port and
 whose scheme has no default port.
 
+An `endpoint_url` declares a host only when every URL parser reads its authority
+alike, as a host and an optional port from 1 to 65535. One with user information, a
+backslash or a percent escape, such as `https://approved.example\@other.example`, which
+Python reads as `other.example` and a browser or Node client as `approved.example`,
+declares no host, so a span to either host is `undeclared`.
+
 IP addresses and host names are compared as text; nothing is resolved, so a span that
 reports an address and an inventory that records a host name do not match. A remote MCP
 server's tools are declared only in an inventory that records them, such as one that
