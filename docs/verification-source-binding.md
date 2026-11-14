@@ -347,7 +347,15 @@ names and the first word of each command a shell operator starts, without a lead
 `NAME=value` assignment, and no other word, so `check.sh --password 482913` is digested
 as `check.sh`; an argument list keeps only URL origins, and each value under
 `headers`, `httpHeaders`, `http_headers` or `env_http_headers`, such as `X-Pin: 482913`,
-becomes `***` while its header name stays. A URL keeps only its scheme, host and
+in a map or in a list, becomes `***` while its header name stays. A `headersHelper`
+counts as a command. A permission rule in a Claude Code or Cursor `permissions.allow`,
+`ask` or `deny` list, or a Gemini CLI `excludeTools`, `coreTools`, `allowedTools` or
+`tools.exclude`, `tools.core` or `tools.allowed` list, and a hook `matcher` keep their
+tool name and the shape of their specifier, so `Bash(mysql -uroot -p482913 db:*)` is
+digested as `Bash(mysql)` and `Read(./src/**)` stays as it is. A Codex
+`shell_environment_policy.set` map and a `query_params` map keep their names only, as
+`env` does, and a Codex `experimental_bearer_token` or an OAuth `clientSecret` becomes
+`***`. A URL keeps only its scheme, host and
 port, and a credential in an assignment, after an authorization scheme or in a known
 token format is removed. The redaction is applied separately to the text between
 the shell operators `;`, `|`, `&`, `$`, `` ` ``, `(`, `)`, `{`, `}`, `<`, `>` and line breaks,
@@ -383,12 +391,13 @@ whitespace change no digest. With the key, `static_value_binding` is an HMAC-SHA
 under the key over every file as read
 (profile `nexus-symbiote/ide-settings-values/v1`), so the record still changes with
 any value while no unkeyed digest covers environment values or text the redaction
-removes. A value the redaction leaves in place outside a command, an argument list or
-a header, such as a password stored under a key name, can still be confirmed from the
+removes. A value the redaction leaves in place outside a command, an argument list,
+a header, a permission rule or the maps and keys named above, such as a password
+stored under another key name or a `cwd` path, can still be confirmed from the
 digest, so keep credentials out of settings files. Without the key, a change only to a
-command's arguments, such as a new pinned version in an MCP server's `args` or a new
-option of a hook, raises no alert; a new program, host, operator, hook or header name
-does. The digests agree between a keyed and an unkeyed
+command's arguments, such as a new pinned version in an MCP server's `args`, a new
+option of a hook or `Bash(npm test)` becoming `Bash(npm publish)`, raises no alert; a
+new program, host, operator, hook, rule, tool or header name does. The digests agree between a keyed and an unkeyed
 collection, except that without the key a file holding an ambiguous URL authority is
 a failure instead of a digest, so enabling the key later changes no recorded digest;
 the binding itself appears only with the key. A record from an earlier build has no

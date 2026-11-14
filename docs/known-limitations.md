@@ -463,14 +463,18 @@ A way around a limit that its entry does not describe is worth a
 - **Settings digests can confirm guesses of what the redaction keeps.** Every digest
   in `settings_hashes` covers its file after the redaction, with or without
   `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, so it cannot confirm a guess of an `env` value,
-  such as the environment of an MCP server that `.gemini/settings.json` declares, of
-  the command of a credential helper (`apiKeyHelper`, `awsAuthRefresh`,
-  `awsCredentialExport`, `gcpAuthRefresh` or `otelHeadersHelper`), or of a credential the redaction
-  recognises, nor of the words of a command, its arguments or an HTTP header value,
-  such as a PIN passed to a hook as `--password 482913` or sent as `X-Pin: 482913`,
-  which the digest covers by shape only (program words and URL origins). A value the
-  redaction leaves in place elsewhere, such as a password stored under a key name, can
-  still be confirmed. Keep credentials out of settings
+  such as the environment of an MCP server that `.gemini/settings.json` declares, or
+  of a Codex `shell_environment_policy.set` value or `query_params` value, of the
+  command of a credential helper (`apiKeyHelper`, `awsAuthRefresh`,
+  `awsCredentialExport`, `gcpAuthRefresh` or `otelHeadersHelper`), of a Codex
+  `experimental_bearer_token` or an OAuth `clientSecret`, or of a credential the
+  redaction recognises, nor of the words of a command, its arguments or an HTTP header
+  value, such as a PIN passed to a hook as `--password 482913` or sent as
+  `X-Pin: 482913`, nor of the words inside a permission rule or hook matcher, such as
+  `Bash(mysql -uroot -p482913 db:*)`, which the digest covers by shape only (tool
+  names, program words and URL origins). A value the redaction leaves in place
+  elsewhere, such as a password stored under another key name, a `cwd` path or a
+  `model` name, can still be confirmed. Keep credentials out of settings
   files; see
   [IDE agent settings](verification-source-binding.md#ide-agent-settings).
 - **Some settings changes alert only with the key.** Every settings file is digested
@@ -479,7 +483,9 @@ A way around a limit that its entry does not describe is worth a
   such as an `env` value, including an MCP server's environment value, the command of
   a credential helper, a token, a URL path, query or userinfo on the same host in a
   `notify` command, an argument of a command, such as an MCP server's pinned version
-  in `args` or an option of a hook command, or an HTTP header value, raises no alert; such a record carries a low `completeness`
+  in `args` or an option of a hook command, an HTTP header value, or the words after
+  the program in a permission rule, such as `Bash(npm test)` becoming
+  `Bash(npm publish)`, raises no alert; such a record carries a low `completeness`
   finding. Adding or removing an `env` name or a credential helper still alerts. The
   redaction ends a URL or an assigned value at a shell operator (`;`, `|`, `&`, `$`,
   `` ` ``, parentheses, braces, `<`, `>` or a line break), and starts a new URL at
