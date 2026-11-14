@@ -74,8 +74,10 @@ from nexus_symbiote.utils.secrets import (
     SecretScrubber,
     redact_descriptor,
     redact_text,
+    secret_like,
     secret_values,
 )
+from nexus_symbiote.utils.terminal import neutralize
 from nexus_symbiote.utils.toml import loads as load_toml
 
 
@@ -307,6 +309,11 @@ def source_binding_key() -> bytes | None:
             f"{_MIN_SOURCE_BINDING_KEY_LENGTH} characters"
         )
     return key.encode()
+
+
+def _launch_secrets(launch: Launch) -> list[str]:
+    # Earlier assignments remain private even when a later value shadows them.
+    return [value for name, value in launch.environment if secret_like(name, value)]
 
 
 def _value_binding(
@@ -1458,6 +1465,7 @@ class MCPScanner(Scanner):
             if key_error is not None and entries:
                 result.scan_failures.append(f"{dialect.path}: {key_error}")
                 continue
+            # Prepared once per file and reused for every server and diagnostic.
             file_secrets = SecretScrubber(self._file_secrets(entries))
             if len(file_secrets) > MAX_SECRETS_PER_FILE:
                 result.scan_failures.append(
@@ -1483,7 +1491,13 @@ class MCPScanner(Scanner):
                     result.scan_failures.append(f"{dialect.path}: {exc}")
                     continue
                 except (TypeError, ValueError, RecursionError):
-                    result.scan_failures.append(f"{dialect.path}: invalid tool definition")
+                    # The whole server record is dropped with its risk findings, so the
+                    # failure must say which server a reviewer no longer sees.
+                    shown = self._diagnostic_server_name(server_name, server_config, file_secrets)
+                    result.scan_failures.append(
+                        f"{dialect.path}: invalid tool definition for server '{shown}'; "
+                        "the server and its risks are not inventoried"
+                    )
                     continue
                 result.components.append(mcp_comp)
                 result.components.extend(tool_comps)
@@ -1510,10 +1524,11 @@ class MCPScanner(Scanner):
 
     @staticmethod
     def _file_secrets(entries: list[tuple[str, Any]]) -> list[str]:
-        """Credential values of every server in a file.
+        """Credential values of every server in a file, inline launcher values included.
 
         One server's tool text or name may repeat a value that another server's
-        environment or headers hold, so the file's values are scrubbed from each.
+        environment, headers or launcher holds, so the file's values are scrubbed
+        from each. A server whose launcher this skips is refused before parsing.
         """
         values: list[str] = []
         for _, config in entries:
@@ -1523,7 +1538,34 @@ class MCPScanner(Scanner):
                 mapping = config.get(field)
                 if isinstance(mapping, dict):
                     values.extend(secret_values(mapping))
+            command, args = config.get("command", ""), config.get("args", [])
+            if (
+                isinstance(command, str)
+                and isinstance(args, list)
+                and len(args) <= MAX_ARGUMENTS
+                and all(isinstance(arg, str) for arg in args)
+            ):
+                try:
+                    values.extend(_launch_secrets(analyze(command, args)))
+                except (TypeError, ValueError, RecursionError):
+                    # The server's normal parsing path reports this failure.
+                    continue
         return values
+
+    @staticmethod
+    def _diagnostic_server_name(
+        name: str, config: dict[str, Any], file_secrets: SecretScrubber | None = None
+    ) -> str:
+        try:
+            launch = analyze(config.get("command", ""), config.get("args", []))
+        except (TypeError, ValueError, RecursionError):
+            return "[withheld]"
+        # The file's prepared values hold this server's own inline values too.
+        scrubber = (
+            file_secrets if file_secrets is not None else SecretScrubber(_launch_secrets(launch))
+        )
+        # Clipping first can truncate a token so its recognizable shape is lost.
+        return neutralize(redact_text(name, scrubber)[:256])
 
     @staticmethod
     def _read_dialect(files: ConfinedCollection, dialect: McpDialect, result: ScanResult) -> Any:
@@ -1656,17 +1698,20 @@ class MCPScanner(Scanner):
         )
         # Launch arguments are opaque executable inputs. Only the launcher's own
         # grammar is read; argument and environment values never leave.
-        # Each header map on its own: a name in both keeps both of its values secret.
-        # The file's other servers contribute too: this server's free text may repeat
-        # a value that one of them holds.
-        scrubber = (file_secrets or SecretScrubber()).extended(
-            [
-                *secret_values(env),
-                *secret_values(config.get("headers", {})),
-                *secret_values(config.get("http_headers", {})),
-                *secret_values(dict(launch.environment)),
-            ]
-        )
+        # The file's prepared values cover this server and its siblings, inline launcher
+        # values included: this server's free text may repeat a value one of them holds.
+        # Without a file context, collect each header map and every inline assignment,
+        # shadowed ones included.
+        scrubber = file_secrets
+        if scrubber is None:
+            scrubber = SecretScrubber(
+                [
+                    *secret_values(env),
+                    *secret_values(config.get("headers", {})),
+                    *secret_values(config.get("http_headers", {})),
+                    *_launch_secrets(launch),
+                ]
+            )
         cwd = config.get("cwd")
         relocated = (
             launch.relocated
@@ -2449,7 +2494,7 @@ class MCPScanner(Scanner):
     ) -> list[ToolComponent]:
         tools_config = config.get("tools", [])
         tool_comps = []
-        scrubber = secrets or SecretScrubber()
+        scrubber = secrets if secrets is not None else SecretScrubber()
 
         if isinstance(tools_config, list):
             for tool_def in tools_config:

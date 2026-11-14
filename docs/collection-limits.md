@@ -255,7 +255,7 @@ shorten lists whose content is recorded or bound anyway.
 | Python file the a2a and rag import heuristics parse; a larger file is skipped, and for a2a one that names `AgentCard` is a gap | 262,144 characters |
 | Root `requirements*.txt` files, together: text, and logical lines | 4 MiB; 100,000 |
 | MCP servers in one MCP client file | 1,000 |
-| Credential values of all MCP servers in one client file, each scrubbed from every server's text; a file with more is a named failure and is not collected | 4,096 |
+| Credential values of all MCP servers in one client file, those assigned inline through a launcher included, each scrubbed from every server's text; a file with more is a named failure and is not collected | 4,096 |
 | MCP tools declared in one MCP client file, and by one server | 5,000 and 1,000 |
 | Arguments, environment variables and headers of one MCP server | 1,024, 256 and 64 |
 | Entries in one list field of an MCP server, such as `alwaysAllow` | 1,000 |

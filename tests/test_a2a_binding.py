@@ -1156,3 +1156,20 @@ def test_a_card_nested_beyond_the_depth_bound_names_the_bound(tmp_path):
 )
 def test_a_card_with_too_many_entries_names_the_bound(tmp_path, card):
     assert _failures(tmp_path, card) == [".well-known/agent.json: A2A card has too many entries"]
+
+
+def test_plaintext_alternative_interfaces_fail_the_transport_check(tmp_path):
+    card = {**CARD, "url": "https://agents.example.com"}
+    insecure = {"url": "http://agents.example.net/a2a", "transport": "JSONRPC"}
+    server = _server(tmp_path / "a", {**card, "additionalInterfaces": [insecure]})
+    assert [r.severity for r in server.risks if r.category == "transport_security"] == ["high"]
+    moved = dict(CARD_1_0)
+    moved["supportedInterfaces"] = [
+        CARD_1_0["supportedInterfaces"][0],
+        {"url": "http://agents.example.net/a2a", "protocolBinding": "JSONRPC"},
+    ]
+    second = _server(tmp_path / "b", moved)
+    assert [r.severity for r in second.risks if r.category == "transport_security"] == ["high"]
+    # A 1.0 gRPC host:port interface declares no cleartext scheme and is not flagged.
+    clean = _server(tmp_path / "c", dict(CARD_1_0))
+    assert not any(r.category == "transport_security" for r in clean.risks)

@@ -1028,11 +1028,15 @@ class A2AScanner(Scanner):
             if gap
         ] + security.unbound
         risks: list[RiskAssessment] = []
-        # A2A 1.0 clients use the first supported interface even when `url` is present.
+        # A2A 1.0 clients use the first supported interface even when `url` is
+        # present, and may send credentials to any declared alternative interface.
+        # An alternative counts only with an explicit non-HTTPS scheme: 1.0 gRPC
+        # interfaces give host:port without one, which declares no cleartext.
+        alternatives = (*supported_urls[1:], *interface_urls)
         if any(
             url and not url.lower().startswith("https://")
             for url in (endpoint, *aliases, *supported_urls[:1])
-        ):
+        ) or any("://" in url and not url.lower().startswith("https://") for url in alternatives):
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.HIGH,
