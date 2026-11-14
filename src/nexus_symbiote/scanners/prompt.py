@@ -871,6 +871,17 @@ class PromptScanner(Scanner):
         files: ConfinedCollection,
         result: ScanResult,
     ) -> PromptComponent | None:
+        """Record the instruction file read from ``rel_path``, or None.
+
+        Every walk reads through ``_read_unless_credential``; the check is repeated on
+        the symlink the read followed, so no walk, and no import of a file a walk
+        recorded, can bring an unkeyed digest of a credential file into the inventory.
+        """
+        target = files.link_target(rel_path)
+        reason = _credential_gap(rel_path, target)
+        if reason is not None:
+            result.surfaces_excluded.append(f"{rel_path}: {reason}; not read or inventoried")
+            return None
         try:
             text = content.decode("utf-8")
         except UnicodeDecodeError:
@@ -880,7 +891,6 @@ class PromptScanner(Scanner):
         component = self._scan_instruction_file(
             Path(rel_path), rel_path, prompt_type, content, text
         )
-        target = files.link_target(rel_path)
         if target is not None:
             component.properties["symlink_target"] = target
         result.components.append(component)

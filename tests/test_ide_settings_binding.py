@@ -610,7 +610,9 @@ def test_adding_a_credential_helper_fails_the_drift_gate(tmp_path, helper):
     run = CliRunner().invoke(main, ["diff", *map(str, outputs), "--fail-on-alert"])
     assert run.exit_code == 1, run.output
     alert = "Risk findings added: 1 medium (credential_helper), 1 low (completeness)."
-    assert f"claude-code: {alert}; properties.settings_hashes changed." in run.output
+    # Without the key a differ may also say first that the record's values are unbound.
+    (line,) = [line for line in run.output.splitlines() if "change in 'claude-code': " in line]
+    assert line.endswith(f"{alert}; properties.settings_hashes changed."), run.output
 
 
 def test_the_credential_helper_finding_names_every_declared_helper(tmp_path):

@@ -250,3 +250,45 @@ def test_a_skill_memory_file_linked_to_a_credential_file_imports_nothing(tmp_pat
     assert not _components(result)
     assert result.surfaces_excluded == [".claude/commands/claude.md: " + LINKED.format(".env")]
     assert hash_bytes((tmp_path / ".env").read_bytes()) not in _published(result)
+
+
+@pytest.mark.parametrize(
+    ("name", "target"),
+    [
+        (".claude/rules/guide.md", ".env"),
+        ("pkg/AGENTS.md", ".env"),
+        ("pkg/CLAUDE.md", ".env"),
+        ("CLAUDE.local.md", ".env"),
+        (".cursorrules", ".env"),
+        (".github/prompts/review.prompt.md", ".env"),
+    ],
+)
+def test_an_import_of_a_walked_file_linked_to_a_credential_file_is_a_gap(tmp_path, name, target):
+    # A walk reaches the file before the import does; neither records the credential file.
+    _write(tmp_path, target, SYNTHETIC_CREDENTIAL)
+    _write(tmp_path, "CLAUDE.md", f"Follow @{name}\n")
+    _link(tmp_path, name, target)
+    result = PromptScanner().scan(tmp_path)
+    components = _components(result)
+    assert {component.source_path for component in result.components} == {"CLAUDE.md"}
+    assert components["prompt:CLAUDE.md"].properties.get("imports") is None
+    assert f"{name}: " + LINKED.format(target) in result.surfaces_excluded
+    assert hash_bytes(SYNTHETIC_CREDENTIAL) not in _published(result)
+
+
+def test_a_walk_that_skips_the_credential_check_still_records_no_credential_file(
+    tmp_path, monkeypatch
+):
+    from nexus_symbiote.scanners import prompt
+
+    def unchecked(path, files, result, *, missing_ok=False, variants_read=(), **_):
+        return files.read_bytes(path, missing_ok=missing_ok, variants_read=variants_read)
+
+    monkeypatch.setattr(prompt, "_read_unless_credential", unchecked)
+    _write(tmp_path, ".env", SYNTHETIC_CREDENTIAL)
+    _write(tmp_path, "CLAUDE.md", "Follow @.claude/rules/guide.md\n")
+    _link(tmp_path, ".claude/rules/guide.md", ".env")
+    result = PromptScanner().scan(tmp_path)
+    assert {component.source_path for component in result.components} == {"CLAUDE.md"}
+    assert ".claude/rules/guide.md: " + LINKED.format(".env") in result.surfaces_excluded
+    assert hash_bytes(SYNTHETIC_CREDENTIAL) not in _published(result)
