@@ -19,6 +19,7 @@ from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import ComponentType, SerializationSafety, TrustTier
 from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION, canonical_json
 from nexus_symbiote.core.models import (
+    UNBOUND_VALUES_DETAIL,
     AnyComponent,
     CompletenessClaim,
     MCPServerComponent,
@@ -43,7 +44,7 @@ def _launch_values_unbound(component: MCPServerComponent) -> bool:
     if component.properties.get("static_value_binding"):
         return False
     return any(
-        risk.category == "completeness" and "values not bound" in risk.detail
+        risk.category == "completeness" and UNBOUND_VALUES_DETAIL in risk.detail
         for risk in component.risks
     )
 

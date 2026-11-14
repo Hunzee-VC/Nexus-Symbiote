@@ -10,6 +10,11 @@ import pytest
 from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
+from nexus_symbiote.core.enums import RiskSeverity
+from nexus_symbiote.core.models import UNBOUND_VALUES_DETAIL, MCPServerComponent, RiskAssessment
+from nexus_symbiote.diff import differ
+from nexus_symbiote.diff.differ import _launch_values_unbound
+from nexus_symbiote.scanners import mcp
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 from tests.support import load_script
 
@@ -81,6 +86,38 @@ def test_the_same_widening_is_a_critical_alert_when_both_scans_are_keyed(tmp_pat
     unchanged = CliRunner().invoke(main, ["diff", str(before), str(before), "--fail-on-alert"])
     assert unchanged.exit_code == 0, unchanged.output
     assert "No changes detected" in unchanged.output
+
+
+def test_the_collector_and_the_differ_share_the_unbound_values_phrase(tmp_path, monkeypatch):
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+    root = tmp_path / "project"
+    _project(root, "/srv/data")
+
+    def collected() -> MCPServerComponent:
+        components = mcp.MCPScanner().scan(root).components
+        [server] = [c for c in components if isinstance(c, MCPServerComponent)]
+        return server
+
+    def completeness(server: MCPServerComponent) -> list[str]:
+        return [risk.detail for risk in server.risks if risk.category == "completeness"]
+
+    def finding(detail: str) -> MCPServerComponent:
+        risk = RiskAssessment(severity=RiskSeverity.LOW, category="completeness", detail=detail)
+        return MCPServerComponent(bom_ref="mcp-server:fs", name="fs", risks=[risk])
+
+    server = collected()
+    assert any(UNBOUND_VALUES_DETAIL in detail for detail in completeness(server))
+    assert _launch_values_unbound(server)
+    phrased = f"MCP server 'fs' {UNBOUND_VALUES_DETAIL}: launch arguments."
+    assert _launch_values_unbound(finding(phrased))
+    assert not _launch_values_unbound(finding("MCP server 'fs' launch arguments were redacted."))
+
+    renamed = "values recorded without a binding key"
+    monkeypatch.setattr(mcp, "UNBOUND_VALUES_DETAIL", renamed)
+    monkeypatch.setattr(differ, "UNBOUND_VALUES_DETAIL", renamed)
+    assert any(renamed in detail for detail in completeness(collected()))
+    assert _launch_values_unbound(collected())
+    assert not _launch_values_unbound(finding(phrased))
 
 
 def test_reviewed_baseline_requires_a_binding_key(tmp_path):

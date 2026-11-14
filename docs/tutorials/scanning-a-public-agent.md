@@ -111,15 +111,27 @@ admission decision.
 
 ## 6. Catch drift on the next review
 
-Store the first inventory as a reviewed baseline. On the next revision, scan
-again and diff:
+Collect a reviewed baseline, and every later scan, with the same source binding
+key: one secret of at least 32 characters, kept outside the checkout (a CI
+secret or a password manager, never a file in the repository). The key binds
+the MCP launch arguments, environment values and endpoint paths that the
+inventory otherwise redacts, so `diff` can tell whether they changed. The
+inventory from step 3 was collected without a key, so take the baseline again:
 
 ```bash
-cp public.aibom.json reviewed.aibom.json
+# One secret of 32 or more characters, kept outside the checkout; the same for every scan.
+export NEXUS_SYMBIOTE_SOURCE_BINDING_KEY="$AGENTBOM_BINDING_KEY"
+nexus-symbiote scan public-mcp-servers --no-project-policy -o reviewed.aibom.json
 # ... after the target advances to a new commit ...
 nexus-symbiote scan public-mcp-servers --no-project-policy -o current.aibom.json
 nexus-symbiote diff reviewed.aibom.json current.aibom.json --fail-on-alert
 ```
+
+When nothing changed, `diff` prints `No changes detected.` and exits 0. Without
+a key, `diff --fail-on-alert` exits 1 with a medium alert for every MCP server
+whose launch arguments, environment values or endpoint path were left unbound,
+even when the two inventories are identical, because redacted values cannot be
+shown to have stayed the same.
 
 `--fail-on-alert` fails on changes rated medium or higher: a changed MCP launcher
 package or version, a swapped integrity value in an npm lockfile
