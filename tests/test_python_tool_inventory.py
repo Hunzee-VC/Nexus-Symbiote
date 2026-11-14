@@ -338,6 +338,15 @@ def test_helpers_of_the_same_file_are_judged_by_what_they_do_with_the_server(tmp
         + "except Exception as error:\n"
         + " error.__traceback__.tb_next.tb_frame.f_locals['self'].tool()(delete_all)\n",
         "def register(server):\n    server.run.__self__.tool()(delete_all)\nregister(mcp)\n",
+        "def configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "configure.__code__ = swap.__code__\nconfigure(mcp)\n",
+        "def configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "setattr(configure, '__code__', swap.__code__)\nconfigure(mcp)\n",
+        "def configure(label=None): pass\nconfigure.__defaults__ = (mcp,)\n",
+        "def configure(*, label=None): pass\nconfigure.__kwdefaults__ = {'label': mcp}\n",
+        "def configure(label): pass\nconfigure.__wrapped__ = mcp\n",
         "def hidden(value: mcp.tool()(delete_all)): pass\n",
         "def hidden() -> mcp.tool()(delete_all): pass\n",
         "registered: mcp.tool()(delete_all) = None\n",
@@ -461,11 +470,11 @@ def test_a_helper_the_call_may_not_reach_is_not_judged_benign(tmp_path, helper):
         "def configure(srv=None, /, **options):\n    options['srv'].tool()(delete_all)\n"
         + "configure(srv=mcp)\n",
         "def configure(srv=None, /):\n    pass\nconfigure(srv=mcp)\n",
-        "def configure(srv, label=None):\n    return srv.sse_app()\n"
-        + "configure(mcp, **options)\n",
         "def configure(label, *rest):\n    rest[0].tool()(delete_all)\nconfigure('x', mcp)\n",
         "def configure(**options):\n    options['srv'].tool()(delete_all)\n"
         + "configure(srv=mcp)\n",
+        "def configure(srv, label=None):\n    srv.tool()(delete_all)\n"
+        + "configure(label='x', **{'srv': mcp})\n",
     ],
 )
 def test_a_server_whose_helper_parameter_is_not_certain_is_a_gap(tmp_path, call):
@@ -489,6 +498,11 @@ def test_a_server_whose_helper_parameter_is_not_certain_is_a_gap(tmp_path, call)
         "def build(label, *, srv):\n    return srv.sse_app()\napp = build('x', srv=mcp)\n",
         "def build(srv, *rest, **options):\n    return srv.sse_app()\n"
         + "app = build(mcp, 'x', label='y')\n",
+        "def build(srv, label=None):\n    return srv.sse_app()\napp = build(mcp, **options)\n",
+        "def build(label=None, srv=None):\n    return srv.sse_app()\n"
+        + "app = build(srv=mcp, **options)\n",
+        "def build(srv, /, **options):\n    return srv.sse_app()\n"
+        + "app = build(mcp, **{'srv': 'x'})\n",
     ],
 )
 def test_a_server_bound_to_a_certain_helper_parameter_stays_benign(tmp_path, call):

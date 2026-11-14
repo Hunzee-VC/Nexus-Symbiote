@@ -296,7 +296,7 @@ A way around a limit that its entry does not describe is worth a
   these ways and not inside a nested function, lambda, class or comprehension.
   The server must bind that parameter by the call alone: passed positionally
   before any `*` spread, or by the keyword of a parameter that is not
-  positional-only, in a call with no `**` spread. A server that may reach
+  positional-only; a `**` spread cannot rebind it. A server that may reach
   another parameter, `*args` or `**kwargs`, as in `configure(*(), server)` or
   `configure(srv=server)` with `srv` positional-only, is a gap.
   Any other use is a gap, such as saving, passing or dereferencing a bound method
@@ -316,7 +316,8 @@ A way around a limit that its entry does not describe is worth a
   and the attribute is a literal name other than `modules` and those listed next, so
   `getattr(os, "environ")` is accepted and `getattr(self, "name")` is a gap; the
   attributes `__self__`, `__closure__`, `__globals__`, `__builtins__`, `__dict__`,
-  `__annotations__`, `__traceback__`, `__getattribute__`, `tb_frame`, `tb_next`,
+  `__annotations__`, `__traceback__`, `__code__`, `__defaults__`, `__kwdefaults__`,
+  `__wrapped__`, `__getattribute__`, `tb_frame`, `tb_next`,
   `f_back`, `f_locals`, `f_globals`, `f_builtins`, `gi_frame`, `cr_frame`,
   `ag_frame`, `_getframe`, `currentframe`, `getouterframes`, `getinnerframes`,
   `getargvalues` and `getclosurevars`, also imported by name; and a `modules`

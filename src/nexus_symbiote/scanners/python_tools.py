@@ -56,6 +56,7 @@ _REFLECTIVE_BUILTINS = _names("locals globals vars eval exec")
 _ATTRIBUTE_BUILTINS = _names("getattr setattr delattr")
 _REFLECTIVE_ATTRIBUTES = _names(
     "__self__ __closure__ __globals__ __builtins__ __dict__ __annotations__ __traceback__ "
+    "__code__ __defaults__ __kwdefaults__ __wrapped__ "
     "__getattribute__ tb_frame tb_next f_back f_locals f_globals f_builtins gi_frame "
     "cr_frame ag_frame _getframe currentframe getouterframes getinnerframes getargvalues "
     "getclosurevars"
@@ -765,8 +766,9 @@ def _benign_helper_arguments(
     call can otherwise reach another definition or what a decorator returned. Each
     helper is read once, however many calls pass it a server, so the work stays
     linear in the size of the file. A positional argument at or after a ``*``
-    spread, and every argument of a call with a ``**`` spread, binds a parameter
-    that cannot be read from the call, so none of them is judged benign.
+    spread binds a parameter that cannot be read from the call, so it is not judged
+    benign. A ``**`` spread cannot rebind a parameter the call already binds, since
+    Python raises before the body runs, so it changes nothing here.
     """
     functions = {
         stmt.name: stmt
@@ -785,8 +787,6 @@ def _benign_helper_arguments(
             isinstance(value, ast.Name) and value.id in servers
             for value in (*node.args, *(keyword.value for keyword in node.keywords))
         ):
-            continue
-        if any(keyword.arg is None for keyword in node.keywords):
             continue
         helper = helpers.get(function.name)
         if helper is None:
