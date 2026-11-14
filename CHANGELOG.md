@@ -6,6 +6,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- Python lockfile index origins normalize ASCII hostname case and the default HTTPS port while retaining ambiguous-source refusal, private registry qualifiers, and private-advisory exclusions.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - A `uv.lock` or `poetry.lock` record whose package index is not a plain lower-case `http://` or `https://` URL is a coverage gap and binds no package URL. Such a source used to be recorded as `https://pypi.org`: a directory of wheels, an upper-case scheme such as `HTTPS://`, a `file://` URL, or an authority with a backslash (`https://evil.example\@pypi.org/simple`), which uv reads as another host than Python's `urlsplit` does.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.

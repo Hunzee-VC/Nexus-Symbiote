@@ -25,7 +25,9 @@ from nexus_symbiote.scanners.registry import RegistryScanner
 INTEGRITY = "sha512-" + base64.b64encode(b"y" * 64).decode()
 NPM_MANIFEST = '{"dependencies":{"openai":"^4.0.0"}}'
 PYTHON_MANIFEST = '[project]\ndependencies = ["mcp-acme-tools>=1.0"]\n'
-UNVERIFIED = "non-registry package source is unverified"
+UNVERIFIED = (
+    "package index of the selected record is not a plain http(s) URL; its origin is unverified"
+)
 
 
 def _scan(root: Path, files: dict[str, str]):
