@@ -290,6 +290,8 @@ class RiskScorer:
             "fail_on_severity": self.fail_on_severity,
             "ignore_categories": sorted(self.ignore_categories),
             "suppressions": len(self.suppressions),
+            # The score is the sum of finding weights. It is not capped at 100.
+            "score_scale": "unbounded-sum",
         }
         coverage = bom.metadata.completeness
         assessment = assess_coverage(coverage)
@@ -375,7 +377,7 @@ class RiskScorer:
                 if self.fail_on_severity == "critical":
                     report.risk_level = "critical"
         if report.overall_score >= self.fail_threshold:
-            report.gate_reasons.append("aggregate score exceeds fail_threshold")
+            report.gate_reasons.append("aggregate score is at or above fail_threshold")
         if "invalid_safetensors" in category_scores:
             report.gate_reasons.append("SafeTensors structural safety is unverified")
         if report.coverage_status != "reported":

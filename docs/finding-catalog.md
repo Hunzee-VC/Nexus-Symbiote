@@ -15,10 +15,14 @@ do about it. Use these names in `ignore_categories` and in
 ## How findings affect the gates
 
 `risk`, and the scan gate of `scan`, `baseline` and the GitHub Action, weigh every
-finding by severity: critical 10, high 7, medium 4, low 1 and info 0. The gate
-fails when any of these holds, with the built-in policy's values in parentheses:
+finding by severity: critical 10, high 7, medium 4, low 1 and info 0. The aggregate
+score is that sum. It is not capped and it is not a percentage from 0 to 100, so it
+grows with the number of findings. The gate fails when any of these holds, with the
+built-in policy's values in parentheses:
 
-- a finding is at or above `fail_on_severity` (`critical`);
+- a finding is at or above `fail_on_severity` (`critical` for the CLI and a project
+  policy; the GitHub Action passes `high` unless its `fail-on-severity` input says
+  otherwise);
 - the aggregate score, the sum of the weights, is at or above `fail_threshold` (50);
 - an `invalid_safetensors` finding is present, whatever the score;
 - coverage is incomplete or unknown;
