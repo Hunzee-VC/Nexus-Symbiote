@@ -20,7 +20,12 @@ ScannerName = Literal[
 OutputFormat = Literal["json", "cyclonedx", "spdx", "sarif"]
 POLICY_FILE_NAMES = (".nexus-symbiote.yaml", ".nexus-symbiote.yml")
 DEFAULT_EXCLUDE_PATHS = ("node_modules", ".git", "__pycache__", ".venv")
+_ALWAYS_EXCLUDED_NAMES = frozenset({*DEFAULT_EXCLUDE_PATHS, "venv"})
 DEFAULT_WARN_THRESHOLD = 25.0
+MAX_YAML_NODES = 250_000
+MAX_POLICY_YAML_NODES = 10_000
+MAX_POLICY_LIST_ITEMS = 256
+MAX_POLICY_ENTRY_CHARS = 1024
 _ISO_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 
@@ -38,7 +43,9 @@ def _default_scanners() -> list[ScannerName]:
 
 class ScanPolicy(PolicySection):
     scanners: list[ScannerName] = Field(default_factory=_default_scanners, min_length=1)
-    exclude_paths: list[str] = Field(default_factory=lambda: list(DEFAULT_EXCLUDE_PATHS))
+    exclude_paths: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_EXCLUDE_PATHS), max_length=MAX_POLICY_LIST_ITEMS
+    )
     failure_mode: Literal["error", "report-only"] = "error"
 
     @model_validator(mode="after")
@@ -46,7 +53,11 @@ class ScanPolicy(PolicySection):
         if len(set(self.scanners)) != len(self.scanners):
             raise ValueError("scanners must be unique")
         if any(
-            not p.strip() or Path(p).is_absolute() or ".." in Path(p).parts
+            not p.strip()
+            or len(p) > MAX_POLICY_ENTRY_CHARS
+            or not Path(p).parts
+            or Path(p).is_absolute()
+            or ".." in Path(p).parts
             for p in self.exclude_paths
         ):
             raise ValueError("exclude_paths must be nonempty paths beneath the scan root")
@@ -101,7 +112,7 @@ class Suppression(PolicySection):
 class RiskPolicy(PolicySection):
     fail_threshold: float = Field(default=50.0, gt=0)
     warn_threshold: float = Field(default=DEFAULT_WARN_THRESHOLD, ge=0)
-    ignore_categories: list[str] = Field(default_factory=list)
+    ignore_categories: list[str] = Field(default_factory=list, max_length=MAX_POLICY_LIST_ITEMS)
     fail_on_severity: Literal["critical", "high", "medium", "low", "info", "none"] = "critical"
     suppressions: list[Suppression] = Field(default_factory=list, max_length=1000)
 
@@ -114,7 +125,7 @@ class RiskPolicy(PolicySection):
             self.__dict__["warn_threshold"] = min(DEFAULT_WARN_THRESHOLD, self.fail_threshold)
         if self.warn_threshold > self.fail_threshold:
             raise ValueError("warn_threshold cannot exceed fail_threshold")
-        if any(not c.strip() for c in self.ignore_categories):
+        if any(not c.strip() or len(c) > 256 for c in self.ignore_categories):
             raise ValueError("ignore_categories must contain nonempty exact category names")
         keys = [
             (entry.component_ref, entry.category, entry.fingerprint) for entry in self.suppressions
@@ -258,7 +269,7 @@ def weakened_settings(policy: Policy) -> list[str]:
         weaker.append("scan.failure_mode=report-only")
     if set(policy.scan.scanners) < set(base.scan.scanners):
         weaker.append("scan.scanners=" + ",".join(policy.scan.scanners))
-    extra = [path for path in policy.scan.exclude_paths if path not in DEFAULT_EXCLUDE_PATHS]
+    extra = [path for path in policy.scan.exclude_paths if path not in _ALWAYS_EXCLUDED_NAMES]
     if extra:
         weaker.append("scan.exclude_paths=" + ",".join(extra))
     return weaker
@@ -279,33 +290,64 @@ def _integer_or_text(loader: Any, node: Any) -> Any:
     return text if ":" in text else loader.construct_yaml_int(node)
 
 
-def parse_yaml_mapping(text: str) -> dict[str, Any]:
+def _contains_lone_surrogate(value: str) -> bool:
+    return any("\ud800" <= char <= "\udfff" for char in value)
+
+
+def parse_yaml_mapping(text: str, *, max_nodes: int = MAX_YAML_NODES) -> dict[str, Any]:
+    if _contains_lone_surrogate(text):
+        raise PolicyError("invalid YAML document")
     try:
         import yaml
     except ImportError as exc:
         raise PolicyError("PyYAML is required; install the declared dependencies") from exc
 
     class UniqueLoader(yaml.SafeLoader):
-        pass
+        def __init__(self, stream: Any) -> None:
+            super().__init__(stream)
+            self._nodes = 0
+
+        def compose_node(self, parent: Any, index: Any) -> Any:
+            if self.check_event(yaml.AliasEvent):
+                raise PolicyError("YAML aliases are not supported in policy files")
+            from typing import cast
+
+            event = cast(Any, self).peek_event()
+            if getattr(event, "anchor", None) is not None:
+                raise PolicyError("YAML anchors are not supported in policy files")
+            self._nodes += 1
+            if self._nodes > max_nodes:
+                raise PolicyError("YAML complexity exceeds policy budget")
+            return super().compose_node(parent, index)
 
     def mapping(loader: Any, node: Any) -> dict[str, Any]:
         data: dict[str, Any] = {}
         for key_node, value_node in node.value:
             key = loader.construct_object(key_node)
-            if not isinstance(key, str) or key in data:
+            if not isinstance(key, str) or _contains_lone_surrogate(key) or key in data:
                 raise PolicyError("YAML mapping keys must be unique strings")
             data[key] = loader.construct_object(value_node)
         return data
 
+    def string_scalar(loader: Any, node: Any) -> str:
+        value = str(loader.construct_yaml_str(node))
+        if _contains_lone_surrogate(value):
+            raise PolicyError("YAML strings must not contain lone UTF-16 surrogates")
+        return value
+
     UniqueLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
+    UniqueLoader.add_constructor("tag:yaml.org,2002:str", string_scalar)
     read_sexagesimal_integers_as_text(UniqueLoader)
     try:
         data = yaml.load(text, Loader=UniqueLoader)  # noqa: S506 - subclass of SafeLoader with unique-key enforcement
         if not isinstance(data, dict):
             raise PolicyError("configuration must be a YAML mapping")
         return data
+    except PolicyError:
+        raise
     # OverflowError: PyYAML's YAML 1.1 base-60 float overflows from 175 parts on.
-    except (yaml.YAMLError, RecursionError, OverflowError) as exc:
+    # ValueError: Python 3.11+ int_max_str_digits rejects oversized integer scalars.
+    except (yaml.YAMLError, RecursionError, OverflowError, ValueError) as exc:
         raise PolicyError("invalid YAML document") from exc
 
 
@@ -328,7 +370,9 @@ def _parse_policy_with_digest(path: Path) -> tuple[Policy, str]:
             raw = stream.read(1024 * 1024 + 1)
             if len(raw) > 1024 * 1024:
                 raise PolicyError("policy exceeds 1 MiB")
-        policy = Policy.model_validate(parse_yaml_mapping(raw.decode("utf-8")))
+        policy = Policy.model_validate(
+            parse_yaml_mapping(raw.decode("utf-8"), max_nodes=MAX_POLICY_YAML_NODES)
+        )
         return policy, "sha256:" + hashlib.sha256(raw).hexdigest()
     except ValidationError as exc:
         details = []

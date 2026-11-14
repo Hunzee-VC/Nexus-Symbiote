@@ -73,13 +73,33 @@ def echo_line(prefix: str, *values: object, err: bool = False) -> None:
     click.echo(safe_line(prefix, *values), err=err)
 
 
-def json_text(text: str) -> str:
-    """JSON text in which no CI runner can find a "##name[" log command.
+_JSON_UNSAFE_TEXT = re.compile(
+    r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\xad\u034f\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891"
+    r"\u08e2\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u2028\u2029\u202a-\u202e"
+    r"\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufff8\ufff9-\ufffb\U000110bd"
+    r"\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a"
+    r"\U000e0000-\U000e0fff]"
+)
 
-    In valid JSON, "##" occurs only inside a string, where the escape "\\u005b" stands
-    for the same "[": the document parses to exactly the same value.
+
+def _json_escape_char(match: re.Match[str]) -> str:
+    point = ord(match.group(0))
+    if point <= 0xFFFF:
+        return f"\\u{point:04x}"
+    offset = point - 0x10000
+    high = 0xD800 + (offset >> 10)
+    low = 0xDC00 + (offset & 0x3FF)
+    return f"\\u{high:04x}\\u{low:04x}"
+
+
+def json_text(text: str) -> str:
+    """JSON text in which no CI runner can find a "##name[" log command or hidden control.
+
+    In valid JSON, "##" and non-whitespace format/control code points occur only inside
+    strings, where RFC 8259 ``\\uXXXX`` escapes stand for the exact same characters.
     """
-    return _JSON_LOG_COMMAND.sub(lambda match: match.group(1) + "\\u005b", text)
+    escaped = _JSON_UNSAFE_TEXT.sub(_json_escape_char, text)
+    return _JSON_LOG_COMMAND.sub(lambda match: match.group(1) + "\\u005b", escaped)
 
 
 # What the output rules themselves produce: a missing directory, a link or file on

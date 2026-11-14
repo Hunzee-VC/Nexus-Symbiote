@@ -217,13 +217,17 @@ def _nested_deeper_than(value: object, limit: int) -> bool:
 def _native_facts(subject: bytes) -> tuple[str, str] | None:
     """The format version and content digest of a native inventory this build reads.
 
-    The nesting is bounded on a plain parse before the strict parse and the content
-    digest, which both serialize recursively.
+    The nesting is bounded lexically before ``json.loads`` and again on the parsed value
+    before the strict parse and the content digest, which both serialize recursively.
     """
+    from nexus_symbiote.core.hashing import MAX_JSON_NESTING, json_nesting_exceeds
+
     if len(subject) > MAX_NATIVE_BYTES:
         return None
     try:
         text = subject.decode("utf-8")
+        if json_nesting_exceeds(text, MAX_JSON_NESTING):
+            return None
         if _nested_deeper_than(json.loads(text), MAX_NATIVE_DEPTH):
             return None
         document = parse_json_strict(text, max_bytes=MAX_NATIVE_BYTES)

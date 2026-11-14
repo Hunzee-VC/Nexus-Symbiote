@@ -221,10 +221,13 @@ def _private_dir_info_error(
     return None
 
 
+_SEEDED_ROOT_SIDECAR = ".trusted_root.seeded.sha256"
+
+
 def _private_file_info_error(
     info: os.stat_result, parent_mode: int | None, path: Path, *, what: str, remedy: str
 ) -> str | None:
-    """Return an error unless a trust file is user-owned and private.
+    """Return an error unless a trust file is user-owned, unlinked elsewhere, and private.
 
     A group/world-writable file is accepted only when its parent directory
     keeps everyone else from traversing to it: sigstore-python seeds
@@ -234,12 +237,45 @@ def _private_file_info_error(
     """
     if (error := _owner_error(info, path, what=what)) is not None:
         return error
+    if info.st_nlink != 1:
+        return f"{what} {path} must not have other hard links; {remedy}"
     if info.st_mode & 0o022:
         if parent_mode is None or parent_mode & 0o011:
             return (
                 f"{what} {path} is group/world-writable and its directory lets "
                 f"others reach it; make the file private, make its directory private, {remedy}"
             )
+    return None
+
+
+def _trusted_ancestor_uids(uid: int) -> set[int]:
+    """Caller and system UIDs, including unmapped host-root overflowuid in rootless userns."""
+    allowed = {0, uid}
+    try:
+        uid_map = Path("/proc/self/uid_map").read_text(encoding="utf-8")
+        if not any(line.split()[0] == "0" for line in uid_map.splitlines() if line.split()):
+            overflow = int(Path("/proc/sys/kernel/overflowuid").read_text(encoding="utf-8").strip())
+            allowed.add(overflow)
+    except (OSError, ValueError):
+        pass
+    return allowed
+
+
+def _ancestor_error(directory: Path, *, dir_what: str, remedy: str) -> str | None:
+    """Reject non-sticky world-writable or foreign non-root ancestors above an unpinned root."""
+    uid = _current_uid()
+    trusted_uids = _trusted_ancestor_uids(uid) if uid is not None else set()
+    for ancestor in Path(os.path.abspath(directory)).parents:
+        try:
+            info = os.lstat(ancestor)
+        except OSError:
+            return f"{dir_what} {ancestor} cannot be inspected"
+        if stat.S_ISLNK(info.st_mode):
+            return f"{dir_what} {ancestor} must not be a symlink"
+        if uid is not None and info.st_uid not in trusted_uids:
+            return f"{dir_what} {ancestor} is not owned by the current user"
+        if (info.st_mode & 0o002) and not (info.st_mode & stat.S_ISVTX):
+            return f"{dir_what} {ancestor} is world-writable without sticky protection; {remedy}"
     return None
 
 
@@ -343,7 +379,75 @@ def _read_sigstore_cache() -> tuple[Path | None, bytes | None, str | None]:
     )
     if content is None:
         return None, None, error or f"Sigstore trusted root {trusted_root} cannot be inspected"
+    content = _refresh_seeded_sigstore_cache(trusted_root, content)
     return trusted_root, content, None
+
+
+def _write_raw_nofollow(dir_fd: int, name: str, payload: bytes) -> None:
+    """Write ``payload`` to ``name`` in ``dir_fd`` via raw OS calls without os.fdopen."""
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    temp_name = f".{name}.{os.getpid()}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | cloexec
+    fd = os.open(temp_name, flags, 0o600, dir_fd=dir_fd)
+    try:
+        view = memoryview(payload)
+        written = 0
+        while written < len(view):
+            written += os.write(fd, view[written:])
+    except BaseException:
+        os.close(fd)
+        try:
+            os.unlink(temp_name, dir_fd=dir_fd)
+        except OSError:
+            pass
+        raise
+    os.close(fd)
+    os.replace(temp_name, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+
+
+def _refresh_seeded_sigstore_cache(trusted_root: Path, content: bytes) -> bytes:
+    """Refresh an unmodified previously seeded cache root when sigstore-python upgrades."""
+    try:
+        from sigstore._internal.tuf import DEFAULT_TUF_URL
+        from sigstore._utils import read_embedded
+
+        embedded = read_embedded("trusted_root.json", DEFAULT_TUF_URL)
+    except Exception:
+        return content
+    if content == embedded:
+        return content
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    try:
+        dir_fd = open_directory_nofollow(trusted_root.parent)
+    except OSError:
+        return content
+    try:
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | cloexec
+        sidecar_fd = os.open(_SEEDED_ROOT_SIDECAR, flags, dir_fd=dir_fd)
+        try:
+            info = os.fstat(sidecar_fd)
+            uid = _current_uid()
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or (uid is not None and info.st_uid != uid)
+                or info.st_size > 128
+            ):
+                return content
+            recorded = os.read(sidecar_fd, 129).strip().decode("ascii")
+        finally:
+            os.close(sidecar_fd)
+        current_digest = hashlib.sha256(content).hexdigest()
+        if not hmac.compare_digest(recorded, current_digest):
+            return content
+        new_digest = hashlib.sha256(embedded).hexdigest().encode("ascii")
+        _write_raw_nofollow(dir_fd, trusted_root.name, embedded)
+        _write_raw_nofollow(dir_fd, _SEEDED_ROOT_SIDECAR, new_digest)
+        return embedded
+    except (OSError, UnicodeDecodeError):
+        return content
+    finally:
+        os.close(dir_fd)
 
 
 def _seed_sigstore_cache(trusted_root: Path) -> str | None:
@@ -373,10 +477,16 @@ def _seed_sigstore_cache(trusted_root: Path) -> str | None:
                 from sigstore._internal.tuf import DEFAULT_TUF_URL
                 from sigstore._utils import read_embedded
 
-                stream.write(read_embedded("trusted_root.json", DEFAULT_TUF_URL))
+                embedded = read_embedded("trusted_root.json", DEFAULT_TUF_URL)
+                stream.write(embedded)
         except Exception:
             os.unlink(trusted_root.name, dir_fd=dir_fd)
             return failure
+        try:
+            digest_bytes = hashlib.sha256(embedded).hexdigest().encode("ascii")
+            _write_raw_nofollow(dir_fd, _SEEDED_ROOT_SIDECAR, digest_bytes)
+        except OSError:
+            pass
     except OSError:
         return failure
     finally:
@@ -432,7 +542,9 @@ def _read_explicit_trust_root(
                 None,
                 "Pinned Sigstore trust-root SHA-256 must be sha256:<64 lowercase hex characters>",
             )
-    content, error = _read_checked_trust_root(path, private=expected is None)
+    content, error = _read_checked_trust_root(
+        path, private=expected is None, check_ancestors=expected is None
+    )
     if content is None:
         return None, None, None, error
     if expected is not None and not hmac.compare_digest(
@@ -446,6 +558,7 @@ def _read_checked_trust_root(
     path: Path,
     *,
     private: bool,
+    check_ancestors: bool = False,
     what: str = "Explicit Sigstore trust root",
     dir_what: str = "Explicit Sigstore trust-root directory",
     remedy: str = _EXPLICIT_REMEDY,
@@ -489,6 +602,8 @@ def _read_checked_trust_root(
                     error = _private_dir_info_error(
                         dir_info, path.parent, what=dir_what, remedy=remedy
                     )
+                if error is None and check_ancestors:
+                    error = _ancestor_error(path.parent, dir_what=dir_what, remedy=remedy)
                 if error is not None:
                     return None, error
             if info.st_size > MAX_TRUST_ROOT_BYTES:
@@ -538,11 +653,18 @@ def verify_file_hash(
 
 
 def _carries_dsse_envelope(bundle_json: bytes) -> bool:
+    from nexus_symbiote.core.hashing import MAX_JSON_NESTING, json_nesting_exceeds
+
     try:
-        document = json.loads(bundle_json)
+        decoded = bundle_json.decode("utf-8")
+        if json_nesting_exceeds(decoded, MAX_JSON_NESTING):
+            return False
+        document = json.loads(decoded)
     except (ValueError, RecursionError):
         return False
-    return isinstance(document, dict) and "dsseEnvelope" in document
+    return isinstance(document, dict) and (
+        "dsseEnvelope" in document or "dsse_envelope" in document
+    )
 
 
 def verify_sigstore_digest(
