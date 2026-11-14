@@ -66,6 +66,10 @@ A way around a limit that its entry does not describe is worth a
   names it, so the default gates fail. A skill checked out with its own `.git`,
   including a Git submodule, whose `.git` is a file, or one whose script left a
   `__pycache__` beside it, fails them until that entry is removed.
+  Outside those directories the skip is silent, so a file the collectors would
+  otherwise record, such as model weights under `venv/weights/` or an instruction
+  file under `node_modules/`, produces no component, finding or drift alert. Review
+  a pull request that adds tracked files under one of these names.
 - **Case variants.** When a fixed path such as `CLAUDE.md`, `.mcp.json`,
   `.claude/settings.json` or a model directory's configuration, tokenizer or chat
   template file or `additional_chat_templates` directory is absent, a file or
@@ -341,7 +345,10 @@ A way around a limit that its entry does not describe is worth a
   [listed suffixes](model-integrity.md#model-files-and-references), NumPy `.npy` and
   `.npz` arrays, and `.pb` files other than `saved_model.pb` produce no component.
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat
-  templates are checked only for known sandbox-escape shapes. A template file larger
+  templates are checked only for known sandbox-escape shapes. The check matches text:
+  a dunder name written without a quoted `__` literal, such as
+  `dict(__class__=1)|first` or `"_" ~ "_class_" ~ "_"`, is not found, so a
+  SafeTensors model beside such a template stays `safe`. A template file larger
   than the `file-bytes` limit is digested but not checked, and is a coverage gap.
   SafeTensors tensor bytes are hashed but not inspected. See
   [what this does not establish](model-integrity.md#what-this-does-not-establish).
@@ -370,6 +377,11 @@ A way around a limit that its entry does not describe is worth a
   text is searched as written, so more is looked up; a host that reads Markdown
   otherwise, such as with GitHub's table or autolink extensions, can still import a
   file from text read here as code.
+  A reference is read only where `@` starts the text or follows white space, and
+  without the sentence punctuation after it. A host that also starts a reference
+  after inline markup (`**@docs/x.md**`, the text of a link, `<b>@x.md</b>`), or keeps that
+  punctuation, an escaped space or a `#fragment` in the path, imports a file that is
+  not inventoried here; which hosts do has not been established by test.
   An import that leaves the project root, names an excluded path or lies deeper than
   the `depth` limit is a gap, so write a path alias such as `@/components` as code. A
   project with more than the [`import-lookups`](collection-limits.md#limits) limit of
@@ -628,7 +640,8 @@ A way around a limit that its entry does not describe is worth a
 - **The Action's trust root ages.** The Action gives its scans an empty private
   cache, so it uses the root embedded in its hash-locked `sigstore` package. A
   bundle that relies on a key Sigstore introduced later fails until you update the
-  Action pin.
+  Action pin. The reverse holds too: a key that Sigstore has retired or revoked
+  since that package was released stays trusted until you update the pin.
 
 ## Attestations
 
