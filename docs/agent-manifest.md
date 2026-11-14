@@ -86,6 +86,7 @@ inventory, so the default gate fails and the evidence stays available for review
 | `agent.yaml#/instructions/N: declared instruction is not UTF-8 text` | It cannot be checked for hidden characters |
 | `agent.yaml#/models/KEY: the declared local model has no collected model artifact` | No collected model at that path |
 | `agent.yaml#/models/KEY: the declared local model is unavailable` | The artifact can no longer be opened safely |
+| `agent.yaml#/models/KEY: the key is too long for a component reference` | A hosted model key that, percent-encoded, makes the model's reference longer than 16,384 characters |
 | `agent.yaml: declares a component reference that is already in use` | A declared instruction or hosted model would take the reference of a different component already in the inventory |
 
 These failures name an entry by its position or its percent-encoded key, never by

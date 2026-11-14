@@ -16,6 +16,7 @@ from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import AssuranceLevel, AutonomyLevel, ComponentType
 from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import (
+    MAX_REFERENCE_CHARS,
     AgentComponent,
     AnyComponent,
     ClaimEvidence,
@@ -226,9 +227,13 @@ def _manifest_dependencies(
     for key, model in declared.models.items():
         locator = f"{MANIFEST}#/models/{_clip(quote(key, safe=''))}"
         if model.path is None:
+            ref = f"model:{agent_ref}/hosted/{quote(key, safe='')}"
+            if len(ref) > MAX_REFERENCE_CHARS:
+                problems.append(f"{locator}: the key is too long for a component reference")
+                continue
             additions.append(
                 ModelComponent(
-                    bom_ref=f"model:{agent_ref}/hosted/{quote(key, safe='')}",
+                    bom_ref=ref,
                     name=model.requested_ref or key,
                     provider=model.provider,
                     requested_alias=model.requested_ref,

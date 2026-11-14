@@ -155,6 +155,23 @@ def test_another_spelling_of_a_directory_collection_never_reads_is_refused(tmp_p
         assemble_repository_agent(AIBOM(), tmp_path)
 
 
+def test_a_hosted_model_key_too_long_for_a_reference_is_recorded_not_fatal(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "agent.yaml").write_text(
+        "name: x\nmodels:\n"
+        f"  ? {'k' * 20_000}\n  : {{provider: openai, requested_ref: gpt-4o}}\n"
+        "  planner: {provider: openai, requested_ref: gpt-4o-mini}\n"
+    )
+    status, bom = _scan(project, tmp_path / "bom.json")
+    assert status == 1
+    failures = bom["metadata"]["completeness"]["scan_failures"]
+    assert [f for f in failures if f.startswith("agent.yaml")] == [
+        f"agent.yaml#/models/{'k' * 199}…: the key is too long for a component reference"
+    ]
+    assert [m["name"] for m in _components(bom, "model")] == ["gpt-4o-mini"]
+
+
 def test_manifest_entries_are_never_echoed_into_failures(tmp_path):
     # Entries are checkout text: terminal escapes, CI log commands or a pasted secret.
     entries = ["\x1b]0;pwn\x07\x1b[31mred.md", "::error::x.md", "sk-live-0123456789abcdef.md"]
@@ -315,6 +332,7 @@ def test_the_inferred_agent_is_the_repository_whatever_its_checkout():
         ("models: {m: {path: models}}", {}),
         ("models: {planner: {provider: openai, requested_ref: gpt-4o}}", {}),
         ("instructions: [Node_Modules/pkg/AGENTS.md]", {}),
+        (f"models:\n  ? {'k' * 20_000}\n  : {{provider: openai, requested_ref: gpt-4o}}", {}),
     ],
 )
 def test_the_guide_documents_each_manifest_failure(tmp_path, manifest, files):
