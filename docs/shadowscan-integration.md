@@ -182,10 +182,14 @@ The collector reads a report at one of three paths beneath the project root:
 one may exist. When more than one does, the scan records the failure
 "ShadowScan reports found at more than one supported path (...); keep exactly one"
 and imports none, so a file committed under another name cannot silently replace
-the report a pipeline generated. A report that only a symbolic link reaches, such as
-`.shadowscan/report.json` when `.shadowscan` is a link to another directory, is
+the report a pipeline generated. A report reached through a symbolic link in a parent
+directory, such as `.shadowscan/report.json` when `.shadowscan` is a link to another directory, is
 refused with the failure "ShadowScan report is reached through a symbolic link; not
-imported", and nothing is imported while one exists. The inventory lists the path it read under
+imported", and nothing is imported while one exists. A leaf link such as
+`.shadowscan/report.json -> ../vendor/report.json` can still be read when it satisfies
+the ordinary [confinement rules](known-limitations.md#every-collector),
+including a relative target inside the project reached without another symlink.
+The inventory lists the path it read under
 `surfaces_scanned`. If none exists, the inventory records that observation. A fully mapped native report
 whose source collection completed can accompany a successful repository baseline.
 The digest and `source_projection_limitations` record the external evidence
