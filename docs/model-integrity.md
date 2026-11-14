@@ -25,7 +25,7 @@ The serialization rating is:
 
 | Rating | When |
 | --- | --- |
-| `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or content recognized as a binary or text-protocol pickle, or a ZIP archive whose first member is a pickle (as `torch.save` writes it), under any other model suffix |
+| `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or content recognized as a binary or text-protocol pickle, or a ZIP archive whose central directory names a pickle-family member (`.pkl`, `.pickle`, and the other pickle suffixes, wherever the member sits), under any other model suffix |
 | `safe` | A SafeTensors file whose header is UTF-8 JSON with string metadata, known dtypes and tensor spans that index the whole data region, in a directory that configures no chat template that reaches Python internals; the scan and `validate` check the header with the same validator, and `validate` compares the templates only through its completeness check |
 | `unsafe-template-injection` | A GGUF file whose embedded chat template reaches Python internals through dunder attributes or the `attr` filter, as Jinja2 sandbox escapes such as CVE-2024-34359 do, or a SafeTensors file that would be `safe` in a directory whose Hugging Face chat template does |
 | `unknown` | Everything else, including ONNX, GGUF, Keras, HDF5, SavedModel, TFLite, Core ML and ExecuTorch files, and a SafeTensors header over the 1 MiB inspection limit |

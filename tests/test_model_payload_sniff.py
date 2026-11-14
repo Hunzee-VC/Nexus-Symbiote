@@ -74,6 +74,35 @@ def test_a_suffix_list_file_is_still_rated_without_a_recognized_stream(tmp_path:
     assert component.serialization_safety is SerializationSafety.UNSAFE_CODE_EXECUTION
 
 
+def test_a_later_or_pickle_named_zip_member_is_critical(tmp_path: Path) -> None:
+    payload = _reduce_pickle()
+    (tmp_path / "models").mkdir()
+    hidden = io.BytesIO()
+    with zipfile.ZipFile(hidden, "w") as archive:
+        archive.writestr("version", b"1")
+        archive.writestr("archive/data.pkl", payload)
+    renamed = io.BytesIO()
+    with zipfile.ZipFile(renamed, "w") as archive:
+        archive.writestr("version", b"1")
+        archive.writestr("weights/data.pickle", payload)
+    plain = io.BytesIO()
+    with zipfile.ZipFile(plain, "w") as archive:
+        archive.writestr("version", b"1")
+        archive.writestr("README.txt", b"numbers only")
+    (tmp_path / "models" / "hidden.zip").write_bytes(hidden.getvalue())
+    (tmp_path / "models" / "renamed.dat").write_bytes(renamed.getvalue())
+    (tmp_path / "models" / "notes.dat").write_bytes(plain.getvalue())
+
+    for relative in ("models/hidden.zip", "models/renamed.dat"):
+        component = _component(tmp_path, relative)
+        assert component is not None
+        assert component.serialization_safety is SerializationSafety.UNSAFE_CODE_EXECUTION
+    assert _component(tmp_path, "models/notes.dat") is None
+    assert sniffed_payload(hidden.getvalue()) is not None
+    assert sniffed_payload(renamed.getvalue()) is not None
+    assert sniffed_payload(plain.getvalue()) is None
+
+
 def test_sniffed_payload_ignores_a_numeric_header_and_a_short_magic_byte() -> None:
     assert sniffed_payload(_npy("<f8")) is None
     assert sniffed_payload(b"\x80\x02") is None

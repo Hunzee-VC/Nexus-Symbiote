@@ -250,14 +250,98 @@ def _numpy_object_header(blob: bytes) -> bool:
     return sample.startswith(b"\x93NUMPY") and _NPY_OBJECT.search(sample[:512]) is not None
 
 
+_ZIP_PICKLE = "ZIP archive contains a pickle member; torch.load unpickles it"
+_PICKLE_NAME_SUFFIXES = tuple(sorted(_UNSAFE_SUFFIXES))
+_PICKLE_NAME_WRAPPERS = tuple(sorted(_PICKLE_WRAPPERS))
+
+
+def _member_is_pickle(name: bytes) -> bool:
+    """A ZIP member whose name is a pickle-family file, including ``.pickle``.
+
+    The directory portion is ignored. A compression wrapper such as ``.pkl.gz``
+    still counts, matching a file of that name on disk.
+    """
+    base = name.rsplit(b"/", 1)[-1].rsplit(b"\\", 1)[-1].lower()
+    text = base.decode("ascii", "ignore")
+    if text.endswith(_PICKLE_NAME_SUFFIXES):
+        return True
+    for wrapper in _PICKLE_NAME_WRAPPERS:
+        if text.endswith(wrapper) and text[: -len(wrapper)].endswith(_PICKLE_NAME_SUFFIXES):
+            return True
+    return False
+
+
+def _central_directory_names(blob: bytes) -> list[bytes] | None:
+    """Member names from a ZIP central directory that this buffer contains.
+
+    ``None`` when the end-of-central-directory record is absent or malformed, so
+    the caller can fall back to the local headers that the buffer does hold.
+    """
+    window = min(len(blob), 22 + 65535)
+    end_record = blob.rfind(b"PK\x05\x06", len(blob) - window)
+    if end_record < 0 or end_record + 22 > len(blob):
+        return None
+    count = int.from_bytes(blob[end_record + 10 : end_record + 12], "little")
+    directory_size = int.from_bytes(blob[end_record + 12 : end_record + 16], "little")
+    directory_offset = int.from_bytes(blob[end_record + 16 : end_record + 20], "little")
+    if count == 0xFFFF or directory_size == 0xFFFFFFFF or directory_offset == 0xFFFFFFFF:
+        return None
+    if directory_offset > len(blob) or directory_size > len(blob) - directory_offset:
+        return None
+    names: list[bytes] = []
+    position = directory_offset
+    end = directory_offset + directory_size
+    while position < end and len(names) <= count and len(names) < 4096:
+        if position + 46 > end or blob[position : position + 4] != b"PK\x01\x02":
+            return None
+        name_length = int.from_bytes(blob[position + 28 : position + 30], "little")
+        extra_length = int.from_bytes(blob[position + 30 : position + 32], "little")
+        comment_length = int.from_bytes(blob[position + 32 : position + 34], "little")
+        name_at = position + 46
+        if name_length > 4096 or name_at + name_length > len(blob):
+            return None
+        names.append(blob[name_at : name_at + name_length])
+        position = name_at + name_length + extra_length + comment_length
+    return names
+
+
+def _local_header_names(blob: bytes) -> list[bytes]:
+    """Names of ZIP local headers in ``blob``, stopping when the next one is not stored."""
+    names: list[bytes] = []
+    position = 0
+    while position + 30 <= len(blob) and len(names) < 4096:
+        if blob[position : position + 4] != b"PK\x03\x04":
+            break
+        flags = int.from_bytes(blob[position + 6 : position + 8], "little")
+        compressed = int.from_bytes(blob[position + 18 : position + 22], "little")
+        name_length = int.from_bytes(blob[position + 26 : position + 28], "little")
+        extra_length = int.from_bytes(blob[position + 28 : position + 30], "little")
+        name_at = position + 30
+        if name_length <= 0 or name_length > 4096 or name_at + name_length > len(blob):
+            break
+        names.append(blob[name_at : name_at + name_length])
+        if flags & 0x08:
+            break
+        nxt = name_at + name_length + extra_length + compressed
+        if nxt <= position:
+            break
+        position = nxt
+    return names
+
+
 def _zip_pickle_member(blob: bytes) -> bool:
-    """True when a ZIP local header's first member name ends in ``.pkl``."""
+    """True when any ZIP member name is a pickle-family file.
+
+    The central directory lists every member, so a first member named ``version``
+    does not hide ``archive/data.pkl`` or ``data.pickle``. Local headers cover a
+    buffer that does not hold the directory.
+    """
     if not blob.startswith(b"PK\x03\x04") or len(blob) < 30:
         return False
-    name_len = int.from_bytes(blob[26:28], "little")
-    if name_len <= 0 or name_len > 4096 or 30 + name_len > len(blob):
-        return False
-    return blob[30 : 30 + name_len].lower().endswith(b".pkl")
+    names = _central_directory_names(blob)
+    if names is None:
+        names = _local_header_names(blob)
+    return any(_member_is_pickle(name) for name in names)
 
 
 def _prefix_is_pickle(blob: bytes) -> bool:
@@ -279,7 +363,7 @@ def sniffed_payload(blob: bytes) -> str | None:
     if _numpy_object_header(blob):
         return "NumPy object-dtype array; np.load(allow_pickle=True) unpickles it"
     if _zip_pickle_member(blob):
-        return "ZIP archive whose first member is a pickle; torch.load unpickles it"
+        return _ZIP_PICKLE
     if _prefix_is_pickle(blob):
         return "Recognized pickle opcode stream; object loading can execute code"
     return None
@@ -336,12 +420,11 @@ def _recognized_pickle(stream: BinaryIO, prefix: bytes, size: int) -> str | None
 
 def _recognized_code_container(stream: BinaryIO, prefix: bytes, size: int) -> str | None:
     if prefix[:4] == b"PK\x03\x04":
-        # torch.save writes its pickle as the first ZIP member.
-        header = prefix + stream.read(22)
-        if len(header) == 30:
-            name_length = int.from_bytes(header[26:28], "little")
-            if 0 < name_length <= 4096 and stream.read(name_length).lower().endswith(b".pkl"):
-                return "ZIP archive whose first member is a pickle; torch.load unpickles it"
+        # The central directory is at the end. A bounded sample covers the small
+        # archives a renamed model uses; a larger directory is read by the tail walk.
+        sample = prefix + stream.read(max(0, min(size, MAX_PICKLE_INSPECTION_BYTES) - len(prefix)))
+        if _zip_pickle_member(sample):
+            return _ZIP_PICKLE
         return None
     return _recognized_pickle(stream, prefix, size)
 
