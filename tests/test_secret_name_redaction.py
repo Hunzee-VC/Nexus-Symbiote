@@ -344,14 +344,24 @@ def test_capitalised_prose_after_a_scheme_word_survives(text):
     assert redact_text(text) == text
 
 
-# Vendor formats with a fixed prefix, assembled at run time like the tokens above.
+# Vendor formats with a fixed prefix, assembled at run time like the tokens above. A
+# Doppler body that opens in lowercase letters and digits, as a service token's config
+# name does, must still be read as the token.
+DOPPLER_BODY = "".join(("a1b2", "C3d4E5f6G7h8" * 3, "J9k"))
 VENDOR_TOKENS = {
-    "sendgrid": "".join(("S", "G.", "a" * 22, ".", "b" * 43)),
     "databricks": "".join(("da", "pi", "0123456789abcdef" * 2)),
     "slack-app": "".join(("xa", "pp-", "1-A0B1C2D3E4-1234567890-", "c" * 24)),
-    "shopify": "".join(("sh", "pat_", "0123456789abcdef" * 2)),
+    "shopify-private-app": "".join(("sh", "ppa_", "0123456789abcdef" * 2)),
     "postman": "".join(("PM", "AK-", "a" * 24, "-", "b" * 34)),
-    "doppler": "".join(("dp", ".pt.", "D" * 43)),
+    "doppler-personal": "".join(("dp", ".pt.", DOPPLER_BODY)),
+    "doppler-cli": "".join(("dp", ".ct.", DOPPLER_BODY)),
+    "doppler-service": "".join(("dp", ".st.", DOPPLER_BODY)),
+    "doppler-service-lowercase": "".join(("dp", ".st.", "0123456789abcdef" * 2, "0123456789ab")),
+    "doppler-service-config": "".join(("dp", ".st.", "dev.", DOPPLER_BODY)),
+    "doppler-service-branch-config": "".join(("dp", ".st.", "prd_api-2.", DOPPLER_BODY)),
+    "doppler-service-account": "".join(("dp", ".sa.", DOPPLER_BODY)),
+    "doppler-scim": "".join(("dp", ".scim.", DOPPLER_BODY)),
+    "doppler-audit": "".join(("dp", ".audit.", DOPPLER_BODY)),
 }
 
 
@@ -360,10 +370,24 @@ VENDOR_TOKENS = {
 def test_vendor_token_formats_are_redacted(token, identifier):
     redacted = redact_text(f"call with {token} inside", identifier=identifier)
     assert token not in redacted and redacted == f"call with {REDACTED} inside"
+    assert secret_like("CONFIG", token)
 
 
 @pytest.mark.parametrize(
-    "name", ["SG.config", "dapi-client", "xapp-bot", "shpat_rotation", "PMAK-docs", "dp.pt.cfg"]
+    "name",
+    [
+        "SG.config",
+        "dapi-client",
+        "dapi-docs",
+        "xapp-bot",
+        "shpat_rotation",
+        "shppa_rotation",
+        "PMAK-docs",
+        "dp.pt.cfg",
+        "dp.st.dev",
+        "dp.st.dev.integrations.secrets_manager.client_factory",
+        "dp.pt.load_pretrained_weights_from_checkpoint_directory",
+    ],
 )
 @pytest.mark.parametrize("identifier", [False, True])
 def test_ordinary_names_near_vendor_token_formats_are_kept(name, identifier):
