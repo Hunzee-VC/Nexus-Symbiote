@@ -347,7 +347,10 @@ def verify_mcp_servers(
                 if time.monotonic() > deadline:
                     raise SessionDeadlineError("descriptor checks exceeded the deadline")
                 descriptor = check_served_tool(tool)
-                checked[descriptor.name] = descriptor
+                shown_name = descriptor.display["name"]
+                if shown_name in checked:
+                    raise _RefusedError("invalid-descriptor")
+                checked[shown_name] = descriptor
             approved = [
                 t
                 for t in bom.components
@@ -371,8 +374,8 @@ def verify_mcp_servers(
         result.protocol_version = declared.version
         report.servers_reachable += 1
         extensions = {
-            name: item.unprofiled_hash
-            for name, item in checked.items()
+            item.name: item.unprofiled_hash
+            for item in checked.values()
             if item.unprofiled_hash is not None
         }
         result.declaration_hash = declaration_hash(
@@ -464,7 +467,11 @@ def record_candidate(bom: AIBOM, report: LiveVerifyReport) -> None:
     for result in report.results:
         if result.status != "verified":
             continue
+        seen_names: set[str] = set()
         for finding in result.tool_findings:
+            if finding.name in seen_names:
+                raise ValueError("colliding redacted tool names in candidate")
+            seen_names.add(finding.name)
             descriptor = finding.descriptor
             if descriptor is None:
                 raise ValueError("candidate requires an observed descriptor")

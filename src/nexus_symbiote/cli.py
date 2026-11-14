@@ -835,6 +835,33 @@ def scan(
             "network",
         ],
     )
+    if check_only:
+        from nexus_symbiote.validators.completeness import (
+            carries_discovery_evidence,
+            discovery_producer_check,
+        )
+
+        if carries_discovery_evidence(aibom):
+            producer_verified = False
+            if signature_policies:
+                prod_status, prod_problems = discovery_producer_check(
+                    aibom, root, signature_policies, exclude_paths=policy.scan.exclude_paths
+                )
+                producer_verified = prod_status == "verified" and not prod_problems
+                if prod_problems:
+                    for problem in prod_problems:
+                        scan_failures.append(f"shadowscan: {problem}")
+                    failures_by.setdefault("shadowscan", []).extend(prod_problems)
+            unsigned_reason = _unsigned_discovery_failure_reason(
+                aibom,
+                fail_on_unsigned_discovery=policy.validation.require_discovery_signature,
+                allow_unsigned_discovery=False,
+                already_verified=producer_verified,
+            )
+            if unsigned_reason is not None:
+                scan_failures.append(f"shadowscan: {unsigned_reason}")
+                failures_by.setdefault("shadowscan", []).append(unsigned_reason)
+
     scorer = RiskScorer.from_policy(policy.risk)
     passed, risk_report = scorer.passes_gate(aibom)
     report_mode = report_only or policy.scan.failure_mode == "report-only"
@@ -1004,6 +1031,15 @@ def import_shadowscan(
         except NativeFormatError as exc:
             raise click.ClickException(f"Inventory not written. {exc}") from exc
 
+    unsigned_reason = _unsigned_discovery_failure_reason(
+        aibom,
+        fail_on_unsigned_discovery=fail_on_unsigned_discovery,
+        allow_unsigned_discovery=allow_unsigned_discovery,
+        already_verified=bool(bundle),
+    )
+    if unsigned_reason is not None:
+        raise click.exceptions.Exit(1)
+
     try:
         write_output_file(Path(output), out_data, overwrite=False)
     except FileExistsError as exc:
@@ -1018,15 +1054,7 @@ def import_shadowscan(
         "; discovery coverage remains partial.",
         err=True,
     )
-    unsigned_reason = _unsigned_discovery_failure_reason(
-        aibom,
-        fail_on_unsigned_discovery=fail_on_unsigned_discovery,
-        allow_unsigned_discovery=allow_unsigned_discovery,
-        already_verified=bool(bundle),
-    )
     if report_only:
-        if unsigned_reason is not None:
-            raise click.exceptions.Exit(1)
         return
     if imported.source_status != "complete":
         raise click.ClickException("ShadowScan source report is incomplete; the BOM is partial")
@@ -1120,10 +1148,10 @@ def verify_artifact(
                 + (f": {verified.error}" if verified.error else "")
             )
         trust_root_path = (verified.details or {}).get("trust_root_path", "unavailable")
-        click.echo(
-            "Artifact digest and Sigstore signer policy verified. "
-            f"Trust root: {trust_root_path}. "
-            "This does not establish artifact safety or a deployment binding."
+        echo_line(
+            "Artifact digest and Sigstore signer policy verified. Trust root: ",
+            trust_root_path,
+            ". This does not establish artifact safety or a deployment binding.",
         )
     else:
         click.echo(
@@ -1257,10 +1285,10 @@ def verify_discovery(
                 + (f": {verified.error}" if verified.error else "")
             )
         trust_root_path = (verified.details or {}).get("trust_root_path", "unavailable")
-        click.echo(
-            "Report signer and direct native projection verified. "
-            f"Trust root: {trust_root_path}. "
-            "Discovery claims retain declared assurance."
+        echo_line(
+            "Report signer and direct native projection verified. Trust root: ",
+            trust_root_path,
+            ". Discovery claims retain declared assurance.",
         )
     elif projection:
         click.echo(

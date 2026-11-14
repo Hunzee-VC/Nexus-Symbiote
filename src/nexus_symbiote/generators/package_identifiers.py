@@ -113,6 +113,8 @@ def _agrees_with_component(package: PackageURL, component: _Declaration) -> bool
     projected, because nothing ties it to the component. A qualifier these rules
     do not know could change what the identifier names, so it is not accepted.
     """
+    if package.subpath is not None:
+        return False
     if package.type in {"pypi", "npm"} and component.registry_type != package.type:
         return False
     qualifiers = package.qualifiers if isinstance(package.qualifiers, dict) else None

@@ -557,7 +557,11 @@ class IntegrityValidator:
             accepted = {raw_hash}
             if comp.redacted_definition_hash is not None:
                 accepted.add(comp.redacted_definition_hash)
-            if recomputed not in accepted and legacy_recomputed not in accepted:
+            legacy_ok = (
+                comp.redacted_definition_hash is not None
+                and legacy_recomputed == comp.redacted_definition_hash
+            )
+            if recomputed not in accepted and not legacy_ok:
                 raise ValueError("Tool definition differs from its declared digest")
             if comp.bom_ref in local_tools:
                 local = local_tools[comp.bom_ref]

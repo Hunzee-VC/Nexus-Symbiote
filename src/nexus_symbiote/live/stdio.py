@@ -250,6 +250,10 @@ def _capture(binary: Path, work: Path) -> PinnedObservation:
                 os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+            try:
+                proc.wait(timeout=5.0)
+            except subprocess.TimeoutExpired:
+                pass
 
 
 def observe_pinned(command: str, digest: str) -> PinnedObservation:
