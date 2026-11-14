@@ -163,7 +163,10 @@ also where file names fold case.
 An entry that names neither a collected model weight file nor the ShadowScan
 report makes the `model` collector fail, and `validate --project` reports it as
 the integrity error `unused_policy_entry` even when the completeness check does
-not run, so an entry can never look enforced while nothing checks it.
+not run, so an entry can never look enforced while nothing checks it. An entry
+beneath the directory of a model that got `validation_budget_exhausted` is not
+reported as unused: that model's weight files were not all bound, and its
+`unknown` issue already keeps integrity from passing.
 
 The ShadowScan report is checked by the discovery producer check of
 `validate --project` and `risk --project`, not by `scan`, and only through a

@@ -270,6 +270,7 @@ class IntegrityValidator:
         )
         self._digests = _ArtifactDigests(self.byte_budget)
         self._inspected_models: set[Path] = set()
+        self._unchecked_model_directories: set[Path] = set()
 
     def validate(
         self,
@@ -289,6 +290,7 @@ class IntegrityValidator:
         report = IntegrityReport(basis="supplied-bom" if project_root is None else "project")
         self._digests = _ArtifactDigests(self.byte_budget)
         self._inspected_models = set()
+        self._unchecked_model_directories = set()
         local_tools: dict[str, ToolComponent | None] = {}
         if project_root is not None and any(isinstance(c, ToolComponent) for c in bom.components):
             # Resolve configuration only inside the operator's root. Never use a BOM-supplied
@@ -432,11 +434,9 @@ class IntegrityValidator:
             self._digests.charge(cost)
         except _BudgetExhaustedError:
             report.issues.append(_budget_issue(comp.bom_ref, self.byte_budget))
-            # The model is unchecked, not unused: its policy entry must not be
-            # reported as naming nothing.
-            root = project_root.resolve()
-            if artifact.is_relative_to(root):
-                self._model_packages(report, root).covered.add(artifact.relative_to(root))
+            # The model is unchecked, not unused: no entry for it or for a weight file
+            # it may bind is reported as naming nothing.
+            self._unchecked_model_directories.add(artifact.parent)
             return False
         if once:
             self._inspected_models.add(artifact)
@@ -696,6 +696,7 @@ class IntegrityValidator:
             self._unsigned_model(comp, report)
             return
         if package.budget_exhausted:
+            self._unchecked_model_directories.add((root / package.weight_files[0][0]).parent)
             report.issues.append(
                 IntegrityIssue(
                     comp.bom_ref,
@@ -753,14 +754,23 @@ class IntegrityValidator:
         """An operator entry that no model of this inventory uses must not look enforced.
 
         The model collector reports the same entries when validation recollects the
-        project; this states them even when the completeness check does not run.
+        project; this states them even when the completeness check does not run. The
+        weight files a model binds never leave its directory, so an entry beneath the
+        directory of a model the budget left unchecked is unknown, not unused: that
+        model's own issue already keeps the verdict from passing.
         """
         if not self._signature_policies or project_root is None:
             return
         root = project_root.resolve()
         covered = self._model_packages(report, root).covered
+        unchecked = self._unchecked_model_directories
+        policies = {
+            key: policy
+            for key, policy in self._signature_policies.items()
+            if unchecked.isdisjoint(key.parents)
+        }
         with ConfinedCollection(root, []) as files:
-            unused = unused_policy_entries(files, self._signature_policies, covered)
+            unused = unused_policy_entries(files, policies, covered)
         for label, reason in unused:
             report.issues.append(
                 IntegrityIssue("signature-policy", "unused_policy_entry", f"{label}: {reason}")

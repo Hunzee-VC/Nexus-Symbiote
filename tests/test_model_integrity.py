@@ -1314,6 +1314,37 @@ def test_validate_reports_unused_entries_when_completeness_is_skipped(tmp_path, 
     )
 
 
+@pytest.mark.parametrize("budget", ["artifact", "bindings"])
+def test_entries_of_a_model_the_budget_left_unchecked_are_not_unused(
+    tmp_path, project, monkeypatch, budget
+):
+    export = project / "export"
+    (export / "variables").mkdir(parents=True)
+    (export / "saved_model.pb").write_bytes(b"\x08\x01")
+    (export / "variables" / "variables.data-00000-of-00001").write_bytes(b"reviewed")
+    (export / "variables" / "variables.index").write_bytes(b"index")
+    (project / "notes.txt").write_text("not a weight file")
+    names = [
+        "export/saved_model.pb",
+        "export/variables/variables.data-00000-of-00001",
+        "export/variables/variables.index",
+        "notes.txt",
+    ]
+    policy = write_policy(tmp_path, [pin(project, name) for name in names])
+    policies = load_signature_policies(policy, project)
+    bom = AIBOM(components=ModelScanner(policies).scan(project).components)
+    if budget == "bindings":
+        monkeypatch.setattr(
+            "nexus_symbiote.validators.integrity.ModelPackages",
+            functools.partial(ModelPackages, binding_budget=0),
+        )
+    validator = IntegrityValidator(policies, byte_budget=1 if budget == "artifact" else None)
+    report = validator.validate(bom, project)
+    assert any(i.category == "validation_budget_exhausted" for i in report.issues)
+    unused = [i.detail for i in report.issues if i.category == "unused_policy_entry"]
+    assert unused == ["notes.txt: signature policy entry names no collected model weight file"]
+
+
 # ONNX keys in every encoding a protobuf runtime accepts --------------------------------
 
 
