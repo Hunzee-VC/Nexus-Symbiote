@@ -74,8 +74,30 @@ def test_unexpected_binary_or_malformed_records_fail_closed(listing):
 
 def test_nul_rename_records_classify_both_paths():
     assert checker.changed_lines(b"1\t2\t\0tests/old.py\0tests/new.py\0") == 0
-    assert checker.changed_lines(b"1\t2\t\0src/old.py\0tests/new.py\0") == 3
-    assert checker.changed_lines(b"1\t2\t\0tests/old.py\0src/new.py\0") == 3
+    assert checker.changed_lines(b"1\t2\t\0src/old.py\0src/new.py\0") == 3
+
+
+@pytest.mark.parametrize(
+    "listing",
+    [b"0\t0\t\0src/old.py\0tests/new.py\0", b"1\t2\t\0tests/old.py\0src/new.py\0"],
+)
+def test_saved_cross_boundary_renames_refuse_unavailable_whole_file_sizes(listing):
+    with pytest.raises(ValueError, match="rename"):
+        checker.changed_lines(listing)
+
+
+@pytest.mark.parametrize(
+    "old,new", [("tests/large.py", "src/large.py"), ("src/large.py", "tests/large.py")]
+)
+def test_a_whole_file_moved_across_an_excluded_boundary_counts_its_lines(history, old, new):
+    root, _ = history
+    base = commit(root / old, "value = 1\n" * 1601)
+    (root / new).parent.mkdir(parents=True, exist_ok=True)
+    git("mv", old, new)
+    git("commit", "-m", "move a whole file")
+    head = git("rev-parse", "HEAD")
+    assert checker.changed_lines(checker._from_git(base, head)) == 1601
+    assert checker.main(["--base", base, "--head", head]) == 1
 
 
 def test_the_command_fails_above_the_limit(tmp_path, capsys):

@@ -1,7 +1,8 @@
 """Fail a PR above the line cap outside tests, benchmarks and reviewed binary assets.
 
 Measure insertions plus deletions between immutable event base/head commit IDs.
-Saved listings must use Git's --numstat -z format, including rename records.
+Saved listings must use Git's --numstat -z --no-renames format. Rename records
+are accepted only when they do not cross an excluded-tree boundary.
 Unexpected binary changes fail closed: .gitattributes cannot hide source edits.
 """
 
@@ -45,8 +46,11 @@ def changed_lines(numstat: bytes) -> int:
         binary = added == deleted == b"-"
         if not binary and not (added.isdigit() and deleted.isdigit()):
             raise ValueError("invalid numstat line counts")
-        if all(path.startswith(SKIP_PREFIXES) for path in paths):
+        excluded = [path.startswith(SKIP_PREFIXES) for path in paths]
+        if all(excluded):
             continue
+        if any(excluded):
+            raise ValueError("cross-boundary rename needs whole-file counts; use --no-renames")
         if binary:
             if all(
                 path.startswith(b"docs/assets/") and path.endswith(BINARY_ASSET_SUFFIXES)
@@ -69,7 +73,7 @@ def _from_git(base: str, head: str) -> bytes:
             "diff",
             "--numstat",
             "-z",
-            "--find-renames",
+            "--no-renames",
             "--no-ext-diff",
             "--no-textconv",
             base,

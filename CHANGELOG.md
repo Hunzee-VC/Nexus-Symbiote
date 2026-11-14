@@ -6,7 +6,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
-- The pull request size gate uses immutable event base/head commits, parses NUL-delimited paths and refuses unexpected binary source changes. Its workflow contract now protects the step, fixed limit and ref selection against removal or weakening.
+- The pull request size gate uses immutable event base/head commits, parses NUL-delimited paths, counts whole files moved across excluded-tree boundaries and refuses unexpected binary source changes. Its workflow contract now protects the step, fixed limit and ref selection against removal or weakening.
 
 - **Breaking (GitHub Action):** `fail-on-severity` defaults to `high`. A finding at or above that severity fails the Action even when the aggregate score stays under `risk-threshold`. The previous Action behavior failed on severity only for critical findings, so a pull request that granted `bypassPermissions` and `Bash(*)`, added an automatic hook and launched unpinned `npx -y` servers could pass every default gate with a score under 50. Set `fail-on-severity: critical` to keep that behavior. `none` disables the severity check and is printed as a warning. The CLI and the built-in project policy still default to `critical`. The aggregate score is the uncapped sum of finding weights; `risk --json-output` records `gate.score_scale` as `unbounded-sum`, and a score equal to `fail_threshold` is reported as at or above the threshold.
 - Piping command output into `head` exits quietly with status 141. It used to report `internal error (BrokenPipeError)` and exit 1.
