@@ -616,6 +616,15 @@ def _gate(
                 f"{'it reports' if unclassified == 1 else 'they report'} cannot be compared "
                 "with the inventory"
             )
+        missing = coverage["spans_without_identifier"]
+        for kind in ("tool", "agent"):
+            count = missing[kind]
+            if count:
+                reasons.append(
+                    f"{count} {kind} {'span names' if count == 1 else 'spans name'} no {kind}, "
+                    f"so what {'it' if count == 1 else 'they'} called cannot be compared with "
+                    "the inventory"
+                )
         over = coverage["attribute_lists_over_bound"]
         if over:
             reasons.append(

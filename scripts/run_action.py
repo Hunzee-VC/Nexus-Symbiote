@@ -42,6 +42,10 @@ THRESHOLD = re.compile(r"(?:0|[1-9][0-9]{0,2})(?:\.[0-9]{1,4})?")
 MAX_BASELINE_BYTES = 16 * 1024 * 1024
 MAX_LIMITS_LENGTH = 1024
 LIMITS_ENV = "NEXUS_SYMBIOTE_LIMITS"
+TRUST_ROOT_ENVS = (
+    "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT",
+    "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256",
+)
 RELAY_PREFIX = "| "
 
 
@@ -264,8 +268,12 @@ def _run(args: list[str], *, private: Path, limits: str = "") -> subprocess.Comp
         "XDG_CACHE_HOME": str(private / "cache"),
         "XDG_DATA_HOME": str(private / "data"),
     }
-    # Collection limits come only from the limits input, never from the job environment.
+    # Collection limits come only from the limits input, never from the job environment,
+    # and the Sigstore trust root only from the hash-locked sigstore package: an explicit
+    # trust root in the job environment would let an earlier step choose the authorities.
     env.pop(LIMITS_ENV, None)
+    for name in TRUST_ROOT_ENVS:
+        env.pop(name, None)
     if limits:
         env[LIMITS_ENV] = limits
     # The executable is this interpreter; arguments never pass through a shell.
