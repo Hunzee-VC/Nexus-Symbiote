@@ -265,3 +265,51 @@ def test_a_symlink_keeps_its_digest_only_when_its_target_is_markdown(tmp_path):
     assert linked.content_hash is None
     assert prompt.withholds_content_hash(linked)
     assert components["prompt:shared/.cursorrules"].content_hash == hash_bytes(b"Be terse.\n")
+
+
+def test_a_suffixless_rule_reached_through_a_directory_symlink_keeps_its_digest(tmp_path):
+    """The walk records the file under the path it resolves to, outside the rule
+    directory; it is still a rule file of that directory, which the collector reads as
+    Markdown, and project validation agrees."""
+    _write(tmp_path, "shared/r/style", "Use tabs.\n")
+    _write(tmp_path, "shared/r/x.json", CONFIGURATION)
+    (tmp_path / ".cursor").mkdir()
+    (tmp_path / ".cursor/rules").symlink_to("../shared/r")
+    result = PromptScanner().scan(tmp_path)
+    components = _components(result)
+    style = components["prompt:shared/r/style"]
+    assert style.content_hash == hash_bytes(b"Use tabs.\n")
+    assert style.properties["instruction_directory"] == ".cursor/rules"
+    assert not prompt.withholds_content_hash(style)
+    assert components["prompt:shared/r/x.json"].content_hash is None
+    assert hash_bytes(CONFIGURATION.encode()) not in _published(result)
+    report = IntegrityValidator().validate(AIBOM(components=result.components), tmp_path)
+    assert report.hashes_failed == 0, report.issues
+
+
+def test_a_changed_withheld_file_names_the_prompt_file_in_the_keyed_mismatch(tmp_path, monkeypatch):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, BINDING_KEY)
+    _write(tmp_path, ".clinerules/style.txt", "Use tabs.\n")
+    components = PromptScanner().scan(tmp_path).components
+    _write(tmp_path, ".clinerules/style.txt", "Use spaces.\n")
+    report = IntegrityValidator().validate(AIBOM(components=components), tmp_path)
+    assert report.hashes_failed == 1
+    assert [issue.detail for issue in report.issues if issue.category == "hash_mismatch"] == [
+        "Keyed content binding mismatch against the prompt file"
+    ]
+
+
+def test_a_skill_resource_linked_to_an_imported_file_keeps_its_documented_digest(tmp_path):
+    """Skill and command files are resources bound by digest whatever their names; the
+    release notes and guides must not promise that every recorded file is withheld."""
+    _write(tmp_path, "config/app.json", CONFIGURATION)
+    _write(tmp_path, "CLAUDE.md", "@config/app.json\n")
+    _link(tmp_path, ".claude/skills/x/app.json", "config/app.json")
+    components = _components(PromptScanner().scan(tmp_path))
+    assert components["prompt:import:config/app.json"].content_hash is None
+    skill = components["skill:.claude/skills/x/app.json"]
+    assert skill.hashes["sha256"] == hash_bytes(CONFIGURATION.encode())
+    root = Path(__file__).resolve().parents[1]
+    for document in ("CHANGELOG.md", "docs/known-limitations.md"):
+        text = " ".join((root / document).read_text(encoding="utf-8").split())
+        assert "`.claude/skills/x/app.json` linked to `config/app.json`" in text, document

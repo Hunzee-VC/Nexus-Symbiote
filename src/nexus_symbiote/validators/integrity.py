@@ -957,7 +957,7 @@ class IntegrityValidator:
             IntegrityIssue(
                 comp.bom_ref,
                 "hash_mismatch",
-                "Keyed content binding mismatch against the imported file",
+                "Keyed content binding mismatch against the prompt file",
             )
         )
 

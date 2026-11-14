@@ -419,8 +419,8 @@ the record carries a low `completeness` finding that names it. An import is a ga
 is not read when the path imported, or the file a symlink there leads to, is
 [named as holding credentials](#files-named-as-holding-credentials).
 
-Every other file the `prompt` collector records follows the same rule, under the same
-profile, with its own path in the binding: an instruction, nested memory, rule, prompt
+Every other instruction, rule, prompt or subagent file the `prompt` collector records
+follows the same rule, under the same profile, with its own path in the binding: an instruction, nested memory, rule, prompt
 or subagent file keeps `content_hash` only when its name has a Markdown suffix, is an
 instruction file name without one (`.cursorrules`, `.clinerules`, `.windsurfrules`,
 `system_prompt.txt`), or, in a rule, prompt or subagent directory, has no suffix at
@@ -428,7 +428,13 @@ all, and when the file a symlink there leads to, if any, has a Markdown suffix, 
 same test an import of that file passes. `AGENTS.md` linked to `config/app.json` or
 `config/.windsurfrules` is recorded as `prompt:AGENTS.md` without `content_hash`, as is
 `.cursor/rules/x.json`; an ordinary
-`CLAUDE.md`, `AGENTS.md` linked to `docs/agents.md` and `.cursor/rules/x.mdc` keep it.
+`CLAUDE.md`, `AGENTS.md` linked to `docs/agents.md` and `.cursor/rules/x.mdc` keep it,
+and so does a rule file without a suffix that a directory symlink leads the walk to,
+such as `shared/r/style` behind `.cursor/rules` linked to `shared/r`, whose record
+names the directory in `properties.instruction_directory`. The files of a skill or
+command directory are skill resources: each keeps its unkeyed `sha256` digest whatever
+its name, also when it is a symlink to a file an import inventories without
+`content_hash`, so keep configuration out of skill directories.
 
 `validate --project` with the key recomputes the binding from the file and counts it
 as a verified hash, and a changed file as a failed one. A binding under another

@@ -388,7 +388,12 @@ A way around a limit that its entry does not describe is worth a
   passes. So `AGENTS.md` linked to `config/app.json` or `config/.windsurfrules`,
   `.cursorrules` linked to `docs/rules.txt` or `shared/.cursorrules`, and
   `.cursor/rules/x.json` or `.clinerules/style.txt` carry no content hash; a nested
-  `shared/.cursorrules` that the walk records under its own name keeps one there. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` a keyed binding covers the
+  `shared/.cursorrules` that the walk records under its own name keeps one there. A
+  file of a skill or command directory is a skill resource that keeps its unkeyed
+  `sha256` digest whatever its name, also when it is a symlink to a file an import
+  inventories without a content hash, such as `.claude/skills/x/app.json` linked to
+  `config/app.json`, so that digest can confirm a guess of the file; keep
+  configuration out of skill directories. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` a keyed binding covers the
   content, which `validate --project` with the same key verifies; without the key the
   component carries a low `completeness` finding, validation counts it as unbound, and
   a change to the file raises no alert and fails no validation. A project with more

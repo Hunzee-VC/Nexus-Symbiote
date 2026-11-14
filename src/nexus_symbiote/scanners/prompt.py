@@ -535,14 +535,21 @@ def _read_unless_credential(
     return None
 
 
-def _found_by_name(path: str, prompt_type: str | None) -> bool:
+def _found_by_name(path: str, prompt_type: str | None, directory: object = None) -> bool:
     """Whether a walk recorded ``path`` because a host loads a file of that name, or a rule,
     prompt or subagent file of that directory whose name has no suffix at all, such as
-    ``.clinerules/style``, which the collector reads as Markdown."""
+    ``.clinerules/style``, which the collector reads as Markdown.
+
+    ``directory`` names the rule, prompt or subagent directory whose walk reached
+    ``path`` through a directory symlink, such as ``.cursor/rules`` linked to
+    ``shared/r``, where the file is recorded under the path it resolves to.
+    """
     if prompt_type == "imported-instruction":
         return False
     parts = PurePosixPath(path).parts
     if path in INSTRUCTION_FILES or (len(parts) > 1 and parts[-1] in NESTED_INSTRUCTION_NAMES):
+        return True
+    if directory in INSTRUCTION_DIRECTORIES and "." not in parts[-1]:
         return True
     return "." not in parts[-1] and any(
         parts[: len(directory)] == directory and len(parts) > len(directory)
@@ -550,7 +557,9 @@ def _found_by_name(path: str, prompt_type: str | None) -> bool:
     )
 
 
-def _instruction_content(path: str, prompt_type: str | None, link_target: object) -> bool:
+def _instruction_content(
+    path: str, prompt_type: str | None, link_target: object, directory: object = None
+) -> bool:
     """Whether a recorded file keeps an unkeyed content hash: the bytes read are those of
     an instruction file.
 
@@ -561,7 +570,7 @@ def _instruction_content(path: str, prompt_type: str | None, link_target: object
     ``AGENTS.md`` linked to ``config/app.json`` or ``config/.windsurfrules``, is named by
     the checkout, not by a host, so its exact bytes may hold configuration or secrets.
     """
-    named = _markdown(path) or _found_by_name(path, prompt_type)
+    named = _markdown(path) or _found_by_name(path, prompt_type, directory)
     return named and (
         link_target is None or (isinstance(link_target, str) and _markdown(link_target))
     )
@@ -578,6 +587,7 @@ def withholds_content_hash(component: PromptComponent) -> bool:
             component.source_path or "",
             component.prompt_type,
             component.properties.get("symlink_target"),
+            component.properties.get("instruction_directory"),
         )
     )
 
@@ -796,7 +806,16 @@ class PromptScanner(Scanner):
                     content = _read_unless_credential(relative, files, result)
                     if content is None:
                         continue
-                    component = self._record(relative, prompt_type, content, files, result)
+                    # A directory symlink there leads the walk to the path it resolves to.
+                    inside = path.parts[: len(Path(directory).parts)] == Path(directory).parts
+                    component = self._record(
+                        relative,
+                        prompt_type,
+                        content,
+                        files,
+                        result,
+                        directory=None if inside else directory,
+                    )
                     if component is not None:
                         recorded[relative] = component
                         texts[relative] = content.decode("utf-8")
@@ -856,8 +875,12 @@ class PromptScanner(Scanner):
         content: bytes,
         files: ConfinedCollection,
         result: ScanResult,
+        directory: str | None = None,
     ) -> PromptComponent | None:
         """Record the instruction file read from ``rel_path``, or None.
+
+        ``directory`` names the rule, prompt or subagent directory whose walk reached the
+        file through a directory symlink; the record keeps it.
 
         Every walk reads through ``_read_unless_credential``; the check is repeated on
         the symlink the read followed, so no walk, and no import of a file a walk
@@ -879,7 +902,9 @@ class PromptScanner(Scanner):
         )
         if target is not None:
             component.properties["symlink_target"] = target
-        if not _instruction_content(rel_path, prompt_type, target):
+        if directory is not None:
+            component.properties["instruction_directory"] = directory
+        if not _instruction_content(rel_path, prompt_type, target, directory):
             self._bind_content(rel_path, prompt_type, content, component, result)
         result.components.append(component)
         return component
