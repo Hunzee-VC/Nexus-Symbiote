@@ -485,9 +485,11 @@ A way around a limit that its entry does not describe is worth a
 - **Effective permissions are not resolved.** User and managed settings, workspace
   trust and session flags are not read, and deny and ask rules are counted, not
   applied to the allow list. A Claude Code allow rule whose command word is a shell,
-  an interpreter or a launcher and that ends in a wildcard, such as `Bash(sh:*)`,
-  `Bash(python3 -c:*)` or `Bash(sudo:*)`, is reported as an unscoped shell grant,
-  because it approves any command; a rule that names another program, such as
+  an interpreter or a launcher and that contains a wildcard, such as `Bash(sh:*)`,
+  `Bash(python3 -c:*)` or `Bash(sudo:*)`, is conservatively reported as an unscoped
+  shell grant. This heuristic also flags a fixed script with wildcard arguments,
+  such as `Bash(python3 scripts/report.py:*)`; it does not establish that every
+  matching rule permits arbitrary commands. A rule that names another program, such as
   `Bash(npm run build:*)`, is read as scoped even where that program runs project code.
 - **Settings digests can confirm guesses.** Without
   `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, the digests of the Claude Code settings,
