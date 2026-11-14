@@ -972,7 +972,8 @@ def _yarn_lockfile_stanzas(text: str) -> tuple[bool, list[tuple[list[str], dict[
         if not line or line.startswith("#"):
             if any(int(m.group(1)) > 1 for m in _YARN_VERSION_COMMENT.finditer(line)):
                 raise ValueError("unsupported yarn.lock version")
-            # Yarn 1 closes every open object at an empty or comment line.
+            # Yarn 1 reads an indented line after one empty line as part of the stanza and
+            # stops reading the lockfile at one after more; refusing it covers both.
             open_keys = []
             continue
         content = line.lstrip(" ")

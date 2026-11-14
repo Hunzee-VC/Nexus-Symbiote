@@ -167,6 +167,8 @@ def test_the_record_yarn_installs_is_the_one_bound(tmp_path, lock):
         f'openai@4.0.0:\n  version "4.0.0"\n  resolved "{EVIL}"\u2028x\n',
         f'openai@4.0.0:\n  version "4.0.0"\n  truex "{EVIL}"\n',
         f'openai@4.0.0:\n  version "4.0.0"\n  resolved:"{EVIL}"\n',
+        f'openai@4.0.0:\n  version 4\n  resolved "{PUBLIC}"\n',
+        'openai@4.0.0:\n  version "4.0.0"\n  resolved true\n',
         # Yarn 1 ends a line at a lone CR and reads the next line as a top-level key.
         stanza("openai@4.0.0", PUBLIC)
         + "\nzzpad@1.0.0:\r  openai@4.0.0:\n"
@@ -198,6 +200,8 @@ def test_the_record_yarn_installs_is_the_one_bound(tmp_path, lock):
         "line-separator",
         "boolean-prefix",
         "unspaced-colon",
+        "number-value",
+        "boolean-value",
         "lone-cr-hides-repeat",
         "lone-cr-hides-stanza",
         "lone-cr-only",

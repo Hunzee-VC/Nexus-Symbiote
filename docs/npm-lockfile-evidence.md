@@ -73,8 +73,8 @@ with one and no `integrity` has a `missing_lockfile_integrity` finding. A line t
 Berry uses for a lockfile that starts with `__metadata`, reads differently or not at
 all fails the lockfile as `yarn.lock: invalid or unsupported lockfile`: a single
 quote, a tab, a comment after text or indented, an odd or deeper indentation than
-an object opens, an indented line after an empty or comment line (Yarn 1 stops
-reading the stanza there), a whitespace-only line, a word Yarn 1 splits into a
+an object opens, an indented line after an empty or comment line (after one empty
+line Yarn 1 keeps reading the stanza, and after more it stops reading the lockfile), a whitespace-only line, a word Yarn 1 splits into a
 number or `true`/`false` and a string (such as an unquoted `4.0.0`), an invalid
 escape, more than one value, a duplicate key, a selector with surrounding spaces,
 a carriage return that is not followed by a line feed (Yarn 1 ends the line there but
