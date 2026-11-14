@@ -220,6 +220,7 @@ shorten lists whose content is recorded or bound anyway.
 | Paths the prompt collector lists in the `imports` and `imported_by` properties of one collection; past it a list is replaced by `imports_count` and `imports_digest`, or by `imported_by_count`, which is not a failure because every imported file is still inventoried and the digest binds what each file imports | 262,144 characters |
 | `@path` import references in one memory or imported file | 1,000 |
 | Codec name in a Python encoding declaration | 64 characters |
+| Dots separating key or table-name parts in TOML read by the registry, IDE and MCP collectors, including Codex settings and package-resolver configuration; quoted parts count, dots inside strings and comments do not | 16 (17 parts); checked before parsing |
 | MCP tool registrations in one TypeScript or JavaScript file | 1,000 |
 | TypeScript native parse time per file | 250 ms, in proportion to `syntax-bytes` above its default |
 | TypeScript analysis time per file | 2 s, in proportion to `ts-nodes` above its default |
