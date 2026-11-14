@@ -6,7 +6,6 @@ import ast
 import re
 from collections import Counter
 from pathlib import Path
-from typing import NamedTuple
 from urllib.parse import quote
 
 from nexus_symbiote.core.hashing import hash_bytes
@@ -34,13 +33,103 @@ _LOW_LEVEL = {
     ("mcp.server.lowlevel", "Server"),
     ("mcp.server.lowlevel.server", "Server"),
 }
-# Server attributes that run or configure the server and register no tools. Any
-# other use of a recognised server, such as passing it to a helper, is a gap.
+# Server methods that run or configure the server and register no tools. Merely
+# retrieving a bound method is not safe: it can expose the server via __self__.
 _SERVER_ATTRIBUTES = _names(
     "run run_async run_stdio_async run_sse_async run_streamable_http_async run_http_async "
     "sse_app streamable_http_app http_app settings name instructions resource prompt "
     "custom_route"
 )
+_RUN_METHODS = _names("run")
+_ASYNC_RUN_METHODS = _names(
+    "run_async run_stdio_async run_sse_async run_streamable_http_async run_http_async"
+)
+_APP_METHODS = _names("sse_app streamable_http_app http_app")
+_DECORATOR_METHODS = _names("resource prompt custom_route")
+_REFLECTIVE_NAMES = _names("locals globals vars eval exec getattr")
+_REFLECTIVE_ATTRIBUTES = _names(
+    "__globals__ __closure__ __traceback__ __dict__ f_locals f_globals "
+    "gi_frame cr_frame ag_frame _getframe currentframe getouterframes modules"
+)
+
+
+def _reflective_access(nodes: list[ast.AST]) -> bool:
+    """Whether common reflection can retrieve an instance without naming it."""
+    return any(
+        (
+            isinstance(node, ast.Call)
+            and (
+                (isinstance(node.func, ast.Name) and node.func.id in _REFLECTIVE_NAMES)
+                or (isinstance(node.func, ast.Attribute) and node.func.attr in _REFLECTIVE_NAMES)
+            )
+        )
+        or (isinstance(node, ast.Attribute) and node.attr in _REFLECTIVE_ATTRIBUTES)
+        or (isinstance(node, ast.Name) and node.id == "__builtins__")
+        for node in nodes
+    )
+
+
+def _inside_try(node: ast.AST, parents: dict[ast.AST, ast.AST], cache: dict[ast.AST, bool]) -> bool:
+    """Whether a surrounding try can expose a receiver in a traceback."""
+    pending: list[ast.AST] = []
+    current: ast.AST | None = node
+    while current is not None and current not in cache:
+        pending.append(current)
+        current = parents.get(current)
+    found = False if current is None else cache[current]
+    for item in reversed(pending):
+        found = found or isinstance(item, (ast.Try, ast.TryStar))
+        cache[item] = found
+    return cache[node]
+
+
+def _safe_server_names(nodes: list[ast.AST]) -> set[ast.AST]:
+    """Names used as receivers in supported direct server operations.
+
+    A bound method can be stored, passed or dereferenced to recover the server.
+    App factories return objects retaining the server, and asynchronous methods
+    return coroutines that do so. A call is safe only if its result is discarded,
+    awaited immediately, or used directly as a supported decorator. Preserve the
+    ordinary ``server.settings.port = ...`` form without allowing settings to escape.
+    """
+    parents = {child: node for node in nodes for child in ast.iter_child_nodes(node)}
+    guarded: dict[ast.AST, bool] = {}
+    safe: set[ast.AST] = set()
+    for node in nodes:
+        if not (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.attr in _SERVER_ATTRIBUTES
+            and isinstance(node.ctx, ast.Load)
+        ):
+            continue
+        parent = parents.get(node)
+        enclosing = parents.get(parent) if parent is not None else None
+        direct = isinstance(parent, ast.Call) and parent.func is node
+        if direct and _inside_try(node, parents, guarded):
+            direct = False
+        if direct and node.attr in _DECORATOR_METHODS:
+            # These methods return decorators which can close over the server.
+            direct = isinstance(enclosing, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
+                parent in enclosing.decorator_list
+            )
+        elif direct and node.attr in _ASYNC_RUN_METHODS:
+            direct = isinstance(enclosing, ast.Await) and isinstance(
+                parents.get(enclosing), ast.Expr
+            )
+        elif direct and node.attr in (_RUN_METHODS | _APP_METHODS):
+            direct = isinstance(enclosing, ast.Expr)
+        else:
+            direct = False
+        if direct or (
+            node.attr == "settings"
+            and isinstance(parent, ast.Attribute)
+            and isinstance(parent.ctx, ast.Store)
+        ):
+            safe.add(node.value)
+    return safe
+
+
 # Constructor keywords that carry tools, or could, are registrations the
 # collector does not resolve.
 _REGISTERING_KEYWORDS = frozenset({"tools", "tool_serializer", "providers", "mount"})
@@ -400,11 +489,32 @@ def _collect_agent_decorators(
     )
     # An agent used other than through an attribute or a `with` statement, such as
     # aliased, passed to a function or held in a list, can be given tools elsewhere.
-    reached = _annotation_names(nodes)
+    # An annotation naming the agent object exposes it through __annotations__.
+    reached: set[ast.AST] = {name for name in _annotation_names(nodes) if name.id not in agents}
+    # Merely obtaining an agent's method exposes the agent through __self__, and
+    # its result may itself retain the agent. Recognize only directly discarded
+    # synchronous runs or immediately awaited asynchronous runs. Decorators
+    # already handled above are safe only in their registration form.
+    parents = {child: node for node in nodes for child in ast.iter_child_nodes(node)}
+    guarded: dict[ast.AST, bool] = {}
     for node in nodes:
-        if isinstance(node, ast.Attribute):
-            reached.add(node.value)
-        elif isinstance(node, ast.withitem):
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            enclosing = parents.get(node)
+            if node in handled:
+                reached.add(node.value)
+            elif (
+                isinstance(enclosing, ast.Call)
+                and enclosing.func is node
+                and not _inside_try(node, parents, guarded)
+            ):
+                outer = parents.get(enclosing)
+                if (node.attr == "run_sync" and isinstance(outer, ast.Expr)) or (
+                    node.attr == "run"
+                    and isinstance(outer, ast.Await)
+                    and isinstance(parents.get(outer), ast.Expr)
+                ):
+                    reached.add(node.value)
+        elif isinstance(node, ast.withitem) and node.optional_vars is None:
             reached.add(node.context_expr)
     escaped = any(
         isinstance(node, ast.Name)
@@ -413,7 +523,12 @@ def _collect_agent_decorators(
         and node not in reached
         for node in nodes
     )
-    if unsupported_factory or escaped or (candidates - handled):
+    if (
+        unsupported_factory
+        or escaped
+        or (candidates - handled)
+        or (agents and _reflective_access(nodes))
+    ):
         result.surfaces_excluded.append(
             f"{path.as_posix()}: unsupported Python SDK tool binding or dynamic registration"
         )
@@ -548,87 +663,13 @@ def _record_decorated_tools(
         _record_decorator(node, stmt.name, servers[receiver], path, source_digest, result)
 
 
-class _Helper(NamedTuple):
-    """How a call binds a top-level function's parameters, and the names it uses unsafely:
-    any use other than reading a run, app or settings attribute of the name."""
+def _annotation_names(nodes: list[ast.AST]) -> set[ast.Name]:
+    """Plain type-name annotations, which do not invoke arbitrary expressions.
 
-    positional: tuple[str, ...]
-    named: frozenset[str]
-    unsafe: frozenset[str]
-
-
-def _helper(function: ast.FunctionDef | ast.AsyncFunctionDef) -> _Helper:
-    positional = tuple(arg.arg for arg in (*function.args.posonlyargs, *function.args.args))
-    nodes = list(ast.walk(function))
-    safe = {
-        node.value
-        for node in nodes
-        if isinstance(node, ast.Attribute) and node.attr in _SERVER_ATTRIBUTES
-    }
-    return _Helper(
-        positional,
-        frozenset({*positional, *(arg.arg for arg in function.args.kwonlyargs)}),
-        frozenset(
-            node.id
-            for node in nodes
-            if isinstance(node, ast.Name) and not (isinstance(node.ctx, ast.Load) and node in safe)
-        ),
-    )
-
-
-def _benign_helper_arguments(
-    tree: ast.Module,
-    nodes: list[ast.AST],
-    servers: dict[str, MCPServerComponent],
-    bindings: Counter[str],
-) -> set[ast.AST]:
-    """Servers passed to a helper of this file that registers nothing on them.
-
-    Only an undecorated function whose name the file binds once is read, since a
-    call can otherwise reach another definition or what a decorator returned. Each
-    helper is read once, however many calls pass it a server, so the work stays
-    linear in the size of the file.
+    An annotation may contain calls, indexing or attribute access and may be
+    evaluated at definition time or later. Those expressions are analyzed as
+    code instead of exempting their entire subtrees from escape detection.
     """
-    functions = {
-        stmt.name: stmt
-        for stmt in tree.body
-        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and not stmt.decorator_list
-        and bindings[stmt.name] == 1
-    }
-    helpers: dict[str, _Helper] = {}
-    benign: set[ast.AST] = set()
-    for node in nodes:
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
-            continue
-        function = functions.get(node.func.id)
-        if function is None or not any(
-            isinstance(value, ast.Name) and value.id in servers
-            for value in (*node.args, *(keyword.value for keyword in node.keywords))
-        ):
-            continue
-        helper = helpers.get(function.name)
-        if helper is None:
-            helper = helpers[function.name] = _helper(function)
-        passed = [
-            (helper.positional[index] if index < len(helper.positional) else None, value)
-            for index, value in enumerate(node.args)
-        ] + [
-            (keyword.arg if keyword.arg in helper.named else None, keyword.value)
-            for keyword in node.keywords
-        ]
-        for parameter, value in passed:
-            if (
-                isinstance(value, ast.Name)
-                and value.id in servers
-                and parameter is not None
-                and parameter not in helper.unsafe
-            ):
-                benign.add(value)
-    return benign
-
-
-def _annotation_names(nodes: list[ast.AST]) -> set[ast.AST]:
     annotations: list[ast.expr] = []
     for node in nodes:
         if isinstance(node, ast.arg) and node.annotation is not None:
@@ -637,32 +678,23 @@ def _annotation_names(nodes: list[ast.AST]) -> set[ast.AST]:
             annotations.append(node.returns)
         elif isinstance(node, ast.AnnAssign):
             annotations.append(node.annotation)
-    return {name for annotation in annotations for name in ast.walk(annotation)}
+    return {annotation for annotation in annotations if isinstance(annotation, ast.Name)}
 
 
 def _has_unsupported_registration(
-    tree: ast.Module,
     nodes: list[ast.AST],
     calls: set[ast.Call],
     handled: set[ast.AST],
     servers: dict[str, MCPServerComponent],
     factories: dict[str, ast.ImportFrom],
-    bindings: Counter[str],
 ) -> bool:
     """Whether a recognised server or factory escapes the supported forms."""
-    if calls - handled:
+    if calls - handled or (servers and _reflective_access(nodes)):
         return True
     factory_calls = {call.func for call in calls}
-    safe = _benign_helper_arguments(tree, nodes, servers, bindings) | _annotation_names(nodes)
-    for node in nodes:
-        if (
-            isinstance(node, ast.Attribute)
-            and isinstance(node.value, ast.Name)
-            and node.value.id in servers
-            and node.attr in _SERVER_ATTRIBUTES
-            and isinstance(node.ctx, ast.Load)
-        ):
-            safe.add(node.value)
+    safe = {
+        name for name in _annotation_names(nodes) if name.id not in servers
+    } | _safe_server_names(nodes)
     for node in nodes:
         if not isinstance(node, ast.Name) or not isinstance(node.ctx, ast.Load) or node in safe:
             continue
@@ -811,7 +843,7 @@ def collect_python_tools(
             result.components.append(server)
         elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
             _record_decorated_tools(stmt, servers, handled, path, source_digest, result)
-    if _has_unsupported_registration(tree, nodes, calls, handled, servers, factories, bindings) or (
+    if _has_unsupported_registration(nodes, calls, handled, servers, factories) or (
         _imported_receivers(tree)
     ):
         result.surfaces_excluded.append(

@@ -211,14 +211,14 @@ A way around a limit that its entry does not describe is worth a
   `websocket_client` of the MCP SDK, `MCPServerStdio`, `MCPServerSse` and
   `MCPServerStreamableHttp` of the OpenAI Agents SDK, `MCPServerStdio`,
   `MCPServerSSE`, `MCPServerHTTP` and `MCPServerStreamableHTTP` of PydanticAI, and
-  LangChain's `MultiServerMCPClient`, used outside an annotation; a class among
+  LangChain's `MultiServerMCPClient`, used outside a plain-name type annotation; a class among
   them also as an attribute of any value, such as a module a parameter or another
   name holds, and a function as an attribute of any name the file imports; in
   TypeScript and
   JavaScript, the SDK's `StdioClientTransport`, `SSEClientTransport`,
   `StreamableHTTPClientTransport` and `WebSocketClientTransport`. A Python file that
-  imports one of these by name from its package and does not use it outside an
-  annotation is a gap too, because another module can import it from that file,
+  imports one of these by name from its package and does not use it outside a
+  plain-name type annotation is a gap too, because another module can import it from that file,
   as from a package `__init__.py` that re-exports it. A Python file that imports
   one by name from any other module, its own project's included, or uses its name
   after a star import of another module, is a gap whether or not it uses it, so a
@@ -247,14 +247,31 @@ A way around a limit that its entry does not describe is worth a
   `FastMCP.from_openapi`, decorators on a server imported from another module, a
   qualified, module-alias or star import, an import spelled only with
   compatibility characters, a server class imported by name and not used
-  outside an annotation, which another module can import from that file, a
+  outside a plain-name type annotation, which another module can import from that file, a
   `FastMCP` or `MCPServer` imported by name from any other module, another
   submodule of `mcp` or `fastmcp` and its own project's included, or used by its
   name after a star import of one, whether or not it is used, and a `FastMCP` or
   `MCPServer` attribute of any value. `MCPServer` imported from `agents.mcp` or
   `pydantic_ai.mcp`, a client base class there, is not a gap. So a
   server built from a class a project module re-exports is a gap on the file that
-  builds it, even when the re-exporting module's own server is inventoried. Any
+  builds it, even when the re-exporting module's own server is inventoried.
+  Calls, indexing and attribute access in annotations are analyzed as code,
+  because annotations may execute at definition time or later. Saving, passing
+  or dereferencing a server's bound method is a gap. App factories return an
+  object that can retain the server, so storing, returning or passing an app,
+  such as `app = server.streamable_http_app()`, is a gap. Saving an asynchronous
+  run coroutine and saving a resource or prompt decorator are gaps for the same
+  reason. Calls protected by a `try` statement are gaps because an exception's
+  traceback can expose the receiver. An immediately awaited run, a directly discarded synchronous run,
+  a directly applied resource or prompt decorator and a direct assignment such as
+  `server.settings.port = 8000` are not gaps. These conservative rules can report
+  gaps for harmless annotations, reads or app setups. Python tracing, exception
+  handling in another file, and other reflective paths are not resolved, so a
+  completed scan cannot prove that a server object never escaped. In a file with
+  a recognized server, common reflection including `locals()`, `globals()`,
+  `vars()`, `eval()`, `exec()`, `getattr()`, `__globals__`, module tables and
+  frame attributes is a gap, even when the reflective operation is harmless.
+  Any
   call whose first argument, or `name` keyword, is a literal that names `mcp`,
   `mcp.server` or `fastmcp`, or a submodule of the last two, is a gap whatever the
   callee, so a loader passed as an argument, bound by a `match` capture, read from
@@ -310,7 +327,9 @@ A way around a limit that its entry does not describe is worth a
   qualified import and a star import are gaps. So is a PydanticAI agent given `tools=`,
   `toolsets=`, `builtin_tools=`, `mcp_servers=` or `*` or `**` arguments, or used
   other than through an attribute or a `with` statement, such as passed to a
-  function or held in a list. Each agent's tools are named per agent, so two agents
+  function or held in a list. Bound methods or returned results that can retain
+  the agent and aliases from `with ... as` are also gaps; directly discarded
+  `run_sync` and immediately awaited `run` calls are accepted. Each agent's tools are named per agent, so two agents
   of a file can each have a tool of the same name. Class-based tools, such as
   `BaseTool` subclasses and `StructuredTool.from_function`, are neither collected
   nor reported.

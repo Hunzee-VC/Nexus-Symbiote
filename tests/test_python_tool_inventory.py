@@ -261,8 +261,7 @@ def test_additional_sdk_import_paths_are_collected(tmp_path, module, factory):
 def test_ordinary_server_use_and_other_frameworks_are_not_gaps(tmp_path):
     result, tools = scan(
         tmp_path,
-        FASTMCP + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n"
-        "app = mcp.streamable_http_app()\nmcp.settings.port = 8000\n",
+        FASTMCP + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\nmcp.settings.port = 8000\n",
     )
     assert [tool.name for tool in tools] == ["add"] and not result.surfaces_excluded
     result, tools = scan(
@@ -293,21 +292,87 @@ def test_references_survive_inserted_lines_and_edits_change_the_digest(tmp_path)
     assert server.properties["source_sha256"] != moved_server.properties["source_sha256"]
 
 
-def test_helpers_of_the_same_file_are_judged_by_what_they_do_with_the_server(tmp_path):
+def test_passing_a_server_to_a_helper_is_a_gap(tmp_path):
     benign = (
         FASTMCP + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n"
         "def build(server: FastMCP, *, host: str) -> object:\n"
-        "    return server.streamable_http_app(host=host)\n"
+        "    server.run()\n"
         "app = build(mcp, host='127.0.0.1')\n"
     )
     result, tools = scan(tmp_path, benign)
-    assert [tool.name for tool in tools] == ["add"] and not result.surfaces_excluded
+    assert [tool.name for tool in tools] == ["add"] and result.surfaces_excluded
     registering = benign.replace(
-        "    return server.streamable_http_app(host=host)\n",
-        "    server.add_tool(lambda: None)\n    return server.streamable_http_app(host=host)\n",
+        "    server.run()\n",
+        "    server.add_tool(lambda: None)\n    server.run()\n",
     )
     result, _ = scan(tmp_path, registering)
     assert result.surfaces_excluded
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "mcp.run.__self__.tool()(delete_all)\n",
+        "bound = mcp.run\nbound.__self__.tool()(delete_all)\n",
+        "closure = mcp.resource('test://x')\n"
+        "closure.__closure__[0].cell_contents.tool()(delete_all)\n",
+        "mcp.resource('test://x').__closure__[0].cell_contents.tool()(delete_all)\n",
+        "app = mcp.sse_app()\n",
+        "app = mcp.streamable_http_app()\n",
+        "app = mcp.http_app()\n",
+        "send_app(mcp.sse_app())\n",
+        "async def hidden():\n    return mcp.run_stdio_async()\n",
+        "def build(server):\n    return server.sse_app()\napp = build(mcp)\n",
+        "def build(server):\n    def delayed(): server.run()\n    return delayed\n"
+        "handler = build(mcp)\nhandler.__closure__[0].cell_contents.tool()(delete_all)\n",
+        "def build(server):\n    return locals()\n"
+        "items = build(mcp)\nitems['server'].tool()(delete_all)\n",
+        "async def build(server): pass\n"
+        "task = build(mcp)\ntask.cr_frame.f_locals['server'].tool()(delete_all)\n",
+        "def build(server):\n    yield None\n"
+        "gen = build(mcp)\ngen.gi_frame.f_locals['server'].tool()(delete_all)\n",
+        "def build(server): server.run(transport='invalid')\n"
+        "try: build(mcp)\n"
+        "except Exception as error:\n"
+        " error.__traceback__.tb_next.tb_frame.f_locals['server'].tool()(delete_all)\n",
+        "try: mcp.run(transport='invalid')\n"
+        "except Exception as error:\n"
+        " error.__traceback__.tb_next.tb_frame.f_locals['self'].tool()(delete_all)\n",
+        "def register(server):\n    server.run.__self__.tool()(delete_all)\nregister(mcp)\n",
+        "def hidden(value: mcp.tool()(delete_all)): pass\n",
+        "def hidden() -> mcp.tool()(delete_all): pass\n",
+        "registered: mcp.tool()(delete_all) = None\n",
+        "def hidden(value: mcp): pass\nhidden.__annotations__['value'].tool()(delete_all)\n",
+        "locals()['mcp'].tool()(delete_all)\n",
+        "globals()['mcp'].tool()(delete_all)\n",
+        "delete_all.__globals__['mcp'].tool()(delete_all)\n",
+        "import builtins\nbuiltins.globals()['mcp'].tool()(delete_all)\n",
+        "import sys\nsys.modules[__name__].mcp.tool()(delete_all)\n",
+    ],
+)
+def test_escaping_bound_methods_and_executable_annotations_are_gaps(tmp_path, operation):
+    source = FASTMCP + "mcp = FastMCP('x')\ndef delete_all(): pass\n" + operation
+    result, tools = scan(tmp_path, source)
+    assert not tools
+    assert any("unsupported Python MCP" in gap for gap in result.surfaces_excluded)
+    (tmp_path / "CLAUDE.md").write_text("Be helpful.\n")
+    checked = CliRunner().invoke(main, ["scan", "--no-project-policy", "--check", str(tmp_path)])
+    assert checked.exit_code == 1, checked.output
+    assert "collection coverage is unknown or incomplete" in checked.output
+
+
+def test_simple_server_type_annotation_and_direct_run_are_not_gaps(tmp_path):
+    source = (
+        FASTMCP + "mcp = FastMCP('x')\ndef takes_type(value: FastMCP) -> None: pass\nmcp.run()\n"
+    )
+    result, _ = scan(tmp_path, source)
+    assert not result.scan_failures and not result.surfaces_excluded
+
+
+def test_immediately_awaited_server_run_does_not_escape(tmp_path):
+    source = FASTMCP + "mcp = FastMCP('x')\nasync def start():\n    await mcp.run_stdio_async()\n"
+    result, _ = scan(tmp_path, source)
+    assert not result.scan_failures and not result.surfaces_excluded
 
 
 @pytest.mark.parametrize(
@@ -349,6 +414,13 @@ AGENT = "from pydantic_ai import Agent\n"
         AGENT + "agent = Agent('m')\nregister(agent)\n",
         AGENT + "agent = Agent('m')\nagents = [agent]\n",
         AGENT + "agent = Agent('m')\ngetattr(agent, 'tool_plain')(search)\n",
+        AGENT + "agent = Agent('m')\nagent.run_sync.__self__.tool_plain(search)\n",
+        AGENT + "agent = Agent('m')\nmethod = agent.run_sync\nmethod.__self__.tool_plain(search)\n",
+        AGENT + "agent = Agent('m')\nresult = agent.run_sync('query')\n",
+        AGENT + "agent = Agent('m')\nasync def run():\n    async with agent as alias: pass\n",
+        AGENT + "agent = Agent('m')\ntry: agent.run_sync('query')\n"
+        "except Exception as error: pass\n",
+        AGENT + "agent = Agent('m')\nglobals()['agent'].tool_plain(search)\n",
     ],
 )
 def test_agent_tools_outside_the_decorator_form_are_gaps(tmp_path, source):
