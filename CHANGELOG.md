@@ -4,9 +4,34 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ## [Unreleased]
 
+### Security
+
+- `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
+- Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
+- The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.
+- `runtime` refuses ambiguous descriptors, non-UTF-8 or BOM-prefixed JSON and patterns Python cannot compile, and removes partial key and envelope files after a failure. A policy path that is not a regular file is refused before it is opened.
+- Collectors check every declared MCP endpoint for transport security, rate a PyPI package from a plain `http://` URL high, transport-check RAG locators written without a URL, recognise host-root and broad Docker mounts, and fail closed on a quoted command word glued to more text.
+
+### Changed
+
+- **Breaking:** a policy file accepts only the documented `validate` key, and an unlistable root is an error. `verify-artifact` and `verify-discovery` reject `--trust-root` or `--trust-root-sha256` without `--bundle`.
+- `risk` prints an unscored run as unscored, labels a failed discovery-producer check as such rather than as a failed project reconciliation, and, like `summary`, orders severity breakdowns from critical to info. `vex` and `advisories` print why an inventory could not be read.
+- PydanticAI tool references include the agent name, so tools of two agents with the same name no longer collide, and agent tools registered outside the decorator form are reported as gaps.
+
+### Fixed
+
+- TypeScript collection records SDK uses hidden by `eval` wrappers, URL queries and fragments, and method names, and records nothing from ambient declarations. Python collection judges a helper only when a call must reach its definition, reads git revisions where pip and uv read them, and counts module literals behind `*` and `**`.
+- Claude settings with an invalid `permissions` value keep their other declarations, and keys the redaction makes equal keep every value in the drift digest.
+- Lockfile collection binds pnpm and Yarn records only to what they resolve and checks Python lock versions against every declaration; a private Python index is named in the package URL.
+- Confined reads report each refusal once under its root-relative path, report every spelling of a default-excluded name, and charge the byte budget only when a read passes it. Merged ONNX tensors are refused, GGUF keys are read up to a NUL, and a pickle that cannot be disassembled is rated unknown.
+- Generators write `save` atomically and never through a link, recover 0.1.0 exports under the 0.1.0 package identifier rule, export MCP launcher package URLs only for a matching ecosystem, reject control characters and IDNA hosts in SPDX namespaces, and accept only well-formed CycloneDX BOM-Links.
+- `minimum-elements` treats blank fillers around a placeholder as the placeholder, and a format 1.0 agent named after its checkout as having no System name. An MCP server links to its image on any registry, a lineage loads again after a withdrawal, and remote-only tools stay out of local calls a trace cannot rule out.
+- The guides show the property names and severities `diff` reports, and tests that could not fail, or failed for a reason other than the one they name, now check the behaviour they describe.
+
 ### Added
 
 - An [operational guidance](docs/operational-guidance.md) page that collects the operator and CI practices the documented guarantees depend on: ignoring project policy on untrusted checkouts, job timeouts, sandboxing, keeping operator-owned inputs out of a pull request's reach, and what is not implemented.
+- The repository hygiene check rejects invisible and bidirectional characters written literally in source, checks image-wrapped and reference-style links, and finds a stale owner in every spelling of the repository slug.
 
 ## [0.2.0] - 2026-11-12
 
