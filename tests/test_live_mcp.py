@@ -430,10 +430,13 @@ def test_bearer_token_passed_only_to_transport_and_redacted_from_echoed_metadata
     assert token not in json.dumps(asdict(result))
 
 
-def test_extension_field_names_do_not_expose_bearer_or_session_in_evidence():
+@pytest.mark.parametrize("echo_session", [False, True])
+def test_extension_field_names_do_not_expose_bearer_or_session_in_evidence(echo_session):
     token = "sensitive-bearer-token-12345"  # noqa: S105 - synthetic fixture
     session = "opaque-sensitive-session-67890"  # noqa: S105 - synthetic fixture
-    raw_tool = {**tool(), f"ext-{token}": "value", f"ext-{session}": "value"}
+    raw_tool = {**tool(), f"ext-{token}": "value"}
+    if echo_session:
+        raw_tool[f"ext-{session}"] = "value"
     raw_sink: dict[str, Any] = {}
     result, _ = scan(
         [
@@ -444,11 +447,15 @@ def test_extension_field_names_do_not_expose_bearer_or_session_in_evidence():
         bearer_token=token,
         raw_sink=raw_sink,
     )
-    assert result.complete, result.failures
+    assert result.complete is not echo_session, result.failures
     assert token not in serialized(result) and session not in serialized(result)
     assert token not in json.dumps(asdict(result)) and session not in json.dumps(asdict(result))
     assert token not in json.dumps(raw_sink) and session not in json.dumps(raw_sink)
-    assert all("***" in name for name in result.tools[0].unprofiled_fields)
+    if echo_session:
+        assert not result.tools
+        assert result.failures == ["server declaration repeats the session identifier"]
+    else:
+        assert all("***" in name for name in result.tools[0].unprofiled_fields)
 
 
 def test_server_error_payload_is_not_copied_into_failure_report():

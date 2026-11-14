@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from nexus_symbiote.cli import main
 from nexus_symbiote.scanners import mcp
 from nexus_symbiote.scanners.mcp import MCPScanner
 
@@ -34,6 +35,13 @@ def test_token_shaped_server_names_are_redacted_from_failure_details(tmp_path):
     assert "server 'agent-***'" in failure
 
 
+def test_generic_api_token_name_uses_free_text_redaction(tmp_path):
+    token = "sk-" + "A1" * 24
+    failure = _failure(tmp_path, token, {})
+    assert token not in failure
+    assert "server '***'" in failure
+
+
 @pytest.mark.parametrize("field", ["env", "headers", "http_headers"])
 def test_known_source_secret_values_are_redacted_from_failure_names(tmp_path, field):
     key = "API_TOKEN" if field == "env" else "Authorization"
@@ -59,6 +67,35 @@ def test_inline_launch_environment_secret_is_redacted_from_failure_names(tmp_pat
     )
     assert SECRET not in failure
     assert "server 'agent-***'" in failure
+
+
+def test_another_servers_inline_environment_secret_is_redacted_from_failure_names(tmp_path):
+    other = {"command": "env", "args": [f"API_TOKEN={SECRET}", "node", "server.js"]}
+    failure = _failure(tmp_path, f"agent-{SECRET}", {}, other)
+    assert SECRET not in failure
+    assert "server 'agent-***'" in failure
+
+
+@pytest.mark.parametrize("output_format", ["json", "cyclonedx", "spdx", "sarif"])
+@pytest.mark.parametrize("source", ["generic-token", "vendor-token", "inline-environment"])
+def test_malformed_names_reach_no_cli_export(tmp_path, runner, output_format, source):
+    project = tmp_path / "project"
+    project.mkdir()
+    secret = {"generic-token": "sk-" + "A1" * 24, "vendor-token": "gsk_" + "B2" * 24}.get(
+        source, SECRET
+    )
+    servers = {secret: {"command": "node", "tools": [{"name": "read", "inputSchema": []}]}}
+    if source == "inline-environment":
+        servers["other"] = {"command": "env", "args": [f"API_TOKEN={secret}", "node", "server.js"]}
+    (project / ".mcp.json").write_text(json.dumps({"mcpServers": servers}))
+    output = tmp_path / "inventory.json"
+    result = runner.invoke(
+        main,
+        ["scan", str(project), "--no-project-policy", "-f", output_format, "-o", str(output)],
+    )
+    assert result.exit_code == 1, result.output
+    assert "invalid tool definition" in result.output
+    assert secret not in result.output + output.read_text()
 
 
 def test_secret_recognition_precedes_name_clipping(tmp_path):
