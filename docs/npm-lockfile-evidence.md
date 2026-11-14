@@ -63,7 +63,13 @@ bind the record Yarn installs from. A selector in more than one stanza, which Ya
 installs from the last of, is reported as `multiple package resolutions for <package>
 are ambiguous` and binds neither stanza; so is a declared spec that one stanza spells
 `openai@4.0.0` and another `openai@npm:4.0.0`, since Yarn 1 looks up the first
-spelling and Yarn Berry the second. A line that Yarn 1, or the YAML reader Yarn
+spelling and Yarn Berry the second. So is, in a Yarn 1 lockfile, a stanza of another
+range of the package, such as `openai@^4.0.0`, with the same `version` as the declared
+spec's stanza and another `resolved`, `integrity` or `checksum`: Yarn 1 reuses the
+first record it resolves with that version, so when a dependency listed earlier in
+`package.json` depends on the other range, Yarn installs the other stanza. A Yarn 1
+`checksum` is not an integrity value, since Yarn 1 does not read it, so a v1 record
+with one and no `integrity` has a `missing_lockfile_integrity` finding. A line that Yarn 1, or the YAML reader Yarn
 Berry uses for a lockfile that starts with `__metadata`, reads differently or not at
 all fails the lockfile as `yarn.lock: invalid or unsupported lockfile`: a single
 quote, a tab, a comment after text or indented, an odd or deeper indentation than

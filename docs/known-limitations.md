@@ -663,7 +663,10 @@ A way around a limit that its entry does not describe is worth a
   read with a strict subset of Yarn 1's lockfile syntax, and of the YAML that Yarn
   Berry writes: a lockfile edited into another layout that Yarn still accepts, such
   as one with indented comments or a carriage return without a line feed, is a
-  collection failure.
+  collection failure. Which of two Yarn 1 stanzas with the same version Yarn installs
+  depends on the order it resolves dependencies in, which is not modeled: when another
+  range's stanza with that version records another URL, integrity or checksum, the
+  package binds no lockfile evidence, even where Yarn would install the declared one.
 - **Some lockfiles are not read.** `Pipfile.lock`, `pdm.lock`, `bun.lock` and
   `bun.lockb` give each package they may resolve a low `lockfile_unread` finding,
   not a gap.

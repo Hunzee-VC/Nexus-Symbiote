@@ -948,9 +948,13 @@ def _yarn_v1_field(content: str) -> tuple[str, _YarnToken | None]:
     return tokens[0].value, rest[0]
 
 
-def _yarn_lockfile_stanzas(text: str) -> list[tuple[list[str], dict[str, str]]]:
-    """The stanzas of a Yarn v1 or Berry lockfile, each with its selectors and the
-    string fields at its first level. Raises ValueError on any line that Yarn 1's
+def _yarn_source(fields: dict[str, str]) -> tuple[str | None, ...]:
+    return tuple(fields.get(k) for k in ("resolved", "integrity", "resolution", "checksum"))
+
+
+def _yarn_lockfile_stanzas(text: str) -> tuple[bool, list[tuple[list[str], dict[str, str]]]]:
+    """Whether a lockfile is Berry's, and its stanzas, each with its selectors and
+    the string fields at its first level. Raises ValueError on any line that Yarn 1's
     parser, or the YAML reader Berry uses, would read differently or not at all."""
     lines = _YARN_LINE_BREAK.split(text)
     # Yarn 1 ends a line at a lone CR but reads the spaces after it as no indentation.
@@ -1011,7 +1015,7 @@ def _yarn_lockfile_stanzas(text: str) -> list[tuple[list[str], dict[str, str]]]:
             fields[key] = value.value
     if not stanzas:
         raise ValueError("empty yarn.lock")
-    return stanzas
+    return berry, stanzas
 
 
 class RegistryScanner(Scanner):
@@ -2009,7 +2013,7 @@ class RegistryScanner(Scanner):
         """Bind Yarn records to the components, which package.json declares from a
         registry. False when the lockfile is not read."""
         try:
-            stanzas = _yarn_lockfile_stanzas(lock_bytes.decode("utf-8"))
+            berry, stanzas = _yarn_lockfile_stanzas(lock_bytes.decode("utf-8"))
         except (ValueError, UnicodeError):
             result.scan_failures.append("yarn.lock: invalid or unsupported lockfile")
             return False
@@ -2039,8 +2043,6 @@ class RegistryScanner(Scanner):
             # As for pnpm: the record decides the identity, or nothing does.
             comp.package_url = None
             req = str(comp.properties.get("requested_version", "")).strip()
-            # Yarn records the spec package.json declares; a stanza of another spec is
-            # another package's dependency, not what this one installs.
             chosen = [e for e in entries if e[0] in (req, f"npm:{req}")]
             if not chosen:
                 continue
@@ -2051,7 +2053,20 @@ class RegistryScanner(Scanner):
                     f"yarn.lock: multiple package resolutions for {comp.name} are ambiguous"
                 )
                 continue
-            sel_spec, fields, locator_key, _ = chosen[0]
+            sel_spec, fields, locator_key, chosen_index = chosen[0]
+            # Yarn 1 installs the first stanza of the package it resolves with the same
+            # version, which may be another range's, by package.json key order.
+            source = _yarn_source(fields)
+            if not berry and any(
+                e[3] != chosen_index
+                and e[1].get("version") == fields.get("version")
+                and _yarn_source(e[1]) != source
+                for e in entries
+            ):
+                result.surfaces_excluded.append(
+                    f"yarn.lock: multiple package resolutions for {comp.name} are ambiguous"
+                )
+                continue
             resolution_val = fields.get("resolution", "")
             resolved_val = fields.get("resolved", "")
             if sel_spec.startswith("npm:") and "@" in sel_spec[4:]:
@@ -2109,7 +2124,7 @@ class RegistryScanner(Scanner):
                 locator,
                 lock_digest,
                 result,
-                checksum_recorded=bool(fields.get("checksum")),
+                checksum_recorded=berry and bool(fields.get("checksum")),
             )
         return True
 

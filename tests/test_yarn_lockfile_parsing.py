@@ -69,6 +69,48 @@ def test_a_repeated_selector_of_another_spec_does_not_block_the_declared_one(tmp
 
 
 @pytest.mark.parametrize(
+    "other",
+    [
+        stanza("openai@^4.0.0", EVIL, integrity=False),
+        stanza("openai@^4.0.0", EVIL),
+        stanza("openai@^4.0.0", PUBLIC, integrity=False),
+        stanza('"openai@npm:^4.0.0"', EVIL),
+    ],
+    ids=["evil-url", "evil-url-with-integrity", "no-integrity", "npm-range"],
+)
+def test_another_range_with_the_same_version_and_another_source_binds_neither(tmp_path, other):
+    # Yarn 1 reuses the first pattern it resolved with that version, so a dependency
+    # earlier in package.json on `openai@^4.0.0` makes it install the other stanza.
+    for lock in (
+        stanza("openai@4.0.0", PUBLIC) + "\n" + other,
+        other + "\n" + stanza("openai@4.0.0", PUBLIC),
+    ):
+        result, comp = scan(tmp_path, "# yarn lockfile v1\n\n" + lock)
+        assert result.scan_failures == []
+        assert result.surfaces_excluded == AMBIGUOUS
+        assert_unbound(comp)
+
+
+def test_another_range_with_another_version_does_not_block_the_declared_one(tmp_path):
+    lock = (
+        stanza("openai@4.0.0", PUBLIC)
+        + "\n"
+        + stanza("openai@^4.0.0", EVIL).replace('"4.0.0"', '"4.1.0"')
+    )
+    result, comp = scan(tmp_path, lock)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    assert comp.package_url == "pkg:npm/openai@4.0.0"
+    assert comp.registry_uri == "https://registry.yarnpkg.com"
+
+
+def test_a_yarn_1_checksum_is_not_integrity(tmp_path):
+    lock = stanza("openai@4.0.0", PUBLIC, integrity=False) + '  checksum "x"\n'
+    result, comp = scan(tmp_path, "# yarn lockfile v1\n\n" + lock)
+    assert comp.package_url == "pkg:npm/openai@4.0.0"
+    assert [r.category for r in comp.risks] == ["missing_lockfile_integrity"]
+
+
+@pytest.mark.parametrize(
     "lock",
     [
         # Yarn decodes quoted keys and selectors as JSON strings.
@@ -302,7 +344,8 @@ def test_a_json_string_is_decoded_as_json(tmp_path):
 
 
 # The first stanza as one folded YAML plain scalar: the key a string alias points to.
-FOLDED = json.dumps(f'version "4.0.0" resolved "{PUBLIC}" integrity {SHA512}')
+# Its `uid` gives the alias target a package name, which the version check alone refuses.
+FOLDED = json.dumps(f'version "4.0.0" resolved "{PUBLIC}" integrity {SHA512} uid "x@y"')
 
 
 @pytest.mark.parametrize(
@@ -314,6 +357,7 @@ def test_a_version_comment_above_1_fails_the_lockfile(tmp_path, comment):
     # string that aliases the second stanza's key.
     lock = (
         stanza("openai@4.0.0", PUBLIC)
+        + '  uid "x@y"\n'
         + f"\n{comment}\n\n{FOLDED}:\n"
         + f'  version: "4.0.0"\n  resolved: "{EVIL}"\n'
     )
