@@ -248,6 +248,8 @@ UNPARSED_CLIENT_FILES = (
 UNPARSED_CLIENT_DIRECTORIES = (".continue/mcpServers",)
 
 MAX_SERVERS_PER_FILE = 1000
+# Credential values of all servers in one file, each scrubbed from every server's text.
+MAX_SECRETS_PER_FILE = 4096
 MAX_TOOLS_PER_SERVER = 1000
 MAX_TOOLS_PER_FILE = 5000
 MAX_ARGUMENTS = 1024
@@ -1392,7 +1394,13 @@ class MCPScanner(Scanner):
             if key_error is not None and entries:
                 result.scan_failures.append(f"{dialect.path}: {key_error}")
                 continue
-            file_secrets = self._file_secrets(entries)
+            file_secrets = SecretScrubber(self._file_secrets(entries))
+            if len(file_secrets) > MAX_SECRETS_PER_FILE:
+                result.scan_failures.append(
+                    f"{dialect.path}: more than {MAX_SECRETS_PER_FILE} credential values in one "
+                    "file; not collected"
+                )
+                continue
             server_refs: list[str] = []
             for server_name, server_config in entries:
                 problem = (
@@ -1563,7 +1571,7 @@ class MCPScanner(Scanner):
         dialect: McpDialect,
         key: bytes | None,
         result: ScanResult,
-        file_secrets: list[str] | None = None,
+        file_secrets: SecretScrubber | None = None,
     ) -> tuple[MCPServerComponent, list[ToolComponent]]:
         config_scope = dialect.path
         command = config.get("command", "")
@@ -1583,9 +1591,8 @@ class MCPScanner(Scanner):
         # Each header map on its own: a name in both keeps both of its values secret.
         # The file's other servers contribute too: this server's free text may repeat
         # a value that one of them holds.
-        scrubber = SecretScrubber(
+        scrubber = (file_secrets or SecretScrubber()).extended(
             [
-                *(file_secrets or []),
                 *secret_values(env),
                 *secret_values(config.get("headers", {})),
                 *secret_values(config.get("http_headers", {})),

@@ -136,3 +136,39 @@ def test_values_of_another_file_are_not_scrubbed(tmp_path):
     result = MCPScanner().scan(project)
     (tool,) = [c for c in result.components if isinstance(c, ToolComponent)]
     assert tool.name == f"login-{SECRET}"
+
+
+def _credential_servers(count: int, per_server: int) -> dict[str, Any]:
+    return {
+        f"server{index}": {
+            "command": "uvx",
+            "args": [f"tool{index}==1.0"],
+            "env": {
+                f"TOKEN_{entry}": f"credential-{index:03d}-{entry:03d}-value"
+                for entry in range(per_server)
+            },
+        }
+        for index in range(count)
+    }
+
+
+def test_a_file_at_the_credential_bound_is_collected(tmp_path):
+    from nexus_symbiote.scanners.mcp import MAX_SECRETS_PER_FILE
+
+    result = _scan(tmp_path / "project", _credential_servers(16, MAX_SECRETS_PER_FILE // 16))
+    assert not result.scan_failures
+    servers = [c for c in result.components if isinstance(c, MCPServerComponent)]
+    assert len(servers) == 16
+
+
+def test_a_file_over_the_credential_bound_is_a_named_failure(tmp_path):
+    # Every server's text is scrubbed of every credential in its file, so the work
+    # grows with servers times values; past the bound the file is not collected.
+    from nexus_symbiote.scanners.mcp import MAX_SECRETS_PER_FILE
+
+    per_server = MAX_SECRETS_PER_FILE // 16
+    result = _scan(tmp_path / "project", _credential_servers(17, per_server))
+    assert result.scan_failures == [
+        f".mcp.json: more than {MAX_SECRETS_PER_FILE} credential values in one file; not collected"
+    ]
+    assert not [c for c in result.components if isinstance(c, MCPServerComponent)]
