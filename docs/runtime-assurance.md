@@ -372,11 +372,46 @@ It is a library helper; no command uses it. Retrieval requires current ACL evide
 across the ancestry and records returned version identifiers, content digests,
 principal, time and read watermark. Source withdrawal cascades to derived records;
 source ACL revocation blocks subsequent retrieval of derived records. `update_acl`
-refuses a revision already used for that version, so an earlier, wider ACL cannot
-be restored under its old revision to replay retrievals approved against it.
-Connect these helpers to the actual datastore's transaction/snapshot and ACL
-enforcement APIs. They do not by themselves delete remote content or authorize
-access to a live vector database.
+refuses a revision already used for that version when its complete revision history
+is available. To retain that history across a restart, persist the whole snapshot:
+
+```python
+# initial_versions are new records with no prior ACL revisions.
+index = LineageIndex.from_new_versions("tenant-a", initial_versions)
+snapshot_json = index.snapshot().model_dump_json()
+# Persist snapshot_json through the operator's protected state store.
+# After a restart, read the latest committed snapshot as a dict:
+index = LineageIndex.from_snapshot(snapshot_dict)
+```
+
+`LineageIndex(tenant)` followed by `add` is also for genuinely new records.
+`from_new_versions` is an explicit assertion that the supplied versions have no
+prior revisions; do not use it, or `add`, to restore existing records. In contrast,
+the existing `LineageIndex(tenant, versions)` constructor imports versions with
+**unknown ACL history**: retrieval still applies each imported record's current
+ACL, but `update_acl` refuses changes to it. This is a behavior change for callers
+that previously created a graph from `versions` and then updated ACLs. Unknown
+history remains unknown after a snapshot round trip, including when the graph mixes
+imported versions and newly added records.
+
+To migrate a versions-only store, obtain every revision used for each version from
+an authoritative audit log and pass the complete mapping (including each current
+revision) to `LineageIndex.from_legacy_versions(tenant, versions,
+acl_revisions=histories)`. The method rejects missing, extra, duplicate or
+current-revision-free histories, but cannot prove that an operator's supplied
+history is complete. If the history cannot be recovered, keep updates disabled
+or create new identifiers under an independently enforced migration policy; do not
+invent a history containing only the current revision.
+
+Snapshots are data, not signatures or an anti-rollback store. An older, modified or
+forged snapshot can reinstate an old ACL and its prior state. The operator must
+authenticate and protect the full snapshot, select the latest committed state,
+and persist it atomically with the authoritative ACL update. Coordinate concurrent
+readers and writers externally; the helper is not thread-safe or a transaction
+manager. A crash between an ACL update and snapshot persistence can otherwise lose
+the update and revision history. Connect these helpers to the actual datastore's
+transaction/snapshot and ACL enforcement APIs. They do not themselves delete remote
+content or authorize access to a live vector database.
 
 ## Verification evidence
 

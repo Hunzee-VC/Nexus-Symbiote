@@ -911,6 +911,11 @@ A way around a limit that its entry does not describe is worth a
 
 ## Runtime gateway
 
+- **Lineage persistence needs trusted, current state.** The lineage helper's
+  snapshot retains ACL revision histories, but does not authenticate them or stop
+  rollback. Versions imported without their histories cannot have their ACLs
+  updated until an operator supplies complete history; see
+  [lineage persistence](runtime-assurance.md#hosted-identity-and-mutable-data).
 - **Only mediated calls are governed.** `ReferenceGateway` authorizes only calls
   routed through `invoke`. The operator builds the authentication, description,
   scope and execution adapters and must close every other path to the tools; see
