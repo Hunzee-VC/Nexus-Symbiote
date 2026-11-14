@@ -130,6 +130,13 @@ def test_a_number_where_the_other_card_declares_a_flag_is_different_content(tmp_
     assert server.properties["agent_card_paths"] == [".well-known/agent-card.json"]
 
 
+def test_a_card_that_is_not_a_mapping_is_named_by_its_path(tmp_path):
+    _write(tmp_path, ".well-known/agent-card.json", CARD)
+    _write(tmp_path, "public/.well-known/agent-card.json", [])
+    result = A2AScanner().scan(tmp_path)
+    assert result.scan_failures == ["public/.well-known/agent-card.json: expected a mapping"]
+
+
 def test_unnamed_cards_in_two_places_do_not_collide(tmp_path):
     unnamed = {key: value for key, value in CARD.items() if key != "name"}
     _write(tmp_path, "a/.well-known/agent.json", unnamed)

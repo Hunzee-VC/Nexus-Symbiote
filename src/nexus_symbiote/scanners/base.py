@@ -35,6 +35,9 @@ def read_regular_text(path: Path, *, max_bytes: int = MAX_CONFIG_BYTES) -> str:
         path.parent, [], max_file_bytes=max_bytes, max_total_bytes=max_bytes
     ) as files:
         content = files.read_text(path.name)
+        # A collection reads through a symlink to a file beside it; this reader does not.
+        if files.link_target(path.name) is not None:
+            content = None
     if content is None:
         raise OSError("bounded regular-file read refused")
     return content
@@ -67,9 +70,9 @@ def parse_python(source: str) -> ast.Module:
     """Parse scanned source without printing compiler warnings, which quote its raw bytes.
 
     A UTF-8 byte-order mark is accepted, as CPython accepts it in a source file. The
-    parser reports deeply nested source as MemoryError or RecursionError; both become
-    ValueError, so callers record a failure for the file instead of losing the whole
-    collector.
+    parser reports deeply nested source as MemoryError, RecursionError or OverflowError;
+    each becomes ValueError, so callers record a failure for the file instead of losing
+    the whole collector.
     """
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", SyntaxWarning)
@@ -233,16 +236,6 @@ class Scanner(ABC):
     def scan(self, project_root: Path) -> ScanResult:
         """Scan a project directory and return discovered components."""
 
-    def _safe_read_json(self, path: Path) -> dict[str, Any] | list[Any] | None:
-        # Compatibility for scanner helpers; scans should open a _collection so
-        # every failure is retained on the ScanResult and the project root pinned.
-        if self._files is not None:
-            data = self._files.read_json(path)
-        else:
-            with ConfinedCollection(path.parent, []) as files:
-                data = files.read_json(path.name)
-        return data if isinstance(data, (dict, list)) else None
-
     def _read_mapping(
         self, path: Path, result: ScanResult, *, missing_ok: bool = True
     ) -> dict[str, Any] | None:
@@ -258,7 +251,7 @@ class Scanner(ABC):
             try:
                 import yaml
             except ImportError:
-                result.scan_failures.append(f"{path.name}: YAML parser unavailable")
+                result.scan_failures.append(f"{path.as_posix()}: YAML parser unavailable")
                 return None
             from nexus_symbiote.policy import parse_yaml_mapping
 
@@ -271,12 +264,12 @@ class Scanner(ABC):
                 data = parse_yaml_mapping(text)
             except (ValueError, RecursionError, OverflowError, IndexError, yaml.YAMLError):
                 result.scan_failures.append(
-                    f"{path.name}: YAML mapping parse failed or unsupported"
+                    f"{path.as_posix()}: YAML mapping parse failed or unsupported"
                 )
                 return None
         if data is None:
             return None
         if not isinstance(data, dict):
-            result.scan_failures.append(f"{path.name}: expected a mapping")
+            result.scan_failures.append(f"{path.as_posix()}: expected a mapping")
             return None
         return data
