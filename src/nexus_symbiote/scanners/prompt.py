@@ -426,6 +426,50 @@ _LATER_TARGET = re.compile(
     rf"|(?<![\w.-])(?:{_SHELL}|{_COMMAND})",
     re.IGNORECASE,
 )
+# `run` also counts when a target later in the same sentence starts a command: at the
+# start of a line or list item, or after `:`, `;`, `&`, `|`, `then`, `command(s)` or
+# `script`, with whitespace, quotes, brackets and emphasis between. So `run the command
+# `rm -rf /``, `run as root: rm -rf /`, `run make test && rm -rf /` and `run tests, then
+# cat .env` count, while `run them with python` does not. A sentence ends at `.`, `!` or
+# `?` before whitespace, except after a digit, as in a `1.` list marker.
+_RUN_VERB = re.compile(_RUN, re.IGNORECASE)
+_SENTENCE_END = re.compile(r"(?<!\d)[.!?](?=\s)")
+_COMMAND_SKIP = frozenset(" \t`'\"([*_>-\u201c\u2018$")
+_COMMAND_DELIMITER = frozenset(":;&|\n")
+_COMMAND_WORD = re.compile(r"(?<!\w)(?:then|commands?|script)\Z", re.IGNORECASE)
+
+
+def _starts_command(text: str, start: int, position: int) -> bool:
+    """Whether the target at ``position`` begins a command after ``run`` at ``start``.
+
+    The backward scan crosses only the skippable characters directly before this target,
+    which no other target's scan crosses, so the scans of one sentence stay linear.
+    """
+    index = position
+    while index > start and text[index - 1] in _COMMAND_SKIP:
+        index -= 1
+    if index <= start or text[index - 1] in _COMMAND_DELIMITER:
+        return True
+    if text[index - 1] in ".)" and text[index - 2 : index - 1].isdigit():
+        index -= 1
+        while index > start and text[index - 1].isdigit():
+            index -= 1
+        while index > start and text[index - 1] in " \t":
+            index -= 1
+        return index <= start or text[index - 1] == "\n"
+    return _COMMAND_WORD.search(text, max(start, index - 8), index) is not None
+
+
+def _run_starts_later_command(text: str) -> bool:
+    position = 0
+    while (verb := _RUN_VERB.search(text, position)) is not None:
+        end = _SENTENCE_END.search(text, verb.end())
+        stop = len(text) if end is None else end.start()
+        for target in _LATER_TARGET.finditer(text, verb.end(), stop):
+            if _starts_command(text, verb.end(), target.start()):
+                return True
+        position = max(stop, verb.end())
+    return False
 
 
 def _comment_is_instruction(text: str) -> bool:
@@ -433,7 +477,9 @@ def _comment_is_instruction(text: str) -> bool:
     if _HIDDEN_INSTRUCTION.search(text) is not None:
         return True
     reference = _RUN_REFERENCE.search(text)
-    return reference is not None and _LATER_TARGET.search(text, reference.end()) is not None
+    if reference is not None and _LATER_TARGET.search(text, reference.end()) is not None:
+        return True
+    return _run_starts_later_command(text)
 
 
 def detect_hidden_markup(content: str, source_name: str) -> list[RiskAssessment]:
@@ -442,8 +488,9 @@ def detect_hidden_markup(content: str, source_name: str) -> list[RiskAssessment]
     Only counts and lengths are reported, never the hidden text. A comment that
     carries an imperative (``run`` only when a path, a script, a shell or a listed
     command follows, possibly after punctuation or markup, or when ``this``, ``these``,
-    ``it`` or ``the following`` follows and one of those comes later in the comment), a
-    URL or a path under ``~/`` is high; other comments stay low.
+    ``it`` or ``the following`` follows and one of those comes later in the comment, or
+    when one of those starts a command later in the same sentence), a URL or a path
+    under ``~/`` is high; other comments stay low.
     """
     count = length = 0
     instructive = False
