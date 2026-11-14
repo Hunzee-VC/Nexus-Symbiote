@@ -96,10 +96,13 @@ Every command prints text taken from an inventory, a checkout or a live server, 
 names, paths, references and descriptions, literally and inert, in a terminal and in a
 CI log:
 
-- control, format and line-break characters, and every other default-ignorable code
-  point (Unicode's Default_Ignorable_Code_Point, such as variation selectors and blank
-  fillers like U+3164), are replaced with U+FFFD, so such text cannot move the cursor,
-  rewrite earlier output, start a new line or carry text a reader cannot see;
+- control, format and line-break characters, the noncharacters U+FFFE and U+FFFF,
+  and every other default-ignorable code point (Unicode's
+  Default_Ignorable_Code_Point, such as variation selectors and blank fillers like
+  U+3164), are replaced with U+FFFD, so such text cannot move the cursor, rewrite
+  earlier output, start a new line or carry text a reader cannot see; a tab is
+  replaced with one space, so a name stays readable but cannot line text up under a
+  later column;
 - a `##` that would introduce a CI log command anywhere in a line (GitHub Actions'
   legacy `##[command]`, Azure Pipelines' `##vso[`, TeamCity's `##teamcity[`) is
   followed by U+FFFD;

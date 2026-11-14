@@ -6,6 +6,10 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
+- Every command refuses a native inventory nested deeper than 128 levels with "inventory nests deeper than 128 levels". The nesting a reader accepted used to depend on the interpreter's recursion limit, so a document that loaded still aborted `diff` and `validate --project` with an internal error while `risk` and `summary` read it.
+- A pickle under another model suffix is recognized by PROTO and 16 well-formed opcodes whatever follows them, and a ZIP archive by a `.pkl` member anywhere in its central directory, read from the end of the archive up to 1 MiB, not only in its first member. A pickle padded past 4,096 opcodes, or a `torch.save` archive whose `data.pkl` is not written first, was rated `unknown` under `.onnx`, `.gguf` or `.safetensors` instead of `unsafe-code-execution`.
+- Terminal and CI output replaces a tab with one space and the noncharacters U+FFFE and U+FFFF with U+FFFD; a tab in a name could line attacker text up under a later column.
+- The `ide_agents` collector checks that a marker file exists without reading it, so instruction files at the `file-bytes` limit no longer spend the `total-bytes` budget on existence checks and drop the later IDE records with a `total-bytes` failure.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
 - The workflow checker closes ways a workflow change could pass it: `action.yml` files beside workflows, a gate in a step that continues on error, interpreter and shell options that run code, heredocs before the command, array assignments, and pinned actions whose version it cannot read. The lock checker requires every hash line to be a single SHA-256 hash.
@@ -21,6 +25,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Fixed
 
+- Root `requirements*.txt` files are parsed up to 100,000 logical lines together, past which the rest are a named collection failure, as past 4 MiB of text; MCP client files in JSONC and `.codex/config.toml` refuse nonfinite numbers such as `1e400` and `inf` as invalid JSON or TOML; an A2A card beyond the nesting or entry bounds is reported as "A2A card nests too deeply" or "A2A card has too many entries" rather than as invalid field types; a Gemini or Cursor settings file larger than 4 MiB is read whole when `--limit file-bytes` allows it, instead of failing as invalid JSON; and live discovery under the offline guard fails at once with the violation instead of waiting for the DNS timeout.
 - TypeScript collection records SDK uses hidden by `eval` wrappers, URL queries and fragments, and method names, and records nothing from ambient declarations. Python collection judges a helper only when a call must reach its definition, reads git revisions where pip and uv read them, and counts module literals behind `*` and `**`.
 - Claude settings with an invalid `permissions` value keep their other declarations, and keys the redaction makes equal keep every value in the drift digest.
 - Lockfile collection binds pnpm and Yarn records only to what they resolve and checks Python lock versions against every declaration; a private Python index is named in the package URL.

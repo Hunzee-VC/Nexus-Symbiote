@@ -340,6 +340,13 @@ A way around a limit that its entry does not describe is worth a
 - **Some files are not inventoried.** Pickles under names other than the
   [listed suffixes](model-integrity.md#model-files-and-references), NumPy `.npy` and
   `.npz` arrays, and `.pb` files other than `saved_model.pb` produce no component.
+- **Pickle recognition under another suffix is bounded.** A binary pickle is
+  recognized by its PROTO opcode and 16 well-formed opcodes in the first 64 KiB, a
+  text-protocol pickle by a consistent stream of at most 4,096 opcodes, and a ZIP
+  archive by a `.pkl` member in its first local header or in a central directory of
+  at most 1 MiB, read from the end of the archive. A pickle hidden otherwise under
+  `.onnx`, `.gguf` or another suffix is rated `unknown`, a high finding, and
+  `validate --project` still refuses it as unverified.
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat
   templates are checked only for known sandbox-escape shapes. A template file larger
   than the `file-bytes` limit is digested but not checked, and is a coverage gap.
@@ -771,6 +778,15 @@ A way around a limit that its entry does not describe is worth a
   list has no content digest, and one larger or deeper than
   a runtime snapshot binds has no canonical digest; `digest` prints `unavailable`
   for the missing one and exits 1.
+- **An inventory nested deeper than 128 levels is not read.** Every command that
+  reads a native inventory, `diff`, `validate`, `risk`, `graph`, `summary`,
+  `digest`, `export-inventory` and the rest, refuses one whose arrays and objects
+  nest more than 128 levels, the root counted, with "inventory nests deeper than 128
+  levels" and exit 1. The bound is fixed, not the interpreter's recursion limit, so
+  the same file is read or refused by every caller. A collected inventory stays
+  within it, since its deepest values, MCP tool definitions, nest at most 64 levels;
+  one edited by hand or written by another producer needs its `properties`
+  flattened.
 - **A malformed `SOURCE_DATE_EPOCH` stops collection.** `scan`, `baseline` and
   `import-shadowscan` exit 2 when it is set to anything but 1 to 12 ASCII digits
   naming an instant up to 9999-12-31T23:59:59Z, an empty value included. Unset it to

@@ -357,8 +357,10 @@ def _recorded_requirement(requirement: Requirement) -> str:
 _LONGEST_VERSION = 128
 # The public index and its file host; any other origin qualifies a pkg:pypi package URL.
 _PYPI_ORIGINS = frozenset({"https://pypi.org", "https://files.pythonhosted.org"})
-# All root requirements*.txt files together, in characters.
+# All root requirements*.txt files together, in characters and in logical lines: within
+# the characters, parsing time grows with the lines.
 _REQUIREMENTS_BUDGET = 4 * 1024 * 1024
+_REQUIREMENTS_LINES = 100_000
 # shlex builds a token one character at a time, so its cost grows with the square
 # of a quoted word's length; option text this long is not read.
 _LONGEST_OPTIONS = 16 * 1024
@@ -2776,6 +2778,7 @@ class RegistryScanner(Scanner):
         noted: set[str] = set()
         unprintable = False
         remaining = _REQUIREMENTS_BUDGET
+        remaining_lines = _REQUIREMENTS_LINES
         for filename in filenames:
             if (
                 UNSAFE_TEXT.search(filename)
@@ -2809,7 +2812,14 @@ class RegistryScanner(Scanner):
                     f"{filename}: declared encoding other than UTF-8: not read"
                 )
                 continue
-            for line in self._requirement_lines(content):
+            lines = self._requirement_lines(content)
+            remaining_lines -= len(lines)
+            if remaining_lines < 0:
+                result.scan_failures.append(
+                    "requirements files exceed the combined line limit: the rest were not read"
+                )
+                break
+            for line in lines:
                 text = self._COMMENT.sub("", line).strip()
                 if not text:
                     continue

@@ -373,6 +373,10 @@ def _resolve_public(host: str, port: int, timeout: float) -> tuple[int, str]:
             )
         except OSError:
             answers.put(None)
+        except BaseException as exc:
+            # The offline guard's violation is a BaseException; handed to the caller, it
+            # is raised there at once instead of dying with this thread at the timeout.
+            answers.put(exc)
         finally:
             _RESOLVER_SLOTS.release()
 
@@ -381,6 +385,8 @@ def _resolve_public(host: str, port: int, timeout: float) -> tuple[int, str]:
         records = answers.get(timeout=timeout)
     except queue.Empty as exc:
         raise DiscoveryError("DNS resolution timed out") from exc
+    if isinstance(records, BaseException):
+        raise records
     if not records or len(records) > 64:
         raise DiscoveryError("DNS resolution failed or exceeded limits")
     candidates: set[tuple[int, str]] = set()

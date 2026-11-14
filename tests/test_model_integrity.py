@@ -687,6 +687,75 @@ def test_torch_zip_checkpoint_behind_another_suffix_is_unsafe(project):
     assert component.serialization_safety == SerializationSafety.UNSAFE_CODE_EXECUTION
 
 
+def _critical_serialization_finding(component) -> bool:
+    return any(
+        risk.category == "serialization_format" and risk.severity == RiskSeverity.CRITICAL
+        for risk in component.risks
+    )
+
+
+def test_torch_zip_with_the_pickle_after_another_member_is_unsafe(project):
+    # torch.save may write archive/version first; the central directory still lists data.pkl.
+    with zipfile.ZipFile(project / "model.onnx", "w") as archive:
+        archive.writestr("archive/version", "3")
+        archive.writestr("archive/data.pkl", pickle.dumps({"weights": [0.0]}))
+    result = ModelScanner().scan(project)
+    assert not result.scan_failures
+    component = result.components[0]
+    assert component.serialization_safety == SerializationSafety.UNSAFE_CODE_EXECUTION
+    assert "ZIP archive" in component.properties["format_inspection"]
+    assert _critical_serialization_finding(component)
+
+
+def test_a_zip_with_many_members_before_the_pickle_is_unsafe(project):
+    with zipfile.ZipFile(project / "model.safetensors", "w") as archive:
+        for index in range(3000):
+            archive.writestr(f"archive/data/{index}", b"\0" * 8)
+        archive.writestr("archive/data.pkl", pickle.dumps({"weights": [0.0]}))
+    component = ModelScanner().scan(project).components[0]
+    assert component.serialization_safety == SerializationSafety.UNSAFE_CODE_EXECUTION
+
+
+def test_a_zip_without_a_pickle_member_behind_another_suffix_stays_unknown(project):
+    with zipfile.ZipFile(project / "model.onnx", "w") as archive:
+        archive.writestr("archive/version", "3")
+        archive.writestr("archive/data/0", b"\0" * 8)
+    result = ModelScanner().scan(project)
+    component = result.components[0]
+    assert component.serialization_safety == SerializationSafety.UNKNOWN
+    assert result.scan_failures == [
+        "model.onnx: ONNX external data not read: the file is a ZIP archive"
+    ]
+
+
+def test_a_padded_binary_pickle_behind_another_suffix_is_unsafe(project):
+    # More than 4,096 well-formed opcodes before GLOBAL os.system and REDUCE.
+    payload = b"\x80\x04" + b"N0" * 2100 + b"cos\nsystem\n(S'id'\ntR."
+    (project / "model.onnx").write_bytes(payload)
+    result = ModelScanner().scan(project)
+    assert not result.scan_failures
+    component = result.components[0]
+    assert component.serialization_safety == SerializationSafety.UNSAFE_CODE_EXECUTION
+    assert "binary pickle" in component.properties["format_inspection"]
+    assert _critical_serialization_finding(component)
+
+
+def test_a_pickle_longer_than_the_inspected_sample_is_unsafe(project):
+    from nexus_symbiote.scanners.model import MAX_PICKLE_INSPECTION_BYTES
+
+    payload = b"\x80\x04" + b"N0" * MAX_PICKLE_INSPECTION_BYTES + b"cos\nsystem\n(S'id'\ntR."
+    (project / "model.gguf").write_bytes(payload)
+    component = ModelScanner().scan(project).components[0]
+    assert component.serialization_safety == SerializationSafety.UNSAFE_CODE_EXECUTION
+
+
+def test_a_plain_onnx_file_stays_unknown(project):
+    (project / "model.onnx").write_bytes(onnx_model(onnx_tensor("w")))
+    result = ModelScanner().scan(project)
+    assert not result.scan_failures
+    assert result.components[0].serialization_safety == SerializationSafety.UNKNOWN
+
+
 def test_keras_archive_is_not_mistaken_for_a_pickle(project):
     with zipfile.ZipFile(project / "model.keras", "w") as archive:
         archive.writestr("metadata.json", "{}")

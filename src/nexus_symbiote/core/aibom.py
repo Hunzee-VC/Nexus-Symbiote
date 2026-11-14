@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import json
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Literal, get_args
 
@@ -24,6 +25,14 @@ from nexus_symbiote.core.models import (
 
 MAX_NATIVE_BYTES = 16 * 1024 * 1024
 """The largest native document any command reads, and therefore the largest one written."""
+
+MAX_NATIVE_NESTING = 128
+"""How many levels of arrays and objects a native document may nest, the root counted.
+
+Twice the runtime snapshot budget (``runtime.MAX_BOM_DEPTH``), so a document the
+snapshot cannot bind still loads and ``digest`` reports its missing canonical digest;
+well below what pydantic serializes, which is where ``diff`` used to fail.
+"""
 
 SCHEMA_ID = (
     "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/schemas/"
@@ -116,16 +125,40 @@ def read_native_bytes(path: Path) -> bytes:
     return raw
 
 
+def _nested_deeper_than(value: Any, limit: int) -> bool:
+    """Whether arrays and objects nest more than ``limit`` levels, checked without recursion."""
+    pending: list[Iterator[Any]] = [iter((value,))]
+    while pending:
+        for item in pending[-1]:
+            if isinstance(item, dict | list):
+                if len(pending) > limit:
+                    return True
+                if item:
+                    pending.append(iter(item.values() if isinstance(item, dict) else item))
+                    break
+        else:
+            pending.pop()
+    return False
+
+
 def parse_native_bytes(raw: bytes) -> Any:
-    """The JSON value of a native document's bytes: strict UTF-8 I-JSON or a NativeFormatError."""
+    """The JSON value of a native document's bytes: strict UTF-8 I-JSON or a NativeFormatError.
+
+    Arrays and objects nest at most ``MAX_NATIVE_NESTING`` levels. The bound is checked
+    without recursion, so what loads does not depend on the caller's stack, and every
+    reader that walks the document recursively, pydantic included, stays within it.
+    """
     from nexus_symbiote.core.hashing import parse_json_strict
 
     try:
-        return parse_json_strict(raw, max_bytes=MAX_NATIVE_BYTES)
+        value = parse_json_strict(raw, max_bytes=MAX_NATIVE_BYTES)
     except (UnicodeError, ValueError, RecursionError) as exc:
         raise NativeFormatError(
             "It is not strict UTF-8 JSON; duplicate keys and nonfinite numbers are refused."
         ) from exc
+    if _nested_deeper_than(value, MAX_NATIVE_NESTING):
+        raise NativeFormatError(f"inventory nests deeper than {MAX_NATIVE_NESTING} levels")
+    return value
 
 
 class DependencyEdge(BaseModel):
