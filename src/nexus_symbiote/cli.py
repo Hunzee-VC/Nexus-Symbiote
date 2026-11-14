@@ -1736,9 +1736,12 @@ def risk(
 @click.argument("new_path", type=click.Path(exists=True))
 @click.option("--json-output", is_flag=True, help="Output as JSON")
 @click.option(
-    "--fail-on-alert", is_flag=True, help="Exit with status 1 if the diff reports a security alert."
+    "--fail-on-alert/--no-fail-on-alert",
+    default=True,
+    show_default=True,
+    help="Exit with status 1 if the diff reports a security alert.",
 )
-def diff(old_path: str, new_path: str, json_output: bool, fail_on_alert: bool = False) -> None:
+def diff(old_path: str, new_path: str, json_output: bool, fail_on_alert: bool = True) -> None:
     """Compare two AIBOM snapshots for supply-chain drift."""
     old_bom = _load_bom(old_path)
     new_bom = _load_bom(new_path)
