@@ -514,12 +514,6 @@ def _markdown(path: str) -> bool:
     return PurePosixPath(path).suffix.lower() in _MARKUP_SUFFIXES
 
 
-# Instruction files without a Markdown suffix that a host loads by name.
-_PLAIN_INSTRUCTION_NAMES = frozenset(
-    PurePosixPath(path).name for path in INSTRUCTION_FILES if not _markdown(path)
-)
-
-
 def _credential_shaped(path: str) -> bool:
     """Whether a file that is not Markdown is named as one that holds credentials, by its
     own name or by a directory on its path, such as ``secrets/token.txt``.
@@ -584,12 +578,6 @@ def _read_unless_credential(
     return None
 
 
-def _instruction_name(path: str) -> bool:
-    """Whether a file's name says it holds instructions: a Markdown suffix, or the name of
-    an instruction file that has none, such as ``.cursorrules`` or ``system_prompt.txt``."""
-    return _markdown(path) or PurePosixPath(path).name in _PLAIN_INSTRUCTION_NAMES
-
-
 def _found_by_name(path: str, prompt_type: str | None) -> bool:
     """Whether a walk recorded ``path`` because a host loads a file of that name, or a rule,
     prompt or subagent file of that directory whose name has no suffix at all, such as
@@ -610,14 +598,15 @@ def _instruction_content(path: str, prompt_type: str | None, link_target: object
     an instruction file.
 
     The path must be Markdown, or an instruction file a walk found by its name, such as
-    ``.cursorrules`` or a rule file without a suffix; and the file a symlink there leads to, if any, must be Markdown or
-    carry such a name. Any other file, such as an import of ``config/app.json``, a rule
-    directory's ``x.json``, or ``AGENTS.md`` linked to ``config/app.json``, is named by the
-    checkout, not by a host, so its exact bytes may hold configuration or secrets.
+    ``.cursorrules`` or a rule file without a suffix; and the file a symlink there leads
+    to, if any, must be Markdown, the one test an @import of that target passes. Any other
+    file, such as an import of ``config/app.json``, a rule directory's ``x.json``, or
+    ``AGENTS.md`` linked to ``config/app.json`` or ``config/.windsurfrules``, is named by
+    the checkout, not by a host, so its exact bytes may hold configuration or secrets.
     """
     named = _markdown(path) or _found_by_name(path, prompt_type)
     return named and (
-        link_target is None or (isinstance(link_target, str) and _instruction_name(link_target))
+        link_target is None or (isinstance(link_target, str) and _markdown(link_target))
     )
 
 
@@ -1063,7 +1052,7 @@ class PromptScanner(Scanner):
 
         A Markdown file, or an instruction file a walk found by its name, is an
         instruction surface and keeps the unkeyed ``content_hash`` every instruction file
-        carries, unless a symlink there leads to a file that is neither (see
+        carries, unless a symlink there leads to a file that is not Markdown (see
         ``_instruction_content``). Any other file, imported with @path, found in a rule,
         prompt or subagent directory, or behind such a symlink, is named by the checkout,
         so its exact bytes may hold configuration or secrets: an unkeyed digest of them

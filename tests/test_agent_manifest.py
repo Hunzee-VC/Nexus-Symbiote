@@ -278,6 +278,54 @@ def test_an_instruction_changed_after_collection_is_recorded(tmp_path):
     assert failures == ["agent.yaml#/instructions/0: instruction changed since scanner collection"]
 
 
+BINDING_KEY = "agent-manifest-key-" + "0123456789abcdef" * 2
+
+
+def _withheld_instructions(project: Path) -> None:
+    (project / ".kiro/steering").mkdir(parents=True)
+    (project / ".kiro/steering/style.txt").write_text("Use tabs.\n")
+    (project / "config").mkdir()
+    (project / "config/app.json").write_text("DB=x\n")
+    (project / "AGENTS.md").symlink_to("config/app.json")
+    (project / "agent.yaml").write_text(
+        "name: a\ninstructions: [.kiro/steering/style.txt, AGENTS.md]\n"
+    )
+
+
+def test_a_declared_instruction_with_a_withheld_digest_is_unbound_not_changed(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    _withheld_instructions(project)
+    code, bom = _scan(project, tmp_path / "bom.json")
+    assert code == 0, bom["metadata"].get("scan_failures")
+    failures = json.dumps(bom)
+    assert "changed since scanner collection" not in failures
+    assert hash_bytes(b"DB=x\n") not in failures
+
+
+def test_a_declared_withheld_instruction_is_checked_by_its_keyed_binding(tmp_path, monkeypatch):
+    from nexus_symbiote.scanners.prompt import PromptScanner
+    from nexus_symbiote.scanners.source_binding import SOURCE_BINDING_KEY_ENV
+
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, BINDING_KEY)
+    _withheld_instructions(tmp_path)
+    components = PromptScanner().scan(tmp_path).components
+    assert all(c.content_hash is None for c in components)
+    failures: list[str] = []
+    assemble_repository_agent(AIBOM(components=list(components)), tmp_path, failures=failures)
+    assert failures == []
+    (tmp_path / "config/app.json").write_text("DB=y\n")
+    assemble_repository_agent(AIBOM(components=list(components)), tmp_path, failures=failures)
+    assert failures == ["agent.yaml#/instructions/1: instruction changed since scanner collection"]
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, "another-" + BINDING_KEY)
+    failures.clear()
+    assemble_repository_agent(AIBOM(components=list(components)), tmp_path, failures=failures)
+    assert failures == [
+        f"agent.yaml#/instructions/{index}: instruction content was bound under another key"
+        for index in range(2)
+    ]
+
+
 def test_an_undeclared_local_model_is_recorded_without_aborting(tmp_path):
     (tmp_path / "agent.yaml").write_text("name: x\nmodels: {m: {path: models}}\n")
     failures: list[str] = []

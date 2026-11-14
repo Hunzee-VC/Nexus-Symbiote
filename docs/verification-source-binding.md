@@ -413,9 +413,10 @@ profile, with its own path in the binding: an instruction, nested memory, rule, 
 or subagent file keeps `content_hash` only when its name has a Markdown suffix, is an
 instruction file name without one (`.cursorrules`, `.clinerules`, `.windsurfrules`,
 `system_prompt.txt`), or, in a rule, prompt or subagent directory, has no suffix at
-all, and when the file a symlink there leads to, if any, has a Markdown suffix or such
-an instruction file name. `AGENTS.md` linked to `config/app.json` is recorded as
-`prompt:AGENTS.md` without `content_hash`, as is `.cursor/rules/x.json`; an ordinary
+all, and when the file a symlink there leads to, if any, has a Markdown suffix, the
+same test an import of that file passes. `AGENTS.md` linked to `config/app.json` or
+`config/.windsurfrules` is recorded as `prompt:AGENTS.md` without `content_hash`, as is
+`.cursor/rules/x.json`; an ordinary
 `CLAUDE.md`, `AGENTS.md` linked to `docs/agents.md` and `.cursor/rules/x.mdc` keep it.
 
 `validate --project` with the key recomputes the binding from the file and counts it

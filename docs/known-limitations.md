@@ -384,10 +384,11 @@ A way around a limit that its entry does not describe is worth a
   keeps its content hash only when its name is Markdown, or is an instruction file name
   without one (`.cursorrules`, `.clinerules`, `.windsurfrules`, `system_prompt.txt`),
   or, in a rule, prompt or subagent directory, has no suffix at all; and when a symlink
-  there leads to a file whose name is Markdown or such an instruction file name. So
-  `AGENTS.md` linked to `config/app.json`, `.cursorrules` linked to
-  `docs/rules.txt`, and `.cursor/rules/x.json` or `.clinerules/style.txt` carry no
-  content hash. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` a keyed binding covers the
+  there leads to a file with a Markdown suffix, the same test an import of that file
+  passes. So `AGENTS.md` linked to `config/app.json` or `config/.windsurfrules`,
+  `.cursorrules` linked to `docs/rules.txt` or `shared/.cursorrules`, and
+  `.cursor/rules/x.json` or `.clinerules/style.txt` carry no content hash; a nested
+  `shared/.cursorrules` that the walk records under its own name keeps one there. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` a keyed binding covers the
   content, which `validate --project` with the same key verifies; without the key the
   component carries a low `completeness` finding, validation counts it as unbound, and
   a change to the file raises no alert and fails no validation. A project with more

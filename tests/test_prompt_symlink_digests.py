@@ -74,6 +74,26 @@ def _cursorrules_linked_to_txt(project: Path) -> None:
     _link(project, ".cursorrules", "config/app.txt")
 
 
+# A symlink target named like an instruction file that has no Markdown suffix is still
+# withheld: an @import of the same target is, so the walk must not publish its digest.
+def _agents_linked_to_windsurfrules(project: Path) -> None:
+    _write(project, "config/.windsurfrules", CONFIGURATION)
+    _link(project, "AGENTS.md", "config/.windsurfrules")
+    _write(project, "CLAUDE.md", "@AGENTS.md @config/.windsurfrules\n")
+
+
+def _gemini_linked_to_system_prompt_txt(project: Path) -> None:
+    _write(project, "config/system_prompt.txt", CONFIGURATION)
+    _link(project, "GEMINI.md", "config/system_prompt.txt")
+    _write(project, "CLAUDE.md", "@config/system_prompt.txt\n")
+
+
+def _cursor_rule_linked_to_clinerules(project: Path) -> None:
+    _write(project, "config/.clinerules", CONFIGURATION)
+    _link(project, ".cursor/rules/a.mdc", "config/.clinerules")
+    _write(project, "CLAUDE.md", "@config/.clinerules\n")
+
+
 VARIANTS = [
     pytest.param(
         _agents_linked_to_json,
@@ -91,6 +111,21 @@ VARIANTS = [
         _github_prompt_json, ["prompt:.github/prompts/deploy.json"], id="github-prompt-json"
     ),
     pytest.param(_cursorrules_linked_to_txt, ["prompt:.cursorrules"], id="cursorrules-to-txt"),
+    pytest.param(
+        _agents_linked_to_windsurfrules,
+        ["prompt:AGENTS.md", "prompt:import:config/.windsurfrules"],
+        id="agents-md-to-windsurfrules-and-imported",
+    ),
+    pytest.param(
+        _gemini_linked_to_system_prompt_txt,
+        ["prompt:GEMINI.md", "prompt:import:config/system_prompt.txt"],
+        id="gemini-md-to-system-prompt-txt-and-imported",
+    ),
+    pytest.param(
+        _cursor_rule_linked_to_clinerules,
+        ["prompt:.cursor/rules/a.mdc", "prompt:import:config/.clinerules"],
+        id="cursor-rule-to-clinerules-and-imported",
+    ),
 ]
 
 
@@ -181,19 +216,16 @@ def test_instruction_files_keep_their_digests(tmp_path):
         ".github/prompts/deploy.prompt.md": "Deploy carefully.\n",
         ".clinerules/style.md": "Use spaces.\n",
         ".claude/rules/style": "Prefer small diffs.\n",
-        "shared/.cursorrules": "Be terse.\n",
         "pkg/.cursorrules": "Be brief.\n",
         "system_prompt.txt": "You are helpful.\n",
     }
     for name, content in files.items():
         _write(tmp_path, name, content)
     _link(tmp_path, "AGENTS.md", "docs/agents.md")
-    _link(tmp_path, ".cursorrules", "shared/.cursorrules")
     components = _components(PromptScanner().scan(tmp_path))
     expected = {
         "prompt:CLAUDE.md": files["CLAUDE.md"],
         "prompt:AGENTS.md": files["docs/agents.md"],
-        "prompt:.cursorrules": files["shared/.cursorrules"],
         "prompt:pkg/.cursorrules": files["pkg/.cursorrules"],
         "prompt:system_prompt.txt": files["system_prompt.txt"],
         "prompt:.cursor/rules/x.mdc": files[".cursor/rules/x.mdc"],
@@ -219,3 +251,17 @@ def test_a_claimed_withholding_on_an_instruction_file_is_missing_evidence(tmp_pa
     report = IntegrityValidator().validate(AIBOM(components=components), tmp_path)
     assert report.status == "unknown"
     assert report.hashes_unbound == 0
+
+
+def test_a_symlink_keeps_its_digest_only_when_its_target_is_markdown(tmp_path):
+    """A target named like an instruction file is not enough: an @import of that target
+    is withheld, so the file linked to it is too. A nested ``.cursorrules`` a walk finds
+    under its own name keeps its digest there."""
+    _write(tmp_path, "shared/.cursorrules", "Be terse.\n")
+    _link(tmp_path, ".cursorrules", "shared/.cursorrules")
+    components = _components(PromptScanner().scan(tmp_path))
+    linked = components["prompt:.cursorrules"]
+    assert linked.properties["symlink_target"] == "shared/.cursorrules"
+    assert linked.content_hash is None
+    assert prompt.withholds_content_hash(linked)
+    assert components["prompt:shared/.cursorrules"].content_hash == hash_bytes(b"Be terse.\n")
