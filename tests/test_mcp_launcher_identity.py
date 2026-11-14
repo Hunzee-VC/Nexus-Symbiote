@@ -108,6 +108,56 @@ def scan_server(project: Path, server: dict) -> MCPServerComponent:
     return next(c for c in result.components if isinstance(c, MCPServerComponent))
 
 
+@pytest.mark.parametrize("option", ["-n", "--node-arg", "--npm"])
+def test_npx_options_that_take_a_value_cannot_present_a_decoy_package(tmp_path, option):
+    # npx removes these options with the word after them, so the second word is the package.
+    server = scan_server(
+        tmp_path, {"command": "npx", "args": [option, "left-pad@1.3.0", "evil-server"]}
+    )
+    assert server.launcher_package == "npm:evil-server"
+    assert server.version_pinned is False
+    assert "left-pad" not in server.model_dump_json()
+    assert any(risk.category == "version_pinning" for risk in server.risks)
+
+
+def test_yarnpkg_is_the_yarn_runner_not_a_local_program(tmp_path):
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps({"mcpServers": {"docs": {"command": "yarnpkg", "args": ["dlx", "evil"]}}})
+    )
+    result = MCPScanner().scan(tmp_path)
+    server = next(c for c in result.components if isinstance(c, MCPServerComponent))
+    yarn = scan_server(tmp_path, {"command": "yarn", "args": ["dlx", "evil"]})
+    assert server.launcher_package == yarn.launcher_package == "npm:evil"
+    assert server.version_pinned is False
+    assert [r.category for r in server.risks] == [r.category for r in yarn.risks]
+
+
+def test_a_bare_deno_lock_option_before_the_script_is_a_gap(tmp_path):
+    # Deno may read the next word as the lock file and run the word after it.
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "docs": {
+                        "command": "deno",
+                        "args": ["run", "--lock", "npm:left-pad@1.3.0", "npm:evil-server"],
+                    }
+                }
+            }
+        )
+    )
+    result = MCPScanner().scan(tmp_path)
+    server = next(c for c in result.components if isinstance(c, MCPServerComponent))
+    assert server.launcher_package is None
+    assert server.version_pinned is not True
+    assert result.surfaces_excluded
+    pinned = scan_server(
+        tmp_path, {"command": "deno", "args": ["run", "--lock=deno.lock", "npm:left-pad@1.3.0"]}
+    )
+    assert pinned.launcher_package == "npm:left-pad"
+    assert pinned.version_pinned is True
+
+
 def test_short_environment_flags_do_not_discard_launcher_identity(tmp_path):
     server = scan_server(
         tmp_path,
