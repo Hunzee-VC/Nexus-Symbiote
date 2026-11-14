@@ -73,9 +73,9 @@ def test_platforms_workflow_triggers_on_pr_and_runs_confinement_suites() -> None
         assert expected in pytest_cmd
 
 
-def test_readme_protect_the_gate_avoids_pull_request_target_head_checkout() -> None:
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    protect = readme.split("#### Protect the gate", 1)[1].split("### Pre-commit hooks", 1)[0]
+def test_protect_the_gate_avoids_pull_request_target_head_checkout() -> None:
+    guide = (ROOT / "docs" / "drift-gate.md").read_text(encoding="utf-8")
+    protect = guide.split("\n## Protect the gate\n", 1)[1].split("\n## ", 1)[0]
     assert "on: pull_request\n" in protect
     assert "ref: ${{ github.event.pull_request.head.sha }}" not in protect
 

@@ -91,7 +91,19 @@ nexus-symbiote risk demo.aibom.json --no-project-policy
 nexus-symbiote validate demo.aibom.json --project examples/demo-agent --no-project-policy
 ```
 
-The scan records 11 components across 9 types and ten findings (risk score 37, below the default fail threshold of 50). `validate` exits 1 on purpose: completeness passes, but the model's integrity stays unknown without a [signer policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md#operator-signature-policy). The [examples walkthrough](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/examples/README.md) adds model approval, drift detection, exports and a trace comparison, all offline.
+The scan records 11 components across 9 types and ten findings (risk score 37, below the default fail threshold of 50). `validate` exits 1 on purpose: completeness passes, but the model's integrity stays unknown because no signer policy was supplied. An inventory can be complete and still not be approvable.
+
+To approve the model, pin its digest in a [signer policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md#operator-signature-policy) you own, kept outside the scanned project. Here the digest comes from the checkout only to show the mechanism; in real use, take it from a source you trust:
+
+```bash
+digest="$(sha256sum examples/demo-agent/models/intent-classifier.safetensors | cut -d' ' -f1)"
+printf '{"version": 2, "artifacts": [{"kind": "digest-pin", "expected_sha256": "sha256:%s",
+  "artifact_path": "models/intent-classifier.safetensors"}]}\n' "$digest" > signers.json
+nexus-symbiote validate demo.aibom.json --project examples/demo-agent --no-project-policy \
+  --signature-policy signers.json
+```
+
+`validate` now exits 0. The [examples walkthrough](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/examples/README.md) adds drift detection, exports, a ShadowScan import and a comparison with a synthetic runtime trace, all offline.
 
 ### Scan your own agent
 
@@ -112,10 +124,11 @@ An agent's behavior depends on its configuration as much as its code — MCP ser
 | Risk | What Nexus SymBiote does |
 | --- | --- |
 | Floating dependencies | Flags unpinned MCP packages (`@latest`) and images without digests |
-| Tool rug-pulls / endpoint repointing | Fingerprints tool definitions; critical or high drift alerts on changes |
-| Executable or unsigned model files | Classifies format without loading; validates SafeTensors headers; checks [signer policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md#operator-signature-policy) |
-| Hidden prompt instructions | Detects bidi/zero-width characters and HTML comments in instruction files |
-| Over-broad IDE permissions | Flags `bypassPermissions`, blanket grants, hooks and dangerous settings |
+| Tool rug pulls | Fingerprints the tools a [live observation](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/offline-and-live-modes.md#detect-drift-on-a-remote-mcp-server) records, so a changed definition is a critical drift alert; a static scan records declared tools by name and file digest |
+| Endpoint repointing, scope widening | Critical or high drift alert when an MCP or A2A endpoint moves host, or an A2A card's OAuth scopes grow |
+| Executable or unsigned model files | Classifies formats without loading them and validates SafeTensors headers; integrity stays `UNKNOWN` until your [signer policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md#operator-signature-policy) verifies the weights |
+| Hidden instructions | Flags bidi and zero-width characters, and text hidden in HTML comments, in instruction files |
+| Over-broad agent permissions | Flags `bypassPermissions`, blanket grants such as `Bash(*)` and hook commands; a changed setting is a drift alert |
 | Credential exposure | Records variable names, never values; redacts known secret patterns |
 
 Every row has limits: [known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md). Trust model and design principles: [security model](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/security-model.md).
@@ -159,7 +172,7 @@ Every row has limits: [known limitations](https://github.com/Hunzee-VC/Nexus-Sym
 | IDE agent settings | `ide_agents` | Permission modes, blanket grants, hooks, settings digests |
 | [ShadowScan](https://github.com/Hunzee-VC/Nexus-ShadowScan) reports | `shadowscan` | Imported discovery claims, kept separate from local evidence |
 
-Select a subset with `--scanner`; omitted collectors are recorded as unknown, not clean. The `mcp`, `rag` and `a2a` collectors also search source code for SDK and library references. Full path lists: [CLI reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/cli-reference.md). Registry detail: [registry collector](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/registry-collector.md). Model verification: [model integrity](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md).
+Nothing a collector reads is executed, imported or loaded. The `mcp`, `rag` and `a2a` collectors also search source code for SDK and library references. Select a subset with `--scanner`; collectors you leave out are recorded as unknown, not clean. Every path each collector reads, and the coding-agent settings that raise findings, are in the [collector reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/collectors.md).
 
 ### Commands
 
@@ -176,9 +189,11 @@ Select a subset with `--scanner`; omitted collectors are recorded as unknown, no
 | `crosswalk` | Which OWASP, MITRE ATLAS, NIST, EU AI Act and CWE [entries](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/framework-crosswalk.md#what-a-reference-means) apply? |
 | `blast-radius` | Which agents and components are associated with a compromised component? |
 | `graph` | Self-contained [HTML view](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/graph-view.md) of components, associations and exposure paths |
+| `verify-artifact`, `verify-discovery` | Do these bytes match a trusted digest, Sigstore identity or ShadowScan report? |
+| `runtime keygen/sign/verify/…` | Are signed [runtime contracts](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/runtime-contract-reference.md) valid, current and canonical? |
 | `discover-mcp`, `verify-live`, `advisories` | What does a running server serve? Known advisories? *(live mode)* |
 
-Full options and exit codes: [CLI reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/cli-reference.md).
+Exit code `0` means every requested gate passed, `1` a gate or check failed or an input could not be read, `2` a usage error. Every command, option and exit condition: [CLI reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/cli-reference.md).
 
 ### What it produces
 
@@ -201,45 +216,57 @@ A scan is an inventory, not a verdict. Read [what results do and do not establis
 
 ### GitHub Action
 
-Pin the Action to a reviewed 40-character commit:
+Pin the Action to a reviewed 40-character commit, keep the token read-only, and set a job timeout: hostile input can keep a scan running until the job times out.
 
 ```yaml
-- uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-  with:
-    persist-credentials: false
-- uses: Hunzee-VC/Nexus-Symbiote@<reviewed-40-character-commit-sha>
-  with:
-    scan-path: .
-    output-file: agentbom.json
-    validate: 'true'
-    risk-check: 'true'
-    risk-threshold: '50'
+name: Agent inventory
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Hunzee-VC/Nexus-Symbiote@<reviewed-40-character-commit-sha>
+        with:
+          scan-path: .
+          output-file: agentbom.json
+          validate: 'true'
+          risk-check: 'true'
+          risk-threshold: '50'
 ```
 
-The Action installs its own hash-locked runtime without touching the job's Python. All inputs, outputs and gate semantics: [action.yml](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/action.yml). Signer-policy setup, drift baselines and gate protection: [Gate drift in CI](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/drift-gate.md).
+The Action installs its own hash-locked runtime off the job's `PATH`, ignores policy in the scanned checkout, and reports each gate in its `result` and `gates` outputs. What each gate checks, how to supply a signer policy, and SARIF upload: [GitHub Action guide](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/github-action.md). Inputs and outputs: [action.yml](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/action.yml).
 
 ### Gate drift in CI
 
-Approve a baseline once on the protected branch, then compare every pull request:
+Approve a baseline once on the protected branch, then compare every pull request with it. `baseline` writes an unsigned file and `diff` checks no signature, so read the baseline from a place the pull request cannot change:
 
 ```bash
-# One secret of 32+ characters, the same for the baseline and every later scan.
+# One secret of 32 or more characters, the same for the baseline and every later scan.
 export NEXUS_SYMBIOTE_SOURCE_BINDING_KEY="$AGENTBOM_BINDING_KEY"
 
-# On the protected branch: approve the baseline.
+# On the protected branch, through a reviewed pull request: approve the baseline.
+mkdir -p .nexus-symbiote
 nexus-symbiote baseline . --no-project-policy -o .nexus-symbiote/reviewed.json
 
-# In the pull-request job: compare against the base commit's baseline.
+# In the pull-request job (with fetch-depth: 0 or the base commit fetched): read the
+# baseline from the base commit, never from the pull request.
+BASE_SHA="${BASE_SHA:-origin/main}"
 git show "$BASE_SHA:.nexus-symbiote/reviewed.json" > "$RUNNER_TEMP/reviewed.json"
 nexus-symbiote scan . --no-project-policy -o "$RUNNER_TEMP/agentbom.json"
 nexus-symbiote diff "$RUNNER_TEMP/reviewed.json" "$RUNNER_TEMP/agentbom.json" --fail-on-alert
 ```
 
-Without the binding key, changed MCP launch arguments, environment values and same-host endpoint paths pass through undetected. Full guide: [Gate drift in CI](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/drift-gate.md). Source binding detail: [verification and source binding](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/verification-source-binding.md).
+`--fail-on-alert` fails on any recorded change rated medium or higher, including a removed component and a coverage regression. Without the binding key, a changed MCP launch argument, environment value or same-host endpoint path passes; see [source binding](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/verification-source-binding.md). Run the comparison in a job the pull request cannot edit ([protect the gate](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/drift-gate.md#protect-the-gate)), and sign the reviewed baseline to know who approved it ([inventory attestation](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/inventory-attestation.md#gate-a-pull-request-on-an-attested-baseline)). Full guide: [Gate drift in CI](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/drift-gate.md).
 
 ### Policy and live mode
 
-Every command is offline by default. Only `discover-mcp`, `advisories` and `verify-live` reach the network, and only in live mode (`--live` or `NEXUS_SYMBIOTE_MODE=live`); see [offline and live modes](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/offline-and-live-modes.md). A project policy (`.nexus-symbiote.yaml`) is read only from the scanned project. Generate one with `nexus-symbiote init`, or pass `--no-project-policy` when the checkout is not yours; see [policy reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/policy-reference.md).
+Every command is offline by default. Only `discover-mcp`, `advisories` and `verify-live` reach the network, and only in live mode (`--live` or `NEXUS_SYMBIOTE_MODE=live`); see [offline and live modes](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/offline-and-live-modes.md). A project policy (`.nexus-symbiote.yaml`) is read only from the scanned project. Generate one with `nexus-symbiote init`, or pass `--no-project-policy` when the checkout is not yours; see [policy reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/policy-reference.md). The [pre-commit hooks](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/cli-reference.md#pre-commit-hooks) are a convenience for your own tree, not a control.
 
 ## Documentation
 
@@ -253,6 +280,8 @@ The [documentation hub](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/do
 | Run the full offline demo | [Examples walkthrough](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/examples/README.md) |
 | Scan a real project end to end | [Scanning a public agent](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/tutorials/scanning-a-public-agent.md) |
 | Look up any command, option or exit code | [CLI reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/cli-reference.md) |
+| See every path a collector reads | [Collector reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/collectors.md) |
+| Configure the GitHub Action's gates and signer policy | [GitHub Action](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/github-action.md) |
 | Write a project policy or suppress a finding | [Policy reference](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/policy-reference.md) |
 | Raise a collection limit | [Collection limits](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/collection-limits.md) |
 | Keep a drift baseline out of a pull request's reach | [Gate drift in CI](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/drift-gate.md) |
@@ -283,4 +312,4 @@ If you use Nexus SymBiote in research or tooling, cite it with the metadata in [
 
 ## License
 
-[MIT](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/LICENSE). Copyright (c) 2026 Emmanuel Dahunsi (AISecNomad). Vendored CycloneDX schemas are Apache-2.0; SPDX schemas are Community-Spec-1.0 with CC-BY-3.0. Full expression: `MIT AND Apache-2.0 AND Community-Spec-1.0 AND CC-BY-3.0`. See [NOTICE](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/NOTICE.txt).
+[MIT](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/LICENSE). Copyright (c) 2026 Emmanuel Dahunsi (AISecNomad). The vendored schemas under `src/nexus_symbiote/generators/schemas/vendor/` keep their upstream licenses: CycloneDX is [Apache-2.0](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/LICENSE-APACHE-2.0.txt), and SPDX 3.0.1 is [Community-Spec-1.0 with CC-BY-3.0](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/LICENSE-SPDX-3.0.1.txt) for pre-existing portions. The [notice](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/src/nexus_symbiote/generators/schemas/vendor/NOTICE.txt) gives their sources, so the distribution's license expression is `MIT AND Apache-2.0 AND Community-Spec-1.0 AND CC-BY-3.0`.

@@ -341,7 +341,7 @@ A way around a limit that its entry does not describe is worth a
 ## Instructions and IDE settings
 
 - **Instruction files under other names are not recorded.** The `prompt` collector
-  reads the fixed files the [CLI reference lists](cli-reference.md),
+  reads the fixed files the [collector reference lists](collectors.md#what-each-collector-reads),
   `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` and `.cursorrules` in any subdirectory, and
   every file in the rule, prompt and subagent directories. Another spelling of a
   nested name, such as `claude.md` in a subdirectory, is a

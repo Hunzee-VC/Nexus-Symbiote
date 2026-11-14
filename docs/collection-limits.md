@@ -205,7 +205,7 @@ ordinary projects exceeded them:
   file just within 200,000 nodes about a second to parse and analyse.
 
 Hashing a 256 GiB model directory takes several minutes; keep a job timeout, as
-the [README](../README.md) recommends.
+the [GitHub Action guide](github-action.md#add-it-to-a-workflow) recommends.
 
 ## Fixed bounds
 
