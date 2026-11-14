@@ -16,6 +16,7 @@ import json
 import os
 import pickletools
 import re
+from collections import deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
@@ -130,6 +131,26 @@ SIGNING_SUFFIXES = [".sig", ".sigstore", ".sigstore.json"]
 
 MAX_MODEL_HEADER_BYTES = 1024 * 1024
 MAX_PICKLE_INSPECTION_BYTES = 65536
+# Opcodes read from a pickle sample, which bounds the work, and the well-formed
+# binary opcodes after PROTO that recognize a pickle whatever follows them.
+MAX_PICKLE_OPCODES = 4096
+MAX_PICKLE_MARKS = 64
+MIN_PICKLE_OPCODES = 16
+# A ZIP central directory is listed from the archive's end; a longer one is not read.
+MAX_ZIP_DIRECTORY_BYTES = MAX_MODEL_HEADER_BYTES
+_ZIP_END_RECORD_BYTES = 22 + 65_535 + 20 + 56
+_ZIP_TAIL_BYTES = MAX_ZIP_DIRECTORY_BYTES + _ZIP_END_RECORD_BYTES
+ZIP_PICKLE_MEMBER = "ZIP archive with a pickle member; torch.load unpickles it"
+ZIP_WITHOUT_PICKLE = (
+    "ZIP archive whose directory lists no pickle member; no bounded structural validator "
+    "for this format/loader"
+)
+ZIP_DIRECTORY_UNREAD = (
+    "ZIP archive whose directory is malformed or over the inspection limit; no bounded "
+    "structural validator for this format/loader"
+)
+_ZIP_NOT_PICKLE = frozenset({ZIP_WITHOUT_PICKLE, ZIP_DIRECTORY_UNREAD})
+ZIP_NOT_GGUF = "the file is a ZIP archive"
 # Chat templates a finding names; it counts the rest.
 _LISTED_TEMPLATES = 3
 _UNSAFE_SUFFIXES = {
@@ -226,38 +247,132 @@ def _recognized_pickle(stream: BinaryIO, prefix: bytes, size: int) -> str | None
     """Recognize bounded pickle instructions without loading objects.
 
     PROTO alone is insufficient: valid tensor header lengths can have the same
-    first byte. Static opcode/stack checks must reach STOP within local limits.
-    This intentionally leaves unsupported, truncated and large samples unknown.
+    first byte. A binary stream of PROTO and ``MIN_PICKLE_OPCODES`` well-formed
+    opcodes is a pickle whatever follows them: a loader runs what they name before it
+    meets a flaw further on, so the opcode count only bounds the work. A shorter
+    sample, or a text-protocol one, must pass static opcode/stack checks to STOP within
+    the limits; this intentionally leaves other unsupported and truncated samples unknown.
     """
     binary = len(prefix) >= 2 and prefix[0] == 0x80 and 2 <= prefix[1] <= 5
     if not binary and (not prefix or prefix[0] not in _TEXT_PICKLE_START):
         return None
     sample = prefix + stream.read(max(0, min(size, MAX_PICKLE_INSPECTION_BYTES) - len(prefix)))
-    try:
-        marks = 0
-        for count, (opcode, _, _) in enumerate(pickletools.genops(sample), start=1):
-            marks += opcode.name == "MARK"
-            if count > 4096 or marks > 64:
-                return None
-        # dis() only checks opcode stack/memo consistency; it never resolves
-        # globals, imports artifact code, invokes reducers or constructs objects.
-        pickletools.dis(sample, out=io.StringIO())
-    except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
-        return None
     kind = "binary" if binary else "text-protocol"
-    return f"Recognized {kind} pickle opcode stream; object loading can execute code"
+    recognized = f"Recognized {kind} pickle opcode stream; object loading can execute code"
+    seen = marks = 0
+    try:
+        for opcode, _, _ in pickletools.genops(sample):
+            seen += 1
+            marks += opcode.name == "MARK"
+            if seen > MAX_PICKLE_OPCODES or marks > MAX_PICKLE_MARKS:
+                break
+        else:
+            # dis() only checks opcode stack/memo consistency; it never resolves
+            # globals, imports artifact code, invokes reducers or constructs objects.
+            pickletools.dis(sample, out=io.StringIO())
+            return recognized
+    except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
+        pass
+    return recognized if binary and seen >= MIN_PICKLE_OPCODES else None
 
 
-def _recognized_code_container(stream: BinaryIO, prefix: bytes, size: int) -> str | None:
-    if prefix[:4] == b"PK\x03\x04":
-        # torch.save writes its pickle as the first ZIP member.
-        header = prefix + stream.read(22)
-        if len(header) == 30:
-            name_length = int.from_bytes(header[26:28], "little")
-            if 0 < name_length <= 4096 and stream.read(name_length).lower().endswith(b".pkl"):
-                return "ZIP archive whose first member is a pickle; torch.load unpickles it"
+def _pickle_member(name: bytes) -> bool:
+    return name.lower().endswith(b".pkl")
+
+
+def _little(data: bytes, offset: int, width: int) -> int:
+    return int.from_bytes(data[offset : offset + width], "little")
+
+
+def _zip_lists_pickle(stream: BinaryIO, consumed: int, size: int) -> bool | None:
+    """Whether the central directory at the end of a ZIP archive names a pickle member.
+
+    The rest of the stream is read in bounded chunks, keeping only the tail that can
+    hold the directory within ``MAX_ZIP_DIRECTORY_BYTES``, the end-of-central-directory
+    record with its comment and the ZIP64 records. ``None`` when the directory is
+    malformed, truncated or beyond that bound, or the stream ends before ``size``.
+    """
+    tail: deque[bytes] = deque()
+    held = 0
+    remaining = size - consumed
+    while remaining > 0:
+        chunk = stream.read(min(65536, remaining))
+        if not chunk:
+            return None
+        remaining -= len(chunk)
+        tail.append(chunk)
+        held += len(chunk)
+        while held - len(tail[0]) >= _ZIP_TAIL_BYTES:
+            held -= len(tail.popleft())
+    data = b"".join(tail)
+    start = size - len(data)
+    end_record = data.rfind(b"PK\x05\x06", max(0, len(data) - 22 - 65_535))
+    if end_record < 0 or end_record + 22 > len(data):
         return None
-    return _recognized_pickle(stream, prefix, size)
+    directory_end = end_record
+    directory_size = _little(data, end_record + 12, 4)
+    directory_offset = _little(data, end_record + 16, 4)
+    if _little(data, end_record + 10, 2) == 0xFFFF or 0xFFFFFFFF in (
+        directory_size,
+        directory_offset,
+    ):
+        locator = end_record - 20
+        if locator < 0 or data[locator : locator + 4] != b"PK\x06\x07":
+            return None
+        record = _little(data, locator + 8, 8) - start
+        if record < 0 or record + 56 > locator or data[record : record + 4] != b"PK\x06\x06":
+            return None
+        directory_end = record
+        directory_size = _little(data, record + 40, 8)
+        directory_offset = _little(data, record + 48, 8)
+    return _directory_lists_pickle(data, directory_offset - start, directory_size, directory_end)
+
+
+def _directory_lists_pickle(data: bytes, begin: int, size: int, end: int) -> bool | None:
+    """Walk the central directory entries that ``data`` holds from ``begin`` to ``end``."""
+    if size > MAX_ZIP_DIRECTORY_BYTES or begin < 0 or begin + size > end:
+        return None
+    position = begin
+    while position < begin + size:
+        if position + 46 > begin + size or data[position : position + 4] != b"PK\x01\x02":
+            return None
+        name_length = _little(data, position + 28, 2)
+        name = data[position + 46 : position + 46 + name_length]
+        if len(name) < name_length:
+            return None
+        if _pickle_member(name):
+            return True
+        position += (
+            46 + name_length + _little(data, position + 30, 2) + _little(data, position + 32, 2)
+        )
+    return False
+
+
+def _recognized_code_container(
+    stream: BinaryIO, prefix: bytes, size: int
+) -> tuple[SerializationSafety, str] | None:
+    """A verdict on a code-executing container, or ``None`` for content not recognized.
+
+    A ZIP archive is a code container when a member is a pickle: ``torch.save`` writes
+    ``data.pkl``, usually first, so its local header is read forward before the
+    directory at the end of the archive, which lists every member, is read.
+    """
+    if prefix[:4] != b"PK\x03\x04":
+        pickle = _recognized_pickle(stream, prefix, size)
+        return None if pickle is None else (SerializationSafety.UNSAFE_CODE_EXECUTION, pickle)
+    header = prefix + stream.read(22)
+    consumed = len(header)
+    first = b""
+    if len(header) == 30:
+        name_length = int.from_bytes(header[26:28], "little")
+        if 0 < name_length <= 4096:
+            first = stream.read(name_length)
+            consumed += len(first)
+    listed = True if _pickle_member(first) else _zip_lists_pickle(stream, consumed, size)
+    if listed:
+        return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_PICKLE_MEMBER
+    explanation = ZIP_WITHOUT_PICKLE if listed is False else ZIP_DIRECTORY_UNREAD
+    return SerializationSafety.UNKNOWN, explanation
 
 
 def inspect_model_format(
@@ -285,8 +400,10 @@ def inspect_model_format(
             )
             if not tensor_candidate:
                 container = _recognized_code_container(opened, prefix, size)
-                if container is not None:
-                    return SerializationSafety.UNSAFE_CODE_EXECUTION, container
+                if container is not None and (
+                    container[0] is SerializationSafety.UNSAFE_CODE_EXECUTION or not safetensors
+                ):
+                    return container
             if not safetensors:
                 return (
                     SerializationSafety.UNKNOWN,
@@ -382,6 +499,14 @@ def observe_model_artifact(
             artifact_size=before.st_size,
             max_header_bytes=MAX_MODEL_HEADER_BYTES,
         )
+    elif key in ("onnx", "gguf") and explanation in _ZIP_NOT_PICKLE:
+        # The directory was read from the archive's end, past the prefix a format
+        # reader replays; an archive holds no ONNX external data and no GGUF metadata,
+        # which is what the readers found before the directory was read.
+        if key == "onnx":
+            extra["external_data"] = ()
+        else:
+            extra["gguf_error"] = ZIP_NOT_GGUF
     elif safety != SerializationSafety.UNSAFE_CODE_EXECUTION and key == "onnx":
         try:
             extra["external_data"] = onnx_external_data(_ReplayReader(observed).read, budget)
