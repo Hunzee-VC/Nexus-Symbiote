@@ -15,6 +15,8 @@ from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import PromptComponent, RiskAssessment, SkillPackageComponent
 from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
+from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection, fold_name
 from nexus_symbiote.utils.markdown import text_outside_code
 from nexus_symbiote.utils.terminal import neutralize
@@ -557,6 +559,28 @@ _MARKUP_SUFFIXES = frozenset({".md", ".mdc", ".markdown"})
 _IMPORTING_NAMES = frozenset({"CLAUDE.md", "CLAUDE.local.md", "GEMINI.md"})
 _MAX_IMPORT_DEPTH = 5
 _MAX_IMPORTS = 1000
+# Names that hold credentials wherever they appear. A memory file names what to
+# import, so a checked-in `@.env` would otherwise direct an unkeyed digest of the
+# file into the inventory, which anyone holding it could confirm guesses against.
+_CREDENTIAL_SUFFIXES = frozenset(
+    {".pem", ".key", ".p12", ".pfx", ".der", ".jks", ".keystore", ".token"}
+)
+_CREDENTIAL_MARKERS = ("secret", "credential", "password", "apikey", "api_key", "api-key")
+_CREDENTIAL_NAMES = frozenset({".netrc", ".npmrc", ".pypirc", "id_rsa", "id_ecdsa", "id_ed25519"})
+# The keyed binding that covers an imported file the unkeyed content hash must not.
+IMPORT_CONTENT_BINDING_PROFILE = "nexus-symbiote/prompt-import-content/v1"
+
+
+def _credential_shaped(path: str) -> bool:
+    """Whether an import target's name says it holds credentials, not instructions."""
+    name = PurePosixPath(path).name.lower()
+    if name in _CREDENTIAL_NAMES or name.startswith(".env"):
+        return True
+    if PurePosixPath(name).suffix in _CREDENTIAL_SUFFIXES:
+        return True
+    return any(marker in name for marker in _CREDENTIAL_MARKERS)
+
+
 # Path characters that the `imports` and `imported_by` lists of one collection hold
 # together. One reference can name a 4 KiB path, so a count of references alone would
 # not bound the inventory.
@@ -917,6 +941,12 @@ class PromptScanner(Scanner):
                     exhausted = True
                     break
                 looked_up.add(target)
+                if _credential_shaped(target):
+                    result.surfaces_excluded.append(
+                        f"{target}: imported by {importer} but its name says it holds "
+                        "credentials; not read or inventoried"
+                    )
+                    continue
                 content = self._read_import(importer, target, files, result)
                 if content is None:
                     continue
@@ -930,6 +960,7 @@ class PromptScanner(Scanner):
                 if component is None:
                     continue
                 component.bom_ref = f"prompt:import:{target}"
+                self._bind_import_content(target, content, component, result)
                 recorded[target] = component
                 paths[target] = target
                 texts[target] = content.decode("utf-8")
@@ -950,6 +981,53 @@ class PromptScanner(Scanner):
             if imports and importer in recorded:
                 listing.add(importer, imports, recorded[importer])
         listing.finish(recorded)
+
+    @staticmethod
+    def _bind_import_content(
+        target: str, content: bytes, component: PromptComponent, result: ScanResult
+    ) -> None:
+        """Bind a non-instruction import's content with the key, never an unkeyed digest.
+
+        An imported Markdown file is an instruction surface and keeps the unkeyed
+        ``content_hash`` every instruction file carries. Any other imported file is
+        named by the checkout, so its exact bytes may hold configuration or secrets:
+        an unkeyed digest of them would let anyone holding the inventory confirm
+        guesses offline (see ``source_binding``). Its hash is withheld; with the
+        operator key an HMAC binds the content, and without one the component says
+        the content is unbound.
+        """
+        if PurePosixPath(target).suffix.lower() in _MARKUP_SUFFIXES:
+            return
+        component.content_hash = None
+        component.properties["content_hash_withheld"] = (
+            "imported file is not a Markdown instruction file; an unkeyed digest of its "
+            "exact bytes could confirm guesses of secret values offline"
+        )
+        try:
+            binding = value_binding(
+                IMPORT_CONTENT_BINDING_PROFILE,
+                {"path": target, "content": content.decode("utf-8")},
+            )
+        except BindingError as exc:
+            result.scan_failures.append(f"{target}: {exc}")
+            return
+        if binding:
+            component.properties.update(binding)
+            return
+        component.risks.append(
+            RiskAssessment(
+                severity=RiskSeverity.LOW,
+                category="completeness",
+                detail=(
+                    f"Imported file '{neutralize(target)}' is not bound in this inventory: "
+                    "its content is not an instruction file and carries no unkeyed digest."
+                ),
+                recommendation=(
+                    f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes to "
+                    "this file."
+                ),
+            )
+        )
 
     @staticmethod
     def _read_import(

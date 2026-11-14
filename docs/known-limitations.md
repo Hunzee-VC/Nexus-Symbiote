@@ -401,7 +401,14 @@ A way around a limit that its entry does not describe is worth a
   otherwise, such as with GitHub's table or autolink extensions, can still import a
   file from text read here as code.
   An import that leaves the project root, names an excluded path or lies deeper than
-  the `depth` limit is a gap, so write a path alias such as `@/components` as code. A
+  the `depth` limit is a gap, so write a path alias such as `@/components` as code. An
+  import whose name says it holds credentials (`.env*`, `.netrc`, `.npmrc`, `.pypirc`,
+  key and certificate suffixes, or a name containing `secret`, `credential`,
+  `password` or an `api key` spelling) is a gap and is not read. An imported file
+  without a Markdown suffix is inventoried without a content hash: its exact bytes
+  may hold configuration or secrets, and an unkeyed digest of them could be confirmed
+  by guessing; with `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` a keyed binding covers the
+  content, and without one the component carries a low `completeness` finding. A
   project with more than the [`import-lookups`](collection-limits.md#limits) limit of
   memory files and import targets fails until the limit is raised. Past 262,144
   characters of listed paths, an `imports` list is replaced by `imports_count` and

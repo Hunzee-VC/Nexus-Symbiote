@@ -676,3 +676,57 @@ def test_reading_markdown_grows_with_the_text_not_with_its_nesting(shape):
     texts = {scale: shape(scale) for scale in (1, 4)}
     growth = len(texts[4]) / len(texts[1])
     assert scaling_ratio(lambda scale: prompt._import_tokens(texts[scale])) < 2.5 * growth
+
+
+def test_credential_shaped_imports_are_never_read_or_hashed(tmp_path):
+    from nexus_symbiote.core.hashing import hash_bytes
+
+    project = tmp_path / "project"
+    _write(project, "CLAUDE.md", "Load @.env and @config/secrets.json first.\n")
+    _write(project, ".env", "DB_PASSWORD=hunter2\n")
+    _write(project, "config/secrets.json", '{"token": "t"}\n')
+    result = PromptScanner().scan(project)
+    refs = {component.bom_ref for component in result.components}
+    assert "prompt:import:.env" not in refs
+    assert "prompt:import:config/secrets.json" not in refs
+    assert sorted(result.surfaces_excluded) == [
+        ".env: imported by CLAUDE.md but its name says it holds credentials; "
+        + "not read or inventoried",
+        "config/secrets.json: imported by CLAUDE.md but its name says it holds "
+        + "credentials; not read or inventoried",
+    ]
+    run = _scan(project, tmp_path / "bom.json")
+    assert run.exit_code == 1, run.output
+    inventory = (tmp_path / "bom.json").read_text()
+    assert hash_bytes((project / ".env").read_bytes()) not in inventory
+    assert hash_bytes((project / "config" / "secrets.json").read_bytes()) not in inventory
+
+
+def test_non_instruction_imports_carry_no_unkeyed_content_hash(tmp_path, monkeypatch):
+    from nexus_symbiote.scanners.source_binding import SOURCE_BINDING_KEY_ENV
+
+    project = tmp_path / "project"
+    _write(project, "CLAUDE.md", "Apply @config/app.json settings.\n")
+    _write(project, "config/app.json", '{"endpoint": "https://internal.example/v1"}\n')
+    result = PromptScanner().scan(project)
+    imported = _components(result)["prompt:import:config/app.json"]
+    assert imported.content_hash is None
+    assert "content_hash_withheld" in imported.properties
+    assert any(risk.category == "completeness" for risk in imported.risks)
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, "prompt-import-key-" + "0123456789abcdef" * 2)
+    keyed = _components(PromptScanner().scan(project))["prompt:import:config/app.json"]
+    assert keyed.content_hash is None
+    assert keyed.properties["static_value_binding_profile"] == prompt.IMPORT_CONTENT_BINDING_PROFILE
+    assert not any(risk.category == "completeness" for risk in keyed.risks)
+    _write(project, "config/app.json", '{"endpoint": "https://evil.example/v1"}\n')
+    moved = _components(PromptScanner().scan(project))["prompt:import:config/app.json"]
+    assert moved.properties["static_value_binding"] != keyed.properties["static_value_binding"]
+
+
+def test_markdown_imports_keep_their_content_hash(tmp_path):
+    from nexus_symbiote.core.hashing import hash_bytes
+
+    _write(tmp_path, "CLAUDE.md", "See @docs/style.md.\n")
+    _write(tmp_path, "docs/style.md", "# Style\n")
+    imported = _components(PromptScanner().scan(tmp_path))["prompt:import:docs/style.md"]
+    assert imported.content_hash == hash_bytes(b"# Style\n")

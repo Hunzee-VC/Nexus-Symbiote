@@ -348,9 +348,9 @@ its TOML. A recognized file that cannot be read or parsed is a failure. So is a 
 whose digest or keyed binding has no RFC 8785 form, such as TOML with a date: the
 failure names it, and the record then carries no keyed binding.
 
-The digests of `.codex/config.toml`, `.cursor/cli.json` and the Antigravity, xAI and
-Copilot files always cover the file after the standard
+Every digest in `settings_hashes` covers the file after the standard
 [redaction](security-model.md#known-false-positive-and-false-negative-classes), with
+or without the key, with
 `env` names but not their values: a URL keeps only its scheme, host and port, and a
 credential in an assignment, after an authorization scheme or in a known token format
 is removed. The redaction is applied separately to the text between the shell
@@ -381,20 +381,17 @@ redaction removes, such as the environment value of an MCP server that
 without the key a change to such a value alone, such as a new token or URL path on
 the same host in a `notify` command such as
 `TOKEN=x curl https://cdn.example/a.sh | sh`, leaves the record unchanged; the record
-then carries a low `completeness` finding that names the key. Without
-`NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` the digests of the other files cover the file as
-read, so any changed value changes the record, and anyone holding the BOM can confirm
-a guess of a whole settings file, including the environment values of the MCP servers
-that `.gemini/settings.json` declares. Reordered keys and whitespace change no digest.
-With the key, every digest covers the file after the redaction, and
-`static_value_binding` is an HMAC-SHA256 under the key over every file as read
+then carries a low `completeness` finding that names the key. Reordered keys and
+whitespace change no digest. With the key, `static_value_binding` is an HMAC-SHA256
+under the key over every file as read
 (profile `nexus-symbiote/ide-settings-values/v1`), so the record still changes with
 any value while no unkeyed digest covers environment values or text the redaction
 removes. A value the redaction leaves in place, such as a password pasted into a hook
 command or stored under a key name, can still be confirmed from the digest, so keep
-credentials out of settings files. Collect the baseline and every later snapshot with
-the same key, or without one: the binding appears only with the key, and the digests
-of the files read as is differ between the two modes.
+credentials out of settings files. The digests agree between a keyed and an unkeyed
+collection, except that without the key a file holding an ambiguous URL authority is
+a failure instead of a digest, so enabling the key later changes no recorded digest;
+the binding itself appears only with the key.
 
 The `claude-code` record also counts what the files declare: hook handlers per event
 (`declared_hooks`), allow, ask and deny rules (`declared_permission_rule_counts`),
