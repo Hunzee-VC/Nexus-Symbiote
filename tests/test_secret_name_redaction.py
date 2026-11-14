@@ -31,6 +31,10 @@ SECRET = "s3cr3tValue9"  # noqa: S105 - synthetic fixture
         "private_key",
         "DB_PASSWORD",
         "mytoken",
+        "ENCRYPTION_KEY",
+        "MASTER_KEY",
+        "signing-key",
+        "session_key",
     ],
 )
 @pytest.mark.parametrize("operator", ["=", ": "])
@@ -42,7 +46,16 @@ def test_credential_assignment_value_is_redacted(name, operator):
 
 
 @pytest.mark.parametrize(
-    "text", ["max_tokens=4096", "tokenizer=bert", "keyword=value", "monkey=banana", "mode=fast"]
+    "text",
+    [
+        "max_tokens=4096",
+        "tokenizer=bert",
+        "keyword=value",
+        "monkey=banana",
+        "mode=fast",
+        "turkey=dinner",
+        "key=C major",
+    ],
 )
 def test_unrelated_assignments_are_unchanged(text):
     assert redact_text(text) == text
@@ -165,6 +178,10 @@ def test_an_escaped_quote_does_not_end_a_quoted_value(text, expected):
         "AKIA" + "ABCDEFGHIJKLMNOP",
         "AIza" + "f6" * 17 + "g",
         "npm_" + "h7" * 18,
+        "SG." + "i8" * 11 + "." + "j9" * 14,
+        "dckr_pat_" + "k0" * 12,
+        "shpat_" + "abcd1234" * 4,
+        "SK" + "0123456789abcdef" * 2,
         "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJl",
     ],
 )

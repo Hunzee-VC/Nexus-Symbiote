@@ -66,7 +66,10 @@ nexus-symbiote runtime keygen --private-key reviewer.pem --public-key reviewer.p
 ```
 
 Add `--passphrase-file FILE` to encrypt the private key with the first line of a file
-only you can read; `attest` then needs the same `--passphrase-file`.
+you own and that gives group and others no permission; `attest` then needs the same `--passphrase-file`.
+`attest` refuses a private key or passphrase file that the user running it does not
+own, or that its group or others can access, also when it runs as root: a container
+job cannot sign with a key mounted from the host and owned by another user.
 `runtime key-id reviewer.pub` prints the key ID, the lowercase hexadecimal SHA-256 of
 the key's DER SubjectPublicKeyInfo, which `attest` and `verify-attestation` print. Use
 a key pair only for attestations, as the runtime rings use one key per purpose, and
@@ -397,7 +400,7 @@ same codes. The message never quotes the file, the envelope or a key.
 | `configuration-invalid` | Signers, trusted keys, threshold, purpose, match mode or age limit are invalid |
 | `input-unreadable` | The subject, envelope, key or passphrase file is not a readable regular file reached without symbolic links |
 | `input-too-large` | An input file exceeds its limit: 64 MiB for a subject, 2 MiB for an envelope, 64 KiB for a key, 4 KiB for a passphrase file |
-| `key-invalid` | A key or passphrase file was refused, for example a private key that its group or others can read, an encrypted key without `--passphrase-file`, or a key that is not Ed25519 |
+| `key-invalid` | A key or passphrase file was refused, for example a private key that the user running the command does not own or that gives its group or others any permission, an encrypted key without `--passphrase-file`, or a key that is not Ed25519 |
 | `envelope-invalid` | The envelope is not a DSSE envelope in the form above |
 | `statement-too-large` | The statement exceeds 1 MiB |
 | `signers-insufficient` | Fewer than `--threshold` distinct trusted keys signed the payload |
@@ -448,5 +451,5 @@ nothing is written.
   [trusted keys](#trusted-keys).
 - **The GitHub Action does not sign or verify attestations yet.** Run the commands in
   a workflow step.
-- **POSIX only.** The owner-only check on private keys and the reads that follow no
-  symbolic link need POSIX file APIs.
+- **POSIX only.** The owner and mode checks on private keys and the reads that follow
+  no symbolic link need POSIX file APIs.

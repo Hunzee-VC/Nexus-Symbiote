@@ -525,3 +525,9 @@ def test_long_inventory_names_print_in_linear_time(tmp_path, name):
         result = runner.invoke(main, args)
         assert time.perf_counter() - started < 10, args
         assert name in result.output
+
+
+def test_a_tab_is_replaced_with_a_space_in_neutralized_text():
+    from nexus_symbiote.utils.terminal import neutralize
+
+    assert neutralize("name\tvalue") == "name value"

@@ -349,10 +349,10 @@ nexus-symbiote attest [OPTIONS] SUBJECT
 
 | Option | Description |
 |---|---|
-| `--key` `FILE` | Ed25519 private key PEM that only its owner can read; repeat for each signer. (required, repeatable) |
+| `--key` `FILE` | Ed25519 private key PEM that you own and that gives group and others no permission; repeat for each signer. (required, repeatable) |
 | `--purpose` `generated\|reviewed` | generated: you produced SUBJECT; reviewed: you reviewed SUBJECT as a baseline. (required) |
 | `--out` `PATH` | Envelope file to create with mode 0600; must not exist. (required) |
-| `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file, which only its owner may read. |
+| `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file, which you own and which gives group and others no permission. |
 | `--source-revision` `TEXT` | Git commit ID SUBJECT was produced from, 40 or 64 lowercase hexadecimal characters; recorded as your claim and never checked. |
 
 SUBJECT is read once, as a regular file reached without symbolic links, at most
@@ -643,11 +643,12 @@ nexus-symbiote runtime keygen [OPTIONS]
 |---|---|
 | `--private-key` `PATH` | New PEM private key file, created with mode 0600; must not exist. (required) |
 | `--public-key` `PATH` | New PEM public key file, created with mode 0600; must not exist. (required) |
-| `--passphrase-file` `PATH` | Encrypt the private key with the passphrase on the first line of this file, which only its owner may read. |
+| `--passphrase-file` `PATH` | Encrypt the private key with the passphrase on the first line of this file, which you own and which gives group and others no permission. |
 
 Use one key pair per purpose: snapshot, approval and trust rings must not share keys.
-A passphrase is at most 1,023 bytes, and a passphrase file that its group or others
-can read is refused. If either file cannot be written, neither key is kept.
+A passphrase is at most 1,023 bytes, and a passphrase file that you do not own, or
+that gives its group or others any permission, is refused. If either file cannot be written,
+neither key is kept.
 
 ### `runtime sign`
 
@@ -660,13 +661,15 @@ nexus-symbiote runtime sign [OPTIONS] CONTRACT_PATH
 | Option | Description |
 |---|---|
 | `--kind` `snapshot\|approval\|trust\|model` | Contract purpose; a signature is valid only for this purpose. (required) |
-| `--key` `PATH` | Ed25519 private key PEM that only its owner can access; repeat for multiple signers. (required, repeatable) |
+| `--key` `PATH` | Ed25519 private key PEM that you own and only you can access; repeat for multiple signers. (required, repeatable) |
 | `--out` `PATH` | Signed envelope file to create; must not exist. (required) |
-| `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file, which only its owner may read. |
+| `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file, which you own and which gives group and others no permission. |
 
 A contract that could never verify, because its validity window is longer than its
 purpose allows or has already ended, is refused. The output includes the contract
-`digest` that approvals and revocation lists use.
+`digest` that approvals and revocation lists use. A key or passphrase file owned by
+another user is refused even when the command runs as root, such as a key mounted
+into a container from the host.
 
 ### `runtime verify`
 

@@ -217,6 +217,7 @@ def _run_worker(wire: bytes) -> bytes:
             stderr=subprocess.DEVNULL,
             env={"PATH": os.defpath},
             close_fds=True,
+            start_new_session=True,
         )
     except OSError as exc:
         raise ValidationBudgetError(
@@ -1021,6 +1022,11 @@ def _evaluate(dialects: dict[str, Any], schema: dict[str, Any], arguments: Any) 
     except SchemaValidationError:
         return _INVALID
     except (SchemaError, Unresolvable, re.error):
+        return _SCHEMA
+    except RecursionError:
+        # Cyclic references can exhaust Python recursion within the worker's
+        # existing CPU, memory and wall-time limits. Report an invalid schema
+        # when that exception arrives before a resource limit ends the worker.
         return _SCHEMA
     return _VALID
 
