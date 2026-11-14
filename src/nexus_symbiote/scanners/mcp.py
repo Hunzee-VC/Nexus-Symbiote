@@ -1173,8 +1173,9 @@ class _Resolvers:
                     if isinstance(target, str):
                         deno_entries.append(("imports", target))
                     elif isinstance(target, list):
-                        # Import-map addresses may be an array of fallback
-                        # strings; every fallback is a redirect surface.
+                        # The import-maps standard accepts only string addresses, but an
+                        # early draft allowed arrays of fallbacks: record each one, so such
+                        # an entry never leaves a launcher looking pinned.
                         for fallback in target:
                             if isinstance(fallback, str):
                                 deno_entries.append(("imports", fallback))
