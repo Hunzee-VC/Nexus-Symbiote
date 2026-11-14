@@ -186,6 +186,21 @@ def test_short_session_id_does_not_mask_ordinary_text():
     assert "***" not in serialized(result)
 
 
+def test_failure_report_is_not_masked_with_the_session_id():
+    # Failure texts are fixed local diagnostics, so the server's identifier must not
+    # blank part of one either.
+    session = "declaration"
+    result, _ = scan(
+        [
+            initialization(session=session),
+            notification_accepted(),
+            rpc_result(2, {"tools": [tool(description=f"a {session}")]}),
+        ]
+    )
+    assert not result.complete
+    assert result.failures == ["server declaration repeats the session identifier"]
+
+
 def test_changed_description_changes_interface_digest():
     first, _ = scan(
         [

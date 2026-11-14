@@ -1040,8 +1040,10 @@ def discover_tools(
     the identity of the production host, since a server can serve a different
     tool list to a client it recognizes as an observer. A ``raw_sink`` receives the
     unredacted server info, capabilities, instructions, tool descriptors, prompts
-    and resource templates that passed intake, with only the bearer token and
-    session ID masked, for review.
+    and resource templates that passed intake, with only the bearer token masked,
+    for review. The server's session identifier is never masked: a declaration that
+    repeats an identifier of ``MIN_GUARDED_SESSION_ID`` or more characters ends the
+    observation, and a shorter one is not checked.
     """
     result = DiscoveryResult()
     raw: dict[str, Any] = raw_sink if raw_sink is not None else {}
@@ -1283,8 +1285,9 @@ def discover_tools(
         )
         result.complete = True
     except DiscoveryError as exc:
-        # DiscoveryError messages are fixed local diagnostics without payloads.
-        result.failures.append(redact_text(str(exc), [*protected, *([session] if session else [])]))
+        # DiscoveryError messages are fixed local diagnostics without payloads, so the
+        # server's session identifier is not a redaction pattern here either.
+        result.failures.append(redact_text(str(exc), protected))
         result.complete = False
     except (
         OSError,
