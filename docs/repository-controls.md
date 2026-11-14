@@ -236,24 +236,53 @@ The other controls in the table were applied on 2026-11-06; to re-apply branch
 protection, use the interim command above. Run these as a repository
 administrator, after reviewing each configuration:
 
+Use two independent tag rulesets. The [immutable-tag rule](../config/github-release-tag-ruleset.json)
+forbids updates and deletions with no bypass actors. The
+[creation-only rule](../config/github-release-tag-creation-ruleset.json) permits only
+repository administrators to create `v*` tags (`RepositoryRole` ID 5). A creator's
+bypass applies only to that second rule; it does not permit moving or deleting an
+existing tag. Administrators can still edit repository settings, so the rule
+configuration itself remains an administrative trust boundary.
+
+First list the live rulesets and review their full details. If a `release tags`
+rule already exists, **update that rule** with the immutable configuration below;
+do not leave an older no-bypass creation rule active beside a new rule. Every
+matching rule applies, and the old one would still block all creation. For a
+missing rule, use `POST .../rulesets` instead of `PUT .../rulesets/<id>`.
+
 ```sh
-# 1. Stop release tags from being moved or deleted once created
-gh api --method POST repos/Hunzee-VC/Nexus-Symbiote/rulesets \
+gh api repos/Hunzee-VC/Nexus-Symbiote/rulesets --jq '.[] | {id, name, target, enforcement}'
+
+# 1. Set this to the reviewed existing "release tags" ID from the listing.
+: "${IMMUTABILITY_RULESET_ID:?Set the existing release tags ruleset ID}"
+gh api --method PUT "repos/Hunzee-VC/Nexus-Symbiote/rulesets/$IMMUTABILITY_RULESET_ID" \
   --input config/github-release-tag-ruleset.json
 
-# 2. Confirm the publication preflight accepts the live state, including the
-#    tag ruleset, its empty bypass list, and the testpypi environment
+# 2. Create the separate creation rule only if it is absent.
+#    If it exists, PUT its reviewed ID instead; do not create duplicates.
+gh api --method POST repos/Hunzee-VC/Nexus-Symbiote/rulesets \
+  --input config/github-release-tag-creation-ruleset.json
+
+# 3. Confirm the publication preflight accepts the immutable-tag rule,
+#    its empty bypass list, and the testpypi environment.
 GH_TOKEN="$(gh auth token)" python scripts/check_repository_controls.py \
   --repo Hunzee-VC/Nexus-Symbiote --branch main --sha "$(git rev-parse origin/main)" \
   --publish testpypi --verify-bypass-actors
 ```
 
-Step 2 is the administrator check. Run it after any change to the ruleset and before
+Step 3 is the administrator check. Run it after any change to the rulesets and before
 approving each publication: it is the only check of who may bypass the release-tag
-ruleset, because GitHub does not show that list to the release workflow's token.
+immutability rule, because GitHub does not show that list to the release workflow's
+token. It rejects a creation restriction combined with the immutable rule; it
+does not certify the separate creator list. Read back that rule's full details
+and verify its sole rule is `creation`, its targets are exactly `refs/tags/v*`
+with no exclusions, and its only bypass is the repository administrator role.
+Confirm the intended release operator has that role before pushing the signed
+tag described in [releasing](releasing.md#each-release). Do not grant the release
+workflow permission to create tags or add a bypass to the immutable rule.
 
 Turn off administrator bypass for the `pypi` and `testpypi` environments under
-*Settings → Environments* first; step 2 fails while it is on. Step 2 passes only once
+*Settings → Environments* first; step 3 fails while it is on. Step 3 passes only once
 the newest trusted CI run for the `main` head has succeeded. Do not delete ruleset
 `main` (ID 26325547): it now protects the default branch.
 

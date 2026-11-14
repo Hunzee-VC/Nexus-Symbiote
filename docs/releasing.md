@@ -50,10 +50,12 @@ as described below.
    high/critical and dependency-advisory acceptance, and, once a second
    authorized reviewer exists, reviewed changes, following the configurations in
    [repository controls](repository-controls.md). The workflow cannot create these
-   controls itself. Apply the release-tag ruleset described there before creating the
+   controls itself. Apply both release-tag rulesets described there before creating the
    first `v*` tag: the README's verified-release install trusts the tag to stay on the
    published commit. Turn off administrator bypass on both environments. The
-   preflight of every `testpypi` and `pypi` run checks the ruleset and the
+   creation-only rule allows repository administrators to create tags; the separate
+   update/deletion rule allows nobody to move or delete them. The preflight of every
+   `testpypi` and `pypi` run checks the immutable-tag ruleset and the
    environment and refuses to publish while either is missing. It cannot see who may
    bypass the ruleset, which GitHub shows only to administrators; the administrator
    check in [repository controls](repository-controls.md#apply-the-outstanding-controls)
@@ -137,8 +139,8 @@ as described below.
    successor: it sorts before `0.1.0` and would not satisfy `nexus-symbiote==0.1.0`.
    Bump to the next patch version, rehearse it, and publish that version.
 4. Tag the release commit before publishing, so that the README's verified install
-   works from the moment the package appears. Create a signed, annotated tag and push
-   it:
+   works from the moment the package appears. A repository administrator creates a
+   signed, annotated tag and pushes it using their own authenticated identity:
 
    ```bash
    git tag -s v<version> -m "nexus-symbiote <version>" <release commit SHA>
