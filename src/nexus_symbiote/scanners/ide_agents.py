@@ -147,9 +147,16 @@ SETTINGS_VALUE_BINDING_PROFILE = "nexus-symbiote/ide-settings-values/v1"
 # `_projection` redacts it. Records without it come from releases that digested most
 # files as read, so a file the redaction changes has another digest there.
 SETTINGS_DIGEST_PROFILE = "nexus-symbiote/ide-settings-redacted/v1"
-# Settings whose value is a command that runs to obtain credentials, so the command may
-# hold one in a form the redaction does not recognise.
-_CREDENTIAL_HELPER_KEYS = frozenset({"apiKeyHelper"})
+# Claude Code settings whose value is a command that runs to obtain credentials: an API
+# key, AWS or Google Cloud credentials or OpenTelemetry headers. The command may hold one in a form the
+# redaction does not recognise.
+_CREDENTIAL_HELPER_KEYS = (
+    "apiKeyHelper",
+    "awsAuthRefresh",
+    "awsCredentialExport",
+    "gcpAuthRefresh",
+    "otelHeadersHelper",
+)
 CODEX_CONFIG = ".codex/config.toml"
 CURSOR_HOOKS = ".cursor/hooks.json"
 GEMINI_SETTINGS = ".gemini/settings.json"
@@ -325,12 +332,13 @@ def _projection(
     The standard redaction is applied to the text between shell operators, cut again
     before each URL scheme, a text value is also redacted by the ``key`` it is held
     under, as a header or an assignment in one string would be, environment
-    variables keep their names only, and a credential helper such as `apiKeyHelper`
-    keeps its key but not its command, so the digest cannot confirm a guess of a value
-    the redaction removes, and does not change with one; only the keyed binding covers
-    those values. ``unkeyed`` raises ``AmbiguousURLError`` for a URL whose authority
-    URL parsers read differently, since its redacted origin could hide a change of
-    host that no keyed binding covers.
+    variables keep their names only, and each credential helper of
+    ``_CREDENTIAL_HELPER_KEYS``, such as `apiKeyHelper`, keeps its key but not its
+    command, so the digest cannot confirm a guess of a value the redaction removes, and
+    does not change with one; only the keyed binding covers those values. ``unkeyed``
+    raises ``AmbiguousURLError`` for a URL whose authority URL parsers read
+    differently, since its redacted origin could hide a change of host that no keyed
+    binding covers.
     """
     if depth > _MAX_SETTINGS_DEPTH:
         raise ValueError("settings nested too deeply")
@@ -609,6 +617,11 @@ def _declared_hooks(hooks: object) -> dict[str, int]:
 
 def _count(value: Any) -> int:
     return len(value) if isinstance(value, (list, dict)) else 0
+
+
+def _series(names: list[str]) -> str:
+    """Names as prose: ``a``, ``a and b`` or ``a, b and c``."""
+    return " and ".join([", ".join(names[:-1]), names[-1]] if len(names) > 1 else names)
 
 
 def _starting_mode_risk(ide_type: str, mode: str | None) -> RiskAssessment | None:
@@ -938,6 +951,8 @@ class IDEAgentScanner(Scanner):
                     recommendation="Review this setting and approve its exact value.",
                 )
             )
+        helpers = [key for key in _CREDENTIAL_HELPER_KEYS if merged.get(key) is not None]
+        commands = "a command that runs" if len(helpers) == 1 else "commands that run"
         for category, severity, present, detail in (
             (
                 "mcp_auto_approval",
@@ -948,8 +963,8 @@ class IDEAgentScanner(Scanner):
             (
                 "credential_helper",
                 RiskSeverity.MEDIUM,
-                declared["api_key_helper"],
-                "declares apiKeyHelper, a command that runs to obtain credentials",
+                bool(helpers),
+                f"declares {_series(helpers)}, {commands} to obtain credentials",
             ),
             (
                 "plugin_sources",
@@ -989,7 +1004,7 @@ class IDEAgentScanner(Scanner):
         Every digest, with or without the operator key, covers the file after the
         redaction, under ``SETTINGS_DIGEST_PROFILE``, so the inventory never carries an
         unkeyed digest of a value the redaction removes, such as a settings `env` map or
-        an `apiKeyHelper` command: anyone holding the inventory could otherwise confirm
+        a credential helper command: anyone holding the inventory could otherwise confirm
         guesses of those values offline. With the key an HMAC covers every file as
         read. A file that has no RFC 8785 form, such as TOML with a date, is a failure
         that names it, and leaves the record's values unbound. Without the key, so is a
