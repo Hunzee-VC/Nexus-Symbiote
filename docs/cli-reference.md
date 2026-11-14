@@ -187,10 +187,15 @@ the same run counts as verification; the outcome recorded in the BOM is not trus
 
 `--signature-policy` (`scan`, `validate`, `risk`, `baseline`) and the Action's
 `signature-policy` input take a strict JSON file, at most 4 MiB and 1,000 artifacts,
-written by the operator, never by the checkout. A policy inside the scanned project
-or inside any Git working tree that encloses it, including a submodule's superproject,
-also under another name for any of these directories, or one with other hard links is
-refused:
+written by the operator, never by the checkout. The CLI refuses a policy inside the
+scanned project or inside any Git working tree that encloses it, including a
+submodule's superproject, also under another name for any of these directories, or
+one with other hard links. The Action checks its input only against
+`GITHUB_WORKSPACE`: it refuses a path inside the workspace, one that passes through a
+symlink, or a hard link. It then copies the policy into a private directory under
+`RUNNER_TEMP`, or under the system temporary directory when `RUNNER_TEMP` is unset,
+and passes that copy to the CLI, which applies the rules above to the copy; a
+temporary directory inside a Git working tree therefore fails the run.
 
 ```json
 {

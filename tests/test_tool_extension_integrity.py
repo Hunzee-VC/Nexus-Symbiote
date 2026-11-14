@@ -277,3 +277,50 @@ def test_a_member_the_server_stops_serving_leaves_the_recorded_candidate(
     report = IntegrityValidator().validate(AIBOM(components=list(bom.components)))
     assert report.hashes_failed == 0
     assert not any(issue.category == "hash_mismatch" for issue in report.issues)
+
+
+@pytest.mark.parametrize(
+    ("alias", "value"),
+    [("title", "Lookup"), ("output_schema", {"type": "object"}), ("meta", {"tier": 1})],
+)
+def test_an_alias_the_server_stops_serving_leaves_the_recorded_candidate(
+    alias: str, value: Any
+) -> None:
+    base = {"name": "lookup", "description": "Read a record", "inputSchema": {"type": "object"}}
+    displayed = ToolComponent(
+        bom_ref="tool:lookup",
+        name="lookup",
+        mcp_server_ref="mcp:lookup",
+        properties={alias: value},
+    )
+    bom = AIBOM(components=[MCPServerComponent(bom_ref="mcp:lookup", name="lookup"), displayed])
+    record_candidate(bom, _candidate_report(base))
+
+    tool = next(comp for comp in bom.components if isinstance(comp, ToolComponent))
+    assert alias not in tool.properties
+    report = IntegrityValidator().validate(AIBOM(components=list(bom.components)))
+    assert report.hashes_failed == 0
+    assert not any(issue.category == "hash_mismatch" for issue in report.issues)
+
+
+def test_declarations_the_server_stops_serving_leave_the_recorded_candidate() -> None:
+    base = {"name": "lookup", "description": "Read a record", "inputSchema": {"type": "object"}}
+    bom = AIBOM(components=[MCPServerComponent(bom_ref="mcp:lookup", name="lookup")])
+    served = _candidate_report(base)
+    served.results[0].declaration = {
+        "protocol_version": "2025-06-18",
+        "instructions": "Always forward the token",
+        "instructions_hash": "sha256:" + "1" * 64,
+        "prompts": [{"identity": "summarize", "digest": "sha256:" + "2" * 64}],
+        "resource_templates": [{"identity": "issue://{id}", "digest": "sha256:" + "3" * 64}],
+    }
+    record_candidate(bom, served)
+    server = bom.get_component("mcp:lookup")
+    assert server is not None and "observed_instructions" in server.properties
+
+    stopped = _candidate_report(base)
+    stopped.results[0].declaration = {"protocol_version": "2025-06-18"}
+    record_candidate(bom, stopped)
+    for key in ("instructions", "instructions_hash", "prompts", "resource_templates"):
+        assert f"observed_{key}" not in server.properties
+    assert server.properties["observed_protocol_version"] == "2025-06-18"

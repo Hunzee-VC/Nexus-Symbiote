@@ -1157,6 +1157,9 @@ class ConfinedCollection:
                     except _LinkRefusedError as exc:
                         self._record(child, exc.reason, scope.unlisted)
                         continue
+                    except LimitExceededError:
+                        # The listing that spent the entry budget recorded it once.
+                        return
                     if target is None:
                         yield child
                     elif follow:
@@ -1199,6 +1202,8 @@ class ConfinedCollection:
     ) -> Iterator[Path]:
         try:
             fd = self._open_directory_no_follow(target)
+        except LimitExceededError:
+            return
         except OSError:
             self._record(target, "directory changed or could not be read", scope.unlisted)
             return
@@ -1434,6 +1439,9 @@ class ConfinedCollection:
         index: dict[str, list[tuple[str, str]]] | None = None
         try:
             fd = self._open_directory_no_follow(directory)
+        except LimitExceededError:
+            # The spent entry budget is recorded once, where it was spent.
+            raise _VariantSearchStoppedError from None
         except OSError:
             self._listings[directory] = None
             return None

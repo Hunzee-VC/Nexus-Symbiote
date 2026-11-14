@@ -194,6 +194,7 @@ class Config:
     allow_unsigned_discovery: bool = False
     fail_on_severity: str = "high"
     binding_key: str = field(default="", repr=False)
+    scratch_parent: Path | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
@@ -274,6 +275,10 @@ class Config:
                 "scanners subset requires validate and risk-check to be false, because "
                 "both gates require all built-in collectors"
             )
+        # A TMPDIR inside the checkout would put the policy snapshot inside the
+        # repository it guards, which the CLI refuses; the runner's own temp is outside.
+        runner_temp = Path(env.get("RUNNER_TEMP", ""))
+        scratch_parent = runner_temp if runner_temp.is_absolute() and runner_temp.is_dir() else None
         return cls(
             workspace,
             project,
@@ -293,6 +298,7 @@ class Config:
             ),
             severity,
             supplied_key,
+            scratch_parent,
         )
 
 
@@ -563,7 +569,9 @@ def run(
             export(native, output, fmt)
 
     _announce(config)
-    with tempfile.TemporaryDirectory(prefix="nexus-symbiote-action-") as created:
+    with tempfile.TemporaryDirectory(
+        prefix="nexus-symbiote-action-", dir=config.scratch_parent
+    ) as created:
         # The CLI refuses symlinked directories, and macOS temp paths contain one.
         scratch = Path(created).resolve(strict=True)
         if command is None:
