@@ -351,7 +351,8 @@ A way around a limit that its entry does not describe is worth a
 - **Instruction files under other names are not recorded.** The `prompt` collector
   reads the fixed files the [collector reference lists](collectors.md#what-each-collector-reads),
   `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` and `.cursorrules` in any subdirectory, and
-  every file in the rule, prompt and subagent directories. Another spelling of a
+  every file in the rule, prompt and subagent directories, apart from files named as
+  holding credentials (see below). Another spelling of a
   nested name, such as `claude.md` in a subdirectory, is a
   [failure](#every-collector), not a file that is read, unless one of those
   directories, or a skill or command directory, holds it. `CLAUDE.local.md`,
@@ -372,13 +373,9 @@ A way around a limit that its entry does not describe is worth a
   file from text read here as code.
   An import that leaves the project root, names an excluded path or lies deeper than
   the `depth` limit is a gap, so write a path alias such as `@/components` as code. An
-  import of a file without a Markdown suffix whose name says it holds credentials
-  (`.env*`, `.netrc`, `.npmrc`, `.pypirc`, key and certificate suffixes, or a name
-  containing `secret`, `credential`, `password` or an `api key` spelling) is a gap and
-  is not read, and so is an import, whatever its name, that a symlink resolves to such
-  a file, such as `docs/guide.md` linked to `.env`. A Markdown file is read whatever
-  its name, such as `docs/secrets-handling.md`, so a credential kept in one is covered
-  by its unkeyed content hash like any instruction file's text. An imported file is
+  import of a file named as holding credentials, as the next entry lists them, is a
+  gap and is not read, and so is an import, whatever its name, that a symlink
+  resolves to such a file, such as `docs/guide.md` linked to `.env`. An imported file is
   inventoried without a content hash unless both the path imported and the file a
   symlink there leads to, if any, have a Markdown suffix: its exact bytes may hold
   configuration or secrets, and an unkeyed digest of them could be confirmed by
@@ -390,14 +387,36 @@ A way around a limit that its entry does not describe is worth a
   import targets fails until the limit is raised. Past 262,144 characters of listed
   paths, an `imports` list is replaced by `imports_count` and `imports_digest`, and an
   `imported_by` list by `imported_by_count`; every file is still inventoried.
+- **Files named as holding credentials are not read.** The `prompt` collector does not
+  read a file without a Markdown suffix whose name says it holds credentials (`.env*`,
+  `.netrc`, `.npmrc`, `.pypirc`, `id_rsa`, `id_ecdsa`, `id_ed25519`, the suffixes
+  `.pem`, `.key`, `.p12`, `.pfx`, `.der`, `.jks`, `.keystore` and `.token`, or a name
+  containing `secret`, `credential`, `password` or an `api key` spelling: `apikey`,
+  `api_key` or `api-key`), or that lies in a directory named exactly one of those words,
+  singular or plural, with or without a leading dot, such as `secrets/token.txt`. Such a
+  file is a gap when a memory file imports it, when an instruction file such as
+  `CLAUDE.md` or `.cursorrules`, a rule, prompt or subagent file, an import or a file of
+  a skill or command directory is a symlink to it, and when a rule, prompt, subagent,
+  skill or command directory holds it; the directory's other files are inventoried. A
+  script whose name contains one of those words, such as `scripts/rotate_password.py`,
+  is therefore a gap too, and so is every file without a Markdown suffix in a skill
+  directory named exactly one of them, such as `.claude/skills/secrets/`. A Markdown
+  file is read whatever its name or directory, such as `docs/secrets-handling.md`, so a
+  credential kept in one, or in any other file the collector digests whose name does not
+  say it holds credentials, such as a skill's `token.txt` outside such a directory, is
+  covered by an unkeyed digest that can confirm a guess of it. So is a file that an
+  [`agent.yaml`](agent-manifest.md) declares as an instruction, which is read and hashed
+  whatever its name, through an in-root symlink too: declare only instruction files
+  there.
 - **Fixtures count.** A nested `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` or `.cursorrules`
   in test fixtures or vendored code is inventoried, and its findings count, like any
   other.
 - **Skill front matter is not interpreted.** Every file in the skill and command
-  directories is bound by digest, but settings such as `allowed-tools` are not
-  read. A skill declaration (`.md`, `.mdc`, `.markdown`, `.txt`, `.yaml`, `.yml`,
-  `.json`, `.toml`) above the `file-bytes` limit is a failure; a larger script or
-  other resource is streamed and digested.
+  directories, apart from files named as holding credentials, is bound by digest,
+  but settings such as `allowed-tools` are not read. A skill declaration (`.md`,
+  `.mdc`, `.markdown`, `.txt`, `.yaml`, `.yml`, `.json`, `.toml`) above the
+  `file-bytes` limit is a failure; a larger script or other resource is streamed and
+  digested.
 - **Binary skill resources are checked only for runs and clusters of hidden
   characters.** A skill or command resource that is not UTF-8 is checked as an
   agent's reader decodes it: as UTF-16 or UTF-32 after that byte-order mark,
@@ -428,18 +447,20 @@ A way around a limit that its entry does not describe is worth a
   in `settings_hashes` covers its file after the redaction, with or without
   `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, so it cannot confirm a guess of an `env` value,
   such as the environment of an MCP server that `.gemini/settings.json` declares, of
-  the command of `apiKeyHelper`, or of a credential the redaction recognises. A value
-  the redaction leaves in place, such as a password pasted into a hook command, stored
-  under a key name or passed to a command under any setting other than `apiKeyHelper`,
-  can still be confirmed. Keep credentials out of settings files; see
+  the command of a credential helper (`apiKeyHelper`, `awsAuthRefresh`,
+  `awsCredentialExport` or `otelHeadersHelper`), or of a credential the redaction
+  recognises. A value the redaction leaves in place, such as a password pasted into a
+  hook command, stored under a key name or passed to a command under any setting
+  other than those helpers, can still be confirmed. Keep credentials out of settings
+  files; see
   [IDE agent settings](verification-source-binding.md#ide-agent-settings).
 - **Some settings changes alert only with the key.** Every settings file is digested
   after the redaction, so that its digest cannot confirm a guess. Without
   `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a change only to a value the redaction removes,
   such as an `env` value, including an MCP server's environment value, the command of
-  `apiKeyHelper`, a token, or a URL path, query or userinfo on the same host in a
+  a credential helper, a token, or a URL path, query or userinfo on the same host in a
   `notify` command, raises no alert; such a record carries a low `completeness`
-  finding. Adding or removing an `env` name or `apiKeyHelper` still alerts. The
+  finding. Adding or removing an `env` name or a credential helper still alerts. The
   redaction ends a URL or an assigned value at a shell operator (`;`, `|`, `&`, `$`,
   `` ` ``, parentheses, braces, `<`, `>` or a line break), and starts a new URL at
   each later scheme such as `https://`, so a command or operator glued to one without

@@ -335,9 +335,11 @@ Every digest in `settings_hashes` covers the file after the standard
 [redaction](security-model.md#known-false-positive-and-false-negative-classes), with
 or without the key, and the record names that form in `settings_hashes_profile`,
 `nexus-symbiote/ide-settings-redacted/v1`. It keeps `env` names but not their values,
-and the `apiKeyHelper` key but not its command, which becomes `***` whatever it is,
-since a helper command such as `printf passphrase` can hold a credential the
-redaction does not recognise; no helper is run. A URL keeps only its scheme, host and
+and the keys of the Claude Code credential helpers `apiKeyHelper`, `awsAuthRefresh`,
+`awsCredentialExport` and `otelHeadersHelper`, wherever a settings file names one, but
+not their commands: each becomes `***` whatever it is, since a helper command such as
+`printf passphrase` can hold a credential the redaction does not recognise. No helper
+is run. A URL keeps only its scheme, host and
 port, and a credential in an assignment, after an authorization scheme or in a known
 token format is removed. The redaction is applied separately to the text between
 the shell operators `;`, `|`, `&`, `$`, `` ` ``, `(`, `)`, `{`, `}`, `<`, `>` and line breaks,
@@ -363,8 +365,8 @@ are redacted the same way, so of two entries whose keys differ only in
 what the redaction removes, the digest covers the last one in the file. Anyone holding
 the BOM therefore cannot confirm a guess of a value the
 redaction removes, such as the environment value of an MCP server that
-`.codex/config.toml` declares, which the `mcp` record withholds too, or an
-`apiKeyHelper` command. The cost is that
+`.codex/config.toml` declares, which the `mcp` record withholds too, or a
+credential helper command. The cost is that
 without the key a change to such a value alone, such as a new helper command, or a
 new token or URL path on the same host in a `notify` command such as
 `TOKEN=x curl https://cdn.example/a.sh | sh`, leaves the record unchanged; the record
@@ -382,7 +384,7 @@ the binding itself appears only with the key. A record from an earlier build has
 `settings_hashes_profile`, so `diff` reports the profile as added, a medium alert
 that fails `--fail-on-alert`, and project validation does not reconcile the record.
 Its digest of a file the redaction leaves as it is matches this build's, but earlier
-builds digested most files as read without the key and kept the `apiKeyHelper`
+builds digested most files as read without the key and kept every credential helper
 command with it, so the digest of a file with an `env` map, a helper or another
 redacted value can also differ, a high alert. Record the baseline again.
 
@@ -403,9 +405,8 @@ anyone holding the BOM confirm by guessing. With `NEXUS_SYMBIOTE_SOURCE_BINDING_
 set, `static_value_binding` is an HMAC-SHA256 under the key over the path imported and
 the file's text (profile `nexus-symbiote/prompt-import-content/v1`); without the key
 the record carries a low `completeness` finding that names it. An import is a gap and
-is not read when the path imported, or the file a symlink there leads to, has no
-Markdown suffix and a name that says it holds credentials; see
-[known limitations](known-limitations.md#instructions-and-ide-settings).
+is not read when the path imported, or the file a symlink there leads to, is
+[named as holding credentials](#files-named-as-holding-credentials).
 
 `validate --project` with the key recomputes the binding from the file and counts it
 as a verified hash, and a changed file as a failed one. A binding under another
@@ -415,6 +416,21 @@ the record in `hashes_unbound` and lists it as an `info` issue, the completeness
 does not report a missing hash, and a change to the file passes validation. Project
 reconciliation compares each record with a fresh collection, so validate with the key
 the inventory was collected with, or without one if it was collected without one.
+
+## Files named as holding credentials
+
+The `prompt` collector does not read a file without a Markdown suffix whose name, or a
+directory on whose path, says it holds credentials, as the
+[known limitations](known-limitations.md#instructions-and-ide-settings) list them, such
+as `.env`, `config/secrets.json` or `secrets/token.txt`, so no `content_hash`, skill
+digest or keyed binding covers it. Such a file is a coverage gap when a memory file
+imports it; when an instruction file such as `CLAUDE.md`, a rule, prompt or subagent
+file, an import or a file of a skill or command directory is a symlink to it, whatever
+that file is named; and when a rule, prompt, subagent, skill or command directory holds
+it, while the directory's other files are inventoried as usual. A symlink replaced
+between that check and the read, so that the read follows it to such a file, is a
+collection failure, and nothing read is kept. A symlink to any other in-root file, such
+as `CLAUDE.md` to `AGENTS.md`, is read through its target.
 
 ## Upgrade existing snapshots
 
