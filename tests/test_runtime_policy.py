@@ -19,6 +19,8 @@ from tests.test_runtime_authorization import NOW, fixture, invoke
 from tests.test_runtime_quorums import configured_gateway
 from tests.test_runtime_stdio_session import launcher, signed_inputs
 
+pytestmark = pytest.mark.usefixtures("nonisolated_pinned_fixtures")
+
 
 def ring(*keys):
     return {key_id(key.public_key()): key.public_key() for key in keys}

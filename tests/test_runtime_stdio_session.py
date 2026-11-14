@@ -4,15 +4,19 @@ import hashlib
 import json
 import os
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
+from nexus_symbiote.live.pinned_process import isolation_off
 from nexus_symbiote.live.session import PinnedStdioSession, invoke_pinned_stdio
 from nexus_symbiote.runtime import AuthorizationError, digest, sign_contract
 from nexus_symbiote.runtime_validation import MAX_ARGUMENT_BYTES
 from tests.test_runtime_authorization import DEFINITION, fixture
+
+pytestmark = pytest.mark.usefixtures("nonisolated_pinned_fixtures")
 
 
 def launcher(
@@ -41,7 +45,7 @@ for line in sys.stdin:
             time.sleep(30)
     elif method == "tools/list":
         with open(log, "a") as f:
-            f.write(json.dumps([method, os.getpid()]) + "\\n")
+            f.write(json.dumps([method, int(os.readlink("/proc/self"))]) + "\\n")
         if mode == "exit":
             raise SystemExit(1)
         if mode == "stall":
@@ -51,7 +55,7 @@ for line in sys.stdin:
             result["nextCursor"] = None
     elif method == "tools/call":
         with open(log, "a") as f:
-            f.write(json.dumps([method, os.getpid(), msg["params"]]) + "\\n")
+            f.write(json.dumps([method, int(os.readlink("/proc/self")), msg["params"]]) + "\\n")
         result = {{"content": [{{"type": "text", "text": "ok"}}]}}
     else:
         raise SystemExit(1)
@@ -189,7 +193,8 @@ def test_concurrent_replay_allows_only_one_call(tmp_path):
 
     def request():
         try:
-            invoke_pinned_stdio(values[0], values[1], command=str(path), sha256=pin, **kwargs)
+            with isolation_off():
+                invoke_pinned_stdio(values[0], values[1], command=str(path), sha256=pin, **kwargs)
             return "executed"
         except AuthorizationError as exc:
             assert "already been used" in str(exc)
@@ -254,8 +259,17 @@ def test_protocol_failure_kills_and_reaps_process(tmp_path, monkeypatch, mode):
         )
     records = [json.loads(line) for line in log.read_text().splitlines()]
     assert [r[0] for r in records] == ["tools/list"]
-    with pytest.raises(ProcessLookupError):
-        os.kill(records[0][1], 0)
+    # The PID namespace is torn down after the supervisor dies, not in the same instant.
+    deadline = time.monotonic() + 2
+    pid = records[0][1]
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError(f"launcher process {pid} was still running")
 
 
 @pytest.mark.parametrize(

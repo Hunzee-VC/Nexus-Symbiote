@@ -18,6 +18,9 @@ from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
 from nexus_symbiote.live import stdio
 from nexus_symbiote.live.verify import verify_mcp_servers
 
+pytestmark = pytest.mark.usefixtures("nonisolated_pinned_fixtures")
+
+
 TOOL = {"name": "weather", "description": "Read weather", "inputSchema": {"type": "object"}}
 SERVER = """import json, os, sys
 assert "PINNED_STDIO_TEST_SECRET" not in os.environ
