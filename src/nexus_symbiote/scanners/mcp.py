@@ -73,8 +73,10 @@ from nexus_symbiote.utils.secrets import (
     SecretScrubber,
     redact_descriptor,
     redact_text,
+    secret_like,
     secret_values,
 )
+from nexus_symbiote.utils.terminal import neutralize
 
 
 @dataclass(frozen=True)
@@ -288,6 +290,11 @@ def source_binding_key() -> bytes | None:
             f"{_MIN_SOURCE_BINDING_KEY_LENGTH} characters"
         )
     return key.encode()
+
+
+def _launch_secrets(launch: Launch) -> list[str]:
+    # Earlier assignments remain private even when a later value shadows them.
+    return [value for name, value in launch.environment if secret_like(name, value)]
 
 
 def _value_binding(
@@ -1392,6 +1399,7 @@ class MCPScanner(Scanner):
             if key_error is not None and entries:
                 result.scan_failures.append(f"{dialect.path}: {key_error}")
                 continue
+            file_secrets = self._file_secrets(entries)
             server_refs: list[str] = []
             for server_name, server_config in entries:
                 problem = (
@@ -1410,7 +1418,13 @@ class MCPScanner(Scanner):
                     result.scan_failures.append(f"{dialect.path}: {exc}")
                     continue
                 except (TypeError, ValueError, RecursionError):
-                    result.scan_failures.append(f"{dialect.path}: invalid tool definition")
+                    # The whole server record is dropped with its risk findings, so the
+                    # failure must say which server a reviewer no longer sees.
+                    shown = self._diagnostic_server_name(server_name, server_config, file_secrets)
+                    result.scan_failures.append(
+                        f"{dialect.path}: invalid tool definition for server '{shown}'; "
+                        "the server and its risks are not inventoried"
+                    )
                     continue
                 result.components.append(mcp_comp)
                 result.components.extend(tool_comps)
@@ -1432,6 +1446,41 @@ class MCPScanner(Scanner):
                 client.server_refs = sorted({*client.server_refs, *server_refs})
                 client.properties["config_paths"].append(dialect.path)
         return found_any
+
+    @staticmethod
+    def _file_secrets(entries: list[tuple[str, Any]]) -> list[str]:
+        """Credential values in a source file, shared by its failure diagnostics."""
+        values: list[str] = []
+        for _, config in entries:
+            if not isinstance(config, dict):
+                continue
+            for field in ("env", "headers", "http_headers"):
+                mapping = config.get(field)
+                if isinstance(mapping, dict):
+                    values.extend(secret_values(mapping))
+            command, args = config.get("command", ""), config.get("args", [])
+            if (
+                isinstance(command, str)
+                and isinstance(args, list)
+                and len(args) <= MAX_ARGUMENTS
+                and all(isinstance(arg, str) for arg in args)
+            ):
+                try:
+                    values.extend(_launch_secrets(analyze(command, args)))
+                except (TypeError, ValueError, RecursionError):
+                    # The server's normal parsing path reports this failure.
+                    continue
+        return values
+
+    @staticmethod
+    def _diagnostic_server_name(name: str, config: dict[str, Any], file_secrets: list[str]) -> str:
+        try:
+            launch = analyze(config.get("command", ""), config.get("args", []))
+        except (TypeError, ValueError, RecursionError):
+            return "[withheld]"
+        scrubber = SecretScrubber([*file_secrets, *_launch_secrets(launch)])
+        # Clipping first can truncate a token so its recognizable shape is lost.
+        return neutralize(redact_text(name, scrubber)[:256])
 
     @staticmethod
     def _read_dialect(files: ConfinedCollection, dialect: McpDialect, result: ScanResult) -> Any:
@@ -1567,7 +1616,7 @@ class MCPScanner(Scanner):
                 *secret_values(env),
                 *secret_values(config.get("headers", {})),
                 *secret_values(config.get("http_headers", {})),
-                *secret_values(dict(launch.environment)),
+                *_launch_secrets(launch),
             ]
         )
         cwd = config.get("cwd")

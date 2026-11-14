@@ -480,3 +480,54 @@ def test_an_invalid_permissions_object_keeps_the_other_declarations(tmp_path):
     assert declared["enable_all_project_mcp_servers"] and declared["api_key_helper"]
     categories = {risk.category for risk in agent.risks}
     assert {"mcp_auto_approval", "credential_helper"} <= categories
+
+
+@pytest.mark.parametrize(
+    ("mode", "severity"),
+    [
+        ("danger-full-access", "high"),
+        ("full-access", "high"),
+        ("never", "medium"),
+        ("auto", "medium"),
+    ],
+)
+def test_prompt_skipping_modes_declared_in_json_settings_are_rated(tmp_path, mode, severity):
+    _write(tmp_path, ".cursor/settings.json", {"agent": {"permissionMode": mode}})
+    result = IDEAgentScanner().scan(tmp_path)
+    agent = _agent(result, "cursor")
+    assert agent.permission_mode == mode
+    assert [r.severity.value for r in agent.risks if r.category == "permission_scope"] == [severity]
+
+
+def test_codex_toml_approval_mode_is_rated_exactly_once(tmp_path):
+    _write(tmp_path, ".codex/config.toml", 'approval_policy = "never"\n')
+    agent = _agent(IDEAgentScanner().scan(tmp_path), "codex")
+    assert agent.permission_mode == "never"
+    assert [r.severity.value for r in agent.risks if r.category == "permission_scope"] == ["medium"]
+
+
+@pytest.mark.parametrize(
+    ("ide_type", "relative", "settings"),
+    [
+        ("claude-code", ".claude/settings.json", {"permissions": {"defaultMode": "dontAsk"}}),
+        ("cursor", ".cursor/settings.json", {"agent": {"permissionMode": "dontAsk"}}),
+    ],
+)
+def test_dont_ask_is_not_rated_as_running_without_prompts(tmp_path, ide_type, relative, settings):
+    # Claude Code's dontAsk denies a tool that is not pre-approved instead of prompting.
+    _write(tmp_path, relative, settings)
+    agent = _agent(IDEAgentScanner().scan(tmp_path), ide_type)
+    assert agent.permission_mode == "dontAsk"
+    assert not [r for r in agent.risks if r.category == "permission_scope"]
+
+
+def test_codex_on_failure_approval_is_rated_alike_in_json_and_toml(tmp_path):
+    # Codex runs each command without asking and asks only after one fails.
+    _write(tmp_path / "json", ".codex/config.json", {"agent": {"permissionMode": "on-failure"}})
+    _write(tmp_path / "toml", ".codex/config.toml", 'approval_policy = "on-failure"\n')
+    for root in (tmp_path / "json", tmp_path / "toml"):
+        agent = _agent(IDEAgentScanner().scan(root), "codex")
+        assert agent.permission_mode == "on-failure"
+        risks = [r for r in agent.risks if r.category == "permission_scope"]
+        assert [r.severity.value for r in risks] == ["medium"], root.name
+        assert "without" in risks[0].detail and "unless they fail" in risks[0].detail
