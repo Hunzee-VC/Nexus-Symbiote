@@ -1487,6 +1487,18 @@ class MCPScanner(Scanner):
                 mapping = config.get(field)
                 if isinstance(mapping, dict):
                     values.extend(secret_values(mapping))
+            command, args = config.get("command", ""), config.get("args", [])
+            if (
+                isinstance(command, str)
+                and isinstance(args, list)
+                and len(args) <= MAX_ARGUMENTS
+                and all(isinstance(arg, str) for arg in args)
+            ):
+                try:
+                    values.extend(secret_values(dict(analyze(command, args).environment)))
+                except (TypeError, ValueError, RecursionError):
+                    # The server's normal parsing path reports this failure.
+                    continue
         return values
 
     @staticmethod
@@ -1497,7 +1509,7 @@ class MCPScanner(Scanner):
             return "[withheld]"
         scrubber = SecretScrubber([*file_secrets, *secret_values(dict(launch.environment))])
         # Clipping first can truncate a token so its recognizable shape is lost.
-        return neutralize(redact_text(name, scrubber, identifier=True)[:256])
+        return neutralize(redact_text(name, scrubber)[:256])
 
     @staticmethod
     def _read_dialect(files: ConfinedCollection, dialect: McpDialect, result: ScanResult) -> Any:
