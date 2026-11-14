@@ -160,7 +160,12 @@ def _identifier(value: Any, field: str) -> str | None:
     if isinstance(value, bool) or not isinstance(value, (str, int)):
         raise _SourceError(f"invalid RAG source {field}")
     text = str(value).strip()
-    if "://" in text or _TOKEN_SHAPE.search(text) or not _IDENTIFIER.fullmatch(text):
+    if (
+        "://" in text
+        or _TOKEN_SHAPE.search(text)
+        or not _IDENTIFIER.fullmatch(text)
+        or redact_text(text) != text
+    ):
         return _REDACTED
     return text
 
@@ -183,7 +188,11 @@ def _exported_uri(raw: str) -> tuple[str, bool]:
         return exported, exported == "[redacted-url]" or beyond_origin(value, ORIGIN_PATHS)
     if "=" in value and (";" in value or value.split("=", 1)[0].strip().isidentifier()):
         return _CONNECTION_STRING, True
-    if _PLAIN_PATH.fullmatch(value) and not _TOKEN_SHAPE.search(value):
+    if (
+        _PLAIN_PATH.fullmatch(value)
+        and not _TOKEN_SHAPE.search(value)
+        and redact_text(value) == value
+    ):
         return value, False
     return _REDACTED, True
 

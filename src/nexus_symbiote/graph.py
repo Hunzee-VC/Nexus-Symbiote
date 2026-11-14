@@ -26,6 +26,7 @@ from nexus_symbiote.core.models import (
     RegistryEntryComponent,
     SkillPackageComponent,
 )
+from nexus_symbiote.utils.secrets import redact_text
 
 if TYPE_CHECKING:
     from nexus_symbiote.utils.confined import ConfinedCollection
@@ -355,13 +356,19 @@ def assemble_repository_agent(
         locator=MANIFEST if declared else ".",
         observed_at=bom.metadata.timestamp,
     )
+    displayed: dict[str, str] = {}
+    if declared:
+        for field in ("name", "version", "framework", "owner", "purpose"):
+            value = getattr(declared, field)
+            if value is not None:
+                displayed[field] = redact_text(value)
     agent = AgentComponent(
         bom_ref=agent_ref,
-        name=declared.name if declared else INFERRED_AGENT_NAME,
-        version=declared.version if declared else None,
-        framework=declared.framework if declared else None,
-        supplier=declared.owner if declared else None,
-        description=declared.purpose
+        name=displayed.get("name", INFERRED_AGENT_NAME),
+        version=displayed.get("version"),
+        framework=displayed.get("framework"),
+        supplier=displayed.get("owner"),
+        description=displayed.get("purpose")
         if declared
         else "Repository agent definition inferred from configuration",
         autonomy_level=None,
