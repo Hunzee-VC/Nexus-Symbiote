@@ -70,6 +70,8 @@ def test_the_0_1_0_fixtures_cover_both_formats_and_a_scan():
     assert FIXTURE_NAMES == [
         "api-inventory.cyclonedx.json",
         "api-inventory.spdx.json",
+        "api-package-ecosystem.cyclonedx.json",
+        "api-package-ecosystem.spdx.json",
         "api-package-urls.cyclonedx.json",
         "api-package-urls.spdx.json",
         "demo-agent-scan.cyclonedx.json",

@@ -113,10 +113,13 @@ those exports have no marker and still recover. Projection 2
   the document's root; `profileConformance` adds `expandedLicensing`; and the
   default identifiers are `urn:uuid` IRIs instead of IRIs under
   `https://spdx.org/spdxdocs/nexus_symbiote`.
-- Both: a package URL is a standard identifier only when it is a PyPI, npm or
-  OCI identity that agrees with the component, including the registry it was
-  resolved from; the loss report (profile `nexus-symbiote-export/v2`) also lists
-  risk findings and declared versions that are not exact.
+- Both: the loss report (profile `nexus-symbiote-export/v2`) also lists risk
+  findings and declared versions that are not exact. A package URL is a standard
+  identifier only when it is a PyPI, npm or OCI identity that agrees with the
+  component: a PyPI or npm package URL only on a registry entry whose
+  `registry_type` names that ecosystem and the registry it was resolved from, and
+  an MCP server's package URL when it names the server's launcher package and
+  version.
 
 A document with an unknown marker, or one whose standard fields match a
 projection other than the one it declares, is rejected. Recovery returns the
