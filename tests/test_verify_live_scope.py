@@ -280,8 +280,9 @@ def test_failures_carry_distinct_reasons(tmp_path, monkeypatch):
     binary = tmp_path / "not-a-program"
     binary.write_bytes(b"\x00\x01\x02")
     pin = "sha256:" + hashlib.sha256(binary.read_bytes()).hexdigest()
+    # unshare itself starts, so a non-executable payload is an empty session, not an exec error.
     assert _reason(tmp_path, {"mcp:weather": {"command": str(binary), "sha256": pin}}) == (
-        "launcher-start-failed"
+        "protocol"
     )
     old = launcher(tmp_path, hello={**HELLO, "protocolVersion": "2099-01-01"}, name="future")
     assert _reason(tmp_path, {"mcp:weather": old["mcp:weather"]}) == (

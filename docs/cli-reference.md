@@ -929,6 +929,11 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 | `--json-output` | Output the verification report as JSON. |
 | `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools, declarations or the server identity drifted, unless `--accept-drift`. |
 | `--accept-drift` | With `--record`, exit 0 although changed or new tools, declarations or server identity were recorded. |
+| `--no-isolation` | Do not run the launcher in a PID namespace. A descendant that calls `setsid` can then outlive the session. Printed as a warning. |
+
+By default the launcher is pid 1 of a new user and PID namespace, so killing the
+session also kills a descendant that called `setsid`. That needs util-linux
+`unshare`. It is not a filesystem or network sandbox.
 
 Servers whose transport is `sse`, `streamable-http` or `http` and that record no
 launch command are reported as not verifiable by `verify-live` (reason

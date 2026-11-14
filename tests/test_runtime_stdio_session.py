@@ -41,7 +41,7 @@ for line in sys.stdin:
             time.sleep(30)
     elif method == "tools/list":
         with open(log, "a") as f:
-            f.write(json.dumps([method, os.getpid()]) + "\\n")
+            f.write(json.dumps([method, int(os.readlink("/proc/self"))]) + "\\n")
         if mode == "exit":
             raise SystemExit(1)
         if mode == "stall":
@@ -51,7 +51,7 @@ for line in sys.stdin:
             result["nextCursor"] = None
     elif method == "tools/call":
         with open(log, "a") as f:
-            f.write(json.dumps([method, os.getpid(), msg["params"]]) + "\\n")
+            f.write(json.dumps([method, int(os.readlink("/proc/self")), msg["params"]]) + "\\n")
         result = {{"content": [{{"type": "text", "text": "ok"}}]}}
     else:
         raise SystemExit(1)
