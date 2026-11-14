@@ -76,6 +76,7 @@ _PYTHON_MARKERS = (
 )
 # Imports the tool collector reads from the syntax tree once a marker is present.
 _FRAMEWORK_IMPORTS = frozenset({*_DECORATOR_IMPORTS, *_AGENT_FACTORIES})
+_FRAMEWORK_MODULES = frozenset(module for module, _ in _FRAMEWORK_IMPORTS)
 _PYTHON_NEEDLES = frozenset(marker.encode() for marker in _PYTHON_MARKERS)
 _CLIENT_MARKER = b"@modelcontextprotocol/sdk"
 _NEEDLES = (*_PYTHON_NEEDLES, *SOURCE_MARKERS, _CLIENT_MARKER)
@@ -588,10 +589,25 @@ def _server_import(tree: ast.Module) -> bool:
 
 
 def _framework_import(tree: ast.Module) -> bool:
+    """An import of a framework's tool decorator or agent class, or of its module.
+
+    The tool collector reads the first and records a qualified or star import of the
+    module as a gap, so each is a framework import here.
+    """
     return any(
-        isinstance(node, ast.ImportFrom)
-        and not node.level
-        and any((node.module, alias.name) in _FRAMEWORK_IMPORTS for alias in node.names)
+        (
+            isinstance(node, ast.ImportFrom)
+            and not node.level
+            and any(
+                (node.module, alias.name) in _FRAMEWORK_IMPORTS
+                or (alias.name == "*" and node.module in _FRAMEWORK_MODULES)
+                for alias in node.names
+            )
+        )
+        or (
+            isinstance(node, ast.Import)
+            and any(alias.name in _FRAMEWORK_MODULES for alias in node.names)
+        )
         for node in ast.walk(tree)
     )
 

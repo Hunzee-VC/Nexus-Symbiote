@@ -304,6 +304,36 @@ def test_a_framework_import_spelled_with_compatibility_characters_is_a_gap(tmp_p
     assert [c.name for c in result.components if c.component_type == "tool"] == ["lookup"]
 
 
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "import {pydantic_ai} as p\nagent = p.Agent('m')\n",
+        "from {pydantic_ai} import *\nagent = Agent('m')\n",
+        "import {langchain_core}.tools as t\n",
+        "from {langchain_core}.tools import *\n",
+    ],
+    ids=["qualified-agent", "star-agent", "qualified-decorator", "star-decorator"],
+)
+def test_a_qualified_or_star_framework_import_with_compatibility_characters_is_a_gap(
+    tmp_path, statement
+):
+    # Spelled in ASCII, the same import is a gap of the tool collector.
+    packages = ("pydantic_ai", "langchain_core")
+    hidden = {
+        name: "".join(chr(ord(letter) + 0xFEE0) if letter.isalpha() else letter for letter in name)
+        for name in packages
+    }
+    _write(tmp_path, "pkg/tools.py", statement.format(**hidden))
+    result = MCPScanner().scan(tmp_path)
+    assert result.surfaces_excluded == [
+        "pkg/tools.py: Python agent framework tool import spelled with compatibility "
+        "characters; its tools are not collected"
+    ]
+    _write(tmp_path, "pkg/tools.py", statement.format(**{name: name for name in packages}))
+    result = MCPScanner().scan(tmp_path)
+    assert result.surfaces_excluded == ["pkg/tools.py: unresolved Python SDK tool import"]
+
+
 @pytest.mark.parametrize("character", ["\ufdfa", "\u3300", "\uff4d"])
 def test_compatibility_characters_cannot_inflate_the_search(tmp_path, character):
     # U+FDFA has an 18-character compatibility form; folding the whole text at once
