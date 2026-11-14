@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import random
+import string
 
 import pytest
 from hypothesis import given
@@ -342,3 +344,158 @@ def test_diagnostic_without_file_context_collects_every_declared_value(field):
     else:
         config[field] = {"API_TOKEN" if field == "env" else "Authorization": secret}
     assert MCPScanner._diagnostic_server_name(f"agent-{secret}", config) == "agent-***"
+
+
+# A known value ending in a letter or digit, right before or after a credential.
+KNOWN = "abcdefgh1"
+EDGE_DESCRIPTION = (
+    f"Use {KNOWN}{GITHUB} ; {KNOWN}Cookie: sid=sessval12345 ; "
+    f"{KNOWN}Authorization: Negotiate yyyyyyyy9"
+)
+EDGE_HOLDERS = {
+    "env": {"command": "node", "env": {"API_KEY": KNOWN}},
+    "inline": _env(f"API_KEY={KNOWN}"),
+}
+
+
+@pytest.mark.parametrize("holder", sorted(EDGE_HOLDERS))
+def test_a_known_value_edge_separates_a_credential_as_its_redaction_did(tmp_path, holder):
+    servers = {"a": EDGE_HOLDERS[holder], "b": _tool(EDGE_DESCRIPTION)}
+    (description,) = _descriptions(tmp_path, servers)
+    assert description == "Use *** ; ***Cookie: sid=*** ; ***Authorization: Negotiate ***"
+    for secret in (GITHUB[4:], "sessval12345", "yyyyyyyy9"):
+        assert secret not in description
+
+
+AKIA = "AKIA" + "ABCDEFGHIJKLMNOP"
+TWILIO = "SK" + "0123456789abcdef" * 2
+JWT = "eyJhbGciOiJI.eyJpc3MiOiJh.c2ln"
+
+
+@pytest.mark.parametrize(
+    ("text", "secret"),
+    [
+        (KNOWN + GITHUB, GITHUB[4:]),
+        (KNOWN + AKIA + " x", AKIA[4:]),
+        (AKIA + KNOWN, AKIA[4:]),
+        (TWILIO + KNOWN, TWILIO[2:]),
+        (KNOWN + "sk-" + "Q" * 24, "Q" * 24),
+        (KNOWN + JWT, "eyJpc3MiOiJh"),
+        (KNOWN + "Bearer Mx9yW8kU12", "Mx9yW8kU12"),
+        (KNOWN + "Authorization: Mx9yW8kU12", "Mx9yW8kU12"),
+        (KNOWN + "Cookie: sid=Mx9yW8kU12", "Mx9yW8kU12"),
+    ],
+)
+def test_rules_with_a_boundary_match_next_to_a_known_value(text, secret):
+    shown = redact_text(text, [KNOWN])
+    assert secret not in shown
+    assert KNOWN not in shown
+
+
+def test_a_known_value_holding_a_separator_does_not_end_a_value_early():
+    # Redacted first, such a value no longer ended the assignment or the URL there.
+    values = ["ab cd efgh"]
+    assert redact_text("password=ab cd efghSECRETZ", values) == "password=***"
+    assert redact_text("see https://h.example/ab cd efghSECRETZ/x", values) == (
+        "see https://h.example"
+    )
+
+
+def test_identifier_rules_also_match_next_to_a_known_value():
+    assert redact_text(f"{KNOWN}{GITHUB}", [KNOWN], identifier=True) == REDACTED
+    assert redact_text(f"{KNOWN}sk-learn-classifier", [KNOWN], identifier=True) == (
+        "***sk-learn-classifier"
+    )
+
+
+_CREDENTIALS = {
+    GITHUB: GITHUB[4:],
+    AKIA: AKIA[4:],
+    TWILIO: TWILIO[2:],
+    "sk-" + "Q" * 24: "Q" * 24,
+    JWT: "eyJpc3MiOiJh",
+    "Bearer Mx9yW8kU12": "Mx9yW8kU12",
+    "Authorization: Negotiate Mx9yW8kU12": "Mx9yW8kU12",
+    "Authorization: Mx9yW8kU12": "Mx9yW8kU12",
+    "Cookie: sid=Mx9yW8kU12": "Mx9yW8kU12",
+    "password=Mx9yW8kU12": "Mx9yW8kU12",
+}
+# A separator, or a known value: both end the word a rule reads.
+_EDGES = st.one_of(st.sampled_from(["", " ", "; ", "="]), st.integers(0, 3))
+
+
+@given(
+    values=st.lists(st.text(alphabet="vVzZ", min_size=3, max_size=10), min_size=1, max_size=4),
+    layout=st.lists(
+        st.tuples(_EDGES, st.sampled_from(sorted(_CREDENTIALS)), _EDGES), min_size=1, max_size=5
+    ),
+    identifier=st.booleans(),
+)
+def test_no_credential_survives_next_to_known_values(values, layout, identifier):
+    def edge(piece):
+        return piece if isinstance(piece, str) else values[piece % len(values)]
+
+    text = " ".join(edge(left) + credential + edge(right) for left, credential, right in layout)
+    shown = redact_text(text, values, identifier=identifier)
+    for value in values:
+        assert value not in shown
+    for _left, credential, _right in layout:
+        if not identifier or credential in (GITHUB, AKIA, TWILIO, JWT):
+            assert _CREDENTIALS[credential] not in shown
+
+
+def _periodic_values(period):
+    rng = random.Random(7)  # noqa: S311 - a reproducible corpus, not a secret
+    base = "".join(rng.choice(string.ascii_letters + string.digits) for _ in range(period))
+    return base, sorted({(base * 2)[i : i + w] for w in range(8, period) for i in range(period)})
+
+
+def test_values_that_cover_a_repeated_text_cost_about_what_a_plain_text_costs():
+    # Every substring of a 64-character period occurs at every repetition. Each one
+    # used to add a span per occurrence: 3,584 values made millions of them.
+    base, values = _periodic_values(64)
+    scrubber = SecretScrubber(values)
+    size = 16384
+    rng = random.Random(3)  # noqa: S311 - a reproducible corpus, not a secret
+    texts = {
+        1: "".join(rng.choice(string.ascii_letters) for _ in range(size)),
+        4: (base * (size // len(base) + 1))[:size],
+    }
+
+    def run(scale):
+        redact_text(texts[scale], scrubber)
+
+    # Scale 4 is the covered repeated text, scale 1 a plain text of the same length.
+    assert scaling_ratio(run) < 6
+    assert redact_text(texts[4], scrubber) == REDACTED
+
+
+def test_values_passing_over_repeated_covered_runs_fall_back_to_a_widened_cover():
+    # Each part of the longest value occurs inside every repetition of it, between
+    # uncovered gaps: without the fallback every part would pass over each one.
+    base, values = _periodic_values(64)
+    part = base[:63]
+    values = sorted({part[i : i + w] for w in range(8, 64) for i in range(64 - w)})
+    scrubber = SecretScrubber(values)
+    repeated = (part + "#") * 1024
+    rng = random.Random(3)  # noqa: S311 - a reproducible corpus, not a secret
+    texts = {1: "".join(rng.choice(string.ascii_letters) for _ in repeated), 4: repeated}
+
+    def run(scale):
+        redact_text(texts[scale], scrubber)
+
+    # Scale 4 is the repeated text, scale 1 a plain text of the same length.
+    assert scaling_ratio(run) < 6
+    assert redact_text(repeated, scrubber) == REDACTED
+
+
+@given(
+    text=_PLAIN,
+    values=st.lists(st.text(alphabet="ab", min_size=1, max_size=9), min_size=1, max_size=6),
+)
+def test_the_widened_cover_holds_every_occurrence(text, values):
+    covered = SecretScrubber(values)._widened_greedy(text)
+    for start in range(len(text)):
+        for value in values:
+            if text.startswith(value, start):
+                assert all(covered[start : start + len(value)])

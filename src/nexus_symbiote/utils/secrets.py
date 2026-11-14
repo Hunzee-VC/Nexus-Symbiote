@@ -7,11 +7,14 @@ import binascii
 import bisect
 import heapq
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 REDACTED = "***"
+# What a known value reads as to the rules on the masked pass: a separator, as its
+# redaction was, that no token, scheme value or header value contains.
+_MASK = REDACTED[0]
 # Shorter environment values are flags such as "1", "en" or "info", not credentials;
 # scrubbing them out of free text would corrupt ordinary names and descriptions.
 MIN_SECRET_LENGTH = 8
@@ -195,15 +198,24 @@ def _periodic_end(text: str, end: int, period: int) -> int:
     return end
 
 
+_COVERED = re.compile(rb"\x01+")
+
+
 class SecretScrubber:
     """Known secret values, prepared once per source and applied linearly per text.
 
     Every occurrence of every value is located in the original text, overlapping ones
-    included, so one value can never hide part of another. Each value costs a scan of
-    the text: a run of a value overlapping itself is measured along its smallest
-    period, so scrubbing a text costs its length times the number of values, never
-    values times every string of a document. Texts shorter than the shortest value
-    are skipped.
+    included, so one value can never hide part of another. Each value costs a search
+    of the text in C. Values go longest first and mark what they cover: a run of a
+    value overlapping itself is measured along its smallest period, an occurrence
+    wholly inside covered text is passed over to the next uncovered character, and
+    every occurrence found otherwise covers a new one, so the interpreted steps grow
+    with the text, not with the number of values times their occurrences. Values
+    that are parts of one another, repeated between uncovered gaps, could still make
+    each value pass over every repetition; past ``len(text) // 8`` passes and a few
+    per value, the cover is every value's greedy replacement widened by the longest
+    value on each side, which holds every overlapping occurrence. Texts shorter than
+    the shortest value are skipped.
     """
 
     __slots__ = ("_periods", "_shortest", "_values")
@@ -244,27 +256,76 @@ class SecretScrubber:
         return any(value in text for value in self._values)
 
     def spans(self, text: str) -> list[Span]:
-        """Where known values occur in ``text``, one span per run of overlapping occurrences."""
-        found: list[Span] = []
+        """Where known values occur in ``text``: sorted, disjoint, touching runs joined."""
         if not self._values or len(text) < self._shortest:
-            return found
+            return []
+        covered = self._covered(text)
+        return [] if covered is None else [run.span() for run in _COVERED.finditer(covered)]
+
+    def _covered(self, text: str) -> bytearray | None:
+        covered: bytearray | None = None
+        passes = len(text) // 8 + 4 * len(self._values) + 1024
+        # Only an occurrence reaching an uncovered character, between the first and
+        # the last, can add to the cover.
+        first, last_free = 0, len(text) - 1
         for value in self._values:
             size = len(value)
             period = self._periods[value]
             # An occurrence overlapping a run at a shift that is not a multiple of the
             # period starts past both the period and size - period (Fine and Wilf).
             resume = min(size, max(period, size - period) + 1)
-            start = text.find(value)
+            if covered is not None:
+                first = covered.find(0, first)
+                if first < 0:
+                    break
+                last_free = covered.rfind(0, 0, last_free + 1)
+            bound = last_free + size
+            start = text.find(value, max(0, first - size + 1), bound)
             while start >= 0:
+                if covered is None:
+                    covered = bytearray(len(text))
+                elif covered.find(0, start, start + size) < 0:
+                    # Every occurrence starting before the next uncovered character
+                    # lies wholly in covered text.
+                    passes -= 1
+                    if passes < 0:
+                        return self._widened_greedy(text)
+                    free = covered.find(0, start + size)
+                    if free < 0:
+                        break
+                    start = text.find(value, max(start + 1, free - size + 1), bound)
+                    continue
                 end = _periodic_end(text, start + size, period)
                 last = start + (end - size - start) // period * period
-                found.append((start, last + size))
-                start = text.find(value, last + resume)
-        return found
+                covered[start : last + size] = b"\x01" * (last + size - start)
+                start = text.find(value, last + resume, bound)
+        return covered
+
+    def _widened_greedy(self, text: str) -> bytearray:
+        """Every value replaced in turn, each run then widened by the longest value.
+
+        An occurrence the replacements skip overlaps a replaced one, so it lies within
+        the longest value's length of a run. A marker no value holds keeps a replaced
+        run from matching a shorter value; one the text holds only widens the cover.
+        """
+        covered = bytearray(len(text))
+        held = set("".join(self._values))
+        marker = next((chr(code) for code in range(0x110000) if chr(code) not in held), None)
+        if marker is None:
+            covered[:] = b"\x01" * len(text)
+            return covered
+        replaced = text
+        for value in self._values:
+            replaced = replaced.replace(value, marker * len(value))
+        reach = len(self._values[0]) - 1
+        for run in re.finditer(re.escape(marker) + "+", replaced):
+            start, end = max(0, run.start() - reach), min(len(text), run.end() + reach)
+            covered[start:end] = b"\x01" * (end - start)
+        return covered
 
     def scrub(self, text: str) -> str:
         spans = self.spans(text)
-        return _apply(text, _merged(spans), []) if spans else text
+        return _apply(text, spans, []) if spans else text
 
 
 def _scrubber(secrets: Iterable[str] | SecretScrubber) -> SecretScrubber:
@@ -295,6 +356,21 @@ def _authorization_scheme_credential(match: re.Match[str]) -> bool:
         match.string, max(0, start - _AUTHORIZATION_LOOKBACK), start
     )
     return header is not None or _credential_like(token, scheme)
+
+
+def _scheme_matches(value: str) -> Iterator[re.Match[str]]:
+    """Scheme matches, each search resuming where the previous credential starts.
+
+    A scheme word can end a credential and start the next (``x=Bearer``, then the
+    value after it). Applied one after another, the rules used to find it once an
+    earlier rule had redacted the first scheme. A credential holds no whitespace and
+    a scheme is followed by some, so a resumed search reads each credential twice at
+    most.
+    """
+    position = 0
+    while (match := _AUTH.search(value, position)) is not None:
+        yield match
+        position = match.start(3)
 
 
 def _private_key_spans(value: str) -> Iterable[Span]:
@@ -429,19 +505,18 @@ def _apply(value: str, spans: list[Span], rewrites: list[_Rewrite]) -> str:
     return "".join(parts)
 
 
-def _redaction(
-    value: str, scrubber: SecretScrubber, *, identifier: bool
+def _rule_matches(
+    value: str, *, identifier: bool, cookie: bool
 ) -> tuple[list[Span], list[_Rewrite]]:
-    """Every rule's and every known value's match in ``value``, found in the original."""
-    spans = scrubber.spans(value)
     rewrites = [
         rewrite for match in _URL.finditer(value) if (rewrite := _url_rewrite(match)) is not None
     ]
+    spans: list[Span] = []
     if not identifier:
         spans.extend(_private_key_spans(value))
     spans.extend(match.span(2) for match in _ASSIGNMENT.finditer(value))
     spans.extend(
-        match.span(3) for match in _AUTH.finditer(value) if _authorization_scheme_credential(match)
+        match.span(3) for match in _scheme_matches(value) if _authorization_scheme_credential(match)
     )
     if identifier:
         spans.extend(match.span() for match in _NAMED_TOKEN.finditer(value))
@@ -452,6 +527,46 @@ def _redaction(
     for match in _COOKIE_HEADER.finditer(value):
         spans.extend(_cookie_spans(value, *match.span(2)))
     spans.extend(match.span() for match in TOKEN_SHAPE.finditer(value))
+    if cookie:
+        spans.extend(_cookie_spans(value))
+    return spans, rewrites
+
+
+def _masked(value: str, spans: list[Span]) -> str:
+    """``value`` with each span replaced by as many marker characters, offsets kept."""
+    parts: list[str] = []
+    copied = 0
+    for start, end in spans:
+        parts.append(value[copied:start])
+        parts.append(_MASK * (end - start))
+        copied = end
+    parts.append(value[copied:])
+    return "".join(parts)
+
+
+def _redaction(
+    value: str, scrubber: SecretScrubber, *, identifier: bool, cookie: bool = False
+) -> tuple[list[Span], list[_Rewrite]]:
+    """Every rule's and every known value's match in ``value``.
+
+    The rules read the original text, where a known value cannot erase the context
+    they need, and again the text with each known value masked, where a value's edge
+    separates words as its redaction did: a token, header or URL right next to a known
+    value still matches. ``cookie`` reads the whole value as cookie pairs.
+    """
+    known = scrubber.spans(value)
+    spans, rewrites = _rule_matches(value, identifier=identifier, cookie=cookie)
+    if known:
+        masked_spans, masked_rewrites = _rule_matches(
+            _masked(value, known), identifier=identifier, cookie=cookie
+        )
+        spans.extend(masked_spans)
+        spans.extend(known)
+        # A masked URL runs on through a known value holding a space or quote, so it
+        # replaces the shorter URL read at the same place.
+        starts = {rewrite.start: rewrite for rewrite in rewrites}
+        starts.update((rewrite.start, rewrite) for rewrite in masked_rewrites)
+        rewrites = list(starts.values())
     return spans, rewrites
 
 
@@ -506,11 +621,9 @@ def redact_keyed_text(
     if redacted is not None:
         safe = redacted
     else:
-        spans, rewrites = _redaction(value, _scrubber(secrets), identifier=False)
-        if cookie:
-            # The pairs are read in the original value: a known value redacted first
-            # could hide the name that marks the pair after it.
-            spans.extend(_cookie_spans(value))
+        # The pairs are read in the original value too: a known value redacted first
+        # could hide the name that marks the pair after it.
+        spans, rewrites = _redaction(value, _scrubber(secrets), identifier=False, cookie=cookie)
         safe = _redact(value, spans, rewrites)
     if _AUTHORIZATION_KEY.fullmatch(key):
         parts = _SCHEME_AND_VALUE.fullmatch(value)
