@@ -6,13 +6,16 @@ drifting apart. When the kernel allows a user and PID namespace, the launcher is
 pid 1 of that namespace and dies with every descendant. If the kernel refuses the
 namespace, launch fails before executing the pinned program. On Linux,
 ``--no-isolation`` starts the launcher through a short exec wrapper that makes it a
-child subreaper, so a descendant that double-forks is killed with the session while
-the launcher is alive; a descendant that outlives the launcher can escape. Elsewhere
-that cleanup is best effort. Neither is a PID or filesystem namespace.
+child subreaper, and cleanup stops the launcher before it sweeps the tree, so while the
+launcher is alive its descendants are killed with the session, including a double-fork.
+A descendant that outlives the launcher can escape, and so can one that deliberately
+evades the sweep. Elsewhere that cleanup is best effort. Neither is a PID or filesystem
+namespace.
 """
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import ctypes
 import hashlib
@@ -22,6 +25,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -34,6 +38,8 @@ _ISOLATION: contextvars.ContextVar[bool] = contextvars.ContextVar(
 _LAUNCHER_BUDGET = 128 * 1024 * 1024
 _NAMESPACE_OK: bool | None = None
 _NAMESPACED: set[int] = set()
+_STOP_SECONDS = 1.0
+_SWEEP_PASSES = 8
 # Runs in a fresh interpreter, so the caller executes no Python between fork and exec.
 # The interpreter ignores SIGPIPE and SIGXFSZ at startup and adds LC_CTYPE under the C
 # locale, so the wrapper restores both signals and passes the launch environment itself.
@@ -218,9 +224,17 @@ def _descendant_pids(root: int) -> set[int]:
 
 
 def _kill_descendants(root: int) -> None:
-    """SIGKILL the descendant tree. Repeated so a fork during the sweep is caught."""
-    for _ in range(8):
-        victims = _descendant_pids(root)
+    """SIGKILL the descendant tree until a scan finds no descendant it has not signalled.
+
+    A killed process cannot complete another fork, and a child it forked before the
+    signal is found by the next scan, under ``root`` once its parent has died, because
+    a living subreaper ``root`` adopts it. Zombies stay in the tree until reaped, so a
+    scan counts only descendants not yet signalled. A process that keeps forking faster
+    than the scans can outlast the bounded passes.
+    """
+    signalled: set[int] = set()
+    for _ in range(_SWEEP_PASSES):
+        victims = _descendant_pids(root) - signalled
         if not victims:
             return
         for victim in victims:
@@ -230,6 +244,36 @@ def _kill_descendants(root: int) -> None:
                 # It exited after the /proc scan, or it runs as another user and cannot be
                 # signalled. Neither may stop cleanup before the launcher's group is killed.
                 pass
+        signalled |= victims
+
+
+def _stop_launcher(pid: int) -> None:
+    """Stop the launcher so it cannot fork while its descendants are swept.
+
+    A stopped launcher is still alive, so on Linux it stays the subreaper that adopts the
+    children of every descendant the sweep kills. The kernel reports the stop only once
+    every thread has stopped, which a thread does on its way out of the kernel, so a fork
+    in progress has attached its child by then. The wait is bounded: a launcher that is
+    traced or blocked in the kernel is swept while it may still run.
+    """
+    try:
+        os.kill(pid, signal.SIGSTOP)
+    except (ProcessLookupError, PermissionError):
+        # It is gone, or not ours to signal; the sweep and killpg still run.
+        return
+    deadline = time.monotonic() + _STOP_SECONDS
+    delay = 0.0005
+    while True:
+        try:
+            # WNOWAIT leaves the exit status for the caller's wait().
+            changed = os.waitid(os.P_PID, pid, os.WSTOPPED | os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        except OSError:
+            # Not a child this process can wait for, or a system without these flags.
+            return
+        if changed is not None or time.monotonic() >= deadline:
+            return
+        time.sleep(delay)
+        delay = min(delay * 2, 0.02)
 
 
 def _subreaper_argv(staged: Path) -> list[str] | None:
@@ -314,12 +358,19 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
     """Kill the session and, outside a PID namespace, every descendant of the launcher.
 
     On Linux the launcher is a child subreaper on that path, so a double-fork is
-    reparented to it instead of pid 1 and the tree sweep still finds it. Descendants
-    are killed first, while that parent is alive. A descendant left behind by a
-    launcher that already exited was adopted outside the tree and is not found.
+    reparented to it instead of pid 1 and the tree sweep still finds it. There the
+    launcher is stopped first, so it cannot start a process after the sweep, such as a
+    helper that a watchdog restarts, which would be reparented to pid 1 when killpg
+    kills the launcher. A descendant left behind by a launcher that already exited was
+    adopted outside the tree and is not found.
     """
+    namespaced = proc.pid in _NAMESPACED
+    # The sweep reads Linux's /proc, and macOS has no os.waitid before Python 3.13. Until
+    # it is reaped, the pid is still this launcher's.
+    stop = not namespaced and sys.platform.startswith("linux") and proc.returncode is None
     try:
-        namespaced = proc.pid in _NAMESPACED
+        if stop:
+            _stop_launcher(proc.pid)
         if not namespaced:
             _kill_descendants(proc.pid)
         try:
@@ -334,3 +385,8 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
         # launcher that is not in a PID namespace, and that launcher would then skip
         # the descendant-tree kill.
         _NAMESPACED.discard(proc.pid)
+        if stop:
+            # killpg has normally killed it already. If cleanup failed before that, a
+            # stopped launcher would never read EOF and the caller's wait() would hang.
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(proc.pid, signal.SIGKILL)

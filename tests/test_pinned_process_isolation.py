@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -30,13 +31,37 @@ from nexus_symbiote.live.stdio import (
 from nexus_symbiote.runtime import AuthorizationError
 from tests.test_pinned_stdio import command, inventory, launcher
 
+_SERVE = """
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get("method")
+    if method == "notifications/initialized":
+        continue
+    if method == "initialize":
+        result = {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "fixture", "version": "1"},
+        }
+    elif method == "tools/list":
+        result = {"tools": [{"name": "weather", "description": "x", "inputSchema": {"type": "object"}}]}
+    else:
+        raise SystemExit(1)
+    print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
+"""
+
+
+def _pinned(path: Path, prelude: str) -> tuple[Path, str]:
+    """A Python MCP server that runs ``prelude`` first, and its pin."""
+    path.write_text(f"#!{sys.executable}\nimport json, os, sys, threading, time\n{prelude}{_SERVE}")
+    path.chmod(0o700)
+    return path, "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
 
 def _launcher(tmp_path: Path, marker: Path, *, detached: bool = False) -> tuple[Path, str]:
-    path = tmp_path / "launcher"
-    path.write_text(
-        f"""#!{sys.executable}
-import json, os, sys, time
-marker = {str(marker)!r}
+    return _pinned(
+        tmp_path / "launcher",
+        f"""marker = {str(marker)!r}
 if os.fork() == 0:
     os.setsid()
     if {detached!r}:
@@ -51,30 +76,41 @@ for _ in range(100):
     if os.path.exists(marker) and os.path.getsize(marker):
         break
     time.sleep(0.01)
-for line in sys.stdin:
-    request = json.loads(line)
-    method = request.get("method")
-    if method == "notifications/initialized":
-        continue
-    if method == "initialize":
-        result = {{
-            "protocolVersion": "2025-06-18",
-            "capabilities": {{"tools": {{}}}},
-            "serverInfo": {{"name": "fixture", "version": "1"}},
-        }}
-    elif method == "tools/list":
-        result = {{"tools": [{{"name": "weather", "description": "x", "inputSchema": {{"type": "object"}}}}]}}
-    else:
-        raise SystemExit(1)
-    print(json.dumps({{"jsonrpc": "2.0", "id": request["id"], "result": result}}), flush=True)
-"""
+""",
     )
-    path.chmod(0o700)
-    return path, "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _watchdog_launcher(tmp_path: Path, helpers: Path) -> tuple[Path, str]:
+    """A launcher whose watchdog thread restarts a ``setsid`` helper whenever it exits."""
+    return _pinned(
+        tmp_path / "watchdog",
+        f"""import subprocess
+helpers = {str(helpers)!r}
+def watchdog():
+    while True:
+        helper = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True
+        )
+        open(os.path.join(helpers, str(helper.pid)), "w").close()
+        helper.wait()
+threading.Thread(target=watchdog, daemon=True).start()
+while not os.listdir(helpers):
+    time.sleep(0.01)
+""",
+    )
 
 
 def _host_pid(marker: Path) -> int:
     return int(marker.read_text())
+
+
+def _stat(pid: int) -> list[str]:
+    """The state, parent and later fields of ``/proc/<pid>/stat``; ``["X"]`` once reaped."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8") as stat:
+            return stat.read().rpartition(")")[2].split()
+    except (FileNotFoundError, ProcessLookupError):
+        return ["X"]
 
 
 def _assert_dead(pid: int) -> None:
@@ -87,12 +123,7 @@ def _assert_dead(pid: int) -> None:
     """
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        try:
-            with open(f"/proc/{pid}/stat", encoding="utf-8") as stat:
-                state = stat.read().rpartition(")")[2].split()[0]
-        except (FileNotFoundError, ProcessLookupError):
-            return
-        if state in {"Z", "X"}:
+        if _stat(pid)[0] in {"Z", "X"}:
             return
         time.sleep(0.05)
     raise AssertionError(f"process {pid} was still running")
@@ -188,6 +219,97 @@ def test_opt_out_kills_a_double_fork_and_a_refused_namespace_never_starts_it(
     assert not blocked.exists()
 
 
+def test_opt_out_stops_the_launcher_before_its_tree_is_swept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The watchdog restarts its helper whenever the sweep kills it. A launcher that still
+    # runs after the sweep starts another one in a new session, which pid 1 adopts once
+    # killpg kills the launcher, out of reach of the second sweep. Cleanup must stop the
+    # launcher first. Real timing opens that window only in some runs, so killpg here
+    # waits until a running launcher has started such a helper, and returns once the
+    # helper has been reparented, as a preempted cleanup thread would.
+    helpers = tmp_path / "helpers"
+    helpers.mkdir()
+    command, digest = _watchdog_launcher(tmp_path, helpers)
+    killpg = os.killpg
+    late: set[int] = set()
+
+    def preempted_killpg(pgid: int, sig: int) -> None:
+        deadline = time.monotonic() + 5
+        while not late and _stat(pgid)[0] not in {"T", "Z", "X"}:
+            for pid in pinned_process._descendant_pids(pgid):
+                fields = _stat(pid)
+                # Alive, and leading its own session, so killpg does not reach it.
+                if fields[0] not in {"Z", "X"} and fields[3] == str(pid):
+                    late.add(pid)
+            if time.monotonic() > deadline:
+                break
+            time.sleep(0.005)
+        killpg(pgid, sig)
+        while any(_stat(pid)[1:2] == [str(pgid)] for pid in late):
+            if time.monotonic() > deadline:
+                break
+            time.sleep(0.005)
+
+    monkeypatch.setattr(pinned_process.os, "killpg", preempted_killpg)
+    try:
+        with isolation_off():
+            observe_pinned(str(command), digest)
+        started = {int(entry.name) for entry in helpers.iterdir()}
+        assert started
+        for pid in sorted(started | late):
+            _assert_dead(pid)
+    finally:
+        for pid in {int(entry.name) for entry in helpers.iterdir()} | late:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+
+
+def test_a_launcher_that_does_not_stop_is_still_killed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A tracer can swallow SIGSTOP. The wait for the stop is bounded, and the running
+    # launcher still adopts its double-forked grandchild until the sweep kills it.
+    kill = os.kill
+
+    def swallow_stop(pid: int, sig: int) -> None:
+        if sig != signal.SIGSTOP:
+            kill(pid, sig)
+
+    monkeypatch.setattr(pinned_process.os, "kill", swallow_stop)
+    monkeypatch.setattr(pinned_process, "_STOP_SECONDS", 0.2)
+    marker = tmp_path / "pid"
+    command, digest = _launcher(tmp_path, marker, detached=True)
+    started = time.monotonic()
+    with isolation_off():
+        observe_pinned(str(command), digest)
+    assert time.monotonic() - started < 10
+    _assert_dead(_host_pid(marker))
+
+
+def test_cleanup_elsewhere_than_linux_does_not_stop_the_launcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Python before 3.13 has no os.waitid on macOS, and the sweep that the stop serves
+    # reads Linux's /proc.
+    monkeypatch.setattr(pinned_process.sys, "platform", "darwin")
+    monkeypatch.delattr(pinned_process.os, "waitid")
+    kill = os.kill
+    sent: list[int] = []
+
+    def record(pid: int, sig: int) -> None:
+        sent.append(sig)
+        kill(pid, sig)
+
+    monkeypatch.setattr(pinned_process.os, "kill", record)
+    marker = tmp_path / "pid"
+    command, digest = _launcher(tmp_path, marker)
+    with isolation_off():
+        observe_pinned(str(command), digest)
+    assert signal.SIGSTOP not in sent
+    _assert_dead(_host_pid(marker))
+
+
 class _NoPrctl:
     """A C library without prctl, as on macOS."""
 
@@ -253,8 +375,10 @@ def test_cli_requires_an_explicit_opt_out_when_the_namespace_is_unavailable(
     assert "kernel PID containment is disabled" in allowed.stderr
     usage = " ".join(CliRunner().invoke(main, ["verify-live", "--help"]).output.split())
     for text in (" ".join(allowed.stderr.split()), usage):
+        assert "stopped before cleanup" in text
         assert "killed with the session while it is alive" in text
         assert "a descendant that outlives the launcher can escape" in text
+        assert "as can one that deliberately evades cleanup" in text
         assert "not a namespace or sandbox" in text
 
 
@@ -315,12 +439,20 @@ def test_no_launch_runs_python_between_fork_and_exec(
     assert kwargs["start_new_session"] is True
 
 
-# The shell applies a redirection to itself while the command runs, so the
-# descriptors are read in a command substitution before any redirection.
+# The signal lines are read with builtins before the shell first forks. dash blocks
+# every signal around a fork and clears its mask afterwards, so a later read shows
+# either of those masks, never the one the launcher inherited. The shell applies a
+# redirection to itself while the redirected command runs, so the descriptors are
+# read in a command substitution outside any redirected command.
 STATE = r"""#!/bin/sh
+signals=
+while read -r key value; do
+  case $key in SigBlk:|SigIgn:) signals="$signals$key $value
+" ;; esac
+done < /proc/$$/status
 fds=$(readlink /proc/$$/cwd /proc/$$/fd/0 /proc/$$/fd/1 /proc/$$/fd/2)
 tr '\0' '\n' < /proc/$$/environ >> OUT
-grep -E '^Sig(Ign|Blk):' /proc/$$/status >> OUT
+printf '%s' "$signals" >> OUT
 tr '\0' '\n' < /proc/$$/cmdline >> OUT
 printf '%s\n' "$fds" >> OUT
 cat /proc/$$/stat >> OUT
@@ -342,16 +474,55 @@ def _launch_state(tmp_path: Path, name: str) -> list[str]:
     return [re.sub(r"pipe:\[\d+\]", "pipe", work.sub("WORK", line)) for line in lines]
 
 
+def _wrapped_and_direct(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[list[str], list[str], set[int]]:
+    """The launch state through the wrapper and by direct exec, and the blocked signals.
+
+    The launcher inherits the calling thread's blocked signals, so one is blocked here
+    to show that the mask reaches the launcher, and a mask the wrapper adds would not.
+    """
+    previous = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR2})
+    try:
+        wrapped = _launch_state(tmp_path, "wrapped")
+        with monkeypatch.context() as direct_exec:
+            direct_exec.setattr(pinned_process, "_subreaper_argv", lambda staged: None)
+            direct = _launch_state(tmp_path, "direct")
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous)
+    return wrapped, direct, {*previous, signal.SIGUSR2}
+
+
 def test_the_subreaper_wrapper_hands_over_the_state_of_a_direct_exec(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    wrapped = _launch_state(tmp_path, "wrapped")
-    monkeypatch.setattr(pinned_process, "_subreaper_argv", lambda staged: None)
-    direct = _launch_state(tmp_path, "direct")
+    wrapped, direct, blocked = _wrapped_and_direct(tmp_path, monkeypatch)
     assert wrapped == direct
     assert wrapped[0] == f"PATH={os.defpath}"
-    assert [line.split(":")[0] for line in wrapped[1:3]] == ["SigBlk", "SigIgn"]
+    mask = sum(1 << (number - 1) for number in blocked)
+    assert wrapped[1].split() == ["SigBlk:", f"{mask:016x}"]
+    assert wrapped[2].split(":")[0] == "SigIgn"
     assert wrapped[3:] == ["/bin/sh", "WORK/server", "WORK", "pipe", "pipe", "/dev/null"]
+
+
+@pytest.mark.parametrize(
+    ("restored", "leak"),
+    [
+        ("os.execve(", "signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1})\nos.execve("),
+        ("signal.signal(signal.SIGPIPE, signal.SIG_DFL)\n", ""),
+        ("signal.signal(signal.SIGXFSZ, signal.SIG_DFL)\n", ""),
+        ('{"PATH": os.defpath}', "os.environ"),
+    ],
+    ids=["blocked-signal", "ignored-sigpipe", "ignored-sigxfsz", "environment"],
+)
+def test_the_launch_state_comparison_detects_a_wrapper_that_leaks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, restored: str, leak: str
+) -> None:
+    leaky = pinned_process._SUBREAPER_EXEC.replace(restored, leak)
+    assert leaky != pinned_process._SUBREAPER_EXEC
+    monkeypatch.setattr(pinned_process, "_SUBREAPER_EXEC", leaky)
+    wrapped, direct, _ = _wrapped_and_direct(tmp_path, monkeypatch)
+    assert wrapped != direct
 
 
 def test_a_stalled_subreaper_wrapper_is_bounded_by_the_protocol_deadline(
