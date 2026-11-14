@@ -115,6 +115,15 @@ binding change with `properties.static_config_hash_profile changed`, and
 `validate --project` reports v3 records as unknown. Recollect and review the
 baseline, including the exported tool names, before approving it.
 
+The same release names client settings whose values the export records only as
+present: a `cwd` other than the workspace root (`.`, `./`, `${workspaceFolder}`),
+`envFile`, `watchPaths`, `oauth`, `auth`, `dev`, `env_vars`,
+`bearer_token_env_var` and `env_http_headers`. Without
+`NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a server that declares one carries the low
+`completeness` finding, and `diff --fail-on-alert` raises the medium alert that
+launch values are unbound for it, even between identical inventories. Set the key
+on both collections to compare those values, or review and accept the alert.
+
 ## SARIF rule identifiers
 
 0.1.0 keyed SARIF rules by category (`nexus_symbiote/<category>`) and raised a

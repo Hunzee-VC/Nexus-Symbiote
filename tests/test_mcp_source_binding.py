@@ -1220,3 +1220,14 @@ def test_client_setting_values_are_named_unbound_without_the_key(
     server = _server(tmp_path, {"command": "uvx", "args": ["mcp-server-git==0.6.2"], **setting})
     finding = next(r for r in server.risks if r.category == "completeness")
     assert label in finding.detail
+
+
+@pytest.mark.parametrize("cwd", [".", "./", " ${workspaceFolder} ", "${workspaceFolder}/"])
+def test_a_root_working_directory_is_not_named_unbound(tmp_path, monkeypatch, cwd):
+    # The export already records that the server starts in the root, so a keyless
+    # diff of identical inventories must not alert on it.
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+    server = _server(tmp_path, {**PINNED_NPX, "cwd": cwd})
+    assert not any(
+        "working directory" in r.detail for r in server.risks if r.category == "completeness"
+    )

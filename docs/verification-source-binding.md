@@ -132,7 +132,7 @@ compare the values. The alert does not record the value.
 MCP keyed-value profile v3 replaces v2, which did not retain Deno import-name-to-target
 associations. Old v2 keyed records fail reconciliation and require recollection and
 review; do not copy or relabel their old binding. This keyed-value version is separate
-from the unchanged v3 exported-structure profile.
+from the exported-structure profile, now `mcp-static-config/v4`.
 
 Static configuration profile v1 records (an unkeyed digest over raw configuration, including secret
 values) let anyone holding the BOM confirm guesses for low-entropy secrets. They

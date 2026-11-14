@@ -2299,8 +2299,10 @@ class MCPScanner(Scanner):
     def _unbound_client_values(config: dict[str, Any]) -> list[str]:
         """Client settings exported only as present, whose values only the keyed binding covers."""
         unbound = []
+        cwd = config.get("cwd")
+        if cwd and not (isinstance(cwd, str) and cwd.strip() in _ROOT_DIRECTORIES):
+            unbound.append("working directory")
         for label, fields in (
-            ("working directory", ("cwd",)),
             ("environment file", ("envFile",)),
             ("watch paths", ("watchPaths",)),
             ("authentication settings", ("oauth", "auth")),
