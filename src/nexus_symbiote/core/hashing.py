@@ -97,16 +97,25 @@ def normalize_digest(expected_hash: str, algorithm: str | None = None) -> tuple[
     return algorithm, digest.lower()
 
 
-def descriptor_binding(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
+def descriptor_binding(info: os.stat_result) -> tuple[int, int, int, int, int]:
     """Return the open-descriptor evidence that must stay fixed across one observation.
 
-    Size, mtime and ctime alone cannot detect a rename-over: when the replacement
+    Size and mtime alone cannot detect a rename-over: when the replacement
     lands within the same coarse-grained kernel timestamp tick, the unlinked
-    inode's ctime equals its previous value. The link count of the inode behind
+    inode's mtime equals its previous value. The link count of the inode behind
     the descriptor drops to zero on unlink, so it is compared as well, together
     with the device and inode identity. A replaced inode that is never unlinked,
     such as a file in an overlayfs lower layer, keeps all of these values; only
     the pathname's current identity (``pathname_identity``) reveals that swap.
+
+    ``st_ctime_ns`` is deliberately not part of the binding. Some filesystems
+    advance ctime asynchronously after a write returns — btrfs with
+    ``compress-force`` updates the inode ~1–200 ms after a large write, while
+    mtime stays fixed — so a ctime-only change during a read is a benign
+    metadata update, not a replacement: it changes neither the bytes nor any
+    of the fields above, and a rename-over is already caught by the link
+    count. Including ctime made freshly written large files fail collection
+    spuriously and charged the digest budget twice for one artifact.
     """
     return (
         info.st_dev,
@@ -114,7 +123,6 @@ def descriptor_binding(info: os.stat_result) -> tuple[int, int, int, int, int, i
         info.st_nlink,
         info.st_size,
         info.st_mtime_ns,
-        info.st_ctime_ns,
     )
 
 
