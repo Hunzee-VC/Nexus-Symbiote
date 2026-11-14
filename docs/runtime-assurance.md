@@ -17,12 +17,8 @@ that an unchanged tool backend is benign. Restrict bypass paths through the
 surrounding runtime, credentials, sandbox and network policy.
 
 Every denial raises `AuthorizationError` with a stable `reason` code. Exceptions
-raised by the operator's adapters propagate unchanged. A failure before admission
-prevents execution, but an executor exception occurs after admission has committed:
-the nonce remains consumed and the external operation may already have taken
-effect. An exception alone therefore does not establish denial or safe retry.
-Reconcile admission and downstream outcome, using idempotency where supported,
-before retrying an operation whose execution failed or timed out.
+raised by the operator's adapters propagate unchanged, so treat every exception
+from `invoke` as a denial.
 
 The gateway copies the request before scope resolution and rejects a resolver
 that modifies its copy during resolution. A resolver retaining that copy cannot

@@ -6,7 +6,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
-- Documented source installation requires the exact reviewed HEAD, and TestPyPI rehearsal installs only its exact checksum-verified regular wheel. Failed commands, missing/duplicate manifest entries and unexpected files stop before installation. Runtime guidance distinguishes denial from post-admission execution failure.
+- Documented source installation requires the exact reviewed HEAD, and TestPyPI rehearsal installs only its exact checksum-verified regular wheel. Failed commands, missing/duplicate manifest entries and unexpected files stop before installation.
 
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
