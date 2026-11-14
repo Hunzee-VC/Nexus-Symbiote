@@ -164,10 +164,16 @@ same policy to `scan`, `validate --project`, `risk --project` and `baseline`
 with `--signature-policy`, or to the GitHub Action with `signature-policy`.
 
 Keep the policy outside the checkout: the commands refuse a policy file inside
-the scanned project, also under another name for the project directory such as a
-case variant or a bind mount (compared by device and inode), or one with other
-hard links, and they resolve the project path first, so a symlinked `--project`
-path works for every command. Every entry must name a file beneath the project,
+the scanned project or anywhere in any enclosing Git working tree, including a
+superproject above a nested checkout or submodule (so a
+monorepo's `ci/signers.json` is refused when you scan `services/agent`), also
+under another name for any of these directories such as a case variant or a bind mount
+(compared by device and inode), or one with other hard links, and they resolve the project path first, so a symlinked `--project`
+path works for every command. Every directory at or above the project with a `.git`
+entry counts as an enclosing repository, so two layouts cannot hold the policy: a
+trusted base checkout that encloses the pull request's checkout (the base at the
+workspace root, the pull request in `pr/`), and a home directory that is itself a
+repository (`~/.git`) when the project is below it. Every entry must name a file beneath the project,
 spelled as its directory spells it: another case is refused on every file system,
 also where file names fold case.
 An entry that names neither a collected model weight file nor the ShadowScan
