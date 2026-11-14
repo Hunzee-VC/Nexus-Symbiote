@@ -43,6 +43,10 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 - The Action no longer passes the job's Sigstore trust-root overrides (`NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` and its SHA-256 pin), `NEXUS_SYMBIOTE_MODE`, or runner and OIDC tokens to the commands it runs, so a job-level variable cannot replace the trust root that `action.yml` documents, and collection, which parses checkout files with native code, holds no token.
 - Secret redaction recognises SendGrid (`SG.`), Databricks (`dapi`), Slack app-level (`xapp-`), Shopify (`shpat_`, `shpss_`, `shpca_`, `shppa_`), Postman (`PMAK-`) and Doppler (`dp.pt.`) tokens in free text and in names, not only after a `key=` assignment.
 - `verify-live` refuses a launch policy below any directory that another user can write and that is not sticky, not only when its own directory is: such a user could rename a directory on the path away and put another policy in its place.
+- Agent manifest display fields and RAG identifiers and plain source paths use the
+  shared credential redactor before entering inventories or exports. Recognized
+  tokens and password assignments are withheld, including Hugging Face and npm
+  tokens; existing exports may contain those values and should be recollected.
 - `advisories --exclude` matches npm names in any case, and refuses a pattern with a `*` anywhere but at its end instead of sending the name it could never match. A scoped registry's package name and both values of a shadowed header are withheld.
 - A `uv.lock` or `poetry.lock` record whose package index is not a plain lower-case `http://` or `https://` URL is a coverage gap and binds no package URL. Such a source used to be recorded as `https://pypi.org`: a directory of wheels, an upper-case scheme such as `HTTPS://`, a `file://` URL, or an authority with a backslash (`https://evil.example\@pypi.org/simple`), which uv reads as another host than Python's `urlsplit` does.
 - Secret redaction covers keys, escaped quotes and Negotiate/NTLM credentials, and A2A card signature headers shaped like credentials are withheld.
