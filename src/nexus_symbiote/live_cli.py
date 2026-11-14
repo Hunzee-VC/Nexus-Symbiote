@@ -118,7 +118,12 @@ def discover_mcp(
     if server_ref is not None and not record:
         raise click.UsageError("--server-ref applies only to --record")
     if raw_descriptors is not None and output is not None:
-        if raw_descriptors.absolute() == output.absolute():
+        same_target = raw_descriptors.absolute() == output.absolute() or raw_descriptors.resolve(
+            strict=False
+        ) == output.resolve(strict=False)
+        if not same_target and raw_descriptors.exists() and output.exists():
+            same_target = os.path.samefile(raw_descriptors, output)
+        if same_target:
             raise click.UsageError("--raw-descriptors must name a different file than --output")
     token = os.environ.get(token_env) if token_env else None
     if token_env and not token:

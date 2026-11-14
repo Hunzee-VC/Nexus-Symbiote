@@ -324,12 +324,22 @@ def _trimmed(value: str | None) -> str | None:
 
 
 def _endpoint(url: str | None) -> tuple[str, int | None] | None:
+    if not url or "\\" in url or any(ch <= " " or ch == "\x7f" for ch in url):
+        return None
     try:
-        parts = urlsplit(url or "")
+        parts = urlsplit(url)
         host, port = parts.hostname, parts.port
     except ValueError:
         return None
-    if not host:
+    if (
+        not parts.scheme
+        or not host
+        or not parts.netloc.isascii()
+        or "@" in parts.netloc
+        or "%" in parts.netloc
+        or parts.netloc.endswith(":")
+        or port == 0
+    ):
         return None
     return host, port if port is not None else _DEFAULT_PORTS.get(parts.scheme.lower())
 
@@ -471,20 +481,20 @@ class _Inventory:
             provider, model = texts
             if provider is None:
                 return [(self._get("models", model), "name")]
-            return [
-                (self._get("models_for", (model, provider.lower())), "name-and-provider"),
-                (self._get("models_open", model), "name"),
-            ]
+            if exact := self._get("models_for", (model, provider.lower())):
+                return [(exact, "name-and-provider")]
+            return [(self._get("models_open", model), "name")]
         if kind == "agent":
             ident, name = texts
-            parts: Candidates = []
-            if ident is not None:
-                parts.append((self._get("agent_ids", _repository_agent_ref(ident)), "id"))
+            if ident is not None and (
+                exact := self._get("agent_ids", _repository_agent_ref(ident))
+            ):
+                return [(exact, "id")]
             if name is not None:
                 # When both sides state an id, the ids decide.
                 table = "agents" if ident is None else "agents_unbound"
-                parts.append((self._get(table, name), "name"))
-            return parts
+                return [(self._get(table, name), "name")]
+            return []
         return [(self._get(kind, texts[0]), "name")]
 
 

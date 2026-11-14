@@ -108,8 +108,24 @@ def _purl_identity(purl: Any, registry_uri: str | None = None) -> tuple[str, str
     # The registry collector names the registry a lockfile resolved a package from
     # when it is not the default one. That qualifier, naming the component's own
     # registry, is the only one accepted; the origin decides whether it is sent.
-    if qualified and (registry_uri is None or qualifiers != f"repository_url={registry_uri}"):
-        raise ValueError("exact package_url is required, without qualifiers or subpath")
+    if qualified:
+        if (
+            registry_uri is None
+            or any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in qualifiers)
+            or re.search(r"%(?![0-9A-Fa-f]{2})", qualifiers)
+        ):
+            raise ValueError("exact package_url is required, without qualifiers or subpath")
+        parts = qualifiers.split("&")
+        if len(parts) != 1 or "=" not in parts[0]:
+            raise ValueError("exact package_url is required, without qualifiers or subpath")
+        q_key, _, q_val = parts[0].partition("=")
+        decoded_val = unquote(q_val, errors="strict")
+        if (
+            q_key.lower() != "repository_url"
+            or any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in decoded_val)
+            or decoded_val != registry_uri
+        ):
+            raise ValueError("exact package_url is required, without qualifiers or subpath")
     match = re.fullmatch(r"pkg:(pypi|npm)/(.+)@([^@/]+)", purl)
     if match is None:
         raise ValueError("only exact PyPI/npm package URLs are supported")

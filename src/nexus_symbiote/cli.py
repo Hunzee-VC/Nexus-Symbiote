@@ -644,6 +644,19 @@ def _render_aibom(aibom: AIBOM, output_format: str, root: Path) -> str:
     is_flag=True,
     help="Use built-in policy without reading configuration from the target.",
 )
+@click.option(
+    "--fail-on-unsigned-discovery",
+    is_flag=True,
+    help="With --check, exit with status 1 when ShadowScan discovery evidence is unverified.",
+)
+@click.option(
+    "--allow-unsigned-discovery",
+    is_flag=True,
+    help=(
+        "With --check, accept unverified ShadowScan discovery evidence explicitly (still warns); "
+        "required in CI."
+    ),
+)
 def scan(
     project_path: str,
     output: str | None,
@@ -653,8 +666,16 @@ def scan(
     signature_policy: Path | None = None,
     no_project_policy: bool = False,
     check_only: bool = False,
+    fail_on_unsigned_discovery: bool = False,
+    allow_unsigned_discovery: bool = False,
 ) -> None:
     """Scan a project and generate an AIBOM."""
+    _unsigned_discovery_flags(fail_on_unsigned_discovery, allow_unsigned_discovery)
+    if (fail_on_unsigned_discovery or allow_unsigned_discovery) and not check_only:
+        raise click.UsageError(
+            "--fail-on-unsigned-discovery and --allow-unsigned-discovery require --check; "
+            "gate a written inventory with validate or risk"
+        )
     if check_only and output:
         raise click.UsageError("--check writes no inventory; drop -o/--output or --check")
     _require_binding_key()
@@ -835,6 +856,38 @@ def scan(
             "network",
         ],
     )
+    if check_only:
+        from nexus_symbiote.validators.completeness import (
+            carries_discovery_evidence,
+            discovery_producer_check,
+            discovery_signature_required,
+        )
+
+        producer_verified = False
+        if discovery_signature_required(
+            policy.validation.require_discovery_signature, root, signature_policies
+        ):
+            prod_status, prod_problems = discovery_producer_check(
+                aibom, root, signature_policies, exclude_paths=policy.scan.exclude_paths
+            )
+            producer_verified = prod_status == "verified" and not prod_problems
+            if prod_problems:
+                for problem in prod_problems:
+                    scan_failures.append(f"shadowscan: {problem}")
+                failures_by.setdefault("shadowscan", []).extend(prod_problems)
+        if carries_discovery_evidence(aibom):
+            unsigned_reason = _unsigned_discovery_failure_reason(
+                aibom,
+                fail_on_unsigned_discovery=(
+                    policy.validation.require_discovery_signature or fail_on_unsigned_discovery
+                ),
+                allow_unsigned_discovery=allow_unsigned_discovery,
+                already_verified=producer_verified,
+            )
+            if unsigned_reason is not None:
+                scan_failures.append(f"shadowscan: {unsigned_reason}")
+                failures_by.setdefault("shadowscan", []).append(unsigned_reason)
+
     scorer = RiskScorer.from_policy(policy.risk)
     passed, risk_report = scorer.passes_gate(aibom)
     report_mode = report_only or policy.scan.failure_mode == "report-only"
@@ -1004,6 +1057,15 @@ def import_shadowscan(
         except NativeFormatError as exc:
             raise click.ClickException(f"Inventory not written. {exc}") from exc
 
+    unsigned_reason = _unsigned_discovery_failure_reason(
+        aibom,
+        fail_on_unsigned_discovery=fail_on_unsigned_discovery,
+        allow_unsigned_discovery=allow_unsigned_discovery,
+        already_verified=bool(bundle),
+    )
+    if unsigned_reason is not None:
+        raise click.exceptions.Exit(1)
+
     try:
         write_output_file(Path(output), out_data, overwrite=False)
     except FileExistsError as exc:
@@ -1018,15 +1080,7 @@ def import_shadowscan(
         "; discovery coverage remains partial.",
         err=True,
     )
-    unsigned_reason = _unsigned_discovery_failure_reason(
-        aibom,
-        fail_on_unsigned_discovery=fail_on_unsigned_discovery,
-        allow_unsigned_discovery=allow_unsigned_discovery,
-        already_verified=bool(bundle),
-    )
     if report_only:
-        if unsigned_reason is not None:
-            raise click.exceptions.Exit(1)
         return
     if imported.source_status != "complete":
         raise click.ClickException("ShadowScan source report is incomplete; the BOM is partial")
@@ -1120,10 +1174,10 @@ def verify_artifact(
                 + (f": {verified.error}" if verified.error else "")
             )
         trust_root_path = (verified.details or {}).get("trust_root_path", "unavailable")
-        click.echo(
-            "Artifact digest and Sigstore signer policy verified. "
-            f"Trust root: {trust_root_path}. "
-            "This does not establish artifact safety or a deployment binding."
+        echo_line(
+            "Artifact digest and Sigstore signer policy verified. Trust root: ",
+            trust_root_path,
+            ". This does not establish artifact safety or a deployment binding.",
         )
     else:
         click.echo(
@@ -1257,10 +1311,10 @@ def verify_discovery(
                 + (f": {verified.error}" if verified.error else "")
             )
         trust_root_path = (verified.details or {}).get("trust_root_path", "unavailable")
-        click.echo(
-            "Report signer and direct native projection verified. "
-            f"Trust root: {trust_root_path}. "
-            "Discovery claims retain declared assurance."
+        echo_line(
+            "Report signer and direct native projection verified. Trust root: ",
+            trust_root_path,
+            ". Discovery claims retain declared assurance.",
         )
     elif projection:
         click.echo(
