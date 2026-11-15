@@ -157,7 +157,9 @@ def test_removed_deny_rule_is_an_alert(tmp_path, project):
     assert code == 1, output
 
 
-def test_reformatted_settings_are_not_an_alert(tmp_path, project):
+def test_reformatted_settings_are_not_an_alert(tmp_path, project, monkeypatch):
+    # The notes server's path is unbound without the key, which is its own alert.
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, "k" * 32)
     reordered = json.dumps({"permissions": {"deny": ["WebFetch"]}}, indent=8) + "\n"
     code, output = _alerts(
         tmp_path, project, lambda: _write(project / ".claude" / "settings.json", reordered)

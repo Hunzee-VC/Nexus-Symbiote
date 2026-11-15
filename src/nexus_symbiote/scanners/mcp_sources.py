@@ -903,12 +903,13 @@ def _root_name(node: ast.expr) -> str | None:
 def _python_launches(tree: ast.Module) -> list[str]:
     """Gaps for MCP servers a file starts or reaches, or loads through a dynamic import.
 
-    A launcher class or function counts wherever it is used outside an annotation, by
-    its imported name, by a star import or as an attribute of its package; a launcher
-    class also as an attribute of any value, and a launcher function as an attribute
-    of any name the file imports. ``ast`` has already folded identifiers to NFKC, as
-    Python does. A launcher imported by name from its package and not used outside an
-    annotation is a gap too, because another module can import it from this one. A
+    A launcher class or function counts wherever it is used other than as a type in an
+    annotation (see ``_annotation_names``), by its imported name, by a star import or
+    as an attribute of its package; a launcher class also as an attribute of any value,
+    and a launcher function as an attribute of any name the file imports. ``ast`` has
+    already folded identifiers to NFKC, as Python does. A launcher imported by name
+    from its package and not used other than as such a type is a gap too, because
+    another module can import it from this one. A
     launcher or server class imported from any other module, or used by its name after
     a star import of one, is a gap, and so is a server class reached as an attribute:
     the tool collector inventories only servers built from the SDK's own import. A

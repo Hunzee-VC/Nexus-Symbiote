@@ -119,3 +119,23 @@ def test_in_place_change_fails_the_drift_gate(tmp_path, change):
     assert result.exit_code == 1, result.output
     alerts = json.loads(result.stdout)["security_alerts"]
     assert any(re.search(rf"'{re.escape(component)}'", alert["alert"]) for alert in alerts), alerts
+
+
+def test_the_drift_gate_is_the_default(tmp_path):
+    """`diff` without flags fails on an alert; opting out takes `--no-fail-on-alert`."""
+    relative, old, new, _component = CHANGES["mcp-launcher-version-bumped"]
+    project = tmp_path / "project"
+    project.mkdir()
+    _project(project)
+    runner = CliRunner()
+    scan = ["scan", str(project), "--no-project-policy", "--report-only", "-o"]
+    before, after = tmp_path / "before.json", tmp_path / "after.json"
+    assert runner.invoke(main, [*scan, str(before)]).exit_code == 0
+    _edit(project / relative, old, new)
+    assert runner.invoke(main, [*scan, str(after)]).exit_code == 0
+    unchanged = runner.invoke(main, ["diff", str(before), str(before)])
+    assert unchanged.exit_code == 0, unchanged.output
+    gated = runner.invoke(main, ["diff", str(before), str(after)])
+    assert gated.exit_code == 1, gated.output
+    opted_out = runner.invoke(main, ["diff", str(before), str(after), "--no-fail-on-alert"])
+    assert opted_out.exit_code == 0, opted_out.output
