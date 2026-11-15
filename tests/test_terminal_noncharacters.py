@@ -20,7 +20,7 @@ def test_there_are_66_noncharacters():
 
 
 def test_every_noncharacter_is_replaced():
-    assert [hex(point) for point in NONCHARACTERS if neutralize(chr(point)) != "�"] == []
+    assert [hex(point) for point in NONCHARACTERS if neutralize(chr(point)) != "\ufffd"] == []
 
 
 def test_neighbours_of_the_noncharacter_ranges_are_left_alone():

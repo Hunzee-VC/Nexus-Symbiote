@@ -65,10 +65,10 @@ def string(pattern: str, **extra: Any) -> dict[str, Any]:
 CASES = [
     # ECMA-262 pattern meaning, through each translation branch.
     ("anchor", string("^a$"), {"v": "a\n"}, "arguments-invalid"),
-    ("ascii-digit", string(r"^\d+$"), {"v": "٣"}, "arguments-invalid"),
+    ("ascii-digit", string(r"^\d+$"), {"v": "\u0663"}, "arguments-invalid"),
     ("ascii-word", string(r"^\w+$"), {"v": "caf\xe9"}, "arguments-invalid"),
-    ("dot", string("^.+$"), {"v": "a b"}, "arguments-invalid"),
-    ("space", string(r"^\s$"), {"v": "﻿"}, "valid"),
+    ("dot", string("^.+$"), {"v": "a\u2028b"}, "arguments-invalid"),
+    ("space", string(r"^\s$"), {"v": "\ufeff"}, "valid"),
     ("not-space", string(r"^\S+$"), {"v": "a\xa0b"}, "arguments-invalid"),
     ("class-escape", string(r"^[\d-]+$"), {"v": "12-34"}, "valid"),
     ("class-complement", string(r"^[^\S]+$"), {"v": " \t"}, "valid"),
@@ -80,8 +80,8 @@ CASES = [
         "arguments-invalid",
     ),
     ("numbered-backreference", string(r"^(a)\1$"), {"v": "aa"}, "valid"),
-    ("unicode-escape", string(r"^A$"), {"v": "A"}, "valid"),
-    ("surrogate-pair", string(r"^😀$"), {"v": "\U0001f600"}, "valid"),
+    ("unicode-escape", string(r"^\u0041$"), {"v": "A"}, "valid"),
+    ("surrogate-pair", string(r"^\ud83d\ude00$"), {"v": "\U0001f600"}, "valid"),
     ("lookbehind", string(r"(?<=a)b"), {"v": "ab"}, "valid"),
     ("negative-lookahead", string(r"^(?!x).$"), {"v": "x"}, "arguments-invalid"),
     ("quantifier", string(r"^a{2,3}$"), {"v": "aaaa"}, "arguments-invalid"),
