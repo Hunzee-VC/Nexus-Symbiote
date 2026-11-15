@@ -2296,6 +2296,8 @@ _YARN_FETCHES = _set("dlx create add install global up upgrade set plugin import
 _YARN_NESTED = _set("workspace workspaces")
 _PNPM_NESTED = _set("recursive multi m")
 _BUN_FETCHES = _set("x create c add a install i update upgrade link pm remove rm")
+# bun exec and yarn exec run a script in the package manager's own shell.
+_SHELL_EXEC = _set("exec")
 
 
 def _local_subcommand(words: list[str], launch: Launch) -> None:
@@ -2303,6 +2305,67 @@ def _local_subcommand(words: list[str], launch: Launch) -> None:
     reason = _embedded_reason(words)
     if reason is not None:
         launch.fail(reason)
+
+
+# Bun Shell keeps a tab inside a word, where shlex splits on it.
+_NOT_SPACE = re.compile(r"[^\S ]")
+
+
+def _exec_script(script: str, launch: Launch) -> list[str] | None:
+    """Words of a script that a package manager runs in its own shell (Bun Shell, Yarn's).
+
+    Neither shell is POSIX, so every word must read as written, without quoting, as
+    for ``fish -c``; anything else is an inline shell script.
+    """
+    label = launch.launcher
+    launch.mark("shell_wrapper")
+    words = None if _NOT_SPACE.search(script) else _split_script(script, literal=True)
+    words = _script_words(words, launch) if words is not None else None
+    if words is None:
+        launch.mark("inline_shell_code")
+        launch.fail(f"{label} script is not a simple command")
+        return None
+    name = normalize_command(words[0])
+    if expands(name) or expands(_basename_text(words[0])) or not name:
+        launch.mark("inline_shell_code")
+        launch.fail(f"{label} script command depends on the environment")
+        return None
+    return words
+
+
+def _bun_exec(words: list[str], launch: Launch) -> None:
+    """``bun exec SCRIPT``: Bun Shell runs SCRIPT; later words are its parameters."""
+    launch.launcher = "bun exec"
+    separated = words[:1] == ["--"]
+    operands = words[1:] if separated else words
+    if not separated and any(word.startswith("-") for word in operands):
+        # Bun reads its options anywhere among these words: --cwd moves the script.
+        launch.fail("unrecognised bun exec option")
+    elif not operands:
+        launch.fail("bun exec without a script")
+    elif len(operands) > 1:
+        launch.fail("bun exec words after the script")
+    else:
+        script = _exec_script(operands[0], launch)
+        if script is not None:
+            _local_subcommand(script, launch)
+
+
+def _yarn_exec(words: list[str], launch: Launch) -> None:
+    """``yarn exec SCRIPT ARGS``: Yarn 2+ runs SCRIPT in its shell with ARGS appended.
+
+    Yarn 1 spawns SCRIPT as a program with ARGS, which the same reading covers.
+    """
+    launch.launcher = "yarn exec"
+    operands = words[1:] if words[:1] == ["--"] else words
+    if not operands:
+        launch.fail("yarn exec without a command")
+    elif operands[0].startswith("-"):
+        launch.fail("unrecognised yarn exec option")
+    else:
+        script = _exec_script(operands[0], launch)
+        if script is not None:
+            _local_subcommand([*script, *operands[1:]], launch)
 
 
 def _npm(name: str, rest: list[str], launch: Launch) -> None:
@@ -2376,6 +2439,8 @@ def _yarn(name: str, rest: list[str], launch: Launch) -> None:
         subcommand, remainder = remainder[1], remainder[2:]
     if subcommand == "workspaces":
         launch.fail("yarn workspaces runs a command in each workspace")
+    elif subcommand == "exec":
+        _yarn_exec(remainder, launch)
     elif subcommand == "dlx":
         launch.launcher = "yarn dlx"
         _package_runner(remainder, launch, _YARN_DLX, {"-p", "--package"})
@@ -2398,6 +2463,8 @@ def _bun(name: str, rest: list[str], launch: Launch) -> None:
     if subcommand == "x":
         launch.launcher = "bun x"
         _package_runner(remainder, launch, _BUNX, {"-p", "--package"})
+    elif subcommand == "exec":
+        _bun_exec(remainder, launch)
     elif subcommand in _BUN_FETCHES:
         launch.fail("bun subcommand fetches or installs packages")
     else:
@@ -3059,18 +3126,18 @@ _STARTS: dict[str, _Starts] = {
     ),
     "yarn": _Starts(
         _table("-s --silent --verbose --offline --prefer-offline", "--cwd"),
-        (_YARN_FETCHES | _YARN_NESTED).__contains__,
+        (_YARN_FETCHES | _YARN_NESTED | _SHELL_EXEC).__contains__,
     ),
     "yarnpkg": _Starts(
         _table("-s --silent --verbose --offline --prefer-offline", "--cwd"),
-        (_YARN_FETCHES | _YARN_NESTED).__contains__,
+        (_YARN_FETCHES | _YARN_NESTED | _SHELL_EXEC).__contains__,
     ),
     "bun": _Starts(
         _table(
             "--bun --silent --smol --hot --watch --no-install --verbose --no-clear-screen",
             "-r --preload --cwd -c --config --env-file --tsconfig-override",
         ),
-        _BUN_FETCHES.__contains__,
+        (_BUN_FETCHES | _SHELL_EXEC).__contains__,
         inline=frozenset({"-e", "--eval", "-p", "--print"}),
     ),
     "deno": _Starts(_DENO_RUN, _deno_starts),
