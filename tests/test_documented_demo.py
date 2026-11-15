@@ -13,7 +13,20 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 
 ROOT = Path(__file__).resolve().parents[1]
-WORDS = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
+WORDS = [
+    "zero",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "eleven",
+]
 
 
 def _demo(tmp_path: Path, monkeypatch) -> tuple[dict, dict]:

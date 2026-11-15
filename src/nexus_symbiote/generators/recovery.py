@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.hashing import parse_json_strict
+from nexus_symbiote.core.hashing import open_regular_file, parse_json_strict
 from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 from nexus_symbiote.generators.spdx import SPDXGenerator
 
@@ -39,6 +39,10 @@ def recover_export(text: str | bytes, *, allow_legacy_relationships: bool = Fals
 
 
 def load_export(path: Path, *, allow_legacy_relationships: bool = False) -> AIBOM:
-    with path.open("rb") as stream:
+    """Load an export from a regular file, read as every native reader reads a document.
+
+    No symbolic link is followed and a special file is refused without blocking.
+    """
+    with open_regular_file(Path(path)) as stream:
         raw = stream.read(MAX_EXPORT_BYTES + 1)
     return recover_export(raw, allow_legacy_relationships=allow_legacy_relationships)

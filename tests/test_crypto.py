@@ -162,9 +162,12 @@ def local_signed_bundle(tmp_path, monkeypatch):
     """Genuine local ECDSA bytes with Sigstore's actual artifact verifier.
 
     Certificate-chain and transparency-log authentication are mocked boundaries;
-    this fixture is not proof of complete public Sigstore provenance. The real
-    Sigstore code verifies Identity/OIDC policy, signature and Rekor consistency.
-    No network, Fulcio identity or public signing service is involved.
+    this fixture is not proof of complete public Sigstore provenance, and the tests
+    built on it say so in their names. The real Sigstore code verifies Identity/OIDC
+    policy, signature and Rekor consistency. No network, Fulcio identity or public
+    signing service is involved. The tests that verify a real, GitHub-signed bundle
+    offline against the production trust root (tests/test_crypto_trust_root*.py) are
+    the authority for the verifier's behaviour.
     """
     pytest.importorskip("sigstore")
     # Verification now checks (and creates, mode 0700) the sigstore-python TUF
@@ -234,7 +237,9 @@ def local_signed_bundle(tmp_path, monkeypatch):
     return artifact, bundle_path, identity, issuer
 
 
-def test_supported_sigstore_api_verifies_genuine_local_signature(local_signed_bundle):
+def test_verifier_with_mocked_chain_and_log_accepts_a_genuine_local_signature(
+    local_signed_bundle,
+):
     artifact, bundle, identity, issuer = local_signed_bundle
     result = verify_sigstore_bundle(artifact, bundle, identity, issuer)
     assert result.verified
@@ -247,7 +252,9 @@ def test_supported_sigstore_api_verifies_genuine_local_signature(local_signed_bu
 
 
 @pytest.mark.parametrize("change", ["artifact", "identity", "issuer"])
-def test_actual_verifier_rejects_changed_artifact_or_signer(local_signed_bundle, change):
+def test_verifier_with_mocked_chain_and_log_rejects_changed_artifact_or_signer(
+    local_signed_bundle, change
+):
     artifact, bundle, identity, issuer = local_signed_bundle
     if change == "artifact":
         artifact.write_bytes(b"tampered artifact")
@@ -293,7 +300,7 @@ def test_actual_sigstore_parser_rejects_invalid_bundle_before_network(tmp_path, 
     assert result.identity is None
 
 
-def test_actual_verifier_rejects_corrupt_signature(local_signed_bundle):
+def test_verifier_with_mocked_chain_and_log_rejects_a_corrupt_signature(local_signed_bundle):
     from sigstore.models import Bundle
 
     artifact, bundle_path, identity, issuer = local_signed_bundle
@@ -302,3 +309,30 @@ def test_actual_verifier_rejects_corrupt_signature(local_signed_bundle):
     result = verify_sigstore_bundle(artifact, bundle_path, identity, issuer)
     assert not result.verified
     assert result.identity is None
+
+
+def test_a_bundle_over_the_byte_limit_is_refused_before_sigstore_is_imported(tmp_path, monkeypatch):
+    from nexus_symbiote.utils.crypto import MAX_BUNDLE_BYTES, verify_sigstore_digest
+
+    # With the modules absent, anything that reaches the parser reports SIGSTORE_MISSING
+    # instead: the limit is applied first, and it is exact.
+    for module in ("sigstore", "sigstore.models", "sigstore.verify", "sigstore_models"):
+        monkeypatch.setitem(sys.modules, module, None)
+    identity, issuer = "publisher@example.test", "https://issuer.example.test"
+    oversized = b"{" + b" " * MAX_BUNDLE_BYTES
+    digest = hashlib.sha256(b"data").hexdigest()
+    result = verify_sigstore_digest(digest, oversized, identity, issuer)
+    assert not result.verified
+    assert result.error == "Sigstore bundle exceeds byte limit"
+    assert (
+        verify_sigstore_digest(digest, oversized[:-1], identity, issuer).error == SIGSTORE_MISSING
+    )
+    artifact = tmp_path / "artifact.bin"
+    bundle = tmp_path / "artifact.sigstore.json"
+    artifact.write_bytes(b"data")
+    bundle.write_bytes(oversized)
+    result = verify_sigstore_bundle(artifact, bundle, identity, issuer)
+    assert not result.verified
+    assert result.error == "Sigstore bundle exceeds byte limit"
+    bundle.write_bytes(oversized[:-1])
+    assert verify_sigstore_bundle(artifact, bundle, identity, issuer).error == SIGSTORE_MISSING

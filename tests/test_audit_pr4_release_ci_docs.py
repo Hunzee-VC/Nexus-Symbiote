@@ -38,13 +38,19 @@ def test_action_rejects_scanner_subset_when_validate_is_enabled(tmp_path: Path) 
         "SYMBIOTE_FORMAT": "json",
     }
     with pytest.raises(
-        run_action.InputError, match="scanners subset requires validate to be false"
+        run_action.InputError,
+        match="scanners subset requires validate and risk-check to be false",
     ):
         run_action.Config.from_env({**base_env, "SYMBIOTE_SCANNERS": "mcp,model"})
 
-    # Allowed when validate is explicitly disabled
+    # Allowed when both gates that need full coverage are explicitly disabled
     cfg_no_val = run_action.Config.from_env(
-        {**base_env, "SYMBIOTE_SCANNERS": "mcp,model", "SYMBIOTE_VALIDATE": "false"}
+        {
+            **base_env,
+            "SYMBIOTE_SCANNERS": "mcp,model",
+            "SYMBIOTE_VALIDATE": "false",
+            "SYMBIOTE_RISK_CHECK": "false",
+        }
     )
     assert cfg_no_val.scanners == ("mcp", "model")
     assert cfg_no_val.validate is False

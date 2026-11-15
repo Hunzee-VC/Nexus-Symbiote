@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -17,6 +18,7 @@ from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION, hash_tool_
 from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
 from nexus_symbiote.live import stdio
 from nexus_symbiote.live.verify import verify_mcp_servers
+from tests.support import STDIO_HELLO, launcher_log, misbehaving_launcher
 
 TOOL = {"name": "weather", "description": "Read weather", "inputSchema": {"type": "object"}}
 SERVER = """import json, os, sys
@@ -224,3 +226,230 @@ time.sleep(30)
     report = verify_mcp_servers(inventory(), trusted_launchers=launcher(tmp_path, source))
     assert not report.complete
     assert time.monotonic() - started < 3
+
+
+# The bounds of the pinned stdio exchange. A launcher that misbehaves in one way is refused
+# at a fixed diagnostic, its process group is killed and reaped before the refusal is
+# reported, and nothing is imported. The snippets run inside the launcher; see
+# tests.support.misbehaving_launcher.
+NOTIFICATION = '{"jsonrpc":"2.0","method":"notifications/message","params":{}}'
+STREAM_ENDED = "MCP stream ended or exceeded its byte limit"
+BAD_ENTRY = "invalid or duplicate MCP list entry"
+BAD_CURSOR = "invalid MCP pagination cursor"
+
+
+def pinned(tmp_path: Path, **behaviour: str | dict) -> tuple[str, str, Path]:
+    log = tmp_path / "launcher.log"
+    path = tmp_path / "misbehaving-launcher"
+    pin = misbehaving_launcher(path, log, **behaviour)
+    return str(path), pin, log
+
+
+def assert_reaped(log: Path) -> list[object]:
+    entries = launcher_log(log)
+    assert entries and entries[0][0] == "started"
+    for entry in entries:
+        with pytest.raises(ProcessLookupError):
+            os.kill(int(entry[1]), 0)
+    return [entry[0] for entry in entries]
+
+
+def refused_observation(
+    tmp_path: Path, failure: str, *, reason: str = "protocol", **behaviour: str | dict
+) -> list[object]:
+    command, pin, log = pinned(tmp_path, **behaviour)
+    with pytest.raises(stdio.StdioProtocolError) as refusal:
+        stdio.observe_pinned(command, pin)
+    assert str(refusal.value) == failure
+    assert refusal.value.reason == reason
+    return assert_reaped(log)
+
+
+def test_a_frame_over_the_line_limit_is_refused(tmp_path):
+    on_list = f"reply({{'tools': [], 'pad': 'x' * {stdio.MAX_LINE}}})"
+    methods = refused_observation(tmp_path, "MCP frame exceeds size limit", on_list=on_list)
+    assert methods == ["started", "initialize", "notifications/initialized", "tools/list"]
+
+
+def test_more_frames_than_the_budget_are_refused_before_the_reply_is_read(tmp_path):
+    on_list = f"for _ in range(1030):\n    emit({NOTIFICATION!r})\nreply({{'tools': []}})"
+    refused_observation(tmp_path, "MCP frame budget exceeded", on_list=on_list)
+
+
+def test_a_stream_over_the_byte_budget_is_refused_before_the_reply_is_read(tmp_path):
+    padded = (
+        "{'jsonrpc': '2.0', 'method': 'notifications/message', 'params': {'pad': 'x' * 500000}}"
+    )
+    on_list = f"for _ in range(20):\n    emit(json.dumps({padded}))\nreply({{'tools': []}})"
+    refused_observation(tmp_path, STREAM_ENDED, on_list=on_list)
+
+
+def test_a_launcher_that_exits_before_replying_is_refused(tmp_path):
+    methods = refused_observation(tmp_path, STREAM_ENDED, on_list="raise SystemExit(0)")
+    assert methods[-1] == "tools/list"
+
+
+@pytest.mark.parametrize(
+    ("on_list", "failure"),
+    [
+        ("emit('not json')", "invalid JSON-RPC frame"),
+        (
+            'emit(\'{"jsonrpc":"2.0","jsonrpc":"2.0","id":2,"result":{}}\')',
+            "invalid JSON-RPC frame",
+        ),
+        ("emit('[]')", "invalid JSON-RPC envelope"),
+        ("emit('null')", "invalid JSON-RPC envelope"),
+        ('emit(\'{"jsonrpc":"1.0","id":2,"result":{"tools":[]}}\')', "invalid JSON-RPC envelope"),
+        ("reply({'tools': []}, request_id=99)", "unexpected MCP response"),
+        (
+            "emit(json.dumps({'jsonrpc': '2.0', 'id': msg['id'], 'result': {}, 'extra': 1}))",
+            "unexpected MCP response",
+        ),
+        (
+            "emit(json.dumps({'jsonrpc': '2.0', 'id': msg['id'], "
+            "'error': {'code': -32603, 'message': 'x'}}))",
+            "unexpected MCP response",
+        ),
+        ("reply([])", "invalid MCP result"),
+    ],
+    ids=[
+        "not-json",
+        "duplicate-key",
+        "array",
+        "null",
+        "wrong-version",
+        "wrong-id",
+        "extra-member",
+        "error-reply",
+        "non-object-result",
+    ],
+)
+def test_malformed_frames_and_replies_are_refused(tmp_path, on_list, failure):
+    refused_observation(tmp_path, failure, on_list=on_list)
+
+
+@pytest.mark.parametrize(
+    "on_list",
+    [
+        "reply({'tools': [{'name': 't%d' % i} for i in range(4097)]})",
+        "reply({'tools': 'weather'})",
+        "reply({})",
+    ],
+    ids=["too-many", "not-a-list", "absent"],
+)
+def test_an_oversized_or_invalid_tool_list_is_refused(tmp_path, on_list):
+    refused_observation(tmp_path, "invalid or oversized MCP list", on_list=on_list)
+
+
+@pytest.mark.parametrize(
+    "on_list",
+    [
+        "reply({'tools': [{'name': 'a'}, {'name': 'a'}]})",
+        "reply({'tools': ['a']})",
+        "reply({'tools': [{'name': ''}]})",
+        "reply({'tools': [{'name': 7}]})",
+        "reply({'tools': [{'name': 'x' * 2049}]})",
+        "reply({'tools': [{'name': 'a\\x00b'}]})",
+    ],
+    ids=["duplicate", "not-an-object", "empty-name", "non-string-name", "long-name", "control"],
+)
+def test_an_invalid_or_duplicate_list_entry_is_refused(tmp_path, on_list):
+    refused_observation(tmp_path, BAD_ENTRY, on_list=on_list)
+
+
+def test_a_duplicate_across_pages_is_refused_like_one_within_a_page(tmp_path):
+    on_list = (
+        "if page == 1:\n    reply({'tools': [{'name': 'a'}], 'nextCursor': 'two'})\n"
+        "else:\n    reply({'tools': [{'name': 'a'}]})"
+    )
+    methods = refused_observation(tmp_path, BAD_ENTRY, on_list=on_list)
+    assert methods.count("tools/list") == 2
+
+
+@pytest.mark.parametrize(
+    "on_list",
+    [
+        "reply({'tools': [], 'nextCursor': ''})",
+        "reply({'tools': [], 'nextCursor': 7})",
+        "reply({'tools': [], 'nextCursor': 'x' * 257})",
+        "reply({'tools': [], 'nextCursor': 'same'})",
+    ],
+    ids=["empty", "not-a-string", "too-long", "repeated"],
+)
+def test_an_invalid_or_repeated_cursor_is_refused(tmp_path, on_list):
+    refused_observation(tmp_path, BAD_CURSOR, on_list=on_list)
+
+
+def test_the_page_budget_ends_a_list_that_never_finishes(tmp_path):
+    on_list = "reply({'tools': [], 'nextCursor': 'page-%d' % page})"
+    methods = refused_observation(tmp_path, "MCP page budget exceeded", on_list=on_list)
+    assert methods.count("tools/list") == 64
+
+
+@pytest.mark.parametrize(
+    "capabilities", [{}, {"tools": "yes"}, {"prompts": {}}], ids=["none", "not-an-object", "other"]
+)
+def test_a_server_that_does_not_negotiate_tool_listing_is_refused(tmp_path, capabilities):
+    hello = {**STDIO_HELLO, "capabilities": capabilities}
+    methods = refused_observation(
+        tmp_path, "MCP tool listing was not negotiated", hello=hello, on_list="reply({'tools': []})"
+    )
+    assert methods == ["started", "initialize"]
+
+
+def test_an_unsupported_protocol_version_is_refused_with_its_own_reason(tmp_path):
+    hello = {**STDIO_HELLO, "protocolVersion": "2099-01-01"}
+    refused_observation(
+        tmp_path,
+        "unsupported MCP protocol version",
+        reason="unsupported-protocol-version",
+        hello=hello,
+    )
+
+
+def test_a_launcher_that_closes_its_input_is_refused_when_the_next_message_is_sent(tmp_path):
+    # The input is closed before the reply, so the client's next message, sent only once
+    # the reply has arrived, always meets a pipe without a reader.
+    on_initialize = "os.close(0)\nreply(hello)\ntime.sleep(30)"
+    methods = refused_observation(tmp_path, "MCP input stream closed", on_initialize=on_initialize)
+    assert methods == ["started", "initialize"]
+
+
+class _ZeroWrites:
+    """``os`` as seen by the module under test, with every write accepting nothing."""
+
+    def __getattr__(self, name: str):
+        return getattr(os, name)
+
+    def write(self, fd: int, data) -> int:
+        return 0
+
+
+def test_a_write_that_makes_no_progress_is_a_closed_input_stream(tmp_path, monkeypatch):
+    command, pin, _ = pinned(tmp_path)
+    monkeypatch.setattr(stdio, "os", _ZeroWrites())
+    with pytest.raises(stdio.StdioProtocolError, match="MCP input stream closed"):
+        stdio.observe_pinned(command, pin)
+
+
+def test_an_exhausted_frame_source_is_a_missing_response(tmp_path, monkeypatch):
+    command, pin, _ = pinned(tmp_path)
+    monkeypatch.setattr(stdio, "_frames", lambda fd, deadline: iter(()))
+    with pytest.raises(stdio.StdioProtocolError, match="missing MCP response"):
+        stdio.observe_pinned(command, pin)
+
+
+def test_a_launcher_over_the_byte_budget_is_refused_before_it_is_read_or_run(tmp_path):
+    # A sparse file: the size check reads st_size before any byte, so no 128 MiB is written.
+    path = tmp_path / "huge-launcher"
+    with path.open("wb") as stream:
+        stream.truncate(128 * 1024 * 1024 + 1)
+    pin = "sha256:" + hashlib.sha256(b"").hexdigest()
+    with pytest.raises(stdio.LaunchPolicyError) as refusal:
+        stdio.observe_pinned(str(path), pin)
+    assert str(refusal.value) == "launcher exceeds byte budget"
+    assert refusal.value.reason == "launcher-unavailable"
+    policy = {"mcp:weather": {"command": str(path), "sha256": pin}}
+    report = verify_mcp_servers(inventory(), trusted_launchers=policy)
+    assert not report.complete
+    assert report.results[0].reason == "launcher-unavailable"

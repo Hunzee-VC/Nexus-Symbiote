@@ -120,3 +120,86 @@ def otlp_export(
             }
         ]
     }
+
+
+STDIO_HELLO = {
+    "protocolVersion": "2025-06-18",
+    "capabilities": {"tools": {}},
+    "serverInfo": {"name": "fixture", "version": "1"},
+}
+_LAUNCHER_TEMPLATE = """#!{python}
+import json, os, sys, time
+log = {log!r}
+hello = {hello!r}
+
+
+def record(*entry):
+    with open(log, "a") as stream:
+        stream.write(json.dumps(list(entry)) + "\\n")
+
+
+def emit(raw):
+    sys.stdout.write(raw + "\\n")
+    sys.stdout.flush()
+
+
+def reply(result, request_id=None):
+    emit(json.dumps({{"jsonrpc": "2.0", "id": msg["id"] if request_id is None else request_id, "result": result}}))
+
+
+record("started", os.getpid())
+page = 0
+for line in sys.stdin:
+    msg = json.loads(line)
+    method = msg.get("method")
+    record(method, os.getpid())
+    if method == "notifications/initialized":
+        continue
+    if method == "initialize":
+{on_initialize}
+        continue
+    if method == "tools/list":
+        page += 1
+{on_list}
+        continue
+    raise SystemExit(1)
+"""
+
+
+def misbehaving_launcher(
+    path: Path,
+    log: Path,
+    *,
+    on_list: str = "reply({'tools': []})",
+    on_initialize: str = "reply(hello)",
+    hello: dict[str, object] | None = None,
+) -> str:
+    """Write a pinned stdio MCP launcher whose replies are the Python snippets given.
+
+    Each snippet runs inside the request loop with ``msg`` (the request), ``page`` (how many
+    ``tools/list`` requests arrived so far), ``reply(result)``, ``emit(raw_line)`` and
+    ``hello``. The launcher appends ``["started", pid]`` and then ``[method, pid]`` for every
+    request to ``log``. Returns the launcher's ``sha256:`` pin.
+    """
+    import hashlib
+    import textwrap
+
+    script = _LAUNCHER_TEMPLATE.format(
+        python=sys.executable,
+        log=str(log),
+        hello=STDIO_HELLO if hello is None else hello,
+        on_initialize=textwrap.indent(textwrap.dedent(on_initialize).strip("\n"), " " * 8),
+        on_list=textwrap.indent(textwrap.dedent(on_list).strip("\n"), " " * 8),
+    )
+    path.write_text(script)
+    path.chmod(0o700)
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def launcher_log(log: Path) -> list[list[object]]:
+    """The entries a misbehaving launcher recorded, oldest first."""
+    import json
+
+    if not log.exists():
+        return []
+    return [json.loads(line) for line in log.read_text().splitlines()]

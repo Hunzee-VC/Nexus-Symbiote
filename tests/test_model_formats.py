@@ -6,6 +6,7 @@ import io
 import random
 import re
 import time
+import tracemalloc
 
 import pytest
 
@@ -406,6 +407,15 @@ def test_gguf_budget_is_shared():
         (b"{{ x.__class__ }}", True),
         (b"{{ x['__globals__'] }}", True),
         (b"{{ x|attr('a') }}", True),
+        # Dunder names can be built from more than two literal pieces.
+        (b"{{ x['_' ~ '_' ~ 'class' ~ '_' ~ '_'] }}", True),
+        (b"{{ x['_' + '_' + 'class' + '_' + '_'] }}", True),
+        (b"{{ x['_' '_' 'class' '_' '_'] }}", True),
+        (b"{{ x['\\x5f' ~ '_' ~ 'class' ~ '_' ~ '\\u005f'] }}", True),
+        (b"{{ x|map(attribute='_'~'_'~'class'~'_'~'_') }}", True),
+        (b"{{ x['_' ~ 'class' ~ '_'] }}", False),
+        (b"Text '_' ~ '_' ~ 'class' ~ '_' ~ '_'", False),
+        (b"{{ x['_'] ~ x['_'] ~ 'class' ~ x['_'] ~ x['_'] }}", False),
         # Jinja skips Unicode whitespace between tokens and decodes string escapes.
         ("{{ ''.\u00a0__class__ }}".encode(), True),
         ("{{ ''.\u3000__class__ }}".encode(), True),
@@ -433,3 +443,38 @@ def test_gguf_budget_is_shared():
 )
 def test_template_escape_heuristic(template, escapes):
     assert template_escape_markers(template) is escapes
+
+
+def test_simple_template_marker_short_circuits_joined_literal_analysis(monkeypatch):
+    def unexpected(_: str) -> bool:
+        raise AssertionError("a direct marker should not need joined-literal analysis")
+
+    monkeypatch.setattr(model_formats, "_joined_literal_marker", unexpected)
+    assert template_escape_markers(b"{{ x.__class__ }}")
+    assert template_escape_markers(b"{{ x['\\x5f\\x5fclass\\x5f\\x5f'] }}")
+
+
+def test_joined_literal_stream_matches_dunder_pattern():
+    rng = random.Random(42)  # noqa: S311 - deterministic parser test data
+    for _ in range(2_000):
+        pieces = ["".join(rng.choices("_abc01!", k=rng.randrange(12))) for _ in range(4)]
+        template = "{{ " + " ~ ".join(f"'{piece}'" for piece in pieces) + " }}"
+        assert model_formats._joined_literal_marker(template) is bool(
+            re.search(r"__[A-Za-z0-9_]+__", "".join(pieces))
+        )
+
+
+def test_long_joined_literal_chain_uses_bounded_auxiliary_memory():
+    template = "{{ " + "'a'~" * 100_000 + "'b' }}"
+    already_tracing = tracemalloc.is_tracing()
+    if not already_tracing:
+        tracemalloc.start()
+    try:
+        before, _ = tracemalloc.get_traced_memory()
+        tracemalloc.reset_peak()
+        assert not model_formats._joined_literal_marker(template)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        if not already_tracing:
+            tracemalloc.stop()
+    assert peak - before < 100_000

@@ -16,7 +16,13 @@ from markdown_it.token import Token
 
 from nexus_symbiote import minimum_elements as me
 from nexus_symbiote.cli import main
-from nexus_symbiote.core.aibom import AIBOM, MAX_NATIVE_BYTES, DependencyEdge
+from nexus_symbiote.core.aibom import (
+    AIBOM,
+    MAX_NATIVE_BYTES,
+    MAX_NATIVE_NESTING,
+    DependencyEdge,
+    NativeFormatError,
+)
 from nexus_symbiote.core.models import (
     AgentComponent,
     MCPServerComponent,
@@ -282,7 +288,10 @@ def test_an_inventory_that_cannot_be_exported_fails_closed(runner, tmp_path):
     assert not report.exists()
 
 
-def test_an_inventory_too_deep_to_export_fails_closed(runner, tmp_path):
+def test_an_inventory_too_deep_to_export_fails_closed(runner, demo, tmp_path, monkeypatch):
+    # An inventory nested past the native bound never reaches the export: it is refused
+    # as it is read. Should the export still recurse past the stack on one that loads,
+    # the command ends with its fixed refusal and no report.
     nested = '"Apache-2.0"'
     for _ in range(400):
         nested = '{"terms": [' + nested + "]}"
@@ -291,8 +300,21 @@ def test_an_inventory_too_deep_to_export_fails_closed(runner, tmp_path):
         '{"metadata": {"spec_version": "1.1.0"}, "components": [{"bom_ref": "model:w", '
         '"component_type": "model", "name": "w", "properties": {"license": ' + nested + "}}]}"
     )
-    assert AIBOM.load(path).components[0].properties["license"]
+    with pytest.raises(NativeFormatError, match=f"nests deeper than {MAX_NATIVE_NESTING} levels"):
+        AIBOM.load(path)
     result = run(runner, str(path), "-o", str(report))
+    assert result.exit_code == 1
+    assert result.output.strip() == (
+        f"Error: {path} is not a valid native AIBOM file. inventory nests deeper than "
+        f"{MAX_NATIVE_NESTING} levels"
+    )
+    assert not report.exists()
+
+    def recursing(bom: AIBOM) -> object:
+        raise RecursionError
+
+    monkeypatch.setattr(me, "assess", recursing)
+    result = run(runner, str(demo), "-o", str(report))
     assert result.exit_code == 1
     assert result.output.strip() == f"Error: {EXPORT_TOO_DEEP}"
     assert not report.exists()

@@ -237,7 +237,8 @@ def weakened_settings(policy: Policy) -> list[str]:
 
     Compared with the built-in policy: disabled validation, a relaxed severity cutoff
     or threshold, ignored categories, each suppression, report-only collection, fewer
-    collectors, extra excluded paths and a raised warning threshold.
+    collectors, extra excluded paths, a raised warning threshold and an export format
+    other than the native one, which changes what ``scan -o`` writes.
     """
     base = Policy()
     weaker: list[str] = []
@@ -261,6 +262,8 @@ def weakened_settings(policy: Policy) -> list[str]:
     extra = [path for path in policy.scan.exclude_paths if path not in DEFAULT_EXCLUDE_PATHS]
     if extra:
         weaker.append("scan.exclude_paths=" + ",".join(extra))
+    if policy.output.default_format != base.output.default_format:
+        weaker.append(f"output.default_format={policy.output.default_format}")
     return weaker
 
 
