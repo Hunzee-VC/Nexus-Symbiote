@@ -258,10 +258,14 @@ class PinnedStdioSession:
     def __exit__(self, *_: object) -> None:
         proc = self._process
         self._process = None
+        teardown: PinnedProcessError | None = None
         try:
             if proc is not None:
                 try:
-                    terminate_process_group(proc)
+                    try:
+                        terminate_process_group(proc)
+                    except PinnedProcessError as exc:
+                        teardown = exc
                     proc.wait(timeout=5)
                 finally:
                     if proc.stdin is not None:
@@ -272,6 +276,13 @@ class PinnedStdioSession:
             if self._directory is not None:
                 self._directory.cleanup()
                 self._directory = None
+        if teardown is None:
+            return
+        if self._called:
+            raise ExecutionOutcomeUnknown(
+                "the launcher's PID namespace did not end; the tool may still be running"
+            ) from teardown
+        raise AuthorizationError(str(teardown)) from teardown
 
 
 def invoke_pinned_stdio(

@@ -3,8 +3,9 @@
 ``live.stdio`` and ``live.session`` both copy the approved bytes and execute that
 private copy. One helper keeps the copy, the digest check and the termination from
 drifting apart. When the kernel allows a user and PID namespace, the launcher is
-pid 1 of that namespace and dies with every descendant. If the kernel refuses the
-namespace, launch fails before executing the pinned program. On Linux,
+pid 1 of that namespace, and cleanup kills it directly and waits until the kernel has
+ended every process in the namespace, or reports that it could not. If the kernel
+refuses the namespace, launch fails before executing the pinned program. On Linux,
 ``--no-isolation`` starts the launcher through a short exec wrapper that makes it a
 child subreaper, and cleanup stops the launcher before it sweeps the tree, so while the
 launcher is alive its descendants are killed with the session, including a double-fork.
@@ -40,6 +41,7 @@ _NAMESPACE_OK: bool | None = None
 _NAMESPACED: set[int] = set()
 _STOP_SECONDS = 1.0
 _SWEEP_PASSES = 8
+_TEARDOWN_SECONDS = 5.0
 # Runs in a fresh interpreter, so the caller executes no Python between fork and exec.
 # The interpreter ignores SIGPIPE and SIGXFSZ at startup and adds LC_CTYPE under the C
 # locale, so the wrapper restores both signals and passes the launch environment itself.
@@ -177,8 +179,8 @@ def isolated_argv(staged: Path) -> list[str]:
     tool = _unshare_path()
     if tool is None:
         raise PinnedProcessError("isolation-unavailable", "PID namespace launcher is unavailable")
-    # --kill-child delivers SIGKILL to the namespace init when unshare dies, and the
-    # kernel then kills every process in that namespace, including setsid descendants.
+    # --kill-child is a parent-death signal, which the launcher can clear, so cleanup
+    # kills the namespace init itself; the flag covers an unshare that dies first.
     return [
         tool,
         "--user",
@@ -191,14 +193,10 @@ def isolated_argv(staged: Path) -> list[str]:
     ]
 
 
-def _descendant_pids(root: int) -> set[int]:
-    """Process-tree descendants of ``root``, including those that called ``setsid``."""
+def _children_by_parent() -> dict[int, list[int]]:
+    """Each parent pid's children, from one scan of ``/proc``; OSError if it is unreadable."""
     children: dict[int, list[int]] = {}
-    try:
-        entries = os.listdir("/proc")
-    except OSError:
-        return set()
-    for entry in entries:
+    for entry in os.listdir("/proc"):
         if not entry.isdigit():
             continue
         pid = int(entry)
@@ -212,6 +210,15 @@ def _descendant_pids(root: int) -> set[int]:
             continue
         if ppid is not None:
             children.setdefault(ppid, []).append(pid)
+    return children
+
+
+def _descendant_pids(root: int) -> set[int]:
+    """Process-tree descendants of ``root``, including those that called ``setsid``."""
+    try:
+        children = _children_by_parent()
+    except OSError:
+        return set()
     found: set[int] = set()
     stack = [root]
     while stack:
@@ -247,20 +254,21 @@ def _kill_descendants(root: int) -> None:
         signalled |= victims
 
 
-def _stop_launcher(pid: int) -> None:
-    """Stop the launcher so it cannot fork while its descendants are swept.
+def _stop_launcher(pid: int) -> int | None:
+    """Stop the launcher, or ``unshare``, so it cannot fork or reap during cleanup.
 
     A stopped launcher is still alive, so on Linux it stays the subreaper that adopts the
     children of every descendant the sweep kills. The kernel reports the stop only once
     every thread has stopped, which a thread does on its way out of the kernel, so a fork
     in progress has attached its child by then. The wait is bounded: a launcher that is
-    traced or blocked in the kernel is swept while it may still run.
+    traced or blocked in the kernel is swept while it may still run. Returns the
+    ``si_code`` of the stop or exit that was seen, or None if neither was.
     """
     try:
         os.kill(pid, signal.SIGSTOP)
     except (ProcessLookupError, PermissionError):
         # It is gone, or not ours to signal; the sweep and killpg still run.
-        return
+        return None
     deadline = time.monotonic() + _STOP_SECONDS
     delay = 0.0005
     while True:
@@ -269,11 +277,66 @@ def _stop_launcher(pid: int) -> None:
             changed = os.waitid(os.P_PID, pid, os.WSTOPPED | os.WEXITED | os.WNOHANG | os.WNOWAIT)
         except OSError:
             # Not a child this process can wait for, or a system without these flags.
-            return
-        if changed is not None or time.monotonic() >= deadline:
-            return
+            return None
+        if changed is not None:
+            return changed.si_code
+        if time.monotonic() >= deadline:
+            return None
         time.sleep(delay)
         delay = min(delay * 2, 0.02)
+
+
+def _status(pid: int) -> dict[str, str] | None:
+    """The fields of ``/proc/<pid>/status``, or None once the pid no longer exists."""
+    try:
+        with open(f"/proc/{pid}/status", encoding="utf-8") as status:
+            return dict(line.rstrip("\n").split(":\t", 1) for line in status if ":\t" in line)
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+
+
+def _ended(pid: int) -> bool:
+    """Whether ``pid`` has finished exiting, or cannot be shown not to have.
+
+    The init of a PID namespace becomes a zombie only after the kernel has killed every
+    other process in the namespace and waited for them. A thread-group leader that exits
+    while another thread runs is a zombie too, so the thread count must have fallen to
+    the leader alone. A status that cannot be read is not taken as an exit.
+    """
+    try:
+        status = _status(pid)
+    except OSError:
+        return False
+    if status is None:
+        return True
+    return status.get("State", "")[:1] in {"Z", "X"} and status.get("Threads") == "1"
+
+
+def _end_namespace(supervisor: int) -> bool:
+    """SIGKILL each child of the stopped ``unshare`` and wait until the kernel ends it.
+
+    A launcher can clear the parent-death signal that ``--kill-child`` sets and leave
+    the process group that killpg reaches. A SIGKILL from the parent namespace always
+    reaches the namespace init, and the kernel then kills every process in the
+    namespace, nested namespaces included. While ``unshare`` is stopped it cannot reap
+    its child, so the child's pid cannot be reused before it is signalled and seen to
+    exit. Returns False when the scan fails or the deadline passes first.
+    """
+    try:
+        inits = _children_by_parent().get(supervisor, [])
+    except OSError:
+        return False
+    for pid in inits:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, signal.SIGKILL)
+    deadline = time.monotonic() + _TEARDOWN_SECONDS
+    delay = 0.0005
+    while inits := [pid for pid in inits if not _ended(pid)]:
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(delay)
+        delay = min(delay * 2, 0.02)
+    return True
 
 
 def _subreaper_argv(staged: Path) -> list[str] | None:
@@ -355,10 +418,16 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
 
 
 def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
-    """Kill the session and, outside a PID namespace, every descendant of the launcher.
+    """Kill the session and every process the launcher started.
 
-    On Linux the launcher is a child subreaper on that path, so a double-fork is
-    reparented to it instead of pid 1 and the tree sweep still finds it. There the
+    In a PID namespace, ``unshare`` is stopped so that it cannot reap the namespace
+    init, the init is killed directly, and cleanup waits until the kernel has ended the
+    namespace. If ``unshare`` does not stop, or the namespace has not ended by the
+    deadline, ``unshare`` is still killed and ``PinnedProcessError`` reports
+    ``isolation-teardown-failed``.
+
+    Outside a namespace, on Linux, the launcher is a child subreaper, so a double-fork
+    is reparented to it instead of pid 1 and the tree sweep still finds it. There the
     launcher is stopped first, so it cannot start a process after the sweep, such as a
     helper that a watchdog restarts, which would be reparented to pid 1 when killpg
     kills the launcher. A descendant left behind by a launcher that already exited was
@@ -367,10 +436,16 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
     namespaced = proc.pid in _NAMESPACED
     # The sweep reads Linux's /proc, and macOS has no os.waitid before Python 3.13. Until
     # it is reaped, the pid is still this launcher's.
-    stop = not namespaced and sys.platform.startswith("linux") and proc.returncode is None
+    stop = sys.platform.startswith("linux") and proc.returncode is None
+    ended = True
     try:
         if stop:
-            _stop_launcher(proc.pid)
+            seen = _stop_launcher(proc.pid)
+            if namespaced and seen == os.CLD_STOPPED:
+                ended = _end_namespace(proc.pid)
+            elif namespaced:
+                # unshare exits only after its child, whose death ends the namespace.
+                ended = seen in (os.CLD_EXITED, os.CLD_KILLED, os.CLD_DUMPED)
         if not namespaced:
             _kill_descendants(proc.pid)
         try:
@@ -390,3 +465,9 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
             # stopped launcher would never read EOF and the caller's wait() would hang.
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.kill(proc.pid, signal.SIGKILL)
+    if not ended:
+        raise PinnedProcessError(
+            "isolation-teardown-failed",
+            "the launcher's PID namespace could not be confirmed ended; "
+            "a process from it may still be running",
+        )

@@ -230,7 +230,10 @@ def _capture(binary: Path, work: Path) -> PinnedObservation:
                 )
             return observation
         finally:
-            terminate_process_group(proc)
+            try:
+                terminate_process_group(proc)
+            except PinnedProcessError as exc:
+                raise LaunchPolicyError(exc.reason, str(exc)) from exc
 
 
 def observe_pinned(command: str, digest: str) -> PinnedObservation:

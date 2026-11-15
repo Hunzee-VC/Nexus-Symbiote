@@ -59,6 +59,10 @@ REASONS: dict[str, str] = {
         "Kernel PID containment is unavailable; the pinned launcher was not executed. "
         "Use an independently isolated worker or explicitly accept --no-isolation."
     ),
+    "isolation-teardown-failed": (
+        "The pinned launcher's PID namespace could not be confirmed ended after the "
+        "session; a process from it may still be running on this worker."
+    ),
     "deadline": (
         "The pinned server's bounded MCP exchange and the checks of its descriptors did "
         "not finish before the deadline."

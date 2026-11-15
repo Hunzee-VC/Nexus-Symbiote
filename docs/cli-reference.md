@@ -966,8 +966,17 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 | `--no-isolation` | Explicitly allow execution without a PID namespace; printed as a warning. On Linux the launcher is made a child subreaper and is stopped before cleanup, so its descendants are killed with the session while it is alive; a descendant that outlives the launcher can escape, as can one that deliberately evades cleanup. Elsewhere cleanup is best effort. This is not a namespace or sandbox. |
 
 By default the launcher must run as pid 1 of a new user and PID namespace
-(`unshare --user --map-root-user --pid --fork --kill-child`), so the kernel ends its
-descendants with the session. Inside the namespace the launcher sees itself as uid 0
+(`unshare --user --map-root-user --pid --fork --kill-child`). When the session ends,
+cleanup stops `unshare` so that it cannot reap the launcher, sends the launcher
+SIGKILL directly and waits until the kernel has ended every process in the
+namespace, including nested PID namespaces. It does not rely on `--kill-child` or
+the process group, which a launcher can defeat by clearing its parent-death signal
+and calling `setsid` or `setpgid`. If `unshare` does not stop within 1 second, or
+the namespace has not ended 5 seconds after the SIGKILL, the server fails with
+`isolation-teardown-failed`. A process that the launcher has another service start,
+such as `systemd-run --user`, is outside the namespace and is not ended, and nothing
+ends the namespace if `verify-live` itself is killed before its cleanup runs.
+Inside the namespace the launcher sees itself as uid 0
 and gid 0, mapped to the invoking user and group; every other uid and gid, including
 the owners of the files it reads and its own supplementary groups, appears as
 `nobody`/`nogroup` (65534), and `setgroups` is denied. That grants no privilege

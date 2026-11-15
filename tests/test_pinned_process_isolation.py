@@ -19,7 +19,7 @@ import pytest
 from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
-from nexus_symbiote.live import pinned_process, stdio
+from nexus_symbiote.live import pinned_process, stdio, verify
 from nexus_symbiote.live.pinned_process import isolation_off
 from nexus_symbiote.live.session import PinnedStdioSession
 from nexus_symbiote.live.stdio import (
@@ -51,9 +51,9 @@ for line in sys.stdin:
 """
 
 
-def _pinned(path: Path, prelude: str) -> tuple[Path, str]:
+def _pinned(path: Path, prelude: str, serve: str = _SERVE) -> tuple[Path, str]:
     """A Python MCP server that runs ``prelude`` first, and its pin."""
-    path.write_text(f"#!{sys.executable}\nimport json, os, sys, threading, time\n{prelude}{_SERVE}")
+    path.write_text(f"#!{sys.executable}\nimport json, os, sys, threading, time\n{prelude}{serve}")
     path.chmod(0o700)
     return path, "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -537,3 +537,293 @@ def test_a_stalled_subreaper_wrapper_is_bounded_by_the_protocol_deadline(
         observe_pinned(str(command), digest)
     assert time.monotonic() - started < 10
     assert not marker.exists()
+
+
+# A launcher, or a library it loads, can clear the parent-death signal that
+# ``--kill-child`` sets and leave the process group that killpg reaches. Each variant
+# records the host pid of every process it wants to outlive the session.
+_ESCAPE = """import ctypes
+libc = ctypes.CDLL(None, use_errno=True)
+libc.prctl.argtypes = [ctypes.c_int] + [ctypes.c_ulong] * 4
+pids = {pids!r}
+def record():
+    open(os.path.join(pids, os.readlink("/proc/self")), "w").close()
+if libc.prctl(1, 0, 0, 0, 0) != 0:
+    raise SystemExit(3)
+{leave}
+record()
+{spawn}
+deadline = time.monotonic() + 5
+while len(os.listdir(pids)) < {count} and time.monotonic() < deadline:
+    time.sleep(0.01)
+"""
+_FORKED = """if os.fork() == 0:
+    os.setsid()
+    record()
+    time.sleep(60)
+    os._exit(0)
+"""
+_DAEMON = """if os.fork() == 0:
+    os.setsid()
+    if os.fork() == 0:
+        record()
+        time.sleep(60)
+    os._exit(0)
+"""
+# The launcher is root in its user namespace, so it can start a nested PID namespace.
+_NESTED = """if libc.unshare(0x20000000) != 0:
+    raise SystemExit(4)
+if os.fork() == 0:
+    record()
+    time.sleep(60)
+    os._exit(0)
+"""
+_ESCAPES = {
+    "setsid": ("os.setsid()", "", 1),
+    "setpgid": ("os.setpgid(0, 0)", "", 1),
+    "setsid-child": ("os.setsid()", _FORKED, 2),
+    "setsid-double-fork": ("os.setsid()", _DAEMON, 2),
+    "nested-pid-namespace": ("os.setsid()", _NESTED, 2),
+}
+
+
+def _escaping_launcher(tmp_path: Path, variant: str) -> tuple[Path, str, Path, int]:
+    pids = tmp_path / "pids"
+    pids.mkdir()
+    leave, spawn, count = _ESCAPES[variant]
+    prelude = _ESCAPE.format(pids=str(pids), leave=leave, spawn=spawn, count=count)
+    # Outlive the end of stdin as well, in case cleanup closes it first.
+    command, digest = _pinned(tmp_path / "launcher", prelude, _SERVE + "time.sleep(60)\n")
+    return command, digest, pids, count
+
+
+def _recorded(pids: Path) -> list[int]:
+    return sorted(int(entry.name) for entry in pids.iterdir())
+
+
+def _kill_leftovers(pids: Path) -> None:
+    for pid in _recorded(pids):
+        if _stat(pid)[0] not in {"Z", "X"}:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+
+
+@pytest.mark.parametrize("entry", ["observe_pinned", "PinnedStdioSession"])
+@pytest.mark.parametrize("variant", sorted(_ESCAPES))
+def test_a_launcher_that_drops_its_death_signal_and_group_ends_with_the_session(
+    tmp_path: Path, variant: str, entry: str
+) -> None:
+    command, digest, pids, count = _escaping_launcher(tmp_path, variant)
+    if not pinned_process.namespace_available():
+        with pytest.raises(LaunchPolicyError) as denied:
+            observe_pinned(str(command), digest)
+        assert denied.value.reason == "isolation-unavailable"
+        assert _recorded(pids) == []
+        return
+    try:
+        if entry == "observe_pinned":
+            assert [tool["name"] for tool in observe_pinned(str(command), digest).tools] == [
+                "weather"
+            ]
+        else:
+            with PinnedStdioSession(command=str(command), sha256=digest, server_id="server:mail"):
+                pass
+        recorded = _recorded(pids)
+        assert len(recorded) == count
+        # Cleanup returns only once the kernel has ended the namespace, so there is no
+        # grace period here.
+        states = {pid: _stat(pid)[0] for pid in recorded}
+        assert set(states.values()) <= {"Z", "X"}, states
+    finally:
+        _kill_leftovers(pids)
+
+
+def test_a_launcher_that_exits_after_its_reply_is_not_a_teardown_failure(tmp_path: Path) -> None:
+    serve = _SERVE.replace(
+        "flush=True)\n", 'flush=True)\n    if method == "tools/list":\n        os._exit(0)\n'
+    )
+    command, digest = _pinned(tmp_path / "launcher", "", serve)
+    if not pinned_process.namespace_available():
+        with pytest.raises(LaunchPolicyError, match="kernel PID containment"):
+            observe_pinned(str(command), digest)
+        return
+    for _ in range(5):
+        assert [tool["name"] for tool in observe_pinned(str(command), digest).tools] == ["weather"]
+
+
+# A stand-in for ``unshare --fork`` that needs no namespace: it waits for a child that
+# has left its session, as a namespace init that called setsid has.
+_SUPERVISOR = """import os, sys, time
+if sys.argv[2] == "idle":
+    time.sleep(60)
+child = os.fork()
+if child == 0:
+    os.setsid()
+    open(sys.argv[1], "w").write(str(os.getpid()))
+    if sys.argv[2] == "exit":
+        os._exit(0)
+    time.sleep(60)
+    os._exit(0)
+os.waitpid(child, 0)
+"""
+
+
+def _supervised(tmp_path: Path, mode: str = "wait") -> tuple[subprocess.Popen[bytes], int | None]:
+    """A process marked as ``unshare``, and the pid of its child once it has one."""
+    marker = tmp_path / "init"
+    proc = subprocess.Popen(  # noqa: S603
+        [sys.executable, "-I", "-S", "-c", _SUPERVISOR, str(marker), mode],
+        start_new_session=True,
+    )
+    pinned_process._NAMESPACED.add(proc.pid)
+    if mode == "idle":
+        return proc, None
+    deadline = time.monotonic() + 10
+    while not (marker.exists() and marker.read_text()) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    if mode == "exit":
+        os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOWAIT)
+    return proc, int(marker.read_text())
+
+
+def _end_supervised(proc: subprocess.Popen[bytes], init: int | None) -> None:
+    pinned_process._NAMESPACED.discard(proc.pid)
+    for pid in (proc.pid, init):
+        if pid is not None and _stat(pid)[0] not in {"Z", "X"}:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
+    proc.wait(timeout=5)
+
+
+def test_namespaced_cleanup_kills_an_init_that_left_the_process_group(tmp_path: Path) -> None:
+    proc, init = _supervised(tmp_path)
+    assert init is not None
+    try:
+        pinned_process.terminate_process_group(proc)
+        assert proc.wait(timeout=5) == -signal.SIGKILL
+        assert _stat(init)[0] in {"Z", "X"}
+        assert proc.pid not in pinned_process._NAMESPACED
+    finally:
+        _end_supervised(proc, init)
+
+
+@pytest.mark.parametrize("mode", ["idle", "exit"])
+def test_namespaced_cleanup_without_a_running_init_succeeds(tmp_path: Path, mode: str) -> None:
+    # unshare stopped before it forked, or after its init exited: nothing is left to end.
+    proc, init = _supervised(tmp_path, mode)
+    try:
+        pinned_process.terminate_process_group(proc)
+        assert proc.wait(timeout=5) == (-signal.SIGKILL if mode == "idle" else 0)
+    finally:
+        _end_supervised(proc, init)
+
+
+def test_namespaced_cleanup_fails_closed_when_the_init_does_not_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An init that never finishes exiting, as one blocked in the kernel would, must not
+    # be reported as ended.
+    proc, init = _supervised(tmp_path)
+    kill = os.kill
+
+    def spare_init(pid: int, sig: int) -> None:
+        if pid != init:
+            kill(pid, sig)
+
+    try:
+        monkeypatch.setattr(pinned_process.os, "kill", spare_init)
+        monkeypatch.setattr(pinned_process, "_TEARDOWN_SECONDS", 0.2)
+        with pytest.raises(pinned_process.PinnedProcessError) as failed:
+            pinned_process.terminate_process_group(proc)
+        assert failed.value.reason == "isolation-teardown-failed"
+        assert proc.wait(timeout=5) == -signal.SIGKILL
+        assert proc.pid not in pinned_process._NAMESPACED
+    finally:
+        monkeypatch.undo()
+        _end_supervised(proc, init)
+
+
+def test_namespaced_cleanup_signals_no_child_of_a_running_unshare(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Only a stopped unshare keeps its child's pid from being reaped and reused, so a
+    # stop that never arrives is reported, and no pid is signalled on a stale scan.
+    proc, init = _supervised(tmp_path)
+    kill = os.kill
+    sent: list[int] = []
+
+    def swallow_stop(pid: int, sig: int) -> None:
+        sent.append(pid)
+        if sig != signal.SIGSTOP:
+            kill(pid, sig)
+
+    try:
+        monkeypatch.setattr(pinned_process.os, "kill", swallow_stop)
+        monkeypatch.setattr(pinned_process, "_STOP_SECONDS", 0.2)
+        with pytest.raises(pinned_process.PinnedProcessError) as failed:
+            pinned_process.terminate_process_group(proc)
+        assert failed.value.reason == "isolation-teardown-failed"
+        assert set(sent) == {proc.pid}
+        assert proc.wait(timeout=5) == -signal.SIGKILL
+    finally:
+        monkeypatch.undo()
+        _end_supervised(proc, init)
+
+
+@pytest.mark.parametrize(
+    ("status", "ended"),
+    [
+        (None, True),
+        ({"State": "Z (zombie)", "Threads": "1"}, True),
+        ({"State": "X (dead)", "Threads": "1"}, True),
+        # A thread-group leader that exited while another thread still runs.
+        ({"State": "Z (zombie)", "Threads": "2"}, False),
+        ({"State": "S (sleeping)", "Threads": "1"}, False),
+        ({"State": "D (disk sleep)", "Threads": "1"}, False),
+        ({"State": "T (stopped)", "Threads": "1"}, False),
+        ({"State": "Z (zombie)"}, False),
+        ({}, False),
+    ],
+)
+def test_an_init_has_ended_only_once_every_thread_has_exited(
+    monkeypatch: pytest.MonkeyPatch, status: dict[str, str] | None, ended: bool
+) -> None:
+    monkeypatch.setattr(pinned_process, "_status", lambda pid: status)
+    assert pinned_process._ended(4242) is ended
+
+
+def test_an_unreadable_init_status_is_not_an_ended_init(monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(pid: int) -> dict[str, str] | None:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(pinned_process, "_status", refuse)
+    assert pinned_process._ended(4242) is False
+
+
+def test_the_status_reader_returns_the_fields_of_a_live_and_a_reaped_process() -> None:
+    fields = pinned_process._status(os.getpid())
+    assert fields is not None
+    assert fields["State"][0] in {"R", "S"}
+    assert fields["PPid"] == str(os.getppid())
+    proc = subprocess.Popen(["/bin/true"])  # noqa: S603
+    proc.wait(timeout=5)
+    assert pinned_process._status(proc.pid) is None
+
+
+def test_verify_live_fails_a_server_whose_namespace_did_not_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    terminate = stdio.terminate_process_group
+
+    def teardown_fails(proc: subprocess.Popen[bytes]) -> None:
+        terminate(proc)
+        raise pinned_process.PinnedProcessError("isolation-teardown-failed", "did not end")
+
+    monkeypatch.setattr(stdio, "terminate_process_group", teardown_fails)
+    arguments, _ = command(tmp_path, inventory(), launcher(tmp_path))
+    result = CliRunner().invoke(main, [*arguments, "--json-output", "--no-isolation"])
+    assert result.exit_code == 1, result.output
+    report = json.loads(result.stdout)
+    assert not report["complete"]
+    assert report["results"][0]["reason"] == "isolation-teardown-failed"
+    assert report["results"][0]["error"] == verify.REASONS["isolation-teardown-failed"]
