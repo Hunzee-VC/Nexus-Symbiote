@@ -2,6 +2,7 @@
 
 import hashlib
 import os
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -103,7 +104,7 @@ def test_descriptor_binding_detects_rename_over_without_timestamp_change(tmp_pat
         before = os.fstat(fd)
         replacement = tmp_path / "replacement.bin"
         replacement.write_bytes(b"replaced")
-        # Pin the replacement's timestamps to the original so size/mtime
+        # Pin the replacement's timestamps to the original so size/mtime/ctime
         # alone cannot distinguish the two inodes.
         os.utime(replacement, ns=(before.st_atime_ns, before.st_mtime_ns))
         replacement.replace(target)
@@ -130,8 +131,15 @@ def test_descriptor_binding_detects_a_ctime_only_change(tmp_path: Path) -> None:
     target = tmp_path / "model.bin"
     target.write_bytes(b"data")
     before = os.stat(target)
-    os.chmod(target, 0o600)
-    after = os.stat(target)
+    target_mode = (before.st_mode & 0o777) ^ 0o100
+    deadline = time.monotonic() + 0.050
+    while True:
+        os.chmod(target, target_mode)
+        after = os.stat(target)
+        if after.st_ctime_ns != before.st_ctime_ns or time.monotonic() >= deadline:
+            break
+        time.sleep(0.001)
+    assert (after.st_mode & 0o777) == target_mode
     assert after.st_ctime_ns != before.st_ctime_ns
     assert after.st_mtime_ns == before.st_mtime_ns
     assert after.st_size == before.st_size

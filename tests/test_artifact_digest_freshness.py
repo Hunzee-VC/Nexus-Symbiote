@@ -1,7 +1,10 @@
 """Real same-inode changes cannot reuse a digest merely by restoring mtime."""
 
+from __future__ import annotations
+
 import hashlib
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -14,20 +17,34 @@ from nexus_symbiote.validators.integrity import IntegrityValidator, _ArtifactDig
 
 ORIGINAL = b"original"
 REPLACED = b"replaced"
+COARSE_TICK_BUDGET_SECONDS = 0.050
 
 
-def digest(data):
+def digest(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
-def change(path: Path, kind: str):
+def change(path: Path, kind: str) -> tuple[os.stat_result, os.stat_result]:
     before = path.stat()
+    deadline = time.monotonic() + COARSE_TICK_BUDGET_SECONDS
     if kind == "content":
         path.write_bytes(REPLACED)
-        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        while True:
+            os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+            after = path.stat()
+            if after.st_ctime_ns != before.st_ctime_ns or time.monotonic() >= deadline:
+                break
+            time.sleep(0.001)
+        assert after.st_mode == before.st_mode
     else:
-        path.chmod(before.st_mode ^ 0o100)
-    after = path.stat()
+        target_mode = (before.st_mode & 0o777) ^ 0o100
+        while True:
+            path.chmod(target_mode)
+            after = path.stat()
+            if after.st_ctime_ns != before.st_ctime_ns or time.monotonic() >= deadline:
+                break
+            time.sleep(0.001)
+        assert (after.st_mode & 0o777) == target_mode
     assert (before.st_dev, before.st_ino, before.st_nlink, before.st_size, before.st_mtime_ns) == (
         after.st_dev,
         after.st_ino,
@@ -40,10 +57,12 @@ def change(path: Path, kind: str):
 
 
 @pytest.mark.parametrize("kind", ["content", "metadata"])
-def test_change_during_observation_is_refused_and_fresh_observation_succeeds(tmp_path, kind):
+def test_change_during_observation_is_refused_and_fresh_observation_succeeds(
+    tmp_path: Path, kind: str
+) -> None:
     path = tmp_path / "prompt.txt"
     path.write_bytes(ORIGINAL)
-    failures = []
+    failures: list[str] = []
     with ConfinedCollection(tmp_path, failures) as files:
         with (
             pytest.raises(OSError, match="changed during collection"),
@@ -59,7 +78,9 @@ def test_change_during_observation_is_refused_and_fresh_observation_succeeds(tmp
 
 
 @pytest.mark.parametrize("kind", ["content", "metadata"])
-def test_cache_rehashes_after_ctime_changes_and_charges_the_new_read(tmp_path, kind):
+def test_cache_rehashes_after_ctime_changes_and_charges_the_new_read(
+    tmp_path: Path, kind: str
+) -> None:
     path = tmp_path / "prompt.txt"
     path.write_bytes(ORIGINAL)
     cache = _ArtifactDigests(1024)
@@ -73,7 +94,9 @@ def test_cache_rehashes_after_ctime_changes_and_charges_the_new_read(tmp_path, k
     assert cache.remaining == remaining - len(expected)
 
 
-def test_integrity_rejects_changed_bytes_between_two_references(tmp_path, monkeypatch):
+def test_integrity_rejects_changed_bytes_between_two_references(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     path = tmp_path / "prompt.txt"
     path.write_bytes(ORIGINAL)
     bom = AIBOM(
@@ -88,9 +111,9 @@ def test_integrity_rejects_changed_bytes_between_two_references(tmp_path, monkey
         ]
     )
     real_digest = _ArtifactDigests.digest
-    reads = []
+    reads: list[str] = []
 
-    def mutate_after_first_read(self, target, algorithm):
+    def mutate_after_first_read(self: _ArtifactDigests, target: Path, algorithm: str) -> str:
         result = real_digest(self, target, algorithm)
         reads.append(result)
         if len(reads) == 1:
