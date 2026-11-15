@@ -539,31 +539,88 @@ def _apply(value: str, spans: list[Span], rewrites: list[_Rewrite]) -> str:
     return "".join(parts)
 
 
-def _assignment_spans(value: str, url_spans: list[Span]) -> Iterable[Span]:
-    """Assignment value spans, bounded by enclosing URLs and chained ``key: `` tails."""
-    url_index = 0
+# The value of a credential name that ends a URL, as in `https://h/?a=b,password: v`:
+# the URL rule takes the name, so the value after it is matched here.
+_VALUE_AFTER_URL = re.compile(
+    r"[ \t]*+(\"(?:[^\"\\\n]|\\.){0,256}\"|'(?:[^'\\\n]|\\.){0,256}'|[^\s,;]++)"
+)
+# What stands in for a URL while the assignment and cookie rules read the rest of the
+# text. It is no keyword, separator, quote or space, so a value that runs into a URL is
+# not cut short and no rule rescans a URL once per assignment before it. A URL is read
+# on its own instead, bounded at its end, so an assignment that starts inside one ends
+# there, as `<a href="https://h/cb?token=v">password: w` needs.
+_URL_MASK = "\x00"
+# What may come before a credential keyword in a name that is itself the next
+# assignment, such as `DB_` in `DB_PASSWORD`; anything else makes the value a value.
+_NAME_PREFIX = re.compile(r"(?:[A-Za-z0-9]{1,32}[-_.]){0,4}")
+
+
+def _masked_urls(value: str, url_spans: list[Span]) -> str:
+    if not url_spans:
+        return value
+    parts: list[str] = []
     position = 0
-    while (match := _ASSIGNMENT.search(value, position)) is not None:
-        start = match.start()
+    for start, end in url_spans:
+        parts.append(value[position:start])
+        parts.append(_URL_MASK * (end - start))
+        position = end
+    parts.append(value[position:])
+    return "".join(parts)
+
+
+def _assignment_spans(value: str, url_spans: list[Span]) -> Iterable[Span]:
+    """Assignment value spans, plus chained ``key: `` tails.
+
+    The text is read with every URL masked, and each URL is read on its own, so an
+    assignment inside a URL ends with it. A credential name that ends a URL takes
+    the value after it. A value that itself starts an assignment, as in
+    ``sort_key = token = v`` or ``signing_key:`` with ``password: v`` on the next line,
+    is read as that assignment instead, when whitespace sets it off from the separator.
+    """
+    masked = _masked_urls(value, url_spans)
+    for url_start, url_end in url_spans:
+        # Each URL once, bounded at its end, so none is rescanned.
+        position = url_start
+        while (inner := _ASSIGNMENT.search(value, position, url_end)) is not None:
+            if inner.end(2) > inner.start(2):
+                yield inner.span(2)
+            position = max(inner.end(), inner.start() + 1)
+        window = max(url_start, url_end - 180)
+        if _TRAILING_ASSIGNMENT_KEY.search(value, window, url_end) is None:
+            continue
+        after = _VALUE_AFTER_URL.match(value, url_end)
+        if after is None or after.end(1) == after.start(1):
+            continue
+        # Whitespace or a quote sets the value off from the URL; text glued to it, as in
+        # `<…?password=>token: v`, is the next rule's. A scheme word such as `Bearer` is
+        # the scheme rule's: it keeps the word and takes the credential after it.
+        spaced = after.start(1) > url_end or value[url_end] in "\"'"
+        if spaced and after.group(1).lower() not in _AUTH_SCHEMES:
+            yield after.span(1)
+    position = 0
+    while (match := _ASSIGNMENT.search(masked, position)) is not None:
         val_start, val_end = match.span(2)
-        while url_index < len(url_spans) and url_spans[url_index][1] <= start:
-            url_index += 1
-        if url_index < len(url_spans) and url_spans[url_index][0] <= start:
-            url_end = url_spans[url_index][1]
-            if val_start < url_end:
-                yield val_start, min(val_end, url_end)
-            position = max(start + 1, min(match.end(), url_end))
+        # Only a value set off by whitespace can be the next name: one glued to the
+        # separator, as in `sort_key=v…`, is a value whatever it spells.
+        if (
+            masked[val_start] not in "\"'"
+            and masked[val_start - 1].isspace()
+            and (inner := _ASSIGNMENT.search(masked, val_start)) is not None
+            and inner.start() < val_end
+            and _NAME_PREFIX.fullmatch(masked, val_start, inner.start()) is not None
+        ):
+            position = val_start
             continue
         yield val_start, val_end
         if (
             val_end > val_start
-            and value[val_start] not in "\"'"
-            and value[val_end - 1] in ":="
-            and val_end < len(value)
-            and value[val_end].isspace()
+            and masked[val_start] not in "\"'"
+            and masked[val_end - 1] in ":="
+            and val_end < len(masked)
+            and masked[val_end].isspace()
         ):
             window_start = max(val_start + 1, val_end - 180)
-            tail = _TRAILING_ASSIGNMENT_KEY.search(value, window_start, val_end)
+            tail = _TRAILING_ASSIGNMENT_KEY.search(masked, window_start, val_end)
             position = tail.start() if tail is not None else match.end()
         else:
             position = match.end()
@@ -588,15 +645,9 @@ def _rule_matches(
     for match in _RAW_AUTH_HEADER.finditer(value):
         if (span := _raw_auth_span(match)) is not None:
             spans.append(span)
-    url_idx = 0
-    for match in _COOKIE_HEADER.finditer(value):
-        c_start, c_end = match.span(2)
-        while url_idx < len(url_spans) and url_spans[url_idx][1] <= match.start():
-            url_idx += 1
-        if url_idx < len(url_spans) and url_spans[url_idx][0] <= match.start():
-            c_end = min(c_end, url_spans[url_idx][1])
-        if c_start < c_end:
-            spans.extend(_cookie_spans(value, c_start, c_end))
+    # A `cookie=` inside a URL is the URL's to rewrite; read only the headers outside one.
+    for match in _COOKIE_HEADER.finditer(_masked_urls(value, url_spans)):
+        spans.extend(_cookie_spans(value, *match.span(2)))
     spans.extend(match.span() for match in TOKEN_SHAPE.finditer(value))
     if cookie:
         spans.extend(_cookie_spans(value))
