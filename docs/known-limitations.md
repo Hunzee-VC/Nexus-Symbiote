@@ -583,17 +583,24 @@ A way around a limit that its entry does not describe is worth a
   such as the environment of an MCP server that `.gemini/settings.json` declares, of
   the command of a credential helper (`apiKeyHelper`, `awsAuthRefresh`,
   `awsCredentialExport`, `gcpAuthRefresh` or `otelHeadersHelper`), of the value of an `Authorization`, `Cookie` or
-  credential-named key, or of a credential the redaction recognises. A value the
-  redaction leaves in place, such as a password pasted into a hook command, stored
-  under a key whose name does not mark a credential or passed to a command under any
-  setting other than those helpers, can still be confirmed. Keep credentials out of
-  settings files; see [IDE agent settings](verification-source-binding.md#ide-agent-settings).
+  credential-named key, including a number, each item of a list and the default of a
+  reference such as `${DB_PASS:-value}` held there, or of a credential the redaction
+  recognises. A value the redaction leaves in place, such as a password pasted into a
+  hook command, stored under a key whose name does not mark a credential, in a mapping
+  nested under a credential-named key, or passed to a command under any setting other
+  than those helpers, can still be confirmed. So can a default written in a reference
+  in free text, such as a `--header` argument `Authorization: Bearer ${TOKEN:-value}`,
+  whose text the redaction reads between the `$`, `{` and `}` operators. Keep
+  credentials out of settings files; see
+  [IDE agent settings](verification-source-binding.md#ide-agent-settings).
 - **Some settings changes alert only with the key.** Every settings file is digested
   after the redaction, so that its digest cannot confirm a guess. Without
   `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a change only to a value the redaction removes,
   such as an `env` value, including an MCP server's environment value, the command of
   a credential helper, a token, the value of an `Authorization`, `Cookie` or credential-named
-  key such as `password` or `X-Api-Key`, or a URL path, query or userinfo on the same
+  key such as `password` or `X-Api-Key`, which includes the name in a bare `$NAME` or in
+  a reference with a default there (only `${NAME}`, `${env:NAME}`, `${input:id}`,
+  `${config:name}` and `${command:id}` are kept), or a URL path, query or userinfo on the same
   host in a `notify` or hook command, changes no digest; such a record carries a low
   `completeness` finding, so `diff` raises a medium alert that its values are unbound
   on every comparison, changed or not, without naming a value, and a keyless

@@ -401,7 +401,12 @@ not their commands: each becomes `***` whatever it is, since a helper command su
 `printf passphrase` can hold a credential the redaction does not recognise. No helper
 is run. A URL keeps only its scheme, host and
 port, and a credential in an assignment, after an authorization scheme or in a known
-token format is removed. The redaction is applied separately to the text between
+token format is removed. A value held under an `Authorization`, `Cookie` or
+credential-named key, such as `password`, is redacted by that key, including a number
+or a list there and a reference that writes a literal, such as `${DB_PASS:-value}` or a
+bare `$NAME`; `${NAME}`, `${env:NAME}`, `${input:id}`, `${config:name}` and
+`${command:id}` are kept ([values held under a key](security-model.md#known-false-positive-and-false-negative-classes)).
+The redaction is applied separately to the text between
 the shell operators `;`, `|`, `&`, `$`, `` ` ``, `(`, `)`, `{`, `}`, `<`, `>` and line breaks,
 which are kept, so a URL or an assigned value ends at the first of them: a command,
 an operator or a host written after one without white space, such as
@@ -437,7 +442,8 @@ under the key over every file as read
 (profile `nexus-symbiote/ide-settings-values/v1`), so the record still changes with
 any value while no unkeyed digest covers environment values or text the redaction
 removes. A value the redaction leaves in place, such as a password pasted into a hook
-command or stored under a key name, can still be confirmed from the digest, so keep
+command or stored under a key whose name does not mark a credential, can still be
+confirmed from the digest, so keep
 credentials out of settings files. The digests agree between a keyed and an unkeyed
 collection, except that without the key a file holding an ambiguous URL authority is
 a failure instead of a digest, so enabling the key later changes no recorded digest;

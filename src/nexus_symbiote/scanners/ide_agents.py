@@ -34,7 +34,12 @@ from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
 from nexus_symbiote.utils.jsonc import strip_jsonc
-from nexus_symbiote.utils.secrets import REDACTED, redact_keyed_text, redact_text
+from nexus_symbiote.utils.secrets import (
+    REDACTED,
+    redact_keyed_scalar,
+    redact_keyed_text,
+    redact_text,
+)
 from nexus_symbiote.utils.toml import loads as load_toml
 
 IDE_AGENT_CONFIGS: dict[str, dict[str, Any]] = {
@@ -330,8 +335,9 @@ def _projection(
     """Settings as a redacted `settings_hashes` digest covers them.
 
     The standard redaction is applied to the text between shell operators, cut again
-    before each URL scheme, a text value is also redacted by the ``key`` it is held
-    under, as a header or an assignment in one string would be, environment
+    before each URL scheme, a text value, a number and each item of a list are also
+    redacted by the ``key`` they are held under, as a header or an assignment in one
+    string would be, environment
     variables keep their names only, and each credential helper of
     ``_CREDENTIAL_HELPER_KEYS``, such as `apiKeyHelper`, keeps its key but not its
     command, so the digest cannot confirm a guess of a value the redaction removes, and
@@ -363,11 +369,11 @@ def _projection(
                 projected[text] = sorted(entries, key=canonical_json)
         return projected
     if isinstance(value, list):
-        return [_projection(item, depth + 1, unkeyed=unkeyed) for item in value]
+        return [_projection(item, depth + 1, unkeyed=unkeyed, key=key) for item in value]
     if isinstance(value, str):
         text = _projected_text(value, unkeyed=unkeyed)
         return text if key is None else redact_keyed_text(key, value, redacted=text)
-    return value
+    return value if key is None else redact_keyed_scalar(key, value)
 
 
 # sh, bash, zsh, dash, including /bin/sh, /usr/bin/bash and `/usr/bin/env bash`. The

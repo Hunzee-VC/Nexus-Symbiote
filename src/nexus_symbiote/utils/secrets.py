@@ -40,9 +40,14 @@ _CREDENTIAL_KEY = re.compile(rf"(?i){_CREDENTIAL_KEYWORD}\Z")
 _AUTHORIZATION_KEY = re.compile(r"(?i)(?:proxy-)?authorization")
 _COOKIE_KEY = re.compile(r"(?i)(?:set-)?cookie")
 _SCHEME_AND_VALUE = re.compile(r"([A-Za-z0-9-]{1,32})(\s++)(\S.*+)", re.DOTALL)
-# A reference names where a credential comes from and holds none. Only the braced and
-# the upper-case forms count: a password may itself begin with "$".
-_REFERENCE = re.compile(r"\$\{[^{}\s]{1,128}\}|\$[A-Z][A-Z0-9_]{1,127}")
+# A reference names where a credential comes from and holds none: `${NAME}`, or an
+# editor's `${env:NAME}`, `${input:id}`, `${config:name}` or `${command:id}`. A default,
+# alternate value or pattern, as in `${NAME:-value}`, is a literal, and a bare `$NAME`
+# may be the password itself, which may begin with "$".
+_REFERENCE = re.compile(
+    r"\$\{(?:[A-Za-z_][A-Za-z0-9_]{0,127}"
+    r"|(?:env|input|config|command):[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})\}"
+)
 _AUTH = re.compile(r"(?i)\b(Bearer|Basic|Token|Bot|ApiKey|Api-Key)(\s++)([A-Za-z0-9_+/=.~-]{6,}+)")
 # After an Authorization or Proxy-Authorization header name the scheme's value is a
 # credential whatever its shape; the shape checks only tell prose from credentials.
@@ -654,26 +659,43 @@ def redact_keyed_text(
     return safe
 
 
+def redact_keyed_scalar(key: str, value: Any) -> Any:
+    """A parsed value that is neither text nor a container, as the redaction shows it.
+
+    A number held under an ``Authorization``, ``Cookie`` or credential-named key, as
+    ``redact_keyed_text`` reads them, such as a numeric PIN under ``password``, is the
+    marker: a digest that covered it could confirm a guess. A boolean and null hold no
+    secret, and any other value, such as a TOML date, which no digest can cover, stays.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return value
+    held = _AUTHORIZATION_KEY.fullmatch(key) or _COOKIE_KEY.fullmatch(key)
+    return REDACTED if held or _CREDENTIAL_KEY.search(key) else value
+
+
 def redact_metadata(value: Any, secrets: Iterable[str] | SecretScrubber = ()) -> Any:
     """Redact textual metadata while retaining its JSON structure."""
     return _redact_metadata(value, _scrubber(secrets))
 
 
-def _redact_metadata(value: Any, scrubber: SecretScrubber) -> Any:
+def _redact_metadata(value: Any, scrubber: SecretScrubber, key: str | None = None) -> Any:
+    """``value`` redacted, by ``key`` when a mapping holds it there.
+
+    Each item of a list is held under the list's key, so `{"password": ["..."]}` is
+    redacted as `{"password": "..."}` is; a mapping's own keys apply inside it.
+    """
     if isinstance(value, str):
-        return redact_text(value, scrubber)
+        return (
+            redact_text(value, scrubber) if key is None else redact_keyed_text(key, value, scrubber)
+        )
     if isinstance(value, dict):
         return {
-            redact_text(str(key), scrubber): (
-                redact_keyed_text(str(key), item, scrubber)
-                if isinstance(item, str)
-                else _redact_metadata(item, scrubber)
-            )
-            for key, item in value.items()
+            redact_text(str(name), scrubber): _redact_metadata(item, scrubber, str(name))
+            for name, item in value.items()
         }
     if isinstance(value, list):
-        return [_redact_metadata(item, scrubber) for item in value]
-    return value
+        return [_redact_metadata(item, scrubber, key) for item in value]
+    return value if key is None else redact_keyed_scalar(key, value)
 
 
 _SCHEMA_LITERALS = frozenset({"default", "const", "enum", "example", "examples"})
@@ -705,7 +727,8 @@ def redact_descriptor(
     """
     scrubber = _scrubber(secrets)
     safe = {}
-    for key, value in descriptor.items():
+    for name, value in descriptor.items():
+        key = name
         if key in {"inputSchema", "outputSchema"}:
             value = _schema_projection(value)
         elif key not in {"name", "title", "description", "annotations", "_meta"}:
@@ -713,5 +736,5 @@ def redact_descriptor(
         if key == "name" and isinstance(value, str):
             safe[key] = redact_text(value, scrubber, identifier=True)
         else:
-            safe[key] = _redact_metadata(value, scrubber)
+            safe[key] = _redact_metadata(value, scrubber, name)
     return safe
