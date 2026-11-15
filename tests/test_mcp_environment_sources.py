@@ -260,7 +260,11 @@ def test_environment_that_replaces_or_constrains_the_package_makes_it_unknown(tm
             "env:YARN_[other]",
         ),
         (
-            {"command": "bunx", "args": JS_RUNNERS["bunx"], "env": {"BUN_OPTIONS": "-r x"}},
+            {
+                "command": "bunx",
+                "args": JS_RUNNERS["bunx"],
+                "env": {"BUN_CONFIG_MAX_HTTP_REQUESTS": "64"},
+            },
             "env:BUN_",
         ),
         (

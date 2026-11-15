@@ -260,15 +260,25 @@ _QUOTING = re.compile(r"['\"\\]")
 _LITERAL_WORD = re.compile(r"[A-Za-z0-9_@%+=:,./-]+")
 
 
+def _program_expands(word: str) -> bool:
+    """Whether the program a command word names is chosen by an expansion."""
+    return expands(normalize_command(word)) or expands(_basename_text(word))
+
+
 def _split_script(
-    script: str, operators: re.Pattern[str] = _SHELL_OPERATOR, *, literal: bool = False
+    script: str,
+    operators: re.Pattern[str] = _SHELL_OPERATOR,
+    *,
+    literal: bool = False,
+    assignment: re.Pattern[str] = _ASSIGNMENT,
 ) -> list[str] | None:
     """Words of a simple command; None for anything a shell would do more with.
 
     Every word must read as written: no character a shell rewrites, no whitespace or
     other character inside a word, and, with ``literal``, no quoting at all. A command
-    word that is itself an expansion is returned, so that it is reported as depending
-    on the environment.
+    word whose program is itself an expansion is returned, so that it is reported as
+    depending on the environment. One that expands only before its last path segment
+    is not: a shell splits the expansion into words, the first of which is the program.
     """
     if len(script) > MAX_SCRIPT_CHARS or operators.search(script):
         return None
@@ -280,8 +290,8 @@ def _split_script(
         return None
     if not 0 < len(words) <= MAX_SCRIPT_TOKENS:
         return None
-    head = next((word for word in words if not _ASSIGNMENT.match(word) and word != "exec"), None)
-    if head is not None and expands(head):
+    head = next((word for word in words if not assignment.match(word) and word != "exec"), None)
+    if head is not None and _program_expands(head):
         return words
     if _POSIX_REWRITE.search(script) or not all(
         _LITERAL_WORD.fullmatch(word) and not word.startswith("=") for word in words
@@ -1814,9 +1824,15 @@ def _program_arguments(words: list[str], launch: Launch) -> None:
         launch.fail(reason)
 
 
+# Packages of a package manager whose default program is not named after the package:
+# npx runs @yarnpkg/cli-dist (Yarn 2+) as yarn, the first of its bins.
+_PACKAGE_PROGRAMS = {"@yarnpkg/cli-dist": "yarn", "@pnpm/exe": "pnpm"}
+
+
 def _package_program(package: Package, words: list[str], launch: Launch) -> None:
     """A package started by its default program, which runners name after the package."""
-    implied = package.name.rsplit("/", 1)[-1] if package.name else ""
+    name = package.name or ""
+    implied = _PACKAGE_PROGRAMS.get(name.lower(), name.rsplit("/", 1)[-1])
     _program_arguments([implied, *words] if implied else words, launch)
 
 
@@ -2001,8 +2017,10 @@ def _unwrap_env(rest: list[str], launch: Launch) -> list[str] | None:
     return None
 
 
-def _script_words(words: list[str], launch: Launch) -> list[str] | None:
-    while words and _ASSIGNMENT.match(words[0]):
+def _script_words(
+    words: list[str], launch: Launch, assignment: re.Pattern[str] = _ASSIGNMENT
+) -> list[str] | None:
+    while words and assignment.match(words[0]):
         name, _, value = words[0].partition("=")
         launch.environment.append((name, value))
         words = words[1:]
@@ -2194,7 +2212,7 @@ def _classify(tokens: list[str], launch: Launch) -> None:
     name = normalize_command(tokens[0])
     rest = tokens[1:]
     launch.executable = name
-    if expands(name) or expands(_basename_text(tokens[0])) or not name:
+    if _program_expands(tokens[0]) or not name:
         launch.launcher = "unknown"
         launch.fail("command depends on the environment")
         return
@@ -2309,9 +2327,16 @@ def _local_subcommand(words: list[str], launch: Launch) -> None:
 
 # Bun Shell keeps a tab inside a word, where shlex splits on it.
 _NOT_SPACE = re.compile(r"[^\S ]")
+# Yarn's shell reads a leading NAME=value as an assignment when NAME is any run of
+# letters, digits and underscores, digit first included.
+_YARN_ASSIGNMENT = re.compile(r"[A-Za-z0-9_]+=", re.ASCII)
+# Yarn 1 reads its reporter options among exec's words; they change only its output.
+_YARN_EXEC_QUIET = frozenset({"-s", "--silent", "--verbose"})
 
 
-def _exec_script(script: str, launch: Launch) -> list[str] | None:
+def _exec_script(
+    script: str, launch: Launch, assignment: re.Pattern[str] = _ASSIGNMENT
+) -> list[str] | None:
     """Words of a script that a package manager runs in its own shell (Bun Shell, Yarn's).
 
     Neither shell is POSIX, so every word must read as written, without quoting, as
@@ -2319,14 +2344,18 @@ def _exec_script(script: str, launch: Launch) -> list[str] | None:
     """
     label = launch.launcher
     launch.mark("shell_wrapper")
-    words = None if _NOT_SPACE.search(script) else _split_script(script, literal=True)
-    words = _script_words(words, launch) if words is not None else None
+    words = (
+        None
+        if _NOT_SPACE.search(script)
+        else _split_script(script, literal=True, assignment=assignment)
+    )
+    words = _script_words(words, launch, assignment) if words is not None else None
     if words is None:
         launch.mark("inline_shell_code")
         launch.fail(f"{label} script is not a simple command")
         return None
     name = normalize_command(words[0])
-    if expands(name) or expands(_basename_text(words[0])) or not name:
+    if _program_expands(words[0]) or not name:
         launch.mark("inline_shell_code")
         launch.fail(f"{label} script command depends on the environment")
         return None
@@ -2354,16 +2383,19 @@ def _bun_exec(words: list[str], launch: Launch) -> None:
 def _yarn_exec(words: list[str], launch: Launch) -> None:
     """``yarn exec SCRIPT ARGS``: Yarn 2+ runs SCRIPT in its shell with ARGS appended.
 
-    Yarn 1 spawns SCRIPT as a program with ARGS, which the same reading covers.
+    Yarn 1 spawns SCRIPT as a program with what is left of ARGS once it has taken its
+    own options from them, so it runs no word this reading does not check.
     """
     launch.launcher = "yarn exec"
+    while words[:1] and words[0] in _YARN_EXEC_QUIET:
+        words = words[1:]
     operands = words[1:] if words[:1] == ["--"] else words
     if not operands:
         launch.fail("yarn exec without a command")
     elif operands[0].startswith("-"):
         launch.fail("unrecognised yarn exec option")
     else:
-        script = _exec_script(operands[0], launch)
+        script = _exec_script(operands[0], launch, _YARN_ASSIGNMENT)
         if script is not None:
             _local_subcommand([*script, *operands[1:]], launch)
 
@@ -3123,6 +3155,8 @@ _STARTS: dict[str, _Starts] = {
             "-C --dir -F --filter --filter-prod --reporter --loglevel --workspace-concurrency",
         ),
         (_PNPM_FETCHES | _PNPM_NESTED).__contains__,
+        # Shell mode makes pnpm exec run its words as a shell command line.
+        inline=frozenset({"-c", "--shell-mode", "--config.shell-mode", "--config.shellMode"}),
     ),
     "yarn": _Starts(
         _table("-s --silent --verbose --offline --prefer-offline", "--cwd"),
