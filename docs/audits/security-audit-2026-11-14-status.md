@@ -17,14 +17,17 @@ second person has reviewed it. Re-check each claim against the commit it names.
 ## How each status was established
 
 - **Fixed** means the code was read on `main` and the regression test named for the
-  finding passes there. For every fix that batch 1 merged, the test was also run against
-  the parent of the fixing commit (`eddf85e^`, `8a2250f^`, `18b93aa^`, `59aec4f^`) and
-  failed there, except where the table says otherwise. The 34 batch-1 regression files
+  finding passes there. For every code fix that batch 1 merged (the M and L rows), the
+  test was also run against the parent of the fixing commit (`eddf85e^`, `8a2250f^`,
+  `18b93aa^`, `59aec4f^`) and failed there, except where the table says otherwise. The
+  T rows are test additions; their tests pass on `main`. The 34 batch-1 regression files
   pass on `main` (1,340 tests).
 - **Fixed here** means a commit on this branch, each with a test that fails without it.
 - Open pull requests were checked for overlap: batches 2 to 4 (#203, #208, #218) and the
   "audit v2" series (#204 to #207) use their own finding identifiers (`NS-AUD-*`), so
-  overlap was judged by the code they change, read on #218's head `1e23eff`.
+  overlap was judged by the code they change, read on #218's head `1e23eff`. This
+  branch's code commits merge into `1e23eff` without conflicts, and their new and
+  changed tests (170) pass in the merged tree.
 
 ## Summary
 
@@ -75,7 +78,7 @@ second person has reviewed it. Re-check each claim against the commit it names.
 | L27 | Addressed, residual documented | Root requirements files stop at 100,000 logical lines (`18b93aa`); model parsers share an `InspectionBudget` (16 million units, at most 4 million ONNX fields). Limits bound size, not time; the threat model asks for a job timeout. |
 | T1 | Fixed (`5617188`) | One fixture-transport case per live-mode refusal in `tests/test_live_mcp.py`. |
 | T2 | Fixed (`5617188`) | One misbehaving launcher per pinned-stdio bound in `tests/test_pinned_stdio.py` and `tests/test_runtime_stdio_session.py`. |
-| T3 | Fixed (`5617188`); completed here | Floors were added. This branch runs the worker's code in-process (`tests/test_runtime_validation_in_process.py`), each case cross-checked against the real isolated worker; `runtime_validation.py` measures 76% before and 92% after on the runtime tests, and its floor is raised to the full-suite measurement. |
+| T3 | Fixed (`5617188`); completed here | Floors were added. This branch runs the worker's code in-process (`tests/test_runtime_validation_in_process.py`), each case cross-checked against the real isolated worker; `runtime_validation.py` measures 76% before and 92% after on the runtime tests; on the full suite 93.39% of statements and 89.21% of branches, so its floor is raised from 76/73 to 92/88. |
 | T4 | Fixed (`5617188`, `5c9a780`, `ddec60b`) | `tests/test_suite_infrastructure.py`, `tests/test_suite_resolver_guards.py`. |
 
 ## Information items
@@ -108,7 +111,7 @@ approver can read a constraint that is never enforced.** `_ignores_a_keyword` in
 `runtime_validation.py` refuses keywords of another dialect and keywords jsonschema does
 not apply, which its docstring frames as "a constraint that whoever approves the schema
 reads". A name no dialect defines is ignored, as JSON Schema specifies: a misspelling
-such as `maxProperites`, or a lookalike such as `maxLеngth` with a Cyrillic `е`, reads
+such as `maxProperites`, or a lookalike such as `maxLength` with its `e` replaced by the Cyrillic U+0435, reads
 as a limit in review and validates as nothing. Precondition: the approver reads the
 schema text and the server's author is hostile. Options: refuse keywords outside the
 dialect's vocabularies except an allowlist of annotations such as `x-*`, or show
