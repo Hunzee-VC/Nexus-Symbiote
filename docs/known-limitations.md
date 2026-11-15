@@ -244,26 +244,40 @@ A way around a limit that its entry does not describe is worth a
   setting makes an unkeyed `diff` raise the medium unbound-values alert.
 - **A `uv run` project environment is read only from `pyproject.toml` and `uv.lock`.**
   In project mode every extra and dependency group is assumed to be installed, and a
-  registry requirement is not a source. uv installs a root `uv.lock` as recorded,
-  with or without `--frozen`, including artifact URLs and dependency edges that
-  `pyproject.toml` never names, so the lock is a source as a whole and bound by its
-  SHA-256; its packages are not classified one by one, so every project-mode `uv run`
-  server in a checkout with a lock loses its `package_url`. Run a pinned server with
-  `--no-project` or `uvx` instead. `VIRTUAL_ENV` and `CONDA_PREFIX` are sources for
-  `uv run` even in project mode, where uv uses them only with `--active`. The
-  metadata of a workspace member or path dependency, a build backend's own
-  configuration, and an existing `.venv` are not read: the default exclusions skip
-  `.venv`, and counting its presence would withhold the identity of every `uv run`
-  server in a developer checkout. A committed `.venv` with a `pyvenv.cfg`, whose
-  interpreter uv uses, and whose installed copy of a pinned package satisfies `--with`,
-  runs under the pinned identity; review a `.venv` in a pull request as code. A
-  `.python-version` in a parent directory of the root is not read either.
+  registry requirement is not a source. uv installs a root `uv.lock` as recorded, with
+  or without `--frozen`, including artifact URLs and dependency edges that
+  `pyproject.toml` never names; the lock is bound by its SHA-256 and is inert only
+  when every package is the root or a `https://pypi.org/simple` package whose every
+  file is a `https://files.pythonhosted.org/` URL. A PyPI release the project
+  environment installs, from `pyproject.toml` or such a lock, runs in the server's
+  environment, and a hostile one could ship a copy of the launched package that
+  satisfies `--with`; the key binds which releases those are, but none is a source.
+  Any other lock is a source as a whole, so a server in a checkout whose lock names
+  another index, a mirror or a local or workspace package loses its `package_url`, as
+  does one whose lock uv ignores: uv installs no root lock without a root
+  `pyproject.toml`, and with `[tool.uv] managed = false` it neither installs the lock
+  nor syncs the requirement lists that are read in project mode. A lock root that is
+  editable is counted as code loading even where `pyproject.toml` builds the project
+  too, so `code_loading_setting` is 2. Run a pinned server with `--no-project` or
+  `uvx` instead. `VIRTUAL_ENV` and `CONDA_PREFIX` are sources for `uv run` even in
+  project mode, where uv uses them only with `--active`. The metadata of a workspace
+  member or path dependency, a build backend's own configuration, and an existing
+  `.venv` are not read: the default exclusions skip `.venv`, and counting its presence
+  would withhold the identity of every `uv run` server in a developer checkout. A
+  committed `.venv` with a `pyvenv.cfg`, whose interpreter uv uses, and whose
+  installed copy of a pinned package satisfies `--with`, runs under the pinned
+  identity; review a `.venv` in a pull request as code. A `.python-version` in a
+  parent directory of the root is not read either.
 - **Python requests are read with uv 0.11's grammar.** A `.python-version` line or uv
-  `--python` value is inert only in a version or implementation form that uv reads
-  before it tries a directory or file of that name; any other is taken to name an
-  interpreter in the checkout, so a form that a later uv adds counts as one until the
-  grammar is updated. `pipx run --python` counts as local code only when its value
-  holds a path separator.
+  `--python` value is inert only in an ASCII version or implementation form, with
+  release numbers up to 255, that uv reads before it tries a directory or file of that
+  name; any other is taken to name an interpreter in the checkout, so a form that a
+  later uv adds counts as one until the grammar is updated. The grammar is a subset of
+  uv's: a version or specifier with white space before or after it, `python 3.12`,
+  or a variant other than `t`, `+freethreaded`, `+debug` and `+gil` (such as `3.13d`)
+  counts as a source although uv reads a version there. Every line of the file is
+  classified, although `uv run` uses only the first request. `pipx run --python`
+  counts as local code only when its value holds a path separator.
 - **Injected environments are not visible.** Variables from an `envFile`, from uv's
   `--env-file`, or from `dotenvx`, `doppler`, `infisical` or `op run --env-file`, are
   not read. A launched package then carries `environment-file=[unresolved]` instead

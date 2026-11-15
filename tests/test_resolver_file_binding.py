@@ -38,6 +38,29 @@ LOCK = (
     'version = 1\nrevision = 3\nrequires-python = ">=3.10"\n\n'
     '[[package]]\nname = "helper"\nversion = "0.1.0"\nsource = { virtual = "." }\n'
 )
+PYPI_FILES = "https://files.pythonhosted.org/packages"
+SIX_WHEEL = f"{PYPI_FILES}/d9/5a/e7c31adbe875f2abbb91bd84cf2dc52d792b5a01506781dbcf25c91daf11"
+SIX_SDIST = f"{PYPI_FILES}/71/39/171f1c67cd00715f190ba0b100d606d440a28c93c7714febeca8b79af85e"
+
+
+def _locked(source: str, sdist: str, wheel: str) -> str:
+    """LOCK with an edge to six, recorded with the given source and file entries."""
+    return LOCK + (
+        'dependencies = [{ name = "six" }]\n\n'
+        f'[[package]]\nname = "six"\nversion = "1.16.0"\nsource = {source}\n'
+        + (f"sdist = {sdist}\n" if sdist else "")
+        + (f"wheels = [{wheel}]\n" if wheel else "")
+    )
+
+
+# uv lock output for a project that depends on six from PyPI.
+PYPI_LOCK = _locked(
+    '{ registry = "https://pypi.org/simple" }',
+    f'{{ url = "{SIX_SDIST}/six-1.16.0.tar.gz", hash = "sha256:{"1" * 64}", size = 34041, '
+    'upload-time = "2021-05-05T14:18:18.379Z" }',
+    f'{{ url = "{SIX_WHEEL}/six-1.16.0-py2.py3-none-any.whl", hash = "sha256:{"2" * 64}", '
+    'size = 11053, upload-time = "2021-05-05T14:18:17.237Z" }',
+)
 # A dependency edge pyproject.toml never declares, to a wheel URL the checkout chose.
 SWAPPED_LOCK = LOCK + (
     'dependencies = [{ name = "mcp-server-fetch" }]\n\n'
@@ -161,6 +184,12 @@ def test_every_resolver_file_value_is_in_the_keyed_binding(
             '{"lock": true, "vendor": true, "nodeModulesDir": "manual"}',
         ),
         (UV_PROJECT, "uv.lock", LOCK, SWAPPED_LOCK),
+        (UV_PROJECT, "uv.lock", PYPI_LOCK, PYPI_LOCK.replace("1.16.0", "1.17.0")),
+        # uv reads these lines untrimmed, as a directory in the checkout, not a version.
+        (UV_PROJECT, ".python-version", "3.12\n", "3.12\x0b\n"),
+        (UV_PROJECT, ".python-version", "3.12\n", "3.12\r#x\n"),
+        (UV_RUN, ".python-version", "3.12\n", "3.12\x1f\n"),
+        (UV_RUN, ".python-version", "pypy\n", " pypy\n"),
     ],
 )
 def test_a_redirecting_resolver_edit_fails_diff_and_validation(
@@ -813,6 +842,82 @@ def test_a_python_version_or_implementation_request_is_not_a_source(tmp_path, re
     _unchanged(_server(tmp_path / "option", option, {}), FETCH)
 
 
+# Each was observed with uv 0.11.32 to run `<request>/bin/python` from the working
+# directory: uv splits lines only at \n, parses them untrimmed, reads ASCII digits only,
+# keeps release numbers in a u8 and lowercases ASCII letters only.
+HIDDEN_PATHS = [
+    " pypy",
+    "pypy ",
+    "any ",
+    " python3.13",
+    "3.13t ",
+    "3.12\x0b",
+    "3.12\x1c",
+    "3.12\x1f",
+    "3.12\u2028",
+    "3.12\x85",
+    "\ufeff3.12",
+    "3.12\r#x",
+    "3.12\r3.13",
+    "\x1f",
+    "\uff13.\uff11\uff12",
+    "\u0663.\u0661\u0662",
+    "cp\u0663\u0661\u0662",
+    "python\uff13",
+    "3.\u0661\u0662",
+    "pypy3.10\u212a",
+    "pyod\u0131de",
+    ">=\x1f3.12",
+    ">=3.11\x1f,<3.14",
+    "~=\x1f3.12",
+    "3rc1",
+    "cp3rc1",
+    "3.256",
+    "3.12.256",
+    "==3.99999999999999999999999",
+    "3.14rc99999999999999999999",
+]
+
+
+def _shown(request_text: str) -> str:
+    return "[local]" if request_text.strip() else "[set]"
+
+
+@pytest.mark.parametrize("request_text", HIDDEN_PATHS)
+def test_a_python_request_uv_reads_as_a_checkout_path_is_a_source(tmp_path, request_text):
+    content = f"{request_text}\n"
+    server = _server(tmp_path, UV_PROJECT, {".python-version": content})
+    # A value Python's strip empties, such as U+001F, is named as set rather than local.
+    _redirected(server, f".python-version:python-request={_shown(request_text)}")
+    option = {**UV_RUN, "args": ["run", "--python", request_text, *UV_RUN["args"][1:]]}
+    assert _server(tmp_path / "option", option, {}).properties["launch_context"] == {
+        "code_loading_option": 1
+    }
+
+
+@pytest.mark.parametrize(
+    "content,shown",
+    [("pypy\r", "[local]"), ("\x1f\n3.12\n", "[set]"), ("# pin\n pypy\n", "[local]")],
+)
+def test_a_python_version_file_is_split_as_uv_splits_it(tmp_path, content, shown):
+    # A final \r stays on the line, and Rust's trim keeps U+001F, so uv reads each as a path.
+    server = _server(tmp_path, UV_RUN, {".python-version": content})
+    _redirected(server, f".python-version:python-request={shown}")
+
+
+@pytest.mark.parametrize(
+    "content", ["3.12\r\n", "\x0b\n3.12\n", "\u3000# pinned\n3.12\n", "\t\n#x\r\n3.12"]
+)
+def test_lines_uv_skips_or_reads_as_versions_are_not_sources(tmp_path, monkeypatch, content):
+    # uv trims with Rust's Unicode White_Space to skip a line, which keeps U+001C to U+001F.
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    server = _server(tmp_path, UV_RUN, {".python-version": content})
+    _unchanged(server, FETCH)
+    plain = _binding(tmp_path / "plain", UV_RUN, {".python-version": "3.12\n"})
+    # The file is bound as written, so a skipped line still changes the binding.
+    assert server.properties["static_value_binding"] != plain
+
+
 @pytest.mark.parametrize(
     "subcommand,rest",
     [
@@ -830,12 +935,18 @@ def test_a_python_option_that_may_name_a_project_interpreter_loads_local_code(
     assert server.properties["launch_context"] == {"code_loading_option": 1}
 
 
-def test_a_pipx_python_option_keeps_its_interpreter_reading(tmp_path):
+@pytest.mark.parametrize(
+    "request_text,local",
+    [("python3.12", False), ("interp", False), (" pypy", False), ("./interp", True)],
+)
+def test_a_pipx_python_option_keeps_its_interpreter_reading(tmp_path, request_text, local):
+    # pipx 1.18 takes a file only from a value with a path separator, then searches PATH.
     pipx = {
         "command": "pipx",
-        "args": ["run", "--python", "python3.12", "mcp-server-fetch==2025.1.17"],
+        "args": ["run", "--python", request_text, "mcp-server-fetch==2025.1.17"],
     }
-    assert "launch_context" not in _server(tmp_path, pipx, {}).properties
+    context = _server(tmp_path, pipx, {}).properties.get("launch_context")
+    assert context == ({"code_loading_option": 1} if local else None)
 
 
 @pytest.mark.parametrize("variable", ["VIRTUAL_ENV", "CONDA_PREFIX"])
@@ -862,23 +973,91 @@ def test_a_uv_environment_file_is_an_unresolved_source(tmp_path, args):
     _redirected(server, "environment-file=[unresolved]")
 
 
+PYPROJECT = '[project]\nname = "helper"\nversion = "0.1.0"\ndependencies = []\n'
+
+
 def test_a_project_lockfile_is_a_bound_package_source(tmp_path, monkeypatch):
     monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
-    pyproject = '[project]\nname = "helper"\nversion = "0.1.0"\ndependencies = []\n'
-    files = {"pyproject.toml": pyproject, "uv.lock": LOCK}
+    files = {"pyproject.toml": PYPROJECT, "uv.lock": SWAPPED_LOCK}
+    _write(tmp_path / "a", UV_PROJECT, files)
+    assert "uv.lock" in MCPScanner().scan(tmp_path / "a").surfaces_scanned
     server = _server(tmp_path / "a", UV_PROJECT, files)
     _redirected(server, "uv.lock:packages=[local]")
     assert "uv.lock:packages" in server.properties["resolver_settings"]
-    swapped = _binding(tmp_path / "b", UV_PROJECT, {**files, "uv.lock": SWAPPED_LOCK})
-    assert swapped != server.properties["static_value_binding"]
-    # Without project mode, and for uv tool runs, uv installs nothing from the lock.
-    for config in (UV_RUN, UVX):
-        plain = _server(tmp_path / f"{config['command']}-x", config, {"pyproject.toml": pyproject})
-        locked = _server(
-            tmp_path / f"{config['command']}-y", config, {**files, "uv.lock": SWAPPED_LOCK}
-        )
+    plain = _binding(tmp_path / "b", UV_PROJECT, {**files, "uv.lock": LOCK})
+    assert plain != server.properties["static_value_binding"]
+    # Without project mode, and for uv tool runs and scripts, uv installs nothing from the lock.
+    script = {**UV_RUN, "args": ["run", "--script", *UV_RUN["args"][2:]]}
+    short = {**UV_RUN, "args": ["run", "-s", *UV_RUN["args"][2:]]}
+    for index, config in enumerate((UV_RUN, UVX, script, short)):
+        bare = _server(tmp_path / f"x{index}", config, {"pyproject.toml": PYPROJECT})
+        locked = _server(tmp_path / f"y{index}", config, files)
         _unchanged(locked, FETCH)
-        assert locked.properties["static_value_binding"] == plain.properties["static_value_binding"]
+        assert locked.properties["static_value_binding"] == bare.properties["static_value_binding"]
+
+
+@pytest.mark.parametrize("lock", [LOCK, PYPI_LOCK, LOCK.replace('version = "0.1.0"\n', "")])
+def test_a_lockfile_of_pypi_files_keeps_the_identity_and_is_bound(tmp_path, monkeypatch, lock):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    server = _server(tmp_path / "a", UV_PROJECT, {"pyproject.toml": PYPROJECT, "uv.lock": lock})
+    _unchanged(server, FETCH)
+    assert "uv.lock:packages" in server.properties["resolver_settings"]
+    edited = lock.replace('requires-python = ">=3.10"', 'requires-python = ">=3.11"')
+    other = _binding(tmp_path / "b", UV_PROJECT, {"pyproject.toml": PYPROJECT, "uv.lock": edited})
+    assert other != server.properties["static_value_binding"]
+
+
+PYPI_REGISTRY = '{ registry = "https://pypi.org/simple" }'
+SIX_FILE = f'{{ url = "{SIX_WHEEL}/six-1.16.0-py2.py3-none-any.whl" }}'
+
+
+@pytest.mark.parametrize(
+    "lock",
+    [
+        # A registry entry may still name any file; only PyPI's file host is inert.
+        _locked(PYPI_REGISTRY, "", '{ url = "file:///tmp/wheels/six-1.16.0-py3-none-any.whl" }'),
+        _locked(PYPI_REGISTRY, '{ url = "https://evil.example/six-1.16.0.tar.gz" }', SIX_FILE),
+        _locked(PYPI_REGISTRY, "", '{ url = "https://files.pythonhosted.org.evil.example/x.whl" }'),
+        _locked(PYPI_REGISTRY, "", '{ url = "https://files.pythonhosted.org@evil.example/x.whl" }'),
+        _locked(PYPI_REGISTRY, "", '{ path = "wheels/six-1.16.0-py3-none-any.whl" }'),
+        _locked(PYPI_REGISTRY, "", SIX_FILE.replace(" }", ', zstd = { hash = "x" } }')),
+        _locked(PYPI_REGISTRY, "", ""),
+        _locked('{ registry = "https://pypi.org/simple/" }', "", SIX_FILE),
+        _locked('{ registry = "https://mirror.example/simple" }', "", SIX_FILE),
+        _locked('{ git = "https://github.com/benjaminp/six?rev=1.16.0#65486e4" }', "", ""),
+        _locked('{ path = "vendor/six-1.16.0.tar.gz" }', "", ""),
+        _locked('{ directory = "vendor/six" }', "", ""),
+        _locked('{ editable = "vendor/six" }', "", ""),
+        _locked('{ virtual = "vendor/six" }', "", ""),
+        _locked('{ url = "https://evil.example/six-1.16.0.tar.gz" }', "", ""),
+        LOCK.replace('source = { virtual = "." }', 'source = { virtual = "." }\nsdist = {}'),
+        LOCK.replace("version = 1\n", "version = 2\n"),
+        LOCK + "\n[tool]\nx = 1\n",
+        LOCK + 'build-hooks = ["x"]\n',
+        "version = 1\n[[package\n",
+        "\ufeff" + LOCK,
+    ],
+)
+def test_a_lockfile_with_any_other_file_or_source_is_a_package_source(tmp_path, lock):
+    server = _server(tmp_path, UV_PROJECT, {"pyproject.toml": PYPROJECT, "uv.lock": lock})
+    _redirected(server, "uv.lock:packages=[local]")
+
+
+def test_a_lockfile_root_is_read_as_the_project(tmp_path):
+    # uv --frozen builds an editable root whatever pyproject.toml says.
+    editable = PYPI_LOCK.replace('{ virtual = "." }', '{ editable = "." }')
+    files = {"pyproject.toml": PYPROJECT + "[tool.uv]\npackage = false\n", "uv.lock": editable}
+    server = _server(tmp_path / "editable", UV_PROJECT, files)
+    assert server.package_url == FETCH
+    assert server.properties["launch_context"] == {"code_loading_setting": 1}
+    named = PYPI_LOCK.replace('name = "helper"', 'name = "MCP_Server.Fetch"')
+    server = _server(
+        tmp_path / "named", UV_PROJECT, {"pyproject.toml": PYPROJECT, "uv.lock": named}
+    )
+    assert server.package_url is None
+    assert any(
+        r.category == "launcher_identity" and r.severity.value == "high" for r in server.risks
+    )
 
 
 def test_a_python_version_request_is_bound_but_not_a_source(tmp_path, monkeypatch):

@@ -92,7 +92,7 @@ against the embedded document.
 `nexus-symbiote/mcp-static-values/v4` binds every setting of each project resolver
 file that applies to a launcher, auth settings excepted: all of `uv.toml`,
 `[tool.uv]` (all of `pyproject.toml`, and the SHA-256 of `uv.lock`, for `uv run` in
-project mode), `.python-version`, `bunfig.toml`, `.yarnrc.yml`, `deno.json` and
+project mode), the text of `.python-version`, `bunfig.toml`, `.yarnrc.yml`, `deno.json` and
 `deno.jsonc`, with TOML and YAML values typed. `uvx` and `uv tool run`, which ignore project uv configuration, keep binding
 only its index, mirror, insecure-host and launched-package `sources` settings. Version 3 bound only the settings it classified as sources
 and Deno's import mappings, so an edited `uv.toml` `cache-dir`, bunfig

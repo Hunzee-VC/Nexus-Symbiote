@@ -83,14 +83,29 @@ entry and any `[tool.uv.sources]` entry are sources, and a project that uv build
 has a `[build-system]` table, or `[tool.uv] package = true`, and not `package = false`)
 installs its own code into the environment the server runs in, a medium
 `launch_context` risk. uv installs `uv.lock` as recorded, with or without `--frozen`,
-artifact URLs and dependency edges that `pyproject.toml` never names included, so in
-project mode a root `uv.lock` is a source (`uv.lock:packages=[local]`) and its bytes
-are bound. Each line of `.python-version` is a Python request. uv reads one as a
-version or implementation (`3.12`, `cpython@3.13`, `>=3.11,<3.14`, `pypy3.10`, `any`)
-before trying a directory or file of that name, so any other request, a bare `interp`,
-`python` or download key such as `cpython-3.12-linux` included, may run an interpreter
-in the checkout and is a source, as `UV_PYTHON` is; a uv `--python` value of that kind
-is a medium `launch_context` risk.
+artifact URLs and dependency edges that `pyproject.toml` never names included, and
+with `--frozen` builds an editable root whatever `pyproject.toml` says. So in project
+mode a root `uv.lock` is read and its SHA-256 bound. It is inert when every package
+is the project root (`virtual` or `editable` `"."`) or comes from the
+`https://pypi.org/simple` registry with every sdist and wheel a
+`https://files.pythonhosted.org/` URL: uv checks each file's hash and version against
+its entry, so such a lock adds only PyPI releases, as a registry requirement in
+`pyproject.toml` does. Any other lock, one that names another index, file host, local
+file, Git, URL, path or workspace source, a key outside uv's lock format or that does
+not parse included, is a source (`uv.lock:packages=[local]`). A lock root is read as
+the project is: an editable root is a medium `launch_context` risk, and a root named
+as a launched package makes the launcher identity unknown. Each line of
+`.python-version` is a Python request, read as uv 0.11 reads it: lines end only at
+`\n` (one `\r` before it is dropped), a line blank or starting with `#` once trimmed of
+Unicode white space is skipped, and every other line is parsed as written. uv reads a
+request as a version or implementation (`3.12`, `cpython@3.13`, `>=3.11,<3.14`,
+`pypy3.10`, `any`) before trying a directory or file of that name, so any other
+request may run an interpreter in the checkout and is a source, as `UV_PYTHON` is: a
+bare `interp`, `python` or download key such as `cpython-3.12-linux`, and also
+`pypy` after a space, `3.12\r#x`, `3.12` followed by U+000B or U+001F, `3.12` in
+full-width or Arabic-Indic digits, `3rc1` and `3.256`, each observed to make uv 0.11.32
+run `<request>/bin/python` from the working directory. The whole file is bound as written. A uv `--python` value of that kind is
+a medium `launch_context` risk.
 bunfig settings are named by their table, such as `install.cache.dir`:
 beside its registries, scopes and CA settings, its cache and global directories
 (`[install.cache] dir`, an `install.cache` other than `false`, `install.globalDir` and
@@ -156,8 +171,8 @@ lets anyone holding the BOM test guesses for it offline. Records then also carry
 and the raw values of every setting of each project resolver file that applies to it,
 whether or not it is classified as a source (profile
 `nexus-symbiote/mcp-static-values/v4`), and a key identifier. That is every top-level
-`.npmrc` and `.yarnrc` setting, the text of `.env.yarn`, each `.python-version`
-request, the SHA-256 of `uv.lock` for `uv run` in project mode, and the whole of `bunfig.toml`, `.yarnrc.yml`, `uv.toml`, `[tool.uv]` (all of
+`.npmrc` and `.yarnrc` setting, the text of `.env.yarn` and of `.python-version`,
+the SHA-256 of `uv.lock` for `uv run` in project mode, and the whole of `bunfig.toml`, `.yarnrc.yml`, `uv.toml`, `[tool.uv]` (all of
 `pyproject.toml` for `uv run` in project mode), `deno.json` and `deno.jsonc`; for
 `uvx` and `uv tool run` only the uv settings that are sources;
 TOML and YAML values keep their type, so a date and the same text, or `1` and `1.0`,

@@ -1173,7 +1173,9 @@ def _file_setting(
     if path in _PYTHON_VERSION_FILES:
         return _python_request(value)
     if path == "uv.lock":
-        return "source"
+        if key == "packages":
+            return "inert" if value == "pypi" else "source"
+        return _uv_setting(key, value, launched, project=True)
     return "unresolved" if path == ".env.yarn" else "inert"
 
 
@@ -1253,6 +1255,32 @@ def _python_request(value: str) -> str:
     """A uv Python request other than a version or implementation may name an interpreter
     in the project, which uv runs as it would one UV_PYTHON names."""
     return "inert" if uv_python_version(value) else "source"
+
+
+# Rust's char::is_whitespace, the Unicode White_Space set; Python's str.isspace also
+# holds U+001C to U+001F, which Rust's trim keeps.
+_RUST_WHITESPACE = (
+    "\t\n\x0b\x0c\r \x85\xa0\u1680"
+    + "".join(chr(code) for code in range(0x2000, 0x200B))
+    + "\u2028\u2029\u202f\u205f\u3000"
+)
+
+
+def _python_requests(text: str) -> list[str]:
+    """The requests of a .python-version file as uv 0.11 reads them.
+
+    Lines end only at ``\\n``, with one ``\\r`` before it dropped (Rust's ``str::lines``).
+    A line blank or starting with ``#`` once trimmed is skipped, and every other line is
+    the request as written: uv parses it untrimmed, so ``3.12\\r#x`` or `` pypy`` is a
+    path.
+    """
+    parts = text.split("\n")
+    lines = [part.removesuffix("\r") for part in parts[:-1]] + parts[-1:]
+    return [
+        line
+        for line in lines
+        if (trimmed := line.strip(_RUST_WHITESPACE)) and not trimmed.startswith("#")
+    ]
 
 
 def _string_list(value: str) -> list[str] | None:
@@ -1463,6 +1491,71 @@ def _uv_project(document: dict[str, Any], uv: dict[str, Any]) -> _ResolverFile:
     return _ResolverFile(tuple(entries), binding_settings=_typed_binding(document))
 
 
+_LOCK_KEYS = _names(
+    "version revision requires-python resolution-markers supported-markers required-markers"
+    " conflicts options manifest package"
+)
+_LOCK_PACKAGE_KEYS = _names(
+    "name version source sdist wheels dependencies optional-dependencies dev-dependencies"
+    " metadata resolution-markers"
+)
+_LOCK_FILE_KEYS = frozenset({"url", "hash", "size", "upload-time"})
+_LOCK_ROOTS = ({"virtual": "."}, {"editable": "."})
+
+
+def _uv_lock(raw: bytes) -> _ResolverFile:
+    """A root uv.lock as ``uv run`` installs it, bound by its SHA-256.
+
+    uv installs the locked packages as recorded, artifact URLs and dependency edges that
+    pyproject.toml never names included, and with ``--frozen`` builds an editable root
+    whatever pyproject.toml says. Its packages are inert only when each is the root or a
+    PyPI registry package whose every file is a files.pythonhosted.org URL: uv checks a
+    file's hash and version against its entry, so such a lock adds only PyPI releases,
+    as a registry requirement in pyproject.toml does. A root is read as a project.
+    """
+    roots = _pypi_lock_roots(raw)
+    entries = [("packages", "[local]" if roots is None else "pypi")]
+    for name, editable in roots or ():
+        entries += [("project.name", name), ("project.package", json.dumps(editable))]
+    return _ResolverFile(tuple(entries), binding_settings=(("packages", hash_bytes(raw)),))
+
+
+def _pypi_lock_roots(raw: bytes) -> list[tuple[str, bool]] | None:
+    """Each root of a lock that installs only PyPI files, editable or not; None otherwise."""
+    try:
+        lock = load_toml(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError, MemoryError):
+        return None
+    packages = lock.get("package", [])
+    if lock.get("version") != 1 or not set(lock) <= _LOCK_KEYS or not isinstance(packages, list):
+        return None
+    roots: list[tuple[str, bool]] = []
+    for package in packages:
+        if not isinstance(package, dict) or not set(package) <= _LOCK_PACKAGE_KEYS:
+            return None
+        name, source = package.get("name"), package.get("source")
+        if not isinstance(name, str):
+            return None
+        files = [package["sdist"]] if "sdist" in package else []
+        wheels = package.get("wheels", [])
+        files += wheels if isinstance(wheels, list) else [wheels]
+        if source in _LOCK_ROOTS and not files:
+            roots.append((name, "editable" in source))
+        elif (
+            source != {"registry": "https://pypi.org/simple"}
+            or not files
+            or not all(
+                isinstance(file, dict)
+                and set(file) <= _LOCK_FILE_KEYS
+                and isinstance(file.get("url"), str)
+                and file["url"].startswith("https://files.pythonhosted.org/")
+                for file in files
+            )
+        ):
+            return None
+    return roots
+
+
 def _bun_entries(table: dict[str, Any], prefix: str = "") -> list[tuple[str, str]]:
     gated = _BUN_IDENTITY_SETTINGS | _BUN_CODE_SETTINGS | _BUN_SOURCE_SETTINGS
     found: list[tuple[str, str]] = []
@@ -1562,23 +1655,19 @@ class _Resolvers:
         if path == ".yarnrc":
             return _ResolverFile(_yarnrc(self._text(path) or ""))
         if path in _PYTHON_VERSION_FILES:
-            lines = re.split(r"[\r\n]+", self._text(path) or "")
-            requests = [line.strip() for line in lines]
+            text = self._text(path)
+            if text is None:
+                return _ResolverFile()
             return _ResolverFile(
-                tuple(
-                    ("python-request", request)
-                    for request in requests
-                    if request and not request.startswith("#")
-                )
+                tuple(("python-request", request) for request in _python_requests(text)),
+                binding_settings=(("text", text),),
             )
         if path == "uv.lock":
-            # uv run installs the locked packages as recorded, artifact URLs and dependency
-            # edges that pyproject.toml never names included.
             raw = self._files.read_bytes(path, missing_ok=True)
             if raw is None:
                 return _ResolverFile()
             self._result.surfaces_scanned.append(path)
-            return _ResolverFile((("packages", hash_bytes(raw)),))
+            return _uv_lock(raw)
         if path == ".env.yarn":
             # Yarn 4 loads .env.yarn into its environment by default (injectEnvironmentFiles).
             text = self._text(path)

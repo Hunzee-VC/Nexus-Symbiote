@@ -670,20 +670,27 @@ _UV_SOURCE = frozenset(
     }
 )
 _UV_LOCATION = frozenset({"--directory", "--project"})
-_PYTHON_RELEASE = r"\d+(?:\.\d+){0,2}"
+# A release component that fits the u8 uv keeps it in: to uv `3.256` is not a version.
+_PYTHON_NUMBER = r"(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])"
+_PYTHON_RELEASE = rf"{_PYTHON_NUMBER}(?:\.{_PYTHON_NUMBER}){{0,2}}"
 _PYTHON_SPECIFIER = (
-    rf"(?:(?:==|!=)\s*{_PYTHON_RELEASE}(?:\.\*)?|~=\s*\d+\.\d+(?:\.\d+)?"
+    rf"(?:(?:==|!=)\s*{_PYTHON_RELEASE}(?:\.\*)?"
+    rf"|~=\s*{_PYTHON_NUMBER}\.{_PYTHON_NUMBER}(?:\.{_PYTHON_NUMBER})?"
     rf"|[<>]=?\s*{_PYTHON_RELEASE})"
 )
 _PYTHON_IMPLEMENTATION = r"(?:cpython|cp|pypy|pp|graalpy|gp|pyodide)"
 # uv reads a Python request as a version or an implementation first, then as a directory
 # or file of that name, and only then as a download key or a program on PATH; so a bare
-# `interp`, `python` or `cpython-3.12-linux` can name an interpreter in the project.
+# `interp`, `python` or `cpython-3.12-linux` can name an interpreter in the project. The
+# grammar is ASCII with no surrounding white space, a subset of uv 0.11's: uv reads ASCII
+# digits only, lowercases ASCII letters only, and takes `3rc1`, ` pypy` or `3.12\x1f` as
+# paths.
 _UV_PYTHON_VERSION = re.compile(
     rf"any|default|{_PYTHON_IMPLEMENTATION}|(?:python@?|{_PYTHON_IMPLEMENTATION}@?)?"
-    r"(?:(?:\d{1,3}|\d+\.\d+(?:\.\d+)?)(?:(?:a|b|rc)\d+)?(?:t|\+(?:freethreaded|debug|gil))?"
+    rf"(?:(?:[0-9]|(?:[0-9]{{2,3}}|{_PYTHON_NUMBER}\.{_PYTHON_NUMBER}(?:\.{_PYTHON_NUMBER})?)"
+    r"(?:(?:a|b|rc)[0-9]{1,9})?)(?:t|\+(?:freethreaded|debug|gil))?"
     rf"|{_PYTHON_SPECIFIER}(?:\s*,\s*{_PYTHON_SPECIFIER})*)",
-    re.IGNORECASE,
+    re.ASCII | re.IGNORECASE,
 )
 
 
