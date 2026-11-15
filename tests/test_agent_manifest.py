@@ -327,6 +327,7 @@ def test_the_inferred_agent_is_the_repository_whatever_its_checkout():
         ("instructions: [missing.md]", {}),
         ("instructions: [node_modules/pkg/AGENTS.md]", {}),
         ("instructions: [binary.md]", {"binary.md": b"\xff\xfe"}),
+        ("instructions: [.env]", {".env": b"SYNTHETIC_PIN=0000\n"}),
         ("models: {m: {path: ../outside}}", {}),
         ("models: {m: {path: node_modules/m}}", {}),
         ("models: {m: {path: models}}", {}),

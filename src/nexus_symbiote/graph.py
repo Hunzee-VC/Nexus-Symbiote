@@ -155,6 +155,24 @@ def _readable_entry(
     return not files.excluded(path)
 
 
+def _credential_entry(files: ConfinedCollection, path: Path) -> str | None:
+    """Why a declared instruction is not read, or None.
+
+    A file whose name says it holds credentials, or a symlink to one in the project, such
+    as ``docs/notes.md -> ../.env``, is not read: an unkeyed digest of it would let anyone
+    holding the inventory confirm a guess of its content. The reason names neither path,
+    as both are checkout text.
+    """
+    from nexus_symbiote.scanners.credential_files import credential_shaped
+
+    if credential_shaped(path.as_posix()):
+        return "names a file whose name says it holds credentials"
+    target = files.in_root_target(path)
+    if target is not None and credential_shaped(target.as_posix()):
+        return "names a symlink to a file whose name says it holds credentials"
+    return None
+
+
 def _manifest_dependencies(
     bom: AIBOM,
     declared: AgentDeclaration,
@@ -165,6 +183,7 @@ def _manifest_dependencies(
     """Bind declared instructions and local models to collected records before changing the BOM."""
     from nexus_symbiote import limits
     from nexus_symbiote.scanners.base import project_relative
+    from nexus_symbiote.scanners.credential_files import credential_shaped
     from nexus_symbiote.scanners.prompt import detect_invisible_characters
 
     in_root = project_relative(files.root)
@@ -189,8 +208,14 @@ def _manifest_dependencies(
             continue
         if not _readable_entry(files, path, locator, problems):
             continue
+        refused = _credential_entry(files, path)
+        if refused is not None:
+            files.exclusions.append(f"{locator}: {refused}; not read or inventoried")
+            continue
         raw = files.read_bytes(path)
-        if raw is None:
+        followed = files.link_target(path)
+        # A symlink replaced after the check above can lead the read to such a file.
+        if raw is None or (followed is not None and credential_shaped(followed)):
             problems.append(f"{locator}: the declared instruction could not be collected safely")
             continue
         digest = hash_bytes(raw)

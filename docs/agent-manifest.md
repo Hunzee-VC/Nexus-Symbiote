@@ -63,7 +63,8 @@ out of these fields and review earlier exports before sharing them.
   as `CLAUDE.md`, maps to that collector's record; it is not inventoried twice. Its
   bytes must still match what the collector recorded. Any other listed file is
   inventoried as `prompt:manifest:<digest of its path>` with its SHA-256 and the same
-  hidden-character checks the collector applies to instruction files. This is how
+  hidden-character checks the collector applies to instruction files, unless it is
+  named as holding credentials ([below](#problems-are-recorded-not-fatal)). This is how
   instruction files the collector does not read, such as `docs/agents/rules.md` or a
   nested `CLAUDE.local.md`, enter the inventory. `surfaces_scanned` lists `agent.yaml`
   once it is read, and each file inventoried only because the manifest declares it.
@@ -87,7 +88,7 @@ inventory, so the default gate fails and the evidence stays available for review
 | `agent.yaml: does not conform to the agent manifest schema` | Not a YAML mapping, an unknown key, a missing `name`, a YAML anchor, alias or tag, or too many tokens. The inferred agent is recorded instead |
 | `agent.yaml: read refused (...)`, `agent.yaml: symlink target ...`, `agent.yaml: file-bytes limit of 1 MiB exceeded; ...` or `agent.yaml: invalid UTF-8` | A non-regular file, a symbolic link other than a relative one to a regular file in the project, a file over 1 MiB, or bytes that are not UTF-8. The inferred agent is recorded instead |
 | `agent.yaml#/instructions/N: must be a relative path beneath the repository` or `agent.yaml#/models/KEY: must be a relative path beneath the repository` | An absolute path, a `..` component, a backslash or a NUL character |
-| `agent.yaml#/instructions/N: the declared instruction could not be collected safely` | Missing, a symbolic link other than a relative one to a regular file in the project, not a regular file, or larger than the `file-bytes` [collection limit](collection-limits.md) (4 MiB by default) |
+| `agent.yaml#/instructions/N: the declared instruction could not be collected safely` | Missing, a symbolic link other than a relative one to a regular file in the project, not a regular file, larger than the `file-bytes` [collection limit](collection-limits.md) (4 MiB by default), or replaced after the credential-name check below by a symbolic link to a file named as holding credentials |
 | `agent.yaml#/instructions/N: names a path inside a directory that collection never reads` or `agent.yaml#/models/KEY: names a path inside a directory that collection never reads` | A path under `.git`, `node_modules`, `__pycache__`, `.venv` or `venv`, in any spelling a case-insensitive file system treats as the same name, such as `Node_Modules` |
 | `agent.yaml#/instructions/N: instruction changed since scanner collection` | The file changed between collection and assembly |
 | `agent.yaml#/instructions/N: declared instruction is not UTF-8 text` | It cannot be checked for hidden characters |
@@ -107,6 +108,29 @@ The project policy's `scan.exclude_paths` (in `.nexus-symbiote.yaml`, which
 every path it names. An excluded path is never read or hashed; it is recorded as a
 coverage gap (`PATH: excluded by collection policy`), so the default gate fails
 rather than silently narrowing what was inventoried.
+
+A listed file without a Markdown suffix whose name says it holds credentials is never
+read or hashed either, and neither is a listed file that is a symbolic link to such a
+file in the project, such as `docs/notes.md` or `CLAUDE.md` linked to `.env`: an
+unkeyed SHA-256 of its bytes would let anyone holding the inventory or an export
+confirm a guess of a short secret offline. The names are those the `prompt` collector
+refuses ([known limitations](known-limitations.md#instructions-and-ide-settings)):
+`.env*`, `.netrc`, `.npmrc`, `.pypirc`, `id_rsa`, `id_ecdsa`, `id_ed25519`, the
+suffixes `.pem`, `.key`, `.p12`, `.pfx`, `.der`, `.jks`, `.keystore` and `.token`, a
+name containing `secret`, `credential`, `password`, `apikey`, `api_key` or `api-key`,
+or a directory on the path named exactly one of those words, singular or plural, with
+or without a leading dot, such as `secrets/token.txt`, in any letter case. Each such
+entry is recorded as one of these coverage gaps, so the default gate fails, and
+`validate --project` and `risk --project` report that the local agent manifest could
+not be reconciled:
+
+- `agent.yaml#/instructions/N: names a file whose name says it holds credentials; not read or inventoried`
+- `agent.yaml#/instructions/N: names a symlink to a file whose name says it holds credentials; not read or inventoried`
+
+A Markdown file is read whatever its name or directory, such as
+`docs/secrets-handling.md`. List only instruction files under `instructions`, and
+give an instruction whose name merely contains one of those words, such as
+`prompts/password-reset.txt`, another name or a Markdown suffix.
 
 ## Trust
 

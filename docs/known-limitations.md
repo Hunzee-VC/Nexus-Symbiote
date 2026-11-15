@@ -528,14 +528,18 @@ A way around a limit that its entry does not describe is worth a
   skill or command directory holds it; the directory's other files are inventoried. A
   script whose name contains one of those words, such as `scripts/rotate_password.py`,
   is therefore a gap too, and so is every file without a Markdown suffix in a skill
-  directory named exactly one of them, such as `.claude/skills/secrets/`. A Markdown
+  directory named exactly one of them, such as `.claude/skills/secrets/`. An
+  [`agent.yaml`](agent-manifest.md) instruction entry that names such a file, or a
+  symlink to one, such as `docs/notes.md` linked to `.env`, is a gap as well and is not
+  read. A Markdown
   file is read whatever its name or directory, such as `docs/secrets-handling.md`, so a
   credential kept in one, or in any other file the collector digests whose name does not
   say it holds credentials, such as a skill's `token.txt` outside such a directory, is
-  covered by an unkeyed digest that can confirm a guess of it. So is a file that an
-  [`agent.yaml`](agent-manifest.md) declares as an instruction, which is read and hashed
-  whatever its name, through an in-root symlink too: declare only instruction files
-  there.
+  covered by an unkeyed digest that can confirm a guess of it. So is any other file
+  that an `agent.yaml` declares as an instruction, such as `config/app.json`, `.pgpass`
+  or `.docker/config.json`, whose names do not say they hold credentials: it is read and
+  hashed whatever it holds, through an in-root symlink too, so declare only instruction
+  files there.
 - **Fixtures count.** A nested `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` or `.cursorrules`
   in test fixtures or vendored code is inventoried, and its findings count, like any
   other.

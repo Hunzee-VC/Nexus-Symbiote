@@ -488,7 +488,11 @@ digest or keyed binding covers it. Such a file is a coverage gap when a memory f
 imports it; when an instruction file such as `CLAUDE.md`, a rule, prompt or subagent
 file, an import or a file of a skill or command directory is a symlink to it, whatever
 that file is named; and when a rule, prompt, subagent, skill or command directory holds
-it, while the directory's other files are inventoried as usual. A symlink replaced
+it, while the directory's other files are inventoried as usual. Manifest assembly
+applies the same names to each file an [`agent.yaml`](agent-manifest.md) lists under
+`instructions`, and to the in-root file a symlink there leads to: such an entry is a
+coverage gap named by its position, such as `agent.yaml#/instructions/0`, and the file
+is neither read nor hashed. A symlink replaced
 between that check and the read, so that the read follows it to such a file, is a
 collection failure, and nothing read is kept. A symlink to any other in-root file, such
 as `CLAUDE.md` to `AGENTS.md`, is read through its target.
