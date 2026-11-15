@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import heapq
 import json
+import re
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -323,6 +324,9 @@ def _trimmed(value: str | None) -> str | None:
     return text or None
 
 
+_PLAIN_ENDPOINT_NETLOC = re.compile(r"(?:\[[0-9A-Fa-f:]+\]|[A-Za-z0-9._~-]+)(?::[0-9]+)?")
+
+
 def _endpoint(url: str | None) -> tuple[str, int | None] | None:
     if not url or "\\" in url or any(ch <= " " or ch == "\x7f" for ch in url):
         return None
@@ -334,10 +338,7 @@ def _endpoint(url: str | None) -> tuple[str, int | None] | None:
     if (
         not parts.scheme
         or not host
-        or not parts.netloc.isascii()
-        or "@" in parts.netloc
-        or "%" in parts.netloc
-        or parts.netloc.endswith(":")
+        or not _PLAIN_ENDPOINT_NETLOC.fullmatch(parts.netloc)
         or port == 0
     ):
         return None

@@ -18,6 +18,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 - **Breaking:** a policy file accepts only the documented `validate` key, and an unlistable root is an error. `verify-artifact` and `verify-discovery` reject `--trust-root` or `--trust-root-sha256` without `--bundle`.
 - `risk` prints an unscored run as unscored, labels a failed discovery-producer check as such rather than as a failed project reconciliation, and, like `summary`, orders severity breakdowns from critical to info. `vex` and `advisories` print why an inventory could not be read.
+- **Breaking:** `scan --check` and `baseline` exit 1 in CI when the project carries unverified ShadowScan discovery evidence, matching `import-shadowscan`, `validate` and `risk`. Verify the report with `--signature-policy` (gating applies when the policy or project policy requires discovery signatures or names the report), or pass `--allow-unsigned-discovery` to keep accepting unverified discovery evidence explicitly.
 - PydanticAI tool references include the agent name, so tools of two agents with the same name no longer collide, and agent tools registered outside the decorator form are reported as gaps.
 
 ### Fixed
