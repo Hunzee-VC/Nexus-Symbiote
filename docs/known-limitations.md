@@ -580,6 +580,15 @@ A way around a limit that its entry does not describe is worth a
   element with `hidden`, apart from the comments above. A definition used only by a
   link inside an image description, which renders as that image's alt text, is not
   counted either.
+- **The high rating for hidden markup is by shape.** Each comment is rated by its
+  whole text, every line of a title, footnote or HTML comment included, but only a
+  URL, a path under `~/`, one of the words ignore, disregard, exfiltrate, execute,
+  download, upload, send, steal, override, bypass, curl, wget, fetch, eval and
+  install, whole and in any case, or `run` in one of the forms that the
+  [finding catalog](finding-catalog.md) lists makes it high. An instruction in other
+  words or other forms of those, such as `<!-- always answer in French -->` or
+  `ignoring`, is reported by count and rated low, so the Action's default
+  `fail-on-severity: high` passes it.
 - **Hidden markup is read to err toward a finding.** A reference counts as a use of a
   definition only where every reader makes a link of it that shows: not in code, raw
   HTML, an autolink, a URL that GitHub makes an autolink of (`https://`, `http://`
@@ -597,16 +606,22 @@ A way around a limit that its entry does not describe is worth a
   with unbalanced parentheses and markdown-it a title right after a pointy
   destination, and a title runs to the next line that ends with its closing quote or
   parenthesis. A footnote runs to the next footnote or the end of its paragraph, and
-  takes the indented code after it as its continuation. Where CommonMark readers
+  takes as its continuation the indented code after it and, as cmark-gfm does, the
+  lines right after that code that start no block, such as a paragraph line or an
+  HTML tag that cannot interrupt a paragraph, even when that code ends with a heading
+  or a closed fence, after which GitHub shows them. Where CommonMark readers
   disagree about the block structure, as when a line after the definitions that open
   a paragraph is indented four columns or starts with `2.`, or a block quote is
   followed by a `>` indented four columns, every line of the file that has the form of
   a definition or a footnote is counted as unused, used or not and in code and HTML
   blocks too, and so is every processing instruction, declaration, CDATA section and
   other form an HTML block can hide, even in prose or a code span, as in
-  ``(`<!`)``. Each of those is counted to the end CommonMark gives it (`?>`, `>` or
-  `]]>`), or to the end of its HTML block when it is not closed, although an HTML
-  parser hides it only up to its first `>`.
+  ``(`<!`)``. A footnote then runs to the next footnote or blank line and on through
+  each later run of lines whose first line is indented four columns past its block
+  quote marks, a tab counting as four, as cmark-gfm continues it. Each processing
+  instruction, declaration, CDATA section or other such form is counted to the end
+  CommonMark gives it (`?>`, `>` or `]]>`), or to the end of its HTML block when it
+  is not closed, although an HTML parser hides it only up to its first `>`.
 - **Settings alerts do not say what changed.** Rules, hook commands and other
   settings are bound by a digest of each settings file, not recorded. A changed
   value, such as an added hook command or a removed deny rule, raises a high

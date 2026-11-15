@@ -130,6 +130,7 @@ class _Block:
     fence_offset: int = 0
     html: int = 0
     suspects: list[int] = field(default_factory=list)
+    after_code: bool = False
 
 
 def text_outside_code(text: str) -> list[str]:
@@ -160,6 +161,12 @@ class _Reader:
         self.parts: list[str] = []
         # Each paragraph, heading and HTML block as written, with its kind, in order.
         self.blocks: list[tuple[str, str]] = []
+        # The paragraphs, setext headings and HTML blocks that cannot interrupt a paragraph
+        # that start right after a line of text in indented code, in no container opened
+        # on their line. Where that code continues a footnote, cmark-gfm reads it as a
+        # paragraph and these blocks as its lazy lines.
+        self.after_code: set[int] = set()
+        self.code_text = self.after_code_text = self.opened = False
         self.stack = [_Block("document")]
         self.line = ""
         self.offset = self.column = 0
@@ -174,7 +181,8 @@ class _Reader:
     def read(self, line: str) -> None:
         self.line = line
         self.offset = self.column = 0
-        self.blank = self.partial = False
+        self.blank = self.partial = self.opened = False
+        self.after_code_text, self.code_text = self.code_text, False
         self.found = (-1, 0)
         stack = self.stack
         old_tip = len(stack) - 1
@@ -202,6 +210,7 @@ class _Reader:
             if not started:
                 self._advance_next_nonspace()
                 break
+            self.opened = self.opened or started == 1
             container = len(stack) - 1
             leaf = started == 2
         if not self.all_closed and not self.blank and stack[-1].kind == "paragraph":
@@ -224,7 +233,7 @@ class _Reader:
             if 1 <= block.html <= 5 and _html_block_ends(block.html, line, self.offset):
                 self._finalize()
         elif self.offset < len(line) and not self.blank:
-            self._add_child("paragraph")
+            self._add_child("paragraph").after_code = self.after_code_text and not self.opened
             self._advance_next_nonspace()
             self._add_line()
 
@@ -371,7 +380,9 @@ class _Reader:
                         kind < 7 or (parent.kind != "paragraph" and not lazy)
                     ):
                         self._close_unmatched()
-                        self._add_child("html").html = kind
+                        block = self._add_child("html")
+                        block.html = kind
+                        block.after_code = kind == 7 and self.after_code_text and not self.opened
                         return 2
             if (
                 char in ("=", "-")
@@ -384,6 +395,8 @@ class _Reader:
                     # A paragraph of nothing but definitions is no heading.
                     raise _AmbiguousError
                 self.parts.append(_outside_spans(content))
+                if parent.after_code:
+                    self.after_code.add(len(self.blocks))
                 self.blocks.append(("heading", content))
                 parent.kind, parent.lines = "heading", []
                 self.offset = len(line)
@@ -458,6 +471,7 @@ class _Reader:
         elif tip.kind in ("indented", "html"):
             self.parts.append(content)
             tip.lines.append(content)
+            self.code_text = tip.kind == "indented" and bool(content.strip(" \t"))
 
     def _add_child(self, kind: str) -> _Block:
         while not _can_contain(self.stack[-1].kind, kind):
@@ -477,6 +491,8 @@ class _Reader:
 
     def _finalize(self) -> None:
         block = self.stack.pop()
+        if block.after_code and block.kind in ("paragraph", "html"):
+            self.after_code.add(len(self.blocks))
         if block.kind == "paragraph":
             content = "\n".join(block.lines)
             if block.suspects:
@@ -588,8 +604,8 @@ class HiddenText:
 @dataclass(slots=True)
 class _Footnote:
     keys: tuple[str, str]
-    text: str
-    reading: str
+    text: list[str]
+    reading: list[str]
 
 
 def hidden_text(text: str) -> HiddenText:
@@ -607,10 +623,13 @@ def hidden_text(text: str) -> HiddenText:
     link destinations do not count, nor do those after a link this cannot settle. A
     definition written as a comment, with a ``#`` or ``<>`` destination, is returned
     wherever it is outside code, used or not and in HTML blocks too. A footnote, which
-    GitHub drops when nothing references it, is returned with its continuation unless a
-    reference outside it, or in a footnote that is referenced, names it. HTML comments
-    are left to the caller. A file whose blocks this cannot settle is read line by line,
-    inside every container and code block, and each of its definitions is returned.
+    GitHub drops when nothing references it, is returned with its continuation, as
+    cmark-gfm reads it, unless a reference outside it, or in a footnote that is
+    referenced, names it: its lazy lines, the indented code after it and the lines right
+    after that code that start no block. HTML comments are left to the caller. A file
+    whose blocks this cannot settle is read line by line, inside every container and
+    code block, and each of its definitions and footnotes is returned, a footnote with
+    each later run of lines that starts indented four columns.
     """
     lines = _LINE_END.split(text)
     if text.endswith("\n"):
@@ -627,15 +646,22 @@ def hidden_text(text: str) -> HiddenText:
     html: list[str] = []
     readings: list[str] = []
     notes: list[_Footnote] = []
-    after_note = False
-    for kind, content in reader.blocks:
+    # cmark-gfm continues a footnote in the indented code after it, and in the lines
+    # right after that code that start no block, as lazy lines of a paragraph.
+    after_note = after_note_code = False
+    for number, (kind, content) in enumerate(reader.blocks):
+        lazy = after_note_code and number in reader.after_code
+        after_note_code = False
         if kind == "indented":
             if after_note:
-                notes[-1].text += "\n" + content
+                notes[-1].text.append(content)
+                after_note_code = True
             after_note = False
             continue
-        after_note = False
+        after_note = lazy
         if kind == "html":
+            if lazy:
+                notes[-1].text.append(content)
             html += _hidden_html(content, block=True)
             comments += [
                 content[start:end]
@@ -645,7 +671,11 @@ def hidden_text(text: str) -> HiddenText:
             continue
         if kind == "heading":
             html += _hidden_html(_outside_spans(content), block=False)
-            readings.append(content)
+            if lazy:
+                notes[-1].text.append(content)
+                notes[-1].reading.append(content)
+            else:
+                readings.append(content)
             continue
         starts = [found.start() for found in _FOOTNOTE.finditer(content)]
         pieces = list(zip([0, *starts], [*starts, len(content)], strict=True))
@@ -657,12 +687,15 @@ def hidden_text(text: str) -> HiddenText:
             found, inline, reading = _read_paragraph(piece)
             spans += found
             html += _hidden_html(_outside_spans(inline), block=False)
-            if marker is None:
+            if marker is None and lazy:
+                notes[-1].text.append(piece)
+                notes[-1].reading.append(reading)
+            elif marker is None:
                 readings.append(reading)
             else:
                 keys = _label_keys("^" + marker.group(1))
-                notes.append(_Footnote(keys, content[start:end].strip("\n"), reading))
-        after_note = len(pieces) > 1
+                notes.append(_Footnote(keys, [content[start:end].strip("\n")], [reading]))
+        after_note = lazy or len(pieces) > 1
     defined = [_label_keys(label) for _, label in spans]
     folded = {keys[0] for keys in defined}
     lowered = {keys[1] for keys in defined}
@@ -684,7 +717,7 @@ def hidden_text(text: str) -> HiddenText:
             used_lowered.add(lower)
             waiting = unreferenced.get(fold)
             if waiting:
-                queue += [note.reading for note in waiting if note.keys[1] == lower]
+                queue += ["\n".join(note.reading) for note in waiting if note.keys[1] == lower]
                 unreferenced[fold] = [note for note in waiting if note.keys[1] != lower]
     hidden: list[str] = []
     seen_folded: set[str] = set()
@@ -701,7 +734,7 @@ def hidden_text(text: str) -> HiddenText:
         seen_folded.add(fold)
         seen_lowered.add(lower)
     hidden += comments
-    hidden += [note.text for waiting in unreferenced.values() for note in waiting]
+    hidden += ["\n".join(note.text) for waiting in unreferenced.values() for note in waiting]
     return HiddenText(tuple(hidden), tuple(html))
 
 
@@ -1177,19 +1210,54 @@ def _references(text: str, defined: Callable[[str], bool]) -> list[str]:
     return labels
 
 
-_CONTAINER_MARKS = re.compile(
-    r"^[ \t]*+(?:(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t]))[ \t]*+)*+", re.M
-)
-_BLANK_LINE = re.compile(r"\n[ \t]*+\n")
+_CONTAINER_MARKS = re.compile(r"^[ \t]*+(?:(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t]))[ \t]*+)*+")
+# Block quote marks, each with the space after it that belongs to the mark.
+_QUOTE_MARKS = re.compile(r"^(?:[ \t]*+> ?)*+")
+
+
+def _chunks(text: str) -> list[tuple[bool, str]]:
+    """The runs of lines of ``text`` between blank lines, each without its container
+    marks, and whether its first line is indented four columns past its block quote
+    marks, a tab counting as four."""
+    chunks: list[tuple[bool, str]] = []
+    lines: list[str] = []
+    indented = False
+    for line in text.split("\n"):
+        bare = _CONTAINER_MARKS.sub("", line, count=1)
+        if not bare:
+            if lines:
+                chunks.append((indented, "\n".join(lines)))
+                lines = []
+            continue
+        if not lines:
+            rest = _QUOTE_MARKS.sub("", line, count=1)
+            indent = rest[: len(rest) - len(rest.lstrip(" \t"))]
+            indented = "\t" in indent or len(indent) >= _CODE_INDENT
+        lines.append(bare)
+    if lines:
+        chunks.append((indented, "\n".join(lines)))
+    return chunks
 
 
 def _hidden_in_whole(text: str) -> HiddenText:
     """Every definition and footnote at the start of a line, past any container marks,
-    and all the hidden HTML of ``text`` read as one HTML block."""
-    definitions = []
-    for chunk in _BLANK_LINE.split(_CONTAINER_MARKS.sub("", text)):
-        definitions += [chunk[start:end] for start, end, _, _ in _definition_spans(chunk)]
-        starts = [found.start() for found in _FOOTNOTE.finditer(chunk)]
+    and all the hidden HTML of ``text`` read as one HTML block. A footnote runs to the
+    next footnote or blank line, and on through each run of lines after that whose first
+    line is indented four columns, as cmark-gfm continues it."""
+    definitions: list[list[str]] = []
+    note = -1
+    for indented, chunk in _chunks(text):
+        if note >= 0 and indented:
+            definitions[note].append(chunk)
+        else:
+            note = -1
+        definitions += [[chunk[start:end]] for start, end, _, _ in _definition_spans(chunk)]
+        starts = [marker.start() for marker in _FOOTNOTE.finditer(chunk)]
         ends = [*starts[1:], len(chunk)] if starts else []
-        definitions += [chunk[a:b] for a, b in zip(starts, ends, strict=True)]
-    return HiddenText(tuple(definitions), tuple(_hidden_html(text, block=True)))
+        for start, end in zip(starts, ends, strict=True):
+            definitions.append([chunk[start:end]])
+            note = len(definitions) - 1
+    return HiddenText(
+        tuple("\n\n".join(parts) for parts in definitions),
+        tuple(_hidden_html(text, block=True)),
+    )
