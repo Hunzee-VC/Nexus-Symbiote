@@ -531,14 +531,17 @@ A way around a limit that its entry does not describe is worth a
   `imported_by` list by `imported_by_count`; every file is still inventoried.
 - **Files named as holding credentials are not read.** The `prompt` collector does not
   read a file without a Markdown suffix whose name says it holds credentials (`.env*`
-  other than a template ending in `.example`, `.sample`, `.template` or `.dist`,
+  other than a template ending in `.example`, `.sample` or `.template`,
   `.netrc`, `.npmrc`, `.pypirc`, `id_rsa`, `id_ecdsa`, `id_ed25519`, the suffixes
   `.pem`, `.key`, `.p12`, `.pfx`, `.der`, `.jks`, `.keystore` and `.token`, or a name
   containing `secret`, `credential`, `password` or an `api key` spelling: `apikey`,
   `api_key` or `api-key`, unless it is a program with the suffix `.py`, `.pyi`, `.sh`,
-  `.bash`, `.zsh`, `.ps1`, `.js`, `.mjs`, `.cjs`, `.ts`, `.rb` or `.go`, such as
-  `rotate_api_key.py`, which is read and inventoried: a credential written into such a
-  program is not withheld by this rule), or that lies in a directory named exactly one of those words,
+  `.bash`, `.zsh`, `.ps1`, `.js`, `.mjs`, `.cjs`, `.ts`, `.rb` or `.go` whose name is
+  more than one of those words, such as `rotate_api_key.py`, which is read and
+  inventoried; a program named only for what it holds, such as `secrets.py` or
+  `credentials.rb`, is still not read. A credential written into a program that this
+  rule reads, such as `client_secret.js` or `local_secrets.py`, or into a `.env`
+  template, is not withheld by it), or that lies in a directory named exactly one of those words,
   singular or plural, with or without a leading dot, such as `secrets/token.txt`. Such a
   file is a gap when a memory file imports it, when an instruction file such as
   `CLAUDE.md` or `.cursorrules`, a rule, prompt or subagent file, an import or a file of

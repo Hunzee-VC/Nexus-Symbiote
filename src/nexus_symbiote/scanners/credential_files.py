@@ -16,10 +16,11 @@ _CREDENTIAL_SUFFIXES = frozenset(
 _CREDENTIAL_MARKERS = ("secret", "credential", "password", "apikey", "api_key", "api-key")
 _CREDENTIAL_NAMES = frozenset({".netrc", ".npmrc", ".pypirc", "id_rsa", "id_ecdsa", "id_ed25519"})
 # A checked-in `.env` template lists the names to set and holds no values.
-_ENV_TEMPLATE_SUFFIXES = frozenset({".example", ".sample", ".template", ".dist"})
+_ENV_TEMPLATE_SUFFIXES = frozenset({".example", ".sample", ".template"})
 # A program named for the credential it handles, such as `rotate_api_key.py`, is code a
 # skill runs, not a store of values: dropping it would take what the agent executes out
-# of the inventory. The names and suffixes above still count for it.
+# of the inventory. One named only for what it holds, such as `secrets.py`, is a store
+# written as a program and stays a credential file, as the names and suffixes above do.
 _PROGRAM_SUFFIXES = frozenset(
     {".py", ".pyi", ".sh", ".bash", ".zsh", ".ps1", ".js", ".mjs", ".cjs", ".ts", ".rb", ".go"}
 )
@@ -51,7 +52,8 @@ def credential_shaped(path: str) -> bool:
     if suffix in _CREDENTIAL_SUFFIXES:
         return True
     if suffix in _PROGRAM_SUFFIXES:
-        return False
+        # `.secrets.py` has stem `.secrets`. Directories already strip a leading dot.
+        return PurePosixPath(name).stem.lstrip(".") in _CREDENTIAL_DIRECTORIES
     return any(marker in name for marker in _CREDENTIAL_MARKERS)
 
 
