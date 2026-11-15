@@ -519,9 +519,11 @@ def test_the_widened_cover_holds_every_occurrence(text, values):
             "<https://h.example>token: ***",
             "hunter2hunter2",
         ),
+        # A name in the host is a value in main's view too, which runs to the next space
+        # once main rewrote the URL; what main hid stays hidden (`_legacy_redaction`).
         (
             '<a href="https://token=abc123.example/cb">password: hunter2hunter2</a>',
-            '<a href="***">password: ***',
+            '<a href="*** ***',
             "hunter2hunter2",
         ),
         (

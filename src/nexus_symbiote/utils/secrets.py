@@ -12,6 +12,8 @@ from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from nexus_symbiote.utils._legacy_redaction import hidden_spans
+
 REDACTED = "***"
 # What a known value reads as to the rules on the masked pass: a separator, as its
 # redaction was, that no token, scheme value or header value contains.
@@ -240,6 +242,11 @@ class SecretScrubber:
 
     def __len__(self) -> int:
         return len(self._values)
+
+    @property
+    def values(self) -> tuple[str, ...]:
+        """The known values, longest first."""
+        return self._values
 
     def extended(self, values: Iterable[str]) -> SecretScrubber:
         """This scrubber with ``values`` added, merged without sorting its own again.
@@ -539,20 +546,17 @@ def _apply(value: str, spans: list[Span], rewrites: list[_Rewrite]) -> str:
     return "".join(parts)
 
 
-# The value of a credential name that ends a URL, as in `https://h/?a=b,password: v`:
-# the URL rule takes the name, so the value after it is matched here.
-_VALUE_AFTER_URL = re.compile(
-    r"[ \t]*+(\"(?:[^\"\\\n]|\\.){0,256}\"|'(?:[^'\\\n]|\\.){0,256}'|[^\s,;]++)"
-)
-# What stands in for a URL while the assignment and cookie rules read the rest of the
-# text. It is no keyword, separator, quote or space, so a value that runs into a URL is
-# not cut short and no rule rescans a URL once per assignment before it. A URL is read
-# on its own instead, bounded at its end, so an assignment that starts inside one ends
-# there, as `<a href="https://h/cb?token=v">password: w` needs.
+# The name part of an assignment, and the two quoted value forms; an unquoted value runs
+# to the next whitespace, `,` or `;`. The value forms are those of _ASSIGNMENT.
+_ASSIGNMENT_NAME = re.compile(rf"(?i){_CREDENTIAL_KEYWORD}[\"']?\s*+[:=]\s*+")
+_QUOTED_VALUE = re.compile(r"\"(?:[^\"\\\n]|\\.){0,256}\"|'(?:[^'\\\n]|\\.){0,256}'")
+_VALUE_END = re.compile(r"[\s,;]")
+# What stands in for a URL while the rules read the rest of the text. It is no keyword,
+# separator, quote or space, so a value that runs into a URL is not cut short and no
+# rule reads a URL's path or query, which its rewrite removes. Each URL is read on its
+# own instead, bounded at its end, so an assignment inside one ends there, as
+# `<a href="https://h/cb?token=v">password: w` needs.
 _URL_MASK = "\x00"
-# What may come before a credential keyword in a name that is itself the next
-# assignment, such as `DB_` in `DB_PASSWORD`; anything else makes the value a value.
-_NAME_PREFIX = re.compile(r"(?:[A-Za-z0-9]{1,32}[-_.]){0,4}")
 
 
 def _masked_urls(value: str, url_spans: list[Span]) -> str:
@@ -568,62 +572,74 @@ def _masked_urls(value: str, url_spans: list[Span]) -> str:
     return "".join(parts)
 
 
-def _assignment_spans(value: str, url_spans: list[Span]) -> Iterable[Span]:
-    """Assignment value spans, plus chained ``key: `` tails.
+class _UnquotedRuns:
+    """The end of the unquoted value that starts at a position, found once per run.
 
-    The text is read with every URL masked, and each URL is read on its own, so an
-    assignment inside a URL ends with it. A credential name that ends a URL takes
-    the value after it. A value that itself starts an assignment, as in
-    ``sort_key = token = v`` or ``signing_key:`` with ``password: v`` on the next line,
-    is read as that assignment instead, when whitespace sets it off from the separator.
+    Values are asked for in nondecreasing order. One that starts inside the run found
+    for an earlier value ends where that run does, as no whitespace, `,` or `;` lies between,
+    so a run is never scanned twice however many names lead into it.
     """
-    masked = _masked_urls(value, url_spans)
+
+    __slots__ = ("end", "limit", "text")
+
+    def __init__(self, text: str, limit: int) -> None:
+        self.text, self.limit, self.end = text, limit, -1
+
+    def value_end(self, start: int) -> int:
+        if start >= self.end:
+            stop = _VALUE_END.search(self.text, start, self.limit)
+            self.end = self.limit if stop is None else stop.start()
+        return self.end
+
+
+def _value_span(text: str, start: int, limit: int, runs: _UnquotedRuns) -> Span | None:
+    if start >= limit or text[start] in ",;" or text[start].isspace():
+        return None
+    quoted = _QUOTED_VALUE.match(text, start, limit)
+    if quoted is not None:
+        return quoted.span()
+    return start, runs.value_end(start)
+
+
+def _every_assignment(text: str, start: int, limit: int) -> Iterable[Span]:
+    """The value of every assignment whose name starts in ``text[start:limit]``.
+
+    Each place a credential name can start is read, not only where the previous
+    assignment ended, so a value that holds another name, as in `sort_key = token = v`,
+    `PRIMARY_KEY=sig_v: v` or `signing_key:` with `password: v` below it, cannot hide
+    that name's own value. Values end at ``limit``.
+    """
+    runs = _UnquotedRuns(text, limit)
+    position = start
+    while (name := _ASSIGNMENT_NAME.search(text, position, limit)) is not None:
+        position = name.start() + 1
+        span = _value_span(text, name.end(), limit, runs)
+        if span is not None:
+            yield span
+
+
+def _assignment_spans(value: str, url_spans: list[Span]) -> Iterable[Span]:
+    """Assignment value spans: read with every URL masked, and in each URL on its own.
+
+    A credential name that ends a URL, as in `https://h/?a=b,password: v`, takes the value
+    that whitespace or a quote sets off after it, unless that is a scheme word such as
+    `Bearer`, which the scheme rule reads.
+    """
+    yield from _every_assignment(_masked_urls(value, url_spans), 0, len(value))
+    after_runs = _UnquotedRuns(value, len(value))
     for url_start, url_end in url_spans:
-        # Each URL once, bounded at its end, so none is rescanned.
-        position = url_start
-        while (inner := _ASSIGNMENT.search(value, position, url_end)) is not None:
-            if inner.end(2) > inner.start(2):
-                yield inner.span(2)
-            position = max(inner.end(), inner.start() + 1)
+        yield from _every_assignment(value, url_start, url_end)
+        if url_end >= len(value) or value[url_end] not in " \t\"'":
+            continue
         window = max(url_start, url_end - 180)
         if _TRAILING_ASSIGNMENT_KEY.search(value, window, url_end) is None:
             continue
-        after = _VALUE_AFTER_URL.match(value, url_end)
-        if after is None or after.end(1) == after.start(1):
-            continue
-        # Whitespace or a quote sets the value off from the URL; text glued to it, as in
-        # `<…?password=>token: v`, is the next rule's. A scheme word such as `Bearer` is
-        # the scheme rule's: it keeps the word and takes the credential after it.
-        spaced = after.start(1) > url_end or value[url_end] in "\"'"
-        if spaced and after.group(1).lower() not in _AUTH_SCHEMES:
-            yield after.span(1)
-    position = 0
-    while (match := _ASSIGNMENT.search(masked, position)) is not None:
-        val_start, val_end = match.span(2)
-        # Only a value set off by whitespace can be the next name: one glued to the
-        # separator, as in `sort_key=v…`, is a value whatever it spells.
-        if (
-            masked[val_start] not in "\"'"
-            and masked[val_start - 1].isspace()
-            and (inner := _ASSIGNMENT.search(masked, val_start)) is not None
-            and inner.start() < val_end
-            and _NAME_PREFIX.fullmatch(masked, val_start, inner.start()) is not None
-        ):
-            position = val_start
-            continue
-        yield val_start, val_end
-        if (
-            val_end > val_start
-            and masked[val_start] not in "\"'"
-            and masked[val_end - 1] in ":="
-            and val_end < len(masked)
-            and masked[val_end].isspace()
-        ):
-            window_start = max(val_start + 1, val_end - 180)
-            tail = _TRAILING_ASSIGNMENT_KEY.search(masked, window_start, val_end)
-            position = tail.start() if tail is not None else match.end()
-        else:
-            position = match.end()
+        gap = url_end
+        while gap < len(value) and value[gap] in " \t":
+            gap += 1
+        span = _value_span(value, gap, len(value), after_runs)
+        if span is not None and value[span[0] : span[1]].lower() not in _AUTH_SCHEMES:
+            yield span
 
 
 def _rule_matches(
@@ -636,22 +652,47 @@ def _rule_matches(
     if not identifier:
         spans.extend(_private_key_spans(value))
     spans.extend(_assignment_spans(value, url_spans))
-    spans.extend(
-        match.span(3) for match in _scheme_matches(value) if _authorization_scheme_credential(match)
-    )
+    # The scheme, header and cookie rules read the text as it is, where a scheme word or
+    # header name inside a URL still marks the credential after it, and again with each
+    # URL masked, as main read it with each URL rewritten: a URL then ends the word or
+    # header before it, so a credential glued to a URL is still a credential.
+    masked = _masked_urls(value, url_spans)
+    readings = (value, masked) if url_spans else (value,)
+    for reading in readings:
+        spans.extend(
+            match.span(3)
+            for match in _scheme_matches(reading)
+            if _authorization_scheme_credential(match)
+        )
     if identifier:
         spans.extend(match.span() for match in _NAMED_TOKEN.finditer(value))
         return spans, rewrites
-    for match in _RAW_AUTH_HEADER.finditer(value):
-        if (span := _raw_auth_span(match)) is not None:
-            spans.append(span)
-    # A `cookie=` inside a URL is the URL's to rewrite; read only the headers outside one.
-    for match in _COOKIE_HEADER.finditer(_masked_urls(value, url_spans)):
-        spans.extend(_cookie_spans(value, *match.span(2)))
+    for reading in readings:
+        for match in _RAW_AUTH_HEADER.finditer(reading):
+            if (span := _raw_auth_span(match)) is not None:
+                spans.append(span)
+    spans.extend(_url_clipped_cookie_spans(value, url_spans))
+    if url_spans:
+        for match in _COOKIE_HEADER.finditer(masked):
+            spans.extend(_cookie_spans(value, *match.span(2)))
     spans.extend(match.span() for match in TOKEN_SHAPE.finditer(value))
     if cookie:
         spans.extend(_cookie_spans(value))
     return spans, rewrites
+
+
+def _url_clipped_cookie_spans(value: str, url_spans: list[Span]) -> Iterable[Span]:
+    """The pairs of each ``Cookie`` header in the text as it is, cut at the end of a URL
+    the header starts in, where the URL's own query is not a header's value."""
+    url_index = 0
+    for match in _COOKIE_HEADER.finditer(value):
+        start, end = match.span(2)
+        while url_index < len(url_spans) and url_spans[url_index][1] <= match.start():
+            url_index += 1
+        if url_index < len(url_spans) and url_spans[url_index][0] <= match.start():
+            end = min(end, url_spans[url_index][1])
+        if start < end:
+            yield from _cookie_spans(value, start, end)
 
 
 def _masked(value: str, spans: list[Span]) -> str:
@@ -678,6 +719,18 @@ def _redaction(
     """
     known = scrubber.spans(value)
     spans, rewrites = _rule_matches(value, identifier=identifier, cookie=cookie)
+    # The rules applied one after another, as before this engine, hide some values a
+    # union of matches shows; whatever they hide is hidden here too. What a URL rewrite
+    # removes is the rewrite's in both.
+    spans.extend(
+        hidden_spans(
+            value,
+            scrubber.values,
+            identifier=identifier,
+            removed=[(rewrite.revealed, rewrite.end) for rewrite in rewrites],
+            cookie=cookie,
+        )
+    )
     if known:
         masked_spans, masked_rewrites = _rule_matches(
             _masked(value, known), identifier=identifier, cookie=cookie

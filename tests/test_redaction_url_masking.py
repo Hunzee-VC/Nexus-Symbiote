@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from nexus_symbiote.utils.secrets import redact_text
+from nexus_symbiote.utils.secrets import redact_keyed_text, redact_text
 from tests.support import scaling_ratio
 
 SECRET = "hunter2hunter2"  # noqa: S105 - synthetic sentinel
@@ -68,3 +68,34 @@ def test_ordinary_forms_redact_as_before(text: str, shown: str) -> None:
 
 def test_urls_holding_assignments_are_read_in_linear_time() -> None:
     assert scaling_ratio(lambda scale: redact_text('https://h/?sig=x"' * (2000 * scale))) < 10
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"wss://h.example/?sig=abc#ApiKey {SECRET})",
+        f"git+ssh://h/zqbb/ApiKey {SECRET}\n",
+        f"wss://h/p#zz s3://h/?sig=a/Authorization: Token {SECRET}\\redis://h/?a=b",
+    ],
+)
+def test_a_scheme_word_inside_a_url_still_marks_the_credential_after_it(text: str) -> None:
+    # The scheme and header rules read the text as it is, as well as with URLs masked.
+    assert SECRET not in redact_text(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f's3://h/p?Authorization":"{SECRET}  next',
+        f"redis://h/db\tproxy-authorization:\twss://h/p?Authorization=\n{SECRET})",
+    ],
+)
+def test_a_header_name_inside_a_url_still_marks_the_value_after_it(text: str) -> None:
+    assert SECRET not in redact_text(text)
+
+
+def test_a_cookie_key_hides_what_main_hid() -> None:
+    # Main read a `Cookie` key's value as pairs after redacting it, so the run after a
+    # closing quote was a pair's value; the union keeps that.
+    shown = redact_keyed_text("Cookie", f'sig_v="abc\\"def"{SECRET}%PRIMARY_KEY')
+    assert SECRET not in shown
