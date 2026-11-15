@@ -576,6 +576,10 @@ HIDDEN_FROM_A_LINE_READER = {
     "long s in an HTML block tag": "<\u017ftyle>\n```\n</style>\n```\n@hidden.md\n```\n",
     "Kelvin sign in an HTML block tag": "<lin\u212a>\n```\n\n```\n@hidden.md\n```\n",
     "long s in an HTML block end": "<style>\n</\u017ftyle>\n` @hidden.md `\n",
+    "U+0000 in an unquoted HTML attribute value": "<a b=c\x00d>\n```\n\n@hidden.md\n```\n",
+    "line separator before a backtick in an info string": "```\u2028`\nx\n```\n@hidden.md\n```\n",
+    "paragraph separator in an info string": "```a\u2029b`\nx\n```\n@hidden.md\n```\n",
+    "digit past ASCII in an ordered list marker": "1\u0663. ```\n    @hidden.md\n",
 }
 
 
@@ -603,6 +607,7 @@ def test_an_import_that_commonmark_reads_as_text_is_inventoried(tmp_path, text):
         "<a b=c\xa0=d>\n` @code.md `\n",
         "See\n<br>\n` @code.md `\n",
         "> See\n<br>\n` @code.md `\n",
+        "```a`\u2028\nx\n```\n@code.md\n```\n",
     ],
 )
 def test_an_import_in_code_is_not_inventoried(tmp_path, text):
@@ -654,7 +659,7 @@ PIECES = (
     *("<div>", "\n<div>\n", "\n</div>\n", "<a>", "</a>", "<a b='`'>", "<x@y.z>", "<http://x`y>"),
     *("\n<!--\n", "<!-- `", "-->", "\n<pre>\n", "</pre>", "\n<?\n", "?>"),
     *("[", "]", "![", "](u)", "](`u)", "](u 't`')", "][r]", "[r]: /u", "\n[r]: /u\n"),
-    *("[r]: /u '`'", "\n[r]:\n/u\n", "\n- [r]: /u\n"),
+    *("[r]: /u '`'", "\n[r]:\n/u\n", "\n- [r]: /u\n", "\x00", "1\u0663. ", "\n\u0661) "),
 )
 
 
@@ -682,8 +687,9 @@ WIDE_SPACES = (
     "\u2028\u2029\u202f\u205f\u3000\ufeff"
 )
 JS_SPACE = f"[\t\n\x0b\x0c\r {WIDE_SPACES}]"
-# commonmark.js's pattern for a line that opens an HTML block of type 7. Backtracking
-# takes time exponential in the attributes of a line, so it is the oracle for short lines.
+# commonmark.js's pattern for a line that opens an HTML block of type 7, which it matches
+# once U+0000 is replaced with U+FFFD. Backtracking takes time exponential in the
+# attributes of a line, so it is the oracle for short lines.
 JS_TAG_LINE = re.compile(
     rf"(?:<[A-Za-z][A-Za-z0-9-]*(?:{JS_SPACE}+[a-zA-Z_:][a-zA-Z0-9:._-]*"
     rf"(?:{JS_SPACE}*={JS_SPACE}*(?:[^\"'=<>`\x00-\x20]+|'[^']*'|\"[^\"]*\"))?)*"
@@ -695,6 +701,10 @@ TAG_PIECES = (
     *(" ", "\t", "\n", "\x0c", "\x00", "\x1f", "\x7f", "\x85", "\u200b", *WIDE_SPACES),
     *(" b", " b=", "=c", "\xa0d", "\u3000\u3000", " x='`'", ' y="a b"', "\u2005 \u2005"),
 )
+
+
+def _js_tag_line(line: str) -> bool:
+    return JS_TAG_LINE.match(line.replace("\x00", "\ufffd")) is not None
 
 
 @pytest.mark.parametrize(
@@ -719,13 +729,16 @@ TAG_PIECES = (
         ("<a b=c\xa0d/x>", True),
         ("<a b=c\x7f\x85d>", True),
         ("<a b=c\x1fd>", False),
+        ("<a b=c\x00d>", True),
+        ("<a b=\x00>", True),
+        ("<a b=c\xa0\x00>", True),
         ("<a b=c\xa0d", False),
         ('<a b="c"d>', False),
     ],
 )
 def test_an_html_tag_line_with_wide_whitespace_opens_a_block_as_commonmark_js_reads_it(line, opens):
     assert bool(TAG_LINE.match(line)) is opens
-    assert bool(JS_TAG_LINE.match(line)) is opens
+    assert _js_tag_line(line) is opens
 
 
 @pytest.mark.parametrize("start", ["<a", "<a b=", "<a b=c"])
@@ -733,7 +746,7 @@ def test_every_short_html_tag_line_opens_a_block_as_commonmark_js_reads_it(start
     for size in range(6):
         for characters in itertools.product("bc.#/ \xa0='\">", repeat=size):
             line = start + "".join(characters)
-            assert bool(TAG_LINE.match(line)) == bool(JS_TAG_LINE.match(line)), repr(line)
+            assert bool(TAG_LINE.match(line)) == _js_tag_line(line), repr(line)
 
 
 # CPython before 3.11.5 does not restore the position when an iteration of a possessive
@@ -768,7 +781,7 @@ def test_html_block_names_match_only_their_ascii_letters():
 )
 def test_an_html_tag_line_opens_a_block_as_commonmark_js_reads_it(start, pieces):
     line = start + "".join(pieces)
-    assert bool(TAG_LINE.match(line)) == bool(JS_TAG_LINE.match(line)), repr(line)
+    assert bool(TAG_LINE.match(line)) == _js_tag_line(line), repr(line)
 
 
 BACKTRACKING_PATTERNS = {
@@ -780,6 +793,7 @@ READER_PIECES = (
     *PIECES,
     *("\n<a", "\n<a b=c\xa0d", "\n<a b=", " b=", "\xa0", "\u3000", "=", "/>", "c\u2000d"),
     *("\n```a`", "\n``` `", "\n````` x`", "\n~~~ `", "````", "\n> <a b=\xa0 c>\n"),
+    *("\x00", "\n<a b=c\x00d>\n", "\n<a b=\x00"),
 )
 
 
@@ -790,8 +804,25 @@ def test_markdown_is_read_as_its_backtracking_patterns_read_it(pieces):
     with contextlib.ExitStack() as patches:
         for name, pattern in BACKTRACKING_PATTERNS.items():
             patches.enter_context(mock.patch.object(markdown, name, pattern))
-        expected = markdown.text_outside_code(text)
-    assert markdown.text_outside_code(text) == expected, repr(text)
+        expected = markdown.text_outside_code(text.replace("\x00", "\ufffd"))
+    read = [part.replace("\x00", "\ufffd") for part in markdown.text_outside_code(text)]
+    assert read == expected, repr(text)
+
+
+# commonmark.js looks for a backtick after a fence up to the end of the line or a U+2028
+# or U+2029, where JavaScript's `.` stops; markdown-it and marked look up to the end.
+JS_OPENING_FENCE = re.compile("`{3,}(?![^\u2028\u2029]*`)")
+
+
+@pytest.mark.parametrize("size", range(5))
+def test_an_import_past_a_line_separator_in_an_info_string_is_found_if_a_reader_finds_it(size):
+    for characters in itertools.product("\u2028\u2029a `", repeat=size):
+        info = "".join(characters)
+        if info.startswith("`"):
+            continue
+        text = f"```{info}\nx\n```\n@hidden.md\n```\n"
+        opened = {bool(JS_OPENING_FENCE.match("```" + info)), "`" not in info}
+        assert ("hidden.md" in prompt._import_tokens(text)) is (True in opened), repr(text)
 
 
 @pytest.mark.parametrize(

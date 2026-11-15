@@ -487,9 +487,14 @@ A way around a limit that its entry does not describe is worth a
   Imports are read from the text outside fenced code and code spans as CommonMark
   reads it, across lines and inside block quotes and list items, in time linear in
   the length of the file. Where CommonMark readers disagree, as after a link
-  reference definition or inside raw HTML, the text is searched as written, so more
-  is looked up; a host that reads Markdown otherwise, such as with GitHub's table or
-  autolink extensions, can still import a file from text read here as code.
+  reference definition, inside raw HTML or where a U+2028 or U+2029 comes before a
+  backtick in a fence's info string, the text is searched as written, so more is
+  looked up; a host that reads Markdown otherwise, such as with GitHub's table or
+  autolink extensions, can still import a file from text read here as code. So can a
+  host that reads with markdown-it (14.1.0, and markdown-it-py 4.2.0), which reads a
+  code span after a `[` as text, also in the text of a link, when a run of backticks
+  that is never closed follows the span within the brackets, or to the end of the
+  paragraph where no `]` closes them, as in ``` [` @notes.md ` `` ```.
   A reference is read only where `@` starts the text or follows white space, and
   without the sentence punctuation after it. A host that also starts a reference
   after inline markup (`**@docs/x.md**`, the text of a link, `<b>@x.md</b>`), keeps that

@@ -17,9 +17,9 @@ the rest of a paragraph after a bracket that can close a link and is followed by
 link label or by a destination that is not plain, or after a ``<`` that could open an
 autolink or raw HTML holding a backtick or closing bracket; a paragraph that can open with a link
 reference definition; and the whole file where such a definition, a lazy line indented
-four columns or a form feed after a list marker can change the block structure, or
-where containers nest or match past a bound. Indented code and HTML blocks are
-returned as written too.
+four columns, a form feed after a list marker or a U+2028 or U+2029 before a backtick
+after a fence can change the block structure, or where containers nest or match past a
+bound. Indented code and HTML blocks are returned as written too.
 """
 
 from __future__ import annotations
@@ -42,25 +42,28 @@ _OPENING_FENCE = re.compile(r"`{3,}+|~{3,}+")
 _CLOSING_FENCE = re.compile(r"(?:`{3,}+|~{3,}+)(?=[ \t]*+$)")
 _THEMATIC_BREAK = re.compile(r"(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$")
 _SETEXT_UNDERLINE = re.compile(r"(?:=+|-+)[ \t]*$")
-_LIST_MARKER = re.compile(r"[*+-]|(\d{1,9})[.)]")
+_LIST_MARKER = re.compile(r"[*+-]|(\d{1,9})[.)]", re.A)
 _LIST_STARTS = frozenset("*+-0123456789")
 _NON_SPACE = re.compile(r"[^ \t\f\v\r\n]")
+# Where JavaScript's `.` stops; commonmark.js looks for a backtick after a fence only up
+# to the first of these, markdown-it and marked in the whole line.
+_JS_LINE_BREAK = re.compile("[\u2028\u2029]")
 # Whitespace as the JavaScript readers that hosts use match it in HTML.
 _ASCII_WHITESPACE = " \t\n\r\x0b\x0c"
 _WIDE_WHITESPACE = "\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 _WHITESPACE = f"[{_ASCII_WHITESPACE}{_WIDE_WHITESPACE}]"
 # commonmark.js matches an open tag as <name(\s+attribute(\s*=\s*value)?)*\s*/?>, where
 # an unquoted value is a run of anything but quotes, `=<>`, backticks and U+0000 to
-# U+0020. Whitespace past ASCII can thus end such a value or stay in it, and a
-# backtracking match tries both at each one, in time exponential in the attributes of
-# a line. This pattern matches the same lines without going back: a value takes such
-# whitespace unless an attribute name ends the run after it, and the first such
-# character after `=` is the value itself when only whitespace follows it up to `>`,
-# or whitespace and then such a name. Repeated groups are atomic rather than possessive:
-# CPython before 3.11.5 does not restore the position when an iteration of a possessive
-# group fails partway.
+# U+0020, in a line where U+0000 has been replaced with U+FFFD. Whitespace past ASCII
+# can thus end such a value or stay in it, and a backtracking match tries both at each
+# one, in time exponential in the attributes of a line. This pattern matches the same
+# lines without going back: a value takes such whitespace unless an attribute name ends
+# the run after it, and the first such character after `=` is the value itself when
+# only whitespace follows it up to `>`, or whitespace and then such a name. Repeated
+# groups are atomic rather than possessive: CPython before 3.11.5 does not restore the
+# position when an iteration of a possessive group fails partway.
 _ATTRIBUTE_NAME = "[a-zA-Z_:][a-zA-Z0-9:._-]*+"
-_NOT_UNQUOTED = r"\"'=<>`\x00-\x20"
+_NOT_UNQUOTED = r"\"'=<>`\x01-\x20"
 _NAME_ENDS_RUN = rf"{_ATTRIBUTE_NAME}[{_WIDE_WHITESPACE}]*+(?![^{_NOT_UNQUOTED}])"
 _VALUE_PART = rf"[^{_NOT_UNQUOTED}{_WIDE_WHITESPACE}]++"
 _UNQUOTED_VALUE = rf"{_VALUE_PART}(?>(?:[{_WIDE_WHITESPACE}]++(?!{_NAME_ENDS_RUN}){_VALUE_PART})*)"
@@ -362,8 +365,14 @@ class _Reader:
                 self.offset = len(line)
                 return 2
             fence = _OPENING_FENCE.match(line, at) if char in ("`", "~") else None
-            # The info string after a backtick fence holds no backtick.
-            if fence is not None and (char == "~" or line.find("`", fence.end()) < 0):
+            if fence is not None and char == "`":
+                # The info string after a backtick fence holds no backtick.
+                tick = line.find("`", fence.end())
+                if tick >= 0:
+                    if _JS_LINE_BREAK.search(line, fence.end(), tick):
+                        raise _AmbiguousError
+                    fence = None
+            if fence is not None:
                 self._close_unmatched()
                 block = self._add_child("fence")
                 block.fence = fence.group()
