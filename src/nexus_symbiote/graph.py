@@ -13,10 +13,11 @@ from urllib.parse import quote
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
-from nexus_symbiote.core.enums import AssuranceLevel, AutonomyLevel, ComponentType
+from nexus_symbiote.core.enums import AssuranceLevel, AutonomyLevel, ComponentType, RiskSeverity
 from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import (
     MAX_REFERENCE_CHARS,
+    UNBOUND_VALUES_DETAIL,
     AgentComponent,
     AnyComponent,
     ClaimEvidence,
@@ -24,6 +25,7 @@ from nexus_symbiote.core.models import (
     ModelComponent,
     PromptComponent,
     RegistryEntryComponent,
+    RiskAssessment,
     SkillPackageComponent,
 )
 from nexus_symbiote.utils.secrets import redact_text
@@ -40,6 +42,8 @@ MAX_MANIFEST_YAML_TOKENS = 20_000
 # the same tree scanned at two locations must yield the same inventory.
 INFERRED_AGENT_IDENTITY = "."
 INFERRED_AGENT_NAME = "repository"
+MANIFEST_VALUE_BINDING_PROFILE = "nexus-symbiote/agent-manifest-values/v1"
+_DISPLAYED_FIELDS = ("name", "version", "framework", "owner", "purpose")
 MAX_GRAPH_ISSUES = 100
 _SHOWN = 200
 _REPOSITORY_ASSOCIATION = "repository association; runtime use and authority unobserved"
@@ -349,6 +353,8 @@ def assemble_repository_agent(
     declares are recorded there once read.
     """
     from nexus_symbiote.policy import PolicyError
+    from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
+    from nexus_symbiote.scanners.source_binding import BindingError, value_binding
     from nexus_symbiote.utils.confined import ConfinedCollection
 
     strict = failures is None
@@ -372,6 +378,27 @@ def assemble_repository_agent(
         unread: list[str] = []
         with ConfinedCollection(root, unread, gaps, exclude_paths=exclude_paths) as files:
             additions = _manifest_dependencies(bom, declared, files, agent_ref, problems)
+
+    # The export shows these fields redacted. A field that redaction changed, such as
+    # an owner URL cut to its origin, would otherwise compare equal after any change to
+    # it, so its value is bound with the operator key or named as unbound.
+    displayed: dict[str, str] = {}
+    withheld: dict[str, str] = {}
+    binding: dict[str, str] = {}
+    if declared:
+        for field in _DISPLAYED_FIELDS:
+            value = getattr(declared, field)
+            if value is not None:
+                # Names keep the token formats ordinary names take, such as
+                # ``sk-research-assistant``; the free-text purpose does not.
+                displayed[field] = redact_text(value, identifier=field != "purpose")
+                if displayed[field] != value:
+                    withheld[field] = value
+        if withheld:
+            try:
+                binding = value_binding(MANIFEST_VALUE_BINDING_PROFILE, withheld)
+            except BindingError as exc:
+                problems.append(f"{MANIFEST}: {exc}")
 
     index: dict[str, AnyComponent] = {c.bom_ref: c for c in bom.components}
     accepted: list[AnyComponent] = []
@@ -402,14 +429,6 @@ def assemble_repository_agent(
         locator=MANIFEST if declared else ".",
         observed_at=bom.metadata.timestamp,
     )
-    displayed: dict[str, str] = {}
-    if declared:
-        for field in ("name", "version", "framework", "owner", "purpose"):
-            value = getattr(declared, field)
-            if value is not None:
-                # Names keep the token formats ordinary names take, such as
-                # ``sk-research-assistant``; the free-text purpose does not.
-                displayed[field] = redact_text(value, identifier=field != "purpose")
     agent = AgentComponent(
         bom_ref=agent_ref,
         name=displayed.get("name", INFERRED_AGENT_NAME),
@@ -435,6 +454,23 @@ def assemble_repository_agent(
             "runtime_use": "unknown",
         },
     )
+    if binding:
+        agent.properties.update(binding)
+    elif withheld:
+        agent.risks.append(
+            RiskAssessment(
+                severity=RiskSeverity.LOW,
+                category="completeness",
+                detail=(
+                    f"Agent manifest {UNBOUND_VALUES_DETAIL}: "
+                    f"{', '.join(sorted(withheld))}, exported redacted."
+                ),
+                recommendation=(
+                    f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes to "
+                    "these values."
+                ),
+            )
+        )
     if declared:
         if declared.autonomy_level is not None:
             agent.properties["declared_autonomy_level"] = declared.autonomy_level.value

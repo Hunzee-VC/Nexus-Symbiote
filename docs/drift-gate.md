@@ -91,7 +91,8 @@ request with itself, and that gate can never fail.
   of 32 or more characters for the baseline and every candidate scan. Without it, the
   values described above cannot alert on a change: every record that carries the low
   `completeness` finding for unbound values, whether an MCP server, an IDE agent, a RAG
-  source, an A2A agent or client, or a prompt file whose content hash is withheld,
+  source, an A2A agent or client, a prompt file whose content hash is withheld, or the
+  repository agent when redaction changed an `agent.yaml` field,
   raises a medium alert on every comparison instead, so `diff --fail-on-alert` fails on
   it rather than reporting no change; the alert does not name the value. The same
   alert is raised when only one of the two scans has the key, and the digests of the

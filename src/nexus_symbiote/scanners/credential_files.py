@@ -15,6 +15,14 @@ _CREDENTIAL_SUFFIXES = frozenset(
 )
 _CREDENTIAL_MARKERS = ("secret", "credential", "password", "apikey", "api_key", "api-key")
 _CREDENTIAL_NAMES = frozenset({".netrc", ".npmrc", ".pypirc", "id_rsa", "id_ecdsa", "id_ed25519"})
+# A checked-in `.env` template lists the names to set and holds no values.
+_ENV_TEMPLATE_SUFFIXES = frozenset({".example", ".sample", ".template", ".dist"})
+# A program named for the credential it handles, such as `rotate_api_key.py`, is code a
+# skill runs, not a store of values: dropping it would take what the agent executes out
+# of the inventory. The names and suffixes above still count for it.
+_PROGRAM_SUFFIXES = frozenset(
+    {".py", ".pyi", ".sh", ".bash", ".zsh", ".ps1", ".js", ".mjs", ".cjs", ".ts", ".rb", ".go"}
+)
 # Directories named for what the files in them hold, such as `secrets/`. Only a whole
 # name counts, so a skill named `secret-scanner` keeps its scripts.
 _CREDENTIAL_DIRECTORIES = frozenset(
@@ -35,10 +43,15 @@ def credential_shaped(path: str) -> bool:
     if any(part.lower().lstrip(".") in _CREDENTIAL_DIRECTORIES for part in directories):
         return True
     name = PurePosixPath(path).name.lower()
-    if name in _CREDENTIAL_NAMES or name.startswith(".env"):
+    suffix = PurePosixPath(name).suffix
+    if name in _CREDENTIAL_NAMES:
         return True
-    if PurePosixPath(name).suffix in _CREDENTIAL_SUFFIXES:
+    if name.startswith(".env"):
+        return suffix not in _ENV_TEMPLATE_SUFFIXES
+    if suffix in _CREDENTIAL_SUFFIXES:
         return True
+    if suffix in _PROGRAM_SUFFIXES:
+        return False
     return any(marker in name for marker in _CREDENTIAL_MARKERS)
 
 
