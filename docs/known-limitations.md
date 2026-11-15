@@ -562,31 +562,48 @@ A way around a limit that its entry does not describe is worth a
 - **Hidden-character detection is character-based.** Lookalike letters are not
   detected, and neither are control characters such as ESC, spaces other than
   U+0020, such as U+00A0 and U+3000, or private-use characters.
-- **Hidden markup means comments and unused definitions.** HTML and Markdown
-  comments are reported by count, not text, and only in Markdown files and
+- **Hidden markup means comments, unused definitions and footnotes.** HTML and
+  Markdown comments are reported by count, not text, and only in Markdown files and
   instruction files without a suffix, such as `.cursorrules`. They are HTML comments,
-  processing instructions, declarations and CDATA sections outside code, and link
-  reference definitions that no link uses or that repeat a label. Text that a rendered
-  view hides in other ways is not reported: the title of a link or image, shown only
-  on hover, whether written inline or in a definition that a link uses; alt text and
-  attribute values; and the content of elements that a sanitizer removes or a viewer
-  collapses, such as `<script>`, `<style>`, `<details>` or an element with `hidden`.
-  A definition used only by a link inside an image description, which renders as
-  that image's alt text, is not counted either.
+  processing instructions, declarations and CDATA sections outside code, the other
+  forms that HTML parsers read as comments (`<! ...>`, `</ ...>`) in HTML blocks, link
+  reference definitions that no link uses or that repeat a label, definitions written
+  as comments, with a `#` or `<>` destination, used or not and also in HTML blocks,
+  and footnotes (`[^x]: ...`) that nothing references, which GitHub drops. Text that a
+  rendered view hides in other ways is not reported: the title of a link or image,
+  shown only on hover, whether written inline or in a definition with another
+  destination that a link with visible text uses, however short that text, and the
+  label of such a definition when only full references, such as `[text][label]`, use
+  it; alt text and attribute values; and the content of elements that a sanitizer
+  removes or a viewer collapses, such as `<script>`, `<style>`, `<details>` or an
+  element with `hidden`, apart from the comments above. A definition used only by a
+  link inside an image description, which renders as that image's alt text, is not
+  counted either.
 - **Hidden markup is read to err toward a finding.** A reference counts as a use of a
-  definition only where every reader makes a link of it: not in code, raw HTML, an
-  autolink or a link destination, not with a `|` in its label, which a table cell can
-  split, not right before brackets that nest, as in `[b][[y]]`, and not later in a
-  paragraph than an inline link whose destination nests parentheses twice, or than a
-  link that only markdown-it reads, with tabs between its parts, and that holds a
-  backtick or `<`. A definition used only there is reported as unused. A line inside a paragraph that has the form of a definition is counted,
-  though CommonMark shows it as text, and so is a definition whose title runs to the
-  last quote or parenthesis of its line. Where CommonMark readers disagree about the
-  block structure, as when the line after a definition is indented four columns or
-  starts with `2.`, or a block quote is followed by a `>` indented four columns, every
-  line of the file that has the form of a definition is counted as unused, in code and
-  HTML blocks too, and so is every processing instruction, declaration and CDATA
-  section. Each of those is counted to the end CommonMark gives it (`?>`, `>` or
+  definition only where every reader makes a link of it that shows: not in code, raw
+  HTML, an autolink, a URL that GitHub makes an autolink of (`https://`, `http://`
+  or `ftp://` after anything but a letter or `[`, or `www.` after a space, `*`, `_`,
+  `~` or `(`, up to a space or `<`), or a link destination, not as a link whose text
+  shows only spaces, ASCII punctuation, entities and tags, as in `[][x]` or `[.][x]`,
+  not with a `|` in its label, which a table cell can split, not right before brackets
+  that nest, as in `[b][[y]]`, and not later in a paragraph than an inline link whose
+  destination nests parentheses twice, or than a link that only markdown-it reads,
+  with tabs between its parts, and that holds a backtick or `<`. A definition used
+  only there is reported as unused, and so is a footnote referenced only there or
+  from a footnote that is not referenced. A line inside a paragraph that has the form
+  of a definition is counted, though CommonMark shows it as text, and so is a
+  definition in the most lenient form a reader takes: cmark-gfm takes a destination
+  with unbalanced parentheses and markdown-it a title right after a pointy
+  destination, and a title runs to the next line that ends with its closing quote or
+  parenthesis. A footnote runs to the next footnote or the end of its paragraph, and
+  takes the indented code after it as its continuation. Where CommonMark readers
+  disagree about the block structure, as when a line after the definitions that open
+  a paragraph is indented four columns or starts with `2.`, or a block quote is
+  followed by a `>` indented four columns, every line of the file that has the form of
+  a definition or a footnote is counted as unused, used or not and in code and HTML
+  blocks too, and so is every processing instruction, declaration, CDATA section and
+  other form an HTML block can hide, even in prose or a code span, as in
+  ``(`<!`)``. Each of those is counted to the end CommonMark gives it (`?>`, `>` or
   `]]>`), or to the end of its HTML block when it is not closed, although an HTML
   parser hides it only up to its first `>`.
 - **Settings alerts do not say what changed.** Rules, hook commands and other

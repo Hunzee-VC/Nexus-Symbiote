@@ -538,9 +538,10 @@ def _comment_is_instruction(text: str) -> bool:
 def detect_hidden_markup(content: str, source_name: str) -> list[RiskAssessment]:
     """Report HTML and Markdown comments, which renderers hide but agents read.
 
-    Markdown comments are the link reference definitions that no link uses or that
-    repeat a label, and HTML comments include the processing instructions, declarations
-    and CDATA sections that HTML parsers read as comments; see :func:`hidden_text`.
+    Markdown comments are the link reference definitions that no link uses, that repeat
+    a label or that are written as comments, and the footnotes that nothing references;
+    HTML comments include the other markup that HTML parsers read as comments, counted
+    once when it is inside one; see :func:`hidden_text`.
     Only counts and lengths are reported, never the hidden text. A comment that carries
     an imperative (``run`` only when a path, a script, a shell or a listed command
     follows, possibly after punctuation or markup, or when ``this``, ``these``, ``it``

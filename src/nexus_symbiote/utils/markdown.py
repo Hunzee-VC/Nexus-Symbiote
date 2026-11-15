@@ -22,9 +22,10 @@ where containers nest or match past a bound. Indented code and HTML blocks are
 returned as written too.
 
 :func:`hidden_text` reads the same blocks for what a rendered view shows nothing of:
-the link reference definitions that no link uses, and the raw HTML that HTML parsers
-read as comments. It errs the other way, toward reporting: a reference counts as a use
-only where every reader makes a link of it.
+the link reference definitions that no link uses or that are written as comments, the
+footnotes that nothing references, and the raw HTML that HTML parsers read as comments.
+It errs the other way, toward reporting: a reference counts as a use only where every
+reader, GitHub's included, makes a link of it that shows.
 """
 
 from __future__ import annotations
@@ -103,6 +104,7 @@ _DEFINITION = re.compile(r"\[(?:[^\\\[\]]|\\.){0,1000}\]:", re.S)
 # while markdown-it and marked start a new block there: a line that is lazy, indented
 # four columns, or that starts with one of these, can then start a different block.
 _AFTER_DEFINITION = frozenset("<0123456789-*+=")
+_TITLE_OPENERS = ('"', "'", "(")
 # A destination that holds nothing a link could take out of a code span, read the same
 # whether or not the brackets before it form a link.
 _PLAIN_DESTINATION = re.compile(r"\([^\s()<>\[\]\\`\"']*\)")
@@ -127,6 +129,7 @@ class _Block:
     fence: str = ""
     fence_offset: int = 0
     html: int = 0
+    suspects: list[int] = field(default_factory=list)
 
 
 def text_outside_code(text: str) -> list[str]:
@@ -213,7 +216,9 @@ class _Reader:
         if block.definition and (
             self.indented or self._peek(self.next_nonspace) in _AFTER_DEFINITION
         ):
-            raise _AmbiguousError
+            # Ambiguous only where the line is not part of a definition, such as its
+            # title, which is known when the paragraph ends.
+            block.suspects.append(len(block.lines))
         if block.kind in ("paragraph", "fence", "indented", "html"):
             self._add_line()
             if 1 <= block.html <= 5 and _html_block_ends(block.html, line, self.offset):
@@ -448,14 +453,11 @@ class _Reader:
         content = self.line[self.offset :]
         if tip.kind == "paragraph":
             if not tip.lines:
-                tip.definition = bool(_DEFINITION.match(content)) or (
-                    content.startswith("[") and "]" not in content
-                )
+                tip.definition = _may_open_with_definition(content)
             tip.lines.append(content)
         elif tip.kind in ("indented", "html"):
             self.parts.append(content)
-            if tip.kind == "html":
-                tip.lines.append(content)
+            tip.lines.append(content)
 
     def _add_child(self, kind: str) -> _Block:
         while not _can_contain(self.stack[-1].kind, kind):
@@ -477,12 +479,35 @@ class _Reader:
         block = self.stack.pop()
         if block.kind == "paragraph":
             content = "\n".join(block.lines)
+            if block.suspects:
+                leading = _leading_definitions_end(content, _definition_spans(content))
+                starts = [0]
+                for line in block.lines:
+                    starts.append(starts[-1] + len(line) + 1)
+                if any(starts[index] >= leading for index in block.suspects):
+                    raise _AmbiguousError
             if _DEFINITION.match(content):
                 self.stack[-1].definitions += 1
             self.parts.append(_outside_spans(content))
             self.blocks.append(("paragraph", content))
-        elif block.kind == "html":
-            self.blocks.append(("html", "\n".join(block.lines)))
+        elif block.kind in ("html", "indented"):
+            self.blocks.append((block.kind, "\n".join(block.lines)))
+
+
+def _may_open_with_definition(line: str) -> bool:
+    """Whether a paragraph whose first line is ``line`` may open with a definition: a
+    label, then nothing, or a destination and nothing or what may open a title."""
+    found = _DEFINITION.match(line)
+    if found is None:
+        return line.startswith("[") and "]" not in line
+    rest = line[found.end() :].lstrip(" \t")
+    close = rest.find(">") if rest.startswith("<") else -1
+    if close >= 0:
+        tail = rest[close + 1 :].lstrip(" \t")
+        if not tail or tail.startswith(_TITLE_OPENERS):
+            return True
+    parts = rest.split(None, 1)
+    return len(parts) < 2 or parts[1].startswith(_TITLE_OPENERS)
 
 
 def _can_contain(parent: str, child: str) -> bool:
@@ -553,26 +578,39 @@ class HiddenText:
     """What a rendered view of a Markdown text shows nothing of, as written in it."""
 
     definitions: tuple[str, ...]
-    """Link reference definitions that no link uses, and every later one of a label."""
+    """Link reference definitions that no link uses, every later one of a label, those
+    written as comments, and footnotes that nothing references."""
     html: tuple[str, ...]
-    """Processing instructions, declarations and CDATA sections, which HTML parsers
-    read as comments."""
+    """Processing instructions, declarations, CDATA sections and, in HTML blocks, the
+    other markup that HTML parsers read as comments; not ``<!--`` comments."""
+
+
+@dataclass(slots=True)
+class _Footnote:
+    keys: tuple[str, str]
+    text: str
+    reading: str
 
 
 def hidden_text(text: str) -> HiddenText:
-    """The link reference definitions and raw HTML of ``text`` that render as nothing.
+    """The link reference definitions, footnotes and raw HTML of ``text`` that render
+    as nothing.
 
     Blocks are read as :func:`text_outside_code` reads them, so code is left out. A
     definition is taken from the start of any line of a paragraph, with spaces or tabs
-    between its parts, a title read as CommonMark reads it or, failing that, as the
-    rest of its line, so that a reader that takes more definitions than commonmark.js
-    does cannot hide one. A definition is visible only as the destination of the links
-    that use it, so it is returned unless a reference that every reader takes for a
-    link names its label: references in code, raw HTML, autolinks and link
-    destinations do not count, nor do those after a link this cannot settle. HTML
-    comments are left to the caller. A file whose blocks this cannot settle is read
-    line by line, inside every container and code block, and each of its definitions
-    is returned.
+    between its parts, a title read as CommonMark reads it or, failing that, as running
+    to the next line that ends with its closing quote or parenthesis, so that a reader
+    that takes more definitions than commonmark.js does cannot hide one. A definition
+    is visible only as the destination of the links that use it, so it is returned
+    unless a reference that every reader takes for a link, with text that shows, names
+    its label: references in code, raw HTML, autolinks, GitHub's extended autolinks and
+    link destinations do not count, nor do those after a link this cannot settle. A
+    definition written as a comment, with a ``#`` or ``<>`` destination, is returned
+    wherever it is outside code, used or not and in HTML blocks too. A footnote, which
+    GitHub drops when nothing references it, is returned with its continuation unless a
+    reference outside it, or in a footnote that is referenced, names it. HTML comments
+    are left to the caller. A file whose blocks this cannot settle is read line by line,
+    inside every container and code block, and each of its definitions is returned.
     """
     lines = _LINE_END.split(text)
     if text.endswith("\n"):
@@ -585,27 +623,46 @@ def hidden_text(text: str) -> HiddenText:
     except _AmbiguousError:
         return _hidden_in_whole(_LINE_END.sub("\n", text))
     spans: list[tuple[str, str]] = []
+    comments: list[str] = []
     html: list[str] = []
     readings: list[str] = []
+    notes: list[_Footnote] = []
+    after_note = False
     for kind, content in reader.blocks:
+        if kind == "indented":
+            if after_note:
+                notes[-1].text += "\n" + content
+            after_note = False
+            continue
+        after_note = False
         if kind == "html":
             html += _hidden_html(content, block=True)
+            comments += [
+                content[start:end]
+                for start, end, _, _ in _definition_spans(content)
+                if _COMMENT_DEFINITION.match(content, start)
+            ]
             continue
-        inline = reading = content
-        if kind == "paragraph":
-            found = _definition_spans(content)
-            spans += [(content[start:end], label) for start, end, label, _ in found]
-            leading = _leading_definitions_end(content, found)
-            later = [(start, end) for start, end, _, _ in found if start >= leading]
-            inline = content[leading:]
-            if any(_TAKEN_BY_INLINE.search(content, start, end) for start, end in later):
-                reading = ""
+        if kind == "heading":
+            html += _hidden_html(_outside_spans(content), block=False)
+            readings.append(content)
+            continue
+        starts = [found.start() for found in _FOOTNOTE.finditer(content)]
+        pieces = list(zip([0, *starts], [*starts, len(content)], strict=True))
+        for index, (start, end) in enumerate(pieces):
+            piece = content[start:end]
+            marker = _FOOTNOTE.match(piece) if index else None
+            if marker is not None:
+                piece = " " * marker.end() + piece[marker.end() :]
+            found, inline, reading = _read_paragraph(piece)
+            spans += found
+            html += _hidden_html(_outside_spans(inline), block=False)
+            if marker is None:
+                readings.append(reading)
             else:
-                cuts = [leading, *(edge for span in later for edge in span), len(content)]
-                pairs = zip(cuts[::2], cuts[1::2], strict=True)
-                reading = "\n".join(content[a:b] for a, b in pairs)
-        html += _hidden_html(_outside_spans(inline), block=False)
-        readings.append(reading)
+                keys = _label_keys("^" + marker.group(1))
+                notes.append(_Footnote(keys, content[start:end].strip("\n"), reading))
+        after_note = len(pieces) > 1
     defined = [_label_keys(label) for _, label in spans]
     folded = {keys[0] for keys in defined}
     lowered = {keys[1] for keys in defined}
@@ -614,9 +671,21 @@ def hidden_text(text: str) -> HiddenText:
         keys = _label_keys(label)
         return keys[0] in folded or keys[1] in lowered
 
-    used = [_label_keys(label) for part in readings for label in _references(part, is_defined)]
-    used_folded = {keys[0] for keys in used}
-    used_lowered = {keys[1] for keys in used}
+    used_folded: set[str] = set()
+    used_lowered: set[str] = set()
+    unreferenced: dict[str, list[_Footnote]] = {}
+    for note in notes:
+        unreferenced.setdefault(note.keys[0], []).append(note)
+    queue = readings[::-1]
+    while queue:
+        for label in _references(queue.pop(), is_defined):
+            fold, lower = _label_keys(label)
+            used_folded.add(fold)
+            used_lowered.add(lower)
+            waiting = unreferenced.get(fold)
+            if waiting:
+                queue += [note.reading for note in waiting if note.keys[1] == lower]
+                unreferenced[fold] = [note for note in waiting if note.keys[1] != lower]
     hidden: list[str] = []
     seen_folded: set[str] = set()
     seen_lowered: set[str] = set()
@@ -626,11 +695,28 @@ def hidden_text(text: str) -> HiddenText:
             or lower in seen_lowered
             or fold not in used_folded
             or lower not in used_lowered
+            or _COMMENT_DEFINITION.match(definition)
         ):
             hidden.append(definition)
         seen_folded.add(fold)
         seen_lowered.add(lower)
+    hidden += comments
+    hidden += [note.text for waiting in unreferenced.values() for note in waiting]
     return HiddenText(tuple(hidden), tuple(html))
+
+
+def _read_paragraph(content: str) -> tuple[list[tuple[str, str]], str, str]:
+    """The definitions of the paragraph ``content`` with their labels, its inline text
+    after the definitions that open it, and the text whose references count as uses."""
+    found = _definition_spans(content)
+    spans = [(content[start:end], label) for start, end, label, _ in found]
+    leading = _leading_definitions_end(content, found)
+    later = [(start, end) for start, end, _, _ in found if start >= leading]
+    if any(_TAKEN_BY_INLINE.search(content, start, end) for start, end in later):
+        return spans, content[leading:], ""
+    cuts = [leading, *(edge for span in later for edge in span), len(content)]
+    pairs = zip(cuts[::2], cuts[1::2], strict=True)
+    return spans, content[leading:], "\n".join(content[a:b] for a, b in pairs)
 
 
 _ASCII_WHITESPACE = " \t\n\r\x0b\x0c"
@@ -645,12 +731,19 @@ _DESTINATION_STOP = re.compile(rf"[\\(){_ASCII_WHITESPACE}]")
 # Markdown-it reads no definition with one of these destinations.
 _REFUSED_SCHEME = re.compile(r"<?[ \t]*(?:javascript|vbscript|file|data):", re.I)
 # A definition as a reader that takes one from any line of a paragraph reads it: a label
-# on one line, the destination on that line or the next, and a title that runs to the
-# last quote or parenthesis of its line.
-_LINE_DEFINITION = re.compile(
-    r"\[([^\[\]\n]*+)\]:[ ]*+\n?[ ]*+\S++"
-    r"(?:[ ]*+\n?[ ]*+(?:([\"'])[^\n]*\2|\([^\n]*\)))?[ ]*+(?=\n|\Z)"
+# on one line, then a destination on that line or the next, pointy or not.
+_LENIENT_LABEL = re.compile(r"\[((?:[^\\\[\]\n]|\\[^\n])*+)\]:[ \t]*+\n?[ \t]*+")
+_LENIENT_DESTINATIONS = (re.compile(r"<[^<>\n]*>"), re.compile(r"\S++"))
+_BLANK_REST = re.compile(r"[ \t]*+(?=\n|\Z)")
+_LINE_CLOSE = re.compile(r"([\"')])[ \t]*+(?=\n|\Z)")
+# The comment idiom, `[//]: # (...)`, and any definition whose destination is `#` or `<>`.
+_COMMENT_DEFINITION = re.compile(
+    r"\[(?:(?://|comment|#)\]:[ \t]*+\n?[ \t]*+(?:#|<>)"
+    r"|(?:[^\\\[\]]|\\.)*+\]:[ \t]*+\n?[ \t]*+(?:#|<#?>)(?=[ \t\n\"'(]|\Z))",
+    re.I | re.S,
 )
+# A GitHub footnote definition, which can interrupt a paragraph.
+_FOOTNOTE = re.compile(r"^[ \t]*+\[\^([^\]\s]++)\]:", re.M)
 
 
 def _label_keys(label: str) -> tuple[str, str]:
@@ -675,6 +768,7 @@ class _Positions:
     def __init__(self, text: str) -> None:
         self.text = text
         self.found: dict[tuple[str, bool], tuple[int, int]] = {}
+        self.closes: dict[str, list[int]] | None = None
 
     def next(self, target: str, start: int, *, unescaped: bool = False) -> int:
         """The next ``target`` at or after ``start``; with ``unescaped``, the next that no
@@ -689,6 +783,16 @@ class _Positions:
             index = text.find(target, index + 1)
         self.found[key] = (start, index)
         return index
+
+    def next_line_close(self, closer: str, start: int) -> int:
+        """The next ``closer`` at or after ``start`` that ends its line, or -1."""
+        if self.closes is None:
+            self.closes = {char: [] for char in "\"')"}
+            for found in _LINE_CLOSE.finditer(self.text):
+                self.closes[found.group(1)].append(found.start())
+        found_at = self.closes[closer]
+        index = bisect_left(found_at, start)
+        return found_at[index] if index < len(found_at) else -1
 
 
 def _skip_gap(text: str, index: int, spaces: str) -> int:
@@ -761,6 +865,33 @@ def _commonmark_end(positions: _Positions, colon: int, spaces: str) -> int:
     return _line_end(text, after, spaces)
 
 
+def _lenient_end(positions: _Positions, start: int) -> tuple[int, str]:
+    """The end and label of the definition at ``start`` as the most lenient reader
+    takes it, or -1: cmark-gfm takes a destination with unbalanced parentheses, and
+    markdown-it a title right after a pointy destination; a title runs to the next line
+    that ends with its closing quote or parenthesis."""
+    text = positions.text
+    head = _LENIENT_LABEL.match(text, start)
+    if head is None:
+        return -1, ""
+    end = -1
+    for pattern in _LENIENT_DESTINATIONS:
+        destination = pattern.match(text, head.end())
+        if destination is None:
+            continue
+        after = destination.end()
+        title = _skip_gap(text, after, " \t")
+        if title < len(text) and text[title] in "\"'(":
+            closer = ")" if text[title] == "(" else text[title]
+            close = positions.next_line_close(closer, title + 1)
+            if close >= 0:
+                end = max(end, _line_end(text, close + 1, " \t"))
+        blank = _BLANK_REST.match(text, after)
+        if blank is not None:
+            end = max(end, blank.end())
+    return end, head.group(1)
+
+
 def _definition_spans(text: str) -> list[tuple[int, int, str, bool]]:
     """The start, end and label of each definition that starts a line of the paragraph
     ``text``, and whether commonmark.js and markdown-it both read it so."""
@@ -780,12 +911,10 @@ def _definition_spans(text: str) -> list[tuple[int, int, str, bool]]:
                 and not 0 <= positions.next("[", start + 1, unescaped=True) < close
             ):
                 commonmark = _commonmark_end(positions, close + 1, " \t")
-            plain = _LINE_DEFINITION.match(text, start)
-            end = max(commonmark, -1 if plain is None else plain.end())
+            lenient, lenient_label = _lenient_end(positions, start)
+            end = max(commonmark, lenient)
             if end >= 0:
-                label = text[start + 1 : close]
-                if commonmark < 0 and plain is not None:
-                    label = plain.group(1)
+                label = text[start + 1 : close] if commonmark >= 0 else lenient_label
                 agreed = (
                     commonmark == end
                     and len(label) <= _MAX_LABEL
@@ -812,20 +941,29 @@ def _leading_definitions_end(text: str, spans: list[tuple[int, int, str, bool]])
     return end
 
 
-_HTML_OPENER = re.compile(r"<(?:\?|!\[CDATA\[|![A-Za-z])")
+_HTML_OPENER = re.compile(r"<(?:!--|\?|!\[CDATA\[|![A-Za-z])")
+# In an HTML block, HTML parsers also read `<!` and `</` followed by what opens no
+# comment, declaration or end tag as a comment that ends at the next `>`.
+_BLOCK_HTML_OPENER = re.compile(r"<(?:!--|\?|!\[CDATA\[|!|/(?![A-Za-z>]))")
 _HTML_CLOSERS = {"<?": "?>", "<![CDATA[": "]]>"}
 
 
 def _hidden_html(text: str, *, block: bool) -> list[str]:
-    """The processing instructions, declarations and CDATA sections in ``text``, also
-    those in what may be a comment, since readers do not agree on where one ends. In an
-    HTML ``block`` one runs to the end of the block when it is not closed, and a
+    """The processing instructions, declarations and CDATA sections in ``text``, and in
+    an HTML ``block`` the other forms HTML parsers read as comments, outside the
+    ``<!--`` comments that the caller counts, each ended where the caller ends it. In
+    an HTML block one runs to the end of the block when it is not closed, and a
     backslash escapes nothing."""
     positions = _Positions(text)
     found = []
     position = 0
-    while (opener := _HTML_OPENER.search(text, position)) is not None:
+    opener_pattern = _BLOCK_HTML_OPENER if block else _HTML_OPENER
+    while (opener := opener_pattern.search(text, position)) is not None:
         start = opener.start()
+        if opener.group() == "<!--":
+            close = positions.next("-->", start + 4)
+            position = len(text) if close < 0 else close + 3
+            continue
         closer = _HTML_CLOSERS.get(opener.group(), ">")
         close = positions.next(closer, opener.end())
         if not block and (close < 0 or _escaped(text, start)):
@@ -858,6 +996,23 @@ _LENIENT_INLINE_LINK = _inline_link("[ \t]")
 _LINK_LABEL = re.compile(r"\[(?:[^\\\[\]]|\\.)*+\]", re.S)
 _REFERENCE_SPECIAL = re.compile(r"[\\`\[\]<]")
 _TAG_STOP = re.compile(r"[<>\"']")
+_TAG_NAME = re.compile(r"[A-Za-z][A-Za-z0-9-]*")
+# What may follow the name of a tag, or the start of an autolink or email autolink.
+_AFTER_TAG_NAME = frozenset("/>+.:@!#$%&'*=?^_`{|}~-")
+# GitHub's extended autolinks, which take the brackets in them out of the text: a URL
+# after anything but a letter, or `www.` after a space, `*`, `_`, `~` or `(`, up to a
+# space or `<`.
+_EXTENDED_AUTOLINK = re.compile(r"(?:(?<![A-Za-z\[])(?:https?|ftp)://|(?<![^\s*_~(])www\.)[^\s<]*")
+_ENTITY_OR_TAG = re.compile(
+    r"&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{0,31});|<[^<>]*>"
+)
+
+
+def _shows(text: str) -> bool:
+    """Whether the text of a link shows anything but spaces and ASCII punctuation."""
+    return any(
+        not char.isspace() and char not in _ESCAPABLE for char in _ENTITY_OR_TAG.sub("", text)
+    )
 
 
 def _html_end(positions: _Positions, start: int) -> int:
@@ -886,6 +1041,10 @@ def _html_end(positions: _Positions, start: int) -> int:
         second == "/" and third.isascii() and third.isalpha()
     ):
         return -1
+    name = _TAG_NAME.match(text, start + (2 if second == "/" else 1))
+    following = "" if name is None else text[name.end() : name.end() + 1]
+    if following and not following.isspace() and following not in _AFTER_TAG_NAME:
+        return -1
     index = start + 1
     while (stop := _TAG_STOP.search(text, index)) is not None:
         char = stop.group()
@@ -904,13 +1063,21 @@ def _references(text: str, defined: Callable[[str], bool]) -> list[str]:
     """The labels that the references in the inline ``text`` name, as CommonMark pairs
     brackets after code spans, raw HTML and autolinks.
 
-    A label counts only where every reader makes a link of it: not in the text of an
-    inline link or of a full reference, not with a ``|``, which a table cell can split,
-    and nothing after a link whose extent this cannot settle the same for every reader.
+    A label counts only where every reader makes a link of it that shows: not in the
+    text of an inline link or of a full reference, not in a GitHub extended autolink,
+    not with a ``|``, which a table cell can split, not as a link whose text shows only
+    spaces and punctuation, and nothing after a link whose extent this cannot settle
+    the same for every reader.
     """
     runs: dict[int, list[int]] = {}
     for found_run in _BACKTICKS.finditer(text):
         runs.setdefault(found_run.end() - found_run.start(), []).append(found_run.start())
+    autolinks = [
+        (found.start(), found.end())
+        for found in _EXTENDED_AUTOLINK.finditer(text)
+        if "[" in found.group() or "]" in found.group()
+    ]
+    autolink_starts = [start for start, _ in autolinks]
     positions = _Positions(text)
     labels: list[str] = []
     openers: list[int] = []
@@ -919,6 +1086,17 @@ def _references(text: str, defined: Callable[[str], bool]) -> list[str]:
     def name(label: str) -> None:
         if len(label) <= _MAX_LABEL and "|" not in label and label.strip(_ASCII_WHITESPACE):
             labels.append(label)
+
+    # Code, raw HTML and inline link destinations the scan skipped, in which no extended
+    # autolink starts.
+    skipped: list[int] = []
+
+    def in_autolink(index: int) -> bool:
+        found = bisect_left(autolink_starts, index + 1) - 1
+        if found < 0 or index >= autolinks[found][1]:
+            return False
+        inside = bisect_left(skipped, autolink_starts[found] + 1)
+        return inside % 2 == 0
 
     position = 0
     while (found := _REFERENCE_SPECIAL.search(text, position)) is not None:
@@ -931,6 +1109,8 @@ def _references(text: str, defined: Callable[[str], bool]) -> list[str]:
             end = position + 1 if run is None else run.end()
             starts = runs.get(end - position, [])
             index = bisect_left(starts, end)
+            if index < len(starts):
+                skipped += [position, starts[index] + end - position]
             position = end if index == len(starts) else starts[index] + end - position
         elif char == "<":
             end = _html_end(positions, position)
@@ -939,7 +1119,10 @@ def _references(text: str, defined: Callable[[str], bool]) -> list[str]:
             elif "`" in text[position:end]:
                 break
             else:
+                skipped += [position, end]
                 position = end
+        elif autolinks and in_autolink(position):
+            position += 1
         elif char == "[":
             openers.append(position)
             position += 1
@@ -951,6 +1134,9 @@ def _references(text: str, defined: Callable[[str], bool]) -> list[str]:
             innermost = last_closed < opened
             last_closed = opened
             label = text[opened + 1 : position - 1]
+            shows = (
+                opened > 0 and text[opened - 1] == "!" and not _escaped(text, opened - 1)
+            ) or _shows(label)
             following = text[position : position + 1]
             if following == "(":
                 link = _INLINE_LINK.match(text, position) if innermost else None
@@ -958,10 +1144,11 @@ def _references(text: str, defined: Callable[[str], bool]) -> list[str]:
                     link = _LENIENT_INLINE_LINK.match(text, position)
                     if link is None or _TAKEN_BY_INLINE.search(link.group()):
                         break
+                skipped += [position, link.end()]
                 position = link.end()
                 continue
             if following != "[":
-                if innermost:
+                if innermost and shows:
                     name(label)
                 continue
             reference = _LINK_LABEL.match(text, position)
@@ -976,14 +1163,15 @@ def _references(text: str, defined: Callable[[str], bool]) -> list[str]:
                 # full reference.
                 continue
             if not target:
-                name(label)
+                if shows:
+                    name(label)
             elif not defined(target):
                 # Brackets followed by a label that names nothing are not a shortcut
                 # reference either; the label is read again as brackets of its own.
                 continue
             elif _TAKEN_BY_INLINE.search(target):
                 break
-            else:
+            elif shows:
                 name(target)
             position = reference.end()
     return labels
@@ -996,9 +1184,12 @@ _BLANK_LINE = re.compile(r"\n[ \t]*+\n")
 
 
 def _hidden_in_whole(text: str) -> HiddenText:
-    """Every definition at the start of a line, past any container marks, and all the
-    hidden HTML of ``text`` read as one HTML block."""
+    """Every definition and footnote at the start of a line, past any container marks,
+    and all the hidden HTML of ``text`` read as one HTML block."""
     definitions = []
     for chunk in _BLANK_LINE.split(_CONTAINER_MARKS.sub("", text)):
         definitions += [chunk[start:end] for start, end, _, _ in _definition_spans(chunk)]
+        starts = [found.start() for found in _FOOTNOTE.finditer(chunk)]
+        ends = [*starts[1:], len(chunk)] if starts else []
+        definitions += [chunk[a:b] for a, b in zip(starts, ends, strict=True)]
     return HiddenText(tuple(definitions), tuple(_hidden_html(text, block=True)))
