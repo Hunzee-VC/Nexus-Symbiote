@@ -805,10 +805,9 @@ _YARN_LINES = 100_000
 _YARN_DEPTH = 8
 _YARN_LINE_BREAK = re.compile(r"\r?\n")
 # What Yarn 1's tokenizer and a YAML reader both read as one plain word.
-_YARN_WORD = re.compile(r"""[^\x00-\x20\x7f-\U0010ffff:,"'\\#]+""")
+_YARN_WORD = re.compile(r"""[^\x00-\x20\x7f-\U0010ffff:,"'\\#\[\]{}]+""")
 _YARN_V1_WORD_START = re.compile(r"[A-Za-z/.-]")
 _YARN_BERRY_WORD_START = re.compile(r"[A-Za-z0-9/._~^<=-]")
-_BERRY_KEY_SEPARATOR = re.compile(r"\s*,\s*")
 # Yarn 1 refuses a version comment above 1 and then re-reads the whole file as YAML.
 _YARN_VERSION_COMMENT = re.compile(r"yarn lockfile v([0-9]+)")
 # The plain scalars Berry's stringifier writes unquoted, which a YAML reader reads as
@@ -821,6 +820,28 @@ _BERRY_PLAIN = re.compile(
 _YARN_SCALAR_FIELDS = frozenset(
     {"version", "resolved", "integrity", "resolution", "checksum", "linkType"}
 )
+_YARN_BERRY_ONLY_FIELDS = frozenset({"resolution", "languageName", "linkType"})
+_YARN_V1_MAP_FIELDS = frozenset(
+    {
+        "dependencies",
+        "optionalDependencies",
+        "peerDependencies",
+        "bundledDependencies",
+        "bundleDependencies",
+    }
+)
+_BERRY_LOCATOR_PROTOCOLS = ("@npm:", "@workspace:", "@patch:", "@portal:", "@link:", "@file:")
+_HEX_CHARS = frozenset("0123456789abcdefABCDEF")
+
+
+def _valid_berry_checksum(value: str | None) -> bool:
+    """Whether ``value`` is a Yarn Berry SHA-512 hex checksum (with optional cache prefix)."""
+    if not value:
+        return False
+    prefix, slash, digest = value.rpartition("/")
+    if slash and (not prefix or len(prefix) > 64 or not all(ch in _HEX_CHARS for ch in prefix)):
+        return False
+    return len(digest) == 128 and all(ch in _HEX_CHARS for ch in digest)
 
 
 class _YarnToken(NamedTuple):
@@ -914,8 +935,10 @@ def _yarn_tokens(line: str, berry: bool) -> list[_YarnToken]:
     return tokens
 
 
-def _yarn_selectors(tokens: list[_YarnToken], berry: bool) -> list[str]:
-    if len(tokens) < 2 or tokens[-1].kind != ":":
+def _yarn_selectors(
+    tokens: list[_YarnToken], berry: bool, *, v1_comment: bool = False
+) -> list[str]:
+    if len(tokens) < 2 or tokens[-1].kind != ":" or tokens[-1].spaced:
         raise ValueError("invalid yarn.lock header")
     keys = tokens[:-1]
     if any(t.kind != "str" for t in keys[::2]) or any(t.kind != "," for t in keys[1::2]):
@@ -924,16 +947,28 @@ def _yarn_selectors(tokens: list[_YarnToken], berry: bool) -> list[str]:
         raise ValueError("invalid yarn.lock header")
     selectors = [t.value for t in keys[::2]]
     if berry:
-        # Berry reads one YAML key and splits it into descriptors.
-        if len(selectors) != 1:
+        # Berry reads one YAML key and splits it into descriptors linearly.
+        if len(selectors) != 1 or selectors[0] != selectors[0].strip():
             raise ValueError("invalid yarn.lock header")
-        selectors = _BERRY_KEY_SEPARATOR.split(selectors[0])
+        selectors = [part.strip() for part in selectors[0].split(",")]
+    else:
+        for sel in selectors:
+            if "," not in sel:
+                continue
+            parts = [part.strip() for part in sel.split(",")]
+            if (
+                not v1_comment
+                or any(not p or p.find("@", 1) <= 0 for p in parts)
+                or any(proto in sel for proto in _BERRY_LOCATOR_PROTOCOLS)
+                or len({p[: p.find("@", 1)] for p in parts}) > 1
+            ):
+                raise ValueError("ambiguous comma-joined yarn.lock selector")
     if any(not s or s != s.strip() for s in selectors):
         raise ValueError("empty yarn.lock selector")
     return selectors
 
 
-def _yarn_v1_field(content: str) -> tuple[str, _YarnToken | None]:
+def _yarn_v1_field(content: str) -> tuple[str, _YarnToken | None, bool]:
     tokens = _yarn_tokens(content, False)
     if not tokens or tokens[0].kind != "str":
         raise ValueError("invalid yarn.lock key")
@@ -942,10 +977,10 @@ def _yarn_v1_field(content: str) -> tuple[str, _YarnToken | None]:
     if colon:
         rest = rest[1:]
     if not rest and colon:
-        return tokens[0].value, None
+        return tokens[0].value, None, True
     if len(rest) != 1 or not rest[0].spaced or rest[0].kind in (":", ","):
         raise ValueError("invalid yarn.lock field")
-    return tokens[0].value, rest[0]
+    return tokens[0].value, rest[0], colon
 
 
 def _yarn_source(fields: dict[str, str]) -> tuple[str | None, ...]:
@@ -963,6 +998,7 @@ def _yarn_lockfile_stanzas(text: str) -> tuple[bool, list[tuple[list[str], dict[
     if len(lines) > _YARN_LINES:
         raise ValueError("yarn.lock line limit exceeded")
     berry = False
+    v1_comment = False
     stanzas: list[tuple[list[str], dict[str, str]]] = []
     fields: dict[str, str] = {}
     # The keys of each open object; a line may be indented one level past the last.
@@ -970,8 +1006,14 @@ def _yarn_lockfile_stanzas(text: str) -> tuple[bool, list[tuple[list[str], dict[
     first_header = True
     for line in lines:
         if not line or line.startswith("#"):
-            if any(int(m.group(1)) > 1 for m in _YARN_VERSION_COMMENT.finditer(line)):
-                raise ValueError("unsupported yarn.lock version")
+            for match in _YARN_VERSION_COMMENT.finditer(line):
+                if int(match.group(1)) > 1:
+                    raise ValueError("unsupported yarn.lock version")
+                if berry:
+                    raise ValueError("conflicting yarn.lock format headers")
+                v1_comment = True
+            if any(not keys for keys in open_keys):
+                raise ValueError("empty yarn.lock mapping")
             # Yarn 1 reads an indented line after one empty line as part of the stanza and
             # stops reading the lockfile at one after more; refusing it covers both.
             open_keys = []
@@ -981,29 +1023,55 @@ def _yarn_lockfile_stanzas(text: str) -> tuple[bool, list[tuple[list[str], dict[
         if not content or spaces % 2 or spaces // 2 > len(open_keys):
             raise ValueError("invalid yarn.lock indentation")
         level = spaces // 2
+        if any(not keys for keys in open_keys[level:]):
+            raise ValueError("empty yarn.lock mapping")
         if first_header:
-            berry = level == 0 and content == "__metadata:"
+            probe = _yarn_tokens(content, True)
+            berry = (
+                level == 0
+                and len(probe) == 2
+                and probe[0].kind == "str"
+                and not probe[0].spaced
+                and probe[0].value == "__metadata"
+                and probe[1].kind == ":"
+                and not probe[1].spaced
+            )
+            if berry and v1_comment:
+                raise ValueError("conflicting yarn.lock format headers")
         if level == 0:
-            selectors = _yarn_selectors(_yarn_tokens(content, berry), berry)
+            selectors = _yarn_selectors(_yarn_tokens(content, berry), berry, v1_comment=v1_comment)
             fields = {}
-            if selectors != ["__metadata"]:
+            if selectors == ["__metadata"]:
+                if not berry or not first_header:
+                    raise ValueError("misplaced yarn.lock metadata")
+            else:
                 # A key without a package name is no package's record, only an alias target.
                 if any(s.find("@", 1) <= 0 for s in selectors):
                     raise ValueError("yarn.lock selector without a package name")
                 stanzas.append((selectors, fields))
-            elif not first_header:
-                raise ValueError("misplaced yarn.lock metadata")
             first_header = False
             open_keys = [set()]
             continue
         del open_keys[level:]
-        key, value = _berry_field(content) if berry else _yarn_v1_field(content)
+        if berry:
+            key, value = _berry_field(content)
+            colon = True
+        else:
+            key, value, colon = _yarn_v1_field(content)
+            if key in _YARN_BERRY_ONLY_FIELDS:
+                raise ValueError("berry field in yarn v1 lockfile")
+            if value is not None and colon and not v1_comment:
+                raise ValueError("ambiguous yarn.lock field syntax")
+            if level > 1 and (colon or value is None or value.kind != "str"):
+                raise ValueError("invalid yarn.lock dependency entry")
         if not key:
             raise ValueError("invalid yarn.lock key")
         if key in open_keys[-1]:
             raise ValueError("duplicate key in yarn.lock stanza")
         open_keys[-1].add(key)
         if value is None:
+            if not berry and (level != 1 or key not in _YARN_V1_MAP_FIELDS):
+                raise ValueError("unsupported nested mapping in yarn.lock")
             if level == 1 and key in _YARN_SCALAR_FIELDS:
                 raise ValueError("yarn.lock field is not a string")
             if len(open_keys) >= _YARN_DEPTH:
@@ -1014,7 +1082,7 @@ def _yarn_lockfile_stanzas(text: str) -> tuple[bool, list[tuple[list[str], dict[
             if value.kind != "str":
                 raise ValueError("yarn.lock field is not a string")
             fields[key] = value.value
-    if not stanzas:
+    if any(not keys for keys in open_keys) or not stanzas:
         raise ValueError("empty yarn.lock")
     return berry, stanzas
 
@@ -2125,7 +2193,7 @@ class RegistryScanner(Scanner):
                 locator,
                 lock_digest,
                 result,
-                checksum_recorded=berry and bool(fields.get("checksum")),
+                checksum_recorded=berry and _valid_berry_checksum(fields.get("checksum")),
             )
         return True
 
