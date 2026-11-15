@@ -433,7 +433,9 @@ def test_helpers_of_the_same_file_are_judged_by_what_they_do_with_the_server(tmp
         "from sys import modules\nmodules[__name__].mcp.tool()(delete_all)\n",
         "import sys\ngetattr(sys, 'modules')[__name__].mcp.tool()(delete_all)\n",
         "import importlib\ngetattr(importlib.import_module(__name__), 'mcp').tool()(delete_all)\n",
-        "def find(value):\n    return getattr(value, 'tool')\n",
+        "getattr(mcp, 'tool')(delete_all)\n",
+        "def find(value):\n    return getattr(value, 'tool')\nfind(mcp)(delete_all)\n",
+        "def run(getattr):\n    return getattr(1, 'real')\n",
         "__builtins__['globals']()['mcp'].tool()(delete_all)\n",
     ],
 )
@@ -484,6 +486,8 @@ def test_immediately_awaited_server_run_does_not_escape(tmp_path):
         "def total(df):\n    return df.eval('a + b')\n",
         "real = getattr(7, 'real')\n",
         "import os\nenviron = getattr(os, 'environ')\n",
+        "def read_title(item):\n    return getattr(item, 'title', '')\n",
+        "class Box:\n    def label(self):\n        return getattr(self, 'name', '')\n",
         "import functools\ndef build(server):\n    return server.sse_app()\napp = build(mcp)\n"
         + "def logged(fn):\n    @functools.wraps(fn)\n    def inner(*a):\n        return fn(*a)\n"
         + "    print(inner.__wrapped__, fn.__defaults__, fn.__kwdefaults__)\n    return inner\n",
@@ -642,3 +646,71 @@ def test_agent_tools_are_named_per_agent(tmp_path):
         "tool:python:pkg%2Fserver.py/a/search",
         "tool:python:pkg%2Fserver.py/b/search",
     ]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def wire(ns, f):\n    getattr(ns, 'mcp').tool()(f)\n",
+        FASTMCP
+        + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n"
+        + "def wire(ns, f):\n    getattr(ns, 'mcp').tool()(f)\n",
+    ],
+)
+def test_unshadowed_getattr_attribute_name_is_not_treated_as_dynamic_module_load(tmp_path, source):
+    result, _ = scan(tmp_path, source)
+    assert not result.scan_failures and not result.surfaces_excluded
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_gap"),
+    [
+        (
+            "import shared\n@getattr(shared, 'mcp').tool()\ndef add(): pass\n",
+            "pkg/server.py: Python MCP tools registered on an imported server",
+        ),
+        (
+            "def f(ns):\n    return getattr(ns, 'FastMCP')('x')\n",
+            "pkg/server.py: MCP server class reached as an attribute; servers built from it not inventoried",
+        ),
+        (
+            "def f(ns):\n    return getattr(ns, 'StdioServerParameters')(command='x')\n",
+            "pkg/server.py: MCP server launched from application code; launcher not inventoried",
+        ),
+        (
+            "import importlib\nload = getattr(importlib, 'import_module')\nload('..server', 'mcp.sub')\n",
+            "pkg/server.py: MCP server module loaded dynamically; tools not inventoried",
+        ),
+        (
+            "def f(getattr):\n    return getattr('mcp', 'x')\n",
+            "pkg/server.py: MCP server module loaded dynamically; tools not inventoried",
+        ),
+        (
+            FASTMCP + "from .evil import *\nmcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n",
+            "pkg/server.py: Python MCP bindings exceed supported scope",
+        ),
+        (
+            FASTMCP + "from .. import *\nmcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n",
+            "pkg/server.py: Python MCP bindings exceed supported scope",
+        ),
+        (
+            FASTMCP
+            + "import mod\ndef configure(server):\n    return server.sse_app()\n"
+            + "ref = getattr(mod, 'configure')\nmcp = FastMCP('x')\nconfigure(mcp)\n",
+            "pkg/server.py: unsupported Python MCP binding or dynamic registration",
+        ),
+        (
+            FASTMCP
+            + "import typing as t\nt.Optional = lookup\nmcp = FastMCP('x')\n"
+            + "def f(x: t.Optional[mcp]): pass\n",
+            "pkg/server.py: unsupported Python MCP binding or dynamic registration",
+        ),
+        (
+            AGENT + "cls = Agent\nagent = Agent('m')\n@agent.tool_plain\ndef search(): pass\n",
+            "pkg/server.py: unsupported Python SDK tool binding or dynamic registration",
+        ),
+    ],
+)
+def test_getattr_parity_and_relative_star_import_gaps(tmp_path, source, expected_gap):
+    result, _ = scan(tmp_path, source)
+    assert expected_gap in result.surfaces_excluded

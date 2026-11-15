@@ -317,11 +317,11 @@ A way around a limit that its entry does not describe is worth a
   `globals`, `vars`, `eval`, `exec`, `__import__`, `setattr` or `delattr`;
   `__builtins__` or an import of `builtins`, `__main__`, `_imp`, `imp`,
   `_frozen_importlib`, `_frozen_importlib_external`, `_importlib` or `runpy`;
-  `getattr` by name, unless called directly with two or three positional arguments
-  whose object is a literal or a name, or attribute of a name, that the file binds
-  only by import and whose attribute is a literal name other than `modules` and
-  those listed next, so `getattr(os, "environ")` is accepted and
-  `getattr(self, "name")` or `fn = getattr` is a gap; the attributes `__self__`,
+  `getattr` by name, unless it is not rebound and is called directly with two or
+  three positional arguments whose attribute is a literal name other than `modules`
+  and those listed next, on an object that is not a recognized server or agent, so
+  `getattr(self, "name")` and `getattr(os, "environ")` are accepted while
+  `getattr(mcp, "tool")` and `fn = getattr` are gaps; the attributes `__self__`,
   `__closure__`, `__globals__`, `__builtins__`, `__dict__`, `__annotations__`,
   `__traceback__`, `__code__`, `__getattribute__`, `__setattr__`, `__delattr__`,
   `__import__`, `import_module`, `resolve_name`, `attrgetter`, `methodcaller`,
@@ -348,15 +348,16 @@ A way around a limit that its entry does not describe is worth a
   position, a keyword or an element of a list, tuple, set or dict argument, also
   behind `*` or `**`, so `functools.partial`, `map` and a thread target's `args` or
   `kwargs` are covered too. A call to another
-  function with such a literal is a gap as well, except `logging.getLogger` and a
-  server class imported from its own module, such as `FastMCP("mcp")`. A literal is a string or an
+  function with such a literal is a gap as well, except `logging.getLogger`, a
+  server class imported from its own module, such as `FastMCP("mcp")`, and the
+  attribute name of an unshadowed `getattr` call, such as `getattr(ns, "mcp")`. A literal is a string or an
   f-string without placeholders. A dynamic import (`importlib.import_module`,
   `__import__` or `pkgutil.resolve_name`, or a name bound to one of them by an
   assignment, an unpacking, a `for`, comprehension or `with ... as` target, an
   import alias or a parameter default) counts on any literal argument, and a
   relative name counts once resolved against a literal package or `__import__`
   globals. A module name computed at run time, a relative name given to a loader
-  no such binding shows, and a loader reached through `getattr`, `globals()` or
+  no such binding shows, and a loader reached through a computed `getattr`, `globals()` or
   code in a string are not followed and leave no gap.
 - **Python files without a reference are not examined.** A file that names neither
   `mcp`, a supported agent framework nor an MCP launcher or server class is not parsed.
