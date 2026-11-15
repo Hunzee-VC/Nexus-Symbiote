@@ -3,10 +3,11 @@
 npm reads its user configuration from ``userconfig`` and its global configuration from
 ``globalconfig``, by default ``<prefix>/etc/npmrc``, and pnpm also reads
 ``<workspace-prefix>/.npmrc``. The environment, the project ``.npmrc`` and the command
-line can each move them, and npm resolves a relative path against the working directory. The collector reads no file there, so ``call``,
-``package`` or ``registry`` added to one would change what runs with nothing in the
-inventory changing; such a setting is treated like ``HOME`` or ``PREFIX`` in the project.
-npm also expands ``${...}`` in setting names, so a name holding one may spell any of them.
+line can each move them, and npm resolves a relative path against the working directory.
+The collector reads no file there, so ``call``, ``package`` or ``registry`` added to one
+would change what runs with nothing in the inventory changing; such a setting is treated
+like ``HOME`` or ``PREFIX`` in the project. npm also expands ``${...}`` in setting names,
+so a name holding one may spell any of them.
 """
 
 from __future__ import annotations
@@ -717,6 +718,11 @@ AFTER_THE_SCRIPT = [
     (["start", "-yC=."], "npm start -C"),
     # -Cy takes --yes as the prefix, so the absolute word after it is not its value.
     (["start", "-Cy", "/srv/agent"], "npm start -C"),
+    # In -CC the first --prefix takes the second as its path, ./--prefix.
+    (["start", "-CC", "/srv/agent"], "npm start -C"),
+    (["start", "-CC=/srv/agent"], "npm start -C"),
+    (["start", "-gCC", "/srv/agent"], "npm start -C"),
+    (["start", "-CgC", "/srv/agent"], "npm start -C"),
     (["start", "--prefix"], "npm start --prefix"),
     (["start", "--prefix", "--"], "npm start --prefix"),
     (["stop", "--userconfig", "${workspaceFolder}/.npmrc-ci"], "npm stop --userconfig"),
@@ -756,12 +762,19 @@ def test_words_npm_does_not_read_as_a_location_after_the_script_name_are_not_rel
     assert not any(r.category == "launcher_identity" for r in record.risks)
 
 
-def test_an_absolute_location_after_the_script_name_is_a_package_source(tmp_path):
-    server = {"command": "npm", "args": ["start", "--userconfig", "/srv/agent/.npmrc"]}
-    record, gaps = collect(tmp_path, server)
+@pytest.mark.parametrize(
+    "args,label",
+    [
+        (["start", "--userconfig", "/srv/agent/.npmrc"], "--userconfig=[local]"),
+        (["start", "-gC", "/srv/agent"], "-C=[local]"),
+        (["start", "-gC=/srv/agent"], "-C=[local]"),
+    ],
+)
+def test_an_absolute_location_after_the_script_name_is_a_package_source(tmp_path, args, label):
+    record, gaps = collect(tmp_path, {"command": "npm", "args": args})
     assert not gaps, gaps
     assert not any(r.category == "launcher_identity" for r in record.risks)
-    assert "--userconfig=[local]" in record.properties["package_sources"]
+    assert label in record.properties["package_sources"]
 
 
 @pytest.mark.parametrize(
@@ -778,3 +791,220 @@ def test_the_scan_gate_fails_for_a_location_on_either_side_of_the_script_name(
     result = scan_cli(root, output)
     assert result.exit_code == 1, result.output
     assert "Scan gate failed" in result.output
+
+
+PNPX = {"command": "pnpx", "args": ["safe-mcp@1.2.3"]}
+BUNX = {"command": "bunx", "args": NPM_READERS["bunx"]}
+DENO = {"command": "deno", "args": NPM_READERS["deno"]}
+# pnpm reads .npmrc with an older ini than npm's, whose section header takes no trailing
+# whitespace: `[x] ` is a key there, and the lines after it are top-level settings.
+LOOSE_SECTIONS = ["[x] ", "[x]\t", "[x]\u00a0", "[x]\u3000", "[ci] \t"]
+
+
+@pytest.mark.parametrize("server", [PNPM_DLX, PNPX], ids=["pnpm-dlx", "pnpx"])
+@pytest.mark.parametrize("header", LOOSE_SECTIONS)
+@pytest.mark.parametrize("key", LOCATIONS)
+def test_pnpm_reads_a_location_after_a_section_header_with_trailing_whitespace(
+    tmp_path, server, header, key
+):
+    files = {".npmrc": f"{header}\n{key}=cfg\n"}
+    record, gaps = collect(tmp_path, server, files)
+    assert moved(key, ".npmrc") in identity_unknown(record, gaps)
+
+
+def test_pnpm_reads_a_registry_after_a_section_header_with_trailing_whitespace(tmp_path):
+    files = {".npmrc": "[x] \nregistry=https://registry.attacker.test/\n"}
+    record, gaps = collect(tmp_path, PNPM_DLX, files)
+    a_medium_source(record, gaps, ".npmrc:registry=https://registry.attacker.test")
+
+
+def test_pnpm_binds_the_lines_after_a_section_header_with_trailing_whitespace(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    root = tmp_path / "project"
+    write_project(root, PNPM_DLX, {".npmrc": "[x] \nfund=false\n"})
+    baseline = tmp_path / "baseline.json"
+    assert scan_cli(root, baseline).exit_code == 0
+    write_project(root, PNPM_DLX, {".npmrc": "[x] \nfund=false\nnode-options=--require ./a.js\n"})
+    candidate = tmp_path / "candidate.json"
+    assert scan_cli(root, candidate, "--report-only").exit_code == 0
+    compared = CliRunner().invoke(main, ["diff", str(baseline), str(candidate), "--fail-on-alert"])
+    assert compared.exit_code == 1, compared.output
+    assert "static source binding changed" in compared.output
+
+
+@pytest.mark.parametrize("key", LOCATIONS)
+def test_the_scan_gate_fails_for_a_location_pnpm_reads_after_a_spaced_section(
+    tmp_path, monkeypatch, key
+):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    root = tmp_path / "project"
+    write_project(root, PNPM_DLX, {".npmrc": f"[x] \n{key}=cfg\n", "cfg/.npmrc": "x=1\n"})
+    output = tmp_path / "bom.json"
+    result = scan_cli(root, output)
+    assert result.exit_code == 1, result.output
+    assert moved(key, ".npmrc") in output.read_text()
+
+
+@pytest.mark.parametrize(
+    "server,npmrc",
+    [
+        # npm's ini takes trailing whitespace after a section header.
+        (NPX, "[x] \nuserconfig=.npmrc-ci\nregistry=https://registry.attacker.test/\n"),
+        ({"command": "npm", "args": ["run", "mcp"]}, "[x] \nuserconfig=.npmrc-ci\n"),
+        (PNPM_DLX, "[x]\nuserconfig=.npmrc-ci\nregistry=https://registry.attacker.test/\n"),
+        (PNPX, "fund=false\n[x] \n"),
+        (BUNX, "[x]\nfund=1\n"),
+    ],
+    ids=["npx", "npm-run", "pnpm-strict-header", "pnpm-header-last", "bunx-strict-header"],
+)
+def test_a_section_both_readers_end_the_top_level_at_keeps_the_identity(tmp_path, server, npmrc):
+    record, gaps = collect(tmp_path, server, {".npmrc": npmrc})
+    assert not gaps, gaps
+    assert not any(r.category in {"launcher_identity", "package_source"} for r in record.risks)
+
+
+@pytest.mark.parametrize("server", [BUNX, DENO], ids=["bunx", "deno"])
+def test_bun_and_deno_fail_closed_where_npm_and_pnpm_read_the_npmrc_differently(tmp_path, server):
+    record, gaps = collect(tmp_path, server, {".npmrc": "[x] \nfund=false\n"})
+    detail = identity_unknown(record, gaps)
+    assert ".npmrc section header with trailing whitespace" in detail
+
+
+@pytest.mark.parametrize(
+    "server",
+    [
+        {"command": "pnpm", "args": ["run", "mcp"]},
+        {"command": "pnpm", "args": ["view", "safe-mcp"]},
+        {"command": "bun", "args": ["run", "mcp"]},
+        {"command": "deno", "args": ["run", "--allow-net", "server.ts"]},
+    ],
+)
+def test_a_launch_without_a_package_sees_a_location_after_a_spaced_section(tmp_path, server):
+    record, gaps = collect(tmp_path, server, {".npmrc": "[x] \nuserconfig=.npmrc-ci\n"})
+    assert any(moved("userconfig", ".npmrc") in gap for gap in gaps), gaps
+
+
+# pnpm 10 reads `--config.<key>=<value>`, --prefix and --dir (-C) before the script name of
+# `pnpm run` and among the words of its own commands, and hands some commands to npm.
+PNPM_OPTIONS = [
+    (["run", "--config.userconfig=.npmrc-ci", "start"], moved("userconfig", "the command line")),
+    (["run", "--config.globalconfig=g", "mcp"], moved("globalconfig", "the command line")),
+    (["run", "--config.prefix=.", "start"], moved("prefix", "the command line")),
+    (
+        ["run", "--config.workspace-prefix=sub", "start"],
+        moved("workspace-prefix", "the command line"),
+    ),
+    (["run", "-config.userconfig=.npmrc-ci", "start"], moved("userconfig", "the command line")),
+    (["run-script", "---config.userconfig=c", "start"], moved("userconfig", "the command line")),
+    (["run", "--config.userconfig=", "start"], moved("userconfig", "the command line")),
+    (
+        ["run", "--filter", "web", "--config.userconfig=c", "start"],
+        moved("userconfig", "the command line"),
+    ),
+    (["run", "--prefix", ".", "start"], f"pnpm run --prefix {MOVES}"),
+    (["run", "--pref=sub", "start"], f"pnpm run --prefix {MOVES}"),
+    (["run", "--pr", "sub", "start"], f"pnpm run --prefix {MOVES}"),
+    (["run", "--dir", "sub", "start"], f"pnpm run --dir {MOVES}"),
+    (["run", "--di=sub", "start"], f"pnpm run --dir {MOVES}"),
+    (["run", "-C", "sub", "start"], f"pnpm run -C {MOVES}"),
+    (["run", "--C=sub", "start"], f"pnpm run -C {MOVES}"),
+    (["run", "-rC", "sub", "start"], f"pnpm run -C {MOVES}"),
+    (["run", "-Cr", "/srv/agent", "start"], f"pnpm run -C {MOVES}"),
+    (["run", "-CC", "/srv/agent", "start"], f"pnpm run -C {MOVES}"),
+    (["restart", "--config.userconfig=.npmrc-ci"], moved("userconfig", "the command line")),
+    (["pack", "--prefix", "."], f"pnpm --prefix {MOVES}"),
+    (["restart", "--prefix"], f"pnpm --prefix {MOVES}"),
+    (["restart", "--dir", "--"], f"pnpm --dir {MOVES}"),
+    (["recursive", "run", "-C", "sub", "start"], f"pnpm run -C {MOVES}"),
+    # pnpm runs `pnpm view` and the other commands it does not implement with npm.
+    (["view", "safe-mcp", "--userconfig", ".npmrc-ci"], f"pnpm --userconfig {MOVES}"),
+    (["docs", "-gC", "."], f"pnpm -C {MOVES}"),
+]
+
+
+@pytest.mark.parametrize("args,reason", PNPM_OPTIONS)
+def test_a_pnpm_location_option_makes_the_identity_unknown(tmp_path, args, reason):
+    record, gaps = collect(tmp_path, {"command": "pnpm", "args": args})
+    finding = next(r for r in record.risks if r.category == "launcher_identity")
+    assert finding.severity.value == "high"
+    assert reason in finding.detail
+    assert any(reason in gap for gap in gaps), gaps
+
+
+@pytest.mark.parametrize(
+    "name,reason",
+    [
+        ("${E}userconfig", "npm setting name with ${...} from the command line"),
+        ("work${E}prefix", "npm setting name with ${...} from the command line"),
+    ],
+)
+def test_a_pnpm_config_name_that_may_expand_to_a_location_makes_the_identity_unknown(
+    tmp_path, name, reason
+):
+    server = {"command": "pnpm", "args": ["run", f"--config.{name}=c", "start"], "env": {"E": ""}}
+    record, gaps = collect(tmp_path, server)
+    assert any(reason in gap for gap in gaps), gaps
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["run", "start", "--config.userconfig=.npmrc-ci"],
+        ["run", "start", "--prefix", "."],
+        ["run", "start", "-C", "."],
+        ["start", "--config.userconfig=.npmrc-ci"],
+        ["start", "-C", "."],
+        ["test", "--prefix", "."],
+        ["exec", "node", "server.js", "--dir", "."],
+        ["mcp", "--config.userconfig=.npmrc-ci"],
+        # Without `=`, pnpm reads --config.<key> as a flag and the next word as the script.
+        ["run", "--config.userconfig", "start"],
+        ["run", "--config.fund=false", "start"],
+        ["run", "--config.USERCONFIG=c", "start"],
+        ["run", "--config.userc=c", "start"],
+        ["run", "--no-dir", "start"],
+        ["run", "--no-config.userconfig=c", "start"],
+        ["run", "-p", "start"],
+        ["run", "--d", "start"],
+        ["run", "--parseable", "start"],
+        ["run", "--", "--prefix", ".", "start"],
+        ["restart", "--", "--config.userconfig=c"],
+    ],
+)
+def test_words_pnpm_does_not_read_as_a_location_are_not_relocation(tmp_path, args):
+    record, gaps = collect(tmp_path, {"command": "pnpm", "args": args})
+    assert not gaps, gaps
+    assert not any(r.category == "launcher_identity" for r in record.risks)
+
+
+@pytest.mark.parametrize(
+    "args,label",
+    [
+        (["run", "--config.userconfig=/srv/agent/.npmrc", "start"], "--config=[local]"),
+        (["run", "--dir", "/srv/agent", "start"], "--dir=[local]"),
+        (["run", "--prefix=/srv/agent", "start"], "--prefix=[local]"),
+    ],
+)
+def test_an_absolute_pnpm_location_option_is_a_package_source(tmp_path, args, label):
+    record, gaps = collect(tmp_path, {"command": "pnpm", "args": args})
+    assert not gaps, gaps
+    assert not any(r.category == "launcher_identity" for r in record.risks)
+    assert label in record.properties["package_sources"]
+
+
+def test_the_scan_gate_fails_for_a_pnpm_run_config_location(tmp_path, monkeypatch):
+    # The review reproduction: pnpm run --config.userconfig=.npmrc-ci start passed the gate.
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    root = tmp_path / "project"
+    files = {
+        "package.json": '{"scripts": {"start": "node server.js"}}',
+        ".npmrc-ci": "fund=false\n",
+    }
+    server = {"command": "pnpm", "args": ["run", "--config.userconfig=.npmrc-ci", "start"]}
+    write_project(root, server, files)
+    output = tmp_path / "bom.json"
+    result = scan_cli(root, output)
+    assert result.exit_code == 1, result.output
+    assert moved("userconfig", "the command line") in output.read_text()

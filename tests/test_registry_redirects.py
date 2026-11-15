@@ -87,6 +87,31 @@ def test_an_npmrc_registry_redirects_packages_without_a_scope_registry(tmp_path)
         )
 
 
+@pytest.mark.parametrize("header", ["[x] ", "[x]\t", "[x]\u00a0"])
+def test_a_registry_pnpm_reads_after_a_spaced_section_header_redirects_packages(tmp_path, header):
+    # pnpm's older ini reads `[x] ` as a key, so the lines after it are top-level there.
+    npmrc = f"{header}\nregistry=https://npm.evil.example/\n"
+    result, entries = _collect(tmp_path, {"package.json": NPM, ".npmrc": npmrc})
+    assert result.surfaces_excluded == []
+    for name in ("openai", "@anthropic-ai/sdk"):
+        assert entries[name].package_url is None
+        assert _sources(entries[name]) == [".npmrc:registry=https://npm.evil.example"]
+
+
+@pytest.mark.parametrize(
+    "npmrc", ["[x]\nregistry=https://npm.evil.example/\n", "fund=false\n[x] \n"]
+)
+def test_a_section_header_both_readers_end_the_top_level_at_redirects_nothing(tmp_path, npmrc):
+    _, entries = _collect(tmp_path, {"package.json": NPM, ".npmrc": npmrc})
+    assert entries["openai"].package_url == "pkg:npm/openai@4.0.0"
+    assert _sources(entries["openai"]) is None
+
+
+def test_a_setting_name_pnpm_reads_after_a_spaced_section_header_is_a_gap(tmp_path):
+    result, _ = _collect(tmp_path, {"package.json": NPM, ".npmrc": "[x] \n${E}registry=x\n"})
+    assert NPM_GAP in result.surfaces_excluded
+
+
 def test_a_scope_registry_redirects_only_its_scope(tmp_path):
     _, entries = _collect(
         tmp_path,

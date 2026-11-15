@@ -2310,23 +2310,32 @@ _NPM_LOCATION_KEYS = ("userconfig", "globalconfig", "prefix")
 _END_OF_OPTIONS = re.compile("-{2,}")
 
 
+def _cluster_last(name: str) -> bool:
+    """Whether the ``-C`` of a word of shorthands takes the next word as its value.
+
+    Only one that ends the word does, and only when it is the only ``C``: a path option
+    takes any word as its value, so in ``-CC`` the first takes the second.
+    """
+    return name.endswith("C") and name.count("C") == 1
+
+
 def _npm_location(word: str) -> tuple[str, bool] | None:
     """The configuration location option npm may read a word as, and whether it is last.
 
     npm's option parser takes any number of dashes, expands an abbreviation (``--userc``)
     and splits a word of single-letter shorthands (``-gC``), where ``-C`` is ``--prefix``.
     An abbreviation counts here even where npm finds it ambiguous, and any word of letters
-    holding ``C`` as a cluster. The option takes the next word only when it ends the word.
+    holding ``C`` as a cluster.
     """
     name = word.partition("=")[0].lstrip("-")
     if not word.startswith("-") or not name:
         return None
     if name.isalpha() and "C" in name:
-        return "-C", name.endswith("C")
+        return "-C", _cluster_last(name)
     for key in _NPM_LOCATION_KEYS:
+        # An exact option name, such as --global, is not an abbreviation.
         if key.startswith(name) and (
-            name == key
-            or (len(name) > 1 and name not in NPM_CONFIG_FLAGS and name not in NPM_CONFIG_VALUES)
+            name == key or (len(name) > 1 and name not in NPM_CONFIG_FLAGS)
         ):
             return f"--{key}", True
     return None
@@ -2351,6 +2360,64 @@ def _npm_locations(words: list[str]) -> list[tuple[str, str]]:
             later = words[index + 1] if index + 1 < len(words) else "--"
             value = "" if _END_OF_OPTIONS.fullmatch(later) else later
         found.append((option, value if last else ""))
+    return found
+
+
+# pnpm 10 settings that name a configuration file or a directory it reads one from.
+_PNPM_LOCATION_KEYS = frozenset({"userconfig", "globalconfig", "prefix", "workspace-prefix"})
+# pnpm 10 commands whose words pnpm reads as its own options up to a word of only dashes,
+# and those it hands to npm with every word. pnpm reads `run` up to the script name and
+# none of the words after `exec`, `test` or a script it runs by name, such as `start`.
+_PNPM_COMMANDS = _set(
+    "audit bin c cache cat-file cat-index ci clean-install completion config deploy dislink"
+    " doctor find-hash get help ic ignored-builds init install-clean la licenses list ll ls"
+    " outdated pack patch patch-commit patch-remove prune publish restart root server set"
+    " setup store uni unlink why"
+)
+_PNPM_TO_NPM = _set(
+    "access adduser bugs deprecate dist-tag docs edit find home info issues login logout"
+    " owner ping prefix profile pkg repo s se search set-script show star stars team token"
+    " unpublish unstar v version view whoami xmas"
+)
+
+
+def _pnpm_locations(words: list[str], script: bool) -> list[tuple[str, str]]:
+    """Configuration location options among the words pnpm reads as its own.
+
+    pnpm's option parser, like npm's, takes any number of dashes, an abbreviation
+    (``--pref``) and a word of single-letter shorthands, where ``-C`` is ``--dir``.
+    ``--config.<key>=<value>`` sets any setting, recorded as ``--config`` with
+    ``<key>=<value>``; without ``=`` it, like a name after ``no-``, is a flag. With
+    ``script``, reading stops at the first word that cannot be an option's value.
+    """
+    found: list[tuple[str, str]] = []
+    value_next = False
+    for index, word in enumerate(words):
+        if _END_OF_OPTIONS.fullmatch(word):
+            break
+        if not word.startswith("-") or word == "-":
+            if script and not value_next:
+                break
+            value_next = False
+            continue
+        name, equals, value = word.partition("=")
+        name = name.lstrip("-")
+        value_next = not equals
+        if not equals:
+            later = words[index + 1] if index + 1 < len(words) else "--"
+            value = "" if _END_OF_OPTIONS.fullmatch(later) else later
+        if name.lower().startswith("no-"):
+            continue
+        if name.startswith("config."):
+            key = name.removeprefix("config.")
+            if equals and (key in _PNPM_LOCATION_KEYS or "${" in key):
+                found.append(("--config", f"{key}={value}"))
+        elif name.isalpha() and "C" in name:
+            found.append(("-C", value if _cluster_last(name) else ""))
+        elif name in {"di", "dir"}:
+            found.append(("--dir", value))
+        elif len(name) > 1 and "prefix".startswith(name):
+            found.append(("--prefix", value))
     return found
 
 
@@ -2408,6 +2475,11 @@ def _pnpm(name: str, rest: list[str], launch: Launch) -> None:
         launch.fail("pnpm subcommand fetches or installs packages")
     else:
         launch.launcher = f"pnpm {subcommand}" if subcommand in {"exec", "run", "start"} else "pnpm"
+        if subcommand in _PNPM_TO_NPM:
+            launch.sources.extend(_npm_locations(remainder))
+        elif subcommand in _PNPM_COMMANDS or subcommand in {"run", "run-script"}:
+            script = subcommand in {"run", "run-script"}
+            launch.sources.extend(_pnpm_locations(remainder, script))
         _local_subcommand([subcommand, *remainder], launch)
 
 

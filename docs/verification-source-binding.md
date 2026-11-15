@@ -30,14 +30,19 @@ and `pyproject.toml` `[tool.uv]` (indexes, mirrors, insecure hosts and `sources`
 entries for a launched package) for `uv run`. `.npmrc` is read as npm reads it: keys
 and values are trimmed, JSON-decoded when quoted and cut at an unescaped `;` or `#`
 otherwise, lines end at a carriage return or line feed, keys after the first
-`[section]` line are ignored, and a key containing `${...}` is `[unresolved]`; npm
+`[section]` line are ignored, and a key containing `${...}` is `[unresolved]`. npm
 expands it, so one that may become `call`, `package`, `userconfig`, `globalconfig`,
 `prefix` or `workspace-prefix` (`${E}userconfig`, but not `//${HOST}/:_authToken` or
 `@${SCOPE}:registry`)
 also makes the launcher identity unknown, as does such an `npm_config_*` name, and one
 that may become a code-loading setting such as `node-options` is recorded as one.
 Such a line, unless its key starts with `//`, is bound with its key and value as
-written. Its
+written. pnpm's older reader takes a section line followed by whitespace, such as
+`[x] `, as a key, so for `pnpm dlx` and `pnpx` the settings after it are top-level ones,
+classified and bound; for a Bun or Deno package, whose readers are not modelled, an
+`.npmrc` that npm and pnpm read differently makes the launcher identity unknown
+(`.npmrc:section=[unresolved]`), and for a launch without a package both readings are
+checked. Its
 registry (and the `@scope:registry` of a configured `scope` for a package without a
 registry of its own, as npm selects it, beside the default registry that pnpm and Bun
 use instead for a launcher other than `npx` and `npm exec`; a `scope` that holds
@@ -49,10 +54,14 @@ npm reads user configuration from `userconfig` and global configuration from
 a `userconfig`, `globalconfig` or `prefix` that may lie in the project (not an absolute
 path, or one with a `..` segment or under `/proc` or `/dev/fd`), from `.npmrc`, an
 `npm_config_*` variable or `--userconfig`, `--globalconfig`, `--prefix` or `-C`
-before the package or after the script name of `npm run`, `npm start` or `npm test`,
+before the package or after the script name of `npm run`, `npm start` or `npm test`
+(also for the commands pnpm hands to npm, such as `pnpm view`), or from pnpm's
+`--config.<setting>=<value>` for one of them or `--prefix`, before the script name of
+`pnpm run` or among the words of pnpm's own commands such as `pnpm restart`,
 makes the launcher identity unknown, as `HOME` or `PREFIX` there does, and so does
-pnpm's `workspace-prefix` from `.npmrc` or the environment, or its workspace directory
-from `NPM_CONFIG_WORKSPACE_DIR`, whose `.npmrc` pnpm reads after the project's,
+pnpm's `workspace-prefix` from `.npmrc`, the environment or `--config`, or its
+workspace directory from `NPM_CONFIG_WORKSPACE_DIR`, `--dir` or `-C`, whose `.npmrc`
+pnpm reads after the project's,
 because a `node-options`, `script-shell`, `registry` or `package` added to that file
 would change what runs unseen. This holds for registry and full-commit git
 packages, whose `.npmrc` is read in full, and for an npm, pnpm, Bun or Deno launch

@@ -24,7 +24,7 @@ A project file can send a package manager to a registry or index other than the 
 
 | Ecosystem | File | Settings |
 | --- | --- | --- |
-| npm | `.npmrc`, which npm, pnpm, Yarn 1 and Bun read | `registry`, `@scope:registry`, and `scope`, whose registry npm uses for every package whose own scope has no registry; pnpm, Yarn 1 and Bun ignore `scope`. It is read with the MCP collector's reader: top-level settings only, as npm reads them, and never an authentication setting |
+| npm | `.npmrc`, which npm, pnpm, Yarn 1 and Bun read | `registry`, `@scope:registry`, and `scope`, whose registry npm uses for every package whose own scope has no registry; pnpm, Yarn 1 and Bun ignore `scope`. It is read with the MCP collector's reader: top-level settings only, as npm reads them and, where pnpm's older reader takes a section line followed by whitespace (`[x] `) as a key, as pnpm reads them too, and never an authentication setting |
 | npm | `.yarnrc` (Yarn 1) | `registry` and `@scope:registry` |
 | npm | `.yarnrc.yml` (Yarn 2 and later) | `npmRegistryServer` and `npmScopes.<scope>.npmRegistryServer` |
 | npm | `bunfig.toml` (Bun) | `registry` and `scopes` in `[install]`, each a URL or a table with a `url` |

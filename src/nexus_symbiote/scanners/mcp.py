@@ -493,7 +493,10 @@ _NPM_CONFIG_LOCATIONS = frozenset({"userconfig", "globalconfig", "prefix", "work
 # pnpm takes its workspace directory, and so workspace-prefix, from
 # NPM_CONFIG_WORKSPACE_DIR in the environment only.
 _NPM_ENVIRONMENT_LOCATIONS = _NPM_CONFIG_LOCATIONS | {"workspace-dir"}
-_NPM_CONFIG_LOCATION_OPTIONS = frozenset({"--userconfig", "--globalconfig", "--prefix", "-C"})
+# pnpm's --dir (-C) moves the workspace directory it reads an .npmrc from.
+_NPM_CONFIG_LOCATION_OPTIONS = frozenset(
+    {"--userconfig", "--globalconfig", "--prefix", "-C", "--dir"}
+)
 _NPM_CONFIG_FAMILIES = frozenset({"npm", "bun", "deno"})
 _RUNNER_LOCATION_ENVIRONMENT = {
     "npm": _NPM_LOCATION_ENVIRONMENT,
@@ -742,6 +745,9 @@ _JS_SPACE = (
 )
 _INI_COMMENT = re.compile(f"[{_JS_SPACE}]*[;#]")
 _INI_SECTION = re.compile(f"\\[[^\\]]*\\][{_JS_SPACE}]*")
+# pnpm reads .npmrc with ini 1.3, whose section header takes no trailing whitespace:
+# it reads `[x] ` as a key, and the lines after it as top-level settings.
+_PNPM_INI_SECTION = re.compile(r"\[[^\]]*\]")
 _NPMRC_AUTH = re.compile(
     r"//.*|_auth|_authToken|_password|username|password|email|certfile|keyfile"
     r"|always-auth|otp",
@@ -1156,6 +1162,8 @@ class _ResolverFile:
     unresolved_run: bool = False
     # Unresolved keys that may expand to a setting that loads local code.
     unresolved_code: int = 0
+    # pnpm's reading of an .npmrc, where it differs from npm's.
+    pnpm: _ResolverFile | None = None
 
 
 def _npmrc(text: str) -> _ResolverFile:
@@ -1164,7 +1172,15 @@ def _npmrc(text: str) -> _ResolverFile:
     Keys are trimmed, JSON-decoded when quoted and cut at ``;`` or ``#`` otherwise;
     a key that holds ``${...}`` depends on the environment and is unresolved. Keys
     after the first section header are not top-level settings and npm ignores them.
+    pnpm's reading is attached where a section header followed by whitespace makes it
+    differ.
     """
+    npm = _npmrc_reading(text, _INI_SECTION)
+    pnpm = _npmrc_reading(text, _PNPM_INI_SECTION)
+    return npm if pnpm == npm else replace(npm, pnpm=pnpm)
+
+
+def _npmrc_reading(text: str, section: re.Pattern[str]) -> _ResolverFile:
     settings: dict[str, str] = {}
     # npm expands an unresolved key, so its raw text and value are bound as written.
     raw: list[tuple[str, str]] = []
@@ -1174,8 +1190,11 @@ def _npmrc(text: str) -> _ResolverFile:
     for line in re.split(r"[\r\n]+", text):
         if not line.strip(_JS_SPACE) or _INI_COMMENT.match(line):
             continue
-        if _INI_SECTION.fullmatch(line):
+        if section.fullmatch(line):
             break
+        if _INI_SECTION.fullmatch(line):
+            # pnpm reads it as a key starting with `[`, which names no setting.
+            continue
         raw_key, equals, raw_value = line.partition("=")
         if not raw_key or (equals and ("\u2028" in raw_value or "\u2029" in raw_value)):
             continue
@@ -2125,13 +2144,20 @@ class MCPScanner(Scanner):
         """Project resolver settings and package manager environment for registry packages.
 
         npm reads its configuration for a git package too, and for every npm, bun or Deno
-        launch a configuration location in the project changes what may run.
+        launch a configuration location in the project changes what may run. pnpm reads
+        the root .npmrc as ``_npmrc`` describes; Bun and Deno have readers of their own.
         """
         view = _ResolverView()
         family = launch.family or ""
         npm_config = family in _NPM_CONFIG_FAMILIES
+        pnpm = (launch.launcher or "").partition(" ")[0] == "pnpm"
         for option, value in launch.sources if npm_config else ():
-            if option in _NPM_CONFIG_LOCATION_OPTIONS and not _absolute(value):
+            if option == "--config":
+                name, _, location = value.partition("=")
+                moved = _npm_relocation(name, location, "the command line")
+                if moved is not None:
+                    view.identity.append(moved)
+            elif option in _NPM_CONFIG_LOCATION_OPTIONS and not _absolute(value):
                 view.identity.append(f"{launch.launcher} {option} {_RELOCATES}")
         packages = [
             package
@@ -2140,13 +2166,18 @@ class MCPScanner(Scanner):
         ]
         if not packages:
             if npm_config and self._resolvers is not None:
-                file = self._resolvers.entries(".npmrc")
-                if file.unresolved_run:
-                    view.identity.append("npm setting name with ${...} from .npmrc")
-                for name, value in file.settings:
-                    moved = _npm_relocation(name, value, ".npmrc")
-                    if moved is not None:
-                        view.identity.append(moved)
+                npmrc = self._resolvers.entries(".npmrc")
+                # pnpm hands some commands to npm, so for it, Bun and Deno both readings count.
+                readings = [npmrc]
+                if npmrc.pnpm is not None and (pnpm or family != "npm"):
+                    readings.append(npmrc.pnpm)
+                for file in readings:
+                    if file.unresolved_run:
+                        view.identity.append("npm setting name with ${...} from .npmrc")
+                    for name, value in file.settings:
+                        moved = _npm_relocation(name, value, ".npmrc")
+                        if moved is not None:
+                            view.identity.append(moved)
             return view
         if environment_file:
             # Variables from an environment file or secret store may redirect or
@@ -2185,6 +2216,15 @@ class MCPScanner(Scanner):
             view.unresolved.append("working-directory")
         for path in files:
             file = self._resolvers.entries(path)
+            if file.pnpm is not None:
+                if pnpm:
+                    file = file.pnpm
+                elif family != "npm":
+                    view.unresolved.append(f"{path}:section")
+                    view.identity.append(
+                        f"{path} section header with trailing whitespace, which npm and pnpm"
+                        " read differently"
+                    )
             if file.unresolved:
                 view.unresolved.append(f"{path}:key")
             if file.unresolved_run:

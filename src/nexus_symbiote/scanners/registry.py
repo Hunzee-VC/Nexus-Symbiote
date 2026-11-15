@@ -1079,11 +1079,13 @@ class RegistryScanner(Scanner):
 
         The files are read with the MCP collector's readers. An empty value selects
         nothing, as npm reads it. A .npmrc key that names an environment variable may
-        be any setting, so its registries are a coverage gap.
+        be any setting, so its registries are a coverage gap. Where pnpm reads .npmrc
+        differently, its reading is listed too, without a scope.
         """
         found: list[tuple[str, dict[str, str], str, str | None]] = []
         for name, default in _NPM_REGISTRY_FILES:
             scope: str | None = None
+            pnpm: dict[str, str] | None = None
             if name == "bunfig.toml":
                 data = self._toml(name, result)
                 if data is None:
@@ -1106,14 +1108,19 @@ class RegistryScanner(Scanner):
                     settings = list(_yarnrc(text))
                 else:
                     parsed = _npmrc(text)
-                    if parsed.unresolved:
+                    # pnpm reads every line npm does, and possibly more.
+                    if (parsed.pnpm or parsed).unresolved:
                         result.surfaces_excluded.append(
                             ".npmrc: a setting name depends on the environment; registries "
                             "not resolved"
                         )
                     settings = list(parsed.settings)
                     scope = dict(parsed.settings).get("scope")
+                    if parsed.pnpm is not None:
+                        pnpm = {key: value for key, value in parsed.pnpm.settings if value}
             found.append((name, {key: value for key, value in settings if value}, default, scope))
+            if pnpm is not None:
+                found.append((name, pnpm, default, None))
         return found
 
     def _redirect_npm(

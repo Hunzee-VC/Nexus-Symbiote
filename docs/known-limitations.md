@@ -241,9 +241,23 @@ A way around a limit that its entry does not describe is worth a
   `npm start`, `npm test` and their aliases, up to `--`, so any word there that npm
   may read as one counts, an ambiguous abbreviation such as `--user` and any word of
   letters holding `C` (a shorthand cluster such as `-gC`) included; put `--` before
-  such a word meant for the script. For a launch
+  such a word meant for the script. A cluster with more than one `C`, such as `-CC`,
+  names a location in the project, because its first `-C` takes the second as its path.
+  pnpm options are read as pnpm 10 reads them: `--config.<setting>=<value>`,
+  `--prefix` and `--dir` (`-C`) before the script name of `pnpm run`, and before `--`
+  among the words of its own commands such as `pnpm restart`, count in the same
+  spellings (`--config.userconfig` without `=` is a flag), and npm's options do for the
+  commands pnpm hands to npm, such as `pnpm view`; the words after the script name of
+  `pnpm run`, after `pnpm exec` or `pnpm test`, or after a script pnpm runs by name, such as `pnpm start`, go to what runs and
+  are not read, even if another pnpm release reads them. pnpm reads `.npmrc` with an
+  older reader than npm's, which takes a section line followed by whitespace, such as
+  `[x] `, as a key, and that difference is modelled; Bun and Deno read `.npmrc` with
+  readers of their own that are not, so a Bun or Deno package whose `.npmrc` npm and
+  pnpm read differently has an unknown identity, and any other way in which their
+  readers differ from npm's is not detected. For a launch
   without a package (`npm run`, `pnpm run`, `bun run`, `deno run` of a local
-  script), the root `.npmrc` is read only for those locations: its other settings,
+  script), the root `.npmrc` is read only for those locations, in pnpm's reading as
+  well unless npm launches it: its other settings,
   such as `script-shell` or `node-options`, are not classified or bound. An `.npmrc`
   line whose key holds `${...}` is bound as written, so a change to it is detected,
   but what it expands to is not known; one whose key starts with `//`, such as
