@@ -140,6 +140,48 @@ def _collected_digest(component: AnyComponent) -> str | None:
     return component.hashes.get("sha256")
 
 
+_CHANGED = "instruction changed since scanner collection"
+
+
+def _collection_mismatch(component: AnyComponent, path: str, raw: bytes) -> str | None:
+    """Why ``raw``, read now from ``path``, does not match what the collector recorded,
+    or None.
+
+    A prompt file whose unkeyed hash the collector withholds is checked against its keyed
+    binding instead. Without the operator key, or without a binding, nothing recorded its
+    content, so it is unbound rather than changed, as integrity validation counts it.
+    """
+    from nexus_symbiote.scanners.prompt import (
+        IMPORT_CONTENT_BINDING_PROFILE,
+        withholds_content_hash,
+    )
+    from nexus_symbiote.scanners.source_binding import BindingError, value_binding
+
+    if not (isinstance(component, PromptComponent) and withholds_content_hash(component)):
+        return _CHANGED if _collected_digest(component) != hash_bytes(raw) else None
+    recorded = component.properties.get("static_value_binding")
+    if recorded is None:
+        return None
+    profile = component.properties.get("static_value_binding_profile")
+    if profile != IMPORT_CONTENT_BINDING_PROFILE:
+        return "instruction content binding has an unknown profile"
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return _CHANGED
+    try:
+        binding = value_binding(IMPORT_CONTENT_BINDING_PROFILE, {"path": path, "content": text})
+    except BindingError as exc:
+        return str(exc)
+    if not binding:
+        return None
+    if binding["static_value_binding_key_id"] != component.properties.get(
+        "static_value_binding_key_id"
+    ):
+        return "instruction content was bound under another key"
+    return _CHANGED if binding["static_value_binding"] != recorded else None
+
+
 def _readable_entry(
     files: ConfinedCollection, path: Path, locator: str, problems: list[str]
 ) -> bool:
@@ -197,8 +239,12 @@ def _manifest_dependencies(
         records = collected_text.get(path.as_posix(), [])
         if records:
             # The collector already inventoried this file, with its own checks.
-            if any(_collected_digest(record) != digest for record in records):
-                problems.append(f"{locator}: instruction changed since scanner collection")
+            mismatches = {
+                reason
+                for record in records
+                if (reason := _collection_mismatch(record, path.as_posix(), raw)) is not None
+            }
+            problems.extend(f"{locator}: {reason}" for reason in sorted(mismatches))
             continue
         try:
             text = raw.decode("utf-8")
