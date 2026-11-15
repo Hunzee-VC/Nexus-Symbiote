@@ -1,0 +1,179 @@
+{
+  "metadata": {
+    "spec_version": "1.1.0",
+    "serial_number": "urn:uuid:2ca5f68a-655f-5324-a099-f843cd657e14",
+    "version": 1,
+    "tool_name": "nexus-symbiote",
+    "tool_version": "0.2.0",
+    "tool_vendor": "aisecnomad",
+    "authors": [],
+    "completeness": {
+      "scope": "repository",
+      "surfaces_scanned": [
+        "a2a (no A2A configurations found)",
+        "a2a: Python SDK references (heuristic)",
+        "ide-agents (no IDE agent configs found)",
+        "mcp-config (no config files found)",
+        "model-weights (no model files found)",
+        "prompts (no instruction files found)",
+        "rag: Python vector-store imports (heuristic)",
+        "rag_config.json",
+        "registry (no AI-related dependencies found)",
+        "shadowscan-report (no report found)",
+        "skills (no skill or command files found)"
+      ],
+      "surfaces_excluded": [],
+      "scan_failures": [],
+      "assurance_level": "observed",
+      "collectors_requested": [
+        "mcp",
+        "model",
+        "prompt",
+        "rag",
+        "registry",
+        "shadowscan",
+        "a2a",
+        "ide_agents"
+      ],
+      "collectors_completed": [
+        "mcp",
+        "model",
+        "prompt",
+        "rag",
+        "registry",
+        "shadowscan",
+        "a2a",
+        "ide_agents"
+      ],
+      "unobserved_surfaces": [
+        "runtime",
+        "effective-identity",
+        "effective-authorization",
+        "live-tools",
+        "network"
+      ],
+      "exclusions": [
+        "**/.git",
+        "**/.venv",
+        "**/__pycache__",
+        "**/node_modules",
+        "**/venv",
+        ".git",
+        ".venv",
+        "__pycache__",
+        "node_modules"
+      ],
+      "source_unmapped_count": 0,
+      "source_unmapped_indexes": [],
+      "discovery_verification": {
+        "status": "not-applicable",
+        "method": "none",
+        "repository": "unknown",
+        "commit": "unknown",
+        "report_time": "unknown"
+      },
+      "scanner_status": {
+        "shadowscan": "complete",
+        "mcp": "complete",
+        "model": "complete",
+        "prompt": "complete",
+        "rag": "complete",
+        "registry": "complete",
+        "a2a": "complete",
+        "ide_agents": "complete"
+      }
+    },
+    "policy_source": "built-in",
+    "policy_weakened": []
+  },
+  "components": [
+    {
+      "bom_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "component_type": "agent",
+      "name": "repository",
+      "description": "Repository agent definition inferred from configuration",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "observed",
+      "properties": {
+        "identity_source": "repository-path",
+        "runtime_use": "unknown"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "repository-assembler",
+          "locator": ".",
+          "evidence_refs": []
+        },
+        "deployment": {
+          "assurance": "declared",
+          "method": "not-collected",
+          "scope": "runtime",
+          "evidence_refs": [],
+          "unknown_reason": "Repository scan cannot identify a running workload"
+        }
+      },
+      "deployment_status": "unknown",
+      "data_refs": [
+        "rag:kb"
+      ],
+      "skill_refs": [],
+      "model_refs": [],
+      "tool_refs": [],
+      "memory_refs": [],
+      "prompt_refs": [],
+      "guardrail_refs": [],
+      "sub_agent_refs": [],
+      "authorizations": [],
+      "risks": [],
+      "autonomy_level": null
+    },
+    {
+      "bom_ref": "rag:kb",
+      "component_type": "rag-source",
+      "name": "kb",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "rag_config.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "source_credentials_omitted": true,
+        "declared_controls": {
+          "sanitization": "enabled",
+          "content_filter": "absent"
+        },
+        "source_values_bound": false,
+        "static_config_hash": "sha256:1da493d8588732ec836580c540822a2787e4c3f276873c8e3229ca61df9c21f9",
+        "static_config_hash_profile": "nexus-symbiote/rag-source-structure/v1",
+        "inline_documents_hash": "sha256:8b61e02c896e62bd3247eac945c40ed830467bcd1bee9074ba21227eeb5778d1"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "rag",
+          "locator": "rag_config.json",
+          "evidence_refs": []
+        }
+      },
+      "corpus_type": "unknown",
+      "source_uris": [],
+      "document_count": 1,
+      "risks": []
+    }
+  ],
+  "dependencies": [
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "rag:kb",
+      "relationship": "retrieves-from",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    }
+  ]
+}
