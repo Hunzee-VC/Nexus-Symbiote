@@ -8,10 +8,13 @@ import pytest
 from nexus_symbiote.scanners.registry import RegistryScanner
 
 SHA512 = "sha512-" + base64.b64encode(b"w" * 64).decode()
+# A checksum Yarn 4 checks: its default cache key and a SHA-512 hex digest.
+CHECKSUM = "10c0/" + "ab" * 64
 PUBLIC = "https://registry.yarnpkg.com/openai/-/openai-4.0.0.tgz"
 EVIL = "https://evil.example/openai.tgz"
 UNREAD = ["yarn.lock: invalid or unsupported lockfile"]
 AMBIGUOUS = ["yarn.lock: multiple package resolutions for openai are ambiguous"]
+PINNED = {"openai": "4.0.0"}
 
 
 def scan(tmp_path, lock):
@@ -252,19 +255,20 @@ def test_a_berry_lockfile_with_nested_metadata_is_bound(tmp_path):
         "  dependenciesMeta:\n"
         "    fsevents:\n"
         "      optional: true\n"
-        "  checksum: 10c0/" + "ab" * 16 + "\n"
+        f"  checksum: {CHECKSUM}\n"
         "  languageName: node\n"
         "  linkType: hard\n"
     )
     result, comp = scan(tmp_path, lock)
     assert result.scan_failures == [] and result.surfaces_excluded == []
     assert comp.package_url == "pkg:npm/openai@4.0.0"
+    assert comp.risks == []
 
 
 BERRY_HEAD = "__metadata:\n  version: 8\n  cacheKey: 10c0\n\n"
 BERRY_OPENAI = (
     '"openai@npm:4.0.0":\n  version: 4.0.0\n  resolution: "openai@npm:4.0.0"\n'
-    "  checksum: 10c0/abab\n  languageName: node\n  linkType: hard\n"
+    f"  checksum: {CHECKSUM}\n  languageName: node\n  linkType: hard\n"
 )
 
 
@@ -283,6 +287,7 @@ def test_berry_plain_scalars_with_spaces_are_read(tmp_path, extra):
     result, comp = scan(tmp_path, BERRY_HEAD + BERRY_OPENAI + "\n" + extra)
     assert result.scan_failures == [] and result.surfaces_excluded == []
     assert comp.package_url == "pkg:npm/openai@4.0.0"
+    assert comp.risks == []
 
 
 @pytest.mark.parametrize(
@@ -428,7 +433,7 @@ def test_quoted_berry_metadata_enables_berry_parsing_and_comma_splitting(tmp_pat
         '"other@npm:^1.0.0, openai@npm:^4.0.0":\n'
         "  version: 4.0.0\n"
         f'  resolution: "openai@{EVIL}"\n'
-        "  checksum: 10c0/" + "ab" * 64 + "\n"
+        f"  checksum: {CHECKSUM}\n"
         "  languageName: node\n"
         "  linkType: hard\n"
     )
@@ -497,50 +502,367 @@ def test_disguised_or_mixed_berry_selectors_fail_the_lockfile(tmp_path, lock):
         "empty-berry-stanza",
     ],
 )
-def test_empty_stanzas_and_safeload_fallback_constructs_fail_the_lockfile(tmp_path, lock):
+def test_empty_stanzas_and_maps_yarn_does_not_write_fail_the_lockfile(tmp_path, lock):
     result, comp = scan(tmp_path, lock)
     assert result.scan_failures == UNREAD
     assert_unbound(comp)
 
 
-def test_berry_comma_separator_is_linear_on_1mib_space_padded_key():
-    import time
-
+@pytest.mark.timeout(30)
+def test_a_berry_key_with_a_long_run_of_spaces_is_split_in_linear_time():
+    # Splitting at \s*,\s* backtracked over a run of spaces that no comma follows:
+    # 1.7 seconds for 40,000 spaces, growing with the square of the run, so this key
+    # took about twenty minutes and the test ran out of time.
     from nexus_symbiote.scanners.registry import _yarn_lockfile_stanzas
 
-    padded = "other@npm:1.0.0" + (" " * (1024 * 1024)) + ", openai@npm:4.0.0"
-    lock = (
-        "__metadata:\n  version: 8\n\n"
-        f'"{padded}":\n  version: 4.0.0\n  resolution: "openai@npm:4.0.0"\n'
-    )
-    start = time.perf_counter()
-    berry, stanzas = _yarn_lockfile_stanzas(lock)
-    elapsed_ms = (time.perf_counter() - start) * 1000.0
-    assert berry is True
+    key = "a@npm:1.0.0" + " " * (1024 * 1024) + "b@npm:1.0.0"
+    lock = BERRY_HEAD + f'"{key}":\n  version: 1.0.0\n'
+    metadata, stanzas = _yarn_lockfile_stanzas(lock)
+    assert metadata == {"version": "8", "cacheKey": "10c0"}
+    assert [selectors for selectors, _ in stanzas] == [[key]]
+    padded = "other@npm:1.0.0" + " " * (1024 * 1024) + ", openai@npm:4.0.0"
+    _, stanzas = _yarn_lockfile_stanzas(BERRY_HEAD + f'"{padded}":\n  version: 4.0.0\n')
     assert stanzas[0][0] == ["other@npm:1.0.0", "openai@npm:4.0.0"]
-    assert elapsed_ms < 50.0, f"expected < 50 ms, took {elapsed_ms:.2f} ms"
+
+
+def berry_record(*fields):
+    return (
+        '"openai@npm:4.0.0":\n  version: 4.0.0\n  resolution: "openai@npm:4.0.0"\n'
+        + "".join(f"  {field}\n" for field in fields)
+        + "  languageName: node\n  linkType: hard\n"
+    )
+
+
+HEX = "ab" * 64
 
 
 @pytest.mark.parametrize(
-    ("checksum", "has_missing_integrity"),
+    ("head", "fields", "checked"),
     [
-        ("x", True),
-        ("10c0/abab", True),
-        ("10c0/" + "zz" * 64, True),
-        ("/" + "ab" * 64, True),
-        ("10/c0/" + "ab" * 64, True),
-        ("ab" * 64, False),
-        ("10/" + "ab" * 64, False),
-        ("10c0/" + "ab" * 64, False),
+        (BERRY_HEAD, [f"checksum: 10c0/{HEX}"], True),
+        # Yarn prefixes a checksum without a cache key with the lockfile's.
+        (BERRY_HEAD, [f"checksum: {HEX}"], True),
+        (BERRY_HEAD, [], False),
+        (BERRY_HEAD, ["checksum: x"], False),
+        (BERRY_HEAD, ["checksum: 10c0/abab"], False),
+        (BERRY_HEAD, ["checksum: 10c0/" + "zz" * 64], False),
+        (BERRY_HEAD, [f"checksum: /{HEX}"], False),
+        # Yarn accepts an archive unchecked when the checksum names another cache key
+        # than the one it computes, 10c0 for Yarn 4 at its default compression level.
+        (BERRY_HEAD, [f"checksum: 10/{HEX}"], False),
+        (BERRY_HEAD, [f"checksum: 9/{HEX}"], False),
+        (BERRY_HEAD, [f"checksum: 8/{HEX}"], False),
+        (BERRY_HEAD, [f"checksum: 10c1/{HEX}"], False),
+        (BERRY_HEAD, [f"checksum: ffff/{HEX}"], False),
+        (BERRY_HEAD, [f"checksum: 10/c0/{HEX}"], False),
+        (BERRY_HEAD, [f"checksum: 10c0/10c0/{HEX}"], False),
+        ("__metadata:\n  version: 8\n\n", [f"checksum: {HEX}"], False),
+        ("__metadata:\n  version: 8\n\n", [f"checksum: 10c0/{HEX}"], False),
+        ("__metadata:\n  version: 6\n  cacheKey: 8\n\n", [f"checksum: {HEX}"], False),
+        ("__metadata:\n  version: 8\n  cacheKey: 8\n\n", [f"checksum: 10c0/{HEX}"], False),
+        # Yarn does not check the archive of a conditional package that is optional.
+        (BERRY_HEAD, [f"checksum: 10c0/{HEX}", "conditions: os=linux"], False),
     ],
 )
-def test_berry_checksum_must_be_valid_sha512_hex_digest(tmp_path, checksum, has_missing_integrity):
-    lock = BERRY_HEAD + (
-        '"openai@npm:4.0.0":\n  version: 4.0.0\n  resolution: "openai@npm:4.0.0"\n'
-        f"  checksum: {checksum}\n  languageName: node\n  linkType: hard\n"
+def test_a_berry_checksum_counts_only_when_yarn_checks_it(tmp_path, head, fields, checked):
+    result, comp = scan(tmp_path, head + berry_record(*fields))
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    assert comp.package_url == "pkg:npm/openai@4.0.0"
+    missing = [r.category for r in comp.risks] == ["missing_lockfile_integrity"]
+    assert missing is not checked and (missing or comp.risks == [])
+    assert "lockfile_integrity" not in comp.properties
+
+
+@pytest.mark.parametrize(
+    ("yarnrc", "checked"),
+    [
+        ("checksumBehavior: throw\ncompressionLevel: 0\nenableGlobalCache: true\n", True),
+        ('compressionLevel: "0"\n', True),
+        ('npmRegistryServer: "https://registry.yarnpkg.com"\n', True),
+        ("checksumBehavior: ignore\n", False),
+        ("checksumBehavior: update\n", False),
+        ("checksumBehavior: reset\n", False),
+        ('checksumBehavior: "${BEHAVIOR}"\n', False),
+        # The cache key becomes 10c1, or 10 for mixed, which a 10c0 checksum does not name.
+        ("compressionLevel: 1\n", False),
+        ("compressionLevel: mixed\n", False),
+        ("compressionLevel: false\n", False),
+        # The project's own cache folder may hold an archive that matches the checksum.
+        ("enableGlobalCache: false\n", False),
+        ("globalFolder: ./.yarn/global\n", False),
+        # Yarn runs the release the checkout supplies, which may compute another key.
+        ("yarnPath: .yarn/releases/yarn-3.8.7.cjs\n", False),
+        ("yarnPath: .yarn/releases/yarn-4.9.2.cjs\n", False),
+    ],
+)
+def test_yarnrc_settings_that_skip_the_checksum_check_leave_no_integrity(tmp_path, yarnrc, checked):
+    (tmp_path / ".yarnrc.yml").write_text(yarnrc)
+    result, comp = scan(tmp_path, BERRY_HEAD + BERRY_OPENAI)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    assert result.surfaces_scanned.count(".yarnrc.yml") == 1
+    assert ("missing_lockfile_integrity" in {r.category for r in comp.risks}) is not checked
+
+
+def test_an_unreadable_yarnrc_fails_once_and_leaves_no_integrity(tmp_path):
+    (tmp_path / ".yarnrc.yml").write_text("- not\n- a mapping\n")
+    result, comp = scan(tmp_path, BERRY_HEAD + BERRY_OPENAI)
+    assert result.scan_failures == [".yarnrc.yml: YAML mapping parse failed or unsupported"]
+    assert [r.category for r in comp.risks] == ["missing_lockfile_integrity"]
+
+
+def test_an_excluded_yarnrc_leaves_berry_checksum_unverified(tmp_path):
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"4.0.0"}}')
+    (tmp_path / ".yarnrc.yml").write_text("checksumBehavior: ignore\n")
+    (tmp_path / "yarn.lock").write_text(BERRY_HEAD + BERRY_OPENAI, newline="")
+    scanner = RegistryScanner()
+    scanner.configure(exclude_paths=(".yarnrc.yml",))
+    result = scanner.scan(tmp_path)
+    assert any(".yarnrc.yml" in entry for entry in result.surfaces_excluded)
+    (comp,) = result.components
+    assert [r.category for r in comp.risks] == ["missing_lockfile_integrity"]
+
+
+def test_saturated_scan_failures_still_detect_unreadable_yarnrc(tmp_path, monkeypatch):
+    from nexus_symbiote.utils import confined
+
+    monkeypatch.setattr(confined, "MAX_LISTED_FAILURES", 1)
+    (tmp_path / ".yarnrc.yml").write_text("- not\n- a mapping\n")
+    scanner = RegistryScanner()
+    orig_lock = scanner._npm_lock
+
+    def prefill_and_lock(result):
+        result.scan_failures.append("prefilled-1")
+        result.scan_failures.append("prefilled-2")
+        return orig_lock(result)
+
+    monkeypatch.setattr(scanner, "_npm_lock", prefill_and_lock)
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"4.0.0"}}')
+    (tmp_path / "yarn.lock").write_text(BERRY_HEAD + BERRY_OPENAI, newline="")
+    result = scanner.scan(tmp_path)
+    (comp,) = result.components
+    assert [r.category for r in comp.risks] == ["missing_lockfile_integrity"]
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        [f"integrity: {SHA512}"],
+        [f"integrity: {SHA512}", "checksum: x"],
+        [f"integrity: {SHA512}", f"checksum: 9/{HEX}"],
+    ],
+    ids=["integrity-only", "integrity-and-invalid-checksum", "integrity-and-unchecked-checksum"],
+)
+def test_a_berry_integrity_field_is_not_integrity(tmp_path, fields):
+    # Yarn Berry does not read `integrity`, so it is neither evidence nor an exported hash.
+    from nexus_symbiote.generators._common import standard_hashes
+
+    result, comp = scan(tmp_path, BERRY_HEAD + berry_record(*fields))
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    assert comp.package_url == "pkg:npm/openai@4.0.0"
+    assert [r.category for r in comp.risks] == ["missing_lockfile_integrity"]
+    assert "lockfile_integrity" not in comp.properties
+    assert standard_hashes(comp) == []
+
+
+def test_a_berry_integrity_field_beside_a_checked_checksum_is_not_exported(tmp_path):
+    result, comp = scan(
+        tmp_path, BERRY_HEAD + berry_record(f"integrity: {SHA512}", f"checksum: {CHECKSUM}")
     )
+    assert result.scan_failures == [] and comp.risks == []
+    assert "lockfile_integrity" not in comp.properties
+
+
+@pytest.mark.parametrize(
+    ("manifest", "checked"),
+    [
+        ({"packageManager": "yarn@4.9.2"}, True),
+        ({"packageManager": "yarn@4.9.2+sha512." + "ab" * 64}, True),
+        ({"devEngines": {"packageManager": {"name": "yarn", "version": "^4.0.0"}}}, True),
+        ({"devEngines": {"packageManager": {"name": "yarn"}}}, True),
+        ({"devEngines": {"runtime": {"name": "node"}}}, True),
+        # Corepack runs another release, which computes another cache key.
+        ({"packageManager": "yarn@3.8.7"}, False),
+        ({"packageManager": "yarn@1.22.22"}, False),
+        ({"packageManager": "yarn@40.0.0"}, False),
+        ({"packageManager": "pnpm@9.0.0"}, False),
+        ({"packageManager": ["yarn@4.9.2"]}, False),
+        ({"devEngines": {"packageManager": {"name": "yarn", "version": "^3.0.0"}}}, False),
+        ({"devEngines": {"packageManager": {"name": "yarn", "version": ">=4"}}}, False),
+        ({"devEngines": {"packageManager": [{"name": "yarn", "version": "^4.0.0"}]}}, False),
+        ({"devEngines": {"packageManager": {"name": "npm"}}}, False),
+        ({"devEngines": None}, False),
+    ],
+)
+def test_a_package_manager_other_than_yarn_4_leaves_no_integrity(tmp_path, manifest, checked):
+    (tmp_path / "package.json").write_text(json.dumps({**manifest, "dependencies": PINNED}))
+    (tmp_path / "yarn.lock").write_text(BERRY_HEAD + BERRY_OPENAI)
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    (comp,) = result.components
+    assert comp.package_url == "pkg:npm/openai@4.0.0"
+    assert ("missing_lockfile_integrity" in {r.category for r in comp.risks}) is not checked
+
+
+def berry_stanza(key, resolution, *fields, version="4.0.0"):
+    return (
+        f'\n"{key}":\n  version: {version}\n  resolution: "{resolution}"\n'
+        + "".join(f"  {field}\n" for field in fields)
+        + "  languageName: node\n  linkType: hard\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "lock",
+    [
+        # Yarn writes one record of a locator and keeps the last one it reads, checksum
+        # and conditions included: a second one with a checksum under another cache key
+        # let a mismatching archive in unchecked, under another range or another key.
+        BERRY_OPENAI + berry_stanza("openai@npm:^4.0.0", "openai@npm:4.0.0", f"checksum: 9/{HEX}"),
+        BERRY_OPENAI + berry_stanza("zzz@npm:1.0.0", "openai@npm:4.0.0", f"checksum: 9/{HEX}"),
+        berry_stanza("openai@npm:^4.0.0", "openai@npm:4.0.0", f"checksum: 9/{HEX}")
+        + "\n"
+        + BERRY_OPENAI,
+        BERRY_OPENAI + berry_stanza("openai@npm:^4.0.0", "openai@npm:4.0.0"),
+        BERRY_OPENAI
+        + berry_stanza("openai@npm:^4.0.0", "openai@npm:4.0.0", f"checksum: {CHECKSUM}"),
+        BERRY_OPENAI
+        + berry_stanza(
+            "openai@npm:^4.0.0", "openai@npm:4.0.0", f"checksum: {CHECKSUM}", "conditions: os=linux"
+        ),
+        # Yarn hashes `@op/enai` as it hashes `openai`: a resolution `@op/enai@npm:4.0.0`
+        # replaces the locator's package, and a key `@op/enai@npm:4.0.0` the declared
+        # descriptor's resolution, so Yarn fetched another package for `openai`. Any
+        # record of a name hashed alike binds none.
+        BERRY_OPENAI + berry_stanza("@op/enai@npm:4.0.0", "@op/enai@npm:4.0.0"),
+        BERRY_OPENAI + berry_stanza("zzz@npm:1.0.0", "@op/enai@npm:4.0.0", f"checksum: {CHECKSUM}"),
+        BERRY_OPENAI + berry_stanza("@op/enai@npm:4.0.0", "zzz@npm:1.0.0", version="1.0.0"),
+        BERRY_OPENAI + berry_stanza("zzz@npm:1.0.0, @op/enai@npm:^9.0.0", "zzz@npm:1.0.0"),
+        berry_stanza("@op/enai@npm:4.0.0", "openai@npm:4.0.0", f"checksum: {CHECKSUM}"),
+    ],
+    ids=[
+        "other-range",
+        "other-package",
+        "other-first",
+        "no-checksum",
+        "same-checksum",
+        "conditions",
+        "alike-locator",
+        "alike-resolution",
+        "alike-descriptor",
+        "alike-other-range",
+        "alike-only",
+    ],
+)
+def test_a_second_berry_record_of_the_bound_package_binds_neither(tmp_path, lock):
+    result, comp = scan(tmp_path, BERRY_HEAD + lock)
+    assert result.scan_failures == []
+    assert result.surfaces_excluded == AMBIGUOUS
+    assert_unbound(comp)
+    assert comp.risks == []
+
+
+def test_an_alias_whose_key_yarn_hashes_alike_is_unresolved(tmp_path):
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"npm:@openai/x@4.0.0"}}')
+    lock = BERRY_HEAD + berry_stanza("@op/enai@npm:@openai/x@4.0.0", "zzz@npm:1.0.0")
+    (tmp_path / "yarn.lock").write_text(lock)
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == []
+    assert result.surfaces_excluded == ["yarn.lock: aliased package identity is unresolved"]
+    (comp,) = result.components
+    assert comp.package_url is None
+
+
+@pytest.mark.parametrize(
+    "lock",
+    [
+        BERRY_HEAD
+        + BERRY_OPENAI
+        + berry_stanza("@openai/agents@npm:1.0.0", "@openai/agents@npm:1.0.0", version="1.0.0")
+        + berry_stanza("openai@npm:^3.0.0", "openai@npm:3.0.0", version="3.0.0"),
+        # Yarn 1 keys stanzas by their text, not by a hash.
+        "# yarn lockfile v1\n\n"
+        + stanza("openai@4.0.0", PUBLIC)
+        + "\n"
+        + stanza('"@op/enai@4.0.0"', "https://registry.yarnpkg.com/@op/enai/-/enai-4.0.0.tgz"),
+    ],
+    ids=["berry", "yarn-1"],
+)
+def test_records_of_other_packages_and_locators_do_not_block_the_declared_one(tmp_path, lock):
     result, comp = scan(tmp_path, lock)
     assert result.scan_failures == [] and result.surfaces_excluded == []
     assert comp.package_url == "pkg:npm/openai@4.0.0"
-    categories = {r.category for r in comp.risks}
-    assert ("missing_lockfile_integrity" in categories) is has_missing_integrity
+
+
+V1_HEAD = "# yarn lockfile v1\n\n\n"
+V1_OPENAI = f'openai@4.0.0:\n  version "4.0.0"\n  resolved "{PUBLIC}#abc"\n  integrity {SHA512}\n'
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        # Yarn 1 writes these nested maps: permissions holds booleans.
+        '  prebuiltVariants:\n    openai-linux-x64 "0123456789abcdef"\n',
+        "  permissions:\n    scripts true\n",
+        # A dependency's name is any package's name, `resolution` included.
+        '  dependencies:\n    resolution "^1.0.5"\n    linkType "^1.0.0"\n',
+        '  dependencies:\n    "abort-controller": "^3.0.0"\n',
+    ],
+    ids=["prebuilt-variants", "permissions", "dependency-named-resolution", "colon-dependency"],
+)
+def test_nested_maps_yarn_1_writes_are_read(tmp_path, extra):
+    result, comp = scan(tmp_path, V1_HEAD + V1_OPENAI + extra)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    assert comp.package_url == "pkg:npm/openai@4.0.0"
+    assert comp.properties["lockfile_integrity"] == SHA512
+
+
+def test_a_yarn_1_colon_field_is_read_without_a_version_comment(tmp_path):
+    # Yarn 1 reads `key: value` as `key value`, with or without the comment.
+    lock = f'openai@4.0.0:\n  version "4.0.0"\n  "resolved": "{EVIL}"\n  integrity {SHA512}\n'
+    result, comp = scan(tmp_path, lock)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    assert comp.registry_uri == "https://evil.example"
+    assert "registry_origin" in {r.category for r in comp.risks}
+
+
+@pytest.mark.parametrize(
+    "lock",
+    [
+        V1_HEAD + 'openai@4.0.0 :\n  version "4.0.0"\n',
+        V1_HEAD + V1_OPENAI + "  uid a{b\n",
+        V1_HEAD + V1_OPENAI + '  resolution "openai@npm:4.0.0"\n',
+        V1_HEAD + V1_OPENAI + "  linkType hard\n",
+        V1_HEAD + V1_OPENAI + "  languageName node\n",
+        V1_HEAD + V1_OPENAI + "  dependencies:",
+        V1_HEAD + '"openai@npm:^4.0.0, openai@npm:4.0.0":\n  version "4.0.0"\n',
+        BERRY_HEAD + "# yarn lockfile v1\n" + BERRY_OPENAI,
+        BERRY_HEAD + BERRY_OPENAI.replace('"openai@npm:4.0.0":', '"openai@npm:4.0.0 ":'),
+        BERRY_HEAD + BERRY_OPENAI.replace('"openai@npm:4.0.0":', '" openai@npm:4.0.0":'),
+        BERRY_HEAD
+        + BERRY_OPENAI.replace('"openai@npm:4.0.0":', '"openai@npm:4.0.0\\t, x@npm:1.0.0":'),
+        BERRY_HEAD
+        + BERRY_OPENAI.replace('"openai@npm:4.0.0":', '"x@npm:1.0.0,\\u00a0openai@npm:4.0.0":'),
+        "__metadata:\n  version: 8\n  cacheKey:\n    a: b\n\n" + BERRY_OPENAI,
+        BERRY_HEAD + BERRY_OPENAI + "  conditions:\n    os: linux\n",
+    ],
+    ids=[
+        "v1-spaced-header-colon",
+        "v1-brace-in-word",
+        "v1-resolution-field",
+        "v1-link-type-field",
+        "v1-language-name-field",
+        "v1-empty-map-at-eof-without-newline",
+        "v1-berry-protocol-comma-list",
+        "v1-comment-after-metadata",
+        "berry-trailing-space",
+        "berry-leading-space",
+        "berry-tab-before-comma",
+        "berry-no-break-space-after-comma",
+        "berry-cache-key-map",
+        "berry-conditions-map",
+    ],
+)
+def test_constructs_yarn_does_not_write_fail_the_lockfile(tmp_path, lock):
+    result, comp = scan(tmp_path, lock)
+    assert result.scan_failures == UNREAD
+    assert_unbound(comp)

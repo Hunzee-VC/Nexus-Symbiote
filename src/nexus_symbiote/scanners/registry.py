@@ -42,7 +42,7 @@ from nexus_symbiote.scanners.mcp import (
     npm_scope_registry,
 )
 from nexus_symbiote.scanners.mcp_launch import expands
-from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.utils.confined import ConfinedCollection, recorded_count
 from nexus_symbiote.utils.secrets import REDACTED, redact_text, redact_url
 from nexus_symbiote.utils.terminal import UNSAFE_TEXT
 from nexus_symbiote.utils.toml import TOMLBoundsError
@@ -846,32 +846,120 @@ _BERRY_PLAIN = re.compile(
     r"""(?![-?:,\[\]{}#&*!|>%@`])[^\x00-\x20\x7f-\U0010ffff,\[\]{}:#'"\\]"""
     r"""(?: *[^\x00-\x20\x7f-\U0010ffff,\[\]{}:#'"\\])*"""
 )
-# Fields a record is bound from: each must be a string Yarn reads as one.
+# Fields the collector reads, from a record or from Berry's `__metadata`: each must be
+# a string Yarn reads as one.
 _YARN_SCALAR_FIELDS = frozenset(
-    {"version", "resolved", "integrity", "resolution", "checksum", "linkType"}
+    {
+        "version",
+        "resolved",
+        "integrity",
+        "resolution",
+        "checksum",
+        "linkType",
+        "conditions",
+        "cacheKey",
+    }
 )
 _YARN_BERRY_ONLY_FIELDS = frozenset({"resolution", "languageName", "linkType"})
+# The nested maps Yarn 1 writes in a stanza (its implodeEntry).
 _YARN_V1_MAP_FIELDS = frozenset(
-    {
-        "dependencies",
-        "optionalDependencies",
-        "peerDependencies",
-        "bundledDependencies",
-        "bundleDependencies",
-    }
+    {"dependencies", "optionalDependencies", "permissions", "prebuiltVariants"}
 )
 _BERRY_LOCATOR_PROTOCOLS = ("@npm:", "@workspace:", "@patch:", "@portal:", "@link:", "@file:")
 _HEX_CHARS = frozenset("0123456789abcdefABCDEF")
+# The cache key Yarn 4 gives the archives it fetches at its default compression level.
+# Yarn checks a fetched archive against a checksum only when the checksum names the
+# key Yarn computes, and accepts the archive unchecked when it names another.
+_YARN_CACHE_KEY = "10c0"
+# A Yarn 4 version as `packageManager` names one, and a range of Yarn 4 versions only.
+_YARN_4_VERSION = re.compile(r"4(?:\.(?:[0-9]+|x)){0,2}(?:-[0-9A-Za-z.-]+)?")
+_YARN_4_RANGE = re.compile(r"[\^~]?" + _YARN_4_VERSION.pattern)
+# Yarn 4 hashes a package's scope and name joined with nothing between them, and a
+# descriptor or locator as that and its range or reference (structUtils.makeIdent), so
+# it reads `@op/enai@npm:4.0.0` as `openai@npm:4.0.0`.
+_BERRY_IDENT = re.compile(r"(?:@([^/]+?)/)?([^@/]+)")
+_BERRY_DESCRIPTOR = re.compile(r"(?:@([^/]+?)/)?([^@/]+?)@(.+)")
 
 
-def _valid_berry_checksum(value: str | None) -> bool:
-    """Whether ``value`` is a Yarn Berry SHA-512 hex checksum (with optional cache prefix)."""
-    if not value:
+def _yarn_cache_key(settings: dict[str, Any] | None) -> str | None:
+    """The cache key Yarn 4 computes under the root ``.yarnrc.yml`` settings, or None
+    when Yarn does not check a fetched archive against the lockfile's checksum: a
+    ``checksumBehavior`` other than ``throw``, a ``compressionLevel`` other than 0,
+    which gives another key, archives the project may supply, from a cache folder
+    with the global cache turned off or from a ``globalFolder`` it chooses, or a
+    ``yarnPath``, which runs a Yarn release the project supplies."""
+    settings = settings or {}
+    level = settings.get("compressionLevel", 0)
+    if (
+        settings.get("checksumBehavior", "throw") != "throw"
+        or not (level == "0" or (type(level) is int and level == 0))
+        or settings.get("enableGlobalCache", True) is not True
+        or "globalFolder" in settings
+        or "yarnPath" in settings
+    ):
+        return None
+    return _YARN_CACHE_KEY
+
+
+def _yarn_4_selected(manifest: dict[str, Any]) -> bool:
+    """Whether package.json names no Yarn release but Yarn 4 for Corepack to run: its
+    ``packageManager`` and ``devEngines.packageManager`` name Yarn 4 or nothing."""
+    if "packageManager" in manifest:
+        named = manifest["packageManager"]
+        if not (
+            isinstance(named, str)
+            and named.startswith("yarn@")
+            and _YARN_4_VERSION.fullmatch(named[5:].partition("+")[0])
+        ):
+            return False
+    if "devEngines" not in manifest:
+        return True
+    engines = manifest["devEngines"]
+    if not isinstance(engines, dict):
         return False
-    prefix, slash, digest = value.rpartition("/")
-    if slash and (not prefix or len(prefix) > 64 or not all(ch in _HEX_CHARS for ch in prefix)):
+    if "packageManager" not in engines:
+        return True
+    engine = engines["packageManager"]
+    if not isinstance(engine, dict) or engine.get("name") != "yarn":
         return False
-    return len(digest) == 128 and all(ch in _HEX_CHARS for ch in digest)
+    version = engine.get("version", "4")
+    return isinstance(version, str) and _YARN_4_RANGE.fullmatch(version) is not None
+
+
+def _berry_ident(name: str) -> str:
+    """What Yarn 4 hashes for a package name, or the name when Yarn reads none in it."""
+    match = _BERRY_IDENT.fullmatch(name)
+    return name if match is None else (match.group(1) or "") + match.group(2)
+
+
+def _berry_hashed(text: str) -> tuple[str, str, str] | None:
+    """The package name in a Berry descriptor or locator, what Yarn 4 hashes for that
+    name, and the range or reference; None when Yarn reads no package name in it."""
+    match = _BERRY_DESCRIPTOR.fullmatch(text)
+    if match is None:
+        return None
+    scope, name, rest = match.groups()
+    return text[: match.start(3) - 1], (scope or "") + name, rest
+
+
+def _berry_checksum_checked(
+    fields: dict[str, str], metadata: dict[str, str], cache_key: str | None
+) -> bool:
+    """Whether Yarn 4 checks the archive it fetches for a Berry record against the
+    record's SHA-512 checksum. The checksum's cache key, its own prefix or else the
+    lockfile's ``cacheKey``, must be the key Yarn computes, and so must the lockfile's.
+    A record with ``conditions`` does not count: Yarn does not check the archive of
+    such a package when it is installed as an optional dependency."""
+    checksum = fields.get("checksum")
+    if not checksum or cache_key is None or "conditions" in fields:
+        return False
+    key, slash, digest = checksum.rpartition("/")
+    return (
+        metadata.get("cacheKey") == cache_key
+        and (key if slash else cache_key) == cache_key
+        and len(digest) == 128
+        and all(ch in _HEX_CHARS for ch in digest)
+    )
 
 
 class _YarnToken(NamedTuple):
@@ -977,10 +1065,19 @@ def _yarn_selectors(
         raise ValueError("invalid yarn.lock header")
     selectors = [t.value for t in keys[::2]]
     if berry:
-        # Berry reads one YAML key and splits it into descriptors linearly.
-        if len(selectors) != 1 or selectors[0] != selectors[0].strip():
+        # Berry reads one YAML key and splits it at / *, */, keeping other whitespace in
+        # a descriptor. A regular expression backtracks over a long run of spaces that
+        # no comma follows, so the split is done by hand.
+        if len(selectors) != 1:
             raise ValueError("invalid yarn.lock header")
-        selectors = [part.strip() for part in selectors[0].split(",")]
+        parts = selectors[0].split(",")
+        selectors = []
+        for index, part in enumerate(parts):
+            if index:
+                part = part.lstrip(" ")
+            if index < len(parts) - 1:
+                part = part.rstrip(" ")
+            selectors.append(part)
     else:
         for sel in selectors:
             if "," not in sel:
@@ -998,7 +1095,7 @@ def _yarn_selectors(
     return selectors
 
 
-def _yarn_v1_field(content: str) -> tuple[str, _YarnToken | None, bool]:
+def _yarn_v1_field(content: str) -> tuple[str, _YarnToken | None]:
     tokens = _yarn_tokens(content, False)
     if not tokens or tokens[0].kind != "str":
         raise ValueError("invalid yarn.lock key")
@@ -1007,20 +1104,24 @@ def _yarn_v1_field(content: str) -> tuple[str, _YarnToken | None, bool]:
     if colon:
         rest = rest[1:]
     if not rest and colon:
-        return tokens[0].value, None, True
+        return tokens[0].value, None
     if len(rest) != 1 or not rest[0].spaced or rest[0].kind in (":", ","):
         raise ValueError("invalid yarn.lock field")
-    return tokens[0].value, rest[0], colon
+    return tokens[0].value, rest[0]
 
 
 def _yarn_source(fields: dict[str, str]) -> tuple[str | None, ...]:
     return tuple(fields.get(k) for k in ("resolved", "integrity", "resolution", "checksum"))
 
 
-def _yarn_lockfile_stanzas(text: str) -> tuple[bool, list[tuple[list[str], dict[str, str]]]]:
-    """Whether a lockfile is Berry's, and its stanzas, each with its selectors and
-    the string fields at its first level. Raises ValueError on any line that Yarn 1's
-    parser, or the YAML reader Berry uses, would read differently or not at all."""
+def _yarn_lockfile_stanzas(
+    text: str,
+) -> tuple[dict[str, str] | None, list[tuple[list[str], dict[str, str]]]]:
+    """The string fields of a Berry lockfile's ``__metadata``, None for a Yarn 1
+    lockfile, and the stanzas, each with its selectors and the string fields at its
+    first level. Raises ValueError on any line that Yarn 1's parser, or the YAML reader
+    Berry uses, would read differently or not at all, and on some that Yarn never
+    writes."""
     lines = _YARN_LINE_BREAK.split(text)
     # Yarn 1 ends a line at a lone CR but reads the spaces after it as no indentation.
     if any("\r" in line for line in lines):
@@ -1029,6 +1130,7 @@ def _yarn_lockfile_stanzas(text: str) -> tuple[bool, list[tuple[list[str], dict[
         raise ValueError("yarn.lock line limit exceeded")
     berry = False
     v1_comment = False
+    metadata: dict[str, str] = {}
     stanzas: list[tuple[list[str], dict[str, str]]] = []
     fields: dict[str, str] = {}
     # The keys of each open object; a line may be indented one level past the last.
@@ -1074,6 +1176,7 @@ def _yarn_lockfile_stanzas(text: str) -> tuple[bool, list[tuple[list[str], dict[
             if selectors == ["__metadata"]:
                 if not berry or not first_header:
                     raise ValueError("misplaced yarn.lock metadata")
+                metadata = fields
             else:
                 # A key without a package name is no package's record, only an alias target.
                 if any(s.find("@", 1) <= 0 for s in selectors):
@@ -1085,15 +1188,11 @@ def _yarn_lockfile_stanzas(text: str) -> tuple[bool, list[tuple[list[str], dict[
         del open_keys[level:]
         if berry:
             key, value = _berry_field(content)
-            colon = True
         else:
-            key, value, colon = _yarn_v1_field(content)
-            if key in _YARN_BERRY_ONLY_FIELDS:
+            key, value = _yarn_v1_field(content)
+            # Inside a map a key is a name, such as a dependency named `resolution`.
+            if level == 1 and key in _YARN_BERRY_ONLY_FIELDS:
                 raise ValueError("berry field in yarn v1 lockfile")
-            if value is not None and colon and not v1_comment:
-                raise ValueError("ambiguous yarn.lock field syntax")
-            if level > 1 and (colon or value is None or value.kind != "str"):
-                raise ValueError("invalid yarn.lock dependency entry")
         if not key:
             raise ValueError("invalid yarn.lock key")
         if key in open_keys[-1]:
@@ -1114,7 +1213,7 @@ def _yarn_lockfile_stanzas(text: str) -> tuple[bool, list[tuple[list[str], dict[
             fields[key] = value.value
     if any(not keys for keys in open_keys) or not stanzas:
         raise ValueError("empty yarn.lock")
-    return berry, stanzas
+    return (metadata if berry else None), stanzas
 
 
 class RegistryScanner(Scanner):
@@ -1373,23 +1472,39 @@ class RegistryScanner(Scanner):
         # A pnpm or Yarn record resolves only a package package.json declares from a
         # registry: npm installs a git, URL or path source whatever the record says.
         registry = [component for component, _ in fetched]
+        # A settings file read here is not read again for the registry settings.
+        read_files: dict[str, dict[str, Any] | None] = {}
         if registry and other_lock is not None:
             lock_name, raw_lock = other_lock
             if lock_name == "pnpm-lock.yaml":
                 read = self._resolve_pnpm_lockfile(raw_lock, registry, components, result)
             else:
-                read = self._resolve_yarn_lockfile(raw_lock, registry, result)
+                before = (
+                    recorded_count(result.scan_failures),
+                    recorded_count(result.surfaces_excluded),
+                )
+                yarnrc = read_files[".yarnrc.yml"] = self._read_mapping(Path(".yarnrc.yml"), result)
+                # A file that cannot be read or is excluded leaves Yarn's settings unknown,
+                # and another Yarn release computes another cache key.
+                after = (
+                    recorded_count(result.scan_failures),
+                    recorded_count(result.surfaces_excluded),
+                )
+                cache_key = (
+                    _yarn_cache_key(yarnrc) if after == before and _yarn_4_selected(data) else None
+                )
+                read = self._resolve_yarn_lockfile(raw_lock, registry, result, cache_key)
             if not read:
                 for component in registry:
                     # The lockfile installs it, so the version an exact spec names
                     # is in doubt.
                     component.package_url = None
         if fetched:
-            self._redirect_npm(result, fetched)
+            self._redirect_npm(result, fetched, read_files)
         return components
 
     def _npm_registries(
-        self, result: ScanResult
+        self, result: ScanResult, read_files: dict[str, dict[str, Any] | None]
     ) -> list[tuple[str, dict[str, str], str, str | None]]:
         """Each project file's registry settings, the setting that names its default
         registry, and for .npmrc the scope its ``scope`` setting selects.
@@ -1410,7 +1525,11 @@ class RegistryScanner(Scanner):
                     _registries(install, default, "scopes") if isinstance(install, dict) else []
                 )
             elif name == ".yarnrc.yml":
-                mapping = self._read_mapping(Path(name), result)
+                mapping = (
+                    read_files[name]
+                    if name in read_files
+                    else self._read_mapping(Path(name), result)
+                )
                 if mapping is None:
                     continue
                 result.surfaces_scanned.append(name)
@@ -1434,7 +1553,10 @@ class RegistryScanner(Scanner):
         return found
 
     def _redirect_npm(
-        self, result: ScanResult, fetched: list[tuple[RegistryEntryComponent, str]]
+        self,
+        result: ScanResult,
+        fetched: list[tuple[RegistryEntryComponent, str]],
+        read_files: dict[str, dict[str, Any] | None],
     ) -> None:
         """Record on every package fetched from a registry the project settings that may
         choose another registry for it.
@@ -1447,7 +1569,7 @@ class RegistryScanner(Scanner):
         gives some scope a registry other than the default one.
         """
         registries: list[tuple[str, dict[str, str], str, str | None]] = []
-        for name, settings, default, scope in self._npm_registries(result):
+        for name, settings, default, scope in self._npm_registries(result, read_files):
             if expands(scope or "") and not any(
                 npm_scope_registry(key) and not _DEFAULT_NPM_REGISTRY.fullmatch(value)
                 for key, value in settings.items()
@@ -2108,14 +2230,17 @@ class RegistryScanner(Scanner):
         lock_bytes: bytes,
         components: list[RegistryEntryComponent],
         result: ScanResult,
+        cache_key: str | None,
     ) -> bool:
         """Bind Yarn records to the components, which package.json declares from a
-        registry. False when the lockfile is not read."""
+        registry. ``cache_key`` is the one Yarn 4 computes for the project, None when it
+        checks no checksum. False when the lockfile is not read."""
         try:
-            berry, stanzas = _yarn_lockfile_stanzas(lock_bytes.decode("utf-8"))
+            metadata, stanzas = _yarn_lockfile_stanzas(lock_bytes.decode("utf-8"))
         except (ValueError, UnicodeError):
             result.scan_failures.append("yarn.lock: invalid or unsupported lockfile")
             return False
+        berry = metadata is not None
         lock_digest = hash_bytes(lock_bytes)
         by_pkg: dict[str, list[tuple[str, dict[str, str], int]]] = {}
         for index, (selectors, fields) in enumerate(stanzas):
@@ -2125,15 +2250,33 @@ class RegistryScanner(Scanner):
                     continue
                 sel_name, sel_spec = sel[:at_idx], sel[at_idx + 1 :]
                 by_pkg.setdefault(sel_name, []).append((sel_spec, fields, index))
+        # Yarn 4 keeps what it reads by hash, so the last record of a locator replaces
+        # its package, checksum and conditions, and a name it hashes alike, as it does
+        # `@op/enai` and `openai`, resolves the other's descriptors and locators.
+        alike: dict[str, set[str]] = {}
+        locators: Counter[tuple[str, str]] = Counter()
+        for selectors, fields in stanzas if berry else ():
+            resolution = _berry_hashed(fields.get("resolution", ""))
+            if resolution is not None:
+                locators[resolution[1:]] += 1
+            for hashed in (*map(_berry_hashed, selectors), resolution):
+                if hashed is not None:
+                    alike.setdefault(hashed[1], set()).add(hashed[0])
         for comp in components:
             alias = comp.properties.get("npm_alias")
             if alias is not None:
                 # Only npm's own lockfile record is resolved against an alias's package.
-                if alias in by_pkg:
+                if alias in by_pkg or _berry_ident(alias) in alike:
                     comp.package_url = None
                     result.surfaces_excluded.append(
                         "yarn.lock: aliased package identity is unresolved"
                     )
+                continue
+            if alike.get(_berry_ident(comp.name), {comp.name}) != {comp.name}:
+                comp.package_url = None
+                result.surfaces_excluded.append(
+                    f"yarn.lock: multiple package resolutions for {comp.name} are ambiguous"
+                )
                 continue
             entries = by_pkg.get(comp.name)
             if not entries:
@@ -2211,20 +2354,28 @@ class RegistryScanner(Scanner):
                     "yarn.lock: local or non-registry resolution is unverified"
                 )
                 continue
+            bound = _berry_hashed(resolution_val)
+            if bound is not None and locators[bound[1:]] > 1:
+                result.surfaces_excluded.append(
+                    f"yarn.lock: multiple package resolutions for {comp.name} are ambiguous"
+                )
+                continue
             # The selector that matched holds only the name and spec the inventory
             # records; another selector of the stanza may be a URL with a credential.
             locator = "yarn.lock#/" + _pointer_token(f"{comp.name}@{sel_spec}")
+            # Yarn 1 reads `integrity` and not `checksum`, and Berry the reverse.
             self._bind_npm_resolution(
                 comp,
                 "yarn.lock",
                 "yarn-lockfile",
                 resolved_version,
                 resolved_val or None,
-                fields.get("integrity"),
+                None if metadata is not None else fields.get("integrity"),
                 locator,
                 lock_digest,
                 result,
-                checksum_recorded=berry and _valid_berry_checksum(fields.get("checksum")),
+                checksum_recorded=metadata is not None
+                and _berry_checksum_checked(fields, metadata, cache_key),
             )
         return True
 
