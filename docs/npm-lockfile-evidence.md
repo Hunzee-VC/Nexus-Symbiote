@@ -70,6 +70,21 @@ spec's stanza and another `resolved`, `integrity` or `checksum`: Yarn 1 reuses t
 first record it resolves with that version, so when a dependency listed earlier in
 `package.json` depends on the other range, Yarn installs the other stanza.
 
+So is, in a Yarn Berry lockfile, a second stanza whose `resolution` names the
+declared spec's locator, under any key (`openai@npm:^4.0.0` or `zzz@npm:1.0.0` with
+`resolution: "openai@npm:4.0.0"`). Yarn writes one stanza per locator, and Yarn 4
+keeps the last one it reads, with its `conditions`, and the last `checksum` of any of
+them, so a second stanza with `checksum: 9/<digest>` lets a mismatching archive in
+unchecked. So is a stanza that names a package Yarn 4 hashes as it hashes the
+declared one, in its key or its `resolution`. Yarn hashes a scope and a name joined
+with nothing between them, so it reads `@op/enai@npm:4.0.0` as `openai@npm:4.0.0`: a
+stanza keyed by it replaces the declared spec's resolution, and a resolution that
+names it replaces the package Yarn fetches for the locator, each with another
+package's archive. An `npm:` alias whose key Yarn hashes as it hashes a name in the
+lockfile is an `aliased package identity is unresolved` exclusion. Yarn refuses these
+lockfiles in an immutable install, its default in CI, but installs from them with
+`enableImmutableInstalls: false` or outside CI.
+
 Each Yarn reads one digest field. A Yarn 1 `checksum` is not an integrity value, since
 Yarn 1 does not read it, so a v1 record with one and no `integrity` has a
 `missing_lockfile_integrity` finding. Neither is a Berry `integrity`, which Berry does
@@ -85,11 +100,15 @@ that counts. Nor does a record with `conditions`, for a package Yarn installs on
 platforms only: Yarn does not check its archive when it is an optional dependency.
 Nor does any checksum when the root `.yarnrc.yml` sets `checksumBehavior`
 to another value than `throw`, `compressionLevel` to another value than 0,
-`enableGlobalCache` to another value than `true`, or `globalFolder`: Yarn then
-accepts a mismatching archive, computes another key, or may take the archive from a
-cache folder the project supplies. A `.yarnrc.yml` that cannot be read counts as one
-that sets them. The Berry checksum itself is not recorded; it is the digest of the
-archive Yarn stores, not of the registry's tarball.
+`enableGlobalCache` to another value than `true`, `globalFolder` or `yarnPath`: Yarn
+then accepts a mismatching archive, computes another key, may take the archive from a
+cache folder the project supplies, or runs a Yarn release the project supplies. A
+`.yarnrc.yml` that cannot be read counts as one that sets them. Nor does any checksum
+when `package.json` names a release other than Yarn 4 for Corepack to run, which
+computes another cache key: a `packageManager` other than `yarn@4.<version>`, or a
+`devEngines.packageManager` other than one object named `yarn` whose `version`, if
+any, is a Yarn 4 version or a `^` or `~` range of one. The Berry checksum itself is not
+recorded; it is the digest of the archive Yarn stores, not of the registry's tarball.
 
 A line that Yarn 1, or the YAML reader Yarn Berry uses for a lockfile that starts with
 `__metadata` (unquoted or as a JSON string), reads differently or not at all fails the

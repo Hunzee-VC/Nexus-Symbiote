@@ -841,14 +841,23 @@ _HEX_CHARS = frozenset("0123456789abcdefABCDEF")
 # Yarn checks a fetched archive against a checksum only when the checksum names the
 # key Yarn computes, and accepts the archive unchecked when it names another.
 _YARN_CACHE_KEY = "10c0"
+# A Yarn 4 version as `packageManager` names one, and a range of Yarn 4 versions only.
+_YARN_4_VERSION = re.compile(r"4(?:\.(?:[0-9]+|x)){0,2}(?:-[0-9A-Za-z.-]+)?")
+_YARN_4_RANGE = re.compile(r"[\^~]?" + _YARN_4_VERSION.pattern)
+# Yarn 4 hashes a package's scope and name joined with nothing between them, and a
+# descriptor or locator as that and its range or reference (structUtils.makeIdent), so
+# it reads `@op/enai@npm:4.0.0` as `openai@npm:4.0.0`.
+_BERRY_IDENT = re.compile(r"(?:@([^/]+?)/)?([^@/]+)")
+_BERRY_DESCRIPTOR = re.compile(r"(?:@([^/]+?)/)?([^@/]+?)@(.+)")
 
 
 def _yarn_cache_key(settings: dict[str, Any] | None) -> str | None:
     """The cache key Yarn 4 computes under the root ``.yarnrc.yml`` settings, or None
     when Yarn does not check a fetched archive against the lockfile's checksum: a
     ``checksumBehavior`` other than ``throw``, a ``compressionLevel`` other than 0,
-    which gives another key, or archives the project may supply, from a cache folder
-    with the global cache turned off or from a ``globalFolder`` it chooses."""
+    which gives another key, archives the project may supply, from a cache folder
+    with the global cache turned off or from a ``globalFolder`` it chooses, or a
+    ``yarnPath``, which runs a Yarn release the project supplies."""
     settings = settings or {}
     level = settings.get("compressionLevel", 0)
     if (
@@ -856,9 +865,51 @@ def _yarn_cache_key(settings: dict[str, Any] | None) -> str | None:
         or not (level == "0" or (type(level) is int and level == 0))
         or settings.get("enableGlobalCache", True) is not True
         or "globalFolder" in settings
+        or "yarnPath" in settings
     ):
         return None
     return _YARN_CACHE_KEY
+
+
+def _yarn_4_selected(manifest: dict[str, Any]) -> bool:
+    """Whether package.json names no Yarn release but Yarn 4 for Corepack to run: its
+    ``packageManager`` and ``devEngines.packageManager`` name Yarn 4 or nothing."""
+    if "packageManager" in manifest:
+        named = manifest["packageManager"]
+        if not (
+            isinstance(named, str)
+            and named.startswith("yarn@")
+            and _YARN_4_VERSION.fullmatch(named[5:].partition("+")[0])
+        ):
+            return False
+    if "devEngines" not in manifest:
+        return True
+    engines = manifest["devEngines"]
+    if not isinstance(engines, dict):
+        return False
+    if "packageManager" not in engines:
+        return True
+    engine = engines["packageManager"]
+    if not isinstance(engine, dict) or engine.get("name") != "yarn":
+        return False
+    version = engine.get("version", "4")
+    return isinstance(version, str) and _YARN_4_RANGE.fullmatch(version) is not None
+
+
+def _berry_ident(name: str) -> str:
+    """What Yarn 4 hashes for a package name, or the name when Yarn reads none in it."""
+    match = _BERRY_IDENT.fullmatch(name)
+    return name if match is None else (match.group(1) or "") + match.group(2)
+
+
+def _berry_hashed(text: str) -> tuple[str, str, str] | None:
+    """The package name in a Berry descriptor or locator, what Yarn 4 hashes for that
+    name, and the range or reference; None when Yarn reads no package name in it."""
+    match = _BERRY_DESCRIPTOR.fullmatch(text)
+    if match is None:
+        return None
+    scope, name, rest = match.groups()
+    return text[: match.start(3) - 1], (scope or "") + name, rest
 
 
 def _berry_checksum_checked(
@@ -1403,12 +1454,15 @@ class RegistryScanner(Scanner):
                     recorded_count(result.surfaces_excluded),
                 )
                 yarnrc = read_files[".yarnrc.yml"] = self._read_mapping(Path(".yarnrc.yml"), result)
-                # A file that cannot be read or is excluded leaves Yarn's settings unknown.
+                # A file that cannot be read or is excluded leaves Yarn's settings unknown,
+                # and another Yarn release computes another cache key.
                 after = (
                     recorded_count(result.scan_failures),
                     recorded_count(result.surfaces_excluded),
                 )
-                cache_key = _yarn_cache_key(yarnrc) if after == before else None
+                cache_key = (
+                    _yarn_cache_key(yarnrc) if after == before and _yarn_4_selected(data) else None
+                )
                 read = self._resolve_yarn_lockfile(raw_lock, registry, result, cache_key)
             if not read:
                 for component in registry:
@@ -2167,15 +2221,33 @@ class RegistryScanner(Scanner):
                     continue
                 sel_name, sel_spec = sel[:at_idx], sel[at_idx + 1 :]
                 by_pkg.setdefault(sel_name, []).append((sel_spec, fields, first_sel, index))
+        # Yarn 4 keeps what it reads by hash, so the last record of a locator replaces
+        # its package, checksum and conditions, and a name it hashes alike, as it does
+        # `@op/enai` and `openai`, resolves the other's descriptors and locators.
+        alike: dict[str, set[str]] = {}
+        locators: Counter[tuple[str, str]] = Counter()
+        for selectors, fields in stanzas if berry else ():
+            resolution = _berry_hashed(fields.get("resolution", ""))
+            if resolution is not None:
+                locators[resolution[1:]] += 1
+            for hashed in (*map(_berry_hashed, selectors), resolution):
+                if hashed is not None:
+                    alike.setdefault(hashed[1], set()).add(hashed[0])
         for comp in components:
             alias = comp.properties.get("npm_alias")
             if alias is not None:
                 # Only npm's own lockfile record is resolved against an alias's package.
-                if alias in by_pkg:
+                if alias in by_pkg or _berry_ident(alias) in alike:
                     comp.package_url = None
                     result.surfaces_excluded.append(
                         "yarn.lock: aliased package identity is unresolved"
                     )
+                continue
+            if alike.get(_berry_ident(comp.name), {comp.name}) != {comp.name}:
+                comp.package_url = None
+                result.surfaces_excluded.append(
+                    f"yarn.lock: multiple package resolutions for {comp.name} are ambiguous"
+                )
                 continue
             entries = by_pkg.get(comp.name)
             if not entries:
@@ -2251,6 +2323,12 @@ class RegistryScanner(Scanner):
                 # resolved URL to check: only the registry's package and version is one.
                 result.surfaces_excluded.append(
                     "yarn.lock: local or non-registry resolution is unverified"
+                )
+                continue
+            bound = _berry_hashed(resolution_val)
+            if bound is not None and locators[bound[1:]] > 1:
+                result.surfaces_excluded.append(
+                    f"yarn.lock: multiple package resolutions for {comp.name} are ambiguous"
                 )
                 continue
             locator = "yarn.lock#/" + locator_key.replace("~", "~0").replace("/", "~1")
