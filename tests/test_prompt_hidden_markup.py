@@ -481,6 +481,8 @@ def _comments(text: str) -> list[str]:
         lambda scale: "https://x.example/[a] " * 20_000 * scale + "\n\n[a]: /u\n",
         lambda scale: '[a]: (x "\n' * 20_000 * scale,
         lambda scale: "<div>\n" + "</ <! " * 20_000 * scale,
+        lambda scale: "[" * (20_000 * scale) + "]" * (20_000 * scale),
+        lambda scale: "![" * (10_000 * scale) + "]" * (10_000 * scale),
     ],
     ids=[
         "unclosed titles",
@@ -502,6 +504,8 @@ def _comments(text: str) -> list[str]:
         "extended autolinks",
         "lenient titles",
         "bogus comments",
+        "nested brackets",
+        "nested image brackets",
     ],
 )
 def test_finding_hidden_markup_grows_with_the_text(shape):
@@ -946,3 +950,53 @@ def test_the_high_gate_fails_on_an_instruction_on_a_later_hidden_line(tmp_path, 
     )
     assert run.exit_code == 1, run.output
     assert "example.test" not in output.read_text()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"See [^1].\n\n[^1]: Summary.\n\n    [//]: # ({EVIL})\n",
+        f'See [^1].\n\n[^1]: Summary.\n\n    [evil]: https://evil.example "{EVIL}"\n',
+        f"See [^1].\n\n[^1]: Summary.\n\n    <?{EVIL}?>\n",
+        f'Contact <mailto:o\'connor?[evil]>.\n\n[evil]: https://evil.example "{EVIL}"\n',
+        f'Clone <ssh://git.example/\'[evil]>.\n\n[evil]: https://evil.example "{EVIL}"\n',
+        f'Join <xmpp:room"[evil]>.\n\n[evil]: https://evil.example "{EVIL}"\n',
+        f'![alt [evil]](https://ok.example/p.png)\n\n[evil]: https://evil.example "{EVIL}"\n',
+        f'![alt [evil]][img]\n\n[img]: https://ok.example/p.png\n[evil]: https://evil.example "{EVIL}"\n',
+        f'![[evil]][]\n\n[evil]: https://evil.example "{EVIL}"\n',
+    ],
+    ids=[
+        "comment definition in referenced footnote continuation",
+        "unused definition in referenced footnote continuation",
+        "processing instruction in referenced footnote continuation",
+        "mailto autolink with single quote",
+        "ssh autolink with single quote",
+        "xmpp autolink with double quote",
+        "link inside inline image alt",
+        "link inside reference image alt",
+        "link inside collapsed image alt",
+    ],
+)
+def test_hidden_markup_in_referenced_footnotes_autolinks_and_image_alt_is_high(text):
+    assert _severities(text) == ["high"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "See [^1].\n\n[^1]: Summary.\n\n    Read [guide] and [^2].\n\n"
+        "[guide]: https://docs.example/guide\n[^2]: Details.\n",
+        f"See [^1].\n\n[^1]: Example:\n\n    ```md\n    [//]: # ({EVIL})\n    ```\n",
+        "Email <o'connor@example.com> or <mailto:o'connor> and read [docs].\n\n"
+        "[docs]: https://docs.example\n",
+        "![alt [docs]][undefined]\n\n[docs]: https://docs.example\n",
+    ],
+    ids=[
+        "used link and chained footnote in referenced footnote continuation",
+        "fenced code inside referenced footnote continuation",
+        "link after quoted email or mailto autolink",
+        "link inside unresolved image brackets",
+    ],
+)
+def test_visible_links_with_footnote_continuations_and_autolinks_are_not_flagged(text):
+    assert _severities(text) == []

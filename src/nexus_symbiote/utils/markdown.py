@@ -655,6 +655,10 @@ def hidden_text(text: str) -> HiddenText:
         if kind == "indented":
             if after_note:
                 notes[-1].text.append(content)
+                try:
+                    _collect_footnote_continuation(content, notes[-1], spans, comments, html)
+                except _AmbiguousError:
+                    return _hidden_in_whole(_LINE_END.sub("\n", text))
                 after_note_code = True
             after_note = False
             continue
@@ -750,6 +754,36 @@ def _read_paragraph(content: str) -> tuple[list[tuple[str, str]], str, str]:
     cuts = [leading, *(edge for span in later for edge in span), len(content)]
     pairs = zip(cuts[::2], cuts[1::2], strict=True)
     return spans, content[leading:], "\n".join(content[a:b] for a, b in pairs)
+
+
+def _collect_footnote_continuation(
+    content: str,
+    note: _Footnote,
+    spans: list[tuple[str, str]],
+    comments: list[str],
+    html: list[str],
+) -> None:
+    """Collect definitions, hidden HTML and inline references from an indented footnote block."""
+    sub = _Reader(len(content) + _SPARE_MATCHES)
+    for line in content.split("\n"):
+        sub.read(line)
+    sub.finish()
+    for sub_kind, sub_content in sub.blocks:
+        if sub_kind == "html":
+            html += _hidden_html(sub_content, block=True)
+            comments += [
+                sub_content[start:end]
+                for start, end, _, _ in _definition_spans(sub_content)
+                if _COMMENT_DEFINITION.match(sub_content, start)
+            ]
+        elif sub_kind == "heading":
+            html += _hidden_html(_outside_spans(sub_content), block=False)
+            note.reading.append(sub_content)
+        elif sub_kind == "paragraph":
+            found, inline, reading = _read_paragraph(sub_content)
+            spans += found
+            html += _hidden_html(_outside_spans(inline), block=False)
+            note.reading.append(reading)
 
 
 _ASCII_WHITESPACE = " \t\n\r\x0b\x0c"
@@ -1030,8 +1064,13 @@ _LINK_LABEL = re.compile(r"\[(?:[^\\\[\]]|\\.)*+\]", re.S)
 _REFERENCE_SPECIAL = re.compile(r"[\\`\[\]<]")
 _TAG_STOP = re.compile(r"[<>\"']")
 _TAG_NAME = re.compile(r"[A-Za-z][A-Za-z0-9-]*")
-# What may follow the name of a tag, or the start of an autolink or email autolink.
-_AFTER_TAG_NAME = frozenset("/>+.:@!#$%&'*=?^_`{|}~-")
+_CLOSING_TAG = re.compile(rf"</[A-Za-z][A-Za-z0-9-]*[{_ASCII_WHITESPACE}]*+>")
+_URI_AUTOLINK = re.compile(r"<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\x00-\x20<>]*+>")
+_EMAIL_AUTOLINK = re.compile(
+    r"<[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]++@"
+    r"(?>[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)"
+    r"(?>\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*+>"
+)
 # GitHub's extended autolinks, which take the brackets in them out of the text: a URL
 # after anything but a letter, or `www.` after a space, `*`, `_`, `~` or `(`, up to a
 # space or `<`.
@@ -1055,6 +1094,9 @@ def _html_end(positions: _Positions, start: int) -> int:
     after the end of any tag a reader finds there.
     """
     text = positions.text
+    autolink = _URI_AUTOLINK.match(text, start) or _EMAIL_AUTOLINK.match(text, start)
+    if autolink is not None:
+        return autolink.end()
     if text.startswith("<!--", start):
         close = positions.next("-->", start + 2)
         if 0 <= close < start + 4:
@@ -1070,13 +1112,14 @@ def _html_end(positions: _Positions, start: int) -> int:
     if second == "!" and third.isascii() and third.isalpha():
         close = positions.next(">", start + 2)
         return close + 1 if close >= 0 else -1
-    if not (second.isascii() and second.isalpha()) and not (
-        second == "/" and third.isascii() and third.isalpha()
-    ):
+    if second == "/":
+        closing = _CLOSING_TAG.match(text, start)
+        return closing.end() if closing is not None else -1
+    if not (second.isascii() and second.isalpha()):
         return -1
-    name = _TAG_NAME.match(text, start + (2 if second == "/" else 1))
+    name = _TAG_NAME.match(text, start + 1)
     following = "" if name is None else text[name.end() : name.end() + 1]
-    if following and not following.isspace() and following not in _AFTER_TAG_NAME:
+    if following and not following.isspace() and following not in "/>":
         return -1
     index = start + 1
     while (stop := _TAG_STOP.search(text, index)) is not None:
@@ -1097,10 +1140,10 @@ def _references(text: str, defined: Callable[[str], bool]) -> list[str]:
     brackets after code spans, raw HTML and autolinks.
 
     A label counts only where every reader makes a link of it that shows: not in the
-    text of an inline link or of a full reference, not in a GitHub extended autolink,
-    not with a ``|``, which a table cell can split, not as a link whose text shows only
-    spaces and punctuation, and nothing after a link whose extent this cannot settle
-    the same for every reader.
+    text of an inline link, of a full reference or of a resolved image, not in a GitHub
+    extended autolink, not with a ``|``, which a table cell can split, not as a link
+    whose text shows only spaces and punctuation, and nothing after a link whose extent
+    this cannot settle the same for every reader.
     """
     runs: dict[int, list[int]] = {}
     for found_run in _BACKTICKS.finditer(text):
@@ -1112,13 +1155,17 @@ def _references(text: str, defined: Callable[[str], bool]) -> list[str]:
     ]
     autolink_starts = [start for start, _ in autolinks]
     positions = _Positions(text)
-    labels: list[str] = []
+    entries: list[tuple[int, str]] = []
     openers: list[int] = []
     last_closed = -1
 
-    def name(label: str) -> None:
+    def name(opened_at: int, label: str) -> None:
         if len(label) <= _MAX_LABEL and "|" not in label and label.strip(_ASCII_WHITESPACE):
-            labels.append(label)
+            entries.append((opened_at, label))
+
+    def drop_inside(opened_at: int) -> None:
+        while entries and entries[-1][0] > opened_at:
+            entries.pop()
 
     # Code, raw HTML and inline link destinations the scan skipped, in which no extended
     # autolink starts.
@@ -1166,23 +1213,25 @@ def _references(text: str, defined: Callable[[str], bool]) -> list[str]:
             opened = openers.pop()
             innermost = last_closed < opened
             last_closed = opened
-            label = text[opened + 1 : position - 1]
-            shows = (
-                opened > 0 and text[opened - 1] == "!" and not _escaped(text, opened - 1)
-            ) or _shows(label)
+            is_image = opened > 0 and text[opened - 1] == "!" and not _escaped(text, opened - 1)
             following = text[position : position + 1]
             if following == "(":
-                link = _INLINE_LINK.match(text, position) if innermost else None
+                link = _INLINE_LINK.match(text, position) if (innermost or is_image) else None
                 if link is None:
                     link = _LENIENT_INLINE_LINK.match(text, position)
                     if link is None or _TAKEN_BY_INLINE.search(link.group()):
                         break
+                if is_image:
+                    drop_inside(opened)
                 skipped += [position, link.end()]
                 position = link.end()
                 continue
+            span_len = (position - 1) - (opened + 1)
             if following != "[":
-                if innermost and shows:
-                    name(label)
+                if innermost and span_len <= _MAX_LABEL:
+                    label = text[opened + 1 : position - 1]
+                    if is_image or _shows(label):
+                        name(opened, label)
                 continue
             reference = _LINK_LABEL.match(text, position)
             if reference is None:
@@ -1190,24 +1239,33 @@ def _references(text: str, defined: Callable[[str], bool]) -> list[str]:
                 # nothing, where commonmark.js reads a shortcut reference.
                 continue
             target = reference.group()[1:-1]
-            if not innermost:
+            if not innermost and not is_image:
                 # Brackets around a link are text to commonmark.js, which then reads
                 # the label after them as brackets of its own; markdown-it reads a
                 # full reference.
                 continue
             if not target:
-                if shows:
-                    name(label)
+                if is_image and not innermost:
+                    drop_inside(opened)
+                    position = reference.end()
+                    continue
+                if span_len <= _MAX_LABEL:
+                    label = text[opened + 1 : position - 1]
+                    if is_image or _shows(label):
+                        name(opened, label)
             elif not defined(target):
                 # Brackets followed by a label that names nothing are not a shortcut
                 # reference either; the label is read again as brackets of its own.
                 continue
             elif _TAKEN_BY_INLINE.search(target):
                 break
-            elif shows:
-                name(target)
+            elif is_image:
+                drop_inside(opened)
+                name(opened, target)
+            elif _shows(text[opened + 1 : position - 1]):
+                name(opened, target)
             position = reference.end()
-    return labels
+    return [label for _, label in entries]
 
 
 _CONTAINER_MARKS = re.compile(r"^[ \t]*+(?:(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t]))[ \t]*+)*+")
