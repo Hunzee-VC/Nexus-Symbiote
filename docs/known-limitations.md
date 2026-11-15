@@ -313,30 +313,31 @@ A way around a limit that its entry does not describe is worth a
   built-in generic such as `list[FastMCP]`. Any other part of an annotation, such
   as a call or another subscript, is analyzed as code, because annotations are
   evaluated. In a file with a recognized server or PydanticAI agent, this
-  reflection is a gap even when harmless: a call by name of `locals`, `globals`,
-  `vars`, `eval` or `exec`; `__builtins__` or an import of the `builtins` module;
-  a call by name of `getattr`, `setattr` or `delattr`, unless the object is a
-  literal or a name, or attribute of a name, that the file binds only by import
-  and the attribute is a literal name other than `modules` and those listed next, so
-  `getattr(os, "environ")` is accepted and `getattr(self, "name")` is a gap; the
-  attributes `__self__`, `__closure__`, `__globals__`, `__builtins__`, `__dict__`,
-  `__annotations__`, `__traceback__`, `__code__`, `__getattribute__`, `tb_frame`,
-  `tb_next`,
-  `f_back`, `f_locals`, `f_globals`, `f_builtins`, `gi_frame`, `cr_frame`,
-  `ag_frame`, `_getframe`, `currentframe`, `getouterframes`, `getinnerframes`,
-  `getargvalues`, `getclosurevars` and `getmodule`, also imported by name; and a
-  `modules` attribute that is not called, as in `sys.modules[__name__]`, or
-  `modules` imported from `sys`; a call of `import_module` or `__import__` with
-  any argument that is not a literal, as in `importlib.import_module(__name__)`,
-  `importlib.import_module(fn.__module__)` or
-  `importlib.import_module(__package__ + ".server")`; and an import of
-  `__main__`. A method that only shares a name, such as `model.eval()`
-  or `model.modules()`, is not reflection. Other reflection is not recognized,
-  such as a reflective builtin under another name, a module that imports itself
-  by its own literal name, as `import server` does in `server.py`, `gc`, or
-  reflection in another file, including on the traceback of an exception that
-  propagated out of a server's run, so a completed scan cannot prove that a
-  server or agent never escaped.
+  reflection is a gap even when harmless: a reference by name to `locals`,
+  `globals`, `vars`, `eval`, `exec`, `__import__`, `setattr` or `delattr`;
+  `__builtins__` or an import of `builtins`, `__main__`, `_imp`, `imp`,
+  `_frozen_importlib`, `_frozen_importlib_external`, `_importlib` or `runpy`;
+  `getattr` by name, unless called directly with two or three positional arguments
+  whose object is a literal or a name, or attribute of a name, that the file binds
+  only by import and whose attribute is a literal name other than `modules` and
+  those listed next, so `getattr(os, "environ")` is accepted and
+  `getattr(self, "name")` or `fn = getattr` is a gap; the attributes `__self__`,
+  `__closure__`, `__globals__`, `__builtins__`, `__dict__`, `__annotations__`,
+  `__traceback__`, `__code__`, `__getattribute__`, `__setattr__`, `__delattr__`,
+  `__import__`, `import_module`, `resolve_name`, `attrgetter`, `methodcaller`,
+  `exec_module`, `load_module`, `spec_from_file_location`, `_gcd_import`,
+  `_bootstrap`, `_bootstrap_external`, `tb_frame`, `tb_next`, `f_back`, `f_locals`,
+  `f_globals`, `f_builtins`, `gi_frame`, `cr_frame`, `ag_frame`, `_getframe`,
+  `currentframe`, `getouterframes`, `getinnerframes`, `getargvalues`,
+  `getclosurevars`, `getmodule`, `stack`, `trace` and `getattr_static`, also
+  imported by name; and a `modules` attribute that is not called, as in
+  `sys.modules[__name__]`, or `modules` imported from `sys`. A method that only
+  shares a name, such as `model.eval()` or `model.modules()`, is not reflection.
+  Other reflection is not recognized, such as a reflective builtin under another
+  name, a module that imports itself by its own literal name, as `import server`
+  does in `server.py`, `gc`, or reflection in another file, including on the
+  traceback of an exception that propagated out of a server's run, so a completed
+  scan cannot prove that a server or agent never escaped.
   Any
   call whose first argument, or `name` keyword, is a literal that names `mcp`,
   `mcp.server` or `fastmcp`, or a submodule of the last two, is a gap whatever the

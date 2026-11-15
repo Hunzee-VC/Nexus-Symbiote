@@ -381,6 +381,35 @@ def test_helpers_of_the_same_file_are_judged_by_what_they_do_with_the_server(tmp
         + "def swap(srv, label=None): srv.tool()(delete_all)\n"
         + "inspect.getmodule(swap).__setattr__('confi' + 'gure', swap)\nconfigure(mcp)\n",
         "from __main__ import mcp as same\nsame.tool()(delete_all)\n",
+        "from importlib import import_module\nimport_module('evil_mod').register(mcp)\n",
+        "from importlib import import_module as im\nim('evil_mod')\n",
+        "from _importlib import import_module as im\nim('evil_mod')\n",
+        "import importlib as il\ngetattr(il, 'import_' + 'module')('evil_mod')\n",
+        "import importlib as il\ngetattr(il, 'import_module')('evil_mod')\n",
+        "import builtins\ngetattr(builtins, '__imp' + 'ort__')('evil_mod')\n",
+        "import sys\ngetattr(sys, 'mod' + 'ules')[__name__].__dict__['mcp'].tool()(delete_all)\n",
+        "import sys\nsys.modules['__main__'].mcp.tool()(delete_all)\n",
+        "import inspect as i\ngetattr(i, 'current' + 'frame')()\n",
+        "import inspect as i\ni.stack()[0][0]\n",
+        "import importlib\nload = importlib.import_module\nload('evil_mod')\n",
+        "imp = __import__\nimp('evil_mod')\n",
+        "import operator\nag = operator.attrgetter\n",
+        "ev = eval\nev('mcp.tool()(delete_all)')\n",
+        "fn = getattr\nfn(delete_all, '__glo' + 'bals__')['mcp'].tool()(delete_all)\n",
+        "gl = globals\ngl()['mcp'].tool()(delete_all)\n",
+        "lo = locals\nlo()['mcp'].tool()(delete_all)\n",
+        "va = vars\nva()['mcp'].tool()(delete_all)\n",
+        "ex = exec\nex('mcp.tool()(delete_all)')\n",
+        "__import__('builtins').eval('mcp.tool()(delete_all)')\n",
+        "__import__('evil_mod')\n",
+        "import importlib\nimportlib.import_module('pkg.server').mcp.tool()(delete_all)\n",
+        "import operator\n"
+        + "operator.attrgetter('__glo' + 'bals__')(delete_all)['mcp'].tool()(delete_all)\n",
+        "from operator import attrgetter\n"
+        + "attrgetter('__glo' + 'bals__')(delete_all)['mcp'].tool()(delete_all)\n",
+        "import pkg.server as s\ndef configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "setattr(s, 'configure', swap)\nconfigure(mcp)\n",
         "def hidden(value: mcp.tool()(delete_all)): pass\n",
         "def hidden() -> mcp.tool()(delete_all): pass\n",
         "registered: mcp.tool()(delete_all) = None\n",
@@ -459,7 +488,7 @@ def test_immediately_awaited_server_run_does_not_escape(tmp_path):
         + "def logged(fn):\n    @functools.wraps(fn)\n    def inner(*a):\n        return fn(*a)\n"
         + "    print(inner.__wrapped__, fn.__defaults__, fn.__kwdefaults__)\n    return inner\n",
         "import logging\nlogger = logging.getLogger(__name__)\n",
-        "import importlib\njson = importlib.import_module('json')\n",
+        "from importlib.metadata import version\nrelease = version('pydantic')\n",
         "def build(server):\n    return server.sse_app()\napp = build(mcp)\napp2 = build(mcp)\n",
     ],
 )

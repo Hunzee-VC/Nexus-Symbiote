@@ -52,18 +52,18 @@ _SERVER_DECORATORS = _names("resource prompt custom_route")
 # called by name, getattr and its kin on an object that could be one, and these
 # attributes, also imported by name, which expose frames, closures, namespaces and
 # bound instances.
-_REFLECTIVE_BUILTINS = _names("locals globals vars eval exec")
-_ATTRIBUTE_BUILTINS = _names("getattr setattr delattr")
-# A module the file can import as itself exposes its servers, agents and helpers as
-# attributes that the analysis of names never sees. A computed module name, such as
-# __name__, fn.__module__ or __package__ + ".server", can name the file itself.
-_IMPORTERS = _names("import_module __import__")
+_REFLECTIVE_BUILTINS = _names("locals globals vars eval exec __import__ setattr delattr")
+_ATTRIBUTE_BUILTINS = _names("getattr")
+_REFLECTIVE_MODULES = _names(
+    "builtins __main__ _imp imp _frozen_importlib _frozen_importlib_external _importlib runpy"
+)
 _REFLECTIVE_ATTRIBUTES = _names(
     "__self__ __closure__ __globals__ __builtins__ __dict__ __annotations__ __traceback__ "
-    "__code__ "
-    "__getattribute__ tb_frame tb_next f_back f_locals f_globals f_builtins gi_frame "
-    "cr_frame ag_frame _getframe currentframe getouterframes getinnerframes getargvalues "
-    "getclosurevars getmodule"
+    "__code__ __getattribute__ __setattr__ __delattr__ __import__ import_module resolve_name "
+    "attrgetter methodcaller exec_module load_module spec_from_file_location _gcd_import "
+    "_bootstrap _bootstrap_external tb_frame tb_next f_back f_locals f_globals f_builtins "
+    "gi_frame cr_frame ag_frame _getframe currentframe getouterframes getinnerframes "
+    "getargvalues getclosurevars getmodule stack trace getattr_static"
 )
 # Generics whose subscript only records its arguments as types.
 _TYPING_MODULES = frozenset({"typing", "typing_extensions", "collections.abc"})
@@ -122,14 +122,18 @@ def _safe_receivers(
 
 
 def _plain_attribute(call: ast.Call, imported: set[str]) -> bool:
-    """Whether getattr, setattr or delattr names a literal attribute, not a reflective
-    one, of an object that cannot be a server or agent of this file.
+    """Whether getattr names a literal attribute, not a reflective one, of an object
+    that cannot be a server or agent of this file.
 
     Such an object is a literal, or a name, or attribute of a name, that the file binds
     only by import. Anything else, such as a parameter, ``self`` or a call's result,
     could be one.
     """
-    if call.keywords or len(call.args) < 2 or any(isinstance(a, ast.Starred) for a in call.args):
+    if (
+        call.keywords
+        or len(call.args) not in (2, 3)
+        or any(isinstance(a, ast.Starred) for a in call.args)
+    ):
         return False
     target, attribute = call.args[0], call.args[1]
     if not (
@@ -146,23 +150,12 @@ def _plain_attribute(call: ast.Call, imported: set[str]) -> bool:
     )
 
 
-def _imports_own_module(call: ast.Call) -> bool:
-    """Whether ``call`` imports a module whose name or package is not a literal, as
-    ``importlib.import_module(__name__)`` imports the file itself."""
-    func = call.func
-    name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
-    return name in _IMPORTERS and not all(
-        isinstance(argument, ast.Constant)
-        for argument in (*call.args, *(keyword.value for keyword in call.keywords))
-    )
-
-
 def _reflective_access(
     nodes: list[ast.AST], parents: dict[ast.AST, ast.AST], bindings: Counter[str]
 ) -> bool:
     """Whether reflection can reach a server or agent of the file without naming it.
 
-    The builtins count when called by their own names and through the builtins
+    The builtins count whenever referenced by their own names and through the builtins
     module; a method that only shares a name, such as ``model.eval()``, does not.
     ``modules`` counts unless it is called, so ``sys.modules[__name__]`` does and
     ``model.modules()`` does not.
@@ -172,11 +165,14 @@ def _reflective_access(
     )
     imported = {name for name, count in imports.items() if bindings[name] == count}
     for node in nodes:
-        if isinstance(node, ast.Call) and _imports_own_module(node):
+        if isinstance(node, ast.Name) and node.id == "__builtins__":
             return True
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            if node.func.id in _REFLECTIVE_BUILTINS or (
-                node.func.id in _ATTRIBUTE_BUILTINS and not _plain_attribute(node, imported)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            use = parents.get(node)
+            if node.id in _REFLECTIVE_BUILTINS:
+                return True
+            if node.id in _ATTRIBUTE_BUILTINS and not (
+                isinstance(use, ast.Call) and use.func is node and _plain_attribute(use, imported)
             ):
                 return True
         elif isinstance(node, ast.Attribute):
@@ -185,15 +181,14 @@ def _reflective_access(
                 node.attr == "modules" and not (isinstance(use, ast.Call) and use.func is node)
             ):
                 return True
-        elif isinstance(node, ast.Name) and node.id == "__builtins__":
-            return True
         elif isinstance(node, ast.Import):
-            if any(alias.name.split(".")[0] in {"builtins", "__main__"} for alias in node.names):
+            if any(alias.name.split(".")[0] in _REFLECTIVE_MODULES for alias in node.names):
                 return True
-        elif isinstance(node, ast.ImportFrom) and not node.level:
-            if node.module in {"builtins", "__main__"} or any(
+        elif isinstance(node, ast.ImportFrom):
+            root = (node.module or "").split(".")[0] if not node.level else ""
+            if root in _REFLECTIVE_MODULES or any(
                 alias.name in _REFLECTIVE_ATTRIBUTES
-                or (node.module == "sys" and alias.name == "modules")
+                or (not node.level and node.module == "sys" and alias.name == "modules")
                 for alias in node.names
             ):
                 return True
