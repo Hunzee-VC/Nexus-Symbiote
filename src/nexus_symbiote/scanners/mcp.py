@@ -24,7 +24,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 from packaging.utils import canonicalize_name
 
@@ -1414,19 +1414,45 @@ class _Identity:
 
 
 _DIAGNOSTIC_NODES = 4096
-_DIAGNOSTIC_FIELDS = ("command", "args", "url", "serverUrl", "endpoint", "httpUrl", "uri")
-_INLINE_ASSIGNMENT = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)=(.+)", re.DOTALL)
+# `NAME=value`, as `cross-env` or `env` take it, or docker's `--env=NAME=value`.
+_INLINE_ASSIGNMENT = re.compile(r"(?:--env=)?([A-Za-z_][A-Za-z0-9_]*)=(.+)", re.DOTALL)
+
+
+def _user_info(locator: str) -> list[str]:
+    """The user name and password of a URL, as written and percent-decoded.
+
+    A WHATWG client, as most MCP clients use, ends the authority of a special scheme
+    at a backslash as at a slash; urlsplit does not, so both readings count.
+    """
+    found: list[str] = []
+    for reading in {locator, locator.replace("\\", "/")}:
+        try:
+            parts = urlsplit(reading)
+            username, password = parts.username, parts.password
+        except ValueError:
+            continue
+        # A short user name such as `git` is a locator that ordinary names repeat; a
+        # long one is often a token. A password is one at any length.
+        for value, counted in (
+            (username, username is not None and len(username) >= MIN_SECRET_LENGTH),
+            (password, True),
+        ):
+            if value and counted:
+                found.extend({value, unquote(value)})
+    return found
 
 
 def _diagnostic_values(config: dict[str, Any]) -> list[str] | None:
-    """User information in this server's URLs, and credentials its `NAME=value` arguments set.
+    """User information in this server's URLs, and credentials its fields and `NAME=value`
+    arguments hold.
 
-    Only the launch and endpoint fields are read, so a large `tools` value cannot use up
-    the walk before them. ``None`` when even those exceed the bounded walk: a server that
-    failed validation can be any shape, and its name is then not shown.
+    Every field but `tools` is read: a large tool list, which is often what failed,
+    cannot use up the walk, while any field a client may read can hold a credential.
+    ``None`` when the fields exceed the bounded walk: a server that failed validation
+    can be any shape, and its name is then not shown, as it never was before.
     """
     values: list[str] = []
-    pending: list[Any] = [config.get(field) for field in _DIAGNOSTIC_FIELDS]
+    pending: list[Any] = [item for field, item in config.items() if field != "tools"]
     visited = 0
     while pending:
         visited += 1
@@ -1434,25 +1460,18 @@ def _diagnostic_values(config: dict[str, Any]) -> list[str] | None:
             return None
         node = pending.pop()
         if isinstance(node, dict):
+            # As for `env`: only a credential name's value, or a credential-shaped one.
+            values.extend(secret_values(node))
             pending.extend(node.values())
         elif isinstance(node, list):
             pending.extend(node)
         elif isinstance(node, str):
             if "@" in node and "://" in node:
-                try:
-                    parts = urlsplit(node)
-                except ValueError:
-                    parts = None
-                if parts is not None:
-                    # A short user name such as `git` is a locator that ordinary names
-                    # repeat; a long one is often a token. A password is one at any length.
-                    if parts.username and len(parts.username) >= MIN_SECRET_LENGTH:
-                        values.append(parts.username)
-                    if parts.password:
-                        values.append(parts.password)
+                for locator in _locators(node):
+                    if "@" in locator:
+                        values.extend(_user_info(locator))
             inline = _INLINE_ASSIGNMENT.fullmatch(node)
             if inline is not None:
-                # As for `env`: only a credential name's value, or a credential-shaped one.
                 values.extend(secret_values({inline.group(1): inline.group(2)}))
     return values
 
