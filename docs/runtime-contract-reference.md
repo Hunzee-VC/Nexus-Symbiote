@@ -499,8 +499,11 @@ other code is permanent for the evidence presented.
 are recorded as `denied`. A session deadline or protocol error before `tools/call` is
 sent is recorded as `adapter-error`. In both cases `tools/call` is never sent. This
 includes a launcher that cannot be read or differs from its pin and a failed
-`initialize` handshake, which happen before the gateway runs; their records hold
-only the time, the call labels and `store_id`.
+`initialize` handshake, which happen at the descriptor step (step 8), when the
+gateway first calls `describe`; their records carry the facts verified up to that
+step. Launcher settings that `PinnedStdioSession` refuses, such as a relative path or
+a malformed pin, are refused before the gateway runs; their records hold only the
+time, the call labels and `store_id`.
 
 The `runtime` commands print the code in parentheses at the end of the error,
 next to their own codes: `runtime-input-error` for a contract that does not

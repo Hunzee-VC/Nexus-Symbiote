@@ -162,7 +162,7 @@ def test_wrong_launcher_pin_never_starts_process(tmp_path):
         ("stall-initialize", True, "adapter-error"),
     ],
 )
-def test_refusals_before_the_gateway_runs_are_recorded(tmp_path, monkeypatch, mode, pinned, reason):
+def test_launcher_refusals_are_recorded_once(tmp_path, monkeypatch, mode, pinned, reason):
     values = fixture(tmp_path)
     decisions = []
     values[0].on_decision = decisions.append

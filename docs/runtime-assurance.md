@@ -21,12 +21,14 @@ raised by the operator's adapters propagate unchanged, so treat every exception
 from `invoke` as a denial.
 
 `invoke_pinned_stdio` starts the pinned launcher and completes the MCP `initialize`
-handshake before the gateway checks the trust status, snapshot and approval, because
-the session that describes the tool is the one that executes the call. A caller that
-presents invalid evidence still makes the operator's launcher run up to its tool
-listing; nothing is called. Admit callers to the integration itself, and run launchers
-in the isolated worker the [security boundaries](../SECURITY.md#security-boundaries)
-describe.
+handshake when the gateway first asks for the served descriptor, after it has checked
+the trust status, snapshot, workload context, companion BOM, scope and grant, because
+the session that describes the tool is the one that executes the call. A caller whose
+trust status or snapshot fails those checks never starts the launcher. The approval is
+checked after the descriptor, so a caller holding a valid snapshot and trust status but
+no valid approval still makes the operator's launcher run up to its tool listing;
+nothing is called. Admit callers to the integration itself, and run launchers in the
+isolated worker the [security boundaries](../SECURITY.md#security-boundaries) describe.
 
 The gateway copies the request before scope resolution and rejects a resolver
 that modifies its copy during resolution. A resolver retaining that copy cannot
@@ -284,8 +286,8 @@ Same-process binding does not establish that a server's implementation or
 remote backend is immutable, safe or honest; a server can change behavior between
 listing and invocation, including during a tool call. The pin covers launcher
 bytes only, not interpreters, shared libraries or dependencies. A launcher is
-executed before the authorization check, so only operator-approved launchers may
-be used. Run it in an externally provisioned sandbox with restricted identity,
+executed before the descriptor and approval checks complete, so only
+operator-approved launchers may be used. Run it in an externally provisioned sandbox with restricted identity,
 filesystem and egress. The adapter does not create that sandbox or mediate other
 calls. `PinnedStdioSession` is a transport primitive and must not be invoked
 directly as an authorization decision.
