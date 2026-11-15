@@ -107,6 +107,7 @@ REQUIRED_COMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
             "scripts/check_dependency_advisories.py",
             "--lock requirements-ci.lock",
             "--lock requirements-action.lock",
+            "--lock requirements-floor.lock",
         ),
         "codeql": (
             "github/codeql-action/init@",
@@ -187,6 +188,42 @@ PYTHON = re.compile(r"python(?:\d+(?:\.\d+)?)?")
 # Python options that print and exit before the script runs, or keep the process alive and
 # discard its status.
 PYTHON_EXITS = frozenset("h?Vi")
+# Flags and inline environment overrides that neutralize a required gate command.
+NEUTRALIZING_GATE_FLAGS = frozenset(
+    {
+        "-h",
+        "--help",
+        "-V",
+        "--version",
+        "-e",
+        "--exit-zero",
+        "--show-files",
+        "--show-settings",
+        "--co",
+        "--collect-only",
+        "--setup-only",
+        "--setup-plan",
+        "--fixtures",
+        "--funcargs",
+        "--fixtures-per-test",
+        "--markers",
+    }
+)
+# Variables that load other code into, or change the arguments of, the gate's process.
+UNSAFE_GATE_ENV = frozenset(
+    {
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "LD_AUDIT",
+        "BASH_ENV",
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "PYTHONINSPECT",
+        "PYTEST_ADDOPTS",
+        "PYTEST_PLUGINS",
+    }
+)
 # The timeout options that leave the command's status intact, alone or with a value.
 TIMEOUT_FLAGS = frozenset({"--foreground", "--preserve-status", "-v", "--verbose"})
 TIMEOUT_VALUED = frozenset({"-k", "--kill-after", "-s", "--signal"})
@@ -909,6 +946,19 @@ class _Gate:
 
     def runs(self, required: str) -> bool:
         """Whether this command runs the required command, or passes it what it needs."""
+        for arg in self.args:
+            if arg == "--":
+                break
+            if arg.partition("=")[0] in NEUTRALIZING_GATE_FLAGS:
+                return False
+            if (
+                arg.startswith("-")
+                and not arg.startswith(("--", "-W", "-X", "-o", "-k", "-m", "-c", "-p", "-r"))
+                and len(arg) > 2
+                and arg[1:].isalpha()
+                and (set(arg[1:]) & {"h", "V", "e"})
+            ):
+                return False
         if " ".join([self.program, *self.args]).startswith(required):
             return True
         if PYTHON.fullmatch(self.program.rsplit("/", 1)[-1]) is None:
@@ -971,6 +1021,8 @@ def _gates(script: str, errexit: bool, pipefail: bool) -> list[_Gate]:
             for assignment in words[:start]:
                 form = ASSIGNMENT.match(assignment)
                 assert form is not None
+                if form[1] in UNSAFE_GATE_ENV and start == len(words):
+                    trusted = False
                 if alone and start == len(words) and not form[2] and not form[3]:
                     variables[form[1]] = assignment[form.end() :]
                 else:
@@ -997,6 +1049,12 @@ def _gates(script: str, errexit: bool, pipefail: bool) -> list[_Gate]:
                 trusted = trusted and not noexec
             elif program in BINDING_BUILTINS or (program == "printf" and "-v" in args):
                 variables.clear()
+                if any(
+                    arg.split("=", 1)[0].split("[", 1)[0].rstrip("+") in UNSAFE_GATE_ENV
+                    for arg in args
+                    if not arg.startswith("-")
+                ):
+                    trusted = False
             elif program in UNSAFE_BUILTINS and not _fails(program, args):
                 trusted = False
     return gates
@@ -1060,8 +1118,13 @@ def _item_gates(item: _Item, pipefail: bool, variables: dict[str, str]) -> list[
         if command.body is not None or (index < len(commands) - 1 and not pipefail):
             continue
         words = command.words
-        while words and ASSIGNMENT.match(words[0]):
+        unsafe_env = False
+        while words and (assigned := ASSIGNMENT.match(words[0])):
+            if assigned[1] in UNSAFE_GATE_ENV:
+                unsafe_env = True
             words = words[1:]
+        if unsafe_env:
+            continue
         if words and words[0] == "timeout":
             words = _after_timeout(words[1:])
         if not words:
@@ -1093,7 +1156,22 @@ def _run_setting(
     return None, ""
 
 
-def _gate_issues(path: Path, name: str, job: dict[str, Any], defaults: Any) -> list[str]:
+def _unsafe_env_scope(workflow_env: Any, job_env: Any, step_env: Any) -> str | None:
+    for scope, env_map in (
+        ("workflow", workflow_env),
+        ("job", job_env),
+        ("step", step_env),
+    ):
+        if env_map is None:
+            continue
+        if not isinstance(env_map, dict) or (set(map(str, env_map)) & UNSAFE_GATE_ENV):
+            return scope
+    return None
+
+
+def _gate_issues(
+    path: Path, name: str, job: dict[str, Any], defaults: Any, workflow_env: Any = None
+) -> list[str]:
     """A required job's gate commands must run, unskippable, and keep their exit status."""
     commands = REQUIRED_COMMANDS.get(path.name, {}).get(name, ())
     text_only = REQUIRED_TEXT.get(path.name, {}).get(name, frozenset())
@@ -1121,7 +1199,10 @@ def _gate_issues(path: Path, name: str, job: dict[str, Any], defaults: Any) -> l
         uses: str = step["uses"] if isinstance(step.get("uses"), str) else ""
         run = step.get("run")
         gates: list[_Gate] = []
-        if isinstance(run, str):
+        bad_env_scope = _unsafe_env_scope(workflow_env, job.get("env"), step.get("env"))
+        if bad_env_scope is not None:
+            errors.append(f"{path}: {name} sets unsafe gate environment in {bad_env_scope} env")
+        elif isinstance(run, str):
             shell, source = _run_setting("shell", step, job, defaults)
             directory, where = _run_setting("working-directory", step, job, defaults)
             flags = SHELLS.get(shell) if isinstance(shell, str) or shell is None else None
@@ -1140,7 +1221,9 @@ def _gate_issues(path: Path, name: str, job: dict[str, Any], defaults: Any) -> l
                 errors.append(f"{path}: {name} discards the exit status of {command}")
             if step.get("continue-on-error", False) is not False:
                 continued.add(command)
-            elif command in text_only or command in uses or any(g.runs(command) for g in gates):
+            elif bad_env_scope is None and (
+                command in text_only or command in uses or any(g.runs(command) for g in gates)
+            ):
                 found.add(command)
             else:
                 unstructured.add(command)
@@ -1216,7 +1299,9 @@ def _workflow_issues(path: Path, document: dict[Any, Any]) -> list[str]:
                 options = step.get("with")
                 if not isinstance(options, dict) or options.get("persist-credentials") is not False:
                     errors.append(f"{path}: {name} must check out with persist-credentials: false")
-        errors.extend(_gate_issues(path, str(name), job, document.get("defaults")))
+        errors.extend(
+            _gate_issues(path, str(name), job, document.get("defaults"), document.get("env"))
+        )
     for name in REQUIRED_COMMANDS.get(path.name, {}):
         if name not in jobs:
             errors.append(f"{path}: required job {name} is missing")
@@ -1281,24 +1366,78 @@ def check(path: Path) -> list[str]:
     return errors
 
 
+def _composed_uses_pins(node: yaml.Node | None) -> tuple[list[tuple[int, str]], bool]:
+    """Pinned `uses` nodes as `(0-based line, pin)` and whether any violates block-line style."""
+    pins: list[tuple[int, str]] = []
+    invalid_style = False
+    active: set[int] = set()
+
+    def walk(current: yaml.Node | None) -> None:
+        nonlocal invalid_style
+        if current is None:
+            return
+        node_id = id(current)
+        if node_id in active:
+            invalid_style = True
+            return
+        active.add(node_id)
+        try:
+            if isinstance(current, yaml.MappingNode):
+                for key_node, val_node in current.value:
+                    if (
+                        isinstance(key_node, yaml.ScalarNode)
+                        and key_node.value == "uses"
+                        and isinstance(val_node, yaml.ScalarNode)
+                        and not val_node.value.startswith("./")
+                        and PIN.fullmatch(val_node.value)
+                    ):
+                        if (
+                            bool(current.flow_style)
+                            or key_node.start_mark.line != val_node.start_mark.line
+                            or val_node.start_mark.line != val_node.end_mark.line
+                        ):
+                            invalid_style = True
+                        pins.append((key_node.start_mark.line, val_node.value))
+                    walk(key_node)
+                    walk(val_node)
+            elif isinstance(current, yaml.SequenceNode):
+                for item_node in current.value:
+                    walk(item_node)
+        finally:
+            active.remove(node_id)
+
+    walk(node)
+    return pins, invalid_style
+
+
 def pin_comments(paths: list[Path]) -> list[str]:
     """Each pin names a full version, the same one wherever it appears, at or above its floor."""
     errors: list[str] = []
     seen: dict[str, tuple[str, Path]] = {}
     for path in paths:
         text = path.read_text(encoding="utf-8")
-        # The comment is read line by line, so a pin in any other YAML spelling, such as a
-        # flow mapping, would escape this check; the parsed file says how many there are.
-        parsed = sum(
-            1
+        # The comment is read line by line, so each AST `uses` pin must sit on the exact
+        # block-style line where USES_LINE reads its version comment.
+        parsed = [
+            value
             for value in _uses_values(yaml.safe_load(text))
             if not value.startswith("./") and PIN.fullmatch(value)
+        ]
+        composed_pins, invalid_style = _composed_uses_pins(
+            yaml.compose(text, Loader=yaml.SafeLoader)
         )
-        lines = [USES_LINE.match(line) for line in text.splitlines()]
-        read = [m for m in lines if m and not m[1].startswith("./") and PIN.fullmatch(m[1])]
-        if len(read) != parsed:
+        read = [
+            (idx, m)
+            for idx, line in enumerate(text.splitlines())
+            if (m := USES_LINE.match(line)) and not m[1].startswith("./") and PIN.fullmatch(m[1])
+        ]
+        if (
+            invalid_style
+            or [(idx, m[1]) for idx, m in read] != composed_pins
+            or [m[1] for _, m in read] != parsed
+        ):
             errors.append(f"{path}: write each pinned uses on a line of its own, as uses: <pin>")
-        for match in read:
+        for _, match in read:
             reference, comment = match[1], match[2] or ""
             version = VERSION.fullmatch(comment)
             if version is None:

@@ -104,7 +104,7 @@ wheel-smoke: ## Build afresh and check the exact wheel in a temporary locked env
 	trap 'rm -rf "$$smoke_dir"' EXIT; \
 	python -m venv "$$smoke_dir"; \
 	"$$smoke_dir/bin/python" -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock; \
-	"$$smoke_dir/bin/python" -m pip install --no-index --no-deps dist/*.whl; \
+	"$$smoke_dir/bin/python" -m pip install --no-index --no-deps --only-binary=:all: dist/*.whl; \
 	"$$smoke_dir/bin/python" -I scripts/check_wheel_security.py dist/*.whl
 
 # ── Clean ────────────────────────────────────────────────────

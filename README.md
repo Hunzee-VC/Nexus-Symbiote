@@ -162,7 +162,7 @@ Every row has limits: [known limitations](https://github.com/Hunzee-VC/Nexus-Sym
 
 1. **Collect.** Each collector reads its surfaces through confined, size-bounded file reads and returns components, findings and coverage status.
 2. **Assemble.** Results merge into one AgentBOM. Every claim keeps its assurance level: declared, observed or verified.
-3. **Gate.** `validate` checks completeness and integrity; `risk` scores findings against your policy. Gaps fail closed.
+3. **Gate.** `validate` checks completeness and recorded local digests, bindings and operator-supplied signature policies for models and discovery reports; it does not authenticate MCP servers, so gate MCP server changes with `diff --fail-on-alert` against a reviewed baseline (see [gates and drift](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md#gates-and-drift)); `risk` scores findings against your policy. Gaps fail closed.
 4. **Compare.** `diff` compares two snapshots semantically and rates each change.
 5. **Export.** Standard formats are generated from the same collection, so every export describes the same evidence.
 
@@ -186,7 +186,7 @@ Nothing a collector reads is executed, imported or loaded. The `mcp`, `rag` and 
 | Command | What it answers |
 | --- | --- |
 | `scan` | Inventory the project → native JSON, CycloneDX, SPDX or SARIF |
-| `validate` | Did every collector finish? Do hashes, signatures and bindings match? |
+| `validate` | Did every collector finish? Do local digests, bindings and operator signer-policy rules match? |
 | `risk` | Does the score or worst severity cross your [policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/policy-reference.md)? |
 | `diff` | What [changed](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/drift-gate.md#what-the-alerts-mean) since the reviewed snapshot, and how much does it matter? |
 | `digest` | Do two inventories record the same [content](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/reproducible-inventories.md#the-content-digest)? |
