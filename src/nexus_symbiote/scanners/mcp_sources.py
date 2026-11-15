@@ -830,7 +830,46 @@ def _bindings(nodes: list[ast.AST]) -> list[tuple[list[ast.expr], list[ast.expr]
     return found
 
 
-def _loader_aliases(nodes: list[ast.AST], loaders: set[str]) -> set[str]:
+def _bound_names(nodes: list[ast.AST]) -> set[str]:
+    """Every plain name bound, imported or declared as a parameter in ``nodes``."""
+    bound: set[str] = set()
+    for node in nodes:
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, ast.alias):
+            bound.add(node.asname or node.name.split(".")[0])
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            bound.add(node.rest)
+    return bound
+
+
+def _unshadowed_getattr(
+    node: ast.AST, bound_names: set[str]
+) -> tuple[ast.expr, str, tuple[ast.expr, ...]] | None:
+    """``(target, attr, non_attr_args)`` for an unshadowed ``getattr(target, "attr"[, default])``."""
+    if not (
+        "getattr" not in bound_names
+        and isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and not node.keywords
+        and len(node.args) in (2, 3)
+        and not any(isinstance(a, ast.Starred) for a in node.args)
+    ):
+        return None
+    attribute = node.args[1]
+    if isinstance(attribute, ast.Constant) and isinstance(attribute.value, str):
+        return node.args[0], attribute.value, (node.args[0], *node.args[2:])
+    return None
+
+
+def _loader_aliases(nodes: list[ast.AST], loaders: set[str], bound_names: set[str]) -> set[str]:
     """``loaders`` and every name a binding gives one, however many steps away.
 
     Any binding counts, wherever it is, so a name once bound to a loader is one. An
@@ -844,7 +883,10 @@ def _loader_aliases(nodes: list[ast.AST], loaders: set[str]) -> set[str]:
         for value in (item for node in values for item in _binding_names(node)):
             if isinstance(value, ast.Name):
                 bound.setdefault(value.id, set()).add(joint)
-            elif isinstance(value, ast.Attribute) and value.attr in _LOADERS:
+            elif (isinstance(value, ast.Attribute) and value.attr in _LOADERS) or (
+                (pair := _unshadowed_getattr(value, bound_names)) is not None
+                and pair[1] in _LOADERS
+            ):
                 reached.add(joint)
         for target in (item for node in targets for item in _binding_names(node)):
             if isinstance(target, ast.Name):
@@ -871,6 +913,23 @@ def _owned(name: str, module: str | None) -> bool:
     return module in _SERVER_CLASSES[name]
 
 
+def _literals_in_expressions(values: Sequence[ast.expr]) -> set[str]:
+    found: set[str] = set()
+    for value in values:
+        if isinstance(value, ast.Starred):
+            value = value.value
+        items: list[ast.expr] = [value]
+        if isinstance(value, ast.List | ast.Tuple | ast.Set):
+            items = value.elts
+        elif isinstance(value, ast.Dict):
+            items = value.values
+        for item in items:
+            text = _literal(item.value if isinstance(item, ast.Starred) else item)
+            if text:
+                found.add(text.partition(":")[0])
+    return found
+
+
 def _named_module(call: ast.Call) -> set[str]:
     """Every module a call's arguments name as a literal, in any position.
 
@@ -894,10 +953,35 @@ def _exempt_call(func: ast.expr, owned: set[str], loggers: set[str]) -> bool:
     )
 
 
-def _root_name(node: ast.expr) -> str | None:
-    while isinstance(node, ast.Attribute):
-        node = node.value
+def _root_name(node: ast.expr, bound_names: set[str]) -> str | None:
+    while True:
+        if isinstance(node, ast.Attribute):
+            node = node.value
+        elif (pair := _unshadowed_getattr(node, bound_names)) is not None:
+            node = pair[0]
+        else:
+            break
     return node.id if isinstance(node, ast.Name) else None
+
+
+def _record_attribute_gap(
+    target: ast.expr,
+    attr: str,
+    packages: set[str],
+    imported: set[str],
+    bound_names: set[str],
+    gaps: set[str],
+) -> None:
+    if attr in _PYTHON_LAUNCHERS:
+        owners, reason = _PYTHON_LAUNCHERS[attr]
+        if (
+            attr in _LAUNCHER_CLASSES
+            or owners & packages
+            or _root_name(target, bound_names) in imported
+        ):
+            gaps.add(reason)
+    elif attr in _SERVER_CLASSES:
+        gaps.add(_SERVER_CLASS_ATTRIBUTE)
 
 
 def _python_launches(tree: ast.Module) -> list[str]:
@@ -920,6 +1004,7 @@ def _python_launches(tree: ast.Module) -> list[str]:
     name is not followed.
     """
     nodes = list(ast.walk(tree))
+    bound_names = _bound_names(nodes)
     packages: set[str] = set()
     imported: set[str] = set()
     names: dict[str, str] = {}
@@ -957,12 +1042,21 @@ def _python_launches(tree: ast.Module) -> list[str]:
                         names[alias.asname or name] = _PYTHON_LAUNCHERS[name][1]
                         if not star:
                             unused.add(alias.asname or name)
-    loaders = _loader_aliases(nodes, loaders)
+    loaders = _loader_aliases(nodes, loaders, bound_names)
     annotations = _annotation_names(nodes)
     for node in nodes:
         if isinstance(node, ast.Call):
-            if _loader(node.func, loaders):
+            func_getattr = _unshadowed_getattr(node.func, bound_names)
+            call_getattr = _unshadowed_getattr(node, bound_names)
+            if _loader(node.func, loaders) or (
+                func_getattr is not None and func_getattr[1] in _LOADERS
+            ):
                 modules = _loaded_names(node)
+            elif call_getattr is not None:
+                target, attr, non_attr_args = call_getattr
+                modules = _literals_in_expressions(non_attr_args)
+                if node not in annotations:
+                    _record_attribute_gap(target, attr, packages, imported, bound_names, gaps)
             elif _exempt_call(node.func, owned - loaders, loggers - loaders):
                 modules = set()
             else:
@@ -974,16 +1068,8 @@ def _python_launches(tree: ast.Module) -> list[str]:
         elif isinstance(node, ast.Name) and node.id in names:
             gaps.add(names[node.id])
             unused.discard(node.id)
-        elif isinstance(node, ast.Attribute) and node.attr in _PYTHON_LAUNCHERS:
-            owners, reason = _PYTHON_LAUNCHERS[node.attr]
-            if (
-                node.attr in _LAUNCHER_CLASSES
-                or owners & packages
-                or _root_name(node.value) in imported
-            ):
-                gaps.add(reason)
-        elif isinstance(node, ast.Attribute) and node.attr in _SERVER_CLASSES:
-            gaps.add(_SERVER_CLASS_ATTRIBUTE)
+        elif isinstance(node, ast.Attribute):
+            _record_attribute_gap(node.value, node.attr, packages, imported, bound_names, gaps)
     if unused:
         gaps.add(_LAUNCHER_PASSED_ON)
     return sorted(gaps)

@@ -120,35 +120,20 @@ def _safe_receivers(
     }
 
 
-def _plain_attribute(call: ast.Call, imported: set[str], any_target: bool) -> bool:
-    """Whether getattr names a literal attribute, not a reflective one, of an object
-    that cannot be a server, context or agent of this file.
-
-    Such an object is a literal, or a name, or attribute of a name, that the file binds
-    only by import. Anything else, such as a parameter, ``self`` or a call's result,
-    could be one, unless ``any_target``: in a file without a server or agent, a literal
-    read is checked as the attribute itself is.
-    """
+def _plain_attribute(call: ast.Call) -> bool:
+    """Whether getattr names a literal attribute, not a reflective one, by position."""
     if (
         call.keywords
         or len(call.args) not in (2, 3)
         or any(isinstance(a, ast.Starred) for a in call.args)
     ):
         return False
-    target, attribute = call.args[0], call.args[1]
-    if not (
+    attribute = call.args[1]
+    return (
         isinstance(attribute, ast.Constant)
         and isinstance(attribute.value, str)
         and attribute.value not in _REFLECTIVE_ATTRIBUTES
         and attribute.value != "modules"
-    ):
-        return False
-    while isinstance(target, ast.Attribute):
-        target = target.value
-    return (
-        any_target
-        or isinstance(target, ast.Constant)
-        or (isinstance(target, ast.Name) and target.id in imported)
     )
 
 
@@ -188,7 +173,6 @@ def _reflective_access(
     nodes: list[ast.AST],
     parents: dict[ast.AST, ast.AST],
     bindings: Counter[str],
-    any_target: bool = False,
 ) -> bool:
     """Whether reflection can reach a server, context or agent of the file without naming it.
 
@@ -199,10 +183,6 @@ def _reflective_access(
     """
     if any(bindings[name] for name in _REFLECTIVE_NAMES):
         return True
-    imports = Counter(
-        node.asname or node.name.split(".")[0] for node in nodes if isinstance(node, ast.alias)
-    )
-    imported = {name for name, count in imports.items() if bindings[name] == count}
     for node in nodes:
         if isinstance(node, ast.Name) and node.id in _REFLECTIVE_NAMES:
             return True
@@ -211,9 +191,10 @@ def _reflective_access(
             if node.id in _REFLECTIVE_BUILTINS and not _names_parameter(node, parents):
                 return True
             if node.id in _ATTRIBUTE_BUILTINS and not (
-                isinstance(use, ast.Call)
+                not bindings[node.id]
+                and isinstance(use, ast.Call)
                 and use.func is node
-                and _plain_attribute(use, imported, any_target)
+                and _plain_attribute(use)
             ):
                 return True
         elif isinstance(node, ast.Attribute):
@@ -225,10 +206,10 @@ def _reflective_access(
         elif isinstance(node, ast.Import):
             if any(alias.name.split(".")[0] == "builtins" for alias in node.names):
                 return True
-        elif isinstance(node, ast.ImportFrom) and not node.level:
-            if node.module == "builtins" or any(
+        elif isinstance(node, ast.ImportFrom):
+            if (not node.level and node.module == "builtins") or any(
                 alias.name in _REFLECTIVE_ATTRIBUTES
-                or (node.module == "sys" and alias.name == "modules")
+                or (not node.level and node.module == "sys" and alias.name == "modules")
                 for alias in node.names
             ):
                 return True
@@ -663,11 +644,17 @@ def _collect_agent_decorators(
         for node in nodes
         if isinstance(node, ast.withitem) and node.optional_vars is None
     )
+    factory_calls = {call.func for call in calls}
+    annotations = _annotation_names(nodes, parsed.roots)
     escaped = any(
         isinstance(node, ast.Name)
         and isinstance(node.ctx, ast.Load)
-        and node.id in agents
-        and node not in reached
+        and (
+            (node.id in agents and node not in reached)
+            or (
+                node.id in agent_factories and node not in factory_calls and node not in annotations
+            )
+        )
         for node in parsed.all_nodes
     )
     if (
@@ -935,6 +922,7 @@ def _typing_generics(nodes: list[ast.AST]) -> tuple[set[str], dict[str, str]]:
     bindings = _bindings(nodes)
     generics: Counter[str] = Counter()
     modules: dict[str, list[str]] = {}
+    mutated: set[str] = set()
     for node in nodes:
         if isinstance(node, ast.ImportFrom) and not node.level and node.module in _TYPING_MODULES:
             generics.update(alias.asname or alias.name for alias in node.names)
@@ -942,12 +930,23 @@ def _typing_generics(nodes: list[ast.AST]) -> tuple[set[str], dict[str, str]]:
             for alias in node.names:
                 name = alias.asname or alias.name.split(".")[0]
                 modules.setdefault(name, []).append(alias.name if alias.asname else name)
+        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            target: ast.expr = node.value
+            while True:
+                if isinstance(target, ast.Attribute):
+                    target = target.value
+                elif (pair := _getattr_attr(target)) is not None:
+                    target = pair[0]
+                else:
+                    break
+            if isinstance(target, ast.Name):
+                mutated.add(target.id)
     names = {name for name, count in generics.items() if bindings[name] == count}
     names.update(name for name in _GENERIC_BUILTINS if not bindings[name])
     roots = {
         name: paths[0]
         for name, paths in modules.items()
-        if bindings[name] == len(paths) and len(set(paths)) == 1
+        if bindings[name] == len(paths) and len(set(paths)) == 1 and name not in mutated
     }
     return names, roots
 
@@ -1205,13 +1204,17 @@ def _imported_receivers(tree: ast.Module) -> bool:
             continue
         for deco in node.decorator_list:
             target = deco.func if isinstance(deco, ast.Call) else deco
-            if not isinstance(target, ast.Attribute) or target.attr != "tool":
+            t_pair = _getattr_attr(target)
+            if isinstance(target, ast.Attribute) and target.attr == "tool":
+                pending: list[ast.expr] = [target.value]
+            elif t_pair is not None and t_pair[1] == "tool":
+                pending = [t_pair[0]]
+            else:
                 continue
-            root = target.value
-            while isinstance(root, ast.Attribute):
-                root = root.value
-            if isinstance(root, ast.Name) and root.id in imported:
-                return True
+            while pending:
+                root = pending.pop()
+                if any(name.id in imported for name in _expr_roots(root)):
+                    return True
     return False
 
 
@@ -1295,21 +1298,31 @@ def _attribute_access(node: ast.AST) -> tuple[ast.expr, str] | None:
 
 
 def _expr_roots(node: ast.expr) -> list[ast.Name]:
-    """The names a chain of attributes or literal ``getattr`` calls can start from.
-
-    A getattr's default is returned when the attribute is missing, so it is one too.
-    """
-    pending = [node]
+    """The names an attribute, literal ``getattr`` or non-call carrier expression can
+    start from without crossing a constructor call."""
+    pending: list[ast.expr] = [node]
     roots: list[ast.Name] = []
     while pending:
-        node = pending.pop()
-        while isinstance(node, ast.Attribute):
-            node = node.value
-        pair = _getattr_attr(node)
-        if isinstance(node, ast.Name):
-            roots.append(node)
-        elif pair is not None and isinstance(node, ast.Call):
-            pending += (pair[0], *node.args[2:])
+        item = pending.pop()
+        while isinstance(item, ast.Attribute):
+            item = item.value
+        pair = _getattr_attr(item)
+        if isinstance(item, ast.Name):
+            roots.append(item)
+        elif pair is not None and isinstance(item, ast.Call):
+            pending.extend((pair[0], *item.args[2:]))
+        elif isinstance(item, ast.NamedExpr):
+            pending.extend((item.target, item.value))
+        elif isinstance(item, (ast.Starred, ast.Subscript)):
+            pending.append(item.value)
+        elif isinstance(item, (ast.Tuple, ast.List, ast.Set)):
+            pending.extend(item.elts)
+        elif isinstance(item, ast.Dict):
+            pending.extend(val for val in item.values if val is not None)
+        elif isinstance(item, ast.BoolOp):
+            pending.extend(item.values)
+        elif isinstance(item, ast.IfExp):
+            pending.extend((item.body, item.orelse))
     return roots
 
 
@@ -1317,26 +1330,67 @@ def _rooted_at_expr(node: ast.expr, names: set[str]) -> bool:
     return any(root.id in names for root in _expr_roots(node))
 
 
+def _target_names(node: ast.expr) -> list[str]:
+    pending: list[ast.expr] = [node]
+    names: list[str] = []
+    while pending:
+        item = pending.pop()
+        if isinstance(item, ast.Name):
+            names.append(item.id)
+        elif isinstance(item, (ast.Tuple, ast.List, ast.Set)):
+            pending.extend(item.elts)
+        elif isinstance(item, ast.Starred):
+            pending.append(item.value)
+    return names
+
+
 def _sdk_roots(nodes: list[ast.AST], modules: set[str]) -> set[str]:
-    """SDK module names, symbols imported from them, and variables assigned from them."""
+    """SDK module names, symbols imported from them, and variables bound from them."""
     roots = set(modules) | {bound for _, bound in _sdk_imported(nodes)}
-    edges: dict[str, list[str]] = {}
+    edges: dict[str, set[str]] = {}
+    pairs: list[tuple[list[ast.expr], list[ast.expr]]] = []
     for node in nodes:
-        if (
-            isinstance(node, ast.Assign)
-            and len(node.targets) == 1
-            and isinstance(node.targets[0], ast.Name)
-        ):
-            for src in _expr_roots(node.value):
-                edges.setdefault(src.id, []).append(node.targets[0].id)
+        if isinstance(node, ast.Assign):
+            pairs.append((node.targets, [node.value]))
+        elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)) and node.value is not None:
+            pairs.append(([node.target], [node.value]))
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            pairs.append(([node.target], [node.iter]))
+        elif isinstance(node, ast.withitem) and node.optional_vars is not None:
+            value = node.context_expr
+            values = [value]
+            if isinstance(value, ast.Call):
+                values.extend((*value.args, *(kw.value for kw in value.keywords)))
+            pairs.append(([node.optional_vars], values))
+        elif isinstance(node, ast.arguments):
+            positional = [*node.posonlyargs, *node.args]
+            arg_pairs = [
+                *zip(
+                    positional[len(positional) - len(node.defaults) :], node.defaults, strict=True
+                ),
+                *zip(node.kwonlyargs, node.kw_defaults, strict=True),
+            ]
+            pairs.extend(
+                ([ast.Name(id=argument.arg)], [default])
+                for argument, default in arg_pairs
+                if default is not None
+            )
+    for index, (targets, values) in enumerate(pairs):
+        joint = f"#{index}"
+        for val in values:
+            for src in _expr_roots(val):
+                edges.setdefault(src.id, set()).add(joint)
+        for target in targets:
+            for dst in _target_names(target):
+                edges.setdefault(joint, set()).add(dst)
     queue = deque(roots)
     while queue:
         current = queue.popleft()
-        for target in edges.get(current, ()):
-            if target not in roots:
-                roots.add(target)
-                queue.append(target)
-    return roots
+        for target_name in edges.get(current, ()):
+            if target_name not in roots:
+                roots.add(target_name)
+                queue.append(target_name)
+    return {name for name in roots if not name.startswith("#")}
 
 
 def _scope(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> ast.AST | None:
@@ -1649,14 +1703,16 @@ def collect_python_tools(
     if not factories and not decorators and not agent_factories:
         _report_imported_receivers(tree, path, result)
         if sdk_import and (
-            parsed.overflow
-            or _reflective_access(parsed.all_nodes, parsed.all_parents, bindings, any_target=True)
+            parsed.overflow or _reflective_access(parsed.all_nodes, parsed.all_parents, bindings)
         ):
             result.surfaces_excluded.append(
                 f"{path.as_posix()}: unsupported Python MCP binding or dynamic registration"
             )
         return
-    if any(a.name == "*" for stmt in imports for a in stmt.names):
+    if any(
+        isinstance(stmt, ast.ImportFrom) and any(a.name == "*" for a in stmt.names)
+        for stmt in nodes
+    ):
         result.surfaces_excluded.append(
             f"{path.as_posix()}: Python MCP bindings exceed supported scope"
         )
@@ -1684,8 +1740,7 @@ def collect_python_tools(
     if not factories:
         _report_imported_receivers(tree, path, result)
         if sdk_import and (
-            parsed.overflow
-            or _reflective_access(parsed.all_nodes, parsed.all_parents, bindings, any_target=True)
+            parsed.overflow or _reflective_access(parsed.all_nodes, parsed.all_parents, bindings)
         ):
             result.surfaces_excluded.append(
                 f"{path.as_posix()}: unsupported Python MCP binding or dynamic registration"

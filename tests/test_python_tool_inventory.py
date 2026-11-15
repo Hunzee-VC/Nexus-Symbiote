@@ -362,7 +362,9 @@ def test_helpers_of_the_same_file_are_judged_by_what_they_do_with_the_server(tmp
         "from sys import modules\nmodules[__name__].mcp.tool()(delete_all)\n",
         "import sys\ngetattr(sys, 'modules')[__name__].mcp.tool()(delete_all)\n",
         "import importlib\ngetattr(importlib.import_module(__name__), 'mcp').tool()(delete_all)\n",
-        "def find(value):\n    return getattr(value, 'tool')\n",
+        "getattr(mcp, 'tool')(delete_all)\n",
+        "def find(value):\n    return getattr(value, 'tool')\nfind(mcp)(delete_all)\n",
+        "def run(getattr):\n    return getattr(1, 'real')\n",
         "__builtins__['globals']()['mcp'].tool()(delete_all)\n",
     ],
 )
@@ -413,6 +415,8 @@ def test_immediately_awaited_server_run_does_not_escape(tmp_path):
         "def total(df):\n    return df.eval('a + b')\n",
         "real = getattr(7, 'real')\n",
         "import os\nenviron = getattr(os, 'environ')\n",
+        "def read_title(item):\n    return getattr(item, 'title', '')\n",
+        "class Box:\n    def label(self):\n        return getattr(self, 'name', '')\n",
     ],
 )
 def test_ordinary_server_use_is_not_a_gap(tmp_path, operation):
@@ -1059,9 +1063,87 @@ def test_annotations_and_parameters_that_run_no_code_are_not_gaps(tmp_path, sour
         "from mcp import ClientSession\nasync def titles(session: ClientSession) -> list[str]:\n"
         + "    result = await session.list_tools()\n"
         + "    return [getattr(tool, 'title', None) or tool.name for tool in result.tools]\n",
+        "def wire(ns, f):\n    getattr(ns, 'mcp').tool()(f)\n",
+        FASTMCP
+        + "mcp = FastMCP('x')\nmcp.settings.port = 8000\n@mcp.tool()\ndef add(): pass\n"
+        + "def wire(ns, f):\n    getattr(ns, 'mcp').tool()(f)\n",
     ],
 )
 def test_literal_getattr_in_a_file_without_a_server_is_not_a_gap(tmp_path, source):
-    result, tools = scan(tmp_path, source)
-    assert not tools
+    result, _ = scan(tmp_path, source)
     assert not result.scan_failures and not result.surfaces_excluded
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_gap"),
+    [
+        (
+            FASTMCP
+            + "import typing as t\nt.Literal = t.Optional\nmcp = FastMCP('x')\n"
+            + "def f(x: t.Literal['mcp.add_tool(delete_all)']) -> None: pass\n",
+            "pkg/server.py: unsupported Python MCP binding or dynamic registration",
+        ),
+        (
+            FASTMCP
+            + "import typing as t\nt.Annotated = t.Tuple\nmcp = FastMCP('x')\n"
+            + "def f(x: t.Annotated[int, 'mcp.add_tool(delete_all)']) -> None: pass\n",
+            "pkg/server.py: unsupported Python MCP binding or dynamic registration",
+        ),
+        (
+            "from fastmcp.server import dependencies as D\n(s,) = (D,)\ns._private\n",
+            "pkg/server.py: Python MCP server reachable through a request context",
+        ),
+        (
+            "from fastmcp.server import dependencies as D\na = b = D\nb._private\n",
+            "pkg/server.py: Python MCP server reachable through a request context",
+        ),
+        (
+            "from fastmcp.server import dependencies as D\ns: object = D\ns.carrier = 1\n",
+            "pkg/server.py: Python MCP server reachable through a request context",
+        ),
+        (
+            "from fastmcp.server import dependencies as D\n(s := D)._private\n",
+            "pkg/server.py: Python MCP server reachable through a request context",
+        ),
+        (
+            "from fastmcp.server import dependencies as D\ndef f(s=D):\n    return s._private\n",
+            "pkg/server.py: Python MCP server reachable through a request context",
+        ),
+        (
+            "from fastmcp.server import dependencies as D\nfor s in (D,):\n    s._private\n",
+            "pkg/server.py: Python MCP server reachable through a request context",
+        ),
+        (
+            FASTMCP + "from .evil import *\nmcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n",
+            "pkg/server.py: Python MCP bindings exceed supported scope",
+        ),
+        (
+            FASTMCP
+            + "from .helper import currentframe\nmcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n",
+            "pkg/server.py: unsupported Python MCP binding or dynamic registration",
+        ),
+        (
+            "import shared\n@getattr(shared, 'mcp').tool()\ndef add(): pass\n",
+            "pkg/server.py: Python MCP tools registered on an imported server",
+        ),
+        (
+            "def f(ns):\n    return getattr(ns, 'FastMCP')('x')\n",
+            "pkg/server.py: MCP server class reached as an attribute; servers built from it not inventoried",
+        ),
+        (
+            "import importlib\nload = getattr(importlib, 'import_module')\nload('..server', 'mcp.sub')\n",
+            "pkg/server.py: MCP server module loaded dynamically; tools not inventoried",
+        ),
+        (
+            "def f(getattr):\n    return getattr('mcp', 'x')\n",
+            "pkg/server.py: MCP server module loaded dynamically; tools not inventoried",
+        ),
+        (
+            AGENT + "cls = Agent\nagent = Agent('m')\n@agent.tool_plain\ndef search(): pass\n",
+            "pkg/server.py: unsupported Python SDK tool binding or dynamic registration",
+        ),
+    ],
+)
+def test_mutated_typing_sdk_root_aliasing_and_getattr_parity_gaps(tmp_path, source, expected_gap):
+    result, _ = scan(tmp_path, source)
+    assert expected_gap in result.surfaces_excluded
