@@ -117,11 +117,17 @@ Without the key, a server whose values go beyond what the inventory exports carr
 low `completeness` risk that names the key and lists what is unbound: a command path
 (a command with a directory, or one behind a wrapper), launch arguments other than the
 recorded launcher package and `-y`, environment values, header values, an endpoint path,
-query, fragment or user information, project resolver settings, or the values of the
-client settings `cwd` (working directory), `envFile` (environment file), `watchPaths`,
-`oauth` and `auth` (authentication settings), `dev` (development settings) and the Codex
-`env_vars`, `bearer_token_env_var` and `env_http_headers` (forwarded environment
-variable names), which the record exports only as present. A server whose
+query, fragment or user information, project resolver settings, redacted tool list
+entries (when an `alwaysAllow`, `autoApprove`, `includeTools`, `excludeTools`,
+`enabled_tools`, `disabled_tools` or `disabledTools` item changes under redaction or
+holds a scrubbed credential, which also records a coverage gap without the key so
+distinct URLs or secrets cannot collide silently), or the values of the client settings
+`cwd` (working directory, except `.`, `./`, `${workspaceFolder}` and
+`${workspaceFolder}/` in a root configuration file; nested configuration files mark any
+`cwd` unbound), `envFile` (environment file), `watchPaths`, `oauth` and `auth`
+(authentication settings), `dev` (development settings) and the Codex `env_vars`,
+`bearer_token_env_var` and `env_http_headers` (forwarded environment variable names),
+which the record exports only as present. A server whose
 arguments are only its recorded launcher package, or with a bare endpoint origin,
 carries none. `diff --fail-on-alert` treats an MCP server with that finding as a
 medium alert that launch values are unbound, including when the two inventories

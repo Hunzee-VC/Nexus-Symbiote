@@ -1268,3 +1268,270 @@ def test_a_root_working_directory_is_not_named_unbound(tmp_path, monkeypatch, cw
     assert not any(
         "working directory" in r.detail for r in server.risks if r.category == "completeness"
     )
+
+
+@pytest.mark.parametrize(
+    "path,field",
+    [
+        (".mcp.json", "autoApprove"),
+        (".roo/mcp.json", "alwaysAllow"),
+        (".gemini/settings.json", "includeTools"),
+        (".kiro/settings/mcp.json", "excludeTools"),
+        (".codex/config.toml", "enabled_tools"),
+        (".codex/config.toml", "disabled_tools"),
+        (".mcp.json", "disabledTools"),
+    ],
+)
+def test_redacted_tool_list_entries_fail_closed_unkeyed_and_bind_raw_items_when_keyed(
+    tmp_path, monkeypatch, path, field
+):
+    first_item = "https://mcp.internal/tools/read_only"
+    second_item = "https://mcp.internal/tools/delete_all"
+
+    def write_project(root: Path, item: str) -> None:
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        if path.endswith(".toml"):
+            content = (
+                '[mcp_servers.git]\ncommand = "docker"\n'
+                'args = ["run", "mcp/git@sha256:' + ("a" * 64) + '"]\n'
+                f"{field} = {_toml_list([item])}\n"
+            )
+        else:
+            server = {
+                "command": "docker",
+                "args": ["run", "mcp/git@sha256:" + ("a" * 64)],
+                field: [item],
+            }
+            content = json.dumps({"mcpServers": {"git": server}})
+        (root / path).write_text(content)
+
+    a_root = tmp_path / "a"
+    b_root = tmp_path / "b"
+    write_project(a_root, first_item)
+    write_project(b_root, second_item)
+
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+    check_run = CliRunner().invoke(main, ["scan", "--no-project-policy", "--check", str(a_root)])
+    assert check_run.exit_code == 1, check_run.output
+
+    scan_result = MCPScanner().scan(a_root)
+    assert any(
+        "tool list entries withheld by redaction" in gap for gap in scan_result.surfaces_excluded
+    )
+
+    unkeyed_a = tmp_path / "unkeyed_a.json"
+    unkeyed_b = tmp_path / "unkeyed_b.json"
+    for root, out in ((a_root, unkeyed_a), (b_root, unkeyed_b)):
+        run = CliRunner().invoke(
+            main, ["scan", "--no-project-policy", "--report-only", str(root), "-o", str(out)]
+        )
+        assert run.exit_code == 0, run.output
+    unkeyed_diff = CliRunner().invoke(
+        main, ["diff", str(unkeyed_a), str(unkeyed_b), "--fail-on-alert"]
+    )
+    assert unkeyed_diff.exit_code == 1, unkeyed_diff.output
+    assert "unbound" in unkeyed_diff.output
+
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    keyed_a = tmp_path / "keyed_a.json"
+    keyed_b = tmp_path / "keyed_b.json"
+    for root, out in ((a_root, keyed_a), (b_root, keyed_b)):
+        check = CliRunner().invoke(main, ["scan", "--no-project-policy", "--check", str(root)])
+        assert check.exit_code == 0, check.output
+        run = CliRunner().invoke(main, ["scan", "--no-project-policy", str(root), "-o", str(out)])
+        assert run.exit_code == 0, run.output
+        exported = out.read_text()
+        assert "read_only" not in exported and "delete_all" not in exported
+        assert "https://mcp.internal" in exported
+
+    same_keyed = CliRunner().invoke(main, ["diff", str(keyed_a), str(keyed_a), "--fail-on-alert"])
+    assert same_keyed.exit_code == 0, same_keyed.output
+
+    swapped_keyed = CliRunner().invoke(
+        main, ["diff", str(keyed_a), str(keyed_b), "--fail-on-alert"]
+    )
+    assert swapped_keyed.exit_code == 1, swapped_keyed.output
+    assert "[CRITICAL]" in swapped_keyed.output
+    assert "static source binding changed" in swapped_keyed.output
+
+
+def test_launch_and_header_scheme_credentials_are_scrubbed_from_tool_lists(tmp_path, monkeypatch):
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+    launch_tok = "launchbearertok9"
+    arg_tok = "argbearertok9876"
+    eq_tok = "flagbearertok987"
+    hdr_tok = "upstreambearer99"
+    env_hdr_tok = "envheaderbearer9"
+    servers = {
+        "inline_env": {
+            "command": "env",
+            "args": [f"AUTH_HEADER=Bearer {launch_tok}", "uvx", "mcp-server-git==0.6.2"],
+            "autoApprove": [launch_tok, "git_status"],
+        },
+        "cli_args": {
+            "command": "npx",
+            "args": [
+                "-y",
+                "mcp-remote@0.1.0",
+                "https://x.example.test/sse",
+                "--header",
+                f"Authorization: Bearer {arg_tok}",
+                f"--header=Authorization: Bearer {eq_tok}",
+                "--header=Accept: application/json",
+            ],
+            "disabledTools": [arg_tok, eq_tok, "application/json"],
+        },
+        "custom_headers": {
+            "type": "http",
+            "url": "https://y.example.test/mcp",
+            "headers": {"X-Upstream": f"Bearer {hdr_tok}"},
+            "env": {"UPSTREAM": f"Authorization: Bearer {env_hdr_tok}"},
+            "alwaysAllow": [hdr_tok, env_hdr_tok, "search"],
+        },
+    }
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": servers}))
+    result = MCPScanner().scan(tmp_path)
+    assert not result.scan_failures, result.scan_failures
+    by_name = {c.name: c for c in result.components if isinstance(c, MCPServerComponent)}
+    assert by_name["inline_env"].properties["client_settings"]["auto_approved_tools"] == {
+        "autoApprove": ["***", "git_status"]
+    }
+    assert by_name["cli_args"].properties["client_settings"]["tool_filter_names"] == {
+        "disabledTools": ["***", "***", "application/json"]
+    }
+    assert by_name["custom_headers"].properties["client_settings"]["auto_approved_tools"] == {
+        "alwaysAllow": ["***", "***", "search"]
+    }
+    dumped = json.dumps([c.model_dump(mode="json") for c in result.components])
+    for secret in (launch_tok, arg_tok, eq_tok, hdr_tok, env_hdr_tok):
+        assert secret not in dumped
+    assert (
+        sum("tool list entries withheld by redaction" in g for g in result.surfaces_excluded) == 3
+    )
+
+
+def test_oauth_auth_and_endpoint_url_secrets_are_scrubbed_from_tool_lists(tmp_path, monkeypatch):
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+    oauth_val = "oauthclientsec99"
+    oauth_bearer = "oauthbearertok99"
+    oauth_url_pw = "oauthurlpasswd99"
+    auth_tok = "authtokenval9876"
+    auth_hdr_tok = "authhdrbearer987"
+    url_pw = "endpointpasswd99"
+    query_tok = "endpointqueryt99"
+    servers = {
+        "oauth_srv": {
+            "type": "http",
+            "url": f"https://admin:{url_pw}@mcp.example.test/sse?api_key={query_tok}",
+            "oauth": {
+                "clientId": "public-client-app",
+                "clientSecret": oauth_val,
+                "accessToken": f"Bearer {oauth_bearer}",
+                "tokenUrl": f"https://svc:{oauth_url_pw}@auth.example.test/oauth/token",
+            },
+            "autoApprove": [
+                oauth_val,
+                oauth_bearer,
+                oauth_url_pw,
+                url_pw,
+                query_tok,
+                "public-client-app",
+            ],
+        },
+        "auth_srv": {
+            "httpUrl": "https://api.example.test/mcp",
+            "auth": {
+                "token": auth_tok,
+                "headers": {"Authorization": f"Bearer {auth_hdr_tok}"},
+            },
+            "excludeTools": [auth_tok, auth_hdr_tok, url_pw, "delete_item"],
+        },
+    }
+    (tmp_path / ".mcp.json").write_text(json.dumps({"mcpServers": servers}))
+    result = MCPScanner().scan(tmp_path)
+    assert not result.scan_failures, result.scan_failures
+    by_name = {c.name: c for c in result.components if isinstance(c, MCPServerComponent)}
+    approved = by_name["oauth_srv"].properties["client_settings"]["auto_approved_tools"][
+        "autoApprove"
+    ]
+    assert approved == ["***", "***", "***", "***", "***", "public-client-app"]
+    excluded = by_name["auth_srv"].properties["client_settings"]["tool_filter_names"][
+        "excludeTools"
+    ]
+    assert excluded == ["***", "***", "***", "delete_item"]
+    dumped = json.dumps([c.model_dump(mode="json") for c in result.components])
+    for item in (
+        oauth_val,
+        oauth_bearer,
+        oauth_url_pw,
+        auth_tok,
+        auth_hdr_tok,
+        url_pw,
+        query_tok,
+    ):
+        assert item not in dumped
+
+
+@pytest.mark.parametrize(
+    "nested_path",
+    [
+        "packages/api/.mcp.json",
+        "packages/api/.vscode/mcp.json",
+        "sub/mcp.json",
+    ],
+)
+def test_nested_mcp_config_does_not_treat_dot_cwd_as_workspace_root_equivalent(
+    tmp_path, monkeypatch, nested_path
+):
+    def write_nested(root: Path, cwd_value: str) -> None:
+        target = root / nested_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        server = {
+            "command": "docker",
+            "args": ["run", "mcp/git@sha256:" + ("b" * 64)],
+            "cwd": cwd_value,
+        }
+        key_name = "servers" if ".vscode/" in nested_path else "mcpServers"
+        target.write_text(json.dumps({key_name: {"git": server}}))
+
+    dot_root = tmp_path / "dot"
+    ws_root = tmp_path / "ws"
+    write_nested(dot_root, ".")
+    write_nested(ws_root, "${workspaceFolder}")
+
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+    for root in (dot_root, ws_root):
+        res = MCPScanner().scan(root)
+        srv = next(c for c in res.components if isinstance(c, MCPServerComponent))
+        finding = next(r for r in srv.risks if r.category == "completeness")
+        assert "working directory" in finding.detail
+
+    dot_bom = tmp_path / "dot_unkeyed.json"
+    ws_bom = tmp_path / "ws_unkeyed.json"
+    for root, out in ((dot_root, dot_bom), (ws_root, ws_bom)):
+        run = CliRunner().invoke(
+            main, ["scan", "--no-project-policy", "--report-only", str(root), "-o", str(out)]
+        )
+        assert run.exit_code == 0, run.output
+    unkeyed_diff = CliRunner().invoke(main, ["diff", str(dot_bom), str(ws_bom), "--fail-on-alert"])
+    assert unkeyed_diff.exit_code == 1, unkeyed_diff.output
+    assert "unbound" in unkeyed_diff.output
+
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    dot_keyed = tmp_path / "dot_keyed.json"
+    ws_keyed = tmp_path / "ws_keyed.json"
+    for root, out in ((dot_root, dot_keyed), (ws_root, ws_keyed)):
+        check = CliRunner().invoke(main, ["scan", "--no-project-policy", "--check", str(root)])
+        assert check.exit_code == 0, check.output
+        run = CliRunner().invoke(main, ["scan", "--no-project-policy", str(root), "-o", str(out)])
+        assert run.exit_code == 0, run.output
+    same_keyed = CliRunner().invoke(
+        main, ["diff", str(dot_keyed), str(dot_keyed), "--fail-on-alert"]
+    )
+    assert same_keyed.exit_code == 0, same_keyed.output
+    changed_keyed = CliRunner().invoke(
+        main, ["diff", str(dot_keyed), str(ws_keyed), "--fail-on-alert"]
+    )
+    assert changed_keyed.exit_code == 1, changed_keyed.output
+    assert "[CRITICAL]" in changed_keyed.output
+    assert "static source binding changed" in changed_keyed.output

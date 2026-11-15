@@ -20,11 +20,12 @@ import math
 import os
 import posixpath
 import re
-from collections.abc import Callable, Iterable, Mapping
+import shlex
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qsl, quote, unquote, urlsplit
 
 from packaging.utils import canonicalize_name
 
@@ -69,11 +70,13 @@ from nexus_symbiote.scanners.mcp_launch import (
 from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.jsonc import strip_jsonc
 from nexus_symbiote.utils.secrets import (
+    MIN_SECRET_LENGTH,
     REDACTED,
     TOKEN_SHAPE,
     SecretScrubber,
     redact_descriptor,
     redact_text,
+    scheme_credentials,
     secret_like,
     secret_values,
 )
@@ -311,9 +314,173 @@ def source_binding_key() -> bytes | None:
     return key.encode()
 
 
-def _launch_secrets(launch: Launch) -> list[str]:
+_SECRET_REFERENCE = re.compile(r"\$\{[^{}\s]{1,128}\}|\$[A-Z][A-Z0-9_]{1,127}")
+_HEADER_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{1,63}")
+_CLI_FLAG = re.compile(r"-{1,2}[A-Za-z][A-Za-z0-9_-]{0,63}")
+_HEADER_FLAGS = frozenset({"-h", "--header"})
+_HEADER_PREFIXES = ("--header=", "-h=")
+_TOOL_APPROVAL_FIELDS = ("alwaysAllow", "autoApprove")
+_TOOL_FILTER_FIELDS = (
+    "includeTools",
+    "excludeTools",
+    "enabled_tools",
+    "disabled_tools",
+    "disabledTools",
+)
+_TOOL_LIST_FIELDS = (*_TOOL_APPROVAL_FIELDS, *_TOOL_FILTER_FIELDS)
+
+
+def _url_secrets(value: str) -> list[str]:
+    """Credentials carried in URL userinfo or credential-named query parameters."""
+    found: list[str] = []
+    for locator in _locators(value):
+        try:
+            parsed = urlsplit(locator)
+        except ValueError:
+            # Malformed URLs contribute no parsed userinfo or query fields.
+            continue
+        secret_part = parsed.password if parsed.password is not None else parsed.username
+        if secret_part is not None:
+            for candidate in (secret_part, unquote(secret_part)):
+                if len(candidate) >= MIN_SECRET_LENGTH and not _SECRET_REFERENCE.fullmatch(
+                    candidate
+                ):
+                    found.append(candidate)
+                    found.extend(scheme_credentials(candidate))
+        if parsed.query:
+            for qk, qv in parse_qsl(parsed.query):
+                if not _SECRET_REFERENCE.fullmatch(qv):
+                    if secret_like(qk, qv):
+                        found.append(qv)
+                    found.extend(scheme_credentials(qv))
+    return found
+
+
+def _header_line_secrets(text: str) -> list[str]:
+    """Credentials in an inline ``Header-Name: value`` string such as ``Authorization: Bearer ...``."""
+    candidate = text.strip()
+    lowered = candidate.lower()
+    for prefix in _HEADER_PREFIXES:
+        if lowered.startswith(prefix):
+            candidate = candidate[len(prefix) :].strip()
+            break
+    else:
+        if candidate.startswith("-H") and len(candidate) > 2 and not candidate.startswith("-H="):
+            candidate = candidate[2:].strip()
+    if ":" not in candidate:
+        return []
+    hdr_name, _, hdr_val = candidate.partition(":")
+    hdr_name = hdr_name.strip(" \"'")
+    if hdr_val.startswith("//") or not _HEADER_NAME.fullmatch(hdr_name):
+        return []
+    hdr_val = hdr_val.strip(" \"'")
+    if not hdr_val or _SECRET_REFERENCE.fullmatch(hdr_val):
+        return []
+    found: list[str] = []
+    if secret_like(hdr_name, hdr_val):
+        found.append(hdr_val)
+    schemes = scheme_credentials(hdr_val)
+    if schemes:
+        if len(hdr_val) >= MIN_SECRET_LENGTH:
+            found.append(hdr_val)
+        found.extend(schemes)
+    found.extend(_url_secrets(hdr_val))
+    return found
+
+
+def _auth_object_secrets(obj: Any) -> list[str]:
+    """Credentials declared inside an ``oauth`` or ``auth`` server mapping."""
+    found: list[str] = []
+    stack: list[tuple[str, Any, int]] = [("", obj, 1)]
+    visited = 0
+    while stack and visited < 1024:
+        key, current, depth = stack.pop()
+        visited += 1
+        if isinstance(current, str):
+            if key and not _SECRET_REFERENCE.fullmatch(current) and secret_like(key, current):
+                found.append(current)
+            schemes = scheme_credentials(current)
+            if schemes:
+                if len(current) >= MIN_SECRET_LENGTH:
+                    found.append(current)
+                found.extend(schemes)
+            for match in TOKEN_SHAPE.finditer(current):
+                found.append(match.group())
+            found.extend(_header_line_secrets(current))
+            found.extend(_url_secrets(current))
+        elif depth < MAX_TOOL_DEPTH:
+            if isinstance(current, dict):
+                for child_key, child_val in current.items():
+                    stack.append((str(child_key), child_val, depth + 1))
+            elif isinstance(current, list):
+                for item in current:
+                    stack.append((key, item, depth + 1))
+    return found
+
+
+def _launch_secrets(launch: Launch, args: Sequence[str] = (), command: str = "") -> list[str]:
     # Earlier assignments remain private even when a later value shadows them.
-    return [value for name, value in launch.environment if secret_like(name, value)]
+    values: list[str] = []
+    for name, value in launch.environment:
+        if secret_like(name, value):
+            values.append(value)
+        schemes = scheme_credentials(value)
+        if schemes:
+            if len(value) >= MIN_SECRET_LENGTH:
+                values.append(value)
+            values.extend(schemes)
+        for match in TOKEN_SHAPE.finditer(value):
+            values.append(match.group())
+        values.extend(_header_line_secrets(value))
+        values.extend(_url_secrets(value))
+    for _, source_value in launch.sources:
+        values.extend(_url_secrets(source_value))
+    tokens: list[str] = []
+    if command:
+        tokens.append(command)
+        if any(char.isspace() for char in command):
+            try:
+                tokens.extend(shlex.split(command))
+            except ValueError:
+                # Unclosed quotes in command still expose whitespace-delimited words.
+                tokens.extend(command.split())
+    tokens.extend(arg for arg in args if isinstance(arg, str))
+    for index, token in enumerate(tokens):
+        for match in TOKEN_SHAPE.finditer(token):
+            values.append(match.group())
+        schemes = scheme_credentials(token)
+        if schemes:
+            if len(token) >= MIN_SECRET_LENGTH:
+                values.append(token)
+            values.extend(schemes)
+        values.extend(_header_line_secrets(token))
+        values.extend(_url_secrets(token))
+        if "=" in token and "==" not in token:
+            lhs, _, rhs = token.partition("=")
+            lhs_clean = lhs.lstrip("-").strip(" \"'")
+            rhs_clean = rhs.strip(" \"'")
+            if lhs_clean and rhs_clean and not _SECRET_REFERENCE.fullmatch(rhs_clean):
+                if lhs_clean.lower() not in {"h", "header"} and secret_like(lhs_clean, rhs_clean):
+                    values.append(rhs_clean)
+                rhs_schemes = scheme_credentials(rhs_clean)
+                if rhs_schemes:
+                    if len(rhs_clean) >= MIN_SECRET_LENGTH:
+                        values.append(rhs_clean)
+                    values.extend(rhs_schemes)
+                values.extend(_header_line_secrets(rhs_clean))
+                values.extend(_url_secrets(rhs_clean))
+        if index > 0:
+            prev = tokens[index - 1]
+            if (
+                _CLI_FLAG.fullmatch(prev)
+                and prev.lower() not in _HEADER_FLAGS
+                and not token.startswith("-")
+                and not _SECRET_REFERENCE.fullmatch(token)
+                and secret_like(prev, token)
+            ):
+                values.append(token)
+                values.extend(scheme_credentials(token))
+    return list(dict.fromkeys(values))
 
 
 def _server_launch(config: dict[str, Any]) -> Launch:
@@ -323,14 +490,48 @@ def _server_launch(config: dict[str, Any]) -> Launch:
 
 
 def _server_secrets(config: dict[str, Any], launch: Launch) -> list[str]:
-    """Credential values one server declares: environment, headers and inline launcher."""
+    """Credential values one server declares: env, headers, auth, endpoints and launcher."""
     values: list[str] = []
     for field in ("env", "headers", "http_headers"):
         mapping = config.get(field)
         if isinstance(mapping, dict):
             values.extend(secret_values(mapping))
-    values.extend(_launch_secrets(launch))
-    return values
+            for item in mapping.values():
+                if isinstance(item, str):
+                    schemes = scheme_credentials(item)
+                    if schemes:
+                        if len(item) >= MIN_SECRET_LENGTH:
+                            values.append(item)
+                        values.extend(schemes)
+                    for match in TOKEN_SHAPE.finditer(item):
+                        values.append(match.group())
+                    values.extend(_header_line_secrets(item))
+                    values.extend(_url_secrets(item))
+    for auth_field in ("oauth", "auth"):
+        auth_obj = config.get(auth_field)
+        if isinstance(auth_obj, dict):
+            values.extend(_auth_object_secrets(auth_obj))
+    for url_field in (*_ENDPOINT_FIELDS, "gallery"):
+        endpoint_val = config.get(url_field)
+        if isinstance(endpoint_val, str):
+            values.extend(_url_secrets(endpoint_val))
+            schemes = scheme_credentials(endpoint_val)
+            if schemes:
+                if len(endpoint_val) >= MIN_SECRET_LENGTH:
+                    values.append(endpoint_val)
+                values.extend(schemes)
+            for match in TOKEN_SHAPE.finditer(endpoint_val):
+                values.append(match.group())
+    raw_args = config.get("args", ())
+    args: Sequence[str] = (
+        raw_args
+        if isinstance(raw_args, Sequence) and not isinstance(raw_args, (str, bytes))
+        else ()
+    )
+    raw_cmd = config.get("command", "")
+    command = raw_cmd if isinstance(raw_cmd, str) else ""
+    values.extend(_launch_secrets(launch, args, command))
+    return list(dict.fromkeys(values))
 
 
 def _value_binding(
@@ -1721,10 +1922,11 @@ class MCPScanner(Scanner):
         if scrubber is None:
             scrubber = SecretScrubber(_server_secrets(config, launch))
         cwd = config.get("cwd")
+        nested = _launch_directory(dialect.path) != ""
         relocated = (
             launch.relocated
             or (isinstance(cwd, str) and cwd.strip() not in _ROOT_DIRECTORIES)
-            or _launch_directory(dialect.path) != ""
+            or nested
         )
         environment = [*env.items(), *launch.environment]
         runner_sources, runner_reasons = _runner_environment(
@@ -1758,6 +1960,8 @@ class MCPScanner(Scanner):
             gaps.append(f"launcher identity unknown ({identity_unknown})")
         if identity.withheld:
             gaps.append("identity withheld by environment-value redaction")
+        if key is None and self._has_redacted_tool_list(config, scrubber):
+            gaps.append("tool list entries withheld by redaction")
         name = identity.name
         tool_names = sorted(
             self._tool_name(str(tool.get("name", "")), scrubber)
@@ -1833,7 +2037,7 @@ class MCPScanner(Scanner):
             {"-y", "--yes", *(package.spec for package in packages)} if launcher_package else set()
         )
         unbound = self._unbound_values(args, env, headers, endpoint_url, command, launch, recorded)
-        unbound.extend(self._unbound_client_values(config))
+        unbound.extend(self._unbound_client_values(config, scrubber, nested=nested))
         if resolver:
             unbound.append("project resolver settings")
         if unbound and key is None:
@@ -2231,7 +2435,7 @@ class MCPScanner(Scanner):
         # what is approved without changing the merged list.
         approved = {
             field: sorted(cls._tool_name(tool, scrubber) for tool in config[field])
-            for field in ("alwaysAllow", "autoApprove")
+            for field in _TOOL_APPROVAL_FIELDS
             if config.get(field)
         }
         if config.get("trust") is True:
@@ -2255,19 +2459,27 @@ class MCPScanner(Scanner):
                 settings[label] = True
         filters = {
             field: sorted(cls._tool_name(tool, scrubber) for tool in config[field])
-            for field in (
-                "includeTools",
-                "excludeTools",
-                "enabled_tools",
-                "disabled_tools",
-                "disabledTools",
-            )
+            for field in _TOOL_FILTER_FIELDS
             if config.get(field)
         }
         if filters:
             settings["tool_filters"] = sum(len(names) for names in filters.values())
             settings["tool_filter_names"] = filters
         return settings
+
+    @classmethod
+    def _has_redacted_tool_list(cls, config: dict[str, Any], scrubber: SecretScrubber) -> bool:
+        """Whether any approval or filter list item changes under redaction or holds a secret."""
+        for field in _TOOL_LIST_FIELDS:
+            items = config.get(field)
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if isinstance(item, str) and (
+                    cls._tool_name(item, scrubber) != item or scrubber.contains(item)
+                ):
+                    return True
+        return False
 
     @staticmethod
     def _unbound_values(
@@ -2295,13 +2507,20 @@ class MCPScanner(Scanner):
             unbound.append("endpoint path and query")
         return unbound
 
-    @staticmethod
-    def _unbound_client_values(config: dict[str, Any]) -> list[str]:
-        """Client settings exported only as present, whose values only the keyed binding covers."""
+    @classmethod
+    def _unbound_client_values(
+        cls,
+        config: dict[str, Any],
+        scrubber: SecretScrubber | None = None,
+        *,
+        nested: bool = False,
+    ) -> list[str]:
+        """Client settings exported only as present or redacted, whose values only the key covers."""
         unbound = []
-        cwd = config.get("cwd")
-        if cwd and not (isinstance(cwd, str) and cwd.strip() in _ROOT_DIRECTORIES):
-            unbound.append("working directory")
+        if "cwd" in config:
+            cwd = config.get("cwd")
+            if nested or not (isinstance(cwd, str) and cwd.strip() in _ROOT_DIRECTORIES):
+                unbound.append("working directory")
         for label, fields in (
             ("environment file", ("envFile",)),
             ("watch paths", ("watchPaths",)),
@@ -2314,6 +2533,9 @@ class MCPScanner(Scanner):
         ):
             if any(config.get(field) for field in fields):
                 unbound.append(label)
+        active_scrubber = scrubber if scrubber is not None else SecretScrubber()
+        if cls._has_redacted_tool_list(config, active_scrubber):
+            unbound.append("redacted tool list entries")
         return unbound
 
     def _server_risks(
