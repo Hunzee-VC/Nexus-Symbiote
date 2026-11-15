@@ -73,6 +73,7 @@ def package_identifier(component: AnyComponent) -> PackageIdentifierProjection:
     if (
         not value
         or len(value) > 2048
+        or "#" in value
         or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value)
         or re.match(r"^pkg:[a-z][a-z0-9.+-]*/", value) is None
         or re.search(r"%(?![0-9A-Fa-f]{2})", value)
@@ -82,13 +83,9 @@ def package_identifier(component: AnyComponent) -> PackageIdentifierProjection:
         decoded = unquote(value, errors="strict")
         if any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in decoded):
             return invalid
-        # PackageURL normalizes dot segments in subpaths. Never silently discard
-        # a supplied traversal segment when projecting a producer's declaration.
-        main, _, raw_fragment = value.partition("#")
-        raw_path, _, raw_query = main.partition("?")
-        path = unquote(raw_path, errors="strict")
-        fragment = unquote(raw_fragment, errors="strict")
-        segments = [*path.split("/"), *(fragment.split("/") if fragment else [])]
+        # PackageURL normalizes dot segments; never silently discard traversal segments.
+        raw_path, _, raw_query = value.partition("?")
+        segments = unquote(raw_path, errors="strict").split("/")
         if any(part in {"", ".", ".."} for part in segments):
             return invalid
         if raw_query:
@@ -113,6 +110,8 @@ def _agrees_with_component(package: PackageURL, component: _Declaration) -> bool
     projected, because nothing ties it to the component. A qualifier these rules
     do not know could change what the identifier names, so it is not accepted.
     """
+    if package.subpath is not None:
+        return False
     if package.type in {"pypi", "npm"} and component.registry_type != package.type:
         return False
     qualifiers = package.qualifiers if isinstance(package.qualifiers, dict) else None
