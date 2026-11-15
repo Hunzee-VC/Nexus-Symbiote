@@ -407,15 +407,19 @@ def _interpreter() -> str | None:
     return interpreter
 
 
+def _pidfd_supported() -> bool:
+    return hasattr(os, "pidfd_open") and hasattr(signal, "pidfd_send_signal")
+
+
 def _gate_argv(staged: Path) -> list[str] | None:
     """Run ``staged`` as the namespace init only once it is released, or None.
 
     The wrapper has the same constraints as the subreaper wrapper. Without a separately
-    runnable interpreter or ``os.pidfd_open``, the init starts at once, and cleanup
-    finds it as the child of a stopped ``unshare`` instead.
+    runnable interpreter, ``os.pidfd_open`` or ``signal.pidfd_send_signal``, the init
+    starts at once, and cleanup finds it as the child of a stopped ``unshare`` instead.
     """
     interpreter = _interpreter()
-    if interpreter is None or not hasattr(os, "pidfd_open"):
+    if interpreter is None or not _pidfd_supported():
         return None
     return [interpreter, "-I", "-S", "-B", "-c", _GATE_EXEC, str(staged)]
 
@@ -446,6 +450,8 @@ def _hold_init(supervisor: int) -> int | None:
     pidfd; cleanup then falls back to stopping ``unshare``. Raises
     ``PinnedProcessError`` when no init starts, before any launcher code has run.
     """
+    if not _pidfd_supported():
+        return None
     try:
         status = _status(supervisor)
     except OSError:
@@ -571,7 +577,8 @@ def _release(proc: subprocess.Popen[bytes]) -> None:
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(proc.pid, signal.SIGKILL)
         if init is not None:
-            os.close(init)
+            with contextlib.suppress(OSError):
+                os.close(init)
         _NAMESPACED.discard(proc.pid)
         proc.stdin.close()
         proc.stdout.close()
@@ -607,21 +614,25 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
     stop = sys.platform.startswith("linux") and proc.returncode is None
     ended = True
     try:
-        if namespaced:
-            try:
-                ended = _end_init(init) if init is not None else _end_unheld_namespace(proc, stop)
-            except Exception:
-                # Whatever failed, the namespace was not shown to have ended.
-                ended = False
-        else:
-            if stop:
-                _stop_launcher(proc.pid)
-            _kill_descendants(proc.pid)
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            # The group already exited; the caller's wait() still reaps the launcher.
-            pass
+            if namespaced:
+                try:
+                    ended = (
+                        _end_init(init) if init is not None else _end_unheld_namespace(proc, stop)
+                    )
+                except Exception:
+                    # Whatever failed, the namespace was not shown to have ended.
+                    ended = False
+            else:
+                if stop:
+                    _stop_launcher(proc.pid)
+                _kill_descendants(proc.pid)
+        finally:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                # The group already exited; the caller's wait() still reaps the launcher.
+                pass
         if not namespaced:
             _kill_descendants(proc.pid)
     finally:
@@ -630,9 +641,13 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
         # the descendant-tree kill.
         _NAMESPACED.discard(proc.pid)
         if init is not None:
-            with contextlib.suppress(OSError):
-                signal.pidfd_send_signal(init, signal.SIGKILL)
-            os.close(init)
+            try:
+                if hasattr(signal, "pidfd_send_signal"):
+                    with contextlib.suppress(OSError):
+                        signal.pidfd_send_signal(init, signal.SIGKILL)
+            finally:
+                with contextlib.suppress(OSError):
+                    os.close(init)
         if stop:
             # killpg has normally killed it already. If cleanup failed before that, a
             # stopped launcher would never read EOF and the caller's wait() would hang.

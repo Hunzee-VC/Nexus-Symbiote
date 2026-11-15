@@ -21,7 +21,7 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Mapping
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -255,23 +255,37 @@ class PinnedStdioSession:
                 "tools/call was sent but no valid result arrived; the tool may have run"
             ) from exc
 
-    def __exit__(self, *_: object) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        *_: object,
+    ) -> None:
         proc = self._process
         self._process = None
-        teardown: PinnedProcessError | None = None
+        teardown: Exception | None = None
         try:
             if proc is not None:
                 try:
                     try:
                         terminate_process_group(proc)
-                    except PinnedProcessError as exc:
-                        teardown = exc
-                    proc.wait(timeout=5)
+                    except Exception as err:
+                        teardown = err
                 finally:
-                    if proc.stdin is not None:
-                        proc.stdin.close()
-                    if proc.stdout is not None:
-                        proc.stdout.close()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired as err:
+                        with suppress(ProcessLookupError, PermissionError):
+                            proc.kill()
+                        with suppress(subprocess.TimeoutExpired):
+                            proc.wait(timeout=1)
+                        if teardown is None:
+                            teardown = err
+                    finally:
+                        if proc.stdin is not None:
+                            proc.stdin.close()
+                        if proc.stdout is not None:
+                            proc.stdout.close()
         finally:
             if self._directory is not None:
                 self._directory.cleanup()
@@ -279,10 +293,20 @@ class PinnedStdioSession:
         if teardown is None:
             return
         if self._called:
+            if isinstance(exc, ExecutionOutcomeUnknown) and not isinstance(
+                teardown, PinnedProcessError
+            ):
+                return
             raise ExecutionOutcomeUnknown(
                 "the launcher's PID namespace did not end; the tool may still be running"
+                if isinstance(teardown, PinnedProcessError)
+                else "launcher cleanup did not complete; the tool may still be running"
             ) from teardown
-        raise AuthorizationError(str(teardown)) from teardown
+        if exc is not None:
+            return
+        if isinstance(teardown, PinnedProcessError):
+            raise AuthorizationError(str(teardown)) from teardown
+        raise teardown
 
 
 def invoke_pinned_stdio(

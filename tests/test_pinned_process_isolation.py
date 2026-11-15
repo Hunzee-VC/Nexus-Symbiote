@@ -1143,3 +1143,54 @@ def test_verify_live_fails_a_server_whose_namespace_did_not_end(
     assert not report["complete"]
     assert report["results"][0]["reason"] == "isolation-teardown-failed"
     assert report["results"][0]["error"] == verify.REASONS["isolation-teardown-failed"]
+
+
+def test_gate_is_disabled_and_init_fd_closes_without_pidfd_send_signal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delattr(pinned_process.signal, "pidfd_send_signal", raising=False)
+    assert pinned_process._gate_argv(tmp_path / "server") is None
+    assert pinned_process._hold_init(os.getpid()) is None
+    proc, init = _supervised(tmp_path)
+    read_fd, write_fd = os.pipe()
+    os.close(write_fd)
+    try:
+        pinned_process._INITS[proc.pid] = read_fd
+        with pytest.raises(pinned_process.PinnedProcessError) as failed:
+            pinned_process.terminate_process_group(proc)
+        assert failed.value.reason == "isolation-teardown-failed"
+        with pytest.raises(OSError):
+            os.fstat(read_fd)
+        assert proc.wait(timeout=5) == -signal.SIGKILL
+    finally:
+        with contextlib.suppress(OSError):
+            os.close(read_fd)
+        monkeypatch.undo()
+        _end_supervised(proc, init)
+
+
+def test_the_launcher_group_is_killed_when_the_sweep_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    killpg = os.killpg
+    groups: list[int] = []
+
+    def record(pgid: int, sig: int) -> None:
+        groups.append(pgid)
+        killpg(pgid, sig)
+
+    def fail(root: int) -> None:
+        raise RuntimeError("sweep failed")
+
+    monkeypatch.setattr(pinned_process, "_kill_descendants", fail)
+    monkeypatch.setattr(pinned_process.os, "killpg", record)
+    proc = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)  # noqa: S603
+    try:
+        with pytest.raises(RuntimeError, match="sweep failed"):
+            pinned_process.terminate_process_group(proc)
+    finally:
+        monkeypatch.undo()
+        with contextlib.suppress(ProcessLookupError):
+            killpg(proc.pid, signal.SIGKILL)
+    assert groups == [proc.pid]
+    assert proc.wait(timeout=5) == -signal.SIGKILL

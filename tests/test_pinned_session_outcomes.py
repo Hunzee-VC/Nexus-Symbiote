@@ -153,3 +153,46 @@ def test_a_namespace_that_did_not_end_before_any_call_is_a_denial(tmp_path, monk
     assert isinstance(caught.value.__cause__, PinnedProcessError)
     assert not log.exists()
     assert [proc.returncode is not None for proc in ended] == [True]
+
+
+def test_unexpected_teardown_error_after_call_reaps_process_and_reports_unknown_outcome(
+    tmp_path, monkeypatch
+):
+    reaped: list = []
+    terminate = session_module.terminate_process_group
+
+    def crash_after_kill(proc):
+        terminate(proc)
+        reaped.append(proc)
+        raise RuntimeError("unexpected cleanup fault")
+
+    monkeypatch.setattr(session_module, "terminate_process_group", crash_after_kill)
+    with pytest.raises(ExecutionOutcomeUnknown) as caught:
+        call(tmp_path, "ok")
+    assert isinstance(caught.value.__cause__, RuntimeError)
+    assert [proc.returncode is not None for proc in reaped] == [True]
+
+
+def test_wait_timeout_after_call_reports_unknown_outcome(tmp_path, monkeypatch):
+    terminate = session_module.terminate_process_group
+
+    def timeout_first_wait(proc):
+        orig_wait = proc.wait
+        calls = 0
+
+        def flaky_wait(timeout=None):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise subprocess.TimeoutExpired(proc.args, timeout or 5)
+            return orig_wait(timeout=timeout)
+
+        monkeypatch.setattr(proc, "wait", flaky_wait)
+        terminate(proc)
+
+    import subprocess
+
+    monkeypatch.setattr(session_module, "terminate_process_group", timeout_first_wait)
+    with pytest.raises(ExecutionOutcomeUnknown) as caught:
+        call(tmp_path, "ok")
+    assert isinstance(caught.value.__cause__, subprocess.TimeoutExpired)
