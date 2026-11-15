@@ -811,13 +811,13 @@ _UV_SOURCE_SETTINGS = _names(
 _UV_REPLACEMENT_SETTINGS = _names(
     "override-dependencies constraint-dependencies build-constraint-dependencies"
 )
-# Settings that are sources unless they hold their default value.
+# Settings that are sources unless they hold their default value, as JSON.
 _UV_DEFAULTS = {
     "offline": "false",
     "no-index": "false",
     "native-tls": "false",
-    "index-strategy": "first-index",
-    "keyring-provider": "disabled",
+    "index-strategy": '"first-index"',
+    "keyring-provider": '"disabled"',
 }
 # Settings that choose versions, build and install behaviour or project metadata, but
 # never where package bytes come from. uv applies [pip] only to `uv pip` commands.
@@ -867,7 +867,10 @@ _BUN_AUTH_SETTINGS = _names("token username password")
 _BUN_TABLES = frozenset({"install", "run", "install.cache"})
 _DENO_SOURCE_SETTINGS = frozenset({"importMap", "imports", "scopes"})
 # A prepared vendor/ or node_modules/ directory in the checkout is used as is.
-_DENO_DEFAULTS = {"nodeModulesDir": frozenset({"none", "false"}), "vendor": frozenset({"false"})}
+_DENO_DEFAULTS = {
+    "nodeModulesDir": frozenset({'"none"', "false"}),
+    "vendor": frozenset({"false"}),
+}
 # links (patch before Deno 2.4) replaces registry packages with local directories.
 _DENO_LINK_SETTINGS = frozenset({"links", "patch"})
 # Unstable features that add runtime APIs; any other may change module resolution.
@@ -877,6 +880,15 @@ _DENO_RUNTIME_FEATURES = _names(
 _DENO_INERT_SETTINGS = _names(
     "$schema name version exports license lock tasks fmt lint test bench publish exclude"
     " compilerOptions workspace deploy permissions minimumDependencyAge"
+)
+# Settings compared with a default or read as a list keep their JSON type: Bun reads
+# `cache = "false"` as a directory named false, not as the boolean.
+_TYPED_SETTINGS = (
+    frozenset(_UV_DEFAULTS)
+    | _UV_REPLACEMENT_SETTINGS
+    | frozenset(_DENO_DEFAULTS)
+    | _DENO_LINK_SETTINGS
+    | {"unstable", "install.cache"}
 )
 _RESOLVER_FILES = {
     "npm": (".npmrc",),
@@ -1309,6 +1321,11 @@ def _setting_text(value: Any) -> str:
     return value if isinstance(value, str) else json.dumps(value, default=str)
 
 
+def _entry(key: str, value: Any) -> tuple[str, str]:
+    """A setting and its text, the JSON text for a setting that keeps its type."""
+    return key, json.dumps(value, default=str) if key in _TYPED_SETTINGS else _setting_text(value)
+
+
 def _typed(value: Any) -> Any:
     """An injective JSON form of a parsed TOML or YAML value: each scalar names its type,
     so a date and its text, or 1 and 1.0, bind differently."""
@@ -1344,7 +1361,7 @@ def _uv_file(settings: dict[str, Any]) -> _ResolverFile:
     """Every setting of uv.toml or [tool.uv]: index and sources entries one per location."""
     entries = list(_uv_settings(settings).settings)
     entries += [
-        (str(key), _setting_text(value))
+        _entry(str(key), value)
         for key, value in settings.items()
         if key not in _UV_SETTINGS and key != "sources"
     ]
@@ -1361,7 +1378,7 @@ def _bun_entries(table: dict[str, Any], prefix: str = "") -> list[tuple[str, str
         if name in _BUN_TABLES and isinstance(value, dict):
             found += _bun_entries(value, name + ".")
         elif value or name not in gated:
-            found.append((name, _setting_text(value)))
+            found.append(_entry(name, value))
     return found
 
 
@@ -1478,7 +1495,7 @@ class _Resolvers:
             try:
                 binding = tuple((key, canonical_json(data[key])) for key in sorted(data))
                 deno_entries = [
-                    (key, _setting_text(value))
+                    _entry(key, value)
                     for key, value in data.items()
                     if key not in _DENO_SOURCE_SETTINGS
                 ]

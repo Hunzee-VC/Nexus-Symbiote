@@ -52,7 +52,8 @@ cache, checksum, offline, network and environment-file settings of `.yarnrc.yml`
 sources, and a `.env.yarn` file, which Yarn 4 loads by default, is `[unresolved]`.
 Every setting of `uv.toml`, `[tool.uv]`, `bunfig.toml`, `deno.json` and `deno.jsonc`
 is classified too, and a setting outside the collector's vocabulary, a misspelled one
-such as `cache_dir` included, is a source. For uv, indexes, mirrors, insecure hosts,
+such as `cache_dir` included, is a source. A setting compared with its default, or
+read as a list, must have the default's type: the string `"false"` is not `false`. For uv, indexes, mirrors, insecure hosts,
 `cache-dir` (a prepared cache in the checkout is used as is, as with `UV_CACHE_DIR`),
 `python-downloads-json-url`, `dependency-metadata`, extra build dependencies and
 variables, `config-settings`, `exclude-dependencies`, `offline`, `no-index` and
@@ -66,8 +67,8 @@ versions or build and install behaviour, project metadata such as `dev-dependenc
 and `workspace`, and the `[pip]` table, which uv applies only to `uv pip` commands,
 are not. bunfig settings are named by their table, such as `install.cache.dir`:
 beside its registries, scopes and CA settings, its cache and global directories
-(`[install.cache] dir`, `install.globalDir`, `install.globalBinDir`) are sources, as
-`BUN_INSTALL_CACHE_DIR` is; `preload` and `run.preload` make the identity unknown;
+(`[install.cache] dir`, an `install.cache` other than `false`, `install.globalDir` and
+`install.globalBinDir`) are sources, as `BUN_INSTALL_CACHE_DIR` is; `preload` and `run.preload` make the identity unknown;
 `run.shell`, `define`, `jsxImportSource` and `[install.security]` change the code that
 runs (a medium `launch_context` risk); install, lockfile, test, logging and display
 settings are not sources. For Deno, `imports`, `scopes` and `importMap` are sources,

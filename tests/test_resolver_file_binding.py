@@ -271,6 +271,18 @@ def test_a_redirecting_resolver_edit_fails_diff_and_validation(
         ),
         (DENO, "deno.json", '{"unstable": ["kv", "byonm"]}', "deno.json:unstable=[local]"),
         (DENO, "deno.json", '{"unstable": "byonm"}', "deno.json:unstable=[local]"),
+        # A value of another type is never read as the default or as a list of it.
+        (
+            BUNX,
+            "bunfig.toml",
+            '[install]\ncache = "false"\n',
+            "bunfig.toml:install.cache=[local]",
+        ),
+        (DENO, "deno.json", '{"vendor": "false"}', "deno.json:vendor=[local]"),
+        (DENO, "deno.json", '{"nodeModulesDir": ["none"]}', "deno.json:nodeModulesDir=[local]"),
+        (DENO, "deno.json", '{"unstable": "[\\"kv\\"]"}', "deno.json:unstable=[local]"),
+        (UV_RUN, "uv.toml", 'offline = "false"\n', "uv.toml:offline=[local]"),
+        (UV_RUN, "uv.toml", "index-strategy = ['first-index']\n", "uv.toml:index-strategy=[local]"),
     ],
 )
 def test_cache_vendor_node_modules_and_override_settings_are_sources(
@@ -329,6 +341,7 @@ def test_unknown_resolver_settings_are_sources_named_other(tmp_path, config, pat
         ("uv.toml", 'override-dependencies = ["not a requirement ;;"]\n'),
         ("uv.toml", "override-dependencies = [7]\n"),
         ("uv.toml", 'override-dependencies = "mcp-server-fetch @ https://evil.example/x.whl"\n'),
+        ("uv.toml", "override-dependencies = '[\"httpx\"]'\n"),
         (
             "pyproject.toml",
             "[tool.uv]\noverride-dependencies = "
@@ -376,9 +389,10 @@ def test_bunfig_settings_that_change_the_running_code_are_launch_context(tmp_pat
     )
 
 
+@pytest.mark.parametrize("value", [["../server-everything"], "[]", "../server-everything"])
 @pytest.mark.parametrize("key", ["links", "patch"])
-def test_deno_local_package_links_make_the_identity_unknown(tmp_path, key):
-    _write(tmp_path, DENO, {"deno.json": json.dumps({key: ["../server-everything"]})})
+def test_deno_local_package_links_make_the_identity_unknown(tmp_path, key, value):
+    _write(tmp_path, DENO, {"deno.json": json.dumps({key: value})})
     result = MCPScanner().scan(tmp_path)
     server = next(c for c in result.components if isinstance(c, MCPServerComponent))
     assert server.package_url is None and server.version_pinned is False
