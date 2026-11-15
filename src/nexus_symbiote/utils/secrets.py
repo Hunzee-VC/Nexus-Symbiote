@@ -278,6 +278,10 @@ class SecretScrubber:
         # the last, can add to the cover.
         first, last_free = 0, len(text) - 1
         for value in self._values:
+            # A value the text does not hold adds nothing to the cover; testing that
+            # first keeps the per-value bookkeeping below off the common path.
+            if value not in text:
+                continue
             size = len(value)
             period = self._periods[value]
             # An occurrence overlapping a run at a shift that is not a multiple of the
