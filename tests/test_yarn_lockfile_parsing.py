@@ -418,3 +418,129 @@ def test_one_stanza_with_a_spec_and_its_npm_spelling_is_bound(tmp_path):
     result, comp = scan(tmp_path, "# yarn lockfile v1\n\n" + lock)
     assert result.scan_failures == [] and result.surfaces_excluded == []
     assert comp.package_url == "pkg:npm/openai@4.0.0"
+
+
+@pytest.mark.parametrize("meta_header", ['"__metadata":', '"\\u005f_metadata":'])
+def test_quoted_berry_metadata_enables_berry_parsing_and_comma_splitting(tmp_path, meta_header):
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"^4.0.0"}}')
+    lock = (
+        f"{meta_header}\n  version: 8\n  cacheKey: 10c0\n\n"
+        '"other@npm:^1.0.0, openai@npm:^4.0.0":\n'
+        "  version: 4.0.0\n"
+        f'  resolution: "openai@{EVIL}"\n'
+        "  checksum: 10c0/" + "ab" * 64 + "\n"
+        "  languageName: node\n"
+        "  linkType: hard\n"
+    )
+    (tmp_path / "yarn.lock").write_text(lock, newline="")
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == []
+    assert result.surfaces_excluded == ["yarn.lock: local or non-registry resolution is unverified"]
+    (comp,) = result.components
+    assert_unbound(comp)
+
+
+@pytest.mark.parametrize(
+    "lock",
+    [
+        '"other@npm:^1.0.0, openai@npm:4.0.0":\n'
+        '  version: "4.0.0"\n'
+        f'  resolution: "openai@{EVIL}"\n',
+        '# yarn lockfile v1\n\n"other@npm:^1.0.0, openai@npm:4.0.0":\n'
+        '  version "4.0.0"\n'
+        f'  resolved "{EVIL}"\n',
+        '# yarn lockfile v1\n\n"other@^1.0.0, openai@4.0.0":\n'
+        '  version "4.0.0"\n'
+        f'  resolved "{EVIL}"\n',
+        '# yarn lockfile v1\n\n"__metadata":\n  version: 8\n\n' + BERRY_OPENAI,
+    ],
+    ids=["yaml-without-meta", "v1-berry-protocol", "v1-cross-pkg-comma", "v1-comment-with-meta"],
+)
+def test_disguised_or_mixed_berry_selectors_fail_the_lockfile(tmp_path, lock):
+    result, comp = scan(tmp_path, lock)
+    assert result.scan_failures == UNREAD
+    assert_unbound(comp)
+
+
+@pytest.mark.parametrize(
+    "lock",
+    [
+        "# yarn lockfile v1\n\nempty@1.0.0:\n" + stanza("openai@4.0.0", PUBLIC),
+        "# yarn lockfile v1\n\nempty@1.0.0:\n\n" + stanza("openai@4.0.0", PUBLIC),
+        "# yarn lockfile v1\n\n" + stanza("openai@4.0.0", PUBLIC) + "\nempty@1.0.0:\n",
+        "# yarn lockfile v1\n\n" + stanza("openai@4.0.0", PUBLIC) + "  dependencies:\n",
+        "# yarn lockfile v1\n\n"
+        'openai@4.0.0:\n  version "4.0.0"\n  dependencies:\n'
+        f'  resolved "{PUBLIC}"\n',
+        "# yarn lockfile v1\n\n" + stanza("openai@4.0.0", PUBLIC) + '  custom:\n    foo "1.0.0"\n',
+        "# yarn lockfile v1\n\n"
+        + stanza("openai@4.0.0", PUBLIC)
+        + '  dependencies:\n    nested:\n      foo "1.0.0"\n',
+        "# yarn lockfile v1\n\n"
+        'openai@4.0.0:\n  version "4.0.0"\n  resolved ' + f'"{PUBLIC}"\n  integrity {{a}}\n',
+        "# yarn lockfile v1\n\n"
+        'openai@4.0.0:\n  version "4.0.0"\n  resolved ' + f'"{PUBLIC}"\n  integrity [a]\n',
+        "__metadata:\n\n" + BERRY_OPENAI,
+        BERRY_HEAD + '"empty@npm:1.0.0":\n\n' + BERRY_OPENAI,
+    ],
+    ids=[
+        "empty-stanza-adjacent",
+        "empty-stanza-blank",
+        "empty-stanza-eof",
+        "empty-dependencies-eof",
+        "empty-dependencies-dedent",
+        "v1-unknown-nested-map",
+        "v1-deep-nested-map",
+        "v1-flow-brace",
+        "v1-flow-bracket",
+        "empty-berry-metadata",
+        "empty-berry-stanza",
+    ],
+)
+def test_empty_stanzas_and_safeload_fallback_constructs_fail_the_lockfile(tmp_path, lock):
+    result, comp = scan(tmp_path, lock)
+    assert result.scan_failures == UNREAD
+    assert_unbound(comp)
+
+
+def test_berry_comma_separator_is_linear_on_1mib_space_padded_key():
+    import time
+
+    from nexus_symbiote.scanners.registry import _yarn_lockfile_stanzas
+
+    padded = "other@npm:1.0.0" + (" " * (1024 * 1024)) + ", openai@npm:4.0.0"
+    lock = (
+        "__metadata:\n  version: 8\n\n"
+        f'"{padded}":\n  version: 4.0.0\n  resolution: "openai@npm:4.0.0"\n'
+    )
+    start = time.perf_counter()
+    berry, stanzas = _yarn_lockfile_stanzas(lock)
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    assert berry is True
+    assert stanzas[0][0] == ["other@npm:1.0.0", "openai@npm:4.0.0"]
+    assert elapsed_ms < 50.0, f"expected < 50 ms, took {elapsed_ms:.2f} ms"
+
+
+@pytest.mark.parametrize(
+    ("checksum", "has_missing_integrity"),
+    [
+        ("x", True),
+        ("10c0/abab", True),
+        ("10c0/" + "zz" * 64, True),
+        ("/" + "ab" * 64, True),
+        ("10/c0/" + "ab" * 64, True),
+        ("ab" * 64, False),
+        ("10/" + "ab" * 64, False),
+        ("10c0/" + "ab" * 64, False),
+    ],
+)
+def test_berry_checksum_must_be_valid_sha512_hex_digest(tmp_path, checksum, has_missing_integrity):
+    lock = BERRY_HEAD + (
+        '"openai@npm:4.0.0":\n  version: 4.0.0\n  resolution: "openai@npm:4.0.0"\n'
+        f"  checksum: {checksum}\n  languageName: node\n  linkType: hard\n"
+    )
+    result, comp = scan(tmp_path, lock)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    assert comp.package_url == "pkg:npm/openai@4.0.0"
+    categories = {r.category for r in comp.risks}
+    assert ("missing_lockfile_integrity" in categories) is has_missing_integrity

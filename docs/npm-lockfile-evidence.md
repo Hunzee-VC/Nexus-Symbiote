@@ -86,9 +86,16 @@ spec's stanza and another `resolved`, `integrity` or `checksum`: Yarn 1 reuses t
 first record it resolves with that version, so when a dependency listed earlier in
 `package.json` depends on the other range, Yarn installs the other stanza. A Yarn 1
 `checksum` is not an integrity value, since Yarn 1 does not read it, so a v1 record
-with one and no `integrity` has a `missing_lockfile_integrity` finding. A line that Yarn 1, or the YAML reader Yarn
-Berry uses for a lockfile that starts with `__metadata`, reads differently or not at
-all fails the lockfile as `yarn.lock: invalid or unsupported lockfile`: a single
+with one and no `integrity` has a `missing_lockfile_integrity` finding; in a Berry
+lockfile (detected from an unquoted or JSON-quoted `__metadata` header), `checksum`
+counts as integrity only when it is a 128-character hexadecimal SHA-512 digest with
+an optional hexadecimal cache-version prefix (`<hex>/<128 hex>`). A line or block
+that Yarn 1, its `js-yaml` fallback, or the YAML reader Yarn
+Berry uses reads differently or not at
+all fails the lockfile as `yarn.lock: invalid or unsupported lockfile`: an empty
+stanza or empty nested mapping, a Yarn 1 nested mapping outside dependency blocks or
+deeper than one level, YAML flow brackets or braces, mixed or disguised Berry
+comma-joined selectors or Berry-only fields without `__metadata`, a single
 quote, a tab, a comment after text or indented, an odd or deeper indentation than
 an object opens, an indented line after an empty or comment line (after one empty
 line Yarn 1 keeps reading the stanza, and after more it stops reading the lockfile), a whitespace-only line, a word Yarn 1 splits into a
