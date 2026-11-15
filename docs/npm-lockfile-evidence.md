@@ -66,12 +66,13 @@ selector that the declared spec matched, `yarn.lock#/openai@4.0.0`, or
 `yarn.lock#/openai@npm:4.0.0` in a Berry lockfile, whose one key lists every
 descriptor of the stanza; another selector of the stanza, which may be a tarball
 URL with a token in it, is never recorded. A pnpm package key is recorded whole when
-its peer suffix names only packages with exact versions, and patch hashes, as pnpm
-writes them (`pnpm-lock.yaml#/packages/~1openai@4.0.0(react@18.2.0)`). A suffix that
-holds anything else, such as a URL, a path or a credential-shaped name, is recorded
-as `(***)`: `pnpm-lock.yaml#/packages/~1openai@4.0.0(***)` no longer points at the
-key, which the root importer's `version`, or the lockfile's only record of the
-package, names.
+its peer suffix names only packages with exact versions, and patch hashes, in
+balanced parentheses as pnpm writes them
+(`pnpm-lock.yaml#/packages/~1openai@4.0.0(react@18.2.0)`). A suffix that holds
+anything else, such as a URL, a path, a credential-shaped name or unbalanced
+parentheses, is recorded as `(***)`: `pnpm-lock.yaml#/packages/~1openai@4.0.0(***)`
+no longer points at the key, which the root importer's `version`, or the lockfile's
+only record of the package, names.
 
 `yarn.lock` is tokenized as Yarn 1 reads it: a quoted key, selector or value is a
 JSON string and is decoded, so `"resolved" "https://..."` and `"\u006fpenai@4.0.0":`

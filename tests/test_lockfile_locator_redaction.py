@@ -213,6 +213,8 @@ UNPLAIN_PEERS = {
     "token-name": f"({NPM_TOKEN}@1.0.0)",
     "token-prerelease": f"(zod@1.0.0-{KEY_ID})",
     "unbalanced": f"(zod@1.0.0(react@18.2.0)fakeuser:{PASSWORD}",
+    "unclosed-group": "(react-dom@18.2.0(react@18.2.0)",
+    "close-before-open": "(react@18.2.0))(react-dom@18.2.0(react@18.2.0)",
     "text-after": f"(zod@1.0.0)fakeuser:{PASSWORD}",
     "patch-hash-with-text": f"(patch_hash=abc fakeuser:{PASSWORD})",
 }

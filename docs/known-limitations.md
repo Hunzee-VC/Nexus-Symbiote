@@ -668,12 +668,12 @@ A way around a limit that its entry does not describe is worth a
   range's stanza with that version records another URL, integrity or checksum, the
   package binds no lockfile evidence, even where Yarn would install the declared one.
   A pnpm record whose key's peer suffix holds anything but package names, exact
-  versions and patch hashes is recorded as `<name>@<version>(***)`, which no JSON
-  pointer resolves; the root importer's `version`, or the lockfile's only record of
-  the package, names the key. A Yarn Berry record is named by the one descriptor the
-  declared spec matched, not by the stanza's whole key. Exact versions are recorded
-  as the lockfile writes them, so a prerelease such as `4.0.0-<text>` keeps its text,
-  credential-shaped or not.
+  versions and patch hashes in balanced parentheses is recorded as
+  `<name>@<version>(***)`, which no JSON pointer resolves; the root importer's
+  `version`, or the lockfile's only record of the package, names the key. A Yarn
+  Berry record is named by the one descriptor the declared spec matched, not by the
+  stanza's whole key. Exact versions are recorded as the lockfile writes them, so a
+  prerelease such as `4.0.0-<text>` keeps its text, credential-shaped or not.
 - **Some lockfiles are not read.** `Pipfile.lock`, `pdm.lock`, `bun.lock` and
   `bun.lockb` give each package they may resolve a low `lockfile_unread` finding,
   not a gap.

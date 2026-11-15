@@ -405,11 +405,11 @@ _PYPROJECT_BUDGET = 256 * 1024
 _MAX_PNPM_LOCK_TOKENS = 1_000_000
 _PNPM_NAME_END = re.compile("[@/]")
 # The opening of one peer in a pnpm package key's suffix as pnpm writes it: an npm
-# package name and the exact version it resolved to, followed by its own peers or
-# its end; or the hash of a patch applied to the package.
+# package name and the exact version it resolved to; or the hash of a patch applied
+# to the package, which holds no peers of its own.
 _PNPM_PEER = re.compile(
     r"\((?:(?:@[A-Za-z0-9][A-Za-z0-9._~-]*/)?[A-Za-z0-9][A-Za-z0-9._~-]*@"
-    r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?(?=[()])"
+    r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?"
     r"|patch_hash=[0-9a-z]{1,128}(?=\)))"
 )
 
@@ -421,8 +421,9 @@ def _pointer_token(text: str) -> str:
 
 def _plain_pnpm_peers(suffix: str) -> bool:
     """Whether a pnpm package key's peer suffix names only packages, exact versions and
-    patch hashes, which a locator can carry: a URL, a path or a credential cannot be
-    told apart from the parentheses around it, and is not recorded."""
+    patch hashes in balanced groups, which a locator can carry: a URL, a path or a
+    credential cannot be told apart from the parentheses around it, and is not
+    recorded."""
     depth = index = 0
     while index < len(suffix):
         if suffix[index] == ")" and depth:
