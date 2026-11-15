@@ -37,6 +37,10 @@ OUTPUT_REFUSED = (
     "may be a symbolic link, and an existing output must not be a directory, device, "
     "FIFO or socket, or a link to one."
 )
+DASH_OUTPUT = (
+    "An output path of '-' is not standard output: leave out the output option to print "
+    "to standard output, or give an absolute path to write a file named '-'."
+)
 
 
 # CI runners act on a "##name[" introducer anywhere in a line, not only at its start:
@@ -105,8 +109,15 @@ def output_failure(exc: BaseException) -> click.ClickException:
     return click.ClickException(OUTPUT_REFUSED)
 
 
+def refuse_dash_output(path: Path | str) -> None:
+    """Refuse ``-``, which here would name a file, not standard output."""
+    if Path(path) == Path("-"):
+        raise click.ClickException(DASH_OUTPUT)
+
+
 def write_cli_output(path: Path, data: str, *, overwrite: bool = True) -> None:
     """Write a selected output file, turning any failure into a plain command error."""
+    refuse_dash_output(path)
     try:
         write_output_file(path, data, overwrite=overwrite)
     except (OSError, ValueError) as exc:

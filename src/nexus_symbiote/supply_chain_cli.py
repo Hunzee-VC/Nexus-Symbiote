@@ -20,6 +20,7 @@ from nexus_symbiote.utils.terminal import (
     json_text,
     neutralize,
     output_failure,
+    refuse_dash_output,
     write_cli_output,
 )
 
@@ -305,6 +306,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         if scan is None:
             raise click.ClickException("scan command is unavailable")
 
+        refuse_dash_output(baseline_path)
         target = baseline_path.absolute()
         try:
             staged = create_staging_file(target, ".nexus-baseline-")

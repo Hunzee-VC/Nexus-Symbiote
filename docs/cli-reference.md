@@ -92,6 +92,9 @@ there too, so that standard output can carry the inventory:
 `nexus-symbiote summary bom.json > summary.txt` keeps the summary, and `2>/dev/null`
 hides only diagnostics.
 
+An output option given as `-`, or `./-`, is refused rather than written to a file named
+`-`: leave out `-o` to print to standard output.
+
 Every command prints text taken from an inventory, a checkout or a live server, such as
 names, paths, references and descriptions, literally and inert, in a terminal and in a
 CI log:
