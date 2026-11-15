@@ -862,6 +862,7 @@ def _check_tool_schema_dialect(schema: dict[str, Any]) -> str:
     if dialect not in _DIALECT_VALIDATORS:
         raise DiscoveryError("unsupported JSON Schema $schema dialect")
 
+    subschema_id = "id" if dialect == DIALECTS[0] else "$id"
     pending: list[tuple[dict[str, Any], int]] = [(schema, 0)]
     while pending:
         node, depth = pending.pop()
@@ -869,7 +870,7 @@ def _check_tool_schema_dialect(schema: dict[str, Any]) -> str:
             if ref_key in node:
                 target = node[ref_key]
                 if not isinstance(target, str) or (target != "#" and not target.startswith("#/")):
-                    raise DiscoveryError("external JSON Schema reference refused")
+                    raise DiscoveryError("non-pointer or external JSON Schema reference refused")
                 if ref_key == "$ref" and not _local_pointer_exists(schema, target):
                     raise DiscoveryError("dangling JSON Schema local reference")
         pattern = node.get("pattern")
@@ -887,30 +888,43 @@ def _check_tool_schema_dialect(schema: dict[str, Any]) -> str:
                     except (re.error, OverflowError, RecursionError) as exc:
                         raise DiscoveryError("invalid MCP tool JSON Schema") from exc
         if depth > 0:
-            for meta_key in ("$schema", "$id", "$vocabulary"):
+            for meta_key in ("$schema", subschema_id, "$vocabulary"):
                 if meta_key in node:
+                    if (
+                        meta_key == subschema_id
+                        and dialect in DIALECTS[:3]
+                        and isinstance(node[meta_key], str)
+                        and node[meta_key].startswith("#")
+                    ):
+                        continue
                     raise DiscoveryError("subschema dialect or base URI override refused")
-        else:
-            if "$id" in node:
-                root_id = node["$id"]
-                if not isinstance(root_id, str) or "://" in root_id or root_id.startswith("//"):
-                    raise DiscoveryError("external JSON Schema $id refused")
-            if "$vocabulary" in node:
-                if dialect not in (DIALECTS[3], DIALECTS[4]):
-                    raise DiscoveryError("$vocabulary is unsupported in declared dialect")
-                vocab = node["$vocabulary"]
-                if not isinstance(vocab, dict) or not all(
-                    isinstance(k, str) and isinstance(v, bool) for k, v in vocab.items()
+        elif "$vocabulary" in node:
+            if dialect not in (DIALECTS[3], DIALECTS[4]):
+                raise DiscoveryError("$vocabulary is unsupported in declared dialect")
+            vocab = node["$vocabulary"]
+            if not isinstance(vocab, dict) or not all(
+                isinstance(k, str) and isinstance(v, bool) for k, v in vocab.items()
+            ):
+                raise DiscoveryError("invalid JSON Schema $vocabulary")
+            allowed = (
+                _ALLOWED_VOCABULARIES_2020_12
+                if dialect == DIALECTS[4]
+                else _ALLOWED_VOCABULARIES_2019_09
+            )
+            validation_vocab = (
+                "https://json-schema.org/draft/2020-12/vocab/validation"
+                if dialect == DIALECTS[4]
+                else "https://json-schema.org/draft/2019-09/vocab/validation"
+            )
+            for uri, enabled in vocab.items():
+                if uri not in allowed:
+                    raise DiscoveryError("unsupported JSON Schema vocabulary")
+                if not enabled and uri.endswith(
+                    ("/core", "/applicator", "/validation", "/unevaluated")
                 ):
-                    raise DiscoveryError("invalid JSON Schema $vocabulary")
-                allowed = (
-                    _ALLOWED_VOCABULARIES_2020_12
-                    if dialect == DIALECTS[4]
-                    else _ALLOWED_VOCABULARIES_2019_09
-                )
-                for uri, required in vocab.items():
-                    if required and uri not in allowed:
-                        raise DiscoveryError("unsupported JSON Schema vocabulary")
+                    raise DiscoveryError("required JSON Schema vocabulary disabled")
+            if vocab.get(validation_vocab) is not True:
+                raise DiscoveryError("JSON Schema validation vocabulary must be enabled")
         for key, value in node.items():
             if key in (_SUBSCHEMA_KEYWORDS | {"additionalItems"}) and isinstance(value, dict):
                 pending.append((value, depth + 1))

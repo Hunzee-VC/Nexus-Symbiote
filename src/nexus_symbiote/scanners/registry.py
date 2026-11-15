@@ -1954,7 +1954,6 @@ class RegistryScanner(Scanner):
         return True
 
     _OVERRIDE_FIELDS = (("overrides",), ("resolutions",), ("pnpm", "overrides"))
-    _PATCHED_FIELDS = (("patchedDependencies",), ("pnpm", "patchedDependencies"))
     _OVERRIDE_ENTRIES = 10_000
 
     @classmethod
@@ -1973,18 +1972,6 @@ class RegistryScanner(Scanner):
             if node is not None:
                 stack.append((node, 0, []))
         remaining = cls._OVERRIDE_ENTRIES
-        for path in cls._PATCHED_FIELDS:
-            node = data
-            for part in path:
-                node = node.get(part) if isinstance(node, dict) else None
-            if isinstance(node, dict):
-                for selector in node:
-                    remaining -= 1
-                    if remaining < 0:
-                        return None
-                    selected = cls._override_names(str(selector))
-                    names.update(name.lower() for name in selected)
-                    sources.update(selected[-1:])
         while stack:
             node, depth, parent = stack.pop()
             if not isinstance(node, dict):

@@ -54,10 +54,10 @@ def test_secrets_redaction_long_quoted_jwt_url_token_host_and_jwk_fields() -> No
     assert long_jwt not in scrubbed
     assert REDACTED in scrubbed
 
-    # Space-containing >256-char quoted secret exercises the raised 512-char _QUOTED_SECRET bound
-    long_spaced_secret = "passphrase with spaces " + ("z" * 300)
-    spaced_scrubbed = redact_text(f'api_secret="{long_spaced_secret}"')
-    assert long_spaced_secret not in spaced_scrubbed
+    # Space-containing >256-char non-token quoted secret pins the raised 8192-char _ASSIGNMENT bound
+    long_spaced_secret = "word " * 80
+    spaced_scrubbed = redact_text(f'password="{long_spaced_secret}"')
+    assert "word word" not in spaced_scrubbed
     assert REDACTED in spaced_scrubbed
 
     gh_token = "ghp_" + ("A1b2C3d4E5f6" * 3)
@@ -120,8 +120,11 @@ def test_template_escape_markers_catch_pipe_attr_and_single_underscore_frames() 
     assert template_escape_markers(b"{{ cycler.next._globals.os }}")
     assert template_escape_markers(b"{{ namespace._builtins }}")
     assert template_escape_markers(b'{{ cycler.next["_" ~ "_globals_" ~ "_"] }}')
+    assert template_escape_markers(b'{{ x[("_" ~ "_globals_" ~ "_")] }}')
+    assert template_escape_markers(b'{{ x[("_") ~ ("_globals_")] }}')
     assert template_escape_markers(b"{{ cycler.next['_' + '_class_' + '_'] }}")
     assert not template_escape_markers(b"{{ messages[0]['content'] | trim }}")
+    assert not template_escape_markers(b"{{ message._init }}")
 
 
 def test_mcp_launch_rejects_package_runner_shells_and_marks_uv_env_file() -> None:
@@ -205,13 +208,14 @@ def test_mcp_jsonc_depth_nonfinite_float_js_comments_and_dup_tools(
 def test_live_mcp_rejects_external_schema_refs_vocabularies_and_non_ascii_content_length(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # Allowed local $defs reference and properties literally named $id / $schema
+    # Allowed root $id, local $defs reference, and properties literally named $id / $schema / id
     valid_tool = check_served_tool(
         {
             "name": "search_docs",
             "description": "Search docs",
             "inputSchema": {
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "$id": "https://example.com/tools/search.json",
                 "$vocabulary": {
                     "https://json-schema.org/draft/2020-12/vocab/core": True,
                     "https://json-schema.org/draft/2020-12/vocab/validation": True,
@@ -222,6 +226,7 @@ def test_live_mcp_rejects_external_schema_refs_vocabularies_and_non_ascii_conten
                     "q": {"$ref": "#/$defs/Query"},
                     "$id": {"type": "string"},
                     "$schema": {"type": "string"},
+                    "id": {"type": "string"},
                 },
             },
         }
@@ -231,7 +236,12 @@ def test_live_mcp_rejects_external_schema_refs_vocabularies_and_non_ascii_conten
     bad_schemas: list[dict[str, Any]] = [
         {"type": "object", "$ref": "https://attacker.example/schema.json"},
         {"type": "object", "properties": {"x": {"$dynamicRef": "https://attacker.example/s#x"}}},
-        {"type": "object", "$id": "https://attacker.example/root.json"},
+        {"type": "object", "properties": {"x": {"$id": "https://attacker.example/sub.json"}}},
+        {
+            "$schema": "http://json-schema.org/draft-04/schema#",
+            "type": "object",
+            "properties": {"x": {"id": "https://attacker.example/sub.json", "type": "string"}},
+        },
         {"type": "object", "$schema": "https://attacker.example/custom-dialect"},
         {
             "type": "object",
@@ -243,7 +253,15 @@ def test_live_mcp_rejects_external_schema_refs_vocabularies_and_non_ascii_conten
         },
         {
             "type": "object",
-            "$vocabulary": {"https://evil.test/vocab/core": True},
+            "$vocabulary": {"https://attacker.example/vocab/custom": False},
+        },
+        {
+            "type": "object",
+            "$vocabulary": {"https://json-schema.org/draft/2020-12/vocab/validation": False},
+        },
+        {
+            "type": "object",
+            "$vocabulary": {"https://json-schema.org/draft/2020-12/vocab/core": True},
         },
         {
             "type": "object",
@@ -307,7 +325,7 @@ def test_registry_scanner_tarball_mismatch_pnpm_risks_and_patched_dependencies(
         "1.2.0",
     )
 
-    # pnpm lockfile without integrity and with non-default registry + patchedDependencies
+    # pnpm.patchedDependencies does not mark project-wide override completeness exclusions
     (tmp_path / "package.json").write_text(
         json.dumps(
             {
@@ -334,41 +352,12 @@ def test_registry_scanner_tarball_mismatch_pnpm_risks_and_patched_dependencies(
         encoding="utf-8",
     )
     res = RegistryScanner().scan(tmp_path)
-    entries = [
+    assert res.scan_failures == []
+    assert res.surfaces_excluded == []
+    comp = next(
         c for c in res.components if isinstance(c, RegistryEntryComponent) and c.name == "openai"
-    ]
-    assert len(entries) == 1
-    assert any(
-        "override" in g.lower() or "patch" in g.lower() or "package.json" in g
-        for g in res.surfaces_excluded
     )
-
-    # pnpm resolution without patchedDependencies verifies missing_lockfile_integrity + registry_origin
-    pkg_dir = tmp_path / "unpatched"
-    pkg_dir.mkdir()
-    (pkg_dir / "package.json").write_text(
-        json.dumps({"name": "demo2", "version": "1.0.0", "dependencies": {"openai": "4.80.0"}}),
-        encoding="utf-8",
-    )
-    (pkg_dir / "pnpm-lock.yaml").write_text(
-        "lockfileVersion: '9.0'\n"
-        "importers:\n"
-        "  .:\n"
-        "    dependencies:\n"
-        "      openai:\n"
-        "        specifier: 4.80.0\n"
-        "        version: 4.80.0\n"
-        "packages:\n"
-        "  openai@4.80.0:\n"
-        "    resolution:\n"
-        "      tarball: https://npm.custom-corp.example/openai/-/openai-4.80.0.tgz\n",
-        encoding="utf-8",
-    )
-    res2 = RegistryScanner().scan(pkg_dir)
-    comp2 = next(
-        c for c in res2.components if isinstance(c, RegistryEntryComponent) and c.name == "openai"
-    )
-    categories = {r.category for r in comp2.risks}
+    categories = {r.category for r in comp.risks}
     assert "missing_lockfile_integrity" in categories
     assert "registry_origin" in categories
 
@@ -464,6 +453,7 @@ def test_model_scanner_second_zip_pickle_member_jinja2_and_nested_custom_code(
     mdir = tmp_path / "hf_model"
     (mdir / "additional_chat_templates").mkdir(parents=True)
     (mdir / "subpkg").mkdir(parents=True)
+    (mdir / "tests").mkdir(parents=True)
     (mdir / "config.json").write_text(
         json.dumps({"model_type": "llama", "auto_map": {"AutoModel": "subpkg.modeling.MyModel"}}),
         encoding="utf-8",
@@ -473,6 +463,8 @@ def test_model_scanner_second_zip_pickle_member_jinja2_and_nested_custom_code(
         encoding="utf-8",
     )
     (mdir / "subpkg" / "modeling.PY").write_text("class MyModel:\n    pass\n", encoding="utf-8")
+    (mdir / "tests" / "test_unrelated.py").write_text("assert True\n", encoding="utf-8")
+    (mdir / "secrets.py").write_text("API_KEY = 'secret'\n", encoding="utf-8")
     (mdir / "model.safetensors").write_bytes((2).to_bytes(8, "little") + b"{}")
 
     mres = ModelScanner().scan(mdir)
@@ -483,22 +475,25 @@ def test_model_scanner_second_zip_pickle_member_jinja2_and_nested_custom_code(
         for entry in mcomp.properties.get("chat_templates", [])
     )
     custom = mcomp.properties.get("custom_code", {})
-    assert any(
-        entry["path"].lower().endswith("subpkg/modeling.py")
-        for entry in custom.get("python_files", [])
-    )
+    recorded_py = [entry["path"].lower() for entry in custom.get("python_files", [])]
+    assert any(p.endswith("subpkg/modeling.py") for p in recorded_py)
+    assert not any("test_unrelated.py" in p for p in recorded_py)
+    assert not any("secrets.py" in p for p in recorded_py)
 
 
 def test_ide_agents_subshell_grants_dont_ask_and_codex_full_access(tmp_path: Path) -> None:
     assert "shell commands" in _broad_grants(["Bash(sh -c *)"])
+    assert "shell commands" in _broad_grants(["Bash(sh -c evil\nid)"])
     assert "shell commands" in _broad_grants(["Bash(/usr/local/bin/bash -c *)"])
     assert "shell commands" in _broad_grants(["Bash(env python3 -c *)"])
     assert "shell commands" in _broad_grants(["Bash(cmd /c *)"])
     assert "shell commands" in _broad_grants(["Bash(pwsh -Command *)"])
     assert _broad_grants(["Bash(git status)"]) == []
     assert _broad_grants(["Bash(sh scripts/check.sh)"]) == []
+    assert _broad_grants(["Bash(sh" + " " * 32000 + "a\nb)"]) == []
 
-    for med_mode in ("dontAsk", "auto", "never"):
+    assert _starting_mode_risk("claude-code", "dontAsk") is None
+    for med_mode in ("auto", "never"):
         risk = _starting_mode_risk("claude-code", med_mode)
         assert risk is not None and risk.severity == RiskSeverity.MEDIUM
     for high_mode in ("bypassPermissions", "always", "full-access", "danger-full-access"):
