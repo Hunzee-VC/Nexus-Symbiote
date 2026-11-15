@@ -1,9 +1,9 @@
 """npm configuration that may lie in the project makes the launcher identity unknown.
 
 npm reads its user configuration from ``userconfig`` and its global configuration from
-``globalconfig``, by default ``<prefix>/etc/npmrc``. The environment, the project
-``.npmrc`` and the command line can each move them, and npm resolves a relative path
-against the working directory. The collector reads no file there, so ``call``,
+``globalconfig``, by default ``<prefix>/etc/npmrc``, and pnpm also reads
+``<workspace-prefix>/.npmrc``. The environment, the project ``.npmrc`` and the command
+line can each move them, and npm resolves a relative path against the working directory. The collector reads no file there, so ``call``,
 ``package`` or ``registry`` added to one would change what runs with nothing in the
 inventory changing; such a setting is treated like ``HOME`` or ``PREFIX`` in the project.
 npm also expands ``${...}`` in setting names, so a name holding one may spell any of them.
@@ -53,7 +53,13 @@ VARIABLES = {
     "NPM_CONFIG_GLOBALCONFIG": "globalconfig",
     "npm_config_prefix": "prefix",
     "NPM_CONFIG_PREFIX": "prefix",
+    "npm_config_workspace_prefix": "workspace-prefix",
+    "NPM_CONFIG_WORKSPACE_PREFIX": "workspace-prefix",
+    # pnpm's workspace directory, whose .npmrc and pnpm-workspace.yaml it reads.
+    "NPM_CONFIG_WORKSPACE_DIR": "workspace-dir",
+    "npm_config_workspace_dir": "workspace-dir",
 }
+LOCATIONS = ["userconfig", "globalconfig", "prefix", "workspace-prefix"]
 # Values npm resolves against the working directory or that may name it.
 IN_PROJECT = [
     ".npmrc-ci",
@@ -138,17 +144,21 @@ def test_an_npm_configuration_location_in_the_project_makes_the_identity_unknown
         assert moved(VARIABLES[variable]) in detail, form
 
 
+def variable(key: str) -> str:
+    return "npm_config_" + key.replace("-", "_")
+
+
 @pytest.mark.parametrize("value", IN_PROJECT)
-@pytest.mark.parametrize("key", ["userconfig", "globalconfig", "prefix"])
+@pytest.mark.parametrize("key", LOCATIONS)
 def test_any_location_npm_may_resolve_into_the_project_is_relocation(tmp_path, key, value):
-    record, gaps = collect(tmp_path, {**NPX, "env": {f"npm_config_{key}": value}})
+    record, gaps = collect(tmp_path, {**NPX, "env": {variable(key): value}})
     assert moved(key) in identity_unknown(record, gaps)
 
 
 @pytest.mark.parametrize("runner", sorted(NPM_READERS))
-@pytest.mark.parametrize("key", ["userconfig", "globalconfig", "prefix"])
+@pytest.mark.parametrize("key", LOCATIONS)
 def test_every_runner_that_reads_npm_configuration_is_covered(tmp_path, runner, key):
-    server = {"command": runner, "args": NPM_READERS[runner], "env": {f"npm_config_{key}": "c"}}
+    server = {"command": runner, "args": NPM_READERS[runner], "env": {variable(key): "c"}}
     record, gaps = collect(tmp_path, server)
     assert moved(key) in identity_unknown(record, gaps)
 
@@ -206,6 +216,8 @@ def test_a_variable_name_npm_may_expand_to_what_runs_makes_the_identity_unknown(
         ("npm_config_globalconfig", "/etc/npmrc"),
         ("npm_config_prefix", "/usr/local"),
         ("npm_config_prefix", "/opt/node22/"),
+        ("NPM_CONFIG_WORKSPACE_PREFIX", "/srv/agent/workspace"),
+        ("NPM_CONFIG_WORKSPACE_DIR", "/srv/agent/workspace"),
     ],
 )
 def test_an_absolute_npm_configuration_location_is_a_package_source(tmp_path, variable, value):
@@ -214,9 +226,9 @@ def test_an_absolute_npm_configuration_location_is_a_package_source(tmp_path, va
     assert value not in record.model_dump_json()
 
 
-@pytest.mark.parametrize("key", ["userconfig", "globalconfig", "prefix"])
+@pytest.mark.parametrize("key", [*LOCATIONS, "workspace-dir"])
 def test_an_empty_variable_npm_ignores_keeps_the_identity(tmp_path, key):
-    record, gaps = collect(tmp_path, {**NPX, "env": {f"npm_config_{key}": ""}})
+    record, gaps = collect(tmp_path, {**NPX, "env": {variable(key): ""}})
     identity_kept(record, gaps)
     assert record.package_url == "pkg:npm/safe-mcp@1.2.3"
 
@@ -272,6 +284,8 @@ def test_runners_that_read_no_npm_configuration_keep_the_identity(tmp_path, runn
         ("userconfig=~/work/repo/repo/.npmrc-ci\n", "userconfig"),
         ("userconfig=/proc/self/cwd/.npmrc-ci\n", "userconfig"),
         ("save-exact=true\nglobalconfig=g\nuserconfig=/etc/npmrc\n", "globalconfig"),
+        ("workspace-prefix=cfg\n", "workspace-prefix"),
+        ("workspace-prefix=\n", "workspace-prefix"),
     ],
 )
 def test_a_project_npmrc_that_moves_npm_configuration_makes_the_identity_unknown(
@@ -294,6 +308,8 @@ def test_a_project_npmrc_that_moves_npm_configuration_makes_the_identity_unknown
         "${E}package=evil-mcp@1.0.0\n",
         '"${E}userconfig"=.npmrc-ci\n',
         "save-exact=true\n${E}prefix=ci\n",
+        "${E}workspace-prefix=cfg\n",
+        "${E}-prefix=cfg\n",
     ],
 )
 def test_an_npmrc_name_npm_may_expand_to_what_runs_makes_the_identity_unknown(tmp_path, npmrc):
@@ -316,6 +332,9 @@ def test_every_runner_that_reads_the_project_npmrc_is_covered(tmp_path, runner):
         ("userconfig=/etc/ci/npmrc\n", ".npmrc:userconfig=[local]"),
         ("globalconfig=/etc/npmrc\n", ".npmrc:globalconfig=[local]"),
         ("prefix=/usr/local\n", ".npmrc:prefix=[local]"),
+        ("workspace-prefix=/srv/agent/workspace\n", ".npmrc:workspace-prefix=[local]"),
+        # pnpm reads its workspace directory from the environment only.
+        ("workspace-dir=cfg\n", ".npmrc:workspace-dir=[local]"),
     ],
 )
 def test_an_absolute_location_in_the_project_npmrc_is_a_package_source(tmp_path, npmrc, label):
@@ -642,3 +661,120 @@ def test_an_unresolved_npmrc_line_is_an_unbound_value_without_the_key(tmp_path):
     record, _ = collect(tmp_path, {**NPX, "env": {"E": ""}}, {".npmrc": "${E}fund=false\n"})
     completeness = [r.detail for r in record.risks if r.category == "completeness"]
     assert any("project resolver settings" in detail for detail in completeness), completeness
+
+
+PNPM_DLX = {"command": "pnpm", "args": NPM_READERS["pnpm"]}
+# pnpm reads <workspace-prefix>/.npmrc after the project .npmrc, and takes the
+# workspace directory from NPM_CONFIG_WORKSPACE_DIR, upper or lower case.
+PNPM_WORKSPACE_FORMS = {
+    "npmrc": ({}, {".npmrc": "workspace-prefix=cfg\n"}, moved("workspace-prefix", ".npmrc")),
+    "env-prefix": ({"NPM_CONFIG_WORKSPACE_PREFIX": "cfg"}, {}, moved("workspace-prefix")),
+    "env-prefix-lower": ({"npm_config_workspace_prefix": "cfg"}, {}, moved("workspace-prefix")),
+    "env-dir": ({"NPM_CONFIG_WORKSPACE_DIR": "cfg"}, {}, moved("workspace-dir")),
+    "env-dir-lower": ({"npm_config_workspace_dir": "cfg"}, {}, moved("workspace-dir")),
+}
+
+
+@pytest.mark.parametrize("form", sorted(PNPM_WORKSPACE_FORMS))
+def test_a_pnpm_workspace_location_in_the_project_makes_the_identity_unknown(tmp_path, form):
+    env, files, reason = PNPM_WORKSPACE_FORMS[form]
+    files = {**files, "cfg/.npmrc": "registry=https://registry.attacker.test/\n"}
+    record, gaps = collect(tmp_path, {**PNPM_DLX, "env": env}, files)
+    assert reason in identity_unknown(record, gaps)
+
+
+@pytest.mark.parametrize("form", sorted(PNPM_WORKSPACE_FORMS))
+def test_the_scan_gate_fails_when_a_pnpm_workspace_moves_into_the_project(
+    tmp_path, monkeypatch, form
+):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    env, files, reason = PNPM_WORKSPACE_FORMS[form]
+    root = tmp_path / "project"
+    write_project(root, {**PNPM_DLX, "env": env}, {**files, "cfg/.npmrc": "fund=false\n"})
+    output = tmp_path / "bom.json"
+    result = scan_cli(root, output)
+    assert result.exit_code == 1, result.output
+    assert reason in output.read_text()
+
+
+# npm reads its options after the script name of npm run, start or test too, up to a
+# word of only dashes, with any number of dashes, abbreviated or in a shorthand cluster.
+AFTER_THE_SCRIPT = [
+    (["start", "--userconfig=.npmrc-ci"], "npm start --userconfig"),
+    (["test", "--prefix", "."], "npm test --prefix"),
+    (["run-script", "start", "-C", "."], "npm run-script -C"),
+    (["run", "mcp", "--globalconfig", "etc/npmrc"], "npm run --globalconfig"),
+    (["run", "mcp", "server", "--userconfig", ".npmrc-ci"], "npm run --userconfig"),
+    (["start", "--usercon=.npmrc-ci"], "npm start --userconfig"),
+    (["start", "--userc", ".npmrc-ci"], "npm start --userconfig"),
+    (["start", "--globalc=etc/npmrc"], "npm start --globalconfig"),
+    (["start", "---userconfig=.npmrc-ci"], "npm start --userconfig"),
+    (["start", "-userconfig=.npmrc-ci"], "npm start --userconfig"),
+    (["start", "-C=."], "npm start -C"),
+    (["start", "--C", "."], "npm start -C"),
+    (["start", "-gC", "."], "npm start -C"),
+    (["start", "--gC", "."], "npm start -C"),
+    (["start", "-yC=."], "npm start -C"),
+    # -Cy takes --yes as the prefix, so the absolute word after it is not its value.
+    (["start", "-Cy", "/srv/agent"], "npm start -C"),
+    (["start", "--prefix"], "npm start --prefix"),
+    (["start", "--prefix", "--"], "npm start --prefix"),
+    (["stop", "--userconfig", "${workspaceFolder}/.npmrc-ci"], "npm stop --userconfig"),
+]
+
+
+@pytest.mark.parametrize("args,reason", AFTER_THE_SCRIPT)
+def test_a_location_option_after_the_script_name_makes_the_identity_unknown(tmp_path, args, reason):
+    record, gaps = collect(tmp_path, {"command": "npm", "args": args})
+    finding = next(r for r in record.risks if r.category == "launcher_identity")
+    assert finding.severity.value == "high"
+    assert f"{reason} {MOVES}" in finding.detail
+    assert gaps == [f".mcp.json: MCP server 's' launcher identity unknown ({reason} {MOVES})"]
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["start"],
+        ["start", "--", "--userconfig", ".npmrc-ci"],
+        ["start", "---", "--prefix", "."],
+        ["run", "mcp", "--", "-C", "."],
+        ["start", "--no-userconfig"],
+        ["start", "--global"],
+        ["start", "--prefer-offline"],
+        ["start", "-p"],
+        ["start", "-C."],
+        ["start", "--userconfig-dir=.npmrc-ci"],
+        ["start", "C", "."],
+    ],
+)
+def test_words_npm_does_not_read_as_a_location_after_the_script_name_are_not_relocation(
+    tmp_path, args
+):
+    record, gaps = collect(tmp_path, {"command": "npm", "args": args})
+    assert not gaps, gaps
+    assert not any(r.category == "launcher_identity" for r in record.risks)
+
+
+def test_an_absolute_location_after_the_script_name_is_a_package_source(tmp_path):
+    server = {"command": "npm", "args": ["start", "--userconfig", "/srv/agent/.npmrc"]}
+    record, gaps = collect(tmp_path, server)
+    assert not gaps, gaps
+    assert not any(r.category == "launcher_identity" for r in record.risks)
+    assert "--userconfig=[local]" in record.properties["package_sources"]
+
+
+@pytest.mark.parametrize(
+    "args", [["start", "--userconfig=.npmrc-ci"], ["--userconfig=.npmrc-ci", "start"]]
+)
+def test_the_scan_gate_fails_for_a_location_on_either_side_of_the_script_name(
+    tmp_path, monkeypatch, args
+):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    root = tmp_path / "project"
+    files = {"package.json": '{"scripts": {"start": "node server.js"}}', ".npmrc-ci": "x=1\n"}
+    write_project(root, {"command": "npm", "args": args}, files)
+    output = tmp_path / "bom.json"
+    result = scan_cli(root, output)
+    assert result.exit_code == 1, result.output
+    assert "Scan gate failed" in result.output

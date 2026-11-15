@@ -185,10 +185,11 @@ A way around a limit that its entry does not describe is worth a
   `-File`.
 - **Environment that moves a runner's configuration is a gap.** A server's `env`
   that may point `HOME`, `XDG_CONFIG_HOME`, `PREFIX`, `DESTDIR`, `GOENV`,
-  `ZDOTDIR`, npm's `userconfig`, `globalconfig` or `prefix` (`npm_config_*` or
-  `pnpm_config_*`, for every npm, pnpm, bun and Deno launch, `npm run` and
-  `deno run` of a local script included) or a relative `PATH` entry into the
-  project, or that replaces the package (`UV_OVERRIDE`, `UV_CONSTRAINT`,
+  `ZDOTDIR`, npm's `userconfig`, `globalconfig` or `prefix` or pnpm's
+  `workspace-prefix` (`npm_config_*` or `pnpm_config_*`, for every npm, pnpm, bun
+  and Deno launch, `npm run` and `deno run` of a local script included), pnpm's
+  workspace directory (`NPM_CONFIG_WORKSPACE_DIR`) or a relative `PATH` entry into
+  the project, or that replaces the package (`UV_OVERRIDE`, `UV_CONSTRAINT`,
   `PIP_CONSTRAINT`), makes the identity unknown. A location may lie in the project
   when it is not an absolute POSIX path, including `~/...`, an expansion such as
   `${...}` and a Windows drive path such as `C:\Users\me\AppData\Roaming\npm`
@@ -229,12 +230,18 @@ A way around a limit that its entry does not describe is worth a
   and the `[tool.uv]` table of `pyproject.toml`. User and global configuration,
   parent directories, `pnpm-workspace.yaml` settings and corepack's
   `packageManager` field are not. npm reads its user and global configuration from
-  wherever `userconfig`, `globalconfig` and `prefix` point, so one that may lie in
-  the project, set in the root `.npmrc` or with `--userconfig`, `--globalconfig`,
-  `--prefix` or `-C` before the package as well as in the environment, makes the
-  identity unknown instead, for a registry package, a full-commit git package and a
-  launch without a package such as `npm run` alike; an absolute one is a medium
-  `package_source` finding, and that file's contents are not compared. For a launch
+  wherever `userconfig`, `globalconfig` and `prefix` point, and pnpm another
+  `.npmrc` (and `pnpm-workspace.yaml`) from its `workspace-prefix` or workspace
+  directory, so one that may lie in the project, set in the root `.npmrc` or with
+  `--userconfig`, `--globalconfig`, `--prefix` or `-C` before the package as well as
+  in the environment, makes the identity unknown instead, for a registry package, a
+  full-commit git package and a launch without a package such as `npm run` alike; an
+  absolute one is a medium `package_source` finding, and that file's contents are not
+  compared. npm also reads those options after the script name of `npm run`,
+  `npm start`, `npm test` and their aliases, up to `--`, so any word there that npm
+  may read as one counts, an ambiguous abbreviation such as `--user` and any word of
+  letters holding `C` (a shorthand cluster such as `-gC`) included; put `--` before
+  such a word meant for the script. For a launch
   without a package (`npm run`, `pnpm run`, `bun run`, `deno run` of a local
   script), the root `.npmrc` is read only for those locations: its other settings,
   such as `script-shell` or `node-options`, are not classified or bound. An `.npmrc`

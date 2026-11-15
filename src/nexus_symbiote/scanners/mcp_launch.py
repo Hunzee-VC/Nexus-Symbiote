@@ -2305,6 +2305,55 @@ def _local_subcommand(words: list[str], launch: Launch) -> None:
         launch.fail(reason)
 
 
+_NPM_LOCATION_KEYS = ("userconfig", "globalconfig", "prefix")
+# npm's option parser stops at a word of two or more dashes.
+_END_OF_OPTIONS = re.compile("-{2,}")
+
+
+def _npm_location(word: str) -> tuple[str, bool] | None:
+    """The configuration location option npm may read a word as, and whether it is last.
+
+    npm's option parser takes any number of dashes, expands an abbreviation (``--userc``)
+    and splits a word of single-letter shorthands (``-gC``), where ``-C`` is ``--prefix``.
+    An abbreviation counts here even where npm finds it ambiguous, and any word of letters
+    holding ``C`` as a cluster. The option takes the next word only when it ends the word.
+    """
+    name = word.partition("=")[0].lstrip("-")
+    if not word.startswith("-") or not name:
+        return None
+    if name.isalpha() and "C" in name:
+        return "-C", name.endswith("C")
+    for key in _NPM_LOCATION_KEYS:
+        if key.startswith(name) and (
+            name == key
+            or (len(name) > 1 and name not in NPM_CONFIG_FLAGS and name not in NPM_CONFIG_VALUES)
+        ):
+            return f"--{key}", True
+    return None
+
+
+def _npm_locations(words: list[str]) -> list[tuple[str, str]]:
+    """Configuration location options among the words npm reads after a script name.
+
+    npm reads options up to a word of only dashes, wherever they stand. A value that
+    cannot be told is empty, which may name the working directory.
+    """
+    found: list[tuple[str, str]] = []
+    for index, word in enumerate(words):
+        if _END_OF_OPTIONS.fullmatch(word):
+            break
+        location = _npm_location(word)
+        if location is None:
+            continue
+        option, last = location
+        _, equals, value = word.partition("=")
+        if not equals:
+            later = words[index + 1] if index + 1 < len(words) else "--"
+            value = "" if _END_OF_OPTIONS.fullmatch(later) else later
+        found.append((option, value if last else ""))
+    return found
+
+
 def _npm(name: str, rest: list[str], launch: Launch) -> None:
     launch.launcher, launch.family = "npm", "npm"
     found = _subcommand(rest, _NPM_EXEC, launch)
@@ -2329,6 +2378,7 @@ def _npm(name: str, rest: list[str], launch: Launch) -> None:
         _package_runner(remainder, launch, _NPM_EXEC, {"-p", "--package"}, options)
     elif subcommand in _NPM_LOCAL:
         launch.launcher = f"npm {subcommand}"
+        launch.sources.extend(_npm_locations(remainder))
         _local_subcommand(remainder, launch)
     else:
         launch.fail("npm subcommand fetches or installs packages")

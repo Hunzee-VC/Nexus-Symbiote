@@ -429,8 +429,8 @@ _CODE_LOADING_ENVIRONMENT = _names(
 # cache, proxy, trust store or engine. npm reads npm_config_<key> for every .npmrc key.
 _NPM_REDIRECT = (
     r"(?:npm|pnpm)_config_(?:(?:@[^:]+:)?registry|userconfig|globalconfig|prefix|cache"
-    r"|offline|prefer[-_]offline|proxy|https[-_]proxy|strict[-_]ssl|ca|cafile"
-    r"|replace[-_]registry[-_]host|store[-_]dir)"
+    r"|workspace[-_]prefix|workspace[-_]dir|offline|prefer[-_]offline|proxy|https[-_]proxy"
+    r"|strict[-_]ssl|ca|cafile|replace[-_]registry[-_]host|store[-_]dir)"
 )
 # Caches and tool directories count too: a prepared one in the checkout is used as is.
 _UV_REDIRECT = (
@@ -486,9 +486,13 @@ _LOCATION_LISTS = frozenset({"PATH", "XDG_CONFIG_DIRS"})
 _NPM_LOCATION_ENVIRONMENT = _names("PREFIX DESTDIR")
 # npm reads user configuration from `userconfig` and global configuration from
 # `globalconfig`, by default <prefix>/etc/npmrc, and resolves a relative one against
-# the working directory. The environment, the project .npmrc and the command line can
-# each set them; bun and Deno are given npm's settings too. No file there is read.
-_NPM_CONFIG_LOCATIONS = frozenset({"userconfig", "globalconfig", "prefix"})
+# the working directory; pnpm also reads <workspace-prefix>/.npmrc. The environment,
+# the project .npmrc and the command line can each set them; bun and Deno are given
+# npm's settings too. No file there is read.
+_NPM_CONFIG_LOCATIONS = frozenset({"userconfig", "globalconfig", "prefix", "workspace-prefix"})
+# pnpm takes its workspace directory, and so workspace-prefix, from
+# NPM_CONFIG_WORKSPACE_DIR in the environment only.
+_NPM_ENVIRONMENT_LOCATIONS = _NPM_CONFIG_LOCATIONS | {"workspace-dir"}
 _NPM_CONFIG_LOCATION_OPTIONS = frozenset({"--userconfig", "--globalconfig", "--prefix", "-C"})
 _NPM_CONFIG_FAMILIES = frozenset({"npm", "bun", "deno"})
 _RUNNER_LOCATION_ENVIRONMENT = {
@@ -756,6 +760,8 @@ _NPMRC_SOURCES = frozenset(
         "globalconfig",
         "replace-registry-host",
         "prefix",
+        "workspace-prefix",
+        "workspace-dir",
         "store-dir",
         "cache-dir",
         "workspace",
@@ -927,7 +933,9 @@ def _runner_environment(
         if family in _NPM_CONFIG_FAMILIES and value:
             # Its package source comes with the runner's other npm settings; npm skips
             # an empty variable.
-            moved = _npm_relocation(_npm_key(variable) or "", value, "the environment")
+            moved = _npm_relocation(
+                _npm_key(variable) or "", value, "the environment", _NPM_ENVIRONMENT_LOCATIONS
+            )
             if moved is not None:
                 reasons.append(moved)
         if _exported_function(variable, value):
@@ -1034,15 +1042,17 @@ def _may_name(key: str, names: frozenset[str]) -> bool:
     )
 
 
-def _npm_relocation(key: str, value: str, source: str) -> str | None:
+def _npm_relocation(
+    key: str, value: str, source: str, locations: frozenset[str] = _NPM_CONFIG_LOCATIONS
+) -> str | None:
     """Why an npm setting may have npm read configuration the collector does not.
 
-    A user or global configuration location that may lie in the project does, and so
-    does a name holding ``${...}`` that may expand to one, to ``call`` or to ``package``.
+    A configuration location that may lie in the project does, and so does a name
+    holding ``${...}`` that may expand to one, to ``call`` or to ``package``.
     """
     if "${" in key:
         return f"npm setting name with ${{...}} from {source}" if _may_name(key, _NPM_RUN) else None
-    if key in _NPM_CONFIG_LOCATIONS and not _absolute(value):
+    if key in locations and not _absolute(value):
         return f"npm {key} setting from {source} {_RELOCATES}"
     return None
 
