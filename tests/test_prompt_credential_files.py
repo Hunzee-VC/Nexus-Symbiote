@@ -309,9 +309,11 @@ def test_a_walk_that_skips_the_credential_check_still_records_no_credential_file
         "secrets/rotate.py",
         "deploy.key",
         "secrets.py",
+        ".secrets.py",
         "config/credentials.rb",
         "api_keys.js",
         "password.sh",
+        ".password.sh",
         ".env.dist",
     ],
 )

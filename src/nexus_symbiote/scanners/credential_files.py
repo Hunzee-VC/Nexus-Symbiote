@@ -52,7 +52,8 @@ def credential_shaped(path: str) -> bool:
     if suffix in _CREDENTIAL_SUFFIXES:
         return True
     if suffix in _PROGRAM_SUFFIXES:
-        return PurePosixPath(name).stem in _CREDENTIAL_DIRECTORIES
+        # `.secrets.py` has stem `.secrets`. Directories already strip a leading dot.
+        return PurePosixPath(name).stem.lstrip(".") in _CREDENTIAL_DIRECTORIES
     return any(marker in name for marker in _CREDENTIAL_MARKERS)
 
 
