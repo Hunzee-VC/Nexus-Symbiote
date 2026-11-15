@@ -273,8 +273,7 @@ def _maximal_policy_yaml(suppressions: int) -> str:
     lines = [
         'version: "1.0"',
         "scan:",
-        '  scanners: ["mcp", "model", "prompt", "rag", "registry", "shadowscan", "a2a",'
-        ' "ide_agents"]',
+        '  scanners: ["mcp", "model", "prompt", "rag", "registry", "shadowscan", "a2a", "ide_agents"]',
         "  exclude_paths:",
         *(f"    - generated/dir_{index}" for index in range(MAX_POLICY_LIST_ITEMS)),
         '  failure_mode: "report-only"',
@@ -501,8 +500,13 @@ def test_confined_collection_mount_check_applies_to_directories_not_regular_file
         assert files.read_text("mnt_dir/secret.txt") is None
         assert files.read_text("link_to_mnt") is None
         assert files._root_fd is not None
-        with pytest.raises(CollectionError, match="mount boundary"):
-            files._open_leaf_no_follow(files._root_fd, "mnt_dir")
+        leaf_fd: int | None = None
+        try:
+            with pytest.raises(CollectionError, match="mount boundary"):
+                leaf_fd = files._open_leaf_no_follow(files._root_fd, "mnt_dir")
+        finally:
+            if leaf_fd is not None:
+                os.close(leaf_fd)
     assert "layer_file.txt" in collected
     assert "link_to_leaf" in collected
     assert "real_target/ok.txt" in collected
