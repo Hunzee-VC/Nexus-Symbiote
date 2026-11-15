@@ -1199,6 +1199,7 @@ class StateStore:
                     os.mkdir(component, 0o700)
                     created = True
                 except FileExistsError:
+                    # Another process created this ancestor directory concurrently; open_directory_nofollow verifies it below.
                     pass
                 if created:
                     comp_fd = os.open(component, dir_flags)

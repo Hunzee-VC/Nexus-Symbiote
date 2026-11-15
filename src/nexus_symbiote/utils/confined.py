@@ -1596,6 +1596,7 @@ class ConfinedCollection:
         try:
             descend(Path(), (), True, False)
         except _VariantSearchStoppedError:
+            # Bounded case-variant search reached _MAX_CASE_VARIANTS; return collected variants.
             pass
         return found
 

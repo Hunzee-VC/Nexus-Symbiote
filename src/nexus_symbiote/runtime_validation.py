@@ -751,6 +751,7 @@ def _ecma_semantics_hold(dialects: dict[str, Any]) -> bool:
         try:
             validator.check_schema({"pattern": "(?i)a"})
         except SchemaError:
+            # Expected: ECMA-262 regex semantics must reject Python inline flags.
             pass
         else:
             return False

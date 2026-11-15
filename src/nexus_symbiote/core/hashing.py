@@ -210,6 +210,7 @@ def open_directory_nofollow(directory: Path) -> int:
                             current_fd = next_fd
                             continue
                         except PermissionError:
+                            # Expected when O_PATH open is also denied; fall back to validated lstat below.
                             pass
                     os.close(current_fd)
                     current_fd = None
