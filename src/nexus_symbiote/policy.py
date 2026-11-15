@@ -8,7 +8,7 @@ import re
 import stat
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
@@ -22,9 +22,8 @@ POLICY_FILE_NAMES = (".nexus-symbiote.yaml", ".nexus-symbiote.yml")
 DEFAULT_EXCLUDE_PATHS = ("node_modules", ".git", "__pycache__", ".venv")
 _ALWAYS_EXCLUDED_NAMES = frozenset({*DEFAULT_EXCLUDE_PATHS, "venv"})
 DEFAULT_WARN_THRESHOLD = 25.0
-MAX_YAML_NODES = 250_000
-MAX_POLICY_YAML_NODES = 10_000
 MAX_POLICY_LIST_ITEMS = 256
+MAX_POLICY_SUPPRESSIONS = 1000
 MAX_POLICY_ENTRY_CHARS = 1024
 _ISO_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
@@ -114,7 +113,9 @@ class RiskPolicy(PolicySection):
     warn_threshold: float = Field(default=DEFAULT_WARN_THRESHOLD, ge=0)
     ignore_categories: list[str] = Field(default_factory=list, max_length=MAX_POLICY_LIST_ITEMS)
     fail_on_severity: Literal["critical", "high", "medium", "low", "info", "none"] = "critical"
-    suppressions: list[Suppression] = Field(default_factory=list, max_length=1000)
+    suppressions: list[Suppression] = Field(
+        default_factory=list, max_length=MAX_POLICY_SUPPRESSIONS
+    )
 
     @model_validator(mode="after")
     def valid_thresholds(self) -> RiskPolicy:
@@ -156,6 +157,26 @@ class Policy(PolicySection):
     risk: RiskPolicy = Field(default_factory=RiskPolicy)
     validation: ValidatePolicy = Field(default_factory=ValidatePolicy, alias="validate")
     output: OutputPolicy = Field(default_factory=OutputPolicy)
+
+
+def _policy_yaml_node_budget() -> int:
+    """The YAML nodes of the largest policy the model accepts, in block or flow style.
+
+    The root mapping, a key and a value node for every section and every setting,
+    each distinct scanner, the two bounded string lists at their maximum length, and
+    every permitted suppression as one mapping with a key and value per field.
+    Comments, document markers and quoting add no node.
+    """
+    sections = (ScanPolicy, RiskPolicy, ValidatePolicy, OutputPolicy)
+    settings = 1 + 2 * len(Policy.model_fields)
+    settings += sum(2 * len(section.model_fields) for section in sections)
+    lists = len(get_args(ScannerName)) + 2 * MAX_POLICY_LIST_ITEMS
+    suppressions = MAX_POLICY_SUPPRESSIONS * (1 + 2 * len(Suppression.model_fields))
+    return settings + lists + suppressions
+
+
+# Larger documents are refused while composing, before any object is built.
+MAX_POLICY_YAML_NODES = _policy_yaml_node_budget()
 
 
 def default_policy() -> Policy:
@@ -294,7 +315,13 @@ def _contains_lone_surrogate(value: str) -> bool:
     return any("\ud800" <= char <= "\udfff" for char in value)
 
 
-def parse_yaml_mapping(text: str, *, max_nodes: int = MAX_YAML_NODES) -> dict[str, Any]:
+def parse_yaml_mapping(text: str, *, max_nodes: int | None = None) -> dict[str, Any]:
+    """Parse one YAML mapping with unique string keys, refusing anchors and aliases.
+
+    ``max_nodes`` bounds the nodes composed; ``None`` sets no node budget, so callers
+    bound the document themselves (pnpm lockfiles, scanner YAML and agent manifests
+    by size and token count). Policy loading passes ``MAX_POLICY_YAML_NODES``.
+    """
     if _contains_lone_surrogate(text):
         raise PolicyError("invalid YAML document")
     try:
@@ -316,7 +343,7 @@ def parse_yaml_mapping(text: str, *, max_nodes: int = MAX_YAML_NODES) -> dict[st
             if getattr(event, "anchor", None) is not None:
                 raise PolicyError("YAML anchors are not supported in policy files")
             self._nodes += 1
-            if self._nodes > max_nodes:
+            if max_nodes is not None and self._nodes > max_nodes:
                 raise PolicyError("YAML complexity exceeds policy budget")
             return super().compose_node(parent, index)
 
@@ -403,7 +430,7 @@ version: "1.0"  # quote it: an unquoted 1.0 is a number and is refused
 scan:
   # Removing a collector leaves coverage partial, which fails the gates.
   scanners: ["mcp", "model", "prompt", "rag", "registry", "shadowscan", "a2a", "ide_agents"]
-  # These four directories are always skipped. Any other path listed here is a
+  # These four directories, and venv, are always skipped. Any other path listed here is a
   # recorded coverage gap, so the scan gate fails; use it only with report-only scans.
   exclude_paths: ["node_modules", ".git", "__pycache__", ".venv"]
   failure_mode: "error"  # or "report-only": never fail CI

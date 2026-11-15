@@ -251,14 +251,62 @@ def _private_file_info_error(
     return None
 
 
+# Every valid uid; (uid_t)-1 is reserved. The initial user namespace maps exactly this.
+_FULL_UID_RANGE = 4_294_967_295
+_DEFAULT_OVERFLOW_UID = 65534
+
+
+def _read_uid_map() -> str | None:
+    """This process's ``/proc/self/uid_map``, or ``None`` where it cannot be read."""
+    try:
+        return Path("/proc/self/uid_map").read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _overflow_uid() -> int:
+    """The uid the kernel shows for an owner unmapped in this user namespace."""
+    try:
+        value = int(Path("/proc/sys/kernel/overflowuid").read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return _DEFAULT_OVERFLOW_UID
+    return value if 0 <= value < _FULL_UID_RANGE else _DEFAULT_OVERFLOW_UID
+
+
+def _parse_uid_map(text: str) -> list[tuple[int, int]] | None:
+    """``(first inside uid, count)`` per ``uid_map`` line, or ``None`` if malformed."""
+    ranges: list[tuple[int, int]] = []
+    for line in text.splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        if len(fields) != 3 or not all(field.isascii() and field.isdigit() for field in fields):
+            return None
+        ranges.append((int(fields[0]), int(fields[2])))
+    return ranges
+
+
 def _trusted_ancestor_uids(uid: int) -> set[int]:
-    """Caller and system UIDs, including unmapped host-root overflowuid in rootless userns."""
-    allowed = {0, uid}
-    with contextlib.suppress(OSError, ValueError):
-        uid_map = Path("/proc/self/uid_map").read_text(encoding="utf-8")
-        if not any(line.split()[0] == "0" for line in uid_map.splitlines() if line.split()):
-            overflow = int(Path("/proc/sys/kernel/overflowuid").read_text(encoding="utf-8").strip())
-            allowed.add(overflow)
+    """Owners trusted above an unpinned trust root or a signature policy.
+
+    The caller's effective uid, and uid 0 when this user namespace maps it. In a
+    user namespace that does not map every uid, the kernel shows every unmapped
+    owner, host root and other host users alike, as the overflow uid, so that uid
+    is never trusted there, not even when it is the caller's own. Where the map
+    cannot be read on Linux a partial namespace cannot be ruled out and the
+    overflow uid is not trusted either; elsewhere there are no user namespaces.
+    """
+    text = _read_uid_map()
+    ranges = None if text is None else _parse_uid_map(text)
+    if ranges is None:
+        if not sys.platform.startswith("linux"):
+            return {0, uid}
+        return {0, uid} - {_overflow_uid()}
+    allowed = {uid}
+    if any(first <= 0 < first + count for first, count in ranges):
+        allowed.add(0)
+    if sum(count for _first, count in ranges) < _FULL_UID_RANGE:
+        allowed.discard(_overflow_uid())
     return allowed
 
 
@@ -695,6 +743,11 @@ def verify_sigstore_digest(
     The caller must bind this digest to the inspected artifact. This function
     verifies a message signature over the artifact digest. A DSSE envelope signs
     an in-toto statement instead, so such a bundle is refused with a fixed reason.
+
+    The bundle must be UTF-8 JSON, as RFC 8259 requires between systems. A bundle
+    in another encoding, such as UTF-16, is refused as unreadable before any DSSE
+    check (``Sigstore artifact verification failed (UnicodeDecodeError)``), even when
+    it carries a DSSE envelope, so it never reports ``DSSE_UNSUPPORTED``.
 
     The trust root comes from an explicit ``--trust-root``/``NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT``
     override when one is set (verified against a pinned SHA-256 when one is

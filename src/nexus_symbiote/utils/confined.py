@@ -464,6 +464,15 @@ class ConfinedCollection:
     for this input. Reaching any limit records a failure that names it. A
     directory exceeding the entry budget is not partially returned. Within those
     bounds traversal is lexical and deterministic.
+
+    Mount boundaries are decided on directories only: a directory, or a directory a
+    symlink names, whose ``st_dev`` differs from the root's is a mount point and is
+    refused, so nothing beneath it is read or walked. A regular file, or a symlink
+    to one, is not refused for its ``st_dev`` alone: overlayfs without ``xino``
+    reports every directory on the overlay device but every non-directory on the
+    device of the layer that holds it, so a device check on leaves would exclude
+    every file in such a container. A file reached this way is still opened without
+    following links, beneath directories that passed the mount check.
     """
 
     def __init__(
@@ -513,7 +522,9 @@ class ConfinedCollection:
         self._root_dev: int | None = None
         self._links: dict[str, str] = {}
         self._listings: dict[Path, dict[str, list[tuple[str, str]]] | None] = {}
-        self._exact_names: dict[tuple[int, int], tuple[tuple[int, int], frozenset[str]]] = {}
+        self._exact_names: dict[
+            tuple[int, int], tuple[tuple[int, int, int, int, int, int], frozenset[str]]
+        ] = {}
         self._case_sensitive_dirs: set[tuple[int, int]] = set()
         self._root_folds = False
         self._folded_excluded: set[tuple[str, ...]] | None = None
@@ -710,18 +721,24 @@ class ConfinedCollection:
                 except OSError:
                     # Any other failure decides nothing; the listing below does.
                     pass
-        stamp = (info.st_mtime_ns, info.st_ctime_ns)
+        stamp = descriptor_binding(info)
         cached = self._exact_names.get(dir_key)
         if cached is None or cached[0] != stamp:
+            if self._entries_exhausted:
+                raise LimitExceededError(self._entry_bound)
             dup_fd = os.dup(directory_fd)
             try:
-                found_names: list[str] = []
+                found: set[str] = set()
                 with os.scandir(dup_fd) as stream:
                     for entry in stream:
-                        if len(found_names) >= self.max_entries:
+                        if self._entry_budget[0] <= 0:
+                            # Metadata-only callers also need a blocking failure; they
+                            # otherwise return no observation when opening is refused.
+                            self._entries_exceeded(Path("."))
                             raise LimitExceededError(self._entry_bound)
-                        found_names.append(entry.name)
-                names = frozenset(found_names)
+                        self._entry_budget[0] -= 1
+                        found.add(entry.name)
+                names = frozenset(found)
             finally:
                 os.close(dup_fd)
             cached = (stamp, names)
@@ -767,8 +784,11 @@ class ConfinedCollection:
                 raise FileNotFoundError(errno.ENOENT, "exact entry not found") from exc
             raise
         try:
-            if self._root_dev is not None and os.fstat(fd).st_dev != self._root_dev:
-                raise CollectionError("path crosses a filesystem mount boundary")
+            if self._root_dev is not None:
+                # Only a directory marks a mount point; see the class docstring.
+                leaf = os.fstat(fd)
+                if stat.S_ISDIR(leaf.st_mode) and leaf.st_dev != self._root_dev:
+                    raise CollectionError("path crosses a filesystem mount boundary")
             exact = self._has_exact_name(directory_fd, name)
         except BaseException:
             os.close(fd)
@@ -1067,18 +1087,25 @@ class ConfinedCollection:
         """Yield root-relative file paths, never through more than one symlink.
 
         A ``directory`` reached through one in-root symlink is walked under its
-        target's name. Inside the walk, a symlink to a regular file beneath the root
-        is yielded under its own name and read through its target. A symlink to a
-        directory inside the walked one is skipped, because that directory is walked
-        under its own name; one to a directory elsewhere beneath the root is walked
-        once under its target's name, as a host reading the walked directory would
-        read it, and one to the root or to a directory that holds the walked one is a
-        failure. ``directory_links`` collects the directory symlinks the walk met, and
-        ``skipped`` the entries it neither entered nor yielded because their name is
-        one of ``DEFAULT_EXCLUDES``, in any spelling a case-insensitive file system
-        treats as that name, which nothing records otherwise. Every other symlink is
-        a recorded failure. Past the collection's listing bounds, the walk's
-        per-entry failures end it as one line per reason.
+        target's name. Inside a walk that did not start through a symlink, a symlink
+        to a regular file beneath the root is yielded under its own name and read
+        through its target. A symlink to a directory inside the walked one is skipped,
+        because that directory is walked under its own name; one to a directory
+        elsewhere beneath the root is walked once under its target's name, as a host
+        reading the walked directory would read it, and one to the root or to a
+        directory that holds the walked one is a failure. Within a directory walked
+        through a symlink, whether ``directory`` itself or a directory symlink met
+        during the walk, every symlink, including one to a regular file, is a failure
+        recorded as reached through another symlink and is not yielded: reading it
+        would follow a second link. ``directory_links`` collects the directory
+        symlinks the walk met, and ``skipped`` the entries it neither entered nor
+        yielded because their name is one of ``DEFAULT_EXCLUDES``, in any spelling a
+        case-insensitive file system treats as that name, which nothing records
+        otherwise. Every other symlink is a recorded failure. A directory whose
+        ``st_dev`` differs from the root's is a mount point, recorded as excluded and
+        not entered; regular files are not refused for their device alone. Past the
+        collection's listing bounds, the walk's per-entry failures end it as one line
+        per reason.
         """
         try:
             relative = self._relative(directory)
@@ -1154,7 +1181,11 @@ class ConfinedCollection:
                         scope.skipped.append(child)
                     continue
                 metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-                if self._root_dev is not None and metadata.st_dev != self._root_dev:
+                if (
+                    self._root_dev is not None
+                    and stat.S_ISDIR(metadata.st_mode)
+                    and metadata.st_dev != self._root_dev
+                ):
                     self._record(child, "cross-filesystem mount excluded", scope.unlisted)
                     continue
                 if stat.S_ISLNK(metadata.st_mode):
@@ -1435,11 +1466,11 @@ class ConfinedCollection:
             raise _LinkRefusedError(str(exc)) from exc
         except OSError as exc:
             raise _LinkRefusedError("symlink target passes through another symlink") from exc
-        if self._root_dev is not None and info.st_dev != self._root_dev:
-            raise _LinkRefusedError("symlink target crosses a filesystem mount boundary")
         if stat.S_ISREG(info.st_mode):
             return None
         if stat.S_ISDIR(info.st_mode):
+            if self._root_dev is not None and info.st_dev != self._root_dev:
+                raise _LinkRefusedError("symlink target crosses a filesystem mount boundary")
             return target
         if stat.S_ISLNK(info.st_mode):
             raise _LinkRefusedError("symlink target is another symlink")

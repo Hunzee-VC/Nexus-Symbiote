@@ -1266,12 +1266,15 @@ class StateStore:
         abs_path = Path(os.path.abspath(self.path))
         try:
             parent_fd = open_directory_nofollow(self.path.parent)
-        except FileNotFoundError:
+        except FileNotFoundError as exc:
             if any(os.path.islink(parent) for parent in abs_path.parents):
                 raise AuthorizationError(
                     "state database cannot be a symlink", reason="state-invalid"
                 ) from None
-            return
+            raise AuthorizationError(
+                "state database identity changed; open the replacement store explicitly",
+                reason="state-unavailable",
+            ) from exc
         except OSError as exc:
             raise AuthorizationError(
                 "state database parent directory cannot be a symlink or unavailable",
@@ -1291,8 +1294,11 @@ class StateStore:
                 )
             try:
                 info = os.stat(self.path.name, dir_fd=parent_fd, follow_symlinks=False)
-            except FileNotFoundError:
-                return
+            except FileNotFoundError as exc:
+                raise AuthorizationError(
+                    "state database identity changed; open the replacement store explicitly",
+                    reason="state-unavailable",
+                ) from exc
             except OSError as exc:
                 raise AuthorizationError(
                     "state database cannot be inspected", reason="state-invalid"
