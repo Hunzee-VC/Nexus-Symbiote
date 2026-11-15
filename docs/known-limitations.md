@@ -485,11 +485,11 @@ A way around a limit that its entry does not describe is worth a
   resolved from that file's directory. The imports of other instruction files, such
   as `AGENTS.md` or a rule file, are followed only when a memory file imports them.
   Imports are read from the text outside fenced code and code spans as CommonMark
-  reads it, across lines and inside block quotes and list items. Where CommonMark
-  readers disagree, as after a link reference definition or inside raw HTML, the
-  text is searched as written, so more is looked up; a host that reads Markdown
-  otherwise, such as with GitHub's table or autolink extensions, can still import a
-  file from text read here as code.
+  reads it, across lines and inside block quotes and list items, in time linear in
+  the length of the file. Where CommonMark readers disagree, as after a link
+  reference definition or inside raw HTML, the text is searched as written, so more
+  is looked up; a host that reads Markdown otherwise, such as with GitHub's table or
+  autolink extensions, can still import a file from text read here as code.
   A reference is read only where `@` starts the text or follows white space, and
   without the sentence punctuation after it. A host that also starts a reference
   after inline markup (`**@docs/x.md**`, the text of a link, `<b>@x.md</b>`), keeps that

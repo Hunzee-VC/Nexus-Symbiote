@@ -4,6 +4,7 @@ bounds on import bookkeeping, and the named byte limit of a streamed skill asset
 from __future__ import annotations
 
 import contextlib
+import itertools
 import json
 import os
 import re
@@ -12,6 +13,7 @@ import subprocess
 import sys
 import tracemalloc
 from pathlib import Path
+from unittest import mock
 
 import pytest
 from click.testing import CliRunner
@@ -25,6 +27,7 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.scanners import prompt
 from nexus_symbiote.scanners.prompt import PromptScanner
+from nexus_symbiote.utils import markdown
 from tests.support import scaling_ratio
 
 RLO = "\u202e"
@@ -566,6 +569,8 @@ HIDDEN_FROM_A_LINE_READER = {
     "fence in an HTML block": "<div>\n```\n\n@hidden.md\n",
     "backtick in an HTML attribute": "<a title='`'> @hidden.md `\n",
     "backtick in a link destination": "[a](`b) @hidden.md `\n",
+    "wide space between HTML attributes": '<a b=c\xa0d="e">\n` @hidden.md `\n',
+    "wide space as an HTML attribute value": "<a b=\u3000 c>\n` @hidden.md `\n",
 }
 
 
@@ -590,6 +595,7 @@ def test_an_import_that_commonmark_reads_as_text_is_inventoried(tmp_path, text):
         "Use `npm install\n@code.md` first.\n",
         "See [the guide](docs/guide.md), <kbd>Ctrl</kbd> and `@code.md`.\n",
         "- [ ] run `@code.md`\n",
+        "<a b=c\xa0=d>\n` @code.md `\n",
     ],
 )
 def test_an_import_in_code_is_not_inventoried(tmp_path, text):
@@ -662,6 +668,92 @@ def test_no_import_that_commonmark_reads_as_text_is_missed(pieces):
     assert host <= found, text
 
 
+# Whitespace past ASCII, which JavaScript matches as \s and an unquoted attribute value
+# can also hold.
+WIDE_SPACES = (
+    "\xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+    "\u2028\u2029\u202f\u205f\u3000\ufeff"
+)
+JS_SPACE = f"[\t\n\x0b\x0c\r {WIDE_SPACES}]"
+# commonmark.js's pattern for a line that opens an HTML block of type 7. Backtracking
+# takes time exponential in the attributes of a line, so it is the oracle for short lines.
+JS_TAG_LINE = re.compile(
+    rf"(?:<[A-Za-z][A-Za-z0-9-]*(?:{JS_SPACE}+[a-zA-Z_:][a-zA-Z0-9:._-]*"
+    rf"(?:{JS_SPACE}*={JS_SPACE}*(?:[^\"'=<>`\x00-\x20]+|'[^']*'|\"[^\"]*\"))?)*"
+    rf"{JS_SPACE}*/?>|</[A-Za-z][A-Za-z0-9-]*{JS_SPACE}*>){JS_SPACE}*$"
+)
+TAG_LINE = markdown._HTML_BLOCK_STARTS[6]
+TAG_PIECES = (
+    *("<", "</", "a", "Z9-", "_:.", "#", "\xe9", "/", "/>", ">", "=", "'", '"', "`", "<x"),
+    *(" ", "\t", "\n", "\x0c", "\x00", "\x1f", "\x7f", "\x85", "\u200b", *WIDE_SPACES),
+    *(" b", " b=", "=c", "\xa0d", "\u3000\u3000", " x='`'", ' y="a b"', "\u2005 \u2005"),
+)
+
+
+@pytest.mark.parametrize(
+    ("line", "opens"),
+    [
+        ('<img src="logo.png" alt="Logo" width=200>', True),
+        ("<a href=https://example.com/a?b>", True),
+        ("<a href=https://example.com/a?b=c>", False),
+        ("<br/>", True),
+        ("</span >", True),
+        ("<a title=caf\xe9\xa0au\xa0lait>", True),
+        ('<a b=c\xa0d="e">', True),
+        ("<a b=\u3000 c='d'>", True),
+        ("<a b=\u2028>", True),
+        ("<a b=c\u205f/d>", True),
+        ("<a b=c\xa0=d>", False),
+        ("<a b= >", False),
+        ("<a b=c\xa0d", False),
+        ('<a b="c"d>', False),
+    ],
+)
+def test_an_html_tag_line_with_wide_whitespace_opens_a_block_as_commonmark_js_reads_it(line, opens):
+    assert bool(TAG_LINE.match(line)) is opens
+    assert bool(JS_TAG_LINE.match(line)) is opens
+
+
+def test_every_short_html_tag_line_opens_a_block_as_commonmark_js_reads_it():
+    for size in range(6):
+        for characters in itertools.product("b.#/ \xa0='\">", repeat=size):
+            line = "<a" + "".join(characters)
+            assert bool(TAG_LINE.match(line)) == bool(JS_TAG_LINE.match(line)), repr(line)
+
+
+@settings(max_examples=1000)
+@given(
+    st.sampled_from(("<a", "<A1-x", "</a", "<a b=", "<")),
+    st.lists(st.sampled_from(TAG_PIECES), max_size=14),
+)
+def test_an_html_tag_line_opens_a_block_as_commonmark_js_reads_it(start, pieces):
+    line = start + "".join(pieces)
+    assert bool(TAG_LINE.match(line)) == bool(JS_TAG_LINE.match(line)), repr(line)
+
+
+BACKTRACKING_PATTERNS = {
+    "_OPENING_FENCE": re.compile(r"`{3,}(?!.*`)|~{3,}"),
+    "_CLOSING_FENCE": re.compile(r"(?:`{3,}|~{3,})(?=[ \t]*$)"),
+    "_HTML_BLOCK_STARTS": (*markdown._HTML_BLOCK_STARTS[:6], JS_TAG_LINE),
+}
+READER_PIECES = (
+    *PIECES,
+    *("\n<a", "\n<a b=c\xa0d", "\n<a b=", " b=", "\xa0", "\u3000", "=", "/>", "c\u2000d"),
+    *("\n```a`", "\n``` `", "\n````` x`", "\n~~~ `", "````", "\n> <a b=\xa0 c>\n"),
+)
+
+
+@settings(max_examples=400)
+@given(st.lists(st.sampled_from(READER_PIECES), max_size=40))
+def test_markdown_is_read_as_its_backtracking_patterns_read_it(pieces):
+    text = "".join(pieces)
+    with contextlib.ExitStack() as patches:
+        for name, pattern in BACKTRACKING_PATTERNS.items():
+            patches.enter_context(mock.patch.object(markdown, name, pattern))
+        expected = markdown.text_outside_code(text)
+    assert markdown.text_outside_code(text) == expected, repr(text)
+
+
 @pytest.mark.parametrize(
     "shape",
     [
@@ -670,13 +762,46 @@ def test_no_import_that_commonmark_reads_as_text_is_missed(pieces):
         lambda scale: ("- " * 15 + "`x\n") * 2_000 * scale,
         lambda scale: "` x " * 20_000 * scale,
         lambda scale: "<a " * 20_000 * scale + "`",
+        # Whitespace past ASCII can end an unquoted attribute value or stay in it.
+        lambda scale: "<a b=c" + "\xa0d" * 2_000 * scale + "\n",
+        lambda scale: "> - <a b=c" + "\u3000d" * 1_000 * scale + '"x">\n',
+        lambda scale: "<a b=" + "\xa0" * 100 * scale + "\n",
+        lambda scale: "<a" + " b=\xa0\xa0" * 3 * scale + "#\n",
+        lambda scale: "`" * 10_000 * scale + "x`\n",
+        lambda scale: "- > " + "`" * 10_000 * scale + "x`\n",
     ],
-    ids=["blank lines under nested items", "nested items", "code spans", "raw HTML"],
+    ids=[
+        "blank lines under nested items",
+        "nested items",
+        "code spans",
+        "raw HTML",
+        "attribute value split by wide whitespace",
+        "nested attribute value split by wide whitespace",
+        "wide whitespace after =",
+        "attributes split by wide whitespace",
+        "backtick after a fence",
+        "nested backtick after a fence",
+    ],
 )
 def test_reading_markdown_grows_with_the_text_not_with_its_nesting(shape):
     texts = {scale: shape(scale) for scale in (1, 4)}
     growth = len(texts[4]) / len(texts[1])
     assert scaling_ratio(lambda scale: prompt._import_tokens(texts[scale])) < 2.5 * growth
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize("space", ["\xa0", "\u2028", "\u3000"], ids=["U+00A0", "U+2028", "U+3000"])
+def test_memory_file_lines_that_backtracking_takes_hours_on_are_read(tmp_path, space):
+    _write(
+        tmp_path,
+        "CLAUDE.md",
+        f"<a{f' b={space}{space}' * 40}#\n\n<a b=c{f'{space}d' * 20_000}\n\n"
+        f"{'`' * 50_000}x`\n\n<a{f' b=c{space}d' * 40}>\n` @hidden.md `\n",
+    )
+    _write(tmp_path, "hidden.md", "Notes.\n")
+    result = PromptScanner().scan(tmp_path)
+    assert not result.scan_failures, result.scan_failures
+    assert _components(result)["prompt:import:hidden.md"].properties["imported_by"] == ["CLAUDE.md"]
 
 
 def test_credential_shaped_imports_are_never_read_or_hashed(tmp_path):

@@ -38,21 +38,42 @@ _CODE_INDENT = 4
 _SPACE_OR_TAB = (" ", "\t")
 _MAYBE_SPECIAL = re.compile(r"[#`~*+_=<>0-9-]")
 _ATX_HEADING = re.compile(r"#{1,6}(?:[ \t]+|$)")
-_OPENING_FENCE = re.compile(r"`{3,}(?!.*`)|~{3,}")
-_CLOSING_FENCE = re.compile(r"(?:`{3,}|~{3,})(?=[ \t]*$)")
+_OPENING_FENCE = re.compile(r"`{3,}+|~{3,}+")
+_CLOSING_FENCE = re.compile(r"(?:`{3,}+|~{3,}+)(?=[ \t]*+$)")
 _THEMATIC_BREAK = re.compile(r"(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})$")
 _SETEXT_UNDERLINE = re.compile(r"(?:=+|-+)[ \t]*$")
 _LIST_MARKER = re.compile(r"[*+-]|(\d{1,9})[.)]")
 _LIST_STARTS = frozenset("*+-0123456789")
 _NON_SPACE = re.compile(r"[^ \t\f\v\r\n]")
 # Whitespace as the JavaScript readers that hosts use match it in HTML.
-_WHITESPACE = "[\t\n\x0b\x0c\r \xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
-_OPEN_TAG = (
-    rf"<[A-Za-z][A-Za-z0-9-]*(?:{_WHITESPACE}+[a-zA-Z_:][a-zA-Z0-9:._-]*"
-    rf"(?:{_WHITESPACE}*={_WHITESPACE}*(?:[^\"'=<>`\x00-\x20]+|'[^']*'|\"[^\"]*\"))?)*"
-    rf"{_WHITESPACE}*/?>"
+_ASCII_WHITESPACE = " \t\n\r\x0b\x0c"
+_WIDE_WHITESPACE = "\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+_WHITESPACE = f"[{_ASCII_WHITESPACE}{_WIDE_WHITESPACE}]"
+# commonmark.js matches an open tag as <name(\s+attribute(\s*=\s*value)?)*\s*/?>, where
+# an unquoted value is a run of anything but quotes, `=<>`, backticks, ASCII whitespace
+# and controls. Whitespace past ASCII can thus end such a value or stay in it, and a
+# backtracking match tries both at each one, in time exponential in the attributes of
+# a line. This pattern matches the same lines without going back: a value takes such
+# whitespace unless an attribute name ends the run after it, and the first such
+# character after `=` is the value itself when only whitespace follows it up to `>`,
+# or whitespace and then such a name.
+_ATTRIBUTE_NAME = "[a-zA-Z_:][a-zA-Z0-9:._-]*+"
+_NOT_UNQUOTED = r"\"'=<>`\x00-\x20"
+_NAME_ENDS_RUN = rf"{_ATTRIBUTE_NAME}[{_WIDE_WHITESPACE}]*+(?![^{_NOT_UNQUOTED}])"
+_VALUE_PART = rf"[^{_NOT_UNQUOTED}{_WIDE_WHITESPACE}]++"
+_UNQUOTED_VALUE = rf"{_VALUE_PART}(?:[{_WIDE_WHITESPACE}]++(?!{_NAME_ENDS_RUN}){_VALUE_PART})*+"
+_ATTRIBUTE_VALUE = (
+    rf"(?>{_WHITESPACE}*+(?:'[^']*+'|\"[^\"]*+\")"
+    rf"|[{_ASCII_WHITESPACE}]*+[{_WIDE_WHITESPACE}]"
+    rf"(?={_WHITESPACE}*+>|{_WHITESPACE}++{_NAME_ENDS_RUN})"
+    rf"|{_WHITESPACE}*+{_UNQUOTED_VALUE})"
 )
-_CLOSE_TAG = rf"</[A-Za-z][A-Za-z0-9-]*{_WHITESPACE}*>"
+_OPEN_TAG = (
+    rf"<[A-Za-z][A-Za-z0-9-]*+"
+    rf"(?:{_WHITESPACE}++{_ATTRIBUTE_NAME}(?:{_WHITESPACE}*+={_ATTRIBUTE_VALUE})?+)*+"
+    rf"{_WHITESPACE}*+/?+>"
+)
+_CLOSE_TAG = rf"</[A-Za-z][A-Za-z0-9-]*+{_WHITESPACE}*+>"
 _BLOCK_TAG_NAMES = (
     "address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd"
     "|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset"
@@ -69,7 +90,7 @@ _HTML_BLOCK_STARTS = (
     re.compile(r"<![A-Za-z]"),
     re.compile(r"<!\[CDATA\["),
     re.compile(rf"</?(?:{_BLOCK_TAG_NAMES})(?:{_WHITESPACE}|/?>|$)", re.I),
-    re.compile(rf"(?:{_OPEN_TAG}|{_CLOSE_TAG}){_WHITESPACE}*$"),
+    re.compile(rf"(?:{_OPEN_TAG}|{_CLOSE_TAG}){_WHITESPACE}*+$"),
 )
 _HTML_BLOCK_ENDS: tuple[re.Pattern[str] | str, ...] = (
     re.compile(r"</(?:pre|script|style|textarea)>", re.I),
@@ -339,7 +360,8 @@ class _Reader:
                 self.offset = len(line)
                 return 2
             fence = _OPENING_FENCE.match(line, at) if char in ("`", "~") else None
-            if fence is not None:
+            # The info string after a backtick fence holds no backtick.
+            if fence is not None and (char == "~" or line.find("`", fence.end()) < 0):
                 self._close_unmatched()
                 block = self._add_child("fence")
                 block.fence = fence.group()
@@ -349,10 +371,11 @@ class _Reader:
                 return 2
             if char == "<":
                 lazy = not self.all_closed and not self.blank and self.stack[-1].kind == "paragraph"
-                for kind, start in enumerate(_HTML_BLOCK_STARTS, 1):
-                    if start.match(line, at) and (
-                        kind < 7 or (parent.kind != "paragraph" and not lazy)
-                    ):
+                # A block of type 7 cannot interrupt a paragraph.
+                interrupting = parent.kind == "paragraph" or lazy
+                starts = _HTML_BLOCK_STARTS[:6] if interrupting else _HTML_BLOCK_STARTS
+                for kind, start in enumerate(starts, 1):
+                    if start.match(line, at):
                         self._close_unmatched()
                         self._add_child("html").html = kind
                         return 2
