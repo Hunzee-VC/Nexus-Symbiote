@@ -21,12 +21,14 @@ Package sources are the registry and index options of a launcher (`--registry`,
 variables that redirect resolution (`npm_config_registry`, `UV_INDEX_URL`,
 `PIP_INDEX_URL`, `UV_PYTHON_INSTALL_MIRROR`, `JSR_URL`, `DOCKER_HOST`, `GOPROXY` and
 similar, and cache or tool directories a prepared copy could serve from:
-`UV_CACHE_DIR`, `UV_TOOL_DIR`, `PIPX_HOME`, `DENO_DIR`, `GOMODCACHE`), container engine options (`docker -H`, `--context`, `--config`; `podman
+`UV_CACHE_DIR`, `UV_TOOL_DIR`, `PIPX_HOME`, `DENO_DIR`, `GOMODCACHE`, and for `uv run`
+the `VIRTUAL_ENV` or `CONDA_PREFIX` environment whose interpreter and packages it uses
+outside a project), container engine options (`docker -H`, `--context`, `--config`; `podman
 --url`, `--root`), `pipx --pip-args` index and trust options (matched by unique
 prefix, as pip's parser does; an unknown option is a gap) and project-root resolver
 settings that apply to the launched package: `.npmrc` for npm, pnpm, bun and Deno
 `npm:` specifiers, `bunfig.toml` for bun, `deno.json` and `deno.jsonc` for Deno,
-`.yarnrc.yml` for `yarn dlx`, and `uv.toml`, `pyproject.toml` and
+`.yarnrc.yml` for `yarn dlx`, and `uv.toml`, `pyproject.toml`, `uv.lock` and
 `.python-version` (or `.python-versions`) for `uv run`. `uvx` and `uv tool run` load
 only user and system configuration; their index, mirror, insecure-host and launched
 package `sources` settings in project `uv.toml` and `[tool.uv]` are still sources, a
@@ -80,8 +82,15 @@ is not a requirement makes the launcher identity unknown, any other URL or path
 entry and any `[tool.uv.sources]` entry are sources, and a project that uv builds (it
 has a `[build-system]` table, or `[tool.uv] package = true`, and not `package = false`)
 installs its own code into the environment the server runs in, a medium
-`launch_context` risk. Each line of `.python-version` is a Python request; one that
-names a path runs that interpreter and is a source, as `UV_PYTHON` is.
+`launch_context` risk. uv installs `uv.lock` as recorded, with or without `--frozen`,
+artifact URLs and dependency edges that `pyproject.toml` never names included, so in
+project mode a root `uv.lock` is a source (`uv.lock:packages=[local]`) and its bytes
+are bound. Each line of `.python-version` is a Python request. uv reads one as a
+version or implementation (`3.12`, `cpython@3.13`, `>=3.11,<3.14`, `pypy3.10`, `any`)
+before trying a directory or file of that name, so any other request, a bare `interp`,
+`python` or download key such as `cpython-3.12-linux` included, may run an interpreter
+in the checkout and is a source, as `UV_PYTHON` is; a uv `--python` value of that kind
+is a medium `launch_context` risk.
 bunfig settings are named by their table, such as `install.cache.dir`:
 beside its registries, scopes and CA settings, its cache and global directories
 (`[install.cache] dir`, an `install.cache` other than `false`, `install.globalDir` and
@@ -107,8 +116,8 @@ that runs in another working directory (a `cwd` other than the root, `env -C`,
 `deno --config`) may read other resolver files, so it carries
 `working-directory=[unresolved]`, and so does a server declared in a configuration
 file below the root (such as `packages/api/.mcp.json`), which its client starts in
-that file's directory; one whose variables come from an `envFile` or from
-`dotenvx`, `doppler`, `infisical` or `op run --env-file` carries
+that file's directory; one whose variables come from an `envFile`, from uv's own
+`--env-file` or from `dotenvx`, `doppler`, `infisical` or `op run --env-file` carries
 `environment-file=[unresolved]`. A variable that adds a trusted CA or disables TLS
 verification (`NODE_EXTRA_CA_CERTS`, `NODE_TLS_REJECT_UNAUTHORIZED=0`,
 `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and similar) is a source, and so are the
@@ -148,7 +157,7 @@ and the raw values of every setting of each project resolver file that applies t
 whether or not it is classified as a source (profile
 `nexus-symbiote/mcp-static-values/v4`), and a key identifier. That is every top-level
 `.npmrc` and `.yarnrc` setting, the text of `.env.yarn`, each `.python-version`
-request, and the whole of `bunfig.toml`, `.yarnrc.yml`, `uv.toml`, `[tool.uv]` (all of
+request, the SHA-256 of `uv.lock` for `uv run` in project mode, and the whole of `bunfig.toml`, `.yarnrc.yml`, `uv.toml`, `[tool.uv]` (all of
 `pyproject.toml` for `uv run` in project mode), `deno.json` and `deno.jsonc`; for
 `uvx` and `uv tool run` only the uv settings that are sources;
 TOML and YAML values keep their type, so a date and the same text, or `1` and `1.0`,

@@ -242,9 +242,15 @@ A way around a limit that its entry does not describe is worth a
   `bunfig.toml` setting, are still read, so such a setting can withhold an identity
   that the runner would not change, and, without the key, a bunfig file with any
   setting makes an unkeyed `diff` raise the medium unbound-values alert.
-- **A `uv run` project environment is read only from `pyproject.toml`.** In project
-  mode every extra and dependency group is assumed to be installed, and a registry
-  requirement is not a source. `uv.lock` (which `--frozen` installs as is), the
+- **A `uv run` project environment is read only from `pyproject.toml` and `uv.lock`.**
+  In project mode every extra and dependency group is assumed to be installed, and a
+  registry requirement is not a source. uv installs a root `uv.lock` as recorded,
+  with or without `--frozen`, including artifact URLs and dependency edges that
+  `pyproject.toml` never names, so the lock is a source as a whole and bound by its
+  SHA-256; its packages are not classified one by one, so every project-mode `uv run`
+  server in a checkout with a lock loses its `package_url`. Run a pinned server with
+  `--no-project` or `uvx` instead. `VIRTUAL_ENV` and `CONDA_PREFIX` are sources for
+  `uv run` even in project mode, where uv uses them only with `--active`. The
   metadata of a workspace member or path dependency, a build backend's own
   configuration, and an existing `.venv` are not read: the default exclusions skip
   `.venv`, and counting its presence would withhold the identity of every `uv run`
@@ -252,9 +258,16 @@ A way around a limit that its entry does not describe is worth a
   interpreter uv uses, and whose installed copy of a pinned package satisfies `--with`,
   runs under the pinned identity; review a `.venv` in a pull request as code. A
   `.python-version` in a parent directory of the root is not read either.
-- **Injected environments are not visible.** Variables from an `envFile`, or from
-  `dotenvx`, `doppler`, `infisical` or `op run --env-file`, are not read. A launched
-  package then carries `environment-file=[unresolved]` instead of its identity.
+- **Python requests are read with uv 0.11's grammar.** A `.python-version` line or uv
+  `--python` value is inert only in a version or implementation form that uv reads
+  before it tries a directory or file of that name; any other is taken to name an
+  interpreter in the checkout, so a form that a later uv adds counts as one until the
+  grammar is updated. `pipx run --python` counts as local code only when its value
+  holds a path separator.
+- **Injected environments are not visible.** Variables from an `envFile`, from uv's
+  `--env-file`, or from `dotenvx`, `doppler`, `infisical` or `op run --env-file`, are
+  not read. A launched package then carries `environment-file=[unresolved]` instead
+  of its identity.
 - **A local `node_modules` can stand in for a pinned package.** `npx` and
   `npm exec` run a matching package already installed in the project's
   `node_modules`, which the collector does not read. A committed

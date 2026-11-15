@@ -670,6 +670,28 @@ _UV_SOURCE = frozenset(
     }
 )
 _UV_LOCATION = frozenset({"--directory", "--project"})
+_PYTHON_RELEASE = r"\d+(?:\.\d+){0,2}"
+_PYTHON_SPECIFIER = (
+    rf"(?:(?:==|!=)\s*{_PYTHON_RELEASE}(?:\.\*)?|~=\s*\d+\.\d+(?:\.\d+)?"
+    rf"|[<>]=?\s*{_PYTHON_RELEASE})"
+)
+_PYTHON_IMPLEMENTATION = r"(?:cpython|cp|pypy|pp|graalpy|gp|pyodide)"
+# uv reads a Python request as a version or an implementation first, then as a directory
+# or file of that name, and only then as a download key or a program on PATH; so a bare
+# `interp`, `python` or `cpython-3.12-linux` can name an interpreter in the project.
+_UV_PYTHON_VERSION = re.compile(
+    rf"any|default|{_PYTHON_IMPLEMENTATION}|(?:python@?|{_PYTHON_IMPLEMENTATION}@?)?"
+    r"(?:(?:\d{1,3}|\d+\.\d+(?:\.\d+)?)(?:(?:a|b|rc)\d+)?(?:t|\+(?:freethreaded|debug|gil))?"
+    rf"|{_PYTHON_SPECIFIER}(?:\s*,\s*{_PYTHON_SPECIFIER})*)",
+    re.IGNORECASE,
+)
+
+
+def uv_python_version(request: str) -> bool:
+    """Whether uv reads a Python request as a version or implementation, never as a path."""
+    return _UV_PYTHON_VERSION.fullmatch(request) is not None
+
+
 _PIPX_RUN = _table(
     "--no-cache --pypackages --path --system-site-packages -e --editable -v --verbose -q"
     " --quiet --fetch-missing-python --global",
@@ -2407,7 +2429,8 @@ def _bun(name: str, rest: list[str], launch: Launch) -> None:
 
 
 def _python_options(options: list[tuple[str, str | None]], launch: Launch) -> None:
-    """Index sources, project location and interpreter paths among uv or pipx options."""
+    """Index sources, project location, environment files and interpreter paths among uv or
+    pipx options."""
     for option, value in options:
         if value is None:
             continue
@@ -2415,7 +2438,12 @@ def _python_options(options: list[tuple[str, str | None]], launch: Launch) -> No
             launch.sources.append((option, value))
         elif option in _UV_LOCATION:
             launch.relocated = launch.relocated or _moves(value)
-        elif option in {"--python", "-p"} and re.search(r"[\\/]", value):
+        elif option == "--env-file":
+            # uv loads the file's variables, PYTHONPATH or a UV_ setting among them.
+            launch.injected_environment = True
+        elif option in {"--python", "-p"} and (
+            re.search(r"[\\/]", value) if launch.family == "pip" else not uv_python_version(value)
+        ):
             # An interpreter path runs local code in place of a managed Python.
             launch.mark("code_loading_option")
 

@@ -34,6 +34,18 @@ DENO = {
 }
 YARN = {"command": "yarn", "args": ["dlx", "left-pad@1.3.0"]}
 FAKE_TOKEN = "ghp_" + "e" * 36
+LOCK = (
+    'version = 1\nrevision = 3\nrequires-python = ">=3.10"\n\n'
+    '[[package]]\nname = "helper"\nversion = "0.1.0"\nsource = { virtual = "." }\n'
+)
+# A dependency edge pyproject.toml never declares, to a wheel URL the checkout chose.
+SWAPPED_LOCK = LOCK + (
+    'dependencies = [{ name = "mcp-server-fetch" }]\n\n'
+    '[[package]]\nname = "mcp-server-fetch"\nversion = "2025.1.17"\n'
+    'source = { registry = "https://pypi.org/simple" }\n'
+    'wheels = [{ url = "http://127.0.0.1:8000/mcp_server_fetch-2025.1.17-py3-none-any.whl", '
+    f'hash = "sha256:{"0" * 64}", size = 1 }}]\n'
+)
 
 
 def _write(root: Path, config: dict, files: dict[str, str]) -> None:
@@ -148,6 +160,7 @@ def test_every_resolver_file_value_is_in_the_keyed_binding(
             '{"lock": true}',
             '{"lock": true, "vendor": true, "nodeModulesDir": "manual"}',
         ),
+        (UV_PROJECT, "uv.lock", LOCK, SWAPPED_LOCK),
     ],
 )
 def test_a_redirecting_resolver_edit_fails_diff_and_validation(
@@ -773,6 +786,11 @@ def test_project_mode_binds_the_whole_pyproject(tmp_path, monkeypatch):
         (".python-version", "./evilpy/python\n"),
         (".python-version", "# pinned\n\n~/py/bin/python3\n"),
         (".python-versions", "3.12\n.venv-evil\\Scripts\\python.exe\n"),
+        # uv tries a directory or file of the name before a download key or PATH.
+        (".python-version", "interp\n"),
+        (".python-version", "python\n"),
+        (".python-version", "cpython-3.12.0-linux-x86_64-gnu\n"),
+        (".python-versions", "3.12\n3.12-64\n"),
     ],
 )
 def test_a_python_version_file_naming_an_interpreter_path_is_a_source(
@@ -782,6 +800,85 @@ def test_a_python_version_file_naming_an_interpreter_path_is_a_source(
     _redirected(server, f"{path}:python-request=[local]")
     from_env = _server(tmp_path / "env", {**config, "env": {"UV_PYTHON": "./evilpy/python"}}, {})
     assert {r.category for r in server.risks} == {r.category for r in from_env.risks}
+
+
+@pytest.mark.parametrize(
+    "request_text",
+    ["3.12", "312", "3.13t", "3.14rc1", "cpython@3.13", "cp312", "pypy3.10", "graalpy", "any"]
+    + [">=3.11, <3.14", "==3.12.*", "python>=3.12", "Python3.12"],
+)
+def test_a_python_version_or_implementation_request_is_not_a_source(tmp_path, request_text):
+    _unchanged(_server(tmp_path, UV_PROJECT, {".python-version": f"{request_text}\n"}), FETCH)
+    option = {**UV_RUN, "args": ["run", "--python", request_text, *UV_RUN["args"][1:]]}
+    _unchanged(_server(tmp_path / "option", option, {}), FETCH)
+
+
+@pytest.mark.parametrize(
+    "subcommand,rest",
+    [
+        (["run"], ["--with", "mcp-server-fetch==2025.1.17", "mcp-server-fetch"]),
+        (["tool", "run"], ["mcp-server-fetch==2025.1.17"]),
+    ],
+)
+@pytest.mark.parametrize("request_text", ["interp", "python", "cpython-3.12-linux", "./interp"])
+def test_a_python_option_that_may_name_a_project_interpreter_loads_local_code(
+    tmp_path, subcommand, rest, request_text
+):
+    args = [*subcommand, "--python", request_text, *rest]
+    server = _server(tmp_path, {"command": "uv", "args": args}, {})
+    assert server.package_url == FETCH
+    assert server.properties["launch_context"] == {"code_loading_option": 1}
+
+
+def test_a_pipx_python_option_keeps_its_interpreter_reading(tmp_path):
+    pipx = {
+        "command": "pipx",
+        "args": ["run", "--python", "python3.12", "mcp-server-fetch==2025.1.17"],
+    }
+    assert "launch_context" not in _server(tmp_path, pipx, {}).properties
+
+
+@pytest.mark.parametrize("variable", ["VIRTUAL_ENV", "CONDA_PREFIX"])
+def test_an_active_environment_for_uv_run_is_a_source(tmp_path, variable):
+    # Outside a project uv run uses the active environment's interpreter and packages.
+    server = _server(tmp_path, {**UV_RUN, "env": {variable: "interp"}}, {})
+    _redirected(server, f"env:{variable}=[local]")
+    absolute = _server(tmp_path / "abs", {**UV_RUN, "env": {variable: "/opt/venv"}}, {})
+    _redirected(absolute, f"env:{variable}=[local]")
+    # uv tool run and uvx use only a system interpreter.
+    _unchanged(_server(tmp_path / "uvx", {**UVX, "env": {variable: "interp"}}, {}), FETCH)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["run", "--no-project", "--env-file", ".env", *UV_RUN["args"][2:]],
+        ["--env-file=.env", *UV_RUN["args"]],
+        ["tool", "run", "--env-file", ".env", "mcp-server-fetch==2025.1.17"],
+    ],
+)
+def test_a_uv_environment_file_is_an_unresolved_source(tmp_path, args):
+    server = _server(tmp_path, {"command": "uv", "args": args}, {".env": "PYTHONPATH=evil\n"})
+    _redirected(server, "environment-file=[unresolved]")
+
+
+def test_a_project_lockfile_is_a_bound_package_source(tmp_path, monkeypatch):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    pyproject = '[project]\nname = "helper"\nversion = "0.1.0"\ndependencies = []\n'
+    files = {"pyproject.toml": pyproject, "uv.lock": LOCK}
+    server = _server(tmp_path / "a", UV_PROJECT, files)
+    _redirected(server, "uv.lock:packages=[local]")
+    assert "uv.lock:packages" in server.properties["resolver_settings"]
+    swapped = _binding(tmp_path / "b", UV_PROJECT, {**files, "uv.lock": SWAPPED_LOCK})
+    assert swapped != server.properties["static_value_binding"]
+    # Without project mode, and for uv tool runs, uv installs nothing from the lock.
+    for config in (UV_RUN, UVX):
+        plain = _server(tmp_path / f"{config['command']}-x", config, {"pyproject.toml": pyproject})
+        locked = _server(
+            tmp_path / f"{config['command']}-y", config, {**files, "uv.lock": SWAPPED_LOCK}
+        )
+        _unchanged(locked, FETCH)
+        assert locked.properties["static_value_binding"] == plain.properties["static_value_binding"]
 
 
 def test_a_python_version_request_is_bound_but_not_a_source(tmp_path, monkeypatch):

@@ -38,6 +38,7 @@ from nexus_symbiote.core.enums import (
 from nexus_symbiote.core.hashing import (
     TOOL_DEFINITION_HASH_VERSION,
     canonical_json,
+    hash_bytes,
     hash_canonical,
     hash_tool_definition,
     tool_definition_extensions,
@@ -66,6 +67,7 @@ from nexus_symbiote.scanners.mcp_launch import (
     expands,
     known_executable,
     origin,
+    uv_python_version,
 )
 from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.jsonc import strip_jsonc
@@ -447,7 +449,9 @@ _REDIRECT_ENVIRONMENT = {
     ),
     "deno": rf"jsr_url|deno_cert|deno_dir|{_NPM_REDIRECT}",
     "uv-tool": _UV_REDIRECT,
-    "uv-project": _UV_REDIRECT,
+    # Outside a project, or with --active, uv run uses the interpreter and packages of an
+    # active virtual or conda environment.
+    "uv-project": rf"{_UV_REDIRECT}|virtual_env|conda_prefix",
     "pip": (
         r"pip_(?:index|index_url|extra_index_url|find_links|config_file|trusted_host|proxy|cert"
         r"|cache_dir)|pipx_home|pipx_shared_libs"
@@ -904,10 +908,12 @@ _RESOLVER_FILES = {
     "deno": (".npmrc", "deno.json", "deno.jsonc"),
     "bun": (".npmrc", "bunfig.toml"),
     "yarn": (".yarnrc.yml", ".yarnrc", ".env.yarn"),
-    "uv-project": ("uv.toml", "pyproject.toml", ".python-version", ".python-versions"),
+    "uv-project": ("uv.toml", "pyproject.toml", "uv.lock", ".python-version", ".python-versions"),
     "uv-tool": ("uv.toml", "pyproject.toml"),
 }
 _PYTHON_VERSION_FILES = frozenset({".python-version", ".python-versions"})
+# Files whose registry settings select a registry per package scope.
+_REGISTRY_FILES = frozenset({".npmrc", "bunfig.toml", ".yarnrc.yml", ".yarnrc"})
 # Setting names exported in clear: fixed vocabularies, never a name taken from input.
 _KNOWN_SETTINGS = (
     _NPM_INERT_SETTINGS
@@ -932,7 +938,7 @@ _KNOWN_SETTINGS = (
     | frozenset(_UV_DEFAULTS)
     | _UV_INERT_SETTINGS
     | _UV_PROJECT_SETTINGS
-    | {"python-request"}
+    | {"python-request", "packages"}
     | {"registry", "npmRegistryServer", "offline", "prefer-offline", "strict-ssl", "environment"}
     | {"unstable"}
 )
@@ -1166,6 +1172,8 @@ def _file_setting(
         return _uv_setting(key, value, launched, project=project)
     if path in _PYTHON_VERSION_FILES:
         return _python_request(value)
+    if path == "uv.lock":
+        return "source"
     return "unresolved" if path == ".env.yarn" else "inert"
 
 
@@ -1242,8 +1250,9 @@ def _requirements(value: str, launched: set[str], *, replaces: bool) -> str:
 
 
 def _python_request(value: str) -> str:
-    """A uv Python request naming a path runs that interpreter, as UV_PYTHON would."""
-    return "source" if re.search(r"[\\/]", value) or value.startswith((".", "~")) else "inert"
+    """A uv Python request other than a version or implementation may name an interpreter
+    in the project, which uv runs as it would one UV_PYTHON names."""
+    return "inert" if uv_python_version(value) else "source"
 
 
 def _string_list(value: str) -> list[str] | None:
@@ -1562,6 +1571,14 @@ class _Resolvers:
                     if request and not request.startswith("#")
                 )
             )
+        if path == "uv.lock":
+            # uv run installs the locked packages as recorded, artifact URLs and dependency
+            # edges that pyproject.toml never names included.
+            raw = self._files.read_bytes(path, missing_ok=True)
+            if raw is None:
+                return _ResolverFile()
+            self._result.surfaces_scanned.append(path)
+            return _ResolverFile((("packages", hash_bytes(raw)),))
         if path == ".env.yarn":
             # Yarn 4 loads .env.yarn into its environment by default (injectEnvironmentFiles).
             text = self._text(path)
@@ -2424,6 +2441,8 @@ class MCPScanner(Scanner):
             view.unresolved.append("working-directory")
         project = family == "uv-project" and launch.project
         for path in files:
+            if path == "uv.lock" and not project:
+                continue
             file = self._resolvers.entries(path, family, project=project)
             if file.unresolved:
                 view.unresolved.append(f"{path}:key")
@@ -2457,9 +2476,7 @@ class MCPScanner(Scanner):
                     view.sources.append((label, value))
                 elif kind == "unresolved":
                     view.unresolved.append(label)
-            if path in {"uv.toml", "pyproject.toml", ".env.yarn", "deno.json", "deno.jsonc"}:
-                continue
-            if path in _PYTHON_VERSION_FILES:
+            if path not in _REGISTRY_FILES:
                 continue
             default = "npmRegistryServer" if path == ".yarnrc.yml" else "registry"
             scope_label, scope = (
