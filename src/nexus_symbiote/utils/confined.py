@@ -1483,8 +1483,10 @@ class ConfinedCollection:
                 os.close(parent)
         except FileNotFoundError as exc:
             raise _LinkRefusedError("symlink target is unavailable") from exc
-        except LimitExceededError as exc:
-            raise _LinkRefusedError(str(exc)) from exc
+        except LimitExceededError:
+            # The entry budget is spent. Wrapping it as a refused link lets the
+            # walk continue and record a second failure for the same limit.
+            raise
         except CollectionError as exc:
             raise _LinkRefusedError(str(exc)) from exc
         except OSError as exc:
