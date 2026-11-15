@@ -454,7 +454,7 @@ def _directory_members(data: bytes, begin: int, size: int, end: int) -> list[_Zi
         extra_length = _little(data, position + 30, 2)
         name = data[position + 46 : position + 46 + name_length]
         if len(name) < name_length:
-            return None
+            return members if any(_pickle_member(m.name) for m in members) else None
         extra_at = position + 46 + name_length
         located = _zip64_location(
             data[extra_at : extra_at + extra_length],

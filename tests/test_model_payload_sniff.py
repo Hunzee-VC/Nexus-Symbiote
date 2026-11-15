@@ -282,6 +282,21 @@ def test_a_later_entry_without_its_zip64_field_does_not_hide_a_pickle(tmp_path: 
     assert component is not None and component.serialization_safety is UNSAFE
 
 
+def test_a_later_entry_whose_name_runs_past_the_file_does_not_hide_a_pickle(
+    tmp_path: Path,
+) -> None:
+    # The first member is not the pickle, so only the central directory names it.
+    archive = _zip(
+        [("archive/version", b"3"), ("archive/data.pkl", _reduce_pickle()), ("archive/x", b"")]
+    )
+    entry = archive.rindex(b"PK\x01\x02")
+    archive = archive[: entry + 28] + b"\xff\xff" + archive[entry + 30 :]
+    (tmp_path / "model.onnx").write_bytes(archive)
+    component = _component(tmp_path, "model.onnx")
+    assert component is not None and component.serialization_safety is UNSAFE
+    assert component.properties["format_inspection"] == ZIP_PICKLE_MEMBER
+
+
 @pytest.mark.parametrize(
     "text",
     [

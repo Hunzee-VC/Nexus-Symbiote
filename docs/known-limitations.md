@@ -446,8 +446,11 @@ A way around a limit that its entry does not describe is worth a
   first lines happen to read as such a reference, such as `cache`, `logs`, `.`, still
   is. A ZIP member is a pickle when its name ends in a pickle-family suffix, so `.pkl`
   and `archive/.pkl` count, and a central directory entry whose 32-bit size or offset
-  is `0xFFFFFFFF` without a ZIP64 field is read as written, as `zipfile` reads it. A NumPy array's version 1, 2 or 3
-  header is parsed when it is at most 64 KiB long, as every version 1 header is, and
+  is `0xFFFFFFFF` without a ZIP64 field is read as written, as `zipfile` reads it. A
+  directory that turns malformed after it lists a pickle-family member, such as with an
+  entry whose name runs past the end of the file, still rates the archive
+  `unsafe-code-execution`. A NumPy array's version 1, 2 or 3 header is parsed when it
+  is at most 64 KiB long, as every version 1 header is, and
   while the 16,000,000 structure units one scan shares with the ONNX and GGUF readers
   last, at one unit a header byte; only its `descr` value is read for types, so a
   field named `O` is not one. A ZIP
