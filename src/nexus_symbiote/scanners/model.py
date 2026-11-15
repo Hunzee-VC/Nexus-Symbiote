@@ -196,8 +196,8 @@ _CONTENT_UNREAD = frozenset(
 )
 _NUMPY_MAGIC = b"\x93NUMPY"
 # Dtype names that make an object dtype: the type code, with the sizes NumPy accepted,
-# and the names that NumPy and its earlier releases accept.
-_OBJECT_TYPE = re.compile(r"O\d*|[Oo]bject\w*")
+# StringDType ('T'), which np.load unpickles, and the names NumPy and earlier releases accept.
+_OBJECT_TYPE = re.compile(r"O\d*|T|[Oo]bject\w*")
 ZIP_NOT_GGUF = "the file is a ZIP archive"
 # Chat templates a finding names; it counts the rest.
 _LISTED_TEMPLATES = 3
@@ -408,7 +408,7 @@ def _pickle_loads(
         for segment in pickle_load.load_segments(sample, size, start, flavor, budget):
             if segment.outcome == "called":
                 return _recognized(binary)
-            if segment.outcome == "unread" and (start or binary or not by_content):
+            if segment.outcome == "unread" and (start or binary or segment.named or not by_content):
                 unread = PICKLE_NAME_UNCALLED if segment.named else PICKLE_UNREAD
                 worst = _worse(worst, (SerializationSafety.UNKNOWN, unread))
             elif segment.named and (segment.outcome == "stop" or binary or not by_content):
@@ -457,54 +457,91 @@ class _ZipMember(NamedTuple):
     offset: int
 
 
-def _zip_directory(
-    stream: BinaryIO, consumed: int, size: int
-) -> tuple[list[_ZipMember], int] | None:
-    """The members the central directory at the end of a ZIP archive lists, and its offset.
+def _zip_directories(
+    stream: BinaryIO, already: bytes, size: int
+) -> tuple[list[tuple[list[_ZipMember], int]], bool]:
+    """Central directory views at the end of a ZIP archive, and whether the primary read succeeded.
 
-    The rest of the stream is read in bounded chunks, keeping only the tail that can
-    hold the directory within ``MAX_ZIP_DIRECTORY_BYTES``, the end-of-central-directory
-    record with its comment and the ZIP64 records. ``None`` when the directory is
-    malformed, truncated or beyond that bound, or the stream ends before ``size``.
+    ``zipfile`` locates the central directory at ``directory_end - directory_size`` and
+    shifts member offsets by ``concat``, and follows a ZIP64 locator ahead of the EOCD
+    whether or not the 32-bit fields overflowed; C++ readers such as ``miniz`` read
+    ``directory_offset`` unshifted. Both views are returned when they differ.
     """
-    tail: deque[bytes] = deque()
-    held = 0
-    remaining = size - consumed
+    tail: deque[bytes] = deque([already]) if already else deque()
+    held = len(already)
+    remaining = size - len(already)
     while remaining > 0:
         chunk = stream.read(min(65536, remaining))
         if not chunk:
-            return None
+            return [], False
         remaining -= len(chunk)
         tail.append(chunk)
         held += len(chunk)
-        while held - len(tail[0]) >= _ZIP_TAIL_BYTES:
+        while len(tail) > 1 and held - len(tail[0]) >= _ZIP_TAIL_BYTES:
             held -= len(tail.popleft())
     data = b"".join(tail)
     start = size - len(data)
-    end_record = data.rfind(b"PK\x05\x06", max(0, len(data) - 22 - 65_535))
+    if len(data) >= 22 and data[-22:-18] == b"PK\x05\x06" and data[-2:] == b"\x00\x00":
+        end_record = len(data) - 22
+    else:
+        end_record = data.rfind(b"PK\x05\x06", max(0, len(data) - 22 - 65_535))
     if end_record < 0 or end_record + 22 > len(data):
-        return None
+        return [], False
+    size32 = _little(data, end_record + 12, 4)
+    offset32 = _little(data, end_record + 16, 4)
+    overflow32 = 0xFFFF in (
+        _little(data, end_record + 8, 2),
+        _little(data, end_record + 10, 2),
+    ) or 0xFFFFFFFF in (size32, offset32)
     directory_end = end_record
-    directory_size = _little(data, end_record + 12, 4)
-    directory_offset = _little(data, end_record + 16, 4)
-    if _little(data, end_record + 10, 2) == 0xFFFF or 0xFFFFFFFF in (
-        directory_size,
-        directory_offset,
-    ):
+    directory_size = size32
+    directory_offset = offset32
+    has_zip64 = False
+    if start + end_record >= 20:
         locator = end_record - 20
-        if locator < 0 or data[locator : locator + 4] != b"PK\x06\x07":
-            return None
-        record = _little(data, locator + 8, 8) - start
-        if record < 0 or record + 56 > locator or data[record : record + 4] != b"PK\x06\x06":
-            return None
-        directory_end = record
-        directory_size = _little(data, record + 40, 8)
-        directory_offset = _little(data, record + 48, 8)
-    members = _directory_members(data, directory_offset - start, directory_size, directory_end)
-    return None if members is None else (members, directory_offset)
+        if locator < 0:
+            return [], False
+        if data[locator : locator + 4] == b"PK\x06\x07":
+            has_zip64 = True
+            if _little(data, locator + 4, 4) != 0 or _little(data, locator + 16, 4) > 1:
+                return [], False
+            offset64 = locator - 56
+            reloff = _little(data, locator + 8, 8)
+            if offset64 < 0 or reloff > start + offset64:
+                return [], False
+            record = reloff - start
+            if (
+                record < 0 or data[record : record + 4] != b"PK\x06\x06"
+            ) and reloff != start + offset64:
+                record = offset64
+            if record < 0 or record + 56 > locator or data[record : record + 4] != b"PK\x06\x06":
+                return [], False
+            directory_end = record
+            directory_size = _little(data, record + 40, 8)
+            directory_offset = _little(data, record + 48, 8)
+    if overflow32 and not has_zip64:
+        return [], False
+    concat = (start + directory_end) - directory_size - directory_offset
+    primary_begin = directory_end - directory_size
+    primary = _directory_members(data, primary_begin, directory_size, directory_end, shift=concat)
+    views: list[tuple[list[_ZipMember], int]] = (
+        [(primary, start + primary_begin)] if primary is not None else []
+    )
+    for alt_size, alt_offset, alt_end in (
+        (directory_size, directory_offset, directory_end),
+        *([(size32, offset32, end_record)] if has_zip64 and not overflow32 else []),
+    ):
+        alt_begin = alt_offset - start
+        if (alt_begin, alt_size) != (primary_begin, directory_size):
+            secondary = _directory_members(data, alt_begin, alt_size, alt_end, shift=0)
+            if secondary is not None:
+                views.append((secondary, alt_offset))
+    return views, primary is not None
 
 
-def _directory_members(data: bytes, begin: int, size: int, end: int) -> list[_ZipMember] | None:
+def _directory_members(
+    data: bytes, begin: int, size: int, end: int, *, shift: int = 0
+) -> list[_ZipMember] | None:
     """Walk the central directory entries that ``data`` holds from ``begin`` to ``end``."""
     if size > MAX_ZIP_DIRECTORY_BYTES or begin < 0 or begin + size > end:
         return None
@@ -527,7 +564,9 @@ def _directory_members(data: bytes, begin: int, size: int, end: int) -> list[_Zi
         )
         if located is None:
             return None
-        members.append(_ZipMember(name, _little(data, position + 10, 2), *located))
+        members.append(
+            _ZipMember(name, _little(data, position + 10, 2), located[0], located[1] + shift)
+        )
         position = extra_at + extra_length + _little(data, position + 32, 2)
     return members
 
@@ -792,28 +831,31 @@ def _recognized_code_container(
         if array is None:
             return SerializationSafety.UNKNOWN, NUMPY_HEADER_UNREAD
         return (SerializationSafety.UNSAFE_CODE_EXECUTION, NUMPY_OBJECT_ARRAY) if array else None
-    if prefix[:4] != b"PK\x03\x04":
+    if prefix[:4] not in (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"):
         return _recognized_pickle(stream, prefix, size, by_content=by_content)
-    header = prefix + stream.read(22)
-    consumed = len(header)
+    already = bytearray(prefix)
     first = b""
-    if len(header) == 30:
-        name_length = int.from_bytes(header[26:28], "little")
-        if 0 < name_length <= 4096:
-            first = stream.read(name_length)
-            consumed += len(first)
+    if prefix[:4] == b"PK\x03\x04":
+        already.extend(stream.read(22))
+        if len(already) == 30:
+            name_length = int.from_bytes(already[26:28], "little")
+            if 0 < name_length <= 4096:
+                first = stream.read(name_length)
+                already.extend(first)
     if _pickle_member(first):
         return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_PICKLE_MEMBER
-    directory = _zip_directory(stream, consumed, size)
-    if directory is None:
-        return SerializationSafety.UNKNOWN, ZIP_DIRECTORY_UNREAD
-    members, offset = directory
-    if any(_pickle_member(member.name) for member in members):
+    directories, complete = _zip_directories(stream, bytes(already), size)
+    if any(_pickle_member(member.name) for members, _ in directories for member in members):
         return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_PICKLE_MEMBER
-    arrays = _members_hold_object_array(stream, members, offset, budget)
-    if arrays:
-        return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_OBJECT_ARRAY
-    return SerializationSafety.UNKNOWN, ZIP_WITHOUT_PICKLE if arrays is False else ZIP_MEMBER_UNREAD
+    unread = False
+    for members, offset in directories:
+        arrays = _members_hold_object_array(stream, members, offset, budget)
+        if arrays:
+            return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_OBJECT_ARRAY
+        unread = unread or arrays is None
+    if not complete:
+        return SerializationSafety.UNKNOWN, ZIP_DIRECTORY_UNREAD
+    return SerializationSafety.UNKNOWN, ZIP_MEMBER_UNREAD if unread else ZIP_WITHOUT_PICKLE
 
 
 def inspect_model_format(
@@ -951,12 +993,13 @@ def observe_content(
 ) -> ModelArtifactObservation | None:
     """Observe a file that no model name rates when its content makes it a model artifact.
 
-    That content is a pickle whose inspected opcodes name a callable, a NumPy array with an object dtype, a ZIP archive with a
-    pickle-family member or such an array as a member, or a NumPy array or ZIP archive
-    that a bound left unread. For other content ``None`` is returned once the inspection
-    has read what it needed, which for a ZIP archive is all of it. An artifact is
-    observed from the same stream, so every byte is read, and charged, once. The caller
-    holds a confined regular-file context, as for ``observe_model_artifact``.
+    That content is a pickle whose inspected opcodes name a callable, a NumPy array with
+    an object dtype, a ZIP archive with a pickle-family member or such an array as a
+    member, or a NumPy array or ZIP archive that a bound left unread. For other content
+    ``None`` is returned once the inspection has read what it needed, which for a ZIP
+    archive is all of it. An artifact is observed from the same stream, so every byte is
+    read, and charged, once. The caller holds a confined regular-file context, as for
+    ``observe_model_artifact``.
     """
     budget = budget or InspectionBudget()
     inspected = _inspect_opened(path, stream, budget)

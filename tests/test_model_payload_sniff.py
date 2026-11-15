@@ -1296,6 +1296,13 @@ _ONE_VERSION_CALLS = {
     "frame-read-on": (_frame(b"I12") + b"\n0cos\nsystem\n)R.", "frame-bounds"),
     "frame-read-at-its-end": (_frame(b"Ix") + b"5\n0cos\nsystem\n)R.", "frame-bounds"),
     "frame-in-a-frame": (b"\x95\x0a" + _Z7 + _frame(b"N") + b"0cos\nsystem\n)R.", "frame-bounds"),
+    # STRING, BINSTRING and SHORT_BINSTRING under utf-8 (torch.load) or latin1 (np.load).
+    "short-binstring-latin1": (b"U\x01\xff0cos\nsystem\n)R.", "string-encoding"),
+    "binstring-utf8": (b"T\x02\x00\x00\x00\xc3\xa90cos\nsystem\n)R.", "string-encoding"),
+    "string-latin1": (b"S'\\xff'\n0cos\nsystem\n)R.", "string-encoding"),
+    # Legacy torch.load persistent_load(('module', obj, ...)) returns obj directly.
+    "persistent-module-str": (b"(S'module'\ncos\nsystem\ntQ)R.", "persistent-module"),
+    "persistent-module-bytes": (b"(C\x06modulecos\nsystem\ntQ)R.", "persistent-module"),
 }
 
 
@@ -1328,3 +1335,91 @@ def test_a_reading_every_version_shares_reports_no_difference() -> None:
             (segment,) = pickle_load.load_segments(data, len(data), 0, flavor, budget)
             assert segment.outcome == "stop", (data, flavor)
             assert not segment.differs, (data, flavor)
+
+
+def test_dag_and_deep_tuple_hashes_and_long_floats_stay_linear(tmp_path: Path) -> None:
+    import sys
+    import time
+
+    # C1: 40 DUP+TUPLE2 steps form a 2^40-leaf tuple DAG; memoized _hash stays O(V+E).
+    dag_call = b"\x80\x04}K\x01" + b"2\x86" * 40 + b"K\x00s0cos\nsystem\n)R."
+    # C3: 3,000 nested 1-tuples exceed Python's default recursion limit if hashed recursively.
+    assert sys.getrecursionlimit() < 3000
+    deep_call = b"\x80\x04}K\x01" + b"\x85" * 2500 + b"K\x00s0cos\nsystem\n)R."
+    # C2: 30,000 digits followed by a non-float byte must not backtrack quadratically.
+    long_float = b"F" + b"1" * 30_000 + b"x\n"
+    started = time.monotonic()
+    (tmp_path / "dag.dat").write_bytes(dag_call)
+    (tmp_path / "deep.dat").write_bytes(deep_call)
+    (tmp_path / "float.dat").write_bytes(long_float)
+    found = _components(tmp_path)
+    assert time.monotonic() - started < 2.0
+    assert found["dag.dat"].serialization_safety is UNSAFE
+    assert found["deep.dat"].serialization_safety is UNSAFE
+    assert "float.dat" not in found
+
+
+@pytest.mark.parametrize("exc_type", [RecursionError, MemoryError])
+def test_interpreter_resource_exhaustion_fails_closed_as_unread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exc_type: type[BaseException]
+) -> None:
+    from nexus_symbiote.scanners.model import inspect_model_format
+
+    def boom(_self: object) -> None:
+        raise exc_type
+
+    monkeypatch.setitem(pickle_load._DISPATCH, ord("K"), boom)
+    for name in ("bad.dat", "bad.onnx"):
+        path = tmp_path / name
+        path.write_bytes(b"\x80\x04K\x01\xff")
+        assert inspect_model_format(path) == (SerializationSafety.UNKNOWN, PICKLE_UNREAD)
+    safetensors_path = tmp_path / "bad.safetensors"
+    safetensors_path.write_bytes(b"\x80\x04K\x01\xff")
+    assert inspect_model_format(safetensors_path)[0] is SerializationSafety.UNKNOWN
+
+
+def test_c_memo_nul_truncation_and_ssize_cap_and_newobj_ex_non_string_keys(
+    tmp_path: Path,
+) -> None:
+    import sys
+
+    # PL-2: C truncates PUT/GET lines at NUL and rejects PUT > sys.maxsize; Python does the reverse.
+    nul_memo = b"cos\nsystem\np0\x00x\n0g0\x00y\n)R."
+    huge_put = f"cos\nsystem\np{sys.maxsize + 1}\n)R.".encode()
+    # PL-5: C types such as dict.__new__ accept non-string keyword dicts in NEWOBJ_EX.
+    newobj_ex_dict = b"\x80\x04cbuiltins\ndict\n)(K\x01K\x02d\x920cos\nsystem\n)R."
+    for name, payload in {
+        "nul.dat": nul_memo,
+        "huge.dat": huge_put,
+        "newobj_ex.dat": newobj_ex_dict,
+    }.items():
+        walk_c = _oracle_walk("c", io.BytesIO(payload), len(payload))
+        walk_py = _oracle_walk("py", io.BytesIO(payload), len(payload))
+        assert _agrees("c", payload, walk_c)
+        assert _agrees("py", payload, walk_py)
+        (tmp_path / name).write_bytes(payload)
+    # Cover non-Opaque NEWOBJ_EX with non-string dict keys and non-dict kwargs in pure-Python.
+    for edge in (b"N)(K\x01K\x02d\x92.", b"cos\nsystem\n)N\x92.", b"F1.5\x00tail\n."):
+        for flavor in pickle_load.FLAVORS:
+            assert _agrees(flavor, edge, _oracle_walk(flavor, io.BytesIO(edge), len(edge)))
+    found = _components(tmp_path)
+    assert {k: v.serialization_safety for k, v in found.items()} == {
+        "nul.dat": UNSAFE,
+        "huge.dat": UNSAFE,
+        "newobj_ex.dat": UNSAFE,
+    }
+
+
+def test_a_first_segment_text_name_cut_short_by_a_bound_is_unknown(tmp_path: Path) -> None:
+    # PK-1b: protocol 0 at offset 0 with no PROTO opcode, resolving an importable name
+    # before a string pushes the REDUCE past MAX_PICKLE_INSPECTION_BYTES.
+    data = b"cos\nsystem\nS'" + b"a" * MAX_PICKLE_INSPECTION_BYTES + b"'\n\x85R."
+    assert _calls_anything(data)
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "weights").write_bytes(data)
+    (tmp_path / "weights.dat").write_bytes(data)
+    found = _components(tmp_path)
+    assert sorted(found) == ["models/weights", "weights.dat"]
+    for component in found.values():
+        assert component.serialization_safety is SerializationSafety.UNKNOWN
+        assert component.properties["format_inspection"] == PICKLE_NAME_UNCALLED

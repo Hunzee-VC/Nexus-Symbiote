@@ -80,6 +80,18 @@ VERSION_DIFFERENCES: dict[str, str] = {
         " pure-Python load_binstring fails a negative one in every version. The C"
         " flavor reads the unsigned count."
     ),
+    "string-encoding": (
+        "STRING, BINSTRING and SHORT_BINSTRING decode with Unpickler's encoding"
+        " parameter: 'ASCII' by default in pickle.load, 'utf-8' in torch.load, and"
+        " 'latin1' in pandas and numpy.load(..., encoding='latin1'). Non-ASCII bytes"
+        " are decoded as UTF-8 when valid and Latin-1 otherwise so a decoy Python 2"
+        " string cannot hide a later call."
+    ),
+    "persistent-module": (
+        "Legacy torch.load's persistent_load(('module', obj, ...)) returns obj"
+        " directly instead of a storage object, while modern torch.load and storage"
+        " unpicklers return a storage or reject the tuple; both readings are followed."
+    ),
 }
 # Differences that change no step here: find_class resolves a dotted name through
 # _getattribute / get_dotted_path in 3.14, without the '<locals>' check of 3.11-3.13,
@@ -116,10 +128,11 @@ class _Persistent:
 
 
 class _Tuple:
-    __slots__ = ("items",)
+    __slots__ = ("hashed", "items")
 
     def __init__(self, items: tuple[object, ...]) -> None:
         self.items = items
+        self.hashed = False
 
 
 class _Sized:
@@ -145,12 +158,16 @@ def _use(value: object, *, certain: bool = True) -> None:
 
 def _hash(value: object) -> None:
     """``hash(value)``: a tuple hashes its items in order; a resolved object runs its hash."""
-    _use(value)
-    if isinstance(value, _Tuple):
-        for item in value.items:
-            _hash(item)
-    elif isinstance(value, _Sized) and value.kind not in ("frozenset", "view"):
-        raise _LoadError  # unhashable type
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        _use(item)
+        if isinstance(item, _Tuple):
+            if not item.hashed:
+                item.hashed = True
+                pending.extend(reversed(item.items))
+        elif isinstance(item, _Sized) and item.kind not in ("frozenset", "view"):
+            raise _LoadError  # unhashable type
 
 
 def _kind(value: object, kind: str) -> bool:
@@ -194,7 +211,7 @@ class Segment:
     left ``io.BytesIO``, then, when different, right after the STOP, as the C
     unpickler leaves a buffered file it peeked ahead in. ``differs`` names the
     ``VERSION_DIFFERENCES`` the walk relied on, and ``crossings`` counts the frame ends
-    the C unpickler read past, where ``load_segment``'s ``jumps`` choose how.
+    or legacy module persistent IDs where ``load_segment``'s ``jumps`` choose how.
     """
 
     outcome: Outcome
@@ -240,8 +257,8 @@ def _py_int(data: bytes, base: int) -> int | None:
 
 
 _C_FLOAT = re.compile(
-    rb"[+-]?(?:(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|inf(?:inity)?|nan)"
-    rb"(?:\x00[^\n]*)?\n",
+    rb"[+-]?(?:(?:[0-9]++(?:\.[0-9]*+)?|\.[0-9]++)(?:[eE][+-]?[0-9]++)?|inf(?:inity)?|nan)"
+    rb"(?:\x00[^\n]*+)?\n",
     re.IGNORECASE,
 )
 
@@ -288,19 +305,23 @@ class _Machine:
             raise _UnreadError
         return self.sample[start:end]
 
+    def _choice(self) -> bool:
+        take = self.crossings < len(self.jumps) and self.jumps[self.crossings]
+        self.crossings += 1
+        return take
+
     def _cross_frame(self) -> None:
         """A read past the frame's end, which the C unpickler reads on from before 3.13.
 
-        The ``crossings``-th one reads on from the frame's end when ``jumps`` says so,
-        and from where it stands otherwise.
+        The ``crossings``-th choice reads on from the frame's end when ``jumps`` says
+        so, and from where it stands otherwise.
         """
         if not self.c:
             raise _LoadError  # pickle exhausted before end of frame
         self.differs.add("frame-bounds")
-        if self.crossings < len(self.jumps) and self.jumps[self.crossings]:
+        if self._choice():
             assert self.frame is not None
             self.pos = self.frame
-        self.crossings += 1
         self.frame = None
 
     def read(self, count: int) -> bytes:
@@ -420,7 +441,7 @@ class _Machine:
                 handler(self)
         except _CallError as call:
             return self._segment("called", certain=call.certain)
-        except _UnreadError:
+        except (_UnreadError, RecursionError, MemoryError):
             return self._segment("unread")
         except (_LoadError, ValueError, UnicodeError, OverflowError, struct.error):
             return self._segment("error")
@@ -472,8 +493,19 @@ class _Machine:
         self.push(_Persistent())
 
     def op_binpersid(self) -> None:
-        # torch.load's persistent_load indexes the id it is given.
-        _use(self.pop(), certain=False)
+        # torch.load's persistent_load indexes the id it is given; its legacy loader
+        # returns the second item of ('module', obj, ...) directly.
+        pid = self.pop()
+        _use(pid, certain=False)
+        if (
+            isinstance(pid, _Tuple)
+            and len(pid.items) >= 2
+            and pid.items[0] in ("module", b"module")
+        ):
+            self.differs.add("persistent-module")
+            if self._choice():
+                self.push(pid.items[1])
+                return
         self.push(_Persistent())
 
     def op_none(self) -> None:
@@ -545,11 +577,21 @@ class _Machine:
     def op_binfloat(self) -> None:
         self.push(float(self.number(8, ">d")))
 
+    def _decode_string(self, data: bytes) -> str:
+        try:
+            return data.decode("ascii")
+        except UnicodeDecodeError:
+            self.differs.add("string-encoding")
+            try:
+                return data.decode("utf-8")
+            except UnicodeDecodeError:
+                return data.decode("latin-1")
+
     def op_string(self) -> None:
         data = self.line()
         if len(data) < 2 or data[0] != data[-1] or data[0] not in b"\"'":
             raise _LoadError  # the STRING opcode argument must be quoted
-        self.push(cast(bytes, codecs.escape_decode(data[1:-1])[0]).decode("ascii"))
+        self.push(self._decode_string(cast(bytes, codecs.escape_decode(data[1:-1])[0])))
 
     def op_binstring(self) -> None:
         count = self.number(4, "<i")
@@ -558,10 +600,10 @@ class _Machine:
                 raise _LoadError  # negative BINSTRING length
             self.differs.add("binstring-count")
             count += 1 << 32
-        self.push(self.read(count).decode("ascii"))
+        self.push(self._decode_string(self.read(count)))
 
     def op_short_binstring(self) -> None:
-        self.push(self.read(self.number(1, "<B")).decode("ascii"))
+        self.push(self._decode_string(self.read(self.number(1, "<B"))))
 
     def op_binbytes(self) -> None:
         self.push(self.read(self.number(4, "<I")))
@@ -821,10 +863,11 @@ class _Machine:
             if not self.c:
                 _use(kwargs)  # **kwargs calls keys() on what is no dict
             uncertain = True
-        elif kwargs is not _NO_KWARGS and not (
-            isinstance(kwargs, _Sized) and kwargs.kind == "dict" and kwargs.string_keys
-        ):
-            raise _LoadError  # keywords must be strings in a dict
+        elif kwargs is not _NO_KWARGS:
+            if not (isinstance(kwargs, _Sized) and kwargs.kind == "dict"):
+                raise _LoadError  # kwargs must be a dict
+            if not kwargs.string_keys:
+                uncertain = True  # C types such as dict.__new__ accept non-string keys
         _use(klass, certain=not uncertain)  # klass.__new__(klass, *args, **kwargs)
         raise _LoadError  # a builtin value has no __new__ that takes itself
 
@@ -877,13 +920,17 @@ class _Machine:
         self.budget.marks -= 1
         self.marks.append(len(self.stack))
 
+    def _memo_index(self) -> int:
+        data = self.line()
+        return int(data.split(b"\x00")[0] if self.c else data)
+
     def _get(self, index: int) -> None:
         if index not in self.memo:
             raise _LoadError  # Memo value not found
         self.push(self.memo[index])
 
     def op_get(self) -> None:
-        self._get(int(self.line()))
+        self._get(self._memo_index())
 
     def op_binget(self) -> None:
         self._get(self.number(1, "<B"))
@@ -892,12 +939,12 @@ class _Machine:
         self._get(self.number(4, "<I"))
 
     def _put(self, index: int) -> None:
-        if index < 0:
-            raise _LoadError  # negative PUT argument
+        if index < 0 or (self.c and index > sys.maxsize):
+            raise _LoadError  # negative or oversized PUT argument
         self.memo[index] = self.top()
 
     def op_put(self) -> None:
-        self._put(int(self.line()))
+        self._put(self._memo_index())
 
     def op_binput(self) -> None:
         self._put(self.number(1, "<B"))

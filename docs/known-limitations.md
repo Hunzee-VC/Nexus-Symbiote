@@ -350,26 +350,39 @@ A way around a limit that its entry does not describe is worth a
   directory named `model`, `models`, `weights`, `checkpoint` or `checkpoints`, and it
   does not have the name of a model directory's configuration, tokenizer or chat
   template file, such as `config.json`, and is not a Python or Jinja source. There, a
-  recognized pickle, a NumPy array with an object dtype (which
+  recognized pickle, a NumPy array with an object or `StringDType` (`T`) dtype (which
   `np.load(allow_pickle=True)` unpickles) and a ZIP archive with a pickle-family
   member or such an array as a member are rated
-  `unsafe-code-execution`, and a NumPy header or ZIP archive left unread at the
-  bounds below is rated `unknown`. A pickle renamed anywhere else, an unrecognized
+  `unsafe-code-execution`, and a pickle, NumPy header or ZIP archive left unread at the
+  bounds below is rated `unknown`. Plain-text files in those locations whose lines
+  happen to form a `GLOBAL` (`c<module>\n<name>\n`) opcode and an opcode that uses the
+  resolved value are rated `unsafe-code-execution` too, because `pickle.load` runs that
+  operation before reaching `STOP`. A pickle renamed anywhere else, an unrecognized
   pickle, a numeric NumPy array, a ZIP archive with neither kind of member, and `.pb`
   files other than `saved_model.pb` produce no component. A candidate ZIP archive is
   read to its end and digested, as a model archive is, and a candidate larger than
   the `model-bytes` limit is a collection failure.
-- **Content recognition is bounded.** A binary pickle is recognized by its PROTO
-  opcode and 16 well-formed opcodes in the first 64 KiB, and a text-protocol pickle
-  by a consistent stream of at most 4,096 opcodes. A NumPy array's version 1, 2 or 3
+- **Content recognition is bounded.** A pickle is interpreted as `pickle.load` reads it
+  in a loop across the first 64 KiB, for at most 4,096 opcodes and 64 `MARK`s over all
+  segments, following both the C and pure-Python unpicklers across CPython 3.11 to
+  3.14, UTF-8/Latin-1 string decodings and legacy `torch.load` module persistent IDs;
+  under a model suffix, a binary pickle is also recognized by `PROTO` and 16
+  well-formed opcodes in the first 64 KiB and a text-protocol one by a consistent
+  stream to `STOP`. A stream cut short at those bounds after `PROTO`, after an earlier
+  `STOP`, after resolving an importable name, or under a model suffix is rated
+  `unknown`, whereas an unnamed text stream cut short at the start of a content-only
+  candidate is not rated. A NumPy array's version 1, 2 or 3
   header is parsed when it is at most 64 KiB long, as every version 1 header is, and
   while the 16,000,000 structure units one scan shares with the ONNX and GGUF readers
-  last, at one unit a header byte; only its `descr` value is read for types, so a
-  field named `O` is not one. A ZIP
-  archive is recognized by a pickle-family member in its first local header or in a
-  central directory of at most 1 MiB, read from the end of the archive, including
-  ZIP64, and by an object-dtype array as any member, read from the member's local
-  header and the start of its stored or DEFLATE-compressed data. A longer array
+  last, at one unit a header byte; only its `descr` value is read for object and `T`
+  (`StringDType`) types, so a field named `O` is not one. A ZIP
+  archive (starting with `PK\x03\x04`, `PK\x05\x06` or `PK\x07\x08`) is recognized by a
+  pickle-family member in its first local header or in a central directory of at most
+  1 MiB read from the end of the archive—both at `zipfile`'s concatenation-adjusted
+  offset and unshifted, and following any ZIP64 locator ahead of the EOCD—and by an
+  object or `StringDType` array as any member, read from the member's local
+  header and the start of its stored or DEFLATE-compressed data; an archive preceded by
+  non-ZIP preamble bytes other than those `PK` signatures is not recognized as ZIP. A longer array
   header, a longer or malformed directory, a member compressed by another method,
   such as BZIP2 or LZMA, and a member whose data runs past the next member's local
   header are rated `unknown`, a high finding; a pickle hidden otherwise under

@@ -248,3 +248,208 @@ def test_a_header_that_claims_more_than_it_holds_costs_only_what_it_holds(
     result = ModelScanner().scan(tmp_path)
     assert not result.scan_failures
     assert {c.name: c.serialization_safety for c in result.components} == {"zz.npy": UNSAFE}
+
+
+@pytest.mark.parametrize("descr", ["'|T'", "'T'", "[('text', '|T')]"])
+def test_numpy_string_dtype_is_treated_as_pickle_backed_object_array(
+    tmp_path: Path, descr: str
+) -> None:
+    # NZ-1: NumPy 2.0 StringDType ('T') serializes strings with pickle.
+    assert _inspect(tmp_path, _npy(descr)) == (UNSAFE, NUMPY_OBJECT_ARRAY)
+    assert _inspect(tmp_path, _zip([("strings.npy", _npy(descr))])) == (UNSAFE, ZIP_OBJECT_ARRAY)
+
+
+def test_empty_zip_and_spanning_prefixes_do_not_hide_zip_members(tmp_path: Path) -> None:
+    # NZ-2: An empty ZIP starts with PK\x05\x06; zipfile opens a real ZIP concatenated after it.
+    empty = _zip([])
+    assert empty[:4] == b"PK\x05\x06"
+    (tmp_path / "empty.dat").write_bytes(empty)
+    assert ModelScanner().scan(tmp_path).components == []
+    assert _inspect(tmp_path, empty) == (SerializationSafety.UNKNOWN, ZIP_WITHOUT_PICKLE)
+
+    concat_pkl = empty + _zip([("archive/data.pkl", pickle.dumps({"w": 1}))])
+    concat_obj = empty + _zip([("arr_0.npy", _npy("'|O'"))])
+    spanned_pkl = b"PK\x07\x08" + b"\x00" * 12 + _zip([("data.pkl", pickle.dumps({"w": 1}))])
+    with zipfile.ZipFile(io.BytesIO(concat_pkl)) as zf:
+        assert zf.namelist() == ["archive/data.pkl"]
+    with zipfile.ZipFile(io.BytesIO(concat_obj)) as zf:
+        assert zf.namelist() == ["arr_0.npy"]
+    assert _inspect(tmp_path, concat_pkl, "weights.dat") == (UNSAFE, ZIP_PICKLE_MEMBER)
+    assert _inspect(tmp_path, concat_obj, "weights.dat") == (UNSAFE, ZIP_OBJECT_ARRAY)
+    assert _inspect(tmp_path, spanned_pkl, "weights.dat") == (UNSAFE, ZIP_PICKLE_MEMBER)
+
+
+def _cd_entry(name: bytes, payload: bytes, local_offset: int, comment: bytes = b"") -> bytes:
+    import struct
+    import zlib
+
+    crc = zlib.crc32(payload) & 0xFFFFFFFF
+    data_size = len(payload)
+    return (
+        struct.pack(
+            "<4sHHHHHHIIIHHHHHII",
+            b"PK\x01\x02",
+            20,
+            20,
+            0,
+            0,
+            0,
+            0,
+            crc,
+            data_size,
+            data_size,
+            len(name),
+            0,
+            len(comment),
+            0,
+            0,
+            0,
+            local_offset,
+        )
+        + name
+        + comment
+    )
+
+
+def _local_entry(name: bytes, payload: bytes) -> bytes:
+    import struct
+    import zlib
+
+    crc = zlib.crc32(payload) & 0xFFFFFFFF
+    return (
+        struct.pack(
+            "<4sHHHHHIIIHH",
+            b"PK\x03\x04",
+            20,
+            0,
+            0,
+            0,
+            0,
+            crc,
+            len(payload),
+            len(payload),
+            len(name),
+            0,
+        )
+        + name
+        + payload
+    )
+
+
+def test_concat_shifted_and_unshifted_central_directories_are_both_checked(
+    tmp_path: Path,
+) -> None:
+    import struct
+
+    # NZ-3a: Decoy central directory at offset_cd (benign.txt), real central directory
+    # immediately before EOCD (arr.npy with '|O') shifted by concat, which zipfile opens.
+    benign_payload = b"hello" * 20
+    benign_local = _local_entry(b"benign.txt", benign_payload)
+    evil_payload = _npy("'|O'")
+    evil_local_offset = len(benign_local)
+    evil_local = _local_entry(b"arr.npy", evil_payload)
+    decoy_cd_offset = len(benign_local) + len(evil_local)
+    decoy_cd = _cd_entry(b"benign.txt", benign_payload, 0)
+    # concat == len(decoy_cd); stored offset + concat == evil_local_offset.
+    assert evil_local_offset >= len(decoy_cd)
+    real_cd = _cd_entry(b"arr.npy", evil_payload, evil_local_offset - len(decoy_cd))
+    padded_decoy_cd = _cd_entry(
+        b"benign.txt", benign_payload, 0, b" " * max(0, len(real_cd) - len(decoy_cd))
+    )
+    real_cd = _cd_entry(b"arr.npy", evil_payload, evil_local_offset - len(padded_decoy_cd))
+    eocd_zipfile = struct.pack(
+        "<4sHHHHIIH",
+        b"PK\x05\x06",
+        0,
+        0,
+        1,
+        1,
+        len(real_cd),
+        decoy_cd_offset,
+        0,
+    )
+    polyglot_zipfile = benign_local + evil_local + padded_decoy_cd + real_cd + eocd_zipfile
+    with zipfile.ZipFile(io.BytesIO(polyglot_zipfile)) as zf:
+        assert zf.namelist() == ["arr.npy"]
+        assert zf.read("arr.npy").startswith(b"\x93NUMPY")
+    assert _inspect(tmp_path, polyglot_zipfile, "polyglot.dat") == (UNSAFE, ZIP_OBJECT_ARRAY)
+
+    # NZ-3b: Reverse polyglot where directory_end - directory_size holds benign.txt (for zipfile)
+    # while offset_cd holds an unshifted central directory with objects_array.npy (for miniz).
+    miniz_local = _local_entry(b"objects_array.npy", evil_payload)
+    evil_cd_offset = len(benign_local) + len(miniz_local)
+    evil_cd = _cd_entry(b"objects_array.npy", evil_payload, evil_local_offset)
+    assert len(evil_cd) >= len(decoy_cd)
+    padded_benign_cd = _cd_entry(
+        b"benign.txt", benign_payload, 0, b" " * (len(evil_cd) - len(decoy_cd))
+    )
+    eocd = struct.pack(
+        "<4sHHHHIIH",
+        b"PK\x05\x06",
+        0,
+        0,
+        1,
+        1,
+        len(evil_cd),
+        evil_cd_offset,
+        0,
+    )
+    polyglot_miniz = benign_local + miniz_local + evil_cd + padded_benign_cd + eocd
+    with zipfile.ZipFile(io.BytesIO(polyglot_miniz)) as zf:
+        assert zf.namelist() == ["benign.txt"]
+    assert _inspect(tmp_path, polyglot_miniz, "miniz.dat") == (UNSAFE, ZIP_OBJECT_ARRAY)
+
+    # Even if zipfile's primary region is corrupt, miniz's view catches evil_cd.
+    corrupt_primary = benign_local + miniz_local + evil_cd + (b"\x00" * len(evil_cd)) + eocd
+    assert _inspect(tmp_path, corrupt_primary, "miniz_only.dat") == (UNSAFE, ZIP_OBJECT_ARRAY)
+
+
+def test_unconditional_zip64_locator_without_overflow_sentinels_is_checked(
+    tmp_path: Path,
+) -> None:
+    import struct
+
+    # NZ-4: 32-bit EOCD has ordinary (non-0xFFFF / non-0xFFFFFFFF) counts pointing at benign_cd,
+    # while PK\x06\x06 + PK\x06\x07 immediately precede EOCD and point to evil_cd.
+    benign_local = _local_entry(b"benign.txt", b"ok")
+    evil_payload = _npy("'|O'")
+    evil_local = _local_entry(b"arr.npy", evil_payload)
+    benign_cd_off = len(benign_local) + len(evil_local)
+    benign_cd = _cd_entry(b"benign.txt", b"ok", 0)
+    evil_cd_off = benign_cd_off + len(benign_cd)
+    evil_cd = _cd_entry(b"arr.npy", evil_payload, len(benign_local))
+    z64_off = evil_cd_off + len(evil_cd)
+    z64_eocd = struct.pack(
+        "<4sQHHIIQQQQ",
+        b"PK\x06\x06",
+        44,
+        45,
+        45,
+        0,
+        0,
+        1,
+        1,
+        len(evil_cd),
+        evil_cd_off,
+    )
+    z64_loc = struct.pack("<4sIQI", b"PK\x06\x07", 0, z64_off, 1)
+    eocd32 = struct.pack(
+        "<4sHHHHIIH",
+        b"PK\x05\x06",
+        0,
+        0,
+        1,
+        1,
+        len(benign_cd),
+        benign_cd_off,
+        0,
+    )
+    crafted = benign_local + evil_local + benign_cd + evil_cd + z64_eocd + z64_loc + eocd32
+    with zipfile.ZipFile(io.BytesIO(crafted)) as zf:
+        assert zf.namelist() == ["arr.npy"]
+    assert _inspect(tmp_path, crafted, "zip64_decoy.dat") == (UNSAFE, ZIP_OBJECT_ARRAY)
+    # Prepended empty ZIP exercises zipfile's fallback from reloff to offset64!
+    prepended = _zip([]) + crafted
+    with zipfile.ZipFile(io.BytesIO(prepended)) as zf:
+        assert zf.namelist() == ["arr.npy"]
+    assert _inspect(tmp_path, prepended, "zip64_prepended.dat") == (UNSAFE, ZIP_OBJECT_ARRAY)
