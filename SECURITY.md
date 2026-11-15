@@ -18,6 +18,11 @@ Include the affected commit or distribution version, platform and Python version
 
 ## Supported versions
 
+| Version | Supported |
+| --- | --- |
+| The newest release on PyPI, and `main` at its head | Yes: security fixes ship as the next release |
+| Any earlier release | No: upgrade to the newest release |
+
 Only the latest reviewed alpha revision is developed. There is no long-term support commitment or established production support window. Confirm release provenance and the matching source revision before installing a published distribution.
 
 ## Imported discovery evidence

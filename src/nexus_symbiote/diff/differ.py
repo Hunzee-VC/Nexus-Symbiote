@@ -191,7 +191,7 @@ def _json_text(value: Any) -> str:
     try:
         return canonical_json(value)
     except (TypeError, ValueError, OverflowError):
-        return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 def _readable_spec_version(version: object) -> bool:
@@ -1379,7 +1379,8 @@ class AIBOMDiffer:
                         "severity": change.severity,
                         "component": change.bom_ref,
                         "alert": (
-                            f"{change.severity.capitalize()} change in '{change.name}': {'; '.join(change.details)}"
+                            f"{change.severity.capitalize()} change in '{_clip(change.name)}': "
+                            f"{'; '.join(change.details)}"
                         ),
                     }
                 )
@@ -1390,7 +1391,7 @@ class AIBOMDiffer:
                     "severity": change.severity,
                     "component": change.bom_ref,
                     "alert": (
-                        f"New component '{change.name}' "
+                        f"New component '{_clip(change.name)}' "
                         f"({change.component_type}) added to supply chain."
                     ),
                 }
@@ -1404,7 +1405,7 @@ class AIBOMDiffer:
                     "severity": change.severity,
                     "component": change.bom_ref,
                     "alert": (
-                        f"Component '{change.name}' ({change.component_type}) is no longer in "
+                        f"Component '{_clip(change.name)}' ({change.component_type}) is no longer in "
                         "the inventory: confirm it was deleted, not moved out of collector scope."
                     ),
                 }

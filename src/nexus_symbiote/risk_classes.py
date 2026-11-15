@@ -145,6 +145,15 @@ def _declared(declaration: CapabilityDeclaration, classes: set[RiskClass], basis
     )
 
 
+def plain_authority(netloc: str) -> bool:
+    """Whether every URL parser reads this authority alike: a host and an optional port.
+
+    User information, a backslash or a percent escape can make Python and the WHATWG
+    parser of the client that connects name different hosts.
+    """
+    return _PLAIN_AUTHORITY.fullmatch(netloc) is not None
+
+
 def _endpoint_host(url: str) -> str:
     """``loopback`` or ``remote`` for a host every URL parser reads alike, else ``unresolved``."""
     try:
@@ -153,11 +162,7 @@ def _endpoint_host(url: str) -> str:
         _ = parsed.port
     except ValueError:
         return "unresolved"
-    if (
-        not host
-        or parsed.scheme.lower() not in _URL_SCHEMES
-        or not _PLAIN_AUTHORITY.fullmatch(parsed.netloc)
-    ):
+    if not host or parsed.scheme.lower() not in _URL_SCHEMES or not plain_authority(parsed.netloc):
         return "unresolved"
     if host in {"localhost", "localhost."}:
         return "loopback"

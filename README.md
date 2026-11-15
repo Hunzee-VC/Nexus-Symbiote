@@ -91,7 +91,7 @@ nexus-symbiote risk demo.aibom.json --no-project-policy
 nexus-symbiote validate demo.aibom.json --project examples/demo-agent --no-project-policy
 ```
 
-The scan records 11 components across 9 types and ten findings (risk score 37, below the default fail threshold of 50). `validate` exits 1 on purpose: completeness passes, but the model's integrity stays unknown because no signer policy was supplied. An inventory can be complete and still not be approvable.
+The scan records 11 components across 9 types and eleven findings (risk score 41, below the default fail threshold of 50). `validate` exits 1 on purpose: completeness passes, but the model's integrity stays unknown because no signer policy was supplied. An inventory can be complete and still not be approvable.
 
 To approve the model, pin its digest in a [signer policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md#operator-signature-policy) you own, kept outside the scanned project. Here the digest comes from the checkout only to show the mechanism; in real use, take it from a source you trust:
 

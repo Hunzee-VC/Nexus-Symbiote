@@ -20,7 +20,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from nexus_symbiote.core.aibom import MAX_NATIVE_BYTES, NativeFormatError
+from nexus_symbiote.core.aibom import MAX_NATIVE_BYTES, MAX_NATIVE_NESTING, NativeFormatError
 from nexus_symbiote.core.content_digest import NESTED_TOO_DEEPLY, inventory_content_digest
 from nexus_symbiote.graph import INFERRED_AGENT_REF
 from nexus_symbiote.inventory_export import (
@@ -536,9 +536,9 @@ def _nested(tmp_path: Path, depth: int) -> Path:
 
 
 def test_nesting_at_the_depth_limit_is_refused_never_raised(tmp_path):
-    # The strict parse refuses at the boundary: it canonicalizes at the same depth as the
-    # content digest. Bisection probes the depth where acceptance ends, where a digest one
-    # call deeper once escaped as a bare RecursionError.
+    # The parse refuses at the native nesting bound, well before the content digest
+    # canonicalizes to the stack limit, where a digest one call deeper once escaped as a
+    # bare RecursionError. Bisection probes the depth where acceptance ends.
     def refusal(depth: int) -> str | None:
         try:
             read_native_inventory(_nested(tmp_path, depth))
@@ -551,8 +551,10 @@ def test_nesting_at_the_depth_limit_is_refused_never_raised(tmp_path):
     while refused - accepted > 1:
         middle = (accepted + refused) // 2
         accepted, refused = (middle, refused) if refusal(middle) is None else (accepted, middle)
-    message = "It is not strict UTF-8 JSON; duplicate keys and nonfinite numbers are refused."
+    message = f"inventory nests deeper than {MAX_NATIVE_NESTING} levels"
     assert refusal(refused) == refusal(refused + 1) == message
+    # The lists sit below the root, the components list, the agent and its properties.
+    assert accepted + 4 == MAX_NATIVE_NESTING
 
 
 def test_a_digest_too_deep_for_the_stack_is_refused_as_the_parse_refuses_it(tmp_path, monkeypatch):

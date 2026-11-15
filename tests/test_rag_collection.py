@@ -302,8 +302,10 @@ def test_structure_digest_names_its_profile(tmp_path):
 def test_overlong_name_is_a_failure_and_names_are_neutralised(tmp_path):
     (tmp_path / "rag_config.json").write_text(json.dumps({"name": "n" * 300}))
     assert RAGScanner().scan(tmp_path).scan_failures
-    component = _source(tmp_path / "b", {**BASE, "name": "kb‮\nx", "source_uris": ["http://h/x"]})
-    assert all("‮" not in r.detail and "\n" not in r.detail for r in component.risks)
+    component = _source(
+        tmp_path / "b", {**BASE, "name": "kb\u202e\nx", "source_uris": ["http://h/x"]}
+    )
+    assert all("\u202e" not in r.detail and "\n" not in r.detail for r in component.risks)
 
 
 def test_python_heuristic_never_fails_the_collector(tmp_path):

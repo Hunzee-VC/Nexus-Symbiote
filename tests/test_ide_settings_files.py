@@ -22,6 +22,7 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.core.hashing import hash_canonical
 from nexus_symbiote.core.models import IDEAgentComponent
 from nexus_symbiote.scanners.ide_agents import (
+    GEMINI_SETTINGS,
     IDE_AGENT_CONFIGS,
     SETTINGS_VALUE_BINDING_PROFILE,
     IDEAgentScanner,
@@ -767,3 +768,59 @@ def test_keys_the_redaction_makes_equal_keep_every_value_in_the_digest(runner, t
     run = _drift(runner, tmp_path, ".cursor/cli.json", before, after, "ide_agents")
     assert run.exit_code == 1, run.output
     assert _high_settings_alert("cursor", run.output), run.output
+
+
+INSTRUCTION_MARKERS = [
+    "CLAUDE.md",
+    ".claude/CLAUDE.md",
+    "CLAUDE.local.md",
+    "codex.md",
+    "CODEX.md",
+    ".codex/instructions.md",
+    ".cursorrules",
+    ".windsurfrules",
+    ".clinerules",
+    "GEMINI.md",
+    ".github/copilot-instructions.md",
+]
+
+
+def test_marker_existence_checks_spend_no_byte_budget(tmp_path):
+    # Eleven markers at the file limit exceed the 32 MiB collection budget when each
+    # existence check reads the file; the prompt collector reads them under its own.
+    project = tmp_path / "project"
+    for marker in INSTRUCTION_MARKERS:
+        _write(project, marker, b"#" * limits.DEFAULTS.file_bytes)
+    result = IDEAgentScanner().scan(project)
+    assert result.scan_failures == []
+    assert {c.ide_type for c in result.components} == {
+        "claude-code",
+        "codex",
+        "cursor",
+        "windsurf",
+        "cline",
+        "gemini",
+        "copilot",
+    }
+    assert set(INSTRUCTION_MARKERS) <= set(result.surfaces_scanned)
+
+
+def test_a_root_marker_spelled_otherwise_is_still_reported(tmp_path):
+    project = tmp_path / "project"
+    _write(project, "Claude.md", "# not the file a host reads\n")
+    result = IDEAgentScanner().scan(project)
+    assert result.components == []
+    assert result.scan_failures == [
+        "Claude.md: case variant of CLAUDE.md is the active file on case-insensitive file "
+        "systems and is not inventoried"
+    ]
+
+
+def test_a_settings_file_within_a_raised_file_limit_is_read_whole(tmp_path):
+    project = tmp_path / "project"
+    settings = json.dumps({"padding": "x" * (5 * 1024 * 1024), "mcpServers": {}})
+    _write(project, GEMINI_SETTINGS, settings)
+    with limits.applied(limits.resolve(["file-bytes=8MiB"], {})):
+        result = IDEAgentScanner().scan(project)
+    assert result.scan_failures == []
+    assert GEMINI_SETTINGS in _record(result, "gemini").properties["settings_hashes"]

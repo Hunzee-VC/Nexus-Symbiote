@@ -334,7 +334,17 @@ _FUNCTIONS = {
     "generator_function_declaration",
     "generator_function",
 }
-_SCOPES = {"program", "statement_block", "catch_clause", *_FUNCTIONS}
+# Where `var` and function parameters live; `let`, `const` and `class` stay in the
+# nearest of _SCOPES, which adds the blocks and the loop and switch heads.
+_VAR_SCOPES = {"program", "class_static_block", "internal_module", "module", *_FUNCTIONS}
+_SCOPES = {
+    "statement_block",
+    "catch_clause",
+    "for_statement",
+    "for_in_statement",
+    "switch_body",
+    *_VAR_SCOPES,
+}
 
 
 @dataclass
@@ -344,12 +354,14 @@ class _Index:
     tree-sitter finds a node's parent by descending from the root, so climbing
     ``Node.parent`` costs the depth at every step. Recording these relations in one
     traversal keeps the analysis linear in the number of nodes. ``erased`` holds the
-    nodes inside type syntax, which has no runtime effect.
+    nodes inside type syntax, which has no runtime effect. ``hoists`` maps each scope
+    to the function, module or static block that a ``var`` declared in it belongs to.
     """
 
     nodes: list[Node]
     parents: dict[int, Node]
     scopes: dict[int, Node]
+    hoists: dict[int, Node]
     erased: set[int]
     deadline: float
 
@@ -360,13 +372,18 @@ class _Index:
         """The nearest scope that is ``node`` itself or encloses it."""
         return None if node is None else self.scopes.get(node.id)
 
+    def var_scope(self, node: Node | None) -> Node | None:
+        """The scope a ``var`` declared at ``node`` is hoisted to."""
+        scope = self.scope(node)
+        return None if scope is None else self.hoists.get(scope.id)
+
     def check_deadline(self) -> None:
         if time.monotonic() >= self.deadline:
             raise _RefusedError("TypeScript analysis exceeded its time limit")
 
 
 def _index(root: Node, limit: Bound, deadline: float) -> _Index:
-    index = _Index([], {}, {}, set(), deadline)
+    index = _Index([], {}, {}, {}, set(), deadline)
     pending: list[tuple[Node, Node | None]] = [(root, None)]
     while pending:
         node, parent = pending.pop()
@@ -379,6 +396,11 @@ def _index(root: Node, limit: Bound, deadline: float) -> _Index:
             index.parents[node.id] = parent
         if parent is None or node.type in _SCOPES:
             index.scopes[node.id] = node
+            index.hoists[node.id] = (
+                node
+                if parent is None or node.type in _VAR_SCOPES
+                else index.hoists[index.scopes[parent.id].id]
+            )
         else:
             index.scopes[node.id] = index.scopes[parent.id]
         if (
@@ -442,7 +464,7 @@ def _imported_name(node: Node | None) -> str | None:
 def _bind_import(
     statement: Node,
     root: Node,
-    bind: Callable[[Node | None, str, object], None],
+    bind: Callable[[Node | None, str, object, Node], None],
     found: _Declarations,
 ) -> None:
     """Bind the names one import declares, sorting the SDK forms the analysis follows."""
@@ -471,12 +493,12 @@ def _bind_import(
                     found.gaps.append((spec, _LOW_LEVEL))
                 elif imported in _TRANSPORTS:
                     value = _Launcher(_TRANSPORTS[imported])
-            bind(root, _name(alias) if alias is not None else imported or "", value)
+            bind(root, _name(alias) if alias is not None else imported or "", value, spec)
         elif spec.type == "namespace_import":
             for child in spec.named_children:
                 if child.type == "identifier":
                     namespace = None if kind is None else _Namespace(kind, module in _MODULES)
-                    bind(root, _name(child), namespace or "other")
+                    bind(root, _name(child), namespace or "other", child)
         elif spec.type in {"import_clause", "import_require_clause"}:
             for child in spec.named_children:
                 if child.type != "identifier":
@@ -485,7 +507,7 @@ def _bind_import(
                 if kind in {"server", "client"}:
                     reason = _LOADED[kind] if spec.type == "import_require_clause" else None
                     found.gaps.append((child, reason or _UNSUPPORTED_IMPORT))
-                bind(root, _name(child), "other")
+                bind(root, _name(child), "other", child)
 
 
 def _reexport(statement: Node, found: _Declarations) -> None:
@@ -520,11 +542,21 @@ def _reexport(statement: Node, found: _Declarations) -> None:
 def _bindings(index: _Index, root: Node) -> _Declarations:
     found = _Declarations({}, [], set(), {"require"})
     bindings = found.bindings
+    followed: set[tuple[int, str]] = set()
 
-    def bind(scope: Node | None, name: str, value: object) -> None:
-        if scope is not None and name:
-            key = (scope.id, name)
-            bindings[key] = "ambiguous" if key in bindings else value
+    def bind(scope: Node | None, name: str, value: object, at: Node) -> None:
+        if scope is None or not name:
+            return
+        key = (scope.id, name)
+        if value == "sdk" or isinstance(value, (_Namespace, _Launcher)):
+            followed.add(key)
+        if key not in bindings:
+            bindings[key] = value
+            return
+        bindings[key] = "ambiguous"
+        if key in followed:
+            # Which declaration a use names is unknown, so nothing built from it is followed.
+            found.gaps.append((at, _UNSUPPORTED_BINDING))
 
     for position, node in enumerate(index.nodes):
         if not position % 1024:
@@ -537,8 +569,10 @@ def _bindings(index: _Index, root: Node) -> _Declarations:
             _reexport(node, found)
         elif node.type == "variable_declarator":
             target = node.child_by_field_name("name")
+            hoisted = parent is not None and parent.type == "variable_declaration"
+            scope = index.var_scope(parent) if hoisted else index.scope(parent)
             for declared_name in _pattern_names(target):
-                bind(index.scope(parent), declared_name, node.id)
+                bind(scope, declared_name, node.id, node)
             if _creates_require(node.child_by_field_name("value")):
                 found.loaders.update(_pattern_names(target))
         elif node.type == "assignment_expression":
@@ -552,17 +586,24 @@ def _bindings(index: _Index, root: Node) -> _Declarations:
                     index.scope(parent) if "declaration" in node.type else node,
                     _name(name),
                     "other",
+                    node,
                 )
             parameters = node.child_by_field_name("parameters") or node.child_by_field_name(
                 "parameter"
             )
             for parameter in _pattern_names(parameters):
-                bind(node, parameter, "other")
+                bind(node, parameter, "other", node)
         elif node.type in {"class_declaration", "enum_declaration"}:
-            bind(index.scope(parent), _name(node.child_by_field_name("name")), "other")
+            bind(index.scope(parent), _name(node.child_by_field_name("name")), "other", node)
         elif node.type == "catch_clause":
             for caught_name in _pattern_names(node.child_by_field_name("parameter")):
-                bind(node, caught_name, "other")
+                bind(node, caught_name, "other", node)
+        elif node.type == "for_in_statement":
+            kind = node.child_by_field_name("kind")
+            if kind is not None:
+                scope = index.var_scope(parent) if kind.type == "var" else node
+                for loop_name in _pattern_names(node.child_by_field_name("left")):
+                    bind(scope, loop_name, "other", node)
     return found
 
 

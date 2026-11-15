@@ -23,7 +23,7 @@ from nexus_symbiote.scanners.prompt import (
     detect_invisible_characters,
 )
 
-RLO = "‮"
+RLO = "\u202e"
 
 
 def _write(root: Path, relative: str, text: str) -> None:
@@ -276,12 +276,12 @@ def test_imports_in_code_and_outside_the_root(tmp_path):
 @pytest.mark.parametrize(
     "text",
     [
-        "Engineer \U0001f9d1‍\U0001f4bb at work",
-        "Family \U0001f468\U0001f3fd‍\U0001f469‍\U0001f467",
-        "Rainbow \U0001f3f3️‍\U0001f308",
+        "Engineer \U0001f9d1\u200d\U0001f4bb at work",
+        "Family \U0001f468\U0001f3fd\u200d\U0001f469\u200d\U0001f467",
+        "Rainbow \U0001f3f3️\u200d\U0001f308",
         "Love ❤️ and keycap 1️⃣",
         "Scotland \U0001f3f4\U000e0067\U000e0062\U000e0073\U000e0063\U000e0074\U000e007f",
-        "﻿Text that starts with a byte-order mark",
+        "\ufeffText that starts with a byte-order mark",
     ],
 )
 def test_ordinary_emoji_and_a_leading_bom_are_not_findings(text):
@@ -297,15 +297,15 @@ def test_ordinary_emoji_and_a_leading_bom_are_not_findings(text):
             "tag_characters",
             "critical",
         ),
-        ("joiner between letters a‍b", "invisible_characters", "high"),
+        ("joiner between letters a\u200db", "invisible_characters", "high"),
         ("selector after a letter a️", "invisible_characters", "high"),
         ("smuggled \U000e0100\U000e0101", "invisible_characters", "high"),
-        ("mongolian separator ᠎", "invisible_characters", "high"),
+        ("mongolian separator \u180e", "invisible_characters", "high"),
         ("hangul filler ㅤ", "invisible_characters", "high"),
-        ("invisible plus ⁤", "invisible_characters", "high"),
-        ("byte-order mark inside ﻿", "invisible_characters", "high"),
-        ("mark ‏", "directional_marks", "medium"),
-        ("interlinear ￹", "invisible_characters", "high"),
+        ("invisible plus \u2064", "invisible_characters", "high"),
+        ("byte-order mark inside \ufeff", "invisible_characters", "high"),
+        ("mark \u200f", "directional_marks", "medium"),
+        ("interlinear \ufff9", "invisible_characters", "high"),
     ],
 )
 def test_other_hidden_characters_are_findings(text, category, severity):

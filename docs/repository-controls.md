@@ -70,7 +70,10 @@ preflight.
 
 With `--publish testpypi` or `--publish pypi`, as the release workflow passes, it
 also requires an active ruleset that stops `refs/tags/v*` from being updated or
-deleted and that the checking token itself cannot bypass, and requires the named
+deleted and that the checking token itself cannot bypass, refuses such a ruleset that
+also restricts tag creation (no one could then create a release tag; creation belongs
+to the separate creation-only ruleset described [below](#apply-the-outstanding-controls)),
+and requires the named
 environment to have a required reviewer, administrator bypass turned off and
 deployments limited to `main` by a single branch policy (the *Protected branches*
 option admits every protected branch, so it is refused). GitHub returns a ruleset's
@@ -208,8 +211,8 @@ Status of the controls tracked in
 [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74), as observed
 through the GitHub API on 2026-11-06, with what the 0.1.0 publication on 2026-11-08
 established. Re-check live settings before relying on any row; this table is a
-dated record, not enforcement. The publication preflight now checks the tag ruleset
-and the environments at every `testpypi` and `pypi` run, so the rows marked
+dated record, not enforcement. The publication preflight now checks the immutable tag
+ruleset and the environments at every `testpypi` and `pypi` run, so the rows marked
 "checked at publication" are verified, or the publication refused, each time; the
 ruleset's bypass list is the exception, which only the administrator check can read.
 
@@ -222,7 +225,7 @@ ruleset's bypass list is the exception, which only the administrator check can r
 | Secret scanning and push protection | Enabled | None |
 | `testpypi` and `pypi` environments | Both exist with @aisecnomad as the required reviewer, *Prevent self-review* off because there is a single maintainer (see [releasing](releasing.md)), and deployments limited to `main`. On 2026-11-06 administrators could bypass the protection rules; whether that was turned off before 0.1.0 was not recorded. Checked at publication | Turn off administrator bypass before the next publication, which is refused otherwise; turn on *Prevent self-review* once a second reviewer exists |
 | Trusted publishers | Confirmed by the 0.1.0 uploads on 2026-11-08: the OIDC uploads to TestPyPI (01:04 UTC) and PyPI (01:28 UTC) succeeded, and the PyPI files carry provenance naming `release.yml` and the `pypi` environment | None |
-| Release tags `v*` | `v0.1.0` (signed, annotated, on `d8c54e4`) was created on 2026-11-09, after publication. Whether the release-tag ruleset was applied first was not recorded; without it, anyone with write access can move or delete the tag. The README's verified-release install requires the wheel's attestation to name the commit the tag points at. That stops a plain tag move, but not a move to a second commit that differs only in its lock file: candidate runs are attested without approval. Only the ruleset keeps the tag on the published commit. Checked at publication, except who may bypass it | Confirm with `gh api repos/Hunzee-VC/Nexus-Symbiote/rulesets`; apply [the release-tag ruleset](../config/github-release-tag-ruleset.json) if it is missing, which the next publication otherwise refuses |
+| Release tags `v*` | `v0.1.0` (signed, annotated, on `d8c54e4`) was created on 2026-11-09, after publication. Whether the release-tag ruleset was applied first was not recorded; without it, anyone with write access can move or delete the tag. The README's verified-release install requires the wheel's attestation to name the commit the tag points at. That stops a plain tag move, but not a move to a second commit that differs only in its lock file: candidate runs are attested without approval. Only the immutable-tag ruleset keeps the tag on the published commit. Checked at publication, except who may bypass it | Confirm with `gh api repos/Hunzee-VC/Nexus-Symbiote/rulesets`; apply the [immutable-tag rule](../config/github-release-tag-ruleset.json) if it is missing, which the next publication otherwise refuses, and the [creation-only rule](../config/github-release-tag-creation-ruleset.json), which limits who may create a `v*` tag; see [apply the outstanding controls](#apply-the-outstanding-controls) |
 
 The repository is public, so branch protection, rulesets, artifact attestations
 and environment protection are available on every GitHub plan; the
@@ -236,24 +239,53 @@ The other controls in the table were applied on 2026-11-06; to re-apply branch
 protection, use the interim command above. Run these as a repository
 administrator, after reviewing each configuration:
 
+Use two independent tag rulesets. The [immutable-tag rule](../config/github-release-tag-ruleset.json)
+forbids updates and deletions with no bypass actors. The
+[creation-only rule](../config/github-release-tag-creation-ruleset.json) permits only
+repository administrators to create `v*` tags (`RepositoryRole` ID 5). A creator's
+bypass applies only to that second rule; it does not permit moving or deleting an
+existing tag. Administrators can still edit repository settings, so the rule
+configuration itself remains an administrative trust boundary.
+
+First list the live rulesets and review their full details. If a `release tags`
+rule already exists, **update that rule** with the immutable configuration below;
+do not leave an older no-bypass creation rule active beside a new rule. Every
+matching rule applies, and the old one would still block all creation. For a
+missing rule, use `POST .../rulesets` instead of `PUT .../rulesets/<id>`.
+
 ```sh
-# 1. Stop release tags from being moved or deleted once created
-gh api --method POST repos/Hunzee-VC/Nexus-Symbiote/rulesets \
+gh api repos/Hunzee-VC/Nexus-Symbiote/rulesets --jq '.[] | {id, name, target, enforcement}'
+
+# 1. Set this to the reviewed existing "release tags" ID from the listing.
+: "${IMMUTABILITY_RULESET_ID:?Set the existing release tags ruleset ID}"
+gh api --method PUT "repos/Hunzee-VC/Nexus-Symbiote/rulesets/$IMMUTABILITY_RULESET_ID" \
   --input config/github-release-tag-ruleset.json
 
-# 2. Confirm the publication preflight accepts the live state, including the
-#    tag ruleset, its empty bypass list, and the testpypi environment
+# 2. Create the separate creation rule only if it is absent.
+#    If it exists, PUT its reviewed ID instead; do not create duplicates.
+gh api --method POST repos/Hunzee-VC/Nexus-Symbiote/rulesets \
+  --input config/github-release-tag-creation-ruleset.json
+
+# 3. Confirm the publication preflight accepts the immutable-tag rule,
+#    its empty bypass list, and the testpypi environment.
 GH_TOKEN="$(gh auth token)" python scripts/check_repository_controls.py \
   --repo Hunzee-VC/Nexus-Symbiote --branch main --sha "$(git rev-parse origin/main)" \
   --publish testpypi --verify-bypass-actors
 ```
 
-Step 2 is the administrator check. Run it after any change to the ruleset and before
+Step 3 is the administrator check. Run it after any change to the rulesets and before
 approving each publication: it is the only check of who may bypass the release-tag
-ruleset, because GitHub does not show that list to the release workflow's token.
+immutability rule, because GitHub does not show that list to the release workflow's
+token. It rejects a creation restriction combined with the immutable rule; it
+does not certify the separate creator list. Read back that rule's full details
+and verify its sole rule is `creation`, its targets are exactly `refs/tags/v*`
+with no exclusions, and its only bypass is the repository administrator role.
+Confirm the intended release operator has that role before pushing the signed
+tag described in [releasing](releasing.md#each-release). Do not grant the release
+workflow permission to create tags or add a bypass to the immutable rule.
 
 Turn off administrator bypass for the `pypi` and `testpypi` environments under
-*Settings → Environments* first; step 2 fails while it is on. Step 2 passes only once
+*Settings → Environments* first; step 3 fails while it is on. Step 3 passes only once
 the newest trusted CI run for the `main` head has succeeded. Do not delete ruleset
 `main` (ID 26325547): it now protects the default branch.
 
