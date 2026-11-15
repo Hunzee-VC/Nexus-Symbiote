@@ -389,9 +389,9 @@ def test_classification_is_sorted_deterministic_and_from_the_fixed_vocabulary():
 
 def test_every_basis_string_is_reachable():
     produced: set[str] = set()
-    for capability in CapabilityClass:
+    for capability in list(CapabilityClass):
         produced.update(classify(tool(capability, CapabilityClass.NETWORK)).basis)
-    for profile in SideEffectProfile:
+    for profile in list(SideEffectProfile):
         produced.update(classify(tool(side_effect_profile=profile)).basis)
     produced.update(classify(tool(egress_domains=["x"])).basis)
     for endpoint in ("https://x.example", "[redacted]"):
@@ -401,7 +401,7 @@ def test_every_basis_string_is_reachable():
     produced.update(
         classify(MCPServerComponent(bom_ref="s", name="s", env={"[redacted-1]": "***"})).basis
     )
-    for safety in SerializationSafety:
+    for safety in list(SerializationSafety):
         produced.update(
             classify(
                 ModelComponent(

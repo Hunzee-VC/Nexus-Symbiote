@@ -12,7 +12,7 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from pydantic import ValidationError
 
-import nexus_symbiote.runtime as runtime
+from nexus_symbiote import runtime
 from nexus_symbiote.core.hashing import hash_tool_definition
 from nexus_symbiote.runtime import (
     MAX_STATEMENT_BYTES,

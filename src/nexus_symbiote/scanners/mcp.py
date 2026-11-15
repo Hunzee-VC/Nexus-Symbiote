@@ -178,10 +178,6 @@ def _launch_directory(path: str) -> str:
     return "/".join(parts)
 
 
-_SDK_IMPORT = re.compile(
-    r"(?:\bfrom\s*[\"']@modelcontextprotocol/sdk(?:/[^\"']*)?[\"']|"
-    r"\brequire\s*\(\s*[\"']@modelcontextprotocol/sdk(?:/[^\"']*)?[\"'])"
-)
 _SPACE = re.compile(r"\s*")
 _CAMEL_BOUNDARY = re.compile(r"([a-z0-9])([A-Z])")
 # Fixed width on purpose: "HTTPServer" splits before the capital that starts "Server".

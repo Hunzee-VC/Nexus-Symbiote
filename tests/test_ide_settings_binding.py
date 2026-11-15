@@ -375,12 +375,16 @@ def test_nested_settings_behind_a_directory_link_are_recorded(tmp_path):
         "pkg/.claude/settings.json": "shared/claude/settings.json"
     }
     assert sorted(result.scan_failures) == [
-        "api/.claude/Settings.local.json: case variant of api/.claude/settings.local.json is "
-        "the active file on case-insensitive file systems and is not inventoried",
+        (
+            "api/.claude/Settings.local.json: case variant of api/.claude/settings.local.json is "
+            "the active file on case-insensitive file systems and is not inventoried"
+        ),
         "top/.claude/settings.json: symlink target is the collection root",
         "top/.claude/settings.local.json: symlink target is the collection root",
-        "web/.Claude/settings.json: case variant of web/.claude/settings.json is the active "
-        "file on case-insensitive file systems and is not inventoried",
+        (
+            "web/.Claude/settings.json: case variant of web/.claude/settings.json is the active "
+            "file on case-insensitive file systems and is not inventoried"
+        ),
     ]
 
 

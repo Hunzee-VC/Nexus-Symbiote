@@ -159,8 +159,10 @@ def test_only_candidate_files_are_held_to_the_syntax_limit(tmp_path):
     _write(tmp_path, "pkg/agent.py", CLIENT_PY + "PAD = '" + "x" * 300_000 + "'\n")
     _write(tmp_path, "server.ts", SERVER_TS + "//" + "x" * 300_000 + "\n")
     assert sorted(MCPScanner().scan(tmp_path).scan_failures) == [
-        "pkg/agent.py: syntax-bytes limit of 256 KiB exceeded; "
-        "raise it with --limit syntax-bytes=N",
+        (
+            "pkg/agent.py: syntax-bytes limit of 256 KiB exceeded; "
+            "raise it with --limit syntax-bytes=N"
+        ),
         "server.ts: syntax-bytes limit of 256 KiB exceeded; raise it with --limit syntax-bytes=N",
     ]
     with limits.applied(replace(limits.DEFAULTS, syntax_bytes=512 * limits.KIB)):

@@ -373,8 +373,6 @@ def test_published_schema_matches_the_manifest_model():
 
 
 def test_the_documented_example_is_a_valid_manifest():
-    import re
-
     import yaml
     from jsonschema import Draft202012Validator
 

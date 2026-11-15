@@ -531,9 +531,11 @@ class SignerScope(Contract):
 class ContractSigner(Protocol):
     """An Ed25519 signer. A KMS, HSM or agent-held key can implement this."""
 
-    def sign(self, data: bytes) -> bytes: ...
+    def sign(self, data: bytes) -> bytes:
+        """The Ed25519 signature over ``data``."""
 
-    def public_key(self) -> Ed25519PublicKey: ...
+    def public_key(self) -> Ed25519PublicKey:
+        """The public key that verifies this signer's signatures."""
 
 
 @dataclass(frozen=True)

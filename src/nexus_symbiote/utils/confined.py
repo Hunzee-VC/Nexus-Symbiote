@@ -1509,6 +1509,7 @@ class ConfinedCollection:
         try:
             descend(Path(), (), True, False)
         except _VariantSearchStoppedError:
+            # The variant bound was reached; the variants found so far are the result.
             pass
         return found
 

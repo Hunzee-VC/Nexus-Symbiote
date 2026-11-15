@@ -273,6 +273,7 @@ def _recognized_pickle(stream: BinaryIO, prefix: bytes, size: int) -> str | None
             pickletools.dis(sample, out=io.StringIO())
             return recognized
     except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
+        # A truncated or malformed stream is judged by the opcodes read before it failed.
         pass
     return recognized if binary and seen >= MIN_PICKLE_OPCODES else None
 

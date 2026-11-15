@@ -34,7 +34,7 @@ from nexus_symbiote import limits
 from nexus_symbiote.core.enums import TrustTier
 from nexus_symbiote.core.models import MCPClientComponent
 from nexus_symbiote.scanners.base import ScanResult, SourceBudget, parse_python
-from nexus_symbiote.scanners.mcp import _SDK_IMPORT, without_js_comments
+from nexus_symbiote.scanners.mcp import without_js_comments
 from nexus_symbiote.scanners.python_tools import (
     _AGENT_FACTORIES,
     _DECORATOR_IMPORTS,
@@ -56,6 +56,11 @@ from nexus_symbiote.scanners.ts_tools import (
     source_text,
 )
 from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection, recorded_count
+
+_SDK_IMPORT = re.compile(
+    r"(?:\bfrom\s*[\"']@modelcontextprotocol/sdk(?:/[^\"']*)?[\"']|"
+    r"\brequire\s*\(\s*[\"']@modelcontextprotocol/sdk(?:/[^\"']*)?[\"'])"
+)
 
 # Test, build output, documentation and example trees are not searched, so code
 # that only illustrates an SDK never fails the collector.

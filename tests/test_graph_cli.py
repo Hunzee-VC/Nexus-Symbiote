@@ -280,7 +280,7 @@ def test_hostile_text_stays_inert_in_files_and_on_standard_output(runner, tmp_pa
 
 
 def test_the_command_stays_offline_even_in_live_mode(runner, demo, tmp_path, monkeypatch):
-    import nexus_symbiote.graph_view as graph_view
+    from nexus_symbiote import graph_view
 
     def resolving(*args: object, **kwargs: object) -> None:
         socket.getaddrinfo("example.com", 443)

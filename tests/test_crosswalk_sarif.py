@@ -77,7 +77,7 @@ def test_every_category_has_its_own_rule_with_valid_bounded_tags():
     rules = _rules()
     assert len(rules) == len(RULES) * len(RiskSeverity)
     for category, info in RULES.items():
-        for severity in RiskSeverity:
+        for severity in list(RiskSeverity):
             rule = rules[f"nexus_symbiote/{category}/{severity.value}"]
             assert rule["shortDescription"]["text"] == f"{info.title} ({severity.value})"
             assert rule["fullDescription"]["text"] == info.description
@@ -91,7 +91,7 @@ def test_every_category_has_its_own_rule_with_valid_bounded_tags():
 def test_earlier_tags_are_unchanged_and_new_tags_only_follow_them():
     rules = _rules()
     for category in EARLIER:
-        for severity in RiskSeverity:
+        for severity in list(RiskSeverity):
             tags = rules[f"nexus_symbiote/{category}/{severity.value}"]["properties"]["tags"]
             earlier = _earlier_tags(category, severity)
             assert tags[: len(earlier)] == earlier, (category, severity)

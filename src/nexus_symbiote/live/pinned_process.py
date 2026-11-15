@@ -27,7 +27,6 @@ import subprocess
 import sys
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
 
 from nexus_symbiote.core.hashing import open_regular_file
@@ -68,7 +67,7 @@ def isolation_enabled() -> bool:
     return _ISOLATION.get()
 
 
-@contextmanager
+@contextlib.contextmanager
 def isolation_off() -> Iterator[None]:
     """Explicitly accept a launch without kernel containment; descendants can escape."""
     token = _ISOLATION.set(False)
