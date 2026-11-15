@@ -66,7 +66,7 @@ MODULE_FLOORS: dict[str, tuple[int, int | None]] = {
     # Measured with the tests added then: 77/74, 93/85, 94/91, 96/90, 95/93, 100/100,
     # 96/94, 93/87, 96/92, 96/91 and 98/93. The worker runs in an isolated subprocess
     # (-I, PATH only) that coverage does not trace, so its code is also run in-process
-    # (tests/test_runtime_validation_in_process.py): runtime_validation.py measured 93/89
+    # (tests/test_runtime_validation_in_process.py): runtime_validation.py measured 94/90
     # with those tests on 2026-11-15.
     "nexus_symbiote/runtime_validation.py": (92, 88),
     "nexus_symbiote/utils/files.py": (92, 84),

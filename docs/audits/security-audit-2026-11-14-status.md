@@ -78,7 +78,7 @@ second person has reviewed it. Re-check each claim against the commit it names.
 | L27 | Addressed, residual documented | Root requirements files stop at 100,000 logical lines (`18b93aa`); model parsers share an `InspectionBudget` (16 million units, at most 4 million ONNX fields). Limits bound size, not time; the threat model asks for a job timeout. |
 | T1 | Fixed (`5617188`) | One fixture-transport case per live-mode refusal in `tests/test_live_mcp.py`. |
 | T2 | Fixed (`5617188`) | One misbehaving launcher per pinned-stdio bound in `tests/test_pinned_stdio.py` and `tests/test_runtime_stdio_session.py`. |
-| T3 | Fixed (`5617188`); completed here | Floors were added. This branch runs the worker's code in-process (`tests/test_runtime_validation_in_process.py`), each case cross-checked against the real isolated worker; `runtime_validation.py` measures 76% before and 92% after on the runtime tests; on the full suite 93.39% of statements and 89.21% of branches, so its floor is raised from 76/73 to 92/88. |
+| T3 | Fixed (`5617188`); completed here | Floors were added. This branch runs the worker's code in-process (`tests/test_runtime_validation_in_process.py`), each case cross-checked against the real isolated worker; `runtime_validation.py` measures 76% before and 92% after on the runtime tests; on the full suite 93.88% of statements and 90.29% of branches, so its floor is raised from 76/73 to 92/88. |
 | T4 | Fixed (`5617188`, `5c9a780`, `ddec60b`) | `tests/test_suite_infrastructure.py`, `tests/test_suite_resolver_guards.py`. |
 
 ## Information items
