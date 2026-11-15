@@ -499,3 +499,100 @@ def test_the_widened_cover_holds_every_occurrence(text, values):
         for value in values:
             if text.startswith(value, start):
                 assert all(covered[start : start + len(value)])
+
+
+@pytest.mark.parametrize(
+    ("text", "expected", "leaked"),
+    [
+        (
+            '<a href="https://h.example/cb?token=abc123">password: hunter2hunter2</a>',
+            '<a href="https://h.example">password: ***',
+            "hunter2hunter2",
+        ),
+        (
+            "<a href='https://h.example/cb?api_key=abc123'>secret: hunter2hunter2",
+            "<a href='https://h.example'>secret: ***",
+            "hunter2hunter2",
+        ),
+        (
+            "<https://h.example/cb?password=>token: hunter2hunter2",
+            "<https://h.example>token: ***",
+            "hunter2hunter2",
+        ),
+        (
+            '<a href="https://token=abc123.example/cb">password: hunter2hunter2</a>',
+            '<a href="***">password: ***',
+            "hunter2hunter2",
+        ),
+        (
+            '<input value="token=abc123">password: hunter2hunter2',
+            '<input value="token=*** ***',
+            "hunter2hunter2",
+        ),
+        (
+            "api_key=abc123&password: hunter2hunter2",
+            "api_key=*** ***",
+            "hunter2hunter2",
+        ),
+    ],
+)
+def test_delimited_urls_and_chained_assignments_never_swallow_following_assignment_keys(
+    text, expected, leaked
+):
+    shown = redact_text(text)
+    assert shown == expected
+    assert leaked not in shown
+
+
+@pytest.mark.parametrize(
+    "pem",
+    [
+        (
+            "-----BEGIN RSA PRIVATE KEY-----\n"
+            "-----END PUBLIC KEY-----\n"
+            "MIIEpAIBAAKCAQEA_SUPER_SECRET_KEY_BODY_1234567890\n"
+            "-----END RSA PRIVATE KEY-----"
+        ),
+        (
+            "-----BEGIN PRIVATE KEY-----\n"
+            "-----END -----\n"
+            "MIIEpAIBAAKCAQEA_SUPER_SECRET_KEY_BODY_1234567890\n"
+            "-----END PRIVATE KEY-----"
+        ),
+        (
+            "-----BEGIN EC PRIVATE KEY-----\n"
+            "-----END\nPRIVATE KEY\n-----\n"
+            "MIIEpAIBAAKCAQEA_SUPER_SECRET_KEY_BODY_1234567890\n"
+            "-----END EC PRIVATE KEY-----"
+        ),
+        (
+            "-----BEGIN RSA PRIVATE KEY-----\n"
+            "MIIEpAIBAAKCAQEA_SUPER_SECRET_KEY_BODY_1234567890\n"
+            "-----END PUBLIC KEY----------END RSA PRIVATE KEY-----"
+        ),
+        (
+            "-----BEGIN OPENSSH PRIVATE KEY-----\n"
+            "-----END CERTIFICATE-----\n"
+            "MIIEpAIBAAKCAQEA_SUPER_SECRET_KEY_BODY_1234567890"
+        ),
+    ],
+)
+def test_decoy_end_markers_never_truncate_pem_private_key_redaction(pem):
+    shown = redact_text(f"prefix {pem} suffix")
+    assert "SUPER_SECRET_KEY_BODY" not in shown
+    if pem.endswith("PRIVATE KEY-----"):
+        assert shown == "prefix *** suffix"
+    else:
+        assert shown == "prefix ***"
+
+
+def test_chained_assignment_tails_and_decoy_pem_markers_scale_linearly():
+    chained = {scale: "ab_key=" * (1000 * scale) + " hunter2hunter2" for scale in (1, 4)}
+    pem = {
+        scale: "-----BEGIN RSA PRIVATE KEY-----\n"
+        + "-----END PUBLIC KEY-----\n" * (500 * scale)
+        + "SECRETBODY\n-----END RSA PRIVATE KEY-----"
+        for scale in (1, 4)
+    }
+    assert scaling_ratio(lambda s: redact_text(chained[s])) < 10
+    assert scaling_ratio(lambda s: redact_text(pem[s])) < 10

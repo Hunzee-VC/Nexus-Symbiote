@@ -35,6 +35,7 @@ _ASSIGNMENT = re.compile(
     rf"(?i)({_CREDENTIAL_KEYWORD}[\"']?\s*+[:=]\s*+)"
     r"(\"(?:[^\"\\\n]|\\.){0,256}\"|'(?:[^'\\\n]|\\.){0,256}'|[^\s,;]++)"
 )
+_TRAILING_ASSIGNMENT_KEY = re.compile(rf"(?i)(?:{_CREDENTIAL_KEYWORD})[\"']?[:=]\Z")
 # A mapping key that _ASSIGNMENT would read as the name in `name: value`.
 _CREDENTIAL_KEY = re.compile(rf"(?i){_CREDENTIAL_KEYWORD}\Z")
 _AUTHORIZATION_KEY = re.compile(r"(?i)(?:proxy-)?authorization")
@@ -402,9 +403,22 @@ def _private_key_spans(value: str) -> Iterable[Span]:
             # The closing dashes may open the next BEGIN line.
             search = label_end
             continue
-        end = value.find("-----END", label_end + 5)
-        close = -1 if end < 0 else value.find("-----", end + 8)
-        search = len(value) if close < 0 else close + 5
+        cursor = label_end + 5
+        while True:
+            end = value.find("-----END", cursor)
+            if end < 0:
+                search = len(value)
+                break
+            close = value.find("-----", end + 8)
+            if close < 0:
+                search = len(value)
+                break
+            end_label = value[end + 8 : close]
+            if "\n" not in end_label and "\r" not in end_label and "PRIVATE KEY" in end_label:
+                search = close + 5
+                break
+            # The closing dashes of a non-matching END marker may open another marker.
+            cursor = close
         yield start, search
 
 
@@ -521,16 +535,46 @@ def _apply(value: str, spans: list[Span], rewrites: list[_Rewrite]) -> str:
     return "".join(parts)
 
 
+def _assignment_spans(value: str, url_spans: list[Span]) -> Iterable[Span]:
+    """Assignment value spans, bounded by enclosing URLs and chained ``key: `` tails."""
+    url_index = 0
+    position = 0
+    while (match := _ASSIGNMENT.search(value, position)) is not None:
+        start = match.start()
+        val_start, val_end = match.span(2)
+        while url_index < len(url_spans) and url_spans[url_index][1] <= start:
+            url_index += 1
+        if url_index < len(url_spans) and url_spans[url_index][0] <= start:
+            url_end = url_spans[url_index][1]
+            if val_start < url_end:
+                yield val_start, min(val_end, url_end)
+            position = max(start + 1, min(match.end(), url_end))
+            continue
+        yield val_start, val_end
+        if (
+            val_end > val_start
+            and value[val_start] not in "\"'"
+            and value[val_end - 1] in ":="
+            and val_end < len(value)
+            and value[val_end].isspace()
+        ):
+            window_start = max(val_start + 1, val_end - 180)
+            tail = _TRAILING_ASSIGNMENT_KEY.search(value, window_start, val_end)
+            position = tail.start() if tail is not None else match.end()
+        else:
+            position = match.end()
+
+
 def _rule_matches(
     value: str, *, identifier: bool, cookie: bool
 ) -> tuple[list[Span], list[_Rewrite]]:
-    rewrites = [
-        rewrite for match in _URL.finditer(value) if (rewrite := _url_rewrite(match)) is not None
-    ]
+    url_matches = list(_URL.finditer(value))
+    url_spans = [match.span() for match in url_matches]
+    rewrites = [rewrite for match in url_matches if (rewrite := _url_rewrite(match)) is not None]
     spans: list[Span] = []
     if not identifier:
         spans.extend(_private_key_spans(value))
-    spans.extend(match.span(2) for match in _ASSIGNMENT.finditer(value))
+    spans.extend(_assignment_spans(value, url_spans))
     spans.extend(
         match.span(3) for match in _scheme_matches(value) if _authorization_scheme_credential(match)
     )
@@ -540,8 +584,15 @@ def _rule_matches(
     for match in _RAW_AUTH_HEADER.finditer(value):
         if (span := _raw_auth_span(match)) is not None:
             spans.append(span)
+    url_idx = 0
     for match in _COOKIE_HEADER.finditer(value):
-        spans.extend(_cookie_spans(value, *match.span(2)))
+        c_start, c_end = match.span(2)
+        while url_idx < len(url_spans) and url_spans[url_idx][1] <= match.start():
+            url_idx += 1
+        if url_idx < len(url_spans) and url_spans[url_idx][0] <= match.start():
+            c_end = min(c_end, url_spans[url_idx][1])
+        if c_start < c_end:
+            spans.extend(_cookie_spans(value, c_start, c_end))
     spans.extend(match.span() for match in TOKEN_SHAPE.finditer(value))
     if cookie:
         spans.extend(_cookie_spans(value))
