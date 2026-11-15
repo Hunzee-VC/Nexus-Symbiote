@@ -188,15 +188,21 @@ _SCOPED_TOOL_CLASSES = {
 # A specifier made only of these characters names everything: Bash(*), Bash(:*),
 # Edit(//**), Read(~/**), Edit(./**).
 _WILDCARD_SPECIFIER = re.compile(r"[\s*:/~.]*")
+_PWSH_EXEC_FLAG = (
+    r"[-/](?:c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?"
+    r"|e(?:c|n(?:c(?:o(?:d(?:e(?:d(?:c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?)?)?)?)?)?)?)?)"
+)
 _SUBSHELL_SPECIFIER = re.compile(
-    r"(?i)(?:(?:(?:/[A-Za-z0-9._-]++)+/)?env(?:\s++(?:-[A-Za-z0-9-]++|[A-Za-z_][A-Za-z0-9_]*+=\S*+))*+\s++)?"
-    r"(?:(?:/[A-Za-z0-9._-]++)+/)?"
+    r"(?i)\A(?:(?:/++(?:[A-Za-z0-9._-]++/++)*+)?env(?:\s++(?:-[A-Za-z0-9-]++|[A-Za-z_][A-Za-z0-9_]*+=\S*+))*+\s++)?"
+    r"(?:/++(?:[A-Za-z0-9._-]++/++)*+)?"
     r"(?:"
     r"(?:(?:ba|z|da|k|a|c|tc)?sh|busybox|toybox)"
     r"(?::[\s\S]*|\s++(?:\*|:[\s\S]*|-[A-Za-z]*[cs]\b[\s\S]*|--command\b[\s\S]*))"
-    r"|(?:python[0-9.]*+|node|nodejs|perl|ruby|pwsh|powershell|cmd(?:\.exe)?)"
-    r"(?::[\s\S]*|\s++(?:\*|:[\s\S]*|(?:-[ce]|/c|-c(?:ommand)?|-enc(?:odedcommand)?)\b[\s\S]*))"
-    r")"
+    r"|(?:python[0-9.]*+|node|nodejs|perl|ruby|cmd(?:\.exe)?)"
+    r"(?::[\s\S]*|\s++(?:\*|:[\s\S]*|(?:-[ce]|/c)\b[\s\S]*))"
+    r"|(?:pwsh|powershell)(?:\.exe)?"
+    r"(?::[\s\S]*|\s++(?:\*|:[\s\S]*|" + _PWSH_EXEC_FLAG + r"\b[\s\S]*))"
+    r")\Z"
 )
 _EXTENSION_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z0-9][a-zA-Z0-9._-]*")
 

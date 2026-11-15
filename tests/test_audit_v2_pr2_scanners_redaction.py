@@ -134,6 +134,20 @@ def test_mcp_launch_rejects_package_runner_shells_and_marks_uv_env_file() -> Non
         )
         assert verdict.unknown is not None
 
+    single_package_shells = [
+        ("npx", ["-y", "csh"]),
+        ("npx", ["-y", "tcsh", "-c", "id"]),
+        ("uvx", ["tcsh", "-c", "id"]),
+        ("bunx", ["tcsh", "-c", "id"]),
+        ("bunx", ["csh", "-c", "id"]),
+        ("bunx", ["toybox", "sh"]),
+        ("pnpm", ["dlx", "toybox", "sh"]),
+        ("pnpm", ["dlx", "sh"]),
+        ("yarn", ["dlx", "busybox", "sh"]),
+    ]
+    for cmd, args in single_package_shells:
+        assert analyze(cmd, args).unknown is not None, (cmd, args)
+
     uv_env = analyze("uv", ["run", "--env-file", ".env.local", "--with", "mcp==1.2.0", "s.py"])
     assert uv_env.injected_environment is True
 
@@ -482,15 +496,27 @@ def test_model_scanner_second_zip_pickle_member_jinja2_and_nested_custom_code(
 
 
 def test_ide_agents_subshell_grants_dont_ask_and_codex_full_access(tmp_path: Path) -> None:
+    import time
+
+    from nexus_symbiote.scanners.ide_agents import _SUBSHELL_SPECIFIER
+
     assert "shell commands" in _broad_grants(["Bash(sh -c *)"])
     assert "shell commands" in _broad_grants(["Bash(sh -c evil\nid)"])
     assert "shell commands" in _broad_grants(["Bash(/usr/local/bin/bash -c *)"])
     assert "shell commands" in _broad_grants(["Bash(env python3 -c *)"])
     assert "shell commands" in _broad_grants(["Bash(cmd /c *)"])
     assert "shell commands" in _broad_grants(["Bash(pwsh -Command *)"])
+    assert "shell commands" in _broad_grants(["Bash(pwsh -enco SQBEAA==)"])
+    assert "shell commands" in _broad_grants(["Bash(powershell /en SQBEAA==)"])
+    assert "shell commands" in _broad_grants(["Bash(pwsh -co Get-Date)"])
+    assert _broad_grants(["Bash(pwsh -ExecutionPolicy Bypass file.ps1)"]) == []
     assert _broad_grants(["Bash(git status)"]) == []
     assert _broad_grants(["Bash(sh scripts/check.sh)"]) == []
     assert _broad_grants(["Bash(sh" + " " * 32000 + "a\nb)"]) == []
+
+    t0 = time.perf_counter()
+    assert _SUBSHELL_SPECIFIER.search("/a" * 5000 + "/env") is None
+    assert time.perf_counter() - t0 < 0.05
 
     assert _starting_mode_risk("claude-code", "dontAsk") is None
     for med_mode in ("auto", "never"):
