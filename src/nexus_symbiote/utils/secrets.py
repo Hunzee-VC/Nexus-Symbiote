@@ -20,11 +20,11 @@ _URL = re.compile(r"(?<![a-zA-Z0-9+.-])[a-zA-Z0-9+.-]+://[^\s\"'<>]+")
 # digits (token2=) may follow the keyword; "max_tokens" and "tokenizer" may not.
 # A backslash escapes the next character of a quoted value, as JSON reads it.
 # Possessive and bounded quantifiers keep every attempt linear.
-_CREDENTIAL_KEYWORD = (
+_CREDENTIAL_WORD = (
     r"(?:api[-_]?key|access[-_]?key|secret[-_]?key|private[-_]?key|account[-_]?key"
     r"|token|password|passwd|passphrase|pwd|secret|credentials?|sig)"
-    r"(?:\d{1,4})?(?:[-_.][a-z0-9]{1,32}){0,4}"
 )
+_CREDENTIAL_KEYWORD = _CREDENTIAL_WORD + r"(?:\d{1,4})?(?:[-_.][a-z0-9]{1,32}){0,4}"
 _ASSIGNMENT = re.compile(
     rf"(?i)({_CREDENTIAL_KEYWORD}[\"']?\s*+[:=]\s*+)"
     r"(\"(?:[^\"\\\n]|\\.){0,256}\"|'(?:[^'\\\n]|\\.){0,256}'|[^\s,;]++)"
@@ -32,9 +32,13 @@ _ASSIGNMENT = re.compile(
 # A credential name that ends a URL match, as in `https://h/?a=b,password: value`: the
 # URL rule stops at whitespace, so it would take the name and leave the value without
 # one. Names are at most about 150 characters, so only the end of a URL is searched.
-_URL_TRAILING_KEY = re.compile(rf"(?i){_CREDENTIAL_KEYWORD}[:=]?+\Z")
+# Only the credential word and the mark are captured: the suffixes of a name are URL
+# text, which is never shown.
+_URL_TRAILING_KEY = re.compile(
+    rf"(?i)({_CREDENTIAL_WORD})(?:\d{{1,4}})?(?:[-_.][a-z0-9]{{1,32}}){{0,4}}([:=]?+)\Z"
+)
 _URL_KEY_WINDOW = 200
-_KEY_SEPARATOR = re.compile(r"[\"']?\s*+[:=]")
+_KEY_SEPARATOR = re.compile(r"\s*+[:=]")
 # A mapping key that _ASSIGNMENT would read as the name in `name: value`.
 _CREDENTIAL_KEY = re.compile(rf"(?i){_CREDENTIAL_KEYWORD}\Z")
 _AUTHORIZATION_KEY = re.compile(r"(?i)(?:proxy-)?authorization")
@@ -132,11 +136,14 @@ def redact_url(value: str) -> str:
 
 
 def _url_replacement(match: re.Match[str]) -> str:
-    """A URL as its origin, followed by a credential name that ended the match.
+    """A URL as its origin, followed by the credential word of a name that ended it.
 
-    The name is kept only when text follows the URL and the name is written as an
+    The name is kept only when whitespace follows the URL and the name is written as an
     assignment: it ends in ``:`` or ``=``, or one follows it. The assignment rule then
     redacts the value; dropping the name with the URL would leave the value in clear.
+    After a quote, ``<`` or ``>`` the name is not kept: the assignment rule would take
+    the glued text as its value, as in ``<https://h/?password=>token: value``, and pass
+    over the name that follows.
     """
     url = match.group()
     end = match.end()
@@ -144,10 +151,11 @@ def _url_replacement(match: re.Match[str]) -> str:
     if (
         tail is None
         or end == len(match.string)
+        or not match.string[end].isspace()
         or (url[-1] not in ":=" and not _KEY_SEPARATOR.match(match.string, end))
     ):
         return redact_url(url)
-    return f"{redact_url(url[: tail.start()])} {tail.group()}"
+    return f"{redact_url(url[: tail.start()])} {tail.group(1)}{tail.group(2)}"
 
 
 def secret_like(name: str, value: str) -> bool:

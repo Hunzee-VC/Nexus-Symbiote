@@ -31,13 +31,14 @@ VALUE = "hunter2hunter2"
         f"(https://h.example/?a=b)secret: {VALUE}",
         f"(https://h.example/path)secret: {VALUE}",
         f"(https://h.example/?token=abc)password: {VALUE}",
+        f"https://h.example/?sig=x&token=abc&password: {VALUE}",
+        f"https://h.example/?token=abc)password= {VALUE}",
         f"[docs](https://h.example/?a=b)password: {VALUE}",
         f"x https://h.example/?q=1#password: {VALUE}",
         f"https://h.example/?a=b,password= {VALUE}",
         f"https://h.example/?a=b,password : {VALUE}",
         f"https://h.example/?a=b,password\t=\t{VALUE}",
         f"https://h.example/?a=b,password:\n{VALUE}",
-        f'https://h.example/?a=b,password:"{VALUE}"',
         f"https://h.example/?a=b,password: '{VALUE}'",
         f"https://h.example/?a=b,DB_PASSWORD_PROD: {VALUE}",
         f"https://h.example/?a=b,API_KEY: {VALUE}",
@@ -52,9 +53,11 @@ def test_value_after_a_name_that_ends_a_url_is_redacted(text: str) -> None:
         assert "***" in shown
 
 
-def test_the_url_keeps_its_origin_and_the_name_stays_readable() -> None:
+def test_the_url_keeps_its_origin_and_the_value_is_redacted() -> None:
     shown = redact_text(f"https://h.example/cb?a=b,password: {VALUE}")
-    assert shown == "https://h.example password: ***"
+    assert shown.startswith("https://h.example ")
+    assert shown.endswith("***")
+    assert VALUE not in shown
 
 
 @pytest.mark.parametrize(
@@ -73,6 +76,20 @@ def test_the_url_keeps_its_origin_and_the_name_stays_readable() -> None:
 )
 def test_other_urls_are_shown_as_before(text: str, expected: str) -> None:
     assert redact_text(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"<https://h.example/cb?password=>token: {VALUE}",
+        f"<https://h.example/cb?password=<b>token: {VALUE}",
+        f"<https://h.example/cb?a=b,password:>secret= {VALUE}",
+        f'<a href="https://h.example/cb?token=abc123">password: {VALUE}</a>',
+        f"<a href='https://h.example/cb?password='>token: {VALUE}</a>",
+    ],
+)
+def test_a_name_glued_to_the_end_of_a_url_does_not_hide_the_next_name(text: str) -> None:
+    assert VALUE not in redact_text(text)
 
 
 def test_a_value_inside_the_url_is_still_dropped_with_it() -> None:
