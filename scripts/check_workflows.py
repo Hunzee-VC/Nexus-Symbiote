@@ -92,6 +92,7 @@ REQUIRED_COMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
             "scripts/check_workflows.py",
             "scripts/check_repository_hygiene.py",
             "scripts/check_locks.py",
+            "scripts/check_pull_request_size.py",
         ),
         "distribution": (
             "python -m build --no-isolation",
@@ -150,6 +151,9 @@ REVIEWED_JOB_CONDITIONS: dict[str, dict[str, str]] = {
     "release.yml": {"build": "github.ref == 'refs/heads/main'"},
 }
 REVIEWED_STEP_CONDITIONS: dict[str, dict[str, frozenset[str]]] = {
+    "ci.yml": {
+        "github.event_name == 'pull_request'": frozenset({"scripts/check_pull_request_size.py"})
+    },
     "release.yml": {
         "inputs.publish != 'none'": frozenset({"scripts/check_repository_controls.py", "--publish"})
     },
@@ -1159,6 +1163,46 @@ def _gate_issues(path: Path, name: str, job: dict[str, Any], defaults: Any) -> l
     return errors
 
 
+def _pr_size_issues(path: Path, jobs: dict[Any, Any], defaults: Any) -> list[str]:
+    """Keep the cap's immutable event pair and fixed limit as a reviewed contract."""
+    quality = jobs.get("quality")
+    if not isinstance(quality, dict):
+        return [
+            f"{path}: pull request size must fetch and compare the immutable event base/head pair"
+        ]
+    steps = list(_steps(quality))
+    candidates = [
+        step
+        for step in steps
+        if step.get("id") == "pr-size" or "check_pull_request_size.py" in str(step.get("run", ""))
+    ]
+    expected_env = {
+        "PR_BASE": "${{ github.event.pull_request.base.sha }}",
+        "PR_HEAD": "${{ github.event.pull_request.head.sha }}",
+    }
+    expected_run = (
+        'git fetch --no-tags --depth=1 origin "$PR_BASE" "$PR_HEAD"\n'
+        'python scripts/check_pull_request_size.py --base "$PR_BASE" --head "$PR_HEAD"'
+    )
+    if len(candidates) == 1:
+        step = candidates[0]
+        shell, _ = _run_setting("shell", step, quality, defaults)
+        directory, _ = _run_setting("working-directory", step, quality, defaults)
+        if (
+            step.get("id") == "pr-size"
+            and _condition(step) == "github.event_name == 'pull_request'"
+            and step.get("continue-on-error", False) is False
+            and (isinstance(shell, str) or shell is None)
+            and shell in SHELLS
+            and directory is None
+            and step.get("env") == expected_env
+            and isinstance(step.get("run"), str)
+            and step["run"].strip() == expected_run
+        ):
+            return []
+    return [f"{path}: pull request size must fetch and compare the immutable event base/head pair"]
+
+
 def _workflow_issues(path: Path, document: dict[Any, Any]) -> list[str]:
     errors: list[str] = []
     allowed = {
@@ -1221,6 +1265,7 @@ def _workflow_issues(path: Path, document: dict[Any, Any]) -> list[str]:
         if name not in jobs:
             errors.append(f"{path}: required job {name} is missing")
     if path.name == "ci.yml":
+        errors.extend(_pr_size_issues(path, jobs, document.get("defaults")))
         verified = jobs.get("verified", {})
         if (
             not isinstance(verified, dict)
