@@ -30,14 +30,24 @@ and `pyproject.toml` `[tool.uv]` (indexes, mirrors, insecure hosts and `sources`
 entries for a launched package) for `uv run`. `.npmrc` is read as npm reads it: keys
 and values are trimmed, JSON-decoded when quoted and cut at an unescaped `;` or `#`
 otherwise, lines end at a carriage return or line feed, keys after the first
-`[section]` line are ignored, and a key containing `${...}` is `[unresolved]`. Its
+`[section]` line are ignored, and a key containing `${...}` is `[unresolved]`; npm
+expands it, so one that may become `call`, `package`, `userconfig`, `globalconfig` or
+`prefix` (`${E}userconfig`, but not `//${HOST}/:_authToken` or `@${SCOPE}:registry`)
+also makes the launcher identity unknown, as does such an `npm_config_*` name. Its
 registry (and the `@scope:registry` of a configured `scope` for a package without a
 registry of its own, as npm selects it, beside the default registry that pnpm and Bun
 use instead for a launcher other than `npx` and `npm exec`; a `scope` that holds
 `${...}` may name any scope, so it is an `[unresolved]` source when the file gives
 some scope a registry), cache, offline, proxy, `strict-ssl=false`,
-CA, user and global configuration, prefix, workspace and store settings are sources;
-auth settings (`//host/:...`, `_auth`, `username` and similar) are ignored. For npm and
+CA, user and global configuration, prefix, workspace and store settings are sources.
+npm reads user configuration from `userconfig` and global configuration from
+`globalconfig`, by default `<prefix>/etc/npmrc`, and the collector reads neither file:
+a `userconfig`, `globalconfig` or `prefix` that may lie in the project (not an absolute
+path, or one with a `..` segment or under `/proc` or `/dev/fd`), from `.npmrc`, an
+`npm_config_*` variable or `--userconfig`, `--globalconfig`, `--prefix` or `-C`
+before the package, makes the launcher identity unknown, as `HOME` or `PREFIX` there
+does, because a `call` added to that file would change what runs unseen. Auth
+settings (`//host/:...`, `_auth`, `username` and similar) are ignored. For npm and
 pnpm, every setting is classified, from `.npmrc` and from `npm_config_*` or
 `pnpm_config_*` variables alike: `call` and `package` decide what `npm exec` runs, so
 they make the launcher identity unknown (a high `launcher_identity` finding and a gap);

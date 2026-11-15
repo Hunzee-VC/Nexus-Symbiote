@@ -484,6 +484,13 @@ _LOCATION_ENVIRONMENT = _names(
 _WINDOWS_LOCATION_ENVIRONMENT = _names("USERPROFILE APPDATA LOCALAPPDATA")
 _LOCATION_LISTS = frozenset({"PATH", "XDG_CONFIG_DIRS"})
 _NPM_LOCATION_ENVIRONMENT = _names("PREFIX DESTDIR")
+# npm reads user configuration from `userconfig` and global configuration from
+# `globalconfig`, by default <prefix>/etc/npmrc, and resolves a relative one against
+# the working directory. The environment, the project .npmrc and the command line can
+# each set them; bun and Deno are given npm's settings too. No file there is read.
+_NPM_CONFIG_LOCATIONS = frozenset({"userconfig", "globalconfig", "prefix"})
+_NPM_CONFIG_LOCATION_OPTIONS = frozenset({"--userconfig", "--globalconfig", "--prefix", "-C"})
+_NPM_CONFIG_FAMILIES = frozenset({"npm", "bun", "deno"})
 _RUNNER_LOCATION_ENVIRONMENT = {
     "npm": _NPM_LOCATION_ENVIRONMENT,
     "bun": _NPM_LOCATION_ENVIRONMENT,
@@ -525,7 +532,8 @@ _DISPLAY_ENVIRONMENT = _names(
     " YARN_SILENT YARN_ENABLE_PROGRESS_BARS YARN_PROGRESS_BAR_STYLE YARN_ENABLE_COLORS"
     " BUN_CONFIG_VERBOSE_FETCH DOCKER_CLI_HINTS COREPACK_ENABLE_DOWNLOAD_PROMPT"
 )
-_RELOCATED = "environment relocates resolver configuration into the project"
+_RELOCATES = "relocates resolver configuration into the project"
+_RELOCATED = f"environment {_RELOCATES}"
 _SEARCHED = "PATH may search the project for the runner"
 _REPLACED = "environment replaces or constrains the launched package"
 # bash imports BASH_FUNC_<name>%% (BASH_FUNC_<name>() on some distributions, and
@@ -757,6 +765,8 @@ _NPMRC_SOURCES = frozenset(
 # `package` installs another package; either way the declared package does not
 # establish what runs (npm reads both from every configuration layer).
 _NPM_IDENTITY_SETTINGS = frozenset({"call", "package"})
+# Settings that change what runs, directly or through a file the collector does not read.
+_NPM_RUN = _NPM_IDENTITY_SETTINGS | _NPM_CONFIG_LOCATIONS
 # Configuration that names local code npm, pnpm or a lifecycle script runs.
 _NPM_CODE_SETTINGS = _names(
     "script-shell node-options shell git node-gyp editor browser viewer init-module init.module"
@@ -914,6 +924,12 @@ def _runner_environment(
     for variable, value in environment if family else ():
         name = variable.upper()
         windows = name in _WINDOWS_LOCATION_ENVIRONMENT
+        if family in _NPM_CONFIG_FAMILIES and value:
+            # Its package source comes with the runner's other npm settings; npm skips
+            # an empty variable.
+            moved = _npm_relocation(_npm_key(variable) or "", value, "the environment")
+            if moved is not None:
+                reasons.append(moved)
         if _exported_function(variable, value):
             reasons.append(_FUNCTION_REPLACED)
         elif name == _STARTUP_ENVIRONMENT or (
@@ -1007,6 +1023,28 @@ def _npm_setting(key: str, value: str) -> str:
     if key in _NPM_INERT_SETTINGS or key.startswith("//") or _NPMRC_AUTH.fullmatch(key):
         return "inert"
     return "source"
+
+
+def _may_name(key: str, names: frozenset[str]) -> bool:
+    """Whether a key holding ``${...}``, which npm expands, can become one of the names."""
+    head, tail = key.partition("${")[0], key.rpartition("}")[2]
+    return any(
+        len(head) + len(tail) <= len(name) and name.startswith(head) and name.endswith(tail)
+        for name in names
+    )
+
+
+def _npm_relocation(key: str, value: str, source: str) -> str | None:
+    """Why an npm setting may have npm read configuration the collector does not.
+
+    A user or global configuration location that may lie in the project does, and so
+    does a name holding ``${...}`` that may expand to one, to ``call`` or to ``package``.
+    """
+    if "${" in key:
+        return f"npm setting name with ${{...}} from {source}" if _may_name(key, _NPM_RUN) else None
+    if key in _NPM_CONFIG_LOCATIONS and not _absolute(value):
+        return f"npm {key} setting from {source} {_RELOCATES}"
+    return None
 
 
 _YARNRC_LINE = re.compile(r'(?:"((?:[^"\\]|\\.)*)"|([^\s"]+))\s*(.*)', re.DOTALL)
@@ -1104,6 +1142,8 @@ class _ResolverFile:
     settings: tuple[tuple[str, str], ...] = ()
     unresolved: bool = False
     binding_settings: tuple[tuple[str, str], ...] | None = None
+    # An unresolved key may expand to `call`, `package` or a configuration location.
+    unresolved_run: bool = False
 
 
 def _npmrc(text: str) -> _ResolverFile:
@@ -1115,6 +1155,7 @@ def _npmrc(text: str) -> _ResolverFile:
     """
     settings: dict[str, str] = {}
     unresolved = False
+    unresolved_run = False
     for line in re.split(r"[\r\n]+", text):
         if not line.strip(_JS_SPACE) or _INI_COMMENT.match(line):
             continue
@@ -1128,9 +1169,10 @@ def _npmrc(text: str) -> _ResolverFile:
             key = key[:-2]
         if "${" in key:
             unresolved = True
+            unresolved_run = unresolved_run or _may_name(key, _NPM_RUN)
         elif key != "__proto__" and not _NPMRC_AUTH.fullmatch(key):
             settings[key] = _ini_text(raw_value) if equals else "true"
-    return _ResolverFile(tuple(settings.items()), unresolved)
+    return _ResolverFile(tuple(settings.items()), unresolved, unresolved_run=unresolved_run)
 
 
 def _npmrc_source(key: str, value: str) -> bool:
@@ -2084,6 +2126,9 @@ class MCPScanner(Scanner):
                     view.sources.append(
                         (_environment_label(variable) if known else "env:npm_config_[other]", value)
                     )
+            for option, value in launch.sources:
+                if option in _NPM_CONFIG_LOCATION_OPTIONS and not _absolute(value):
+                    view.identity.append(f"{launch.launcher} {option} {_RELOCATES}")
         if family == "yarn":
             # Yarn reads every setting from YARN_<NAME> variables, yarnPath included.
             for variable, value in environment:
@@ -2100,6 +2145,8 @@ class MCPScanner(Scanner):
             file = self._resolvers.entries(path)
             if file.unresolved:
                 view.unresolved.append(f"{path}:key")
+            if file.unresolved_run:
+                view.identity.append(f"npm setting name with ${{...}} from {path}")
             settings = dict(file.settings)
             binding = file.settings if file.binding_settings is None else file.binding_settings
             view.binding.extend([f"{path}:{key}", value] for key, value in binding)
@@ -2107,6 +2154,9 @@ class MCPScanner(Scanner):
                 label = f"{path}:{_setting_name(key, launched)}"
                 view.names.append(label)
                 kind = _file_setting(path, family, key, value, launched)
+                moved = _npm_relocation(key, value, path) if path == ".npmrc" else None
+                if moved is not None:
+                    view.identity.append(moved)
                 if kind == "identity":
                     if path == ".npmrc":
                         view.identity.append(f"npm {key} setting from {path}")

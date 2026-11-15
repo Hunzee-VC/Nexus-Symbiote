@@ -185,12 +185,19 @@ A way around a limit that its entry does not describe is worth a
   `-File`.
 - **Environment that moves a runner's configuration is a gap.** A server's `env`
   that may point `HOME`, `XDG_CONFIG_HOME`, `PREFIX`, `DESTDIR`, `GOENV`,
-  `ZDOTDIR` or a relative `PATH` entry into the project, or that replaces the
-  package (`UV_OVERRIDE`, `UV_CONSTRAINT`, `PIP_CONSTRAINT`), makes the identity
-  unknown. Other locations and the runner's own namespace (`UV_*`, `PIP_*`,
-  `YARN_*`, `BUN_*`, `DOCKER_*` and similar) are a medium `package_source`
-  finding, and the package URL is withheld. Configuration names that look like
-  tokens or hold one after a prefix (`AWS_AKIA...`) are exported as `[redacted]`,
+  `ZDOTDIR`, npm's `userconfig`, `globalconfig` or `prefix` (`npm_config_*` or
+  `pnpm_config_*`, for npm, pnpm, bun and Deno) or a relative `PATH` entry into the
+  project, or that replaces the package (`UV_OVERRIDE`, `UV_CONSTRAINT`,
+  `PIP_CONSTRAINT`), makes the identity unknown. A location may lie in the project
+  when it is not an absolute path, including `~/...` and an expansion such as
+  `${...}`, or when it has a `..` segment or lies under `/proc` or `/dev/fd`; an
+  absolute path that leads into the checkout, such as the CI checkout directory, is
+  not recognized, and environment a client sets for every server, such as the `env`
+  of `.claude/settings.json`, is not read as a server's environment. Other locations
+  and the runner's own namespace (`UV_*`, `PIP_*`, `YARN_*`, `BUN_*`, `DOCKER_*` and
+  similar) are a medium `package_source` finding, and the package URL is withheld.
+  Configuration names that look like tokens or hold one after a prefix
+  (`AWS_AKIA...`) are exported as `[redacted]`,
   and a launcher package whose name or specifier looks like a token is withheld
   (`[withheld]`, no package URL) with a medium `completeness` finding.
 - **Changed values need the binding key.** Launch arguments, environment and header
@@ -218,9 +225,14 @@ A way around a limit that its entry does not describe is worth a
   root `.npmrc`, `bunfig.toml`, `.yarnrc.yml`, `.yarnrc`, `.env.yarn`, `uv.toml`
   and the `[tool.uv]` table of `pyproject.toml`. User and global configuration,
   parent directories, `pnpm-workspace.yaml` settings and corepack's
-  `packageManager` field are not. For runners that read project resolver files, a
-  server that runs in another working directory, or that a configuration file below
-  the root declares, has its package identity withheld
+  `packageManager` field are not. npm reads its user and global configuration from
+  wherever `userconfig`, `globalconfig` and `prefix` point, so one that may lie in
+  the project, set in the root `.npmrc` or with `--userconfig`, `--globalconfig`,
+  `--prefix` or `-C` before the package as well as in the environment, makes the
+  identity unknown instead; an absolute one is a medium `package_source` finding,
+  and that file's contents are not compared. For runners that read project
+  resolver files, a server that runs in another working directory, or that a
+  configuration file below the root declares, has its package identity withheld
   (`working-directory=[unresolved]`) and a medium `package_source` risk.
 - **Injected environments are not visible.** Variables from an `envFile`, or from
   `dotenvx`, `doppler`, `infisical` or `op run --env-file`, are not read. A launched
