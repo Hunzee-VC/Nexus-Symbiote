@@ -562,6 +562,8 @@ _CONTEXT_HIGH = {
 }
 _CONTEXT_MEDIUM = {
     "host_namespaces": "a host namespace",
+    "container_namespaces": "another container's namespace",
+    "inherited_mounts": "another container's mounts",
     "added_capabilities": "added capabilities",
     "devices": "host devices",
     "broad_host_mount": "a broad host directory mount",

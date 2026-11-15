@@ -2589,32 +2589,67 @@ def _pipx(name: str, rest: list[str], launch: Launch) -> None:
 _DANGEROUS_CAPABILITIES = frozenset(
     {"all", "sys_admin", "net_admin", "sys_ptrace", "sys_module", "dac_read_search", "sys_rawio"}
 )
-_SOCKETS = ("docker.sock", "podman.sock", "containerd.sock", "docker_engine")
+_SOCKETS = (
+    "docker.sock",
+    "docker.sock.raw",
+    "podman.sock",
+    "containerd.sock",
+    "crio.sock",
+    "docker_engine",
+)
 _BROAD = re.compile(
-    r"(?:~|\$\{?home\}?|%userprofile%|/home|/users|/root|/etc|/var|/proc|/sys|/dev|/boot|/usr"
-    r"|[a-z]:[\\/]users)(?:[\\/][^\\/]*)?[\\/]?$",
+    r"(?:~|\$\{?home\}?|%userprofile%|/home|/users|/root|/etc|/var|/run|/proc|/sys|/dev|/boot"
+    r"|/usr|[a-z]:[\\/]users)(?:[\\/][^\\/]*)?[\\/]?$",
     re.IGNORECASE,
 )
+# Where engines serve their API: below a runtime directory, and in a desktop engine's
+# directory below a home directory. A bind mount of a socket, of the directory that holds
+# it or of any directory above it gives the container the engine.
+_RUNTIME_SOCKETS = (
+    "docker.sock",
+    "docker/containerd/containerd.sock",
+    "containerd/containerd.sock",
+    "podman/podman.sock",
+    "crio/crio.sock",
+    "k3s/containerd/containerd.sock",
+    "user/*/docker.sock",
+    "user/*/docker/containerd/containerd.sock",
+    "user/*/podman/podman.sock",
+)
+_HOME_SOCKETS = (
+    ".docker/run/docker.sock",
+    ".docker/desktop/docker.sock",
+    ".colima/*/docker.sock",
+    ".lima/*/sock/docker.sock",
+    ".rd/docker.sock",
+    ".orbstack/run/docker.sock",
+    ".local/share/containers/podman/machine/*/podman.sock",
+)
+_RUNTIME_DIRECTORIES = ("run", "var/run", "private/var/run")
+_HOME_DIRECTORIES = ("root", "home/*", "users/*", "var/home/*")
+# Each socket path, as components, with the fewest components of a mount that reaches it:
+# a home directory, and the directories above it, are broad mounts, not socket mounts.
+_HOME_SOCKET_PATHS = tuple((tuple(socket.split("/")), 1) for socket in _HOME_SOCKETS)
+_SOCKET_PATHS = tuple(
+    (tuple(f"{directory}/{socket}".split("/")), 0)
+    for directory in _RUNTIME_DIRECTORIES
+    for socket in _RUNTIME_SOCKETS
+) + tuple(
+    (tuple(f"{home}/{socket}".split("/")), home.count("/") + 2)
+    for home in _HOME_DIRECTORIES
+    for socket in _HOME_SOCKETS
+)
+_PIPE_NAMESPACE = re.compile(r"[\\/]{2}[.?][\\/]pipe[\\/]*", re.IGNORECASE)
+_GLOB = re.compile(r"[*?\[]")
+_VOLUME_SYNTAX = re.compile(r":|\$\{")
+# A ${NAME...} whose default, assigned or alternate operand, or replacement text, the
+# client or shell may substitute.
+_OPERAND = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?::?[-=+]|/[/#%]?[^/]*/)(.*)", re.DOTALL)
+_VARIABLE_NAME = re.compile(r"(?:env:)?([A-Za-z_][A-Za-z0-9_]*)")
+_HOME_VARIABLES = frozenset({"home", "userhome"})
 
 
-def _host_source(spec: str, *, mount: bool) -> str | None:
-    if mount:
-        # docker reads --mount as one CSV record and lower-cases each key and the type.
-        try:
-            parts = next(csv.reader([spec]), [])
-        except csv.Error:
-            parts = spec.split(",")
-        fields = {key.lower(): value for key, _, value in (part.partition("=") for part in parts)}
-        if fields.get("type", "volume").lower() != "bind":
-            return None
-        return fields.get("source") or fields.get("src") or None
-    if ":" not in spec:
-        return None
-    source = spec.split(":", 1)[0]
-    if re.match(r"[A-Za-z]:[\\/]", spec):
-        if ":" not in spec[2:]:
-            return None
-        source = spec[:2] + spec[2:].split(":", 1)[0]
+def _path_source(source: str) -> str | None:
     return (
         source
         if source in {".", ".."}
@@ -2622,6 +2657,196 @@ def _host_source(spec: str, *, mount: bool) -> str | None:
         or re.match(r"[A-Za-z]:", source)
         else None
     )
+
+
+def _volume_separator(spec: str) -> int:
+    """The colon that ends a -v source: the first one outside a ${...} the client expands."""
+    position = 0
+    while (match := _VOLUME_SYNTAX.search(spec, position)) is not None:
+        if match.group() == ":":
+            return match.start()
+        end = _expansion_end(spec, match.start())
+        if end < 0:
+            return spec.find(":", match.end())
+        position = end + 1
+    return -1
+
+
+def _host_source(spec: str, *, mount: bool) -> str | None:
+    if mount:
+        # docker reads --mount as one CSV record and lower-cases each key and the type;
+        # source and src are one key, and a repeated key takes its last value.
+        try:
+            parts = next(csv.reader([spec]), [])
+        except csv.Error:
+            parts = spec.split(",")
+        kind, source, device = "volume", "", ""
+        for part in parts:
+            key, _, value = part.partition("=")
+            key = key.lower()
+            if key == "type":
+                kind = value.lower()
+            elif key in {"source", "src"}:
+                source = value
+            elif key == "volume-opt":
+                name, _, setting = value.partition("=")
+                if name.lower() == "device":
+                    device = setting
+        # podman bind-mounts each match of a glob; the local volume driver mounts its device.
+        if kind in {"bind", "glob", "npipe"}:
+            return source or None
+        return _path_source(device) if kind == "volume" and device else None
+    if re.match(r"[A-Za-z]:[\\/]", spec):
+        if ":" not in spec[2:]:
+            return None
+        return _path_source(spec[:2] + spec[2:].split(":", 1)[0])
+    separator = _volume_separator(spec)
+    return None if separator < 0 else _path_source(spec[:separator])
+
+
+def _defaulted(text: str, depth: int = 0) -> str | None:
+    """``text`` with each ${...} that has an operand replaced by it; None past the depth."""
+    if depth > MAX_EXPANSION_DEPTH:
+        return None
+    pieces: list[str] = []
+    position = 0
+    while (start := text.find("${", position)) >= 0:
+        end = _expansion_end(text, start)
+        if end < 0:
+            break
+        found = _OPERAND.fullmatch(text, start + 2, end)
+        if found is None:
+            pieces.append(text[position : end + 1])
+        else:
+            operand = _defaulted(found.group(1), depth + 1)
+            if operand is None:
+                return None
+            pieces.append(text[position:start] + operand)
+        position = end + 1
+    return "".join(pieces) + text[position:]
+
+
+def _known_base(source: str) -> str:
+    """``source`` with a leading home or runtime directory variable read as that directory."""
+    if source.startswith("${"):
+        end = _expansion_end(source, 0)
+        name = _VARIABLE_NAME.match(source, 2, end) if end > 0 else None
+        rest = source[end + 1 :]
+    else:
+        name = _VARIABLE_NAME.match(source, 1) if source.startswith("$") else None
+        rest = source[name.end() :] if name else ""
+    if name is None:
+        return source
+    variable = name.group(1).casefold()
+    if variable in _HOME_VARIABLES:
+        return "~" + rest
+    return "/run/user/0" + rest if variable == "xdg_runtime_dir" else source
+
+
+def _matches(part: str, expected: str) -> bool:
+    if expected == "*":
+        return True
+    return fnmatch.fnmatchcase(expected, part) if _GLOB.search(part) else part == expected
+
+
+def _on_socket_path(parts: list[str], paths: tuple[tuple[tuple[str, ...], int], ...]) -> bool:
+    return any(
+        fewest <= len(parts) <= len(path)
+        and all(_matches(part, expected) for part, expected in zip(parts, path, strict=False))
+        for path, fewest in paths
+    )
+
+
+def _proc_link(parts: list[str]) -> str | None:
+    """What a /proc or /dev/fd link that ``parts`` ends on leads to, for the daemon."""
+    if 3 <= len(parts) <= 6 and parts[0] == "proc":
+        tail = parts[4:] if parts[2] == "task" else parts[2:]
+        if len(tail) == 1 and tail[0] in {"root", "cwd"}:
+            return "root"
+        if len(tail) == 2 and tail[0] in {"fd", "map_files"}:
+            return "unknown"
+    if len(parts) == 3 and parts[:2] == ["dev", "fd"]:
+        return "unknown"
+    return "unknown" if parts in (["dev", "stdin"], ["dev", "stdout"], ["dev", "stderr"]) else None
+
+
+def _resolved(source: str) -> tuple[str, list[str]] | None:
+    """The base and the components a POSIX host source names, read as the engine reads them.
+
+    The base is ``root``, ``home``, ``relative`` (the launch directory) or ``unknown``: a
+    path that climbs above a home or relative base, or goes through an open file, may
+    reach any directory, so what follows is read from the root. The engine daemon
+    follows /proc/<pid>/root to that process's root and, as daemons run from /,
+    /proc/<pid>/cwd too. None for a Windows path.
+    """
+    if re.match(r"[A-Za-z]:|%|\\", source):
+        return None
+    head = re.split(r"[\\/]", source, maxsplit=1)[0]
+    if source.startswith("/") or head in {".", ".."}:
+        base, rest = ("root" if head == "" else "relative"), source
+    elif head.startswith("~"):
+        base, rest = "home", source[len(head) :]
+    else:
+        return None
+    parts: list[str] = []
+    for part in re.split(r"[\\/]", rest):
+        if part == "..":
+            if parts:
+                parts.pop()
+            elif base != "root":
+                base = "unknown"
+        elif part not in {"", "."}:
+            parts.append(part.casefold())
+            link = _proc_link(parts) if base in {"root", "unknown"} else None
+            if link is not None:
+                base, parts = link, []
+    return base, parts
+
+
+def _engine_socket(source: str, resolved: tuple[str, list[str]] | None) -> bool:
+    """Whether a host source is an engine socket or a directory that holds one or is above it."""
+    if _PIPE_NAMESPACE.fullmatch(source):
+        return True
+    if resolved is None or resolved[0] == "relative":
+        return False
+    base, parts = resolved
+    if base == "home":
+        return _on_socket_path(parts, _HOME_SOCKET_PATHS)
+    return (base == "root" or bool(parts)) and _on_socket_path(parts, _SOCKET_PATHS)
+
+
+def _mount_flags(source: str) -> set[str]:
+    normalized = source.rstrip("/\\") or ("/" if source.startswith("/") else "\\")
+    resolved = _resolved(source)
+    canonical = (
+        "/" + "/".join(resolved[1])
+        if resolved is not None and resolved[0] == "root"
+        else normalized
+    )
+    flags: set[str] = set()
+    if canonical in {"/", "\\"} or re.fullmatch(r"[A-Za-z]:[\\/]?", canonical):
+        flags.add("host_root_mount")
+    if canonical.lower().endswith(_SOCKETS) or _engine_socket(source, resolved):
+        flags.add("runtime_socket_mount")
+    if not flags and (
+        _BROAD.fullmatch(canonical)
+        or canonical == ".."
+        or canonical.startswith(("../", "..\\"))
+        or posixpath.normpath(normalized.replace("\\", "/")).startswith("..")
+    ):
+        flags.add("broad_host_mount")
+    return flags
+
+
+def _mount_readings(source: str) -> list[str] | None:
+    """The source as written, with defaults taken, and with a known variable read."""
+    if "$" not in source:
+        return [source]
+    defaulted = _defaulted(source)
+    if defaulted is None:
+        return None
+    readings = (source, defaulted, _known_base(source), _known_base(defaulted))
+    return list(dict.fromkeys(readings))
 
 
 def _container_context(options: list[tuple[str, str | None]], launch: Launch) -> None:
@@ -2635,8 +2860,15 @@ def _container_context(options: list[tuple[str, str | None]], launch: Launch) ->
         if option == "--privileged" and text in {"", "true", "1"}:
             launch.mark("privileged")
         elif option in {"--network", "--net", "--pid", "--ipc", "--uts", "--userns", "--cgroupns"}:
-            if text == "host":
+            # podman's ns:<path> joins the namespace at a path, which may be the host's.
+            if text == "host" or text.startswith("ns:"):
                 launch.mark("host_namespaces")
+            elif text.startswith("container:"):
+                launch.mark("container_namespaces")
+        elif option == "--pod" and not text.startswith("new:"):
+            launch.mark("container_namespaces")
+        elif option == "--volumes-from":
+            launch.mark("inherited_mounts")
         elif option == "--cap-add":
             launch.mark("added_capabilities")
             if text.removeprefix("cap_") in _DANGEROUS_CAPABILITIES:
@@ -2652,24 +2884,12 @@ def _container_context(options: list[tuple[str, str | None]], launch: Launch) ->
             if source is None:
                 continue
             launch.mark("host_mounts")
-            normalized = source.rstrip("/\\") or ("/" if source.startswith("/") else "\\")
-            # normpath keeps a leading "//", which Linux and Go's filepath.Clean read as "/".
-            canonical = (
-                posixpath.normpath("/" + normalized.lstrip("/"))
-                if normalized.startswith("/") and "\\" not in normalized
-                else normalized
-            )
-            if canonical in {"/", "\\"} or re.fullmatch(r"[A-Za-z]:[\\/]?", canonical):
-                launch.mark("host_root_mount")
-            elif canonical.lower().endswith(_SOCKETS):
-                launch.mark("runtime_socket_mount")
-            elif (
-                _BROAD.fullmatch(canonical)
-                or canonical == ".."
-                or canonical.startswith(("../", "..\\"))
-                or posixpath.normpath(normalized.replace("\\", "/")).startswith("..")
-            ):
-                launch.mark("broad_host_mount")
+            readings = _mount_readings(source)
+            if readings is None:
+                launch.fail("container mount source is not readable")
+                continue
+            for flag in sorted(set().union(*map(_mount_flags, readings))):
+                launch.mark(flag)
         elif option == "--entrypoint":
             launch.mark("entrypoint_override")
 

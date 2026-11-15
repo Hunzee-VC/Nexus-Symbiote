@@ -130,6 +130,29 @@ A way around a limit that its entry does not describe is worth a
   by digest. The collector records both in `launch_context`; explicit `false` or
   `0` disables the flag, and the last occurrence wins. This describes the declared
   launch, without contacting the engine or checking its permissions.
+- **Container mount sources are read from the declared text.** A `-v`, `--volume`
+  or `--mount` source is a high runtime socket mount when it is an engine socket,
+  the directory that holds one or a directory above it: `/run`, `/var/run` and
+  `/run/user/<uid>` with the `docker`, `containerd`, `podman`, `crio` and `k3s`
+  directories below them, a desktop engine's directory below a home directory
+  (`.docker/run`, `.docker/desktop`, `.colima`, `.lima`, `.rd`, `.orbstack` and
+  Podman's machine directory), the Windows pipe namespace, and the host root. A
+  `--mount` source is the last `source` or `src` given, of a `bind`, podman `glob`
+  or `npipe` mount, or a local volume's `volume-opt=device`. Dot segments, repeated
+  and trailing separators, letter case, `/proc/<pid>/root` and `/proc/<pid>/cwd`, a
+  `${NAME:-value}` default or alternate value, and `HOME`, `userHome` and
+  `XDG_RUNTIME_DIR` are read; a path that climbs above the launch or home directory,
+  or goes through an open file descriptor, is read from the root. Not read: where a
+  symbolic link in the project points, so `./data` linked to `/run` is only a host
+  mount; the value of any other variable, or of one without a default, which is not
+  read as empty; what a named volume or a `--volumes-from` container mounts; and the
+  depth of the launch directory, so a source that only climbs, such as `../../..`, is
+  a broad mount whatever its depth. A home directory itself stays a medium broad
+  mount although desktop engines keep their socket below it, Windows paths other than
+  the pipe namespace and drive roots are not read for a socket, and another host
+  control socket, such as `/run/dbus/system_bus_socket`, is only a host mount;
+  `/run` and each directory directly below it are at least broad mounts.
+  `--volumes-from` and joining another container's namespaces are medium.
 - **What a local program or project script runs is not read.** `./start.sh`,
   `make serve`, `npm run mcp`, `uv run server.py` or a program that installs
   packages can start an unpinned package the inventory does not show. Review what
