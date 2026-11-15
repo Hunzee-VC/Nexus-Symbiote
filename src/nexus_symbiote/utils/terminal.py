@@ -21,15 +21,21 @@ from nexus_symbiote.utils.files import OutputRefusedError, write_output_file
 # Line breaks are included: a file name or component name containing one could
 # forge whole output lines, and in CI a line starting with "::" is a workflow command.
 # Such text must not start a line either; safe_line() gives every line a fixed prefix.
-# The noncharacters U+FFFE and U+FFFF are included: unassigned for ever, some
-# terminals drop them. A tab (U+0009) is not: it becomes one space (neutralize), so a
-# name stays readable but cannot line text up under a later column.
+# Every noncharacter is included, U+FDD0 to U+FDEF and the last two code points of each
+# plane: unassigned for ever, some terminals drop them. Private-use characters are not:
+# a font draws them as some visible glyph, and they cannot move the cursor or hide text.
+# A tab (U+0009) is not either: it becomes one space (neutralize), so a name stays
+# readable but cannot line text up under a later column.
 UNSAFE_TEXT = re.compile(
     r"[\x00-\x08\x0a-\x1f\x7f-\x9f\xad\u034f\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891"
     r"\u08e2\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u2028\u2029\u202a-\u202e"
-    r"\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufff8\ufff9-\ufffb\ufffe\uffff"
-    r"\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a"
-    r"\U000e0000-\U000e0fff]"
+    r"\u2060-\u206f\u3164\ufdd0-\ufdef\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufff8\ufff9-\ufffb"
+    r"\ufffe\uffff\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3"
+    r"\U0001d173-\U0001d17a\U000e0000-\U000e0fff"
+    r"\U0001fffe\U0001ffff\U0002fffe\U0002ffff\U0003fffe\U0003ffff\U0004fffe\U0004ffff"
+    r"\U0005fffe\U0005ffff\U0006fffe\U0006ffff\U0007fffe\U0007ffff\U0008fffe\U0008ffff"
+    r"\U0009fffe\U0009ffff\U000afffe\U000affff\U000bfffe\U000bffff\U000cfffe\U000cffff"
+    r"\U000dfffe\U000dffff\U000efffe\U000effff\U000ffffe\U000fffff\U0010fffe\U0010ffff]"
 )
 
 OUTPUT_REFUSED = (
