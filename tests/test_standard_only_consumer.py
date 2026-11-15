@@ -459,7 +459,7 @@ def scans(tmp_path_factory) -> dict[str, dict[str, dict[str, Any]]]:
         "subset": (full, ["--scanner", "mcp"]),
         "failed": (gap, []),
         "init-policy": (initialized, []),
-        "models-excluded": (narrowed, []),
+        "models-excluded": (narrowed, ["--accept-project-policy"]),
         "every-scanner": (full, every_scanner),
     }
     documents: dict[str, dict[str, dict[str, Any]]] = {}

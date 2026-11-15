@@ -357,8 +357,10 @@ def _recorded_requirement(requirement: Requirement) -> str:
 _LONGEST_VERSION = 128
 # The public index and its file host; any other origin qualifies a pkg:pypi package URL.
 _PYPI_ORIGINS = frozenset({"https://pypi.org", "https://files.pythonhosted.org"})
-# All root requirements*.txt files together, in characters.
+# All root requirements*.txt files together, in characters and in logical lines: within
+# the characters, parsing time grows with the lines.
 _REQUIREMENTS_BUDGET = 4 * 1024 * 1024
+_REQUIREMENTS_LINES = 100_000
 # shlex builds a token one character at a time, so its cost grows with the square
 # of a quoted word's length; option text this long is not read.
 _LONGEST_OPTIONS = 16 * 1024
@@ -662,6 +664,7 @@ _DEFAULT_NPM_REGISTRY = re.compile(
     r"https://registry\.(?:npmjs\.org|yarnpkg\.com)(?::443)?/?", re.ASCII | re.IGNORECASE
 )
 _DEFAULT_PYPI_INDEX = re.compile(r"(?i:https://pypi\.org)(?::443)?/simple/?", re.ASCII)
+_PYPI_ORIGIN = "https://pypi.org"
 # The pip options and configuration keys that replace or add where packages come from;
 # pip reads --pypi-url as --index-url. Index options on a requirement line are ignored.
 # pip looks a configuration key up as the long option --<key>, so the long name of each
@@ -1266,9 +1269,17 @@ class RegistryScanner(Scanner):
         elif not registry:
             risks.append(self._npm_source_risk(name, kind, spec))
         package_url = None
-        if resolution is not None and resolution.consistent:
+        # A name the redaction changed is exported as the marker; no package URL may
+        # spell it out.
+        if name == package and resolution is not None and resolution.consistent:
             package_url = self._npm_purl(package, resolution.version, resolution.origin)
-        elif registry and record is None and not in_doubt and _npm_exact(version_range):
+        elif (
+            name == package
+            and registry
+            and record is None
+            and not in_doubt
+            and _npm_exact(version_range)
+        ):
             # Only without a lock record: one that was not taken, a lockfile that was
             # not read and an override each leave the version the spec names in doubt.
             package_url = self._npm_purl(package, version_range, None)
@@ -1301,6 +1312,33 @@ class RegistryScanner(Scanner):
     @classmethod
     def _default_registry(cls, origin: str) -> bool:
         return origin.removeprefix("https://") in cls._NPM_DEFAULT_REGISTRIES
+
+    @classmethod
+    def _npm_record_risks(
+        cls, name: str, digest_recorded: bool, origin: str | None
+    ) -> list[RiskAssessment]:
+        """What a lockfile record leaves open, whichever package manager wrote it."""
+        risks: list[RiskAssessment] = []
+        if not digest_recorded:
+            risks.append(
+                _risk(
+                    RiskSeverity.MEDIUM,
+                    "missing_lockfile_integrity",
+                    f"npm package '{name}' has a lockfile record without an integrity value.",
+                    "Regenerate the lockfile so that it records a sha512 integrity value.",
+                )
+            )
+        if origin is not None and not cls._default_registry(origin):
+            risks.append(
+                _risk(
+                    RiskSeverity.LOW,
+                    "registry_origin",
+                    f"npm package '{name}' is resolved from {origin}, not the default npm "
+                    "registry.",
+                    "Confirm that this registry is intended and trusted for this package.",
+                )
+            )
+        return risks
 
     @staticmethod
     def _npm_source_risk(name: str, kind: str, spec: str) -> RiskAssessment:
@@ -1385,25 +1423,7 @@ class RegistryScanner(Scanner):
                     "Regenerate the lockfile from the registry and review the change.",
                 )
             )
-        if integrity is None:
-            risks.append(
-                _risk(
-                    RiskSeverity.MEDIUM,
-                    "missing_lockfile_integrity",
-                    f"npm package '{name}' has a lockfile record without an integrity value.",
-                    "Regenerate the lockfile so that it records a sha512 integrity value.",
-                )
-            )
-        if origin is not None and not self._default_registry(origin):
-            risks.append(
-                _risk(
-                    RiskSeverity.LOW,
-                    "registry_origin",
-                    f"npm package '{name}' is resolved from {origin}, not the default npm "
-                    "registry.",
-                    "Confirm that this registry is intended and trusted for this package.",
-                )
-            )
+        risks.extend(self._npm_record_risks(name, integrity is not None, origin))
         return _Resolution(
             version=version,
             origin=origin,
@@ -1490,11 +1510,15 @@ class RegistryScanner(Scanner):
         locator: str,
         lock_digest: str,
         result: ScanResult,
+        *,
+        checksum_recorded: bool = False,
     ) -> None:
         """Bind a pnpm or Yarn record's exact version to a component, checked as an npm
         record is: an exact spec must agree with it, a download URL is read as a
-        WHATWG parser reads it, and an integrity value must be strong. Nothing is
-        bound, and a failure says why, when a check fails."""
+        WHATWG parser reads it, an integrity value must be strong, and a record
+        without one or from another registry carries the finding an npm record does.
+        ``checksum_recorded`` says the record holds Yarn's own checksum instead.
+        Nothing is bound, and a failure says why, when a check fails."""
         requested = str(component.properties.get("requested_version", "")).strip()
         if _npm_exact(requested) and requested != version:
             result.scan_failures.append(
@@ -1525,6 +1549,11 @@ class RegistryScanner(Scanner):
                     "Regenerate the lockfile from the registry and review the change.",
                 )
             )
+        component.risks.extend(
+            self._npm_record_risks(
+                component.name, integrity is not None or checksum_recorded, origin
+            )
+        )
         component.version = version
         component.package_url = (
             self._npm_purl(component.name, version, origin) if consistent else None
@@ -1911,6 +1940,7 @@ class RegistryScanner(Scanner):
                 locator,
                 lock_digest,
                 result,
+                checksum_recorded=bool(fields.get("checksum")),
             )
         return True
 
@@ -2729,21 +2759,48 @@ class RegistryScanner(Scanner):
                     + ", ".join(dict.fromkeys(disagree))
                 )
                 continue
-            registry_origin: str | None = "https://pypi.org"
+            registry_origin = _PYPI_ORIGIN
             if isinstance(source, dict):
+                # A source that is not an HTTP(S) index, such as a directory of wheels,
+                # is not PyPI: assuming so would export the public package's identity.
                 raw_url = source.get("registry") if method == "uv-lockfile" else source.get("url")
-                if isinstance(raw_url, str) and raw_url.startswith(("https://", "http://")):
-                    origin = sanitized_origin(raw_url)
-                    registry_origin = origin if origin != "[redacted]" else None
+                origin = (
+                    sanitized_origin(raw_url)
+                    if isinstance(raw_url, str) and raw_url.startswith(("https://", "http://"))
+                    else "[redacted]"
+                )
+                if origin == "[redacted]":
+                    result.surfaces_excluded.append(
+                        f"{lock_name}: non-registry package source is unverified"
+                    )
+                    continue
+                https = origin.startswith("https://")
+                registry_origin = origin.removesuffix(":443") if https else origin
             locator = f"{lock_name}#/package/{index}"
             comp.version = resolved_version
             comp.package_url = (
                 f"pkg:pypi/{quote(comp.name, safe='')}@{quote(resolved_version, safe='')}"
             )
-            if registry_origin is not None and registry_origin not in _PYPI_ORIGINS:
-                # As for npm: the package URL names the index it was resolved from, so it
-                # is not mistaken for the public package of the same name.
+            if registry_origin not in _PYPI_ORIGINS:
+                # As for npm: the package URL names the index it was resolved from.
                 comp.package_url += f"?repository_url={registry_origin}"
+                cleartext = registry_origin.startswith("http://")
+                comp.risks.append(
+                    _risk(
+                        RiskSeverity.HIGH if cleartext else RiskSeverity.LOW,
+                        "registry_origin",
+                        f"PyPI package '{comp.name}' is resolved from {registry_origin}, "
+                        + (
+                            "over cleartext HTTP, where a download can be replaced in transit."
+                            if cleartext
+                            else "not the default Python package index."
+                        ),
+                        "Use an HTTPS index and confirm that it is intended and trusted for "
+                        "this package."
+                        if cleartext
+                        else "Confirm that this index is intended and trusted for this package.",
+                    )
+                )
             comp.registry_uri = registry_origin
             comp.source_path = lock_name
             comp.assurance_level = AssuranceLevel.DECLARED
@@ -2776,6 +2833,7 @@ class RegistryScanner(Scanner):
         noted: set[str] = set()
         unprintable = False
         remaining = _REQUIREMENTS_BUDGET
+        remaining_lines = _REQUIREMENTS_LINES
         for filename in filenames:
             if (
                 UNSAFE_TEXT.search(filename)
@@ -2809,7 +2867,14 @@ class RegistryScanner(Scanner):
                     f"{filename}: declared encoding other than UTF-8: not read"
                 )
                 continue
-            for line in self._requirement_lines(content):
+            lines = self._requirement_lines(content)
+            remaining_lines -= len(lines)
+            if remaining_lines < 0:
+                result.scan_failures.append(
+                    "requirements files exceed the combined line limit: the rest were not read"
+                )
+                break
+            for line in lines:
                 text = self._COMMENT.sub("", line).strip()
                 if not text:
                     continue

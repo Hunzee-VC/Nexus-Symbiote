@@ -29,6 +29,7 @@ from nexus_symbiote.core.models import (
 )
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.utils.terminal import UNSAFE_TEXT
 
 MAX_REPORT_BYTES = 16 * 1024 * 1024
 MAX_FINDINGS = 10_000
@@ -185,13 +186,16 @@ def _unrecognized(
 def _clean_binding(value: Any) -> str | None:
     """One binding value from a report, or ``None`` when it is absent or unsafe.
 
-    A binding is a non-empty string of at most 4,096 characters without C0 control
-    characters or DEL. Anything else is not a repository or commit the report can be
-    bound to.
+    A binding is a non-empty string of at most 4,096 characters without a control
+    character (C0, DEL or C1) or a format character that disguises text, such as a
+    bidirectional override or a zero-width space. Anything else is not a repository or
+    commit the report can be bound to.
     """
     if not isinstance(value, str) or not value or len(value) > 4096:
         return None
     if any(ord(char) < 0x20 or ord(char) == 0x7F for char in value):
+        return None
+    if UNSAFE_TEXT.search(value):
         return None
     return value
 
@@ -366,10 +370,22 @@ class ShadowScanImporter(Scanner):
             max_total_bytes=MAX_REPORT_BYTES,
         ) as files:
             present: dict[tuple[int, int], str] = {}
+            linked: list[str] = []
             for relative in REPORT_PATHS:
                 identity = files.path_identity(relative)
                 if identity is not None:
                     present.setdefault(identity, relative)
+                elif files.regular_file(relative) is not None:
+                    # path_identity follows no link, but a read follows one in-root
+                    # directory link, so a report that only a link reaches would be
+                    # imported without counting against the paths below. A link is
+                    # what the checkout chose, not where a pipeline wrote its report.
+                    linked.append(relative)
+            for relative in linked:
+                result.scan_failures.append(
+                    f"{relative}: ShadowScan report is reached through a symbolic link; "
+                    "not imported"
+                )
             if len(present) > 1:
                 # A file committed at a higher-precedence name must not silently replace
                 # the report a pipeline generated: import neither.
@@ -378,7 +394,7 @@ class ShadowScanImporter(Scanner):
                     + ", ".join(sorted(present.values()))
                     + "); keep exactly one"
                 )
-            for relative in REPORT_PATHS if len(present) <= 1 else ():
+            for relative in REPORT_PATHS if len(present) <= 1 and not linked else ():
                 raw = files.read_bytes(relative, missing_ok=True)
                 if raw is None:
                     continue

@@ -1133,3 +1133,25 @@ def test_a2a_1_0_card_matches_its_published_structure_vector(tmp_path):
     assert card.properties["security_scheme_origins"] == ["//t.example"]
     assert card.properties["security_scheme_types"] == ["apiKey", "oauth2"]
     assert card.capabilities is not None and card.capabilities.oauth_scopes == ["s", "t"]
+
+
+def test_a_card_nested_beyond_the_depth_bound_names_the_bound(tmp_path):
+    nested: Any = {"tokenUrl": "https://t.example/token"}
+    for _ in range(10):
+        nested = {"flows": nested}
+    assert _failures(tmp_path, {**CARD, "additionalInterfaces": [nested]}) == [
+        ".well-known/agent.json: A2A card nests too deeply"
+    ]
+
+
+@pytest.mark.parametrize(
+    "card",
+    [
+        {**CARD, "additionalInterfaces": [{"url": "https://a.example"}] * 1001},
+        {**CARD, "additionalInterfaces": {f"u{i}": {} for i in range(1001)}},
+        {**CARD, **{f"x-{i}": "" for i in range(1001)}},
+    ],
+    ids=["list", "mapping", "card-fields"],
+)
+def test_a_card_with_too_many_entries_names_the_bound(tmp_path, card):
+    assert _failures(tmp_path, card) == [".well-known/agent.json: A2A card has too many entries"]

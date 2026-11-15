@@ -265,3 +265,49 @@ def test_the_generated_template_loads_to_the_built_in_policy(tmp_path):
     (tmp_path / ".nexus-symbiote.yaml").write_text(DEFAULT_POLICY_YAML)
     policy = load_policy(tmp_path)
     assert policy == Policy() and weakened_settings(policy) == []
+
+
+def _scan_and_validate(tmp_path: Path) -> list[str]:
+    """The outputs of scan and validate --project on tmp_path; both fail on a bad policy."""
+    from click.testing import CliRunner
+
+    from nexus_symbiote.cli import main
+    from nexus_symbiote.core.aibom import AIBOM
+
+    project = tmp_path
+    inventory = tmp_path.parent / "inventory.json"
+    AIBOM().save(inventory)
+    runner = CliRunner()
+    outputs = []
+    for args in (
+        ["scan", str(project), "-o", str(tmp_path.parent / "scanned.json")],
+        ["validate", str(inventory), "--project", str(project)],
+    ):
+        result = runner.invoke(main, args)
+        assert result.exit_code == 1, result.output
+        outputs.append(result.output)
+    assert not (tmp_path.parent / "scanned.json").exists()
+    return outputs
+
+
+def test_a_symlinked_policy_file_is_refused_by_scan_and_validate(tmp_path):
+    elsewhere = tmp_path.parent / "elsewhere.yaml"
+    elsewhere.write_text("risk: {fail_on_severity: none}\n")
+    (tmp_path / ".nexus-symbiote.yaml").symlink_to(elsewhere)
+    with pytest.raises(PolicyError, match="policy must not be a symlink"):
+        load_policy(tmp_path)
+    for output in _scan_and_validate(tmp_path):
+        assert "policy must not be a symlink" in output
+
+
+def test_a_policy_file_over_one_mebibyte_is_refused_by_scan_and_validate(tmp_path):
+    policy = tmp_path / ".nexus-symbiote.yaml"
+    policy.write_bytes(b"#" * (1024 * 1024 + 1))
+    with pytest.raises(PolicyError, match="regular file no larger than 1 MiB"):
+        load_policy(tmp_path)
+    for output in _scan_and_validate(tmp_path):
+        assert "no larger than 1 MiB" in output
+    # One byte less is read: a file of comments is then refused for what it says.
+    policy.write_bytes(b"#" * (1024 * 1024))
+    with pytest.raises(PolicyError, match="YAML mapping"):
+        load_policy(tmp_path)

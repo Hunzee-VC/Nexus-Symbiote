@@ -170,13 +170,13 @@ rates each change with the same words.
 
 ### Risk level
 
-The label `risk` prints beside the aggregate score, as in `Risk Score: 37.0 (high)`.
+The label `risk` prints beside the aggregate score, as in `Risk Score: 41.0 (high)`.
 It reuses severity words with another meaning: `critical` for a critical finding or
 a score at or above the fail threshold, `high` for a score at or above the warning
 threshold (25 by default), `moderate` for any other score above 0, `clean` for 0,
 and `unknown` when there are no findings and coverage is not reported, or when
 `--project` reconciliation failed. A `high` risk level can therefore come with a
-passing gate, as on the demo agent, whose score of 37 is below the default fail
+passing gate, as on the demo agent, whose score of 41 is below the default fail
 threshold of 50.
 
 ### Gate

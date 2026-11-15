@@ -232,13 +232,23 @@ def test_click_errors_worded_by_code_or_input_stay_one_neutralized_line(error):
 
 def test_every_format_control_and_line_break_character_is_neutralized():
     # Every such character in this Python's Unicode database, not a sample: a later
-    # Unicode version that adds one makes this fail until UNSAFE_TEXT covers it.
+    # Unicode version that adds one makes this fail until UNSAFE_TEXT covers it. A tab
+    # becomes one space, which keeps a file name readable; every other one is replaced.
     characters = "".join(
         chr(code)
         for code in range(0x110000)
-        if unicodedata.category(chr(code)) in {"Cf", "Cc", "Zl", "Zp"} and chr(code) != "\t"
+        if unicodedata.category(chr(code)) in {"Cf", "Cc", "Zl", "Zp"}
     )
-    assert neutralize(characters) == "\ufffd" * len(characters)
+    assert "\t" in characters
+    assert neutralize(characters) == "".join(
+        " " if character == "\t" else "\ufffd" for character in characters
+    )
+
+
+def test_a_tab_cannot_line_text_up_under_a_column_and_noncharacters_are_replaced():
+    assert neutralize("ok\t\t\tGate: PASSED") == "ok   Gate: PASSED"
+    assert "\t" not in safe_line("  - ", "a\tb")
+    assert neutralize("a\ufffeb\uffffc") == "a\ufffdb\ufffdc"
 
 
 @pytest.mark.parametrize(

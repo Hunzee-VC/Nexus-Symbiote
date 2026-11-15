@@ -400,6 +400,27 @@ def test_bearer_token_passed_only_to_transport_and_redacted_from_echoed_metadata
     assert token not in json.dumps(asdict(result))
 
 
+def test_extension_field_names_do_not_expose_bearer_or_session_in_evidence():
+    token = "sensitive-bearer-token-12345"  # noqa: S105 - synthetic fixture
+    session = "opaque-sensitive-session-67890"  # noqa: S105 - synthetic fixture
+    raw_tool = {**tool(), f"ext-{token}": "value", f"ext-{session}": "value"}
+    raw_sink: dict[str, Any] = {}
+    result, _ = scan(
+        [
+            initialization(session=session),
+            notification_accepted(),
+            rpc_result(2, {"tools": [raw_tool]}),
+        ],
+        bearer_token=token,
+        raw_sink=raw_sink,
+    )
+    assert result.complete, result.failures
+    assert token not in serialized(result) and session not in serialized(result)
+    assert token not in json.dumps(asdict(result)) and session not in json.dumps(asdict(result))
+    assert token not in json.dumps(raw_sink) and session not in json.dumps(raw_sink)
+    assert all("***" in name for name in result.tools[0].unprofiled_fields)
+
+
 def test_server_error_payload_is_not_copied_into_failure_report():
     token = "sensitive-bearer-token-12345"  # noqa: S105 - synthetic redaction fixture
     error = HTTPReply(
@@ -445,3 +466,331 @@ def test_sse_response_extracts_matching_jsonrpc_result_without_executing_request
     assert result.complete
     assert len(result.tools) == 1
     assert len(transport.calls) == 3
+
+
+# A hostile or broken reply stops discovery at a fixed diagnostic. Each case checks the
+# text, that the observation is incomplete and that no request follows the refusal: the
+# queued sentinel reply is never consumed.
+SENTINEL = rpc_result(99, {"tools": [tool("never-requested")]})
+JSON_HEADERS = {"Content-Type": "application/json"}
+SSE_HEADERS = {"Content-Type": "text/event-stream"}
+NOT_ASCII = "endpoint must be an ASCII HTTPS URL without controls"
+NOT_PLAIN = "endpoint credentials, queries, fragments or non-HTTPS scheme refused"
+
+
+def raw_reply(
+    body: bytes, *, status: int = 200, headers: dict[str, str] | None = None
+) -> HTTPReply:
+    chosen = JSON_HEADERS if headers is None else headers
+    return HTTPReply(status=status, headers=dict(chosen), body=body)
+
+
+def hello_result(**extra: Any) -> dict[str, Any]:
+    return {
+        "protocolVersion": PROTOCOL,
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": "fixture-server", "version": "1.0.0"},
+        **extra,
+    }
+
+
+def refused(replies: list[HTTPReply], failure: str, *, requests: int, **kwargs: Any):
+    transport = FixtureTransport([*replies, SENTINEL])
+    result = discover_tools(ENDPOINT, allowed_origins=[ORIGIN], transport=transport, **kwargs)
+    assert result.failures == [failure]
+    assert not result.complete
+    assert result.completed_at
+    assert len(transport.calls) == requests
+    assert transport.replies == [SENTINEL]
+    return result, transport
+
+
+@pytest.mark.parametrize("status", [201, 202, 204, 400, 401, 403, 404, 429, 500, 503])
+def test_an_unsuccessful_http_status_stops_discovery_without_another_request(status):
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "result": hello_result()}).encode()
+    failure = "MCP request returned an unsuccessful HTTP status"
+    refused([raw_reply(body, status=status)], failure, requests=1)
+    refused(
+        [initialization(), notification_accepted(), raw_reply(b"{}", status=status)],
+        failure,
+        requests=3,
+    )
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Content-Type": "text/html"},
+        {"Content-Type": "application/json-seq"},
+        {"Content-Type": "application/octet-stream"},
+        {"Content-Type": "text/event-stream+json"},
+        {"Content-Type": ""},
+        {},
+    ],
+)
+def test_an_unsupported_media_type_is_refused_before_the_body_is_read(headers):
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "result": hello_result()}).encode()
+    refused([raw_reply(body, headers=headers)], "unsupported MCP response media type", requests=1)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"jsonrpc": "1.0", "id": 1, "result": {}},
+        {"jsonrpc": "2.0 ", "id": 1, "result": {}},
+        {"jsonrpc": 2.0, "id": 1, "result": {}},
+        {"id": 1, "result": {}},
+    ],
+)
+def test_a_reply_with_the_wrong_jsonrpc_version_is_refused(message):
+    refused([raw_reply(json.dumps(message).encode())], "invalid JSON-RPC version", requests=1)
+    stream = b"data: " + json.dumps(message).encode() + b"\n\n"
+    refused([raw_reply(stream, headers=SSE_HEADERS)], "invalid JSON-RPC version", requests=1)
+
+
+def test_a_stream_without_the_requested_response_or_with_two_is_refused():
+    response = json.dumps({"jsonrpc": "2.0", "id": 1, "result": hello_result()}).encode()
+    notification = b'data: {"jsonrpc":"2.0","method":"notifications/message","params":{}}\n\n'
+    twice = b"data: " + response + b"\n\ndata: " + response + b"\n\n"
+    for body in (notification, b"", twice):
+        refused(
+            [raw_reply(body, headers=SSE_HEADERS)],
+            "missing or duplicate JSON-RPC response",
+            requests=1,
+        )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'{"jsonrpc":"2.0","id":1,"result":{},"result":{}}',
+        b'{"jsonrpc":"2.0","id":1,"result":{"a":1,"a":2}}',
+        b'{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"x","name":"y"}}}',
+    ],
+)
+def test_a_reply_with_a_duplicate_json_key_is_refused_by_name(body):
+    refused([raw_reply(body)], "duplicate JSON key", requests=1)
+    refused(
+        [raw_reply(b"data: " + body + b"\n\n", headers=SSE_HEADERS)],
+        "duplicate JSON key",
+        requests=1,
+    )
+
+
+@pytest.mark.parametrize(
+    ("body", "failure"),
+    [
+        (b"not json", "invalid JSON response"),
+        (b"", "invalid JSON response"),
+        (b"\xff\xfe", "invalid JSON response"),
+        (b'{"jsonrpc":"2.0","id":1,"result":{}} trailing', "invalid JSON response"),
+        (b'{"jsonrpc":"2.0","id":1,"result":NaN}', "nonfinite JSON"),
+        (b'{"jsonrpc":"2.0","id":1,"result":[Infinity]}', "nonfinite JSON"),
+        (b"[]", "JSON response must be an object"),
+        (b'"text"', "JSON response must be an object"),
+        (b"1", "JSON response must be an object"),
+        (b"null", "JSON response must be an object"),
+    ],
+)
+def test_a_reply_that_is_not_a_json_object_is_refused(body, failure):
+    refused([raw_reply(body)], failure, requests=1)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b"data: \xff\n\n",
+        b"event: \xc3\n\n",
+        b'data: {"jsonrpc":"2.0","id":1,"result":{}}\n: \xed\xa0\x80\n\n',
+    ],
+)
+def test_a_stream_line_that_is_not_utf8_is_refused(body):
+    refused([raw_reply(body, headers=SSE_HEADERS)], "invalid SSE UTF-8", requests=1)
+
+
+def test_the_requested_response_in_a_stream_must_be_an_object_with_the_version():
+    body = b'data: {"jsonrpc":"2.0","id":1,"result":{}}\n\ndata: []\n\n'
+    refused([raw_reply(body, headers=SSE_HEADERS)], "JSON response must be an object", requests=1)
+
+
+def with_session(reply: HTTPReply, session: str) -> HTTPReply:
+    return HTTPReply(reply.status, {**reply.headers, "Mcp-Session-Id": session}, reply.body)
+
+
+@pytest.mark.parametrize(
+    ("replies", "requests"),
+    [
+        (
+            [
+                initialization(session="session-one"),
+                notification_accepted(),
+                with_session(rpc_result(2, {"tools": [tool()]}), "session-two"),
+            ],
+            3,
+        ),
+        (
+            [
+                initialization(session="session-one"),
+                with_session(notification_accepted(), "session-two"),
+            ],
+            2,
+        ),
+        (
+            [
+                initialization(),
+                notification_accepted(),
+                with_session(rpc_result(2, {"tools": []}), "session-late"),
+            ],
+            3,
+        ),
+        (
+            [
+                initialization(session="session-one"),
+                notification_accepted(),
+                rpc_result(2, {"tools": [tool()], "nextCursor": "next"}),
+                with_session(rpc_result(3, {"tools": []}), "session-two"),
+            ],
+            4,
+        ),
+    ],
+    ids=["tools-list", "notification", "late-session", "second-page"],
+)
+def test_a_session_id_that_changes_mid_discovery_stops_it(replies, requests):
+    result, _ = refused(replies, "MCP session changed during discovery", requests=requests)
+    text = serialized(result)
+    for session in ("session-one", "session-two", "session-late", "s2"):
+        assert session not in text
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        HTTPReply(status=200, headers={}, body=b""),
+        HTTPReply(status=204, headers={}, body=b""),
+        HTTPReply(status=202, headers={}, body=b"{}"),
+        HTTPReply(status=202, headers=JSON_HEADERS, body=b'{"jsonrpc":"2.0","id":2,"result":{}}'),
+        HTTPReply(status=400, headers={}, body=b""),
+    ],
+)
+def test_an_unacknowledged_initialized_notification_stops_before_listing(reply):
+    result, transport = refused(
+        [initialization(), reply], "initialized notification was not acknowledged", requests=2
+    )
+    assert [call["body"]["method"] for call in transport.calls] == [
+        "initialize",
+        "notifications/initialized",
+    ]
+    assert result.tools == []
+
+
+@pytest.mark.parametrize(
+    ("pages", "requests"),
+    [
+        ([{"tools": [tool("get_issue"), tool("get_issue")]}], 3),
+        ([{"tools": [tool("get_issue")], "nextCursor": "two"}, {"tools": [tool("get_issue")]}], 4),
+        (
+            [
+                {"tools": [tool("get_issue")], "nextCursor": "two"},
+                {"tools": [tool("list_issues")], "nextCursor": "three"},
+                {"tools": [tool("get_issue", description="renamed later")]},
+            ],
+            5,
+        ),
+    ],
+    ids=["same-page", "next-page", "third-page"],
+)
+def test_a_duplicate_tool_identity_across_pages_stops_discovery(pages, requests):
+    replies = [initialization(), notification_accepted()]
+    replies.extend(rpc_result(index + 2, page) for index, page in enumerate(pages))
+    failure = "duplicate tool identity across discovery pages"
+    result, _ = refused(replies, failure, requests=requests)
+    assert [item.name for item in result.tools].count("get_issue") <= 1
+    assert result.declaration_hash is None
+
+
+@pytest.mark.parametrize(
+    ("capabilities", "method", "key", "entries"),
+    [
+        (
+            {"tools": {}, "prompts": {}},
+            "prompts/list",
+            "prompts",
+            [{"name": "summarize"}, {"name": "summarize", "description": "second"}],
+        ),
+        (
+            {"tools": {}, "resources": {}},
+            "resources/templates/list",
+            "resourceTemplates",
+            [{"uriTemplate": "issue://{id}"}, {"uriTemplate": "issue://{id}", "name": "again"}],
+        ),
+    ],
+)
+def test_a_duplicate_list_entry_identity_stops_discovery(capabilities, method, key, entries):
+    replies = [
+        rpc_result(1, hello_result(capabilities=capabilities)),
+        notification_accepted(),
+        rpc_result(2, {"tools": [tool()]}),
+        rpc_result(3, {key: entries}),
+    ]
+    result, transport = refused(replies, "duplicate list entry identity", requests=4)
+    assert transport.calls[-1]["body"]["method"] == method
+    assert result.prompts is None and result.resource_templates is None
+    assert result.declaration_hash is None
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "allowed"),
+    [
+        ("https://fixture.example/mcp/sensitive-bearer-token-12345", [ORIGIN]),
+        (
+            "https://sensitive-bearer-token-12345.example/mcp",
+            ["https://sensitive-bearer-token-12345.example"],
+        ),
+    ],
+)
+def test_a_bearer_credential_in_the_endpoint_is_refused_before_any_request(endpoint, allowed):
+    token = "sensitive-bearer-token-12345"  # noqa: S105 - synthetic redaction fixture
+    transport = FixtureTransport([SENTINEL])
+    result = discover_tools(
+        endpoint, allowed_origins=allowed, transport=transport, bearer_token=token
+    )
+    assert result.failures == ["bearer credential in endpoint refused"]
+    assert not result.complete
+    assert transport.calls == [] and transport.replies == [SENTINEL]
+    assert result.endpoint == "[invalid-endpoint]"
+    assert token not in serialized(result)
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "failure"),
+    [
+        ("https://fixtüre.example/mcp", NOT_ASCII),
+        ("https://fixture.example/mcp\x7f", NOT_ASCII),
+        ("https://fixture.example/m cp", NOT_ASCII),
+        ("https://fixture.example/mcp\n", NOT_ASCII),
+        ("https://" + "a" * 4100 + ".example/mcp", NOT_ASCII),
+        ("https://fixture.example./mcp", "invalid endpoint authority"),
+        ("https://fixture.example:0/mcp", "invalid endpoint authority"),
+        ("https://fixture.example:70000/mcp", "invalid endpoint"),
+        ("https://fixture.example:abc/mcp", "invalid endpoint"),
+        ("https://fixture.example\\mcp", NOT_PLAIN),
+        ("https://fixture%2eexample/mcp", NOT_PLAIN),
+        ("https:///mcp", NOT_PLAIN),
+    ],
+)
+def test_endpoint_encoding_and_authority_checks_fail_before_any_request(endpoint, failure):
+    transport = FixtureTransport([SENTINEL])
+    result = discover_tools(endpoint, allowed_origins=[ORIGIN], transport=transport)
+    assert result.failures == [failure]
+    assert not result.complete
+    assert transport.calls == [] and transport.replies == [SENTINEL]
+    assert result.endpoint == "[invalid-endpoint]"
+
+
+def test_an_allowed_origin_that_fails_the_same_checks_is_refused():
+    transport = FixtureTransport([SENTINEL])
+    result = discover_tools(
+        ENDPOINT, allowed_origins=[ORIGIN, "https://other.example./"], transport=transport
+    )
+    assert result.failures == ["invalid endpoint authority"]
+    assert transport.calls == []

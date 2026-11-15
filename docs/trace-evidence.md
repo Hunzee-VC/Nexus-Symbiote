@@ -177,6 +177,12 @@ and the basis, `host` for the endpoint and `name-and-host` for its tools, says t
 port was compared. The same holds for a server whose `endpoint_url` states no port and
 whose scheme has no default port.
 
+An `endpoint_url` declares a host only when every URL parser reads its authority
+alike, as a host and an optional port from 1 to 65535. One with user information, a
+backslash or a percent escape, such as `https://approved.example\@other.example`, which
+Python reads as `other.example` and a browser or Node client as `approved.example`,
+declares no host, so a span to either host is `undeclared`.
+
 IP addresses and host names are compared as text; nothing is resolved, so a span that
 reports an address and an inventory that records a host name do not match. A remote MCP
 server's tools are declared only in an inventory that records them, such as one that
@@ -206,7 +212,7 @@ untrusted: escape it before you place it in HTML, Markdown or a shell command.
 
 | `--fail-on` | Exit 1 when |
 |---|---|
-| `undeclared` (default) | A tool, model, agent or MCP endpoint is `undeclared` or `unidentified`, a span cannot be classified (`spans_unclassified`), a span or resource has more than 128 attributes (`attribute_lists_over_bound`), or no span carries a GenAI or MCP attribute of its own, so that traces from a pipeline that lost its GenAI instrumentation cannot pass |
+| `undeclared` (default) | A tool, model, agent or MCP endpoint is `undeclared` or `unidentified`, a span cannot be classified (`spans_unclassified`), a tool or agent span names no tool or agent (`spans_without_identifier`), a span or resource has more than 128 attributes (`attribute_lists_over_bound`), or no span carries a GenAI or MCP attribute of its own, so that traces from a pipeline that lost its GenAI instrumentation, or that dropped the identifiers, cannot pass |
 | `none` | Never for a gate reason; the evidence and summary still list everything |
 
 A trace file or inventory that cannot be read, a malformed structure and a bound that is

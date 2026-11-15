@@ -157,7 +157,7 @@ def test_one_object_and_json_lines_read_the_same_spans(tmp_path):
         b'{"resource_spans": []}',
         b'{"resourceSpans": {"MARKER-7f3e9a": 1}}',
         b'{"resourceSpans": [], "MARKER-7f3e9a": "\xff"}',
-        '﻿{"resourceSpans": []}'.encode(),
+        '\ufeff{"resourceSpans": []}'.encode(),
         b'{"resourceSpans": [], "resourceSpans": ["MARKER-7f3e9a"]}',
         b'{"resourceSpans": [], "x": NaN}',
         b'{"resourceSpans": [], "x": 1152921504606846976}',

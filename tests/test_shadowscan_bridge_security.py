@@ -269,6 +269,26 @@ def test_cyclonedx_truncation_is_listed_once(truncated, excluded, listed):
     assert imported.limitations.count("CycloneDX source omits or truncates findings") == listed
 
 
+def test_more_cyclonedx_entries_than_the_maximum_are_refused_before_any_is_read():
+    from nexus_symbiote.scanners.shadowscan import MAX_FINDINGS
+
+    # Components and services count together, and none of these would pass as an entry:
+    # the count is refused first.
+    report = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "metadata": {"properties": [{"name": "shadowscan:scan:status", "value": "complete"}]},
+        "components": [{"bom-ref": f"c{index}"} for index in range(MAX_FINDINGS // 2 + 1)],
+        "services": [{"bom-ref": f"s{index}"} for index in range(MAX_FINDINGS // 2)],
+        "compositions": [{"aggregate": "complete"}],
+    }
+    with pytest.raises(ValueError, match="too many CycloneDX entries"):
+        ShadowScanImporter().parse_report(json.dumps(report))
+    report["components"].pop()
+    imported = ShadowScanImporter().parse_report(json.dumps(report))
+    assert imported.source_status == "complete"
+
+
 def test_conventional_scan_carries_source_fingerprint(tmp_path):
     directory = tmp_path / ".shadowscan"
     directory.mkdir()

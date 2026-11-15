@@ -99,7 +99,7 @@ of this tree's scan of the demo:
 
 ```text
 {"key_id": "04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39", "encrypted": false}
-{"out": "reviewed.json.att", "subject_sha256": "bc080585c01210a33805b28da6ac8a71a395a043c32c1f32e316f8bbe3a5eafa", "subject_format": "nexus-symbiote-aibom", "content_digest": "sha256:9fcb408d5986be3f3fe498f0c0a2b9c300cba69d0a6cca78162a7fec55db3a0b", "purpose": "reviewed", "signers": ["04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39"], "signed": true}
+{"out": "reviewed.json.att", "subject_sha256": "60e32fbb6148488917aa50e9a46fecbea5466d8a62098dc87c54152c74878db7", "subject_format": "nexus-symbiote-aibom", "content_digest": "sha256:794bc288b0a155c8faef008921f54b3df5829eabd05b008f95e51b00b1821f05", "purpose": "reviewed", "signers": ["04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39"], "signed": true}
 ```
 
 Verify it with the public key:
@@ -111,10 +111,10 @@ nexus-symbiote verify-attestation reviewed.json reviewed.json.att --trusted-key 
 ```text
 Attestation verified: purpose reviewed, 1 trusted key. It does not establish that the file is accurate, complete or safe.
 Signer key ID: 04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39
-Subject SHA-256: bc080585c01210a33805b28da6ac8a71a395a043c32c1f32e316f8bbe3a5eafa
+Subject SHA-256: 60e32fbb6148488917aa50e9a46fecbea5466d8a62098dc87c54152c74878db7
 Match: bytes
 Subject format: nexus-symbiote-aibom 1.1.0
-Content digest: sha256:9fcb408d5986be3f3fe498f0c0a2b9c300cba69d0a6cca78162a7fec55db3a0b (nexus-symbiote/inventory-content/v1)
+Content digest: sha256:794bc288b0a155c8faef008921f54b3df5829eabd05b008f95e51b00b1821f05 (nexus-symbiote/inventory-content/v1)
 Signed at (signer's clock): 2026-11-12T11:09:57Z
 ```
 
@@ -145,10 +145,10 @@ nexus-symbiote verify-attestation candidate.json reviewed.json.att --trusted-key
 ```text
 Attestation verified: purpose reviewed, 1 trusted key. It does not establish that the file is accurate, complete or safe.
 Signer key ID: 04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39
-Subject SHA-256: 618c132ca6e2bb46c3be3c7d0c6754cf498aac1511e15e1fbac8bd62bba31e5b
-Match: content; the attested file's SHA-256 is bc080585c01210a33805b28da6ac8a71a395a043c32c1f32e316f8bbe3a5eafa
+Subject SHA-256: da67363ac2029fbe1b5f665468914865baee65a955e3aa81c17e59a0a1840333
+Match: content; the attested file's SHA-256 is 60e32fbb6148488917aa50e9a46fecbea5466d8a62098dc87c54152c74878db7
 Subject format: nexus-symbiote-aibom 1.1.0
-Content digest: sha256:9fcb408d5986be3f3fe498f0c0a2b9c300cba69d0a6cca78162a7fec55db3a0b (nexus-symbiote/inventory-content/v1)
+Content digest: sha256:794bc288b0a155c8faef008921f54b3df5829eabd05b008f95e51b00b1821f05 (nexus-symbiote/inventory-content/v1)
 Signed at (signer's clock): 2026-11-12T11:09:57Z
 ```
 

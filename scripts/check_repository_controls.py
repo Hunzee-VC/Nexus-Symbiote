@@ -343,6 +343,14 @@ def evaluate_tag_rulesets(
     itself may. A missing or null value of either is unknown, never empty or "never": the
     workflow reports it, and the administrator's check (``verify_bypass_actors``) fails on it.
     """
+    for ruleset in rulesets:
+        if _guards_release_tags(ruleset) and any(
+            rule.get("type") == "creation" for rule in ruleset["rules"] if isinstance(rule, dict)
+        ):
+            return [
+                "release-tag creation must use a separate creation-only ruleset with an"
+                " authorized creator; the no-bypass immutability ruleset must allow creation"
+            ], []
     unknown_actors = unknown_caller = False
     for ruleset in rulesets:
         if not _guards_release_tags(ruleset):

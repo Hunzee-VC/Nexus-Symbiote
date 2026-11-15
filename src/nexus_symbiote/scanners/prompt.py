@@ -381,30 +381,148 @@ def _hidden_character_risks(
     return risks
 
 
+# Notes say `run` too (`Run make docs`, `dry-run`, `last run:`), so it counts only when
+# the next word names what to run: a path, a script or executable file, a shell, or a
+# command that executes code, reads secrets or deletes files. Any punctuation that a path
+# cannot contain may come first, so `Run: ./x.sh`, `run (bash)` and `run **./x.sh**`
+# count, as do an arrow or a bullet (`->`, `- `), a prompt (`$ `), an HTML tag, a code
+# fence's language and `_` emphasis. A hyphen joined to a word before it (`dry-run`) makes
+# a noun, except in `re-run`; `<!--run` does not. A separator is never a path character,
+# so a path's scan stops at the next `run`'s separator and stays linear.
+_PATH_CHARACTER = r"[\w.~$%+@-]"
+_PUNCTUATION = r"[^\w.~$%+@/\\-]"
+_RUN_SEPARATOR = (
+    rf"(?:{_PUNCTUATION}|[-$]++(?={_PUNCTUATION})|<[a-z]++>|(?<=```)[\w+-]++(?=[ \t]*\n))"
+)
+_RUN = rf"(?<!\w)(?:(?<=\bre-)|(?<!\w-))run{_RUN_SEPARATOR}+_{{0,2}}"
+# A name ends where a word does, or where underscores close emphasis (`_bash_`).
+_NAME_END = r"(?:\b|(?=_+(?!\w)))"
+_SHELL = rf"(?:(?:ba|z|da)?sh|pwsh|powershell){_NAME_END}"
+# A command joined to a word by a hyphen (`go-live`, `cat-food`) is a different word.
+_COMMAND = (
+    r"(?:python3?|py|node|deno|bun|ruby|perl|php|java|osascript"
+    r"|npx|uvx|pipx|pip3?|npm|pnpm|yarn|uv|poetry|cargo|go|brew|apt-get|apt|gem"
+    r"|sudo|doas|su|env|exec|eval|source|curl|wget|iwr|cat|cp|mv|rm|dd|chmod|chown"
+    r"|ssh|scp|nc|base64|xargs|docker|kubectl|git|iex|irm|iwr"
+    rf"|invoke-(?:expression|restmethod|webrequest))(?!-\w){_NAME_END}"
+)
+_PATH_START = (
+    r"[/\\]\S"
+    rf"|(?:[a-z_.~$%]{_PATH_CHARACTER}*|[a-z]:|\$env:\w+|\$\{{[\w:]+\}})[/\\]"
+)
+_SCRIPT = rf"{_PATH_CHARACTER}+\.(?:sh|bash|zsh|ps1|bat|cmd|exe|py){_NAME_END}"
+_RUN_TARGET = rf"{_RUN}(?:{_PATH_START}|{_SCRIPT}|{_SHELL}|{_COMMAND})"
+_HIDDEN_INSTRUCTION = re.compile(
+    r"https?://|~/"
+    r"|\b(?:ignore|disregard|exfiltrate|execute|download|upload|send|steal|override|"
+    rf"bypass|curl|wget|fetch|eval|install)\b|{_RUN_TARGET}",
+    re.IGNORECASE,
+)
+# `run this`, `run the following`, `run these` and `run it` point at what comes later in
+# the same comment. Each target starts where a word or path does, so the scan is linear.
+_RUN_REFERENCE = re.compile(rf"{_RUN}(?:this|these|it|the\s+following)\b", re.IGNORECASE)
+_LATER_TARGET = re.compile(
+    rf"(?<![\w.~$%+@/\\<-])(?:{_PATH_START})"
+    rf"|(?<!{_PATH_CHARACTER})(?:{_SCRIPT})"
+    rf"|(?<![\w.-])(?:{_SHELL}|{_COMMAND})",
+    re.IGNORECASE,
+)
+# `run` also counts when a target later in the same sentence starts a command: at the
+# start of a line or list item, or after `:`, `;`, `&`, `|`, `then`, `command(s)` or
+# `script`, with whitespace, quotes, brackets and emphasis between. So `run the command
+# `rm -rf /``, `run as root: rm -rf /`, `run make test && rm -rf /` and `run tests, then
+# cat .env` count, while `run them with python` does not. A sentence ends at `.`, `!` or
+# `?` before whitespace, except after a digit, as in a `1.` list marker.
+_RUN_VERB = re.compile(_RUN, re.IGNORECASE)
+_SENTENCE_END = re.compile(r"(?<!\d)[.!?](?=\s)")
+_COMMAND_SKIP = frozenset(" \t`'\"([*_>-\u201c\u2018$")
+_COMMAND_DELIMITER = frozenset(":;&|\n")
+_COMMAND_WORD = re.compile(r"(?<!\w)(?:then|commands?|script)\Z", re.IGNORECASE)
+
+
+def _starts_command(text: str, start: int, position: int) -> bool:
+    """Whether the target at ``position`` begins a command after ``run`` at ``start``.
+
+    The backward scan crosses only the skippable characters directly before this target,
+    which no other target's scan crosses, so the scans of one sentence stay linear.
+    """
+    index = position
+    while index > start and text[index - 1] in _COMMAND_SKIP:
+        index -= 1
+    if index <= start or text[index - 1] in _COMMAND_DELIMITER:
+        return True
+    if text[index - 1] in ".)" and text[index - 2 : index - 1].isdigit():
+        index -= 1
+        while index > start and text[index - 1].isdigit():
+            index -= 1
+        while index > start and text[index - 1] in " \t":
+            index -= 1
+        return index <= start or text[index - 1] == "\n"
+    return _COMMAND_WORD.search(text, max(start, index - 8), index) is not None
+
+
+def _run_starts_later_command(text: str) -> bool:
+    position = 0
+    while (verb := _RUN_VERB.search(text, position)) is not None:
+        end = _SENTENCE_END.search(text, verb.end())
+        stop = len(text) if end is None else end.start()
+        for target in _LATER_TARGET.finditer(text, verb.end(), stop):
+            if _starts_command(text, verb.end(), target.start()):
+                return True
+        position = max(stop, verb.end())
+    return False
+
+
+def _comment_is_instruction(text: str) -> bool:
+    """An imperative, a URL, or a home-directory path inside hidden text."""
+    if _HIDDEN_INSTRUCTION.search(text) is not None:
+        return True
+    reference = _RUN_REFERENCE.search(text)
+    if reference is not None and _LATER_TARGET.search(text, reference.end()) is not None:
+        return True
+    return _run_starts_later_command(text)
+
+
 def detect_hidden_markup(content: str, source_name: str) -> list[RiskAssessment]:
     """Report HTML and Markdown comments, which renderers hide but agents read.
 
-    Only counts and lengths are reported, never the hidden text.
+    Only counts and lengths are reported, never the hidden text. A comment that
+    carries an imperative (``run`` only when a path, a script, a shell or a listed
+    command follows, possibly after punctuation or markup, or when ``this``, ``these``,
+    ``it`` or ``the following`` follows and one of those comes later in the comment, or
+    when one of those starts a command later in the same sentence), a URL or a path
+    under ``~/`` is high; other comments stay low.
     """
     count = length = 0
+    instructive = False
     position = 0
     while (start := content.find("<!--", position)) != -1:
         end = content.find("-->", start + 4)
         stop = len(content) if end == -1 else end + 3
         count += 1
         length += stop - start
+        instructive = instructive or _comment_is_instruction(content[start:stop])
         position = stop
-    references = _MARKDOWN_COMMENT.findall(content)
-    count += len(references)
+    for line in content.splitlines():
+        if _MARKDOWN_COMMENT.match(line):
+            count += 1
+            instructive = instructive or _comment_is_instruction(line)
     if not count:
         return []
+    severity = RiskSeverity.HIGH if instructive else RiskSeverity.LOW
+    qualifier = (
+        " At least one comment contains an instruction, a URL or a home-directory path."
+        if instructive
+        else ""
+    )
     return [
         RiskAssessment(
-            severity=RiskSeverity.LOW,
+            severity=severity,
             category="hidden_markup",
             detail=(
                 f"'{neutralize(source_name)}' contains {count} HTML or Markdown comment(s) "
                 f"({length} characters of HTML comments) that rendered views hide and agents read."
+                f"{qualifier}"
             ),
             recommendation="Review comment text in the raw file; move notes out of agent instructions.",
         )

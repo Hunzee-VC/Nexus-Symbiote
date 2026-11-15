@@ -1,8 +1,8 @@
-"""Hugging Face chat templates get the sandbox-escape check that GGUF templates get.
+"""Hugging Face chat templates get the access-pattern check that GGUF templates get.
 
 `tokenizer_config.json` `chat_template`, `chat_template.json`, `chat_template.jinja` and
 `additional_chat_templates/*.jinja` were digested but never inspected, so a template
-that reaches Python internals left a SafeTensors model rated safe.
+with a suspicious access pattern left a SafeTensors model rated safe.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ ESCAPES = [
     "{{ ''['__class__'] }}",
     "{{ x|attr('\\x5f\\x5fclass\\x5f\\x5f') }}",
     "{{ ''['__cl\\\nass__'] }}",
+    "{{ cycler['_'~'_'~'init'~'_'~'_']['_'~'_'~'globals'~'_'~'_'] }}",
 ]
 BENIGN = (
     "{% for message in messages %}<|{{ message['role'] }}|>{{ message['content'] }}"
@@ -42,10 +43,10 @@ SOURCES = [
     "additional_chat_templates/tool_use.jinja",
 ]
 DETAIL = (
-    "Model 'model.safetensors' is configured with a chat template that reaches Python "
-    "internals through dunder attributes or the attr filter, as Jinja2 sandbox escapes "
-    "such as CVE-2024-34359 do: "
+    "Model 'model.safetensors' is configured with a chat template containing "
+    "a potential Python-internals access pattern: "
 )
+DETAIL_END = ". Actual behavior depends on the renderer and its sandbox."
 
 
 def _safetensors(path: Path) -> None:
@@ -106,8 +107,10 @@ def test_an_escaping_template_in_any_source_is_critical(tmp_path, source, templa
     assert component.serialization_safety == SerializationSafety.UNSAFE_TEMPLATE_INJECTION
     (risk,) = [r for r in component.risks if r.category == "serialization_format"]
     assert risk.severity == RiskSeverity.CRITICAL
-    assert risk.detail == f"{DETAIL}m/{source}."
-    assert risk.references == ["https://nvd.nist.gov/vuln/detail/CVE-2024-34359"]
+    assert risk.detail == f"{DETAIL}m/{source}{DETAIL_END}"
+    assert risk.references == [
+        "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md"
+    ]
     assert template not in risk.detail
 
 
@@ -133,7 +136,9 @@ def test_each_named_template_of_a_list_is_checked(tmp_path):
     _template(directory, "tokenizer_config.json#chat_template", named)
     component = _model(tmp_path)
     assert component.serialization_safety == SerializationSafety.UNSAFE_TEMPLATE_INJECTION
-    assert _template_findings(component) == [f"{DETAIL}m/tokenizer_config.json#chat_template/1."]
+    assert _template_findings(component) == [
+        f"{DETAIL}m/tokenizer_config.json#chat_template/1{DETAIL_END}"
+    ]
 
 
 def test_a_finding_names_three_templates_and_counts_the_rest(tmp_path):
@@ -144,7 +149,7 @@ def test_a_finding_names_three_templates_and_counts_the_rest(tmp_path):
     (detail,) = _template_findings(_model(tmp_path))
     assert detail == (
         f"{DETAIL}m/additional_chat_templates/t0.jinja, m/additional_chat_templates/t1.jinja, "
-        "m/additional_chat_templates/t2.jinja and 2 more."
+        f"m/additional_chat_templates/t2.jinja and 2 more{DETAIL_END}"
     )
 
 
@@ -198,9 +203,9 @@ def test_a_code_executing_format_keeps_its_rating_and_gains_the_template_finding
     serialization = [r for r in component.risks if r.category == "serialization_format"]
     assert [r.severity for r in serialization] == [RiskSeverity.CRITICAL] * 2
     assert _template_findings(component) == [
-        "Model 'pytorch_model.bin' is configured with a chat template that reaches Python "
-        "internals through dunder attributes or the attr filter, as Jinja2 sandbox escapes "
-        "such as CVE-2024-34359 do: m/tokenizer_config.json#chat_template."
+        "Model 'pytorch_model.bin' is configured with a chat template containing "
+        "a potential Python-internals access pattern: m/tokenizer_config.json#chat_template"
+        + DETAIL_END
     ]
 
 
@@ -264,9 +269,9 @@ def test_an_unknown_rating_and_its_findings_survive_an_escaping_template(
     (component,) = result.components
     assert component.serialization_safety == SerializationSafety.UNKNOWN
     assert _template_findings(component) == [
-        f"Model '{artifact}' is configured with a chat template that reaches Python internals "
-        "through dunder attributes or the attr filter, as Jinja2 sandbox escapes such as "
-        "CVE-2024-34359 do: m/tokenizer_config.json#chat_template."
+        f"Model '{artifact}' is configured with a chat template containing "
+        "a potential Python-internals access pattern: m/tokenizer_config.json#chat_template"
+        + DETAIL_END
     ]
     assert [
         (risk.severity, risk.category)
@@ -397,6 +402,66 @@ def test_a_tampered_template_verdict_fails_the_completeness_check_not_integrity(
     assert "Integrity check\n  Status: PASS" in skipped.output, skipped.output
 
 
+def test_joined_dunder_template_fails_scan_validate_and_risk_with_pinned_weights(runner, tmp_path):
+    project = tmp_path / "project"
+    weights = project / "models" / "m" / "model.safetensors"
+    _safetensors(weights)
+    _template(weights.parent, "tokenizer_config.json#chat_template", ESCAPES[-1])
+    signers = tmp_path / "signers.json"
+    signers.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "artifacts": [
+                    {
+                        "kind": "digest-pin",
+                        "artifact_path": "models/m/model.safetensors",
+                        "expected_sha256": "sha256:"
+                        + hashlib.sha256(weights.read_bytes()).hexdigest(),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    bom = tmp_path / "bom.json"
+    policy = ["--no-project-policy", "--signature-policy", str(signers)]
+    scan = runner.invoke(main, ["scan", str(project), *policy, "-o", str(bom)])
+    assert scan.exit_code == 1, scan.output
+    model = next(
+        c for c in json.loads(bom.read_text())["components"] if c["bom_ref"].startswith("model:")
+    )
+    assert model["serialization_safety"] == "unsafe-template-injection"
+    for command in ("validate", "risk"):
+        checked = runner.invoke(main, [command, str(bom), "--project", str(project), *policy])
+        assert checked.exit_code == 1, checked.output
+
+
+def test_joined_dunder_in_embedded_gguf_template_is_reported(tmp_path):
+    directory = tmp_path / "m"
+    directory.mkdir()
+    (directory / "model.gguf").write_bytes(_gguf(ESCAPES[-1]))
+    component = _model(tmp_path, "model.gguf")
+    assert component.serialization_safety == SerializationSafety.UNSAFE_TEMPLATE_INJECTION
+    (risk,) = [r for r in component.risks if r.category == "serialization_format"]
+    assert risk.severity == RiskSeverity.CRITICAL
+    assert "potential Python-internals access pattern" in risk.detail
+    assert risk.references == [
+        "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md"
+    ]
+
+
+def test_joined_literal_check_scales_with_template_size():
+    from nexus_symbiote.utils.model_formats import template_escape_markers
+
+    unit = b"{{ 'a' ~ 'b' ~ 'c' ~ 'd' }}"
+
+    def run(scale: int) -> None:
+        assert not template_escape_markers(unit * 5_000 * scale)
+
+    assert scaling_ratio(run) < 10
+
+
 def test_records_are_identical_wherever_the_project_is_checked_out(tmp_path):
     components = []
     for root in (tmp_path / "one", tmp_path / "two" / "nested"):
@@ -493,7 +558,7 @@ def test_an_in_root_linked_template_is_read_through_its_target(tmp_path):
     assert not result.scan_failures and not result.surfaces_excluded
     (component,) = result.components
     assert component.serialization_safety == SerializationSafety.UNSAFE_TEMPLATE_INJECTION
-    assert _template_findings(component) == [f"{DETAIL}m/chat_template.jinja."]
+    assert _template_findings(component) == [f"{DETAIL}m/chat_template.jinja{DETAIL_END}"]
 
 
 @pytest.mark.parametrize(
@@ -513,7 +578,7 @@ def test_a_linked_template_directory_is_read_through_the_link(tmp_path, link, ta
     (component,) = result.components
     assert component.serialization_safety == SerializationSafety.UNSAFE_TEMPLATE_INJECTION
     source = "m/m/additional_chat_templates/tool_use.jinja"
-    assert _template_findings(component) == [f"{DETAIL}{source}."]
+    assert _template_findings(component) == [f"{DETAIL}{source}{DETAIL_END}"]
     assert [item["source"] for item in component.properties["chat_templates"]] == [source]
 
 
