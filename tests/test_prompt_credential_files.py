@@ -309,9 +309,15 @@ def test_a_walk_that_skips_the_credential_check_still_records_no_credential_file
         "secrets/rotate.py",
         "deploy.key",
         "secrets.py",
+        ".secrets.py",
+        ".SECRETS.PY",
+        "..secrets.py",
         "config/credentials.rb",
+        "config/.credentials.rb",
         "api_keys.js",
+        ".api_keys.ts",
         "password.sh",
+        ".password.sh",
         ".env.dist",
     ],
 )
@@ -326,6 +332,7 @@ def test_names_that_hold_credentials_are_credential_shaped(name):
         ".env.sample",
         ".env.template",
         "scripts/rotate_api_key.py",
+        ".rotate_api_key.py",
         "ROTATE_API_KEY.PY",
         "check_password_strength.sh",
         "secret_scanner.ts",
@@ -363,3 +370,21 @@ def test_a_skill_file_linked_to_a_store_written_as_a_program_is_a_gap(tmp_path):
         digest.removeprefix("sha256:") not in AIBOM(components=result.components).model_dump_json()
     )
     assert any("holds credentials" in entry for entry in result.surfaces_excluded)
+
+
+def test_a_skill_or_symlink_to_a_hidden_credential_program_is_a_gap(tmp_path):
+    (tmp_path / "config").mkdir()
+    hidden = tmp_path / "config" / ".secrets.py"
+    hidden.write_text('WIFI_PASSWORD = "hunter2"\n')
+    skill = tmp_path / ".claude" / "skills" / "ops"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: ops\ndescription: x\n---\nRun helper.py.\n")
+    (skill / ".password.sh").write_text("DB_PASS=correct-horse\n")
+    (skill / "helper.py").symlink_to("../../../config/.secrets.py")
+    result = PromptScanner().scan(tmp_path)
+    exported = AIBOM(components=result.components).model_dump_json()
+    assert hash_bytes(hidden.read_bytes()).removeprefix("sha256:") not in exported
+    assert hash_bytes((skill / ".password.sh").read_bytes()).removeprefix("sha256:") not in exported
+    excluded = [entry for entry in result.surfaces_excluded if "holds credentials" in entry]
+    assert any(".password.sh" in entry for entry in excluded)
+    assert any("config/.secrets.py" in entry for entry in excluded)

@@ -504,7 +504,7 @@ A way around a limit that its entry does not describe is worth a
   `.bash`, `.zsh`, `.ps1`, `.js`, `.mjs`, `.cjs`, `.ts`, `.rb` or `.go` whose name is
   more than one of those words, such as `rotate_api_key.py`, which is read and
   inventoried; a program named only for what it holds, such as `secrets.py` or
-  `credentials.rb`, is still not read. A credential written into a program that this
+  `credentials.rb`, with or without a leading dot, is still not read. A credential written into a program that this
   rule reads, such as `client_secret.js` or `local_secrets.py`, or into a `.env`
   template, is not withheld by it), or that lies in a directory named exactly one of those words,
   singular or plural, with or without a leading dot, such as `secrets/token.txt`. Such a
