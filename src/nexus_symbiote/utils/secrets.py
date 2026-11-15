@@ -29,6 +29,12 @@ _ASSIGNMENT = re.compile(
     rf"(?i)({_CREDENTIAL_KEYWORD}[\"']?\s*+[:=]\s*+)"
     r"(\"(?:[^\"\\\n]|\\.){0,256}\"|'(?:[^'\\\n]|\\.){0,256}'|[^\s,;]++)"
 )
+# A credential name that ends a URL match, as in `https://h/?a=b,password: value`: the
+# URL rule stops at whitespace, so it would take the name and leave the value without
+# one. Names are at most about 150 characters, so only the end of a URL is searched.
+_URL_TRAILING_KEY = re.compile(rf"(?i){_CREDENTIAL_KEYWORD}[:=]?+\Z")
+_URL_KEY_WINDOW = 200
+_KEY_SEPARATOR = re.compile(r"[\"']?\s*+[:=]")
 # A mapping key that _ASSIGNMENT would read as the name in `name: value`.
 _CREDENTIAL_KEY = re.compile(rf"(?i){_CREDENTIAL_KEYWORD}\Z")
 _AUTHORIZATION_KEY = re.compile(r"(?i)(?:proxy-)?authorization")
@@ -123,6 +129,25 @@ def redact_url(value: str) -> str:
         return urlunsplit((parts.scheme, host, "", "", ""))
     except ValueError:
         return "[redacted-url]"
+
+
+def _url_replacement(match: re.Match[str]) -> str:
+    """A URL as its origin, followed by a credential name that ended the match.
+
+    The name is kept only when text follows the URL and the name is written as an
+    assignment: it ends in ``:`` or ``=``, or one follows it. The assignment rule then
+    redacts the value; dropping the name with the URL would leave the value in clear.
+    """
+    url = match.group()
+    end = match.end()
+    tail = _URL_TRAILING_KEY.search(url, max(0, len(url) - _URL_KEY_WINDOW))
+    if (
+        tail is None
+        or end == len(match.string)
+        or (url[-1] not in ":=" and not _KEY_SEPARATOR.match(match.string, end))
+    ):
+        return redact_url(url)
+    return f"{redact_url(url[: tail.start()])} {tail.group()}"
 
 
 def secret_like(name: str, value: str) -> bool:
@@ -300,7 +325,7 @@ def redact_text(
     still redacted.
     """
     value = _scrubber(secrets).scrub(value)
-    value = _URL.sub(lambda match: redact_url(match.group()), value)
+    value = _URL.sub(_url_replacement, value)
     if not identifier:
         value = _redact_private_keys(value)
     value = _ASSIGNMENT.sub(lambda match: match.group(1) + REDACTED, value)
