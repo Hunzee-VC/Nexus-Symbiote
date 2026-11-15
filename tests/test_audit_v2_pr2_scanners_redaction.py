@@ -27,6 +27,7 @@ from nexus_symbiote.scanners.ide_agents import IDEAgentScanner, _broad_grants, _
 from nexus_symbiote.scanners.live_mcp import (
     DiscoveryError,
     PinnedHTTPTransport,
+    _local_pointer_exists,
     _resolve_public,
     check_served_tool,
 )
@@ -246,8 +247,53 @@ def test_live_mcp_rejects_external_schema_refs_vocabularies_and_non_ascii_conten
         }
     )
     assert valid_tool.name == "search_docs"
+    assert _local_pointer_exists({}, "https://example.com/schema") is False
+
+    root_ref = check_served_tool(
+        {"name": "root_ref", "inputSchema": {"type": "object", "$ref": "#"}}
+    )
+    assert root_ref.name == "root_ref"
+    list_ref = check_served_tool(
+        {
+            "name": "list_ref",
+            "inputSchema": {
+                "type": "object",
+                "anyOf": [{"type": "string"}],
+                "$ref": "#/anyOf/0",
+            },
+        }
+    )
+    assert list_ref.name == "list_ref"
+    draft07_anchor = check_served_tool(
+        {
+            "name": "draft07_anchor",
+            "inputSchema": {
+                "$schema": "http://json-schema.org/draft-07/schema#",
+                "type": "object",
+                "properties": {"x": {"$id": "#local", "type": "string"}},
+            },
+        }
+    )
+    assert draft07_anchor.name == "draft07_anchor"
 
     bad_schemas: list[dict[str, Any]] = [
+        {"type": "object", "$schema": 1},
+        {
+            "type": "object",
+            "anyOf": [{"type": "string"}],
+            "$ref": "#/anyOf/01",
+        },
+        {
+            "type": "object",
+            "anyOf": [{"type": "string"}],
+            "$ref": "#/anyOf/9",
+        },
+        {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "$vocabulary": {},
+        },
+        {"type": "object", "$vocabulary": []},
         {"type": "object", "$ref": "https://attacker.example/schema.json"},
         {"type": "object", "properties": {"x": {"$dynamicRef": "https://attacker.example/s#x"}}},
         {"type": "object", "properties": {"x": {"$id": "https://attacker.example/sub.json"}}},

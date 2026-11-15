@@ -601,6 +601,31 @@ def test_write_output_file_fallback_when_hardlinks_unsupported(
     assert out.read_text(encoding="utf-8") == '{"ok": true}\n'
 
 
+def test_write_output_file_fallback_unlinks_when_direct_fsync_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def no_hardlink(*_args: object, **_kwargs: object) -> None:
+        raise OSError(errno.EOPNOTSUPP, "Operation not supported")
+
+    real_fsync = os.fsync
+    calls = 0
+
+    def fsync_then_fail(fd: int) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            real_fsync(fd)
+            return
+        raise OSError(errno.EIO, "Input/output error")
+
+    monkeypatch.setattr(os, "link", no_hardlink)
+    monkeypatch.setattr(os, "fsync", fsync_then_fail)
+    out = tmp_path / "report.json"
+    with pytest.raises(OSError, match="Input/output error"):
+        write_output_file(out, '{"ok": true}\n', overwrite=False)
+    assert not out.exists()
+
+
 def test_json_text_escapes_bidi_c1_and_line_separators() -> None:
     payload = chr(0x202E) + chr(0x009B) + chr(0x2028) + chr(0xFE0F) + chr(0xE0020)
     raw = '{"msg":"' + payload + '"}'
