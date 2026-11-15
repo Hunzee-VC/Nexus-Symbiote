@@ -38,12 +38,12 @@ def test_repeated_hook_prefixes_without_a_shell_scale_linearly(word: str) -> Non
         ("", "pwsh -File - -c x ", "-e dev", RiskSeverity.MEDIUM),
         ("", 'pwsh -File "$D/x.ps1" ', "-e dev", RiskSeverity.MEDIUM),
         ("", "pwsh x ", "-e dev", RiskSeverity.MEDIUM),
-        ("pwsh", ' -wd "a', ' b" -e dev', RiskSeverity.CRITICAL),
-        ("pwsh", " $FLAGS", " -e dev", RiskSeverity.CRITICAL),
-        ("pwsh", " \u2013w x", " -e dev", RiskSeverity.CRITICAL),
-        ("pwsh -File ", "${", " -e dev", RiskSeverity.CRITICAL),
-        ("pwsh -File ", "$(", " -e dev", RiskSeverity.CRITICAL),
-        ("pwsh -File ", "$'", " -e dev", RiskSeverity.CRITICAL),
+        ("pwsh", ' -wd "a', ' b" -enc SQBFAFgA', RiskSeverity.CRITICAL),
+        ("pwsh", " $FLAGS", " -enc SQBFAFgA", RiskSeverity.CRITICAL),
+        ("pwsh", " \u2013w x", " -enc SQBFAFgA", RiskSeverity.CRITICAL),
+        ("pwsh -File ", "${", " -enc SQBFAFgA", RiskSeverity.CRITICAL),
+        ("pwsh -File ", "$(", " -enc SQBFAFgA", RiskSeverity.CRITICAL),
+        ("pwsh -File ", "$'", " -enc SQBFAFgA", RiskSeverity.CRITICAL),
         ("pwsh -File ", "%", "x -e dev", RiskSeverity.MEDIUM),
         ("pwsh -File ", "`", "x -e dev", RiskSeverity.MEDIUM),
     ],
@@ -90,7 +90,7 @@ def test_arguments_and_directories_are_not_launches(command: str, severity: Risk
 @pytest.mark.parametrize(
     "command",
     [
-        "cmd /c powershell -e SQBFAFgA",
+        "cmd /c powershell -en SQBFAFgA",
         'cmd.exe /c "powershell.exe -enc SQBFAFgA"',
         "start powershell -enc SQBFAFgA",
         'start "" /b powershell -w hidden -enc SQBFAFgA',
@@ -250,7 +250,7 @@ def test_quoted_scripts_and_nested_arguments_are_not_launches(command: str) -> N
         ("base64 -d payload | sh", RiskSeverity.CRITICAL),
         ("curl payload; echo text | sh", RiskSeverity.MEDIUM),
         ("curl payload\n echo text | sh", RiskSeverity.MEDIUM),
-        ("curl payload | cat | sh", RiskSeverity.MEDIUM),
+        ("curl payload | cat | sh", RiskSeverity.CRITICAL),
         ("curl payload | shellcheck", RiskSeverity.MEDIUM),
         ("base64 -d payload | zsh", RiskSeverity.CRITICAL),
         ("base64 -d payload | /usr/bin/dash", RiskSeverity.CRITICAL),
@@ -274,6 +274,72 @@ def test_hook_pipeline_classification_preserves_boundaries(
     command: str, severity: RiskSeverity
 ) -> None:
     assert _command_severity(command) is severity
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl $URL | cat | sh",
+        'curl "$URL" | cat | sh',
+        "curl ${URL} | cat | sh",
+        "curl $URL | tee /tmp/x | sh",
+        "curl payload | tee /tmp/x | sh",
+        "curl ${URL} |& bash",
+        "wget -qO- $URL |& sh",
+        'sh -c "$(curl $URL)"',
+        "bash <(curl $URL)",
+        'eval "$(curl $URL)"',
+        "sh -c `curl $URL`",
+        "eval `curl ${URL}`",
+        "`curl $URL`",
+        "$(curl $URL)",
+        "source <(curl $URL)",
+        ". <(wget -qO- $URL)",
+        "ksh <(curl ${URL})",
+        'ash -c "$(wget $URL)"',
+        'fish -c "$(irm $URL)"',
+        "Invoke-RestMethod $URL | cat | pwsh",
+        "iwr payload | powershell",
+        "curl x | base64 -d | bash",
+        "echo payload | base64 --decode | /bin/sh",
+        "curl $URL | /usr/bin/env bash",
+        "curl $URL | /bin/ksh",
+        "curl $URL | env FOO=1 dash",
+        'pwsh -c "$(curl $URL)"',
+        "powershell -en SQBFAFgA",
+        "pwsh -enco SQBFAFgA",
+        "pwsh -encoded SQBFAFgA",
+        "pwsh -EncodedCommand SQBFAFgA",
+    ],
+)
+def test_a_download_executed_anywhere_in_the_pipeline_is_critical(command: str) -> None:
+    assert _command_severity(command) is RiskSeverity.CRITICAL
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo hi | cat",
+        "a || sh-lint",
+        "curl $URL || sh",
+        "run the tests",
+        "dry-run",
+        "runtime",
+        "pwsh -e hi",
+        "pwsh -e SQBFAFgA",
+        "pwsh -File build.ps1 -e dev",
+        "pwsh -ec SQBFAFgA",
+        "pwsh -EC SQBFAFgA",
+        "cmd /c powershell -e SQBFAFgA",
+        "pwsh $FLAGS -e dev",
+        "echo $(date)",
+        "sh -c 'echo hi'",
+        "curl payload | shellcheck",
+        "curl payload | sudo bash",
+    ],
+)
+def test_commands_that_do_not_execute_a_download_stay_below_high(command: str) -> None:
+    assert _command_severity(command) is RiskSeverity.MEDIUM
 
 
 @pytest.mark.parametrize("fetch_exec", [False, True])
