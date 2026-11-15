@@ -1412,6 +1412,40 @@ class _Identity:
     withheld: list[str]
 
 
+_DIAGNOSTIC_NODES = 4096
+_INLINE_ASSIGNMENT = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)=(.+)", re.DOTALL)
+
+
+def _diagnostic_values(config: dict[str, Any]) -> list[str]:
+    """User information in this server's URLs, and credentials its `NAME=value` arguments set.
+
+    The walk is bounded: a server that failed validation can be any shape.
+    """
+    values: list[str] = []
+    pending: list[Any] = [config]
+    visited = 0
+    while pending and visited < _DIAGNOSTIC_NODES:
+        node = pending.pop()
+        visited += 1
+        if isinstance(node, dict):
+            pending.extend(node.values())
+        elif isinstance(node, list):
+            pending.extend(node)
+        elif isinstance(node, str):
+            if "@" in node and "://" in node:
+                try:
+                    parts = urlsplit(node)
+                except ValueError:
+                    parts = None
+                if parts is not None:
+                    values.extend(part for part in (parts.username, parts.password) if part)
+            inline = _INLINE_ASSIGNMENT.fullmatch(node)
+            if inline is not None:
+                # As for `env`: only a credential name's value, or a credential-shaped one.
+                values.extend(secret_values({inline.group(1): inline.group(2)}))
+    return values
+
+
 class MCPScanner(Scanner):
     name = "mcp"
     _resolvers: _Resolvers | None = None
@@ -1545,12 +1579,20 @@ class MCPScanner(Scanner):
 
         One server's tool text or name may repeat a value that another server's
         environment, headers or launcher holds, so the file's values are scrubbed
-        from each. Only servers that _server_problem admits count: a refused server
-        is never parsed, so its values must not push the file over the limit.
+        from each. A server that _server_problem refuses is never parsed, but its
+        `env`, `headers` and `http_headers` still count, as they did before launcher
+        values were added: refusing it must not publish what its siblings repeat. Only
+        its launcher is not analysed.
         """
         values: list[str] = []
         for _, config in entries:
-            if not isinstance(config, dict) or cls._server_problem(config) is not None:
+            if not isinstance(config, dict):
+                continue
+            if cls._server_problem(config) is not None:
+                for field in ("env", "headers", "http_headers"):
+                    mapping = config.get(field)
+                    if isinstance(mapping, dict):
+                        values.extend(secret_values(mapping))
                 continue
             try:
                 launch = _server_launch(config)
@@ -1579,6 +1621,10 @@ class MCPScanner(Scanner):
             if file_secrets is not None
             else SecretScrubber(_server_secrets(config, launch))
         )
+        # A name may repeat what only this server's text holds and no rule reads as a
+        # credential: URL user information, or `NAME=value` passed to a launcher such
+        # as `cross-env`, which the launch analysis does not unwrap.
+        scrubber = scrubber.extended(_diagnostic_values(config))
         # Clipping first can truncate a token so its recognizable shape is lost.
         return neutralize(redact_text(name, scrubber)[:256])
 
