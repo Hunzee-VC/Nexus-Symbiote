@@ -462,3 +462,163 @@ def test_other_list_errors_still_fail_closed(replies):
     )
     assert not result.complete
     assert result.failures == ["MCP server reported an error or invalid result"]
+
+
+def test_discovery_limits_reject_out_of_range_bounds():
+    with pytest.raises(live_mcp.DiscoveryError, match="unsupported discovery limits"):
+        live_mcp.DiscoveryLimits(max_pages=0)
+    with pytest.raises(live_mcp.DiscoveryError, match="unsupported discovery limits"):
+        live_mcp.DiscoveryLimits(max_sse_events=1001)
+
+
+def test_schema_dialect_pointer_list_traversal_draft07_anchor_and_invalid_vocabularies():
+    assert live_mcp._local_pointer_exists({"type": "object"}, "relative/pointer") is False
+
+    valid_schemas = [
+        {
+            "type": "object",
+            "anyOf": [{"type": "object", "properties": {"a": {"type": "string"}}}],
+            "properties": {
+                "self": {"$ref": "#"},
+                "branch": {"$ref": "#/anyOf/0"},
+            },
+            "patternProperties": {"^[a-z]+$": {"type": "string"}},
+        },
+        {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "properties": {"item": {"$id": "#local-item", "type": "string"}},
+        },
+    ]
+    for valid_schema in valid_schemas:
+        checked = live_mcp.check_served_tool({"name": "valid_tool", "inputSchema": valid_schema})
+        assert checked.name == "valid_tool"
+
+    refused_schemas = [
+        {
+            "type": "object",
+            "anyOf": [{"type": "string"}],
+            "properties": {"bad": {"$ref": "#/anyOf/01"}},
+        },
+        {
+            "type": "object",
+            "anyOf": [{"type": "string"}],
+            "properties": {"bad": {"$ref": "#/anyOf/5"}},
+        },
+        {"$schema": 123, "type": "object"},
+        {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "$vocabulary": {},
+        },
+        {"type": "object", "$vocabulary": []},
+        {
+            "type": "object",
+            "$vocabulary": {"https://json-schema.org/draft/2020-12/vocab/core": "yes"},
+        },
+    ]
+    for refused in refused_schemas:
+        with pytest.raises(live_mcp.DiscoveryError):
+            live_mcp.check_served_tool({"name": "bad_tool", "inputSchema": refused})
+
+
+def test_descriptor_list_item_and_hello_boundary_validations():
+    base_schema = {"type": "object"}
+    invalid_tools = [
+        {"name": "bad\x00name", "inputSchema": base_schema},
+        {"name": "t", "description": 99, "inputSchema": base_schema},
+        {"name": "t", "annotations": [], "inputSchema": base_schema},
+        {"name": "t", "annotations": {"title": 99}, "inputSchema": base_schema},
+        {"name": "t", "_meta": "not-an-object", "inputSchema": base_schema},
+        {"name": "t", "x_nan": float("nan"), "inputSchema": base_schema},
+    ]
+    for raw_tool in invalid_tools:
+        with pytest.raises(live_mcp.DiscoveryError):
+            live_mcp.check_served_tool(raw_tool)
+
+    with pytest.raises(live_mcp.DiscoveryError, match="invalid MCP list entry identity"):
+        live_mcp.check_listed_item({"name": ""}, "name")
+    with pytest.raises(live_mcp.DiscoveryError, match="exceeds the validation budget"):
+        live_mcp.check_listed_item(
+            {"name": "p", "pad": "x" * (live_mcp.MAX_SCHEMA_BYTES + 32)}, "name"
+        )
+
+    with pytest.raises(live_mcp.DiscoveryError, match="did not negotiate tool listing"):
+        live_mcp.check_server_hello(
+            {
+                "protocolVersion": live_mcp.PROTOCOL_VERSION,
+                "capabilities": {},
+                "serverInfo": {"name": "srv", "version": "1.0"},
+            }
+        )
+    with pytest.raises(live_mcp.DiscoveryError, match="invalid MCP server implementation identity"):
+        live_mcp.check_server_hello(
+            {
+                "protocolVersion": live_mcp.PROTOCOL_VERSION,
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "srv"},
+            }
+        )
+    with pytest.raises(live_mcp.DiscoveryError, match="exceed the validation budget"):
+        live_mcp.check_server_hello(
+            {
+                "protocolVersion": live_mcp.PROTOCOL_VERSION,
+                "capabilities": {"tools": {"pad": "x" * (live_mcp.MAX_SCHEMA_BYTES + 32)}},
+                "serverInfo": {"name": "srv", "version": "1.0"},
+            }
+        )
+
+
+def test_session_repeat_in_list_invalid_collector_id_and_session_deadlines(monkeypatch):
+    session = "guarded-session-id-98765"
+    nested_tool = {
+        "name": "list_echo",
+        "description": "ok",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"choice": {"type": "string", "enum": ["safe", f"prefix-{session}"]}},
+        },
+    }
+    init_reply = hello()
+    init_reply.headers["Mcp-Session-Id"] = session
+    repeated, _ = observe(
+        init_reply,
+        notification_accepted(),
+        rpc_result(2, {"tools": [nested_tool]}),
+    )
+    assert repeated.failures == ["server declaration repeats the session identifier"]
+
+    bad_collector = discover_tools(
+        ENDPOINT,
+        allowed_origins=[ORIGIN],
+        transport=FixtureTransport([]),
+        collector_id="x" * 129,
+    )
+    assert bad_collector.failures == ["invalid collector identifier"]
+
+    # Expire deadline before first transport.request, then right after transport.request,
+    # and finally inside check_deadline() after tools/list completes.
+    ticks_before = iter([10.0, 45.0])
+    monkeypatch.setattr(live_mcp.time, "monotonic", lambda: next(ticks_before))
+    expired_pre = discover_tools(ENDPOINT, allowed_origins=[ORIGIN], transport=FixtureTransport([]))
+    assert expired_pre.failures == ["discovery session deadline exceeded"]
+
+    ticks_after = iter([10.0, 15.0, 45.0])
+    monkeypatch.setattr(live_mcp.time, "monotonic", lambda: next(ticks_after))
+    expired_post = discover_tools(
+        ENDPOINT,
+        allowed_origins=[ORIGIN],
+        transport=FixtureTransport([hello()]),
+    )
+    assert expired_post.failures == ["discovery session deadline exceeded"]
+
+    ticks_between_lists = iter([10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 45.0])
+    monkeypatch.setattr(live_mcp.time, "monotonic", lambda: next(ticks_between_lists))
+    expired_check = discover_tools(
+        ENDPOINT,
+        allowed_origins=[ORIGIN],
+        transport=FixtureTransport(
+            [hello(), notification_accepted(), rpc_result(2, {"tools": [tool()]})]
+        ),
+    )
+    assert expired_check.failures == ["discovery session deadline exceeded"]

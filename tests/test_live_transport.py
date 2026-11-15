@@ -382,3 +382,68 @@ def test_a_stream_within_the_limit_returns_the_response_and_drops_the_rest(monke
     )
     assert result.body == b": ping\r\n\r\n" + response
     assert calls[0].closed
+
+
+def test_literal_public_ipv4_and_ipv6_destinations_and_ipv6_connect_tuple(monkeypatch):
+    assert live._resolve_public("93.184.216.34", 443, 1.0) == (socket.AF_INET, "93.184.216.34")
+    ipv6 = "2606:2800:220:1:248:1893:25c8:1946"
+    assert live._resolve_public(ipv6, 443, 1.0) == (socket.AF_INET6, ipv6)
+
+    raw = FakeSocket()
+    secured = FakeSocket()
+    context = ssl.create_default_context()
+    monkeypatch.setattr(ssl, "create_default_context", lambda: context)
+    monkeypatch.setattr(context, "wrap_socket", lambda stream, *, server_hostname: secured)
+    monkeypatch.setattr(socket, "socket", lambda *a, **kw: raw)
+    conn = live._PinnedHTTPSConnection("fixture.example", 8443, socket.AF_INET6, ipv6, 1.0)
+    conn.connect()
+    assert raw.connected == [(ipv6, 8443, 0, 0)]
+
+
+def test_resolver_thread_start_failure_releases_semaphore_slot(monkeypatch):
+    def cannot_start(self):
+        raise RuntimeError("thread spawn refused")
+
+    monkeypatch.setattr(threading.Thread, "start", cannot_start)
+    with pytest.raises(RuntimeError, match="thread spawn refused"):
+        live._resolve_public("fixture.example", 443, 1.0)
+
+    # Both resolver slots must still be available after start() fails.
+    assert live._RESOLVER_SLOTS.acquire(blocking=False)
+    try:
+        assert live._RESOLVER_SLOTS.acquire(blocking=False)
+        live._RESOLVER_SLOTS.release()
+    finally:
+        live._RESOLVER_SLOTS.release()
+
+
+def test_deadline_socket_rejects_write_mode_expired_sendall_and_idempotent_reader_close():
+    underlying = FakeSocket(b"ok")
+    sock = live._DeadlineSocket(underlying, time.monotonic() + 5.0)  # type: ignore[arg-type]
+    with pytest.raises(live.DiscoveryError, match="unsupported HTTP stream mode"):
+        sock.makefile("wb")
+
+    reader = live._DeadlineReader(sock)
+    sock._readers = 1
+    sock.close()
+    assert not underlying.closed
+    reader.close()
+    assert underlying.closed
+    # A second close() on _DeadlineReader must not decrement _readers again.
+    reader.close()
+    assert sock._readers == 0
+
+    expired = live._DeadlineSocket(FakeSocket(), time.monotonic() - 1.0)  # type: ignore[arg-type]
+    with pytest.raises(TimeoutError, match="discovery request deadline exceeded"):
+        expired.sendall(b"POST /mcp HTTP/1.1\r\n\r\n")
+
+
+def test_transport_enforces_eight_origin_limit_and_post_resolve_deadline():
+    transport = live.PinnedHTTPTransport()
+    for idx in range(8):
+        transport._peers[(f"h{idx}.example", 443)] = (socket.AF_INET, "93.184.216.34")
+    with pytest.raises(live.DiscoveryError, match="transport origin limit exceeded"):
+        transport.request("https://h8.example/mcp", b"{}", {}, timeout=1.0, max_bytes=128)
+
+    with pytest.raises(live.DiscoveryError, match="request deadline exceeded"):
+        transport.request("https://h0.example/mcp", b"{}", {}, timeout=0.0, max_bytes=128)
