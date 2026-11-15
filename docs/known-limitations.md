@@ -669,10 +669,18 @@ A way around a limit that its entry does not describe is worth a
   binds no package URL or lockfile evidence and is a gap, whatever version the patch
   names. Without a package URL it is not queried for advisories, although the release
   it patches may have them. The patch file is not read, so what it changes is not
-  recorded. A patch of a package outside the catalog, such as a transitive dependency
-  of an inventoried package, is not reported. Code that an install runs, such as
-  `patch-package` from a `postinstall` script or a `.pnpmfile.cjs` hook, can change
-  installed packages with no finding.
+  recorded. A patch of a catalogued AI package that `package.json` does not declare,
+  such as the `openai` that `@langchain/openai` depends on, is the same gap with no
+  finding, since no component binds that package, and the packages that depend on it
+  keep their lockfile evidence. A patch that only `pnpm-lock.yaml` names is read only
+  when the lockfile is, which needs an inventoried package that `package.json` declares
+  from a registry and that no other patch names; pnpm 10 applies only the patches its
+  settings name, refuses a frozen install from a lockfile that names others, and drops
+  them from the lockfile otherwise. A patch of a package outside the catalog is not
+  reported, whether `package.json` declares it or it is a transitive dependency of an
+  inventoried package. Code that an install runs, such as `patch-package` from a
+  `postinstall` script or a `.pnpmfile.cjs` hook, can change installed packages with no
+  finding.
 - **A pin in any root file resolves a range.** A PyPI range that an exact pin of the
   same package in another root file satisfies is taken as resolved, even when that
   file, such as `requirements-docs.txt`, is never installed.

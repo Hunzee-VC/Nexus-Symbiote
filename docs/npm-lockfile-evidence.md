@@ -68,7 +68,10 @@ value is that of the unpatched tarball. pnpm applies the patches that
 the `patched dependency is unverified` exclusion, with a medium `nonregistry_source`
 finding on the package, as described with the
 [coverage gaps](registry-collector.md#coverage-gaps). A hash in a peer's group, as in
-`0.3.0(openai@4.104.0(patch_hash=...))`, is the peer's, not the package's.
+the `@langchain/core` version `0.3.0(openai@4.104.0(patch_hash=...))`, is the peer's,
+not the package's. A patch of a catalogued AI package that `package.json` does not
+declare, such as that `openai`, is the same exclusion with no finding:
+`@langchain/core` keeps its record, and no component binds the patched package.
 
 For Python, `uv.lock` or `poetry.lock` in the project root supplies the exact
 version and the index origin of each AI package declared in `requirements*.txt` or

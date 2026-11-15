@@ -1054,7 +1054,11 @@ class RegistryScanner(Scanner):
                     gaps[self._NPM_GAPS["unclassified"]] = None
                 continue
             selected.append((key, specs, kind, version_range, record, package))
-        patches = self._npm_patches(data, entries, result) if selected else {}
+        # Without an inventoried npm package, the workspace gap already covers what
+        # pnpm-workspace.yaml may patch, so a file pnpm would refuse fails nothing.
+        patches = self._npm_patches(
+            data, result, workspace=bool(selected) and "pnpm-workspace.yaml" in entries
+        )
         for key, specs, kind, version_range, record, package in selected:
             overridden = overrides is None or bool({key.lower(), package.lower()} & overrides[0])
             if overridden:
@@ -1090,6 +1094,12 @@ class RegistryScanner(Scanner):
             # Too many overrides to read, or one that installs an AI package under
             # another package's name.
             gaps[self._NPM_GAPS["override"]] = None
+        for source, names in patches.items():
+            if names is None or any(self._is_ai_package(name) for name in names):
+                # Also a patch of an AI package that package.json does not declare,
+                # such as one an inventoried package depends on: no component binds
+                # it, yet what is installed is not the registry artifact.
+                gaps[f"{source}: {self._PATCHED_GAP}"] = None
         for replaced in sorted(overrides[2]) if overrides is not None else ():
             # As for a dependency: a git, URL or path source is installed under the
             # name whatever package it holds, and only a lock record names that.
@@ -1710,6 +1720,9 @@ class RegistryScanner(Scanner):
             result.scan_failures.append("pnpm-lock.yaml: invalid or unsupported lockfile")
             return False
         lock_digest = hash_bytes(lock_bytes)
+        if any(self._is_ai_package(name) for name in lock_patches):
+            # As for package.json: an AI package that no component binds is patched too.
+            self._pnpm_patch_gap(result)
         packages = packages or {}
         importers = lock_doc.get("importers")
         root_importer = (
@@ -1866,10 +1879,13 @@ class RegistryScanner(Scanner):
         """Leave a package the lockfile records as patched unbound, with the gap and
         finding a patch that package.json names gives it."""
         component.package_url = None
+        self._pnpm_patch_gap(result)
+        component.risks.append(self._npm_patch_risk(component.name, ["pnpm-lock.yaml"]))
+
+    def _pnpm_patch_gap(self, result: ScanResult) -> None:
         gap = f"pnpm-lock.yaml: {self._PATCHED_GAP}"
         if gap not in result.surfaces_excluded:
             result.surfaces_excluded.append(gap)
-        component.risks.append(self._npm_patch_risk(component.name, ["pnpm-lock.yaml"]))
 
     def _resolve_yarn_lockfile(
         self,
@@ -2048,10 +2064,11 @@ class RegistryScanner(Scanner):
         return frozenset(names)
 
     def _npm_patches(
-        self, data: dict[str, Any], entries: list[str], result: ScanResult
+        self, data: dict[str, Any], result: ScanResult, *, workspace: bool
     ) -> dict[str, frozenset[str] | None]:
-        """The names each file outside the lockfile patches, by file; None for a file
-        whose names are not known, which then counts for every package."""
+        """The names package.json, and with ``workspace`` pnpm-workspace.yaml, patch,
+        by file; None for a file whose names are not known, which then counts for
+        every package."""
         patches: dict[str, frozenset[str] | None] = {}
         manifest: frozenset[str] | None = frozenset()
         for path in self._PATCHED_FIELDS:
@@ -2062,10 +2079,10 @@ class RegistryScanner(Scanner):
             manifest = None if names is None or manifest is None else manifest | names
         if manifest is None or manifest:
             patches["package.json"] = manifest
-        if "pnpm-workspace.yaml" in entries:
-            workspace = self._workspace_patches(result)
-            if workspace is None or workspace:
-                patches["pnpm-workspace.yaml"] = workspace
+        if workspace:
+            names = self._workspace_patches(result)
+            if names is None or names:
+                patches["pnpm-workspace.yaml"] = names
         return patches
 
     def _workspace_patches(self, result: ScanResult) -> frozenset[str] | None:

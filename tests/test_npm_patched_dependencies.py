@@ -158,6 +158,9 @@ def test_a_lockfile_patch_entry_alone_unbinds_the_package(tmp_path, patched):
         f"4.0.0(patch_hash={HASH}",
         f"4.0.0)(patch_hash={HASH}",
         f"4.0.0_patch_hash={HASH}",
+        # Parentheses that do not balance: which group the hash is in is not known.
+        f"4.0.0(zod@3.23.8(patch_hash={HASH})",
+        f"4.0.0)((zod@3.23.8(patch_hash={HASH}))",
     ],
 )
 def test_a_patch_hash_in_the_importer_version_alone_unbinds_the_package(tmp_path, version):
@@ -253,6 +256,16 @@ def test_a_workspace_file_that_is_not_read_leaves_every_package_unbound(tmp_path
     assert result.surfaces_excluded == [WORKSPACE_UNREAD, WORKSPACE_GAP]
     assert [c.package_url for c in result.components] == [None, None]
     assert all("lockfile_integrity" not in c.properties for c in result.components)
+
+
+def test_a_workspace_file_over_the_token_bound_is_not_read(tmp_path, monkeypatch):
+    monkeypatch.setattr("nexus_symbiote.scanners.registry._MAX_PNPM_LOCK_TOKENS", 64)
+    workspace = "packages:\n" + "".join(f"  - 'packages/p{index}'\n" for index in range(40))
+    manifest = {"dependencies": {"openai": "4.0.0"}}
+    result = write_project(tmp_path, manifest, workspace=workspace)
+    assert result.scan_failures == ["pnpm-workspace.yaml: invalid or unsupported workspace file"]
+    assert result.surfaces_excluded == [WORKSPACE_UNREAD, WORKSPACE_GAP]
+    assert result.components[0].package_url is None
 
 
 @pytest.mark.parametrize("workspace", ["", "# no settings\n", "---\n", "--- # empty\n...\n"])
@@ -400,30 +413,155 @@ def test_a_patch_hash_of_a_peer_does_not_unbind_the_package_that_requires_it(tmp
     assert component.properties["lockfile_integrity"] == INTEGRITY
 
 
-@pytest.mark.parametrize(
-    "patches",
-    [
-        {"left-pad@1.3.0": "p"},
-        {"openai-extra@1.0.0": "p"},
-        {"@openai/agents@0.1.0": "p"},
-        {"@scope/openai@1.0.0": "p"},
-        # The name a package without an alias would be compared under if it had one.
-        {"none@1.0.0": "p"},
-        {},
-    ],
-)
-def test_a_patch_of_another_package_leaves_the_package_bound(tmp_path, patches):
+def scan_with_other_patches(root, patches):
     manifest = {"dependencies": {"openai": "4.0.0"}, "pnpm": {"patchedDependencies": patches}}
     lock = pnpm10_lock(patched=None, version="4.0.0")
     if patches:
         names = "".join(f"  '{key}':\n    hash: {HASH}\n    path: p\n" for key in patches)
         lock = lock.replace("importers:", f"patchedDependencies:\n{names}\nimporters:", 1)
-    result = write_project(tmp_path, manifest, lock)
-    assert result.scan_failures == [] and result.surfaces_excluded == []
+    result = write_project(root, manifest, lock)
+    assert result.scan_failures == []
     (component,) = result.components
     assert component.package_url == "pkg:npm/openai@4.0.0"
     assert component.properties["lockfile_integrity"] == INTEGRITY
     assert not any("patch" in risk.detail for risk in component.risks)
+    return result
+
+
+@pytest.mark.parametrize(
+    "patches",
+    [
+        {"left-pad@1.3.0": "p"},
+        # A dependency of an inventoried package that is outside the catalog.
+        {"zod@3.25.76": "p"},
+        # The name a package without an alias would be compared under if it had one.
+        {"none@1.0.0": "p"},
+        {},
+    ],
+)
+def test_a_patch_of_a_package_outside_the_catalog_is_not_reported(tmp_path, patches):
+    assert scan_with_other_patches(tmp_path, patches).surfaces_excluded == []
+
+
+@pytest.mark.parametrize(
+    "patches",
+    [
+        {"openai-extra@1.0.0": "p"},
+        {"@openai/agents@0.1.0": "p"},
+        {"@scope/openai@1.0.0": "p"},
+    ],
+)
+def test_a_patch_of_another_ai_package_is_a_gap_and_leaves_the_package_bound(tmp_path, patches):
+    result = scan_with_other_patches(tmp_path, patches)
+    assert result.surfaces_excluded == [MANIFEST_GAP, PNPM_GAP]
+
+
+def transitive_lock(*, patched=True):
+    """The lockfile pnpm 10.28 writes for @langchain/openai and @langchain/core 0.3.0
+    with a patch of openai, which @langchain/openai depends on, trimmed to the records
+    the collector reads."""
+    peer = f"openai@4.104.0{f'(patch_hash={HASH})' if patched else ''}(zod@3.25.76)"
+    head = "lockfileVersion: '9.0'\n\n"
+    if patched:
+        head += (
+            "patchedDependencies:\n"
+            "  openai@4.104.0:\n"
+            f"    hash: {HASH}\n"
+            "    path: patches/openai.patch\n\n"
+        )
+    return head + (
+        "importers:\n\n"
+        "  .:\n"
+        "    dependencies:\n"
+        "      '@langchain/core':\n"
+        "        specifier: 0.3.0\n"
+        f"        version: 0.3.0({peer})\n"
+        "      '@langchain/openai':\n"
+        "        specifier: 0.3.0\n"
+        f"        version: 0.3.0(@langchain/core@0.3.0({peer}))\n\n"
+        "packages:\n\n"
+        "  '@langchain/core@0.3.0':\n"
+        f"    resolution: {{integrity: {INTEGRITY}}}\n\n"
+        "  '@langchain/openai@0.3.0':\n"
+        f"    resolution: {{integrity: {INTEGRITY}}}\n"
+    )
+
+
+TRANSITIVE = {"@langchain/core": "0.3.0", "@langchain/openai": "0.3.0"}
+
+
+def assert_bound_unpatched(result):
+    assert [c.name for c in result.components] == ["@langchain/core", "@langchain/openai"]
+    for component in result.components:
+        assert component.package_url == f"pkg:npm/{component.name.replace('@', '%40')}@0.3.0"
+        assert component.properties["lockfile_integrity"] == INTEGRITY
+        assert not any("patch" in risk.detail for risk in component.risks)
+
+
+@pytest.mark.parametrize(
+    ("manifest", "lock", "workspace", "gaps"),
+    [
+        (
+            {"dependencies": TRANSITIVE, "pnpm": {"patchedDependencies": {"openai@4.104.0": "p"}}},
+            transitive_lock(),
+            None,
+            [MANIFEST_GAP, PNPM_GAP],
+        ),
+        # Bun's field, without a lockfile.
+        (
+            {"dependencies": TRANSITIVE, "patchedDependencies": {"openai": "p"}},
+            None,
+            None,
+            [MANIFEST_GAP],
+        ),
+        # Only the lockfile names it.
+        ({"dependencies": TRANSITIVE}, transitive_lock(), None, [PNPM_GAP]),
+        (
+            {"dependencies": TRANSITIVE},
+            transitive_lock(patched=False),
+            "patchedDependencies:\n  openai@4.104.0: patches/openai.patch\n",
+            [WORKSPACE_UNREAD, WORKSPACE_GAP],
+        ),
+    ],
+)
+def test_a_patch_of_an_ai_package_package_json_does_not_declare_is_a_gap(
+    tmp_path, manifest, lock, workspace, gaps
+):
+    # The inventoried packages are the registry artifacts, but the openai they load is
+    # not, and no component binds it.
+    result = write_project(tmp_path, manifest, lock, workspace)
+    assert result.scan_failures == []
+    assert result.surfaces_excluded == gaps
+    if lock is not None:
+        assert_bound_unpatched(result)
+    else:
+        assert all(component.package_url is not None for component in result.components)
+
+
+def test_a_patch_of_an_ai_package_package_json_does_not_declare_fails_the_scan_gate(tmp_path):
+    manifest = {
+        "dependencies": TRANSITIVE,
+        "pnpm": {"patchedDependencies": {"openai@4.104.0": "patches/openai.patch"}},
+    }
+    write_project(tmp_path, manifest, transitive_lock())
+    result = CliRunner().invoke(main, ["scan", str(tmp_path), "--no-project-policy", "--check"])
+    assert result.exit_code == 1
+    assert MANIFEST_GAP in result.stderr and PNPM_GAP in result.stderr
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        {"dependencies": {"left-pad": "1.3.0"}, "pnpm": {"patchedDependencies": {"openai": "p"}}},
+        {"dependencies": {"left-pad": "1.3.0"}, "patchedDependencies": ["openai"]},
+        {"pnpm": {"patchedDependencies": {"@4.0.0": "p"}}},
+    ],
+)
+def test_a_patch_of_an_ai_package_is_a_gap_without_an_inventoried_package(tmp_path, manifest):
+    result = write_project(tmp_path, manifest)
+    assert result.scan_failures == []
+    assert result.surfaces_excluded == [MANIFEST_GAP]
+    assert result.components == []
 
 
 def test_a_workspace_without_patches_leaves_the_package_bound(tmp_path):
