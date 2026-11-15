@@ -1102,13 +1102,50 @@ class _Starts:
     The runner's options before its subcommand are skipped. An option the table
     does not know is a flag or takes the next word; both readings are checked,
     unless the runner rejects unknown options (``strict``). ``starts`` decides
-    whether a subcommand word starts code; ``inline`` options run code by themselves.
+    whether a subcommand word starts code; ``inline`` options run code by themselves,
+    and so does any option word ``inline_option`` accepts, in whatever spelling.
     """
 
     options: _Options
     starts: Callable[[str], bool]
     strict: bool = False
     inline: frozenset[str] = frozenset()
+    inline_option: Callable[[str], bool] | None = None
+
+
+_PNPM_SHELL_MODE = "shell-mode"
+_CONFIG_KEY_SEPARATORS = re.compile(r"[-_.\s]")
+
+
+def pnpm_shell_mode_key(key: str) -> bool:
+    """Whether pnpm reads a configuration key as ``shellMode``, which it camelCases."""
+    return _CONFIG_KEY_SEPARATORS.sub("", key).casefold() == "shellmode"
+
+
+def _pnpm_shell_mode(word: str) -> bool:
+    """Whether pnpm reads an option word as shell mode, in which ``pnpm exec`` runs a shell.
+
+    pnpm's parser (nopt) strips every leading dash and each ``no-``, accepts any
+    abbreviation of a long option, such as ``--she`` or ``-shell``, and sets the
+    camelCased key of ``--config.<key>``; any value of that key names the shell.
+    """
+    name = word.partition("=")[0].lstrip("-").casefold()
+    while name.startswith("no-"):
+        name = name[3:]
+    if len(name) >= 2 and _PNPM_SHELL_MODE.startswith(name):
+        return True
+    return name.startswith("config.") and pnpm_shell_mode_key(name[7:])
+
+
+def _inline_option(word: str, grammar: _Starts, letters: set[str]) -> bool:
+    if not word.startswith("-") or word == "-" or word == "--":
+        return False
+    name = word.partition("=")[0]
+    return (
+        name in grammar.inline
+        or (not word.startswith("--") and not letters.isdisjoint(name[1:]))
+        or (grammar.inline_option is not None and grammar.inline_option(word))
+    )
 
 
 def _subcommands(words: list[str], start: int, grammar: _Starts, budget: list[int] | None) -> bool:
@@ -1127,11 +1164,14 @@ def _subcommands(words: list[str], start: int, grammar: _Starts, budget: list[in
         if not word.startswith("-") or word == "-":
             return grammar.starts(word)
         name, equals, _ = word.partition("=")
-        if name in grammar.inline or (
-            not word.startswith("--") and not inline.isdisjoint(name[1:])
-        ):
+        if _inline_option(word, grammar, inline):
             return True
         if name in table.values or any(p.fullmatch(name) for p in table.value_patterns):
+            following = "" if equals or index + 1 >= len(words) else words[index + 1]
+            _spend(budget, following)
+            # pnpm's parser leaves an option word after -C as an option of its own.
+            if _inline_option(following, grammar, inline):
+                return True
             index += 1 if equals else 2
         elif name in table.flags or any(p.fullmatch(name) for p in table.flag_patterns):
             index += 1
@@ -2221,6 +2261,14 @@ def _classify(tokens: list[str], launch: Launch) -> None:
         launch.runner = True
         handler(name, rest, launch)
         return
+    stem = _SCRIPT_SUFFIX.sub("", name)
+    entry = _runner_key(stem)
+    if stem != name and (entry in _RUNNERS or entry in _UNCLASSIFIED_RUNNERS):
+        # npx-cli.js, pnpm.cjs and corepack's dist/yarn.js run as the runner whose entry
+        # point they are, under a name the runner grammars are not looked up by.
+        launch.launcher = "unknown"
+        launch.fail(f"command is a script entry point of {entry}")
+        return
     runner = _runner_key(name)
     if runner in _UNCLASSIFIED_RUNNERS and (
         _UNCLASSIFIED_RUNNERS[runner] is None or _launches(runner, tokens, 1)
@@ -2332,6 +2380,68 @@ _NOT_SPACE = re.compile(r"[^\S ]")
 _YARN_ASSIGNMENT = re.compile(r"[A-Za-z0-9_]+=", re.ASCII)
 # Yarn 1 reads its reporter options among exec's words; they change only its output.
 _YARN_EXEC_QUIET = frozenset({"-s", "--silent", "--verbose"})
+# Yarn 1.22's own options (its commander table), by whether they take the next word.
+_YARN1_VALUES = _set(
+    "--use-yarnrc --link-folder --global-folder --modules-folder --preferred-cache-folder"
+    " --cache-folder --mutex --cwd --proxy --https-proxy --registry --network-concurrency"
+    " --network-timeout --otp"
+)
+_YARN1_OPTIONAL = _set("--prod --production --emoji --scripts-prepend-node-path")
+_YARN1_FLAGS = _set(
+    "-v --version --no-default-rc --verbose --offline --prefer-offline --enable-pnp --pnp"
+    " --disable-pnp --strict-semver --json --ignore-scripts --har --ignore-platform"
+    " --ignore-engines --ignore-optional --force --skip-integrity-check --check-files"
+    " --no-bin-links --flat --no-lockfile --pure-lockfile --frozen-lockfile --update-checksums"
+    " --link-duplicates -s --silent --no-progress --non-interactive --no-node-version-check"
+    " --focus"
+)
+
+
+def _yarn1_normalized(words: list[str]) -> list[str]:
+    """Commander's split of ``-abc`` into ``-a -b -c`` and of ``--a=b`` into ``--a b``."""
+    normalized: list[str] = []
+    for index, word in enumerate(words):
+        if index and words[index - 1] in _YARN1_VALUES:
+            normalized.append(word)
+        elif len(word) > 1 and word[0] == "-" and word[1] != "-":
+            normalized.extend(f"-{letter}" for letter in word[1:])
+        elif word.startswith("--") and "=" in word:
+            normalized.extend(word.split("=", 1))
+        else:
+            normalized.append(word)
+    return normalized
+
+
+def _yarn1_exec_words(words: list[str]) -> list[str] | None:
+    """The words Yarn 1 spawns for ``yarn exec WORDS``; None when it spawns nothing.
+
+    Yarn 1 cuts its arguments at the first ``--`` and passes the words after it as
+    written. Before it, commander takes Yarn's own options with their values and drops
+    any other option together with the next word unless that word starts with ``-``.
+    So ``sh -- -c SCRIPT`` runs ``sh -c SCRIPT``, and ``--foo server.js`` disappears.
+    """
+    cut = words.index("--") if "--" in words else len(words)
+    normalized = _yarn1_normalized(words[:cut])
+    spawned: list[str] = []
+    index = 0
+    while index < len(normalized):
+        word = normalized[index]
+        following = normalized[index + 1] if index + 1 < len(normalized) else None
+        if word in _YARN1_VALUES:
+            if following is None:
+                return None
+            index += 1
+        elif word in _YARN1_OPTIONAL:
+            if following is not None and (following == "-" or not following.startswith("-")):
+                index += 1
+        elif word not in _YARN1_FLAGS and len(word) > 1 and word.startswith("-"):
+            if following is not None and not following.startswith("-"):
+                index += 1
+        elif word not in _YARN1_FLAGS:
+            spawned.append(word)
+        index += 1
+    spawned.extend(words[cut + 1 :])
+    return spawned or None
 
 
 def _exec_script(
@@ -2383,10 +2493,11 @@ def _bun_exec(words: list[str], launch: Launch) -> None:
 def _yarn_exec(words: list[str], launch: Launch) -> None:
     """``yarn exec SCRIPT ARGS``: Yarn 2+ runs SCRIPT in its shell with ARGS appended.
 
-    Yarn 1 spawns SCRIPT as a program with what is left of ARGS once it has taken its
-    own options from them, so it runs no word this reading does not check.
+    Yarn 1 spawns SCRIPT as a program with the words commander leaves of ARGS, whose
+    roles can differ from ARGS as written, so both readings are checked.
     """
     launch.launcher = "yarn exec"
+    spawned = _yarn1_exec_words(words)
     while words[:1] and words[0] in _YARN_EXEC_QUIET:
         words = words[1:]
     operands = words[1:] if words[:1] == ["--"] else words
@@ -2398,6 +2509,8 @@ def _yarn_exec(words: list[str], launch: Launch) -> None:
         script = _exec_script(operands[0], launch, _YARN_ASSIGNMENT)
         if script is not None:
             _local_subcommand([*script, *operands[1:]], launch)
+            if spawned is not None:
+                _local_subcommand([*script, *spawned[1:]], launch)
 
 
 def _npm(name: str, rest: list[str], launch: Launch) -> None:
@@ -3156,7 +3269,8 @@ _STARTS: dict[str, _Starts] = {
         ),
         (_PNPM_FETCHES | _PNPM_NESTED).__contains__,
         # Shell mode makes pnpm exec run its words as a shell command line.
-        inline=frozenset({"-c", "--shell-mode", "--config.shell-mode", "--config.shellMode"}),
+        inline=frozenset({"-c"}),
+        inline_option=_pnpm_shell_mode,
     ),
     "yarn": _Starts(
         _table("-s --silent --verbose --offline --prefer-offline", "--cwd"),
