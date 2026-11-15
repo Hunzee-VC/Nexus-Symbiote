@@ -106,9 +106,9 @@ A way around a limit that its entry does not describe is worth a
 
 ## MCP servers and tools
 
-- **Deno resolver selection is deliberately bounded.** Implicit project-root
-  `deno.json` and `deno.jsonc` import/scopes mappings are bound only when the
-  operator supplies the source-binding key. Explicit `--config`/`-c`, disabled
+- **Deno resolver selection is deliberately bounded.** The settings of implicit
+  project-root `deno.json` and `deno.jsonc`, import/scopes mappings included, are
+  bound only when the operator supplies the source-binding key. Explicit `--config`/`-c`, disabled
   configuration (`--no-config`), explicit `--import-map`, referenced `importMap`
   files and unsupported import/scopes shapes produce coverage gaps, including
   an explicit selector for an otherwise supported root filename. Selected-file
@@ -215,13 +215,24 @@ A way around a limit that its entry does not describe is worth a
   risk score, so about ten such servers add 10 points toward the default fail
   threshold of 50.
 - **Resolver settings outside the root are not read.** Settings are read from the
-  root `.npmrc`, `bunfig.toml`, `.yarnrc.yml`, `.yarnrc`, `.env.yarn`, `uv.toml`
-  and the `[tool.uv]` table of `pyproject.toml`. User and global configuration,
-  parent directories, `pnpm-workspace.yaml` settings and corepack's
-  `packageManager` field are not. For runners that read project resolver files, a
+  root `.npmrc`, `bunfig.toml`, `deno.json`, `deno.jsonc`, `.yarnrc.yml`, `.yarnrc`,
+  `.env.yarn`, `uv.toml` and the `[tool.uv]` table of `pyproject.toml`. User and
+  global configuration, parent directories, `pnpm-workspace.yaml` settings and
+  corepack's `packageManager` field are not. For runners that read project resolver files, a
   server that runs in another working directory, or that a configuration file below
   the root declares, has its package identity withheld
   (`working-directory=[unresolved]`) and a medium `package_source` risk.
+- **Resolver settings are classified from a fixed vocabulary.** Which `uv.toml`,
+  `[tool.uv]`, `bunfig.toml` and `deno.json` settings change where a package comes
+  from is decided from the runners' documented settings, not observed. A setting
+  outside the vocabulary is a source; one the vocabulary treats as inert, such as
+  Deno's `compilerOptions`, `lock` or `workspace` or bunfig's `loader`, is bound by
+  the key but never a finding. `.yarnrc.yml` settings other than its registries and
+  the code and source settings listed in
+  [source binding](verification-source-binding.md) are bound by the key but are not
+  sources, and adding or removing one does not change the unkeyed digest. The
+  contents of a cache, `vendor`, `node_modules` or `links` directory, a lockfile, a
+  Deno workspace member's configuration and a bun security scanner are not read.
 - **Injected environments are not visible.** Variables from an `envFile`, or from
   `dotenvx`, `doppler`, `infisical` or `op run --env-file`, are not read. A launched
   package then carries `environment-file=[unresolved]` instead of its identity.
@@ -229,7 +240,9 @@ A way around a limit that its entry does not describe is worth a
   `npm exec` run a matching package already installed in the project's
   `node_modules`, which the collector does not read. A committed
   `node_modules/<name>` that claims the pinned version runs under the pinned
-  identity.
+  identity. Deno uses the project's `node_modules` too when the root has a
+  `package.json` and no `nodeModulesDir` setting; only an explicit `nodeModulesDir`
+  or `vendor` setting is a package source.
 - **Servers started from code are gaps, not records.** Application code that starts
   or reaches a server leaves no component for it, only a gap that fails the default
   gates: in Python, `StdioServerParameters`, `sse_client`, `streamablehttp_client` and

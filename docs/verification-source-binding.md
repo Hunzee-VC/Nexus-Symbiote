@@ -25,9 +25,9 @@ similar, and cache or tool directories a prepared copy could serve from:
 --url`, `--root`), `pipx --pip-args` index and trust options (matched by unique
 prefix, as pip's parser does; an unknown option is a gap) and project-root resolver
 settings that apply to the launched package: `.npmrc` for npm, pnpm, bun and Deno
-`npm:` specifiers, `bunfig.toml` for bun, `.yarnrc.yml` for `yarn dlx`, and `uv.toml`
-and `pyproject.toml` `[tool.uv]` (indexes, mirrors, insecure hosts and `sources`
-entries for a launched package) for `uv run`. `.npmrc` is read as npm reads it: keys
+`npm:` specifiers, `bunfig.toml` for bun, `deno.json` and `deno.jsonc` for Deno,
+`.yarnrc.yml` for `yarn dlx`, and `uv.toml` and `pyproject.toml` `[tool.uv]` for
+`uv run`, `uvx` and `uv tool run`. `.npmrc` is read as npm reads it: keys
 and values are trimmed, JSON-decoded when quoted and cut at an unescaped `;` or `#`
 otherwise, lines end at a carriage return or line feed, keys after the first
 `[section]` line are ignored, and a key containing `${...}` is `[unresolved]`. Its
@@ -50,6 +50,34 @@ Yarn's `yarnPath` and `plugins` (`.yarnrc.yml`, or `YARN_YARN_PATH` and
 and make the identity unknown; proxy, CA, strict-SSL,
 cache, checksum, offline, network and environment-file settings of `.yarnrc.yml` are
 sources, and a `.env.yarn` file, which Yarn 4 loads by default, is `[unresolved]`.
+Every setting of `uv.toml`, `[tool.uv]`, `bunfig.toml`, `deno.json` and `deno.jsonc`
+is classified too, and a setting outside the collector's vocabulary, a misspelled one
+such as `cache_dir` included, is a source. For uv, indexes, mirrors, insecure hosts,
+`cache-dir` (a prepared cache in the checkout is used as is, as with `UV_CACHE_DIR`),
+`python-downloads-json-url`, `dependency-metadata`, extra build dependencies and
+variables, `config-settings`, `exclude-dependencies`, `offline`, `no-index` and
+`native-tls` other than `false`, an `index-strategy` other than `first-index`, a
+`keyring-provider` other than `disabled` and the `sources` entry of a launched package
+are sources. `override-dependencies`, `constraint-dependencies` and
+`build-constraint-dependencies`, the file forms of `UV_OVERRIDE`, `UV_CONSTRAINT` and
+`UV_BUILD_CONSTRAINT`, are sources, and an entry that names a launched package, or
+that is not a requirement, makes the launcher identity unknown. Settings that choose
+versions or build and install behaviour, project metadata such as `dev-dependencies`
+and `workspace`, and the `[pip]` table, which uv applies only to `uv pip` commands,
+are not. bunfig settings are named by their table, such as `install.cache.dir`:
+beside its registries, scopes and CA settings, its cache and global directories
+(`[install.cache] dir`, `install.globalDir`, `install.globalBinDir`) are sources, as
+`BUN_INSTALL_CACHE_DIR` is; `preload` and `run.preload` make the identity unknown;
+`run.shell`, `define`, `jsxImportSource` and `[install.security]` change the code that
+runs (a medium `launch_context` risk); install, lockfile, test, logging and display
+settings are not sources. For Deno, `imports`, `scopes` and `importMap` are sources,
+and so are `vendor` other than `false` and `nodeModulesDir` other than `none` or
+`false`, since a prepared `vendor` or `node_modules` directory in the checkout is used
+as is, and an `unstable` feature other than one that only adds a runtime API (`kv`,
+`cron`, `temporal`, `ffi` and similar); `links` and `patch` replace registry packages
+with local directories and make the identity unknown; `tasks`, `fmt`, `lint`, `test`,
+`bench`, `publish`, `compilerOptions`, `lock`, `workspace` and package metadata are
+not sources.
 Sources are exported as `package_sources` entries such as
 `.npmrc:@acme:registry=https://npm.acme.example`: the origin only, `[local]` for a
 path or other value and `[unresolved]` for a value with `${...}` expansion. A server
@@ -67,7 +95,7 @@ verification (`NODE_EXTRA_CA_CERTS`, `NODE_TLS_REJECT_UNAUTHORIZED=0`,
 keeps its version but loses `launcher_package` and `package_url`, and carries a medium
 `package_source` risk. Setting names are exported as `resolver_settings` and digested
 only when they come from a fixed vocabulary (npm and pnpm configuration keys, the
-Yarn, bun and uv settings above, a scoped registry with a well-formed scope, or the
+Yarn, bun, Deno and uv settings above, a scoped registry with a well-formed scope, or the
 `sources` entry of a launched package); any other name is `[other]`, once per setting,
 because a token pasted on its own `.npmrc` line is read as a setting name. Values
 enter only the keyed binding.
@@ -95,12 +123,20 @@ from a secure random source, for example with
 every keyed record exports a key identifier derived from the key, so a guessable key
 lets anyone holding the BOM test guesses for it offline. Records then also carry
 `static_value_binding`, an HMAC-SHA256 under that key over the original server object
-and the raw values of every project resolver setting that applies to it, auth
-settings excepted (profile `nexus-symbiote/mcp-static-values/v3`), and a key
-identifier. This detects a different package with the same version, changed
-arguments, environment and header values, endpoint and index paths, opaque launchers
-and the directory of a command. The key never enters the BOM; without it, the binding
-cannot be used to test guesses for a secret. Keep the key in the CI secret store, use
+and the raw values of every setting of each project resolver file that applies to it,
+whether or not it is classified as a source (profile
+`nexus-symbiote/mcp-static-values/v4`), and a key identifier. That is every top-level
+`.npmrc` and `.yarnrc` setting, the text of `.env.yarn`, and the whole of
+`bunfig.toml`, `.yarnrc.yml`, `uv.toml`, `[tool.uv]`, `deno.json` and `deno.jsonc`;
+TOML and YAML values keep their type, so a date and the same text, or `1` and `1.0`,
+bind differently. Auth settings are excepted: `.npmrc` auth keys, the `token`,
+`username` and `password` of a bunfig registry or scope, and Yarn's `npmAuthToken`,
+`npmAuthIdent`, `npmAlwaysAuth`, `httpsCertFilePath` and `httpsKeyFilePath`, also per
+scope and per registry. This detects a different package with the same version,
+changed arguments, environment and header values, endpoint and index paths, resolver
+setting values, opaque launchers and the directory of a command. The key never enters
+the BOM; without it, the binding cannot be used to test guesses for a secret. Keep the
+key in the CI secret store, use
 the same key for a baseline and its candidates, and rotate it by recollecting both. A
 keyed BOM validated without the key, or with a different key, fails reconciliation. The
 CLI refuses a key shorter than 32 characters before any collector runs (exit 2);
@@ -120,10 +156,13 @@ were collected from the same bytes: the redacted export cannot show that an
 argument or environment value stayed the same. Set the key on both collections to
 compare the values. The alert does not record the value.
 
-MCP keyed-value profile v3 replaces v2, which did not retain Deno import-name-to-target
-associations. Old v2 keyed records fail reconciliation and require recollection and
-review; do not copy or relabel their old binding. This keyed-value version is separate
-from the unchanged v3 exported-structure profile.
+MCP keyed-value profile v4 replaces v3 and v2. v3 bound only the uv, bun and Yarn
+settings it classified as sources and Deno's import mappings, so a changed `uv.toml`
+`cache-dir` or `override-dependencies`, bunfig `[install.cache] dir` or `deno.json`
+`vendor` left the binding unchanged; v2 also did not retain Deno import-name-to-target
+associations. Old v3 and v2 keyed records fail reconciliation and require recollection
+and review; do not copy or relabel their old binding. This keyed-value version is
+separate from the unchanged v3 exported-structure profile.
 
 Static configuration profile v1 records (an unkeyed digest over raw configuration, including secret
 values) let anyone holding the BOM confirm guesses for low-entropy secrets. They
@@ -527,5 +566,7 @@ own authenticated review; passing one scope does not establish the other.
 The regression cases in `tests/test_mcp_source_binding.py` cover changed source,
 edited supplied descriptors, missing legacy evidence, redaction, canonical
 object-key ordering and project resolver settings, and hold the known-answer vectors
-for the v3 structure digest and the v2 keyed binding. These cases test the stated contract, not detection efficacy
+for the v3 structure digest and the v4 keyed binding;
+`tests/test_resolver_file_binding.py` covers the classification and binding of every
+resolver file setting. These cases test the stated contract, not detection efficacy
 across an independently sampled population of agent deployments.

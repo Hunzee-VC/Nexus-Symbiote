@@ -87,6 +87,26 @@ conditional relationships remain in the native extension, and the
 `"conditional": true`. CycloneDX and SPDX recovery check the standard projection
 against the embedded document.
 
+## MCP resolver binding v4
+
+`nexus-symbiote/mcp-static-values/v4` binds every setting of each project resolver
+file that applies to a launcher, auth settings excepted: all of `uv.toml`,
+`[tool.uv]`, `bunfig.toml`, `.yarnrc.yml`, `deno.json` and `deno.jsonc`, with TOML
+and YAML values typed. Version 3 bound only the settings it classified as sources
+and Deno's import mappings, so an edited `uv.toml` `cache-dir`, bunfig
+`[install.cache] dir` or `deno.json` `vendor` kept the binding. Recollect and review
+keyed MCP baselines and candidates under v4; v3 and v2 records fail project
+reconciliation. The exported-structure profile remains `mcp-static-config/v3`, but
+its digest now names every setting of those files but `.yarnrc.yml`, so an unkeyed
+record of a server whose resolver file holds a setting the collector did not read
+before also changes once; recollect and review those unkeyed MCP baselines too.
+
+Settings outside the collector's vocabulary, and cache, vendor, `node_modules`,
+mirror, offline and override settings, are package sources now: such a server loses
+its `package_url` and carries a medium `package_source` finding, and a uv override
+or constraint of the launched package, or Deno `links`, makes its launcher identity
+unknown.
+
 ## MCP resolver binding v3
 
 `nexus-symbiote/mcp-static-values/v3` retains the complete Deno import-name-to-target

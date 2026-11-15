@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
+from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
 
 from nexus_symbiote.core.enums import (
@@ -285,7 +286,7 @@ _TRANSITIVE_RUNNERS = frozenset(
 # Values are bound by an HMAC under an operator key that never enters the BOM.
 # A change to either preimage requires a new profile and new test vectors.
 STATIC_CONFIG_HASH_PROFILE = "nexus-symbiote/mcp-static-config/v3"
-STATIC_VALUE_BINDING_PROFILE = "nexus-symbiote/mcp-static-values/v3"
+STATIC_VALUE_BINDING_PROFILE = "nexus-symbiote/mcp-static-values/v4"
 SOURCE_BINDING_KEY_ENV = "NEXUS_SYMBIOTE_SOURCE_BINDING_KEY"
 _MIN_SOURCE_BINDING_KEY_LENGTH = 32
 
@@ -798,6 +799,38 @@ _UV_SETTINGS = (
     "python-install-mirror",
     "pypy-install-mirror",
 )
+# uv.toml and [tool.uv] settings are classified as .npmrc settings are: any setting the
+# vocabularies below do not make inert is a source. These name or feed where packages,
+# builds and interpreters come from; a prepared cache in the checkout is used as is.
+_UV_SOURCE_SETTINGS = _names(
+    "cache-dir python-downloads-json-url dependency-metadata extra-build-dependencies"
+    " extra-build-variables config-settings config-settings-package exclude-dependencies"
+)
+# The file forms of --overrides, --constraints and --build-constraints, which
+# UV_OVERRIDE, UV_CONSTRAINT and UV_BUILD_CONSTRAINT also set.
+_UV_REPLACEMENT_SETTINGS = _names(
+    "override-dependencies constraint-dependencies build-constraint-dependencies"
+)
+# Settings that are sources unless they hold their default value.
+_UV_DEFAULTS = {
+    "offline": "false",
+    "no-index": "false",
+    "native-tls": "false",
+    "index-strategy": "first-index",
+    "keyring-provider": "disabled",
+}
+# Settings that choose versions, build and install behaviour or project metadata, but
+# never where package bytes come from. uv applies [pip] only to `uv pip` commands.
+_UV_INERT_SETTINGS = _names(
+    "add-bounds cache-keys check-url compile-bytecode concurrent-builds concurrent-downloads"
+    " concurrent-installs exclude-newer exclude-newer-package fork-strategy link-mode no-binary"
+    " no-binary-package no-build no-build-isolation no-build-isolation-package"
+    " no-build-package no-cache no-sources prerelease preview publish-url python-downloads"
+    " python-preference reinstall reinstall-package required-version resolution"
+    " trusted-publishing upgrade upgrade-package pip conflicts default-groups dependency-groups"
+    " dev-dependencies environments required-environments managed package workspace"
+    " build-backend"
+)
 # Yarn settings that replace or extend yarn with local code, and that redirect or
 # relax where packages come from (.yarnrc.yml for Yarn 2+, .yarnrc for Yarn 1).
 _YARN_CODE_SETTINGS = frozenset({"yarnPath", "plugins", "yarn-path"})
@@ -807,10 +840,44 @@ _YARN_SOURCE_SETTINGS = _names(
     " unsafeHttpWhitelist checksumBehavior enableOfflineMode injectEnvironmentFiles"
     " packageExtensions"
 )
+# Credentials and client certificates, kept out of the keyed binding as .npmrc's are.
+_YARN_AUTH_SETTINGS = _names(
+    "npmAuthToken npmAuthIdent npmAlwaysAuth httpsCertFilePath httpsKeyFilePath"
+)
+# bunfig.toml settings are named by their table: `install.cache.dir` for [install.cache].
+# preload, run.preload, run.shell, install.ca and install.cafile count only when set.
 _BUN_IDENTITY_SETTINGS = frozenset({"preload", "run.preload"})
 _BUN_CODE_SETTINGS = frozenset({"run.shell"})
 _BUN_SOURCE_SETTINGS = frozenset({"install.ca", "install.cafile"})
+# The runtime rewrites the package's code with these; a security scanner runs at install.
+_BUN_TRANSFORM_SETTINGS = frozenset({"define", "jsxImportSource", "install.security"})
+# Like BUN_INSTALL_CACHE_DIR, a cache or global directory may be a prepared one.
+_BUN_LOCATION_SETTINGS = _names(
+    "install.cache install.cache.dir install.globalDir install.globalBinDir"
+)
+_BUN_INERT_SETTINGS = _names(
+    "jsx jsxFactory jsxFragment smol logLevel telemetry console test debug serve loader"
+    " install.optional install.dev install.peer install.production install.exact"
+    " install.saveTextLockfile install.auto install.frozenLockfile install.dryRun"
+    " install.lockfile install.linker install.minimumReleaseAge install.minimumReleaseAgeExcludes"
+    " install.concurrentScripts install.linkWorkspacePackages install.cache.disable"
+    " install.cache.disableManifest run.bun run.silent"
+)
+_BUN_AUTH_SETTINGS = _names("token username password")
+_BUN_TABLES = frozenset({"install", "run", "install.cache"})
 _DENO_SOURCE_SETTINGS = frozenset({"importMap", "imports", "scopes"})
+# A prepared vendor/ or node_modules/ directory in the checkout is used as is.
+_DENO_DEFAULTS = {"nodeModulesDir": frozenset({"none", "false"}), "vendor": frozenset({"false"})}
+# links (patch before Deno 2.4) replaces registry packages with local directories.
+_DENO_LINK_SETTINGS = frozenset({"links", "patch"})
+# Unstable features that add runtime APIs; any other may change module resolution.
+_DENO_RUNTIME_FEATURES = _names(
+    "kv cron temporal broadcast-channel worker-options net http fs ffi webgpu otel"
+)
+_DENO_INERT_SETTINGS = _names(
+    "$schema name version exports license lock tasks fmt lint test bench publish exclude"
+    " compilerOptions workspace deploy permissions minimumDependencyAge"
+)
 _RESOLVER_FILES = {
     "npm": (".npmrc",),
     "deno": (".npmrc", "deno.json", "deno.jsonc"),
@@ -830,9 +897,20 @@ _KNOWN_SETTINGS = (
     | _BUN_IDENTITY_SETTINGS
     | _BUN_CODE_SETTINGS
     | _BUN_SOURCE_SETTINGS
+    | _BUN_TRANSFORM_SETTINGS
+    | _BUN_LOCATION_SETTINGS
+    | _BUN_INERT_SETTINGS
     | _DENO_SOURCE_SETTINGS
+    | frozenset(_DENO_DEFAULTS)
+    | _DENO_LINK_SETTINGS
+    | _DENO_INERT_SETTINGS
     | frozenset(_UV_SETTINGS)
+    | _UV_SOURCE_SETTINGS
+    | _UV_REPLACEMENT_SETTINGS
+    | frozenset(_UV_DEFAULTS)
+    | _UV_INERT_SETTINGS
     | {"registry", "npmRegistryServer", "offline", "prefer-offline", "strict-ssl", "environment"}
+    | {"unstable"}
 )
 
 
@@ -1052,16 +1130,71 @@ def _file_setting(path: str, family: str, key: str, value: str, launched: set[st
         }
         return "inert" if relaxed.get(key) == value else "source"
     if path == "bunfig.toml":
-        if key in _BUN_IDENTITY_SETTINGS:
-            return "identity"
-        if key in _BUN_CODE_SETTINGS:
-            return "code"
-        return "source" if key in _BUN_SOURCE_SETTINGS else "inert"
+        return _bun_setting(key, value)
     if path in {"deno.json", "deno.jsonc"}:
-        return "source" if key in _DENO_SOURCE_SETTINGS else "inert"
+        return _deno_setting(key, value)
     if path in {"uv.toml", "pyproject.toml"}:
-        return "source" if not key.startswith("sources.") or key[8:] in launched else "inert"
+        return _uv_setting(key, value, launched)
     return "unresolved" if path == ".env.yarn" else "inert"
+
+
+def _bun_setting(key: str, value: str) -> str:
+    if key == "registry" or _SCOPED_REGISTRY.fullmatch(key):
+        return "inert"
+    if key in _BUN_IDENTITY_SETTINGS:
+        return "identity"
+    if key in _BUN_CODE_SETTINGS or key in _BUN_TRANSFORM_SETTINGS:
+        return "code"
+    if key == "install.cache" and value == "false":
+        return "inert"
+    return "inert" if key in _BUN_INERT_SETTINGS else "source"
+
+
+def _deno_setting(key: str, value: str) -> str:
+    if key in _DENO_LINK_SETTINGS:
+        return "inert" if value == "[]" else "identity"
+    if key == "unstable":
+        features = _string_list(value)
+        if features is not None and set(features) <= _DENO_RUNTIME_FEATURES:
+            return "inert"
+        return "source"
+    defaults = _DENO_DEFAULTS.get(key)
+    if defaults is not None:
+        return "inert" if value in defaults else "source"
+    return "inert" if key in _DENO_INERT_SETTINGS else "source"
+
+
+def _uv_setting(key: str, value: str, launched: set[str]) -> str:
+    if key.startswith("sources."):
+        return "source" if key[8:] in launched else "inert"
+    if key in _UV_REPLACEMENT_SETTINGS:
+        requirements = _string_list(value)
+        if requirements is None:
+            return "identity"
+        names: set[str] = set()
+        for requirement in requirements:
+            try:
+                names.add(canonicalize_name(Requirement(requirement).name))
+            except InvalidRequirement:
+                return "identity"
+        if names & launched:
+            return "identity"
+        return "source" if names else "inert"
+    default = _UV_DEFAULTS.get(key)
+    if default is not None:
+        return "inert" if value == default else "source"
+    return "inert" if key in _UV_INERT_SETTINGS else "source"
+
+
+def _string_list(value: str) -> list[str] | None:
+    """The strings of a list setting recorded as JSON text, or None for any other shape."""
+    try:
+        items = json.loads(value)
+    except (ValueError, RecursionError):
+        return None
+    if not isinstance(items, list) or not all(isinstance(item, str) for item in items):
+        return None
+    return items
 
 
 # Working directories that are the scan root; any other one may hold other resolver files.
@@ -1099,7 +1232,11 @@ def _ini_text(raw: str) -> str:
 
 @dataclass(frozen=True)
 class _ResolverFile:
-    """Effective settings of one project resolver file; auth settings are left out."""
+    """Effective settings of one project resolver file; auth settings are left out.
+
+    ``settings`` are named and classified. ``binding_settings``, when given, is what the
+    keyed binding covers instead: every setting of the file but its auth settings.
+    """
 
     settings: tuple[tuple[str, str], ...] = ()
     unresolved: bool = False
@@ -1168,6 +1305,98 @@ def _uv_settings(settings: dict[str, Any]) -> _ResolverFile:
     return _ResolverFile(tuple(found))
 
 
+def _setting_text(value: Any) -> str:
+    return value if isinstance(value, str) else json.dumps(value, default=str)
+
+
+def _typed(value: Any) -> Any:
+    """An injective JSON form of a parsed TOML or YAML value: each scalar names its type,
+    so a date and its text, or 1 and 1.0, bind differently."""
+    if isinstance(value, dict):
+        return {str(key): _typed(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_typed(item) for item in value]
+    if isinstance(value, (str, bool)):
+        return [type(value).__name__, value]
+    isoformat = getattr(value, "isoformat", None)
+    return [type(value).__name__, isoformat() if callable(isoformat) else repr(value)]
+
+
+def _typed_binding(table: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
+    return tuple((str(key), canonical_json(_typed(value))) for key, value in table.items())
+
+
+def _without(table: Mapping[str, Any], names: frozenset[str]) -> dict[str, Any]:
+    return {key: value for key, value in table.items() if key not in names}
+
+
+def _within(table: Any, names: frozenset[str]) -> Any:
+    """Each per-scope or per-registry table of a group without the given settings."""
+    if not isinstance(table, dict):
+        return table
+    return {
+        name: _without(entry, names) if isinstance(entry, dict) else entry
+        for name, entry in table.items()
+    }
+
+
+def _uv_file(settings: dict[str, Any]) -> _ResolverFile:
+    """Every setting of uv.toml or [tool.uv]: index and sources entries one per location."""
+    entries = list(_uv_settings(settings).settings)
+    entries += [
+        (str(key), _setting_text(value))
+        for key, value in settings.items()
+        if key not in _UV_SETTINGS and key != "sources"
+    ]
+    return _ResolverFile(tuple(entries), binding_settings=_typed_binding(settings))
+
+
+def _bun_entries(table: dict[str, Any], prefix: str = "") -> list[tuple[str, str]]:
+    gated = _BUN_IDENTITY_SETTINGS | _BUN_CODE_SETTINGS | _BUN_SOURCE_SETTINGS
+    found: list[tuple[str, str]] = []
+    for key, value in table.items():
+        name = prefix + str(key)
+        if name in {"install.registry", "install.scopes"}:
+            continue
+        if name in _BUN_TABLES and isinstance(value, dict):
+            found += _bun_entries(value, name + ".")
+        elif value or name not in gated:
+            found.append((name, _setting_text(value)))
+    return found
+
+
+def _bun_file(settings: dict[str, Any]) -> _ResolverFile:
+    """Every bunfig.toml setting; registry and scope credentials stay out of the binding."""
+    install = settings.get("install")
+    install_map = install if isinstance(install, dict) else {}
+    entries = _registries(install_map, "registry", "scopes") + _bun_entries(settings)
+    bound = dict(settings)
+    if install_map:
+        stripped = dict(install_map)
+        if isinstance(stripped.get("registry"), dict):
+            stripped["registry"] = _without(stripped["registry"], _BUN_AUTH_SETTINGS)
+        if "scopes" in stripped:
+            stripped["scopes"] = _within(stripped["scopes"], _BUN_AUTH_SETTINGS)
+        bound["install"] = stripped
+    return _ResolverFile(tuple(entries), binding_settings=_typed_binding(bound))
+
+
+def _yarnrc_yml(settings: dict[str, Any]) -> _ResolverFile:
+    """The registry, code and source settings of a .yarnrc.yml; every other one but auth
+    settings, its per-scope and per-registry ones included, is bound as well."""
+    entries = _registries(settings, "npmRegistryServer", "npmScopes")
+    entries += [
+        (str(key), _setting_text(value))
+        for key, value in settings.items()
+        if key in _YARN_CODE_SETTINGS or key in _YARN_SOURCE_SETTINGS
+    ]
+    bound = _without(settings, _YARN_AUTH_SETTINGS)
+    for group in ("npmScopes", "npmRegistries"):
+        if group in bound:
+            bound[group] = _within(bound[group], _YARN_AUTH_SETTINGS)
+    return _ResolverFile(tuple(entries), binding_settings=_typed_binding(bound))
+
+
 class _Resolvers:
     """Project-root package resolver settings, read once per collection when needed."""
 
@@ -1216,13 +1445,7 @@ class _Resolvers:
             settings = self._read_mapping(Path(path), self._result) or {}
             if settings:
                 self._result.surfaces_scanned.append(path)
-            entries = _registries(settings, "npmRegistryServer", "npmScopes")
-            entries += [
-                (str(key), value if isinstance(value, str) else json.dumps(value, default=str))
-                for key, value in settings.items()
-                if key in _YARN_CODE_SETTINGS or key in _YARN_SOURCE_SETTINGS
-            ]
-            return _ResolverFile(tuple(entries))
+            return self._values(path, lambda: _yarnrc_yml(settings))
         if path in {"deno.json", "deno.jsonc"}:
             text = self._text(path)
             if text is None:
@@ -1253,15 +1476,15 @@ class _Resolvers:
             ):
                 self._result.surfaces_excluded.append(f"{path}: unsupported Deno import-map shape")
             try:
-                binding = tuple(
-                    (key, canonical_json(data[key]))
-                    for key in sorted(_DENO_SOURCE_SETTINGS)
-                    if key in data
-                )
+                binding = tuple((key, canonical_json(data[key])) for key in sorted(data))
+                deno_entries = [
+                    (key, _setting_text(value))
+                    for key, value in data.items()
+                    if key not in _DENO_SOURCE_SETTINGS
+                ]
             except (TypeError, ValueError, RecursionError):
                 self._result.scan_failures.append(f"{path}: invalid JSON values")
                 return _ResolverFile()
-            deno_entries: list[tuple[str, str]] = []
             import_map = data.get("importMap")
             if isinstance(import_map, str) and import_map:
                 deno_entries.append(("importMap", import_map))
@@ -1285,46 +1508,19 @@ class _Resolvers:
             return _ResolverFile(tuple(deno_entries), binding_settings=binding)
         settings = self._toml(path)
         if path == "bunfig.toml":
-            install = settings.get("install")
-            install_map = install if isinstance(install, dict) else {}
-            bun_entries = _registries(install_map, "registry", "scopes")
-            for ca_key in ("ca", "cafile"):
-                if ca_key in install_map and install_map[ca_key]:
-                    bun_entries.append(
-                        (
-                            f"install.{ca_key}",
-                            install_map[ca_key]
-                            if isinstance(install_map[ca_key], str)
-                            else json.dumps(install_map[ca_key], default=str),
-                        )
-                    )
-            if settings.get("preload"):
-                bun_entries.append(
-                    (
-                        "preload",
-                        settings["preload"]
-                        if isinstance(settings["preload"], str)
-                        else json.dumps(settings["preload"], default=str),
-                    )
-                )
-            run_cfg = settings.get("run")
-            if isinstance(run_cfg, dict):
-                for run_key in ("preload", "shell"):
-                    if run_cfg.get(run_key):
-                        bun_entries.append(
-                            (
-                                f"run.{run_key}",
-                                run_cfg[run_key]
-                                if isinstance(run_cfg[run_key], str)
-                                else json.dumps(run_cfg[run_key], default=str),
-                            )
-                        )
-            return _ResolverFile(tuple(bun_entries))
+            return self._values(path, lambda: _bun_file(settings))
         if path == "pyproject.toml":
             tool = settings.get("tool")
             uv = tool.get("uv") if isinstance(tool, dict) else None
             settings = uv if isinstance(uv, dict) else {}
-        return _uv_settings(settings)
+        return self._values(path, lambda: _uv_file(settings))
+
+    def _values(self, path: str, build: Callable[[], _ResolverFile]) -> _ResolverFile:
+        try:
+            return build()
+        except (TypeError, ValueError, RecursionError):
+            self._result.scan_failures.append(f"{path}: invalid setting values")
+            return _ResolverFile()
 
 
 class _ResolverView:
@@ -2112,6 +2308,14 @@ class MCPScanner(Scanner):
                         view.identity.append(f"npm {key} setting from {path}")
                     elif path == "bunfig.toml":
                         view.identity.append(f"{path} {key} preloads local code")
+                    elif path in {"uv.toml", "pyproject.toml"}:
+                        view.identity.append(
+                            f"{path} {key} replaces or constrains the launched package"
+                        )
+                    elif path in {"deno.json", "deno.jsonc"}:
+                        view.identity.append(
+                            f"{path} {key} replaces packages with local directories"
+                        )
                     else:
                         view.identity.append(f"{path} {key} replaces or extends yarn")
                 elif kind == "code":
