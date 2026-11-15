@@ -247,3 +247,58 @@ def test_validation_observes_a_content_artifact_as_the_scan_did(tmp_path: Path) 
         assert (reference, "unsafe_format") in issues
         assert (reference, "format_subject_mismatch") not in issues
         assert (reference, "format_claim_mismatch") not in issues
+
+
+@pytest.mark.parametrize("member", [".pkl", "archive/.pkl", "archive/..pkl", "DATA.PKL"])
+@pytest.mark.parametrize("name", ["model.gguf", "model.onnx", "models/archive"])
+def test_a_pickle_member_named_only_by_its_suffix_is_critical(
+    tmp_path: Path, member: str, name: str
+) -> None:
+    target = tmp_path / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(_zip([("archive/version", b"3"), (member, _reduce_pickle())]))
+    component = _component(tmp_path, name)
+    assert component is not None and component.serialization_safety is UNSAFE
+    assert component.properties["format_inspection"] == ZIP_PICKLE_MEMBER
+
+
+def _without_zip64(archive: bytes, member: bytes) -> bytes:
+    """``archive`` with ``member``'s central entry claiming 0xFFFFFFFF bytes, no ZIP64 field."""
+    entry = archive.index(b"PK\x01\x02")
+    while archive[entry + 46 : entry + 46 + len(member)] != member:
+        entry = archive.index(b"PK\x01\x02", entry + 4)
+    return archive[: entry + 24] + b"\xff\xff\xff\xff" + archive[entry + 28 :]
+
+
+def test_a_later_entry_without_its_zip64_field_does_not_hide_a_pickle(tmp_path: Path) -> None:
+    archive = _without_zip64(
+        _zip([("archive/data.pkl", _reduce_pickle()), ("archive/version", b"3")]),
+        b"archive/version",
+    )
+    with zipfile.ZipFile(io.BytesIO(archive)) as opened:
+        assert opened.read("archive/data.pkl")  # the loader still reads the pickle
+    (tmp_path / "model.onnx").write_bytes(archive)
+    component = _component(tmp_path, "model.onnx")
+    assert component is not None and component.serialization_safety is UNSAFE
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        b"checkpoint*\n*.pth\n.DS_Store\n",
+        b"N.B. these weights are converted by convert.py\n",
+        b"cached/\nlogs/\n.",
+        b"logs/*\n.env\n",
+    ],
+)
+def test_text_under_a_model_directory_is_not_read_as_a_pickle(tmp_path: Path, text: bytes) -> None:
+    (tmp_path / "checkpoints").mkdir()
+    (tmp_path / "checkpoints" / ".gitignore").write_bytes(text)
+    assert _component(tmp_path, "checkpoints/.gitignore") is None
+
+
+def test_a_text_pickle_that_names_an_importable_global_is_critical(tmp_path: Path) -> None:
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "payload").write_bytes(b'cos\nsystem\n(S"id"\ntR.')
+    component = _component(tmp_path, "models/payload")
+    assert component is not None and component.serialization_safety is UNSAFE

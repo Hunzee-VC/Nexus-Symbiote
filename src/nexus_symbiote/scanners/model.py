@@ -306,6 +306,23 @@ def manifest_digest(entries: Iterable[tuple[str, str]]) -> str:
     )
 
 
+# Behind a model name such a stream is still rated as the pickle it parses as; as content
+# alone, in a file no model name rates, it is not inventoried.
+TEXT_PICKLE_WITHOUT_CALLABLE = (
+    "Recognized text-protocol pickle opcode stream that names no importable callable; "
+    "object loading can execute code"
+)
+_DOTTED_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
+
+
+def _importable_reference(argument: object) -> bool:
+    """Whether a text GLOBAL or INST argument, ``module name``, names what can be imported."""
+    if not isinstance(argument, str):
+        return False
+    module, _, name = argument.partition(" ")
+    return bool(_DOTTED_IDENTIFIER.fullmatch(module) and _DOTTED_IDENTIFIER.fullmatch(name))
+
+
 def _recognized_pickle(stream: BinaryIO, prefix: bytes, size: int) -> str | None:
     """Recognize bounded pickle instructions without loading objects.
 
@@ -323,17 +340,24 @@ def _recognized_pickle(stream: BinaryIO, prefix: bytes, size: int) -> str | None
     kind = "binary" if binary else "text-protocol"
     recognized = f"Recognized {kind} pickle opcode stream; object loading can execute code"
     seen = marks = 0
+    # A text-protocol stream calls code only through GLOBAL or INST, and a loader can
+    # import only a module and name that are dotted identifiers. Text such as a
+    # `.gitignore` line `checkpoint*` (GLOBAL) or `N.B.` (NONE, STOP) parses as a stream
+    # that names nothing a loader could call.
+    names_callable = binary
     try:
-        for opcode, _, _ in pickletools.genops(sample):
+        for opcode, argument, _ in pickletools.genops(sample):
             seen += 1
             marks += opcode.name == "MARK"
+            if opcode.name in {"GLOBAL", "INST"} and _importable_reference(argument):
+                names_callable = True
             if seen > MAX_PICKLE_OPCODES or marks > MAX_PICKLE_MARKS:
                 break
         else:
             # dis() only checks opcode stack/memo consistency; it never resolves
             # globals, imports artifact code, invokes reducers or constructs objects.
             pickletools.dis(sample, out=io.StringIO())
-            return recognized
+            return recognized if names_callable else TEXT_PICKLE_WITHOUT_CALLABLE
     except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
         pass
     return recognized if binary and seen >= MIN_PICKLE_OPCODES else None
@@ -343,9 +367,18 @@ def _pickle_member(name: bytes) -> bool:
     """Whether a ZIP member's name is a pickle-family file name, wherever the member sits.
 
     ``torch.load`` unpickles ``data.pkl``; a loader handed the archive can open any other
-    member, so a member is rated by its name, as a file on disk is.
+    member, so a member is rated by its name, as a file on disk is. The name is matched
+    as text, not split into suffixes, so ``.pkl`` and ``archive/.pkl``, which
+    ``PurePath`` reads as names without a suffix, count as ``zipfile`` opens them.
     """
-    return _pickle_family(PurePosixPath(name.decode("latin-1")))
+    text = name.decode("latin-1").lower()
+    if text.endswith(tuple(_UNSAFE_SUFFIXES)):
+        return True
+    return any(
+        text.endswith(unsafe + wrapper)
+        for unsafe in _UNSAFE_SUFFIXES
+        for wrapper in _PICKLE_WRAPPERS
+    )
 
 
 def _little(data: bytes, offset: int, width: int) -> int:
@@ -416,7 +449,7 @@ def _directory_members(data: bytes, begin: int, size: int, end: int) -> list[_Zi
     position = begin
     while position < begin + size:
         if position + 46 > begin + size or data[position : position + 4] != b"PK\x01\x02":
-            return None
+            return members if any(_pickle_member(m.name) for m in members) else None
         name_length = _little(data, position + 28, 2)
         extra_length = _little(data, position + 30, 2)
         name = data[position + 46 : position + 46 + name_length]
@@ -430,7 +463,8 @@ def _directory_members(data: bytes, begin: int, size: int, end: int) -> list[_Zi
             _little(data, position + 42, 4),
         )
         if located is None:
-            return None
+            # A pickle member already listed is rated whatever a later entry holds.
+            return members if any(_pickle_member(m.name) for m in members) else None
         members.append(_ZipMember(name, _little(data, position + 10, 2), *located))
         position = extra_at + extra_length + _little(data, position + 32, 2)
     return members
@@ -442,8 +476,10 @@ def _zip64_location(
     """A member's compressed size and local header offset, from ZIP64 when they overflow.
 
     The ZIP64 extra field holds, in this order, each of the uncompressed size, the
-    compressed size and the offset whose 32-bit field is 0xFFFFFFFF. ``None`` when one
-    it must hold is missing, which ``zipfile`` refuses as a corrupt archive.
+    compressed size and the offset whose 32-bit field is 0xFFFFFFFF. ``None`` when the
+    field is there but too short for them, which ``zipfile`` refuses as a corrupt
+    archive. Without the field, ``zipfile`` keeps the 32-bit values as written and reads
+    the archive, so they are kept here too.
     """
     if 0xFFFFFFFF not in (uncompressed, compressed, offset):
         return compressed, offset
@@ -462,7 +498,7 @@ def _zip64_location(
                     cursor += 8
             return values[1], values[2]
         position += 4 + length
-    return None
+    return compressed, offset
 
 
 def _reread(stream: BinaryIO, offset: int, size: int) -> bytes:
@@ -859,7 +895,7 @@ def observe_content(
     """
     budget = budget or InspectionBudget()
     inspected = _inspect_opened(path, stream, budget)
-    if (
+    if inspected.explanation == TEXT_PICKLE_WITHOUT_CALLABLE or (
         inspected.safety != SerializationSafety.UNSAFE_CODE_EXECUTION
         and inspected.explanation not in _CONTENT_UNREAD
     ):

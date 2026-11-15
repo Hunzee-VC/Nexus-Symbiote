@@ -439,7 +439,14 @@ A way around a limit that its entry does not describe is worth a
   the `model-bytes` limit is a collection failure.
 - **Content recognition is bounded.** A binary pickle is recognized by its PROTO
   opcode and 16 well-formed opcodes in the first 64 KiB, and a text-protocol pickle
-  by a consistent stream of at most 4,096 opcodes. A NumPy array's version 1, 2 or 3
+  by a consistent stream of at most 4,096 opcodes. In a file inventoried only by its
+  content, a text-protocol stream must also name an importable callable (a `GLOBAL`
+  or `INST` whose module and name are dotted identifiers), so text that only parses as
+  one, such as a `.gitignore` under `checkpoints/`, is not inventoried; text whose
+  first lines happen to read as such a reference, such as `cache`, `logs`, `.`, still
+  is. A ZIP member is a pickle when its name ends in a pickle-family suffix, so `.pkl`
+  and `archive/.pkl` count, and a central directory entry whose 32-bit size or offset
+  is `0xFFFFFFFF` without a ZIP64 field is read as written, as `zipfile` reads it. A NumPy array's version 1, 2 or 3
   header is parsed when it is at most 64 KiB long, as every version 1 header is, and
   while the 16,000,000 structure units one scan shares with the ONNX and GGUF readers
   last, at one unit a header byte; only its `descr` value is read for types, so a
