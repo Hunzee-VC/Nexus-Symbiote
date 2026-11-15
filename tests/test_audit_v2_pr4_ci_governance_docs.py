@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import ssl
 import subprocess
 import sys
@@ -106,6 +107,7 @@ def test_action_yml_isolates_pip_and_clarifies_validate_scope() -> None:
     install_steps = [s for s in action["runs"]["steps"] if s.get("id") == "install"]
     assert len(install_steps) == 1
     script = install_steps[0]["run"]
+    assert "unless paired with signature-policy" not in validate_desc
     assert "PIP_CONFIG_FILE=/dev/null" in script
     assert "--isolated" in script
     assert "--no-index" in script
@@ -131,6 +133,13 @@ def test_repository_controls_tls_strict_json_and_proxy_isolation(
         controls._strict_json(b'{"bad": NaN}')
     with pytest.raises(ValueError, match="non-finite JSON constant"):
         controls._strict_json(b'{"bad": Infinity}')
+    for overflowing in (b'{"bad": 1e999}', b'{"bad": -1e999}', b"[1.5e400]"):
+        with pytest.raises(ValueError, match="non-finite JSON number"):
+            controls._strict_json(overflowing)
+    assert controls._strict_json(b'{"ok": 1.5e300, "n": 12345678901234567890}') == {
+        "ok": 1.5e300,
+        "n": 12345678901234567890,
+    }
 
     no_redirect = controls._NoRedirect()
     assert (
@@ -166,20 +175,22 @@ def test_repository_controls_tls_strict_json_and_proxy_isolation(
     assert any(isinstance(h, controls._NoRedirect) for h in captured_handlers)
 
 
-def test_repository_controls_requires_all_four_tag_rules_and_optional_tag_signer_allowlist(
+def test_repository_controls_tag_ruleset_stays_immutability_only_with_signer_allowlist(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # The immutability ruleset blocks updates and deletions only: `update` already refuses
+    # fast-forwards, the tag signature is checked on the tag object itself, and a separate
+    # creation-only ruleset (integration batch 1) must still see a {creation, update,
+    # deletion} ruleset as guarding so that its creation-deadlock refusal keeps working.
     ruleset = json.loads((ROOT / "config" / "github-release-tag-ruleset.json").read_text("utf-8"))
-    rule_types = {r["type"] for r in ruleset["rules"]}
-    assert rule_types == {"update", "deletion", "non_fast_forward", "required_signatures"}
-
-    for missing in ("non_fast_forward", "required_signatures"):
-        weakened = {
-            **ruleset,
-            "id": 99,
-            "current_user_can_bypass": "never",
-            "rules": [r for r in ruleset["rules"] if r["type"] != missing],
-        }
+    assert ruleset["rules"] == [{"type": "update"}, {"type": "deletion"}]
+    good = {**ruleset, "id": 99, "current_user_can_bypass": "never"}
+    assert controls.evaluate_tag_rulesets([good], verify_bypass_actors=True) == ([], [])
+    assert controls._guards_release_tags(
+        {**good, "rules": [{"type": "creation"}, {"type": "update"}, {"type": "deletion"}]}
+    )
+    for missing in ("update", "deletion"):
+        weakened = {**good, "rules": [r for r in good["rules"] if r["type"] != missing]}
         errors, _ = controls.evaluate_tag_rulesets([weakened], verify_bypass_actors=True)
         assert errors
 
@@ -247,7 +258,12 @@ def test_workflow_checker_blocks_flow_mapping_count_balancing_and_neutralizing_f
 
     for bad_flag in (
         "-e",
+        "-qe",
+        "-qh",
+        "-qV",
         "--exit-zero",
+        "--show-files",
+        "--show-settings",
         "--help",
         "-h",
         "--version",
@@ -255,11 +271,18 @@ def test_workflow_checker_blocks_flow_mapping_count_balancing_and_neutralizing_f
         "--co",
         "--collect-only",
         "--setup-only",
+        "--setup-plan",
+        "--fixtures",
+        "--markers",
     ):
         parsed_gates = check_workflows._gates(
             f"ruff check src tests scripts {bad_flag}", True, True
         )
         assert not any(g.runs("ruff check src tests scripts") for g in parsed_gates)
+    assert any(
+        g.runs("python -m pytest")
+        for g in check_workflows._gates("python -m pytest -Werror -rfe", True, True)
+    )
 
     assert (
         check_workflows._gates(
@@ -273,6 +296,17 @@ def test_workflow_checker_blocks_flow_mapping_count_balancing_and_neutralizing_f
         )
         == []
     )
+    for prefix in (
+        "PYTEST_ADDOPTS=--co",
+        "PYTHONPATH=/tmp/shadow",
+        "PYTHONSTARTUP=/tmp/startup.py",
+        "BASH_ENV=/tmp/x",
+        "LD_AUDIT=x",
+    ):
+        assert not any(
+            g.runs("python -m pytest")
+            for g in check_workflows._gates(f"{prefix} python -m pytest -q", True, True)
+        )
     for poisoned in (
         "export LD_PRELOAD=/nonexistent/evil.so\nruff check src tests scripts",
         "declare -x PYTHONHOME=/nonexistent/fake\nruff check src tests scripts",
@@ -304,16 +338,8 @@ def test_workflow_checker_blocks_flow_mapping_count_balancing_and_neutralizing_f
     assert any("does not run" in err for err in gate_step_env_errors)
 
 
-def test_coverage_floors_include_tier0_runtime_live_and_supply_chain_modules() -> None:
-    expected = {
-        "nexus_symbiote/runtime_validation.py",
-        "nexus_symbiote/supply_chain_cli.py",
-        "nexus_symbiote/live/stdio.py",
-        "nexus_symbiote/live/session.py",
-        "nexus_symbiote/live/verify.py",
-        "nexus_symbiote/scanners/live_mcp.py",
-    }
-    assert expected <= set(check_coverage.MODULE_FLOORS)
+def test_coverage_floors_include_supply_chain_cli() -> None:
+    assert check_coverage.MODULE_FLOORS["nexus_symbiote/supply_chain_cli.py"] == (84, 82)
 
 
 def test_benchmark_and_evidence_helpers_enforce_confined_io(
@@ -445,9 +471,24 @@ def test_workflows_makefile_and_docs_security_invariants() -> None:
     )
     assert "pip install --only-binary=:all: dist/*.whl" in ci_text
     assert "pip install --only-binary=:all: dist/*.whl" in release_text
-    assert "tests/test_registry_redirects.py" in deps_text
-    assert "PYTHON ?= python" in makefile_text
+    assert "ALLOWED_RELEASE_TAG_SIGNERS: ${{ vars.ALLOWED_RELEASE_TAG_SIGNERS }}" in release_text
+    # Every Hypothesis module runs under the randomized fuzz profile.
+    hypothesis_modules = sorted(
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "tests").glob("test_*.py")
+        if re.search(
+            r"^(?:from hypothesis import|import hypothesis)\b", path.read_text("utf-8"), re.M
+        )
+    )
+    assert hypothesis_modules
+    assert [m for m in hypothesis_modules if m not in deps_text] == []
+    # An ambient PYTHON variable must not choose the interpreter that runs the gates.
+    assert "$(PYTHON)" not in makefile_text and "PYTHON ?=" not in makefile_text
     assert "--no-index --no-deps --only-binary=:all: dist/*.whl" in makefile_text
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "URI origins" in readme
+    assert "--signature-policy` and `diff --fail-on-alert` to govern MCP" not in readme
 
     threat_model = (ROOT / "docs" / "threat-model.md").read_text(encoding="utf-8")
     assert "a `pull_request_target` job" not in threat_model

@@ -1,5 +1,4 @@
 .DEFAULT_GOAL := help
-PYTHON ?= python
 PYTHON_FLOOR ?= python3.11
 
 # ── Development ──────────────────────────────────────────────
@@ -9,23 +8,23 @@ install: install-locked ## Install the reviewed locked development environment
 
 .PHONY: install-locked
 install-locked: ## Install from the locked CI dependency set
-	$(PYTHON) -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock
-	$(PYTHON) -m pip install --no-deps --no-build-isolation -e .
-	$(PYTHON) -m pip check
+	python -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock
+	python -m pip install --no-deps --no-build-isolation -e .
+	python -m pip check
 
 # ── Dependency locks ─────────────────────────────────────────
 
 .PHONY: lock
 lock: ## Regenerate the CI, Action and floor locks from pyproject.toml (pinned uv, needs PyPI)
-	$(PYTHON) scripts/check_locks.py --regenerate
+	python scripts/check_locks.py --regenerate
 
 .PHONY: lock-upgrade
 lock-upgrade: ## Upgrade every locked package to the newest release at least a week old
-	$(PYTHON) scripts/check_locks.py --regenerate --upgrade
+	python scripts/check_locks.py --regenerate --upgrade
 
 .PHONY: lock-check
 lock-check: ## Check the locks against pyproject.toml and each other, offline
-	$(PYTHON) scripts/check_locks.py
+	python scripts/check_locks.py
 
 # ── Quality ──────────────────────────────────────────────────
 
@@ -46,21 +45,21 @@ quality: lint format-check typecheck workflow-check hygiene lock-check ## Run al
 
 .PHONY: workflow-check
 workflow-check: ## Validate pinned workflow references and shell inputs
-	$(PYTHON) scripts/check_workflows.py
+	python scripts/check_workflows.py
 
 .PHONY: hygiene
 hygiene: ## Check tracked source, links, versions and vendor digests
-	$(PYTHON) scripts/check_repository_hygiene.py
+	python scripts/check_repository_hygiene.py
 
 # ── Testing ──────────────────────────────────────────────────
 
 .PHONY: test
 test: ## Run the test suite; a skip other than a host file-system one (or a missing pip outside CI) fails it
-	$(PYTHON) -m pytest --strict-skips
+	python -m pytest --strict-skips
 
 .PHONY: test-verbose
 test-verbose: ## Run the test suite with verbose output
-	$(PYTHON) -m pytest -vv --durations=20 --strict-skips
+	python -m pytest -vv --durations=20 --strict-skips
 
 .PHONY: test-floor
 test-floor: ## Run the suite on Python 3.11 with each runtime dependency at its declared floor, without the locked_only tests
@@ -74,12 +73,12 @@ test-floor: ## Run the suite on Python 3.11 with each runtime dependency at its 
 
 .PHONY: coverage
 coverage: ## Run tests with coverage reporting
-	$(PYTHON) -m pytest --strict-skips --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=term-missing --cov-report=json:coverage.json
-	$(PYTHON) scripts/check_coverage.py coverage.json
+	python -m pytest --strict-skips --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=term-missing --cov-report=json:coverage.json
+	python scripts/check_coverage.py coverage.json
 
 .PHONY: security-regressions
 security-regressions: ## Run the committed security regression contracts
-	PYTHONPATH=src $(PYTHON) scripts/check_security_regressions.py --out security-regressions.json
+	PYTHONPATH=src python scripts/check_security_regressions.py --out security-regressions.json
 
 .PHONY: check
 check: quality coverage security-regressions ## Run the offline subset of the required CI checks
@@ -91,11 +90,11 @@ check: quality coverage security-regressions ## Run the offline subset of the re
 
 .PHONY: build
 build: ## Build sdist and wheel distributions
-	$(PYTHON) -m build --no-isolation
+	python -m build --no-isolation
 
 .PHONY: check-dist
 check-dist: ## Validate built distributions with twine
-	$(PYTHON) -m twine check --strict dist/*
+	python -m twine check --strict dist/*
 
 .PHONY: wheel-smoke
 wheel-smoke: ## Build afresh and check the exact wheel in a temporary locked environment
@@ -103,7 +102,7 @@ wheel-smoke: ## Build afresh and check the exact wheel in a temporary locked env
 	$(MAKE) build
 	@set -eu; smoke_dir="$$(mktemp -d)"; \
 	trap 'rm -rf "$$smoke_dir"' EXIT; \
-	$(PYTHON) -m venv "$$smoke_dir"; \
+	python -m venv "$$smoke_dir"; \
 	"$$smoke_dir/bin/python" -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock; \
 	"$$smoke_dir/bin/python" -m pip install --no-index --no-deps --only-binary=:all: dist/*.whl; \
 	"$$smoke_dir/bin/python" -I scripts/check_wheel_security.py dist/*.whl

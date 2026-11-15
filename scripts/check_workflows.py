@@ -197,12 +197,33 @@ NEUTRALIZING_GATE_FLAGS = frozenset(
         "--version",
         "-e",
         "--exit-zero",
+        "--show-files",
+        "--show-settings",
         "--co",
         "--collect-only",
         "--setup-only",
+        "--setup-plan",
+        "--fixtures",
+        "--funcargs",
+        "--fixtures-per-test",
+        "--markers",
     }
 )
-UNSAFE_GATE_ENV = frozenset({"LD_PRELOAD", "LD_LIBRARY_PATH", "PYTHONHOME", "PYTHONINSPECT"})
+# Variables that load other code into, or change the arguments of, the gate's process.
+UNSAFE_GATE_ENV = frozenset(
+    {
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "LD_AUDIT",
+        "BASH_ENV",
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "PYTHONINSPECT",
+        "PYTEST_ADDOPTS",
+        "PYTEST_PLUGINS",
+    }
+)
 # The timeout options that leave the command's status intact, alone or with a value.
 TIMEOUT_FLAGS = frozenset({"--foreground", "--preserve-status", "-v", "--verbose"})
 TIMEOUT_VALUED = frozenset({"-k", "--kill-after", "-s", "--signal"})
@@ -929,6 +950,14 @@ class _Gate:
             if arg == "--":
                 break
             if arg.partition("=")[0] in NEUTRALIZING_GATE_FLAGS:
+                return False
+            if (
+                arg.startswith("-")
+                and not arg.startswith(("--", "-W", "-X", "-o", "-k", "-m", "-c", "-p", "-r"))
+                and len(arg) > 2
+                and arg[1:].isalpha()
+                and (set(arg[1:]) & {"h", "V", "e"})
+            ):
                 return False
         if " ".join([self.program, *self.args]).startswith(required):
             return True

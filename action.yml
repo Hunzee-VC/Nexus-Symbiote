@@ -26,8 +26,9 @@ inputs:
     description: >-
       Fail the action when completeness or integrity validation fails. Integrity requires at
       least one verified hash or signature and no unknown component evidence: a checkout
-      instruction or static tool digest satisfies that without authenticating unverified MCP
-      servers unless paired with signature-policy and reviewed-baseline. A model passes integrity
+      instruction or static tool digest satisfies that without authenticating any MCP server;
+      signature-policy covers models and discovery reports only, so gate MCP server changes
+      with reviewed-baseline. A model passes integrity
       only as a SafeTensors file each of whose weight files (the file and any shard index bound
       to it) is Sigstore-signed or digest-pinned in signature-policy. 'false' skips both checks
       and prints a warning

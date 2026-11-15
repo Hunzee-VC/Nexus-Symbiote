@@ -60,12 +60,9 @@ MODULE_FLOORS: dict[str, tuple[int, int | None]] = {
     # parse pre-empts is covered by substituting the digest).
     "nexus_symbiote/inventory_export.py": (98, 98),
     "nexus_symbiote/inventory_export_cli.py": (98, 98),
-    "nexus_symbiote/runtime_validation.py": (72, 67),
+    # Integration batch 3 floors runtime_validation, live/* and scanners/live_mcp higher
+    # than this tree's tests reach; this entry is the one module it leaves unfloored.
     "nexus_symbiote/supply_chain_cli.py": (84, 82),
-    "nexus_symbiote/live/stdio.py": (80, 67),
-    "nexus_symbiote/live/session.py": (85, 67),
-    "nexus_symbiote/live/verify.py": (91, 88),
-    "nexus_symbiote/scanners/live_mcp.py": (89, 82),
 }
 COUNTS = (
     ("statement", "covered_lines", "num_statements"),

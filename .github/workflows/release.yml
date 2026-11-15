@@ -55,6 +55,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PUBLISH: ${{ inputs.publish }}
           SOAK_OVERRIDE: ${{ inputs.soak_override }}
+          # Optional comma-separated tagger emails; unset means no allowlist.
+          ALLOWED_RELEASE_TAG_SIGNERS: ${{ vars.ALLOWED_RELEASE_TAG_SIGNERS }}
         run: >-
           python scripts/check_repository_controls.py --repo "$GITHUB_REPOSITORY"
           --branch main --sha "$GITHUB_SHA" --publish "$PUBLISH"

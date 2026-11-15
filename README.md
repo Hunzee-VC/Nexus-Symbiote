@@ -155,7 +155,7 @@ Every row has limits: [known limitations](https://github.com/Hunzee-VC/Nexus-Sym
 
 1. **Collect.** Each collector reads its surfaces through confined, size-bounded file reads and returns components, findings and coverage status.
 2. **Assemble.** Results merge into one AgentBOM. Every claim keeps its assurance level: declared, observed or verified.
-3. **Gate.** `validate` checks completeness and recorded local digests, bindings and operator-supplied signature policies (pair with `--signature-policy` and `diff --fail-on-alert` to govern MCP server changes; see [gates and drift](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md#gates-and-drift)); `risk` scores findings against your policy. Gaps fail closed.
+3. **Gate.** `validate` checks completeness and recorded local digests, bindings and operator-supplied signature policies for models and discovery reports; it does not authenticate MCP servers, so gate MCP server changes with `diff --fail-on-alert` against a reviewed baseline (see [gates and drift](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md#gates-and-drift)); `risk` scores findings against your policy. Gaps fail closed.
 4. **Compare.** `diff` compares two snapshots semantically and rates each change.
 5. **Export.** Standard formats are generated from the same collection, so every export describes the same evidence.
 
@@ -166,7 +166,7 @@ Every row has limits: [known limitations](https://github.com/Hunzee-VC/Nexus-Sym
 | MCP servers and clients | `mcp` | Clients, servers, launchers, package pins, transports, endpoints, tool fingerprints |
 | Model weights | `model` | SHA-256 of weight files, serialization safety, SafeTensors structure, signature status |
 | Instructions and rules | `prompt` | Content digests; hidden-character and hidden-comment findings |
-| RAG and vector stores | `rag` | Retrieval sources, store/index/embedding identities, control states |
+| RAG and vector stores | `rag` | Retrieval sources, store/index/embedding identities, URI origins, control states |
 | Packages and images | `registry` | AI packages in the [catalog](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/registry-collector.md#ai-package-catalog), pins, lockfile integrity, image digests, registry redirects |
 | A2A agent cards | `a2a` | Endpoints, security schemes, scopes, card signatures |
 | IDE agent settings | `ide_agents` | Permission modes, blanket grants, hooks, settings digests |

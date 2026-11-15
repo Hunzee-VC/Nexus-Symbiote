@@ -41,7 +41,10 @@ def materials() -> dict[str, str]:
     files = {
         f"package/{p.relative_to(package).as_posix()}": p
         for p in package.rglob("*")
-        if not p.is_symlink() and p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"
+        if not p.is_symlink()
+        and p.is_file()
+        and "__pycache__" not in p.parts
+        and p.suffix != ".pyc"
     }
     for path in [
         DIRECTORY / "evidence.py",

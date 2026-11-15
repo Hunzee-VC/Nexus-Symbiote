@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import http.client
 import json
+import math
 import os
 import re
 import ssl
@@ -109,8 +110,17 @@ def _strict_json(raw: bytes) -> Any:
     def _invalid_constant(value: str) -> None:
         raise ValueError(f"non-finite JSON constant in GitHub API response: {value}")
 
+    def _finite_float(value: str) -> float:
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("non-finite JSON number in GitHub API response")
+        return number
+
     return json.loads(
-        raw.decode("utf-8"), object_pairs_hook=_pairs, parse_constant=_invalid_constant
+        raw.decode("utf-8"),
+        object_pairs_hook=_pairs,
+        parse_constant=_invalid_constant,
+        parse_float=_finite_float,
     )
 
 
@@ -339,7 +349,7 @@ def fetch_tag_rulesets(repo: str, token: str) -> list[Any]:
 
 
 def _guards_release_tags(ruleset: Any) -> bool:
-    """Active, covering every v* tag, requiring signatures and blocking updates/deletions."""
+    """Active, covering every v* tag and blocking updates and deletions."""
     if (
         not isinstance(ruleset, dict)
         or ruleset.get("target") != "tag"
@@ -358,7 +368,7 @@ def _guards_release_tags(ruleset: Any) -> bool:
     types = (
         {r.get("type") for r in rules if isinstance(r, dict)} if isinstance(rules, list) else set()
     )
-    return {"update", "deletion", "non_fast_forward", "required_signatures"} <= types
+    return {"update", "deletion"} <= types
 
 
 def evaluate_tag_rulesets(
