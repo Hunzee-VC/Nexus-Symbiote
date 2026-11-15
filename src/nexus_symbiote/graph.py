@@ -13,10 +13,11 @@ from urllib.parse import quote
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
-from nexus_symbiote.core.enums import AssuranceLevel, AutonomyLevel, ComponentType
+from nexus_symbiote.core.enums import AssuranceLevel, AutonomyLevel, ComponentType, RiskSeverity
 from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import (
     MAX_REFERENCE_CHARS,
+    UNBOUND_VALUES_DETAIL,
     AgentComponent,
     AnyComponent,
     ClaimEvidence,
@@ -24,8 +25,10 @@ from nexus_symbiote.core.models import (
     ModelComponent,
     PromptComponent,
     RegistryEntryComponent,
+    RiskAssessment,
     SkillPackageComponent,
 )
+from nexus_symbiote.utils.secrets import redact_text
 
 if TYPE_CHECKING:
     from nexus_symbiote.utils.confined import ConfinedCollection
@@ -39,6 +42,8 @@ MAX_MANIFEST_YAML_TOKENS = 20_000
 # the same tree scanned at two locations must yield the same inventory.
 INFERRED_AGENT_IDENTITY = "."
 INFERRED_AGENT_NAME = "repository"
+MANIFEST_VALUE_BINDING_PROFILE = "nexus-symbiote/agent-manifest-values/v1"
+_DISPLAYED_FIELDS = ("name", "version", "framework", "owner", "purpose")
 MAX_GRAPH_ISSUES = 100
 _SHOWN = 200
 _REPOSITORY_ASSOCIATION = "repository association; runtime use and authority unobserved"
@@ -139,6 +144,48 @@ def _collected_digest(component: AnyComponent) -> str | None:
     return component.hashes.get("sha256")
 
 
+_CHANGED = "instruction changed since scanner collection"
+
+
+def _collection_mismatch(component: AnyComponent, path: str, raw: bytes) -> str | None:
+    """Why ``raw``, read now from ``path``, does not match what the collector recorded,
+    or None.
+
+    A prompt file whose unkeyed hash the collector withholds is checked against its keyed
+    binding instead. Without the operator key, or without a binding, nothing recorded its
+    content, so it is unbound rather than changed, as integrity validation counts it.
+    """
+    from nexus_symbiote.scanners.prompt import (
+        IMPORT_CONTENT_BINDING_PROFILE,
+        withholds_content_hash,
+    )
+    from nexus_symbiote.scanners.source_binding import BindingError, value_binding
+
+    if not (isinstance(component, PromptComponent) and withholds_content_hash(component)):
+        return _CHANGED if _collected_digest(component) != hash_bytes(raw) else None
+    recorded = component.properties.get("static_value_binding")
+    if recorded is None:
+        return None
+    profile = component.properties.get("static_value_binding_profile")
+    if profile != IMPORT_CONTENT_BINDING_PROFILE:
+        return "instruction content binding has an unknown profile"
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return _CHANGED
+    try:
+        binding = value_binding(IMPORT_CONTENT_BINDING_PROFILE, {"path": path, "content": text})
+    except BindingError as exc:
+        return str(exc)
+    if not binding:
+        return None
+    if binding["static_value_binding_key_id"] != component.properties.get(
+        "static_value_binding_key_id"
+    ):
+        return "instruction content was bound under another key"
+    return _CHANGED if binding["static_value_binding"] != recorded else None
+
+
 def _readable_entry(
     files: ConfinedCollection, path: Path, locator: str, problems: list[str]
 ) -> bool:
@@ -196,8 +243,12 @@ def _manifest_dependencies(
         records = collected_text.get(path.as_posix(), [])
         if records:
             # The collector already inventoried this file, with its own checks.
-            if any(_collected_digest(record) != digest for record in records):
-                problems.append(f"{locator}: instruction changed since scanner collection")
+            mismatches = {
+                reason
+                for record in records
+                if (reason := _collection_mismatch(record, path.as_posix(), raw)) is not None
+            }
+            problems.extend(f"{locator}: {reason}" for reason in sorted(mismatches))
             continue
         try:
             text = raw.decode("utf-8")
@@ -302,6 +353,8 @@ def assemble_repository_agent(
     declares are recorded there once read.
     """
     from nexus_symbiote.policy import PolicyError
+    from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
+    from nexus_symbiote.scanners.source_binding import BindingError, value_binding
     from nexus_symbiote.utils.confined import ConfinedCollection
 
     strict = failures is None
@@ -325,6 +378,27 @@ def assemble_repository_agent(
         unread: list[str] = []
         with ConfinedCollection(root, unread, gaps, exclude_paths=exclude_paths) as files:
             additions = _manifest_dependencies(bom, declared, files, agent_ref, problems)
+
+    # The export shows these fields redacted. A field that redaction changed, such as
+    # an owner URL cut to its origin, would otherwise compare equal after any change to
+    # it, so its value is bound with the operator key or named as unbound.
+    displayed: dict[str, str] = {}
+    withheld: dict[str, str] = {}
+    binding: dict[str, str] = {}
+    if declared:
+        for field in _DISPLAYED_FIELDS:
+            value = getattr(declared, field)
+            if value is not None:
+                # Names keep the token formats ordinary names take, such as
+                # ``sk-research-assistant``; the free-text purpose does not.
+                displayed[field] = redact_text(value, identifier=field != "purpose")
+                if displayed[field] != value:
+                    withheld[field] = value
+        if withheld:
+            try:
+                binding = value_binding(MANIFEST_VALUE_BINDING_PROFILE, withheld)
+            except BindingError as exc:
+                problems.append(f"{MANIFEST}: {exc}")
 
     index: dict[str, AnyComponent] = {c.bom_ref: c for c in bom.components}
     accepted: list[AnyComponent] = []
@@ -357,11 +431,11 @@ def assemble_repository_agent(
     )
     agent = AgentComponent(
         bom_ref=agent_ref,
-        name=declared.name if declared else INFERRED_AGENT_NAME,
-        version=declared.version if declared else None,
-        framework=declared.framework if declared else None,
-        supplier=declared.owner if declared else None,
-        description=declared.purpose
+        name=displayed.get("name", INFERRED_AGENT_NAME),
+        version=displayed.get("version"),
+        framework=displayed.get("framework"),
+        supplier=displayed.get("owner"),
+        description=displayed.get("purpose")
         if declared
         else "Repository agent definition inferred from configuration",
         autonomy_level=None,
@@ -380,6 +454,23 @@ def assemble_repository_agent(
             "runtime_use": "unknown",
         },
     )
+    if binding:
+        agent.properties.update(binding)
+    elif withheld:
+        agent.risks.append(
+            RiskAssessment(
+                severity=RiskSeverity.LOW,
+                category="completeness",
+                detail=(
+                    f"Agent manifest {UNBOUND_VALUES_DETAIL}: "
+                    f"{', '.join(sorted(withheld))}, exported redacted."
+                ),
+                recommendation=(
+                    f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes to "
+                    "these values."
+                ),
+            )
+        )
     if declared:
         if declared.autonomy_level is not None:
             agent.properties["declared_autonomy_level"] = declared.autonomy_level.value

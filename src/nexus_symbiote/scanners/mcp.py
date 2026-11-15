@@ -43,6 +43,7 @@ from nexus_symbiote.core.hashing import (
     tool_definition_extensions,
 )
 from nexus_symbiote.core.models import (
+    UNBOUND_VALUES_DETAIL,
     CapabilityDeclaration,
     MCPClientComponent,
     MCPServerComponent,
@@ -282,7 +283,7 @@ _TRANSITIVE_RUNNERS = frozenset(
 # Values are bound by an HMAC under an operator key that never enters the BOM.
 # A change to either preimage requires a new profile and new test vectors.
 STATIC_CONFIG_HASH_PROFILE = "nexus-symbiote/mcp-static-config/v3"
-STATIC_VALUE_BINDING_PROFILE = "nexus-symbiote/mcp-static-values/v2"
+STATIC_VALUE_BINDING_PROFILE = "nexus-symbiote/mcp-static-values/v3"
 SOURCE_BINDING_KEY_ENV = "NEXUS_SYMBIOTE_SOURCE_BINDING_KEY"
 _MIN_SOURCE_BINDING_KEY_LENGTH = 32
 
@@ -530,6 +531,7 @@ _NPM_PURL_NAME = re.compile(r"(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*")
 _CONTEXT_HIGH = {
     "privileged": "privileged mode",
     "runtime_socket_mount": "a container runtime socket mount",
+    "runtime_credentials_forwarded": "forwarded client credentials",
     "host_root_mount": "a host root mount",
     "security_options_disabled": "disabled confinement",
     "dangerous_capabilities": "a host-level capability",
@@ -1077,6 +1079,7 @@ class _ResolverFile:
 
     settings: tuple[tuple[str, str], ...] = ()
     unresolved: bool = False
+    binding_settings: tuple[tuple[str, str], ...] | None = None
 
 
 def _npmrc(text: str) -> _ResolverFile:
@@ -1206,6 +1209,33 @@ class _Resolvers:
                 self._result.scan_failures.append(f"{path}: invalid JSON or duplicate keys")
                 return _ResolverFile()
             if not isinstance(data, dict):
+                self._result.scan_failures.append(f"{path}: expected a JSON object")
+                return _ResolverFile()
+            if "importMap" in data:
+                self._result.surfaces_excluded.append(
+                    f"{path}: referenced Deno import map is not collected"
+                )
+            imports = data.get("imports", {})
+            scopes = data.get("scopes", {})
+            if (
+                not isinstance(imports, dict)
+                or any(not isinstance(target, str) for target in imports.values())
+                or not isinstance(scopes, dict)
+                or any(
+                    not isinstance(mapping, dict)
+                    or any(not isinstance(target, str) for target in mapping.values())
+                    for mapping in scopes.values()
+                )
+            ):
+                self._result.surfaces_excluded.append(f"{path}: unsupported Deno import-map shape")
+            try:
+                binding = tuple(
+                    (key, canonical_json(data[key]))
+                    for key in sorted(_DENO_SOURCE_SETTINGS)
+                    if key in data
+                )
+            except (TypeError, ValueError, RecursionError):
+                self._result.scan_failures.append(f"{path}: invalid JSON values")
                 return _ResolverFile()
             deno_entries: list[tuple[str, str]] = []
             import_map = data.get("importMap")
@@ -1226,7 +1256,9 @@ class _Resolvers:
             scopes = data.get("scopes")
             if isinstance(scopes, dict) and scopes:
                 deno_entries.append(("scopes", json.dumps(scopes, sort_keys=True, default=str)))
-            return _ResolverFile(tuple(deno_entries))
+            # Source labels intentionally omit import specifiers. The private HMAC
+            # must retain their associations, including scopes and fallback order.
+            return _ResolverFile(tuple(deno_entries), binding_settings=binding)
         settings = self._toml(path)
         if path == "bunfig.toml":
             install = settings.get("install")
@@ -1755,10 +1787,7 @@ class MCPScanner(Scanner):
                 RiskAssessment(
                     severity=RiskSeverity.LOW,
                     category="completeness",
-                    detail=(
-                        f"MCP server '{name}' values not bound in this inventory: "
-                        f"{'; '.join(unbound)}."
-                    ),
+                    detail=f"MCP server '{name}' {UNBOUND_VALUES_DETAIL}: {'; '.join(unbound)}.",
                     recommendation=(
                         f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes to "
                         "these values."
@@ -2019,8 +2048,9 @@ class MCPScanner(Scanner):
             if file.unresolved:
                 view.unresolved.append(f"{path}:key")
             settings = dict(file.settings)
+            binding = file.settings if file.binding_settings is None else file.binding_settings
+            view.binding.extend([f"{path}:{key}", value] for key, value in binding)
             for key, value in file.settings:
-                view.binding.append([f"{path}:{key}", value])
                 label = f"{path}:{_setting_name(key, launched)}"
                 view.names.append(label)
                 kind = _file_setting(path, family, key, value, launched)

@@ -136,7 +136,7 @@ Colors are used only on a terminal, and `NO_COLOR` turns them off.
 | Exit | Meaning |
 |---|---|
 | `0` | The command completed and every requested gate passed. |
-| `1` | A gate or check failed (risk gate, integrity, digest or signature mismatch, `diff --fail-on-alert`, incomplete collection or observation), the input could not be read or parsed, `import-shadowscan` ran without `--report-only`, unverified ShadowScan discovery evidence was imported, validated or scored in CI without `--allow-unsigned-discovery`, a project policy that weakens a gate was applied in CI without `--accept-project-policy`, or an unexpected internal error occurred. |
+| `1` | A gate or check failed (risk gate, integrity, digest or signature mismatch, a `diff` security alert, since `--fail-on-alert` is the default and only `--no-fail-on-alert` turns that gate off, incomplete collection or observation), the input could not be read or parsed, `import-shadowscan` ran without `--report-only`, unverified ShadowScan discovery evidence was imported, validated or scored in CI without `--allow-unsigned-discovery`, a project policy that weakens a gate was applied in CI without `--accept-project-policy`, or an unexpected internal error occurred. |
 | `2` | Usage error: an unknown command or option, a missing argument or file, a `PROJECT_PATH` of `scan` or `baseline` or a `--project` of `validate`, `risk`, `verify-artifact` or `verify-live` that is a file, a `verify-live` launch policy kept where the [launch policy](#launch-policy) rules forbid, a `verify-attestation` `--trusted-key` kept where the [trusted-key rule](#verify-attestation) forbids, an invalid value (including a malformed `verify-artifact --sha256` and an incomplete `--bundle`, `--signer-identity` and `--issuer` set), a relative project path that a symbolic link leads outside the working directory, an invalid `NEXUS_SYMBIOTE_MODE` or collection limit, a `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` shorter than 32 characters, a malformed `SOURCE_DATE_EPOCH` for `scan`, `baseline` or `import-shadowscan`, or a live command run without live mode (`advisories --dry-run` contacts nothing and runs in either mode). |
 
 What exit status 1 means for each gate:
@@ -146,7 +146,7 @@ What exit status 1 means for each gate:
 | `scan` | A collector failed or the scan gate failed, unless `--report-only` or a report-only project policy applies. |
 | `validate` | Completeness, integrity (including integrity that is only unknown), the discovery producer check, the minimum assurance level or the dependency graph failed, or unverified discovery evidence was gated (see below). |
 | `risk` | The risk gate failed, `--project` reconciliation failed, or unverified discovery evidence was gated (see below). |
-| `diff` | `--fail-on-alert` was given and the diff reports a security alert. |
+| `diff` | The diff reports a security alert; `--no-fail-on-alert` turns this gate off. |
 | `digest` | The file is a valid native inventory, but its canonical or content digest is undefined: the other values are printed, and the missing one as `unavailable` (`null` with `--json-output`). |
 | `graph` | The inventory's graph is invalid, `--focus` names no component, or the view would hold more components than `--max-nodes`. |
 | `minimum-elements` | `--fail-under` was given and fewer than that percentage of the assessable elements are present, or the inventory's CycloneDX export fails its checks. |
@@ -287,10 +287,13 @@ repos:
 
 pre-commit installs a hook of `language: python` into its own environment with
 `pip install`, which resolves the dependency ranges in `pyproject.toml` from PyPI
-without hashes, unlike the hash-locked install the README describes. Pin `rev` to a
-reviewed commit, and treat the hooks as a convenience for your own tree, not a control:
-a failing hook can be skipped, and the GitHub Action or a protected CI job is the
-gate.
+without hashes, unlike the hash-locked install the README describes. pre-commit
+cannot apply `requirements-ci.lock` itself. For a locked environment, install that
+lock in the way the README describes and point pre-commit at the resulting command
+with `language: system` instead of using the published `language: python` hooks.
+Pin `rev` to a reviewed commit, and treat the hooks as a convenience for your own
+tree, not a control: a failing hook can be skipped, and the GitHub Action or a
+protected CI job is the gate.
 
 ## Command details
 
@@ -418,7 +421,7 @@ nexus-symbiote diff [OPTIONS] OLD_PATH NEW_PATH
 | Option | Description |
 |---|---|
 | `--json-output` | Output as JSON |
-| `--fail-on-alert` | Exit with status 1 if the diff reports a security alert. |
+| `--fail-on-alert` / `--no-fail-on-alert` | Exit with status 1 if the diff reports a security alert (default: fail). |
 
 The report lists security alerts, notes (`[INFO]` metadata changes, and `[NOTE]` lines
 about the comparison itself, also after `No changes detected.`), and added, removed and
@@ -942,6 +945,32 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 | `--json-output` | Output the verification report as JSON. |
 | `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools, declarations or the server identity drifted, unless `--accept-drift`. |
 | `--accept-drift` | With `--record`, exit 0 although changed or new tools, declarations or server identity were recorded. |
+| `--no-isolation` | Explicitly allow execution without a PID namespace; printed as a warning. On Linux the launcher is made a child subreaper and is stopped before cleanup, so its descendants are killed with the session while it is alive; a descendant that outlives the launcher can escape, as can one that deliberately evades cleanup. Elsewhere cleanup is best effort. This is not a namespace or sandbox. |
+
+By default the launcher must run as pid 1 of a new user and PID namespace
+(`unshare --user --map-root-user --pid --fork --kill-child`), so the kernel ends its
+descendants with the session. Inside the namespace the launcher sees itself as uid 0
+and gid 0, mapped to the invoking user and group; every other uid and gid, including
+the owners of the files it reads and its own supplementary groups, appears as
+`nobody`/`nogroup` (65534), and `setgroups` is denied. That grants no privilege
+outside the namespace, but a launcher that refuses to run as root, inspects its
+supplementary groups or changes file ownership behaves differently than under direct
+execution. A host that refuses the namespace fails with `isolation-unavailable`
+before executing the pinned launcher. Only the explicit operator option
+`--no-isolation` permits a launch without this boundary. On that path, on Linux,
+a short exec wrapper (the running interpreter with `-I -S`) sets
+`PR_SET_CHILD_SUBREAPER` and then executes the staged launcher with the same
+argument, environment and working directory. While the launcher is alive, its
+descendants stay in its process tree, including a `setsid` child that
+double-forks. Cleanup stops the launcher before it kills them, so the launcher
+cannot start another process, such as a helper that a watchdog restarts, and then
+kills the launcher's process group. A descendant that outlives the launcher,
+because the launcher exited or was killed before the session ended, is adopted
+outside that tree and can escape. So can a launcher or descendant that deliberately
+evades cleanup, for example by clearing the subreaper flag or forking faster than
+the tree is scanned, and a descendant running as another user cannot be signalled.
+On other systems that cleanup is best effort. The option is not a PID namespace,
+and neither form is a filesystem or network sandbox.
 
 Servers whose transport is `sse`, `streamable-http` or `http` and that record no
 launch command are reported as not verifiable by `verify-live` (reason

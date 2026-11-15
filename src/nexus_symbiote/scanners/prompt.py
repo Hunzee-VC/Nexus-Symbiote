@@ -13,8 +13,18 @@ from pathlib import Path, PurePosixPath
 from nexus_symbiote import limits
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import hash_bytes
-from nexus_symbiote.core.models import PromptComponent, RiskAssessment, SkillPackageComponent
+from nexus_symbiote.core.models import (
+    UNBOUND_VALUES_DETAIL,
+    PromptComponent,
+    RiskAssessment,
+    SkillPackageComponent,
+)
 from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.scanners.credential_files import MARKDOWN_SUFFIXES as _MARKUP_SUFFIXES
+from nexus_symbiote.scanners.credential_files import credential_gap as _credential_gap
+from nexus_symbiote.scanners.credential_files import credential_shaped as _credential_shaped
+from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
+from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection, fold_name
 from nexus_symbiote.utils.markdown import text_outside_code
 from nexus_symbiote.utils.terminal import neutralize
@@ -149,6 +159,39 @@ def _character_name(char: str) -> str:
     return unicodedata.name(char, unnamed)
 
 
+_LINE_SEPARATORS = ("\u2028", "\u2029")
+
+
+def _line_separator_counts(content: str) -> dict[str, int]:
+    if "\u2028" not in content and "\u2029" not in content:
+        return {}
+    return {char: content.count(char) for char in _LINE_SEPARATORS if char in content}
+
+
+def _line_separator_risks(counts: dict[str, int], source_name: str) -> list[RiskAssessment]:
+    if not counts:
+        return []
+    names = {
+        "\u2028": "LINE SEPARATOR",
+        "\u2029": "PARAGRAPH SEPARATOR",
+    }
+    shown = ", ".join(
+        f"{names[char]} (U+{ord(char):04X}) x{count}"
+        for char, count in sorted(counts.items(), key=lambda item: ord(item[0]))
+    )
+    return [
+        RiskAssessment(
+            severity=RiskSeverity.LOW,
+            category="line_separators",
+            detail=(
+                f"'{neutralize(source_name)}' contains line or paragraph separators: {shown}. "
+                "They can split a line in some renderers."
+            ),
+            recommendation="Replace them with ordinary newline characters.",
+        )
+    ]
+
+
 def detect_invisible_characters(content: str, source_name: str) -> list[RiskAssessment]:
     """Detect invisible Unicode characters that could be used for prompt trojans.
 
@@ -161,7 +204,10 @@ def detect_invisible_characters(content: str, source_name: str) -> list[RiskAsse
     and the England, Scotland and Wales flag sequences are ordinary text.
     """
     counts, tags = _hidden_counts(content, at_start=True)
-    return _hidden_character_risks(counts, tags, source_name)
+    return [
+        *_hidden_character_risks(counts, tags, source_name),
+        *_line_separator_risks(_line_separator_counts(content), source_name),
+    ]
 
 
 def _hidden_counts(content: str, *, at_start: bool) -> tuple[dict[str, int], int]:
@@ -222,6 +268,7 @@ class _HiddenCharacterStream:
         self._offset = 0
         self._plane_14: deque[int] = deque(maxlen=_BINARY_PLANE_14)
         self._dense_plane_14 = False
+        self._line_seps: dict[str, int] = {}
 
     @property
     def binary(self) -> bool:
@@ -242,6 +289,13 @@ class _HiddenCharacterStream:
         if not self.binary:
             return self._tags
         return self._tags if self._dense_plane_14 else self._run_tags
+
+    @property
+    def line_separators(self) -> dict[str, int]:
+        """U+2028 and U+2029. A binary file does not report them."""
+        if self.binary:
+            return {}
+        return self._line_seps
 
     def feed(self, chunk: bytes, *, final: bool = False) -> None:
         if self._decoder is None:
@@ -269,6 +323,8 @@ class _HiddenCharacterStream:
             self._pending = text
             return
         segment = text[:end]
+        for char, count in _line_separator_counts(segment).items():
+            self._line_seps[char] = self._line_seps.get(char, 0) + count
         counts, tags = _hidden_counts(segment, at_start=self._at_start)
         self._tags += tags
         for char, count in counts.items():
@@ -580,6 +636,10 @@ INSTRUCTION_DIRECTORIES: dict[str, str] = {
     ".github/agents": "subagent",
 }
 
+_INSTRUCTION_DIRECTORY_PARTS = tuple(
+    PurePosixPath(directory).parts for directory in INSTRUCTION_DIRECTORIES
+)
+
 SKILL_DIRECTORIES = [
     ".claude/skills",
     ".claude/commands",
@@ -598,11 +658,109 @@ _SKILL_PARTS = tuple(PurePosixPath(directory).parts for directory in SKILL_DIREC
 _DECLARATION_SUFFIXES = frozenset(
     {".md", ".mdc", ".markdown", ".txt", ".yaml", ".yml", ".json", ".toml"}
 )
-_MARKUP_SUFFIXES = frozenset({".md", ".mdc", ".markdown"})
 # Claude Code memory files and Gemini CLI context files import others with @path.
 _IMPORTING_NAMES = frozenset({"CLAUDE.md", "CLAUDE.local.md", "GEMINI.md"})
 _MAX_IMPORT_DEPTH = 5
 _MAX_IMPORTS = 1000
+# The keyed binding that covers a recorded file, imported or found by a walk, that the
+# unkeyed content hash must not.
+IMPORT_CONTENT_BINDING_PROFILE = "nexus-symbiote/prompt-import-content/v1"
+
+
+def _markdown(path: str) -> bool:
+    return PurePosixPath(path).suffix.lower() in _MARKUP_SUFFIXES
+
+
+def _read_unless_credential(
+    path: str,
+    files: ConfinedCollection,
+    result: ScanResult | None,
+    *,
+    context: str = "",
+    missing_ok: bool = False,
+    variants_read: Collection[str] = (),
+) -> bytes | None:
+    """The bytes of the file at ``path``, or None when it is absent, unreadable or a gap.
+
+    A file that ``_credential_gap`` names is a gap and is not read, so no unkeyed digest
+    of it can reach the inventory, and a symlink replaced between that check and the
+    read, so that the read followed it to such a file, is a failure. ``context`` goes
+    before the reason for the gap. Without ``result`` neither is recorded: a walk that
+    inventories the file records it.
+    """
+    linked = None if _credential_shaped(path) else files.in_root_target(path)
+    reason = _credential_gap(path, None if linked is None else linked.as_posix())
+    if reason is not None:
+        if result is not None:
+            result.surfaces_excluded.append(f"{path}: {context}{reason}; not read or inventoried")
+        return None
+    content = files.read_bytes(path, missing_ok=missing_ok, variants_read=variants_read)
+    followed = files.link_target(path)
+    if content is None or followed is None or not _credential_shaped(followed):
+        return content
+    # The symlink was replaced after the check above.
+    if result is not None:
+        result.scan_failures.append(f"{path}: file changed during collection")
+    return None
+
+
+def _found_by_name(path: str, prompt_type: str | None, directory: object = None) -> bool:
+    """Whether a walk recorded ``path`` because a host loads a file of that name, or a rule,
+    prompt or subagent file of that directory whose name has no suffix at all, such as
+    ``.clinerules/style``, which the collector reads as Markdown.
+
+    ``directory`` names the rule, prompt or subagent directory whose walk reached
+    ``path`` through a directory symlink, such as ``.cursor/rules`` linked to
+    ``shared/r``, where the file is recorded under the path it resolves to.
+    """
+    if prompt_type == "imported-instruction":
+        return False
+    parts = PurePosixPath(path).parts
+    if path in INSTRUCTION_FILES or (len(parts) > 1 and parts[-1] in NESTED_INSTRUCTION_NAMES):
+        return True
+    if directory in INSTRUCTION_DIRECTORIES and "." not in parts[-1]:
+        return True
+    return "." not in parts[-1] and any(
+        parts[: len(directory)] == directory and len(parts) > len(directory)
+        for directory in _INSTRUCTION_DIRECTORY_PARTS
+    )
+
+
+def _instruction_content(
+    path: str, prompt_type: str | None, link_target: object, directory: object = None
+) -> bool:
+    """Whether a recorded file keeps an unkeyed content hash: the bytes read are those of
+    an instruction file.
+
+    The path must be Markdown, or an instruction file a walk found by its name, such as
+    ``.cursorrules`` or a rule file without a suffix; and the file a symlink there leads
+    to, if any, must be Markdown, the one test an @import of that target passes. Any other
+    file, such as an import of ``config/app.json``, a rule directory's ``x.json``, or
+    ``AGENTS.md`` linked to ``config/app.json`` or ``config/.windsurfrules``, is named by
+    the checkout, not by a host, so its exact bytes may hold configuration or secrets.
+    """
+    named = _markdown(path) or _found_by_name(path, prompt_type, directory)
+    return named and (
+        link_target is None or (isinstance(link_target, str) and _markdown(link_target))
+    )
+
+
+def withholds_content_hash(component: PromptComponent) -> bool:
+    """Whether the collector withholds the unkeyed content hash of ``component`` by design.
+
+    Such a file is bound only by the operator key, so validation verifies that binding,
+    or counts the component as unbound, instead of reporting a missing hash.
+    """
+    return bool(component.properties.get("content_hash_withheld")) and not (
+        _instruction_content(
+            component.source_path or "",
+            component.prompt_type,
+            component.properties.get("symlink_target"),
+            component.properties.get("instruction_directory"),
+        )
+    )
+
+
 # Path characters that the `imports` and `imported_by` lists of one collection hold
 # together. One reference can name a 4 KiB path, so a count of references alone would
 # not bound the inventory.
@@ -758,7 +916,9 @@ class PromptScanner(Scanner):
                 if rel_path in INSTRUCTION_DIRECTORIES and files.is_directory(rel_path):
                     continue
                 spellings = _CODEX_SPELLINGS if rel_path in _CODEX_SPELLINGS else ()
-                content = files.read_bytes(rel_path, missing_ok=True, variants_read=spellings)
+                content = _read_unless_credential(
+                    rel_path, files, result, missing_ok=True, variants_read=spellings
+                )
                 if content is None:
                     continue
                 # A case-insensitive checkout holds one file for the name and another
@@ -793,7 +953,7 @@ class PromptScanner(Scanner):
                     or relative in recorded
                 ):
                     continue
-                content = files.read_bytes(path)
+                content = _read_unless_credential(relative, files, result)
                 if content is None:
                     continue
                 component = self._record(relative, nested_type, content, files, result)
@@ -812,10 +972,19 @@ class PromptScanner(Scanner):
                     relative = path.as_posix()
                     if relative in recorded:
                         continue
-                    content = files.read_bytes(path)
+                    content = _read_unless_credential(relative, files, result)
                     if content is None:
                         continue
-                    component = self._record(relative, prompt_type, content, files, result)
+                    # A directory symlink there leads the walk to the path it resolves to.
+                    inside = path.parts[: len(Path(directory).parts)] == Path(directory).parts
+                    component = self._record(
+                        relative,
+                        prompt_type,
+                        content,
+                        files,
+                        result,
+                        directory=None if inside else directory,
+                    )
                     if component is not None:
                         recorded[relative] = component
                         texts[relative] = content.decode("utf-8")
@@ -858,7 +1027,7 @@ class PromptScanner(Scanner):
             if relative not in texts:
                 if not any(variant.parts[: len(parts)] == parts for parts in _SKILL_PARTS):
                     continue
-                content = files.read_bytes(variant)
+                content = _read_unless_credential(relative, files, None)
                 if content is None:
                     continue
                 try:
@@ -875,7 +1044,22 @@ class PromptScanner(Scanner):
         content: bytes,
         files: ConfinedCollection,
         result: ScanResult,
+        directory: str | None = None,
     ) -> PromptComponent | None:
+        """Record the instruction file read from ``rel_path``, or None.
+
+        ``directory`` names the rule, prompt or subagent directory whose walk reached the
+        file through a directory symlink; the record keeps it.
+
+        Every walk reads through ``_read_unless_credential``; the check is repeated on
+        the symlink the read followed, so no walk, and no import of a file a walk
+        recorded, can bring an unkeyed digest of a credential file into the inventory.
+        """
+        target = files.link_target(rel_path)
+        reason = _credential_gap(rel_path, target)
+        if reason is not None:
+            result.surfaces_excluded.append(f"{rel_path}: {reason}; not read or inventoried")
+            return None
         try:
             text = content.decode("utf-8")
         except UnicodeDecodeError:
@@ -885,9 +1069,12 @@ class PromptScanner(Scanner):
         component = self._scan_instruction_file(
             Path(rel_path), rel_path, prompt_type, content, text
         )
-        target = files.link_target(rel_path)
         if target is not None:
             component.properties["symlink_target"] = target
+        if directory is not None:
+            component.properties["instruction_directory"] = directory
+        if not _instruction_content(rel_path, prompt_type, target, directory):
+            self._bind_content(rel_path, prompt_type, content, component, result)
         result.components.append(component)
         return component
 
@@ -963,6 +1150,12 @@ class PromptScanner(Scanner):
                     exhausted = True
                     break
                 looked_up.add(target)
+                if _credential_shaped(target):
+                    result.surfaces_excluded.append(
+                        f"{target}: imported by {importer} but its name says it holds "
+                        "credentials; not read or inventoried"
+                    )
+                    continue
                 content = self._read_import(importer, target, files, result)
                 if content is None:
                     continue
@@ -998,10 +1191,69 @@ class PromptScanner(Scanner):
         listing.finish(recorded)
 
     @staticmethod
+    def _bind_content(
+        path: str,
+        prompt_type: str,
+        content: bytes,
+        component: PromptComponent,
+        result: ScanResult,
+    ) -> None:
+        """Bind the content of a file that is not an instruction file with the key, never
+        an unkeyed digest.
+
+        A Markdown file, or an instruction file a walk found by its name, is an
+        instruction surface and keeps the unkeyed ``content_hash`` every instruction file
+        carries, unless a symlink there leads to a file that is not Markdown (see
+        ``_instruction_content``). Any other file, imported with @path, found in a rule,
+        prompt or subagent directory, or behind such a symlink, is named by the checkout,
+        so its exact bytes may hold configuration or secrets: an unkeyed digest of them
+        would let anyone holding the inventory confirm guesses offline (see
+        ``source_binding``). Its hash is withheld; with the operator key an HMAC binds
+        the content, and without one the component says the content is unbound.
+        """
+        imported = prompt_type == "imported-instruction"
+        subject = "Imported file" if imported else "File"
+        component.content_hash = None
+        component.properties["content_hash_withheld"] = (
+            f"{subject.lower()} is not a Markdown instruction file; an unkeyed digest of its "
+            "exact bytes could confirm guesses of secret values offline"
+        )
+        try:
+            binding = value_binding(
+                IMPORT_CONTENT_BINDING_PROFILE,
+                {"path": path, "content": content.decode("utf-8")},
+            )
+        except BindingError as exc:
+            result.scan_failures.append(f"{path}: {exc}")
+            return
+        if binding:
+            component.properties.update(binding)
+            return
+        component.risks.append(
+            RiskAssessment(
+                severity=RiskSeverity.LOW,
+                category="completeness",
+                detail=(
+                    f"{subject} '{neutralize(path)}' {UNBOUND_VALUES_DETAIL}: its content, "
+                    "which is not an instruction file and carries no unkeyed digest."
+                ),
+                recommendation=(
+                    f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes to "
+                    "this file."
+                ),
+            )
+        )
+
+    @staticmethod
     def _read_import(
         importer: str, target: str, files: ConfinedCollection, result: ScanResult
     ) -> bytes | None:
-        """An imported file's bytes, or None when it is absent, a directory or a gap."""
+        """An imported file's bytes, or None when it is absent, a directory or a gap.
+
+        A symlink that leads to a file named as one that holds credentials is a gap
+        whatever name imports it, so a Markdown name cannot bring the content hash of
+        such a file into the inventory (see ``_read_unless_credential``).
+        """
         if len(PurePosixPath(target).parts) > files.max_depth + 1:
             result.surfaces_excluded.append(
                 f"{target}: imported by {importer} below the collection depth limit "
@@ -1016,7 +1268,9 @@ class PromptScanner(Scanner):
             return None
         if files.is_directory(target):
             return None
-        return files.read_bytes(target, missing_ok=True)
+        return _read_unless_credential(
+            target, files, result, context=f"imported by {importer} but ", missing_ok=True
+        )
 
     def _scan_skills(
         self, files: ConfinedCollection, result: ScanResult, reported: set[Path]
@@ -1057,17 +1311,34 @@ class PromptScanner(Scanner):
     def _skill_file(
         path: Path, files: ConfinedCollection, result: ScanResult
     ) -> tuple[str, list[RiskAssessment]] | None:
-        """A bundle file's digest and the hidden-character findings of its text."""
+        """A bundle file's digest and the hidden-character findings of its text.
+
+        A file that ``_credential_gap`` names, by its own name or the name of the in-root
+        file a symlink there leads to, is a gap and is not read, so the inventory carries
+        no unkeyed digest of it; the bundle's other files are inventoried as usual. A
+        symlink replaced after that check, so that the read followed it to such a file,
+        is a failure.
+        """
         relative = path.as_posix()
         text_file = path.suffix.lower() in _DECLARATION_SUFFIXES
-        found = files.regular_file(path)
+        found = None if _credential_shaped(relative) else files.regular_file(path)
+        reason = _credential_gap(relative, None if found is None else found[0].as_posix())
+        if reason is not None:
+            result.surfaces_excluded.append(f"{relative}: {reason}; not read or inventoried")
+            return None
         if found is not None and found[1] > files.max_file_bytes and not text_file:
             # A large asset, such as a sample PDF, is streamed within the collection's
             # byte budget instead of being read whole: digested, and checked for hidden
             # characters when it is UTF-8 text, such as instructions SKILL.md points to.
+            # The stream opens the file checked above, without following a symlink.
             return PromptScanner._stream_skill_file(found[0], relative, files)
         content = files.read_bytes(path)
         if content is None:
+            return None
+        followed = files.link_target(path)
+        if followed is not None and _credential_shaped(followed):
+            # The symlink was replaced after the check above.
+            result.scan_failures.append(f"{relative}: file changed during collection")
             return None
         try:
             text = content.decode("utf-8")
@@ -1078,9 +1349,10 @@ class PromptScanner(Scanner):
             # An agent's reader still decodes such a file; check the text it would read.
             stream = _HiddenCharacterStream()
             stream.feed(content, final=True)
-            return hash_bytes(content), _hidden_character_risks(
-                stream.counts, stream.tags, relative
-            )
+            return hash_bytes(content), [
+                *_hidden_character_risks(stream.counts, stream.tags, relative),
+                *_line_separator_risks(stream.line_separators, relative),
+            ]
         risks = detect_invisible_characters(text, relative)
         if path.suffix.lower() in _MARKUP_SUFFIXES:
             risks.extend(detect_hidden_markup(text, relative))
@@ -1100,9 +1372,10 @@ class PromptScanner(Scanner):
         except (OSError, CollectionError):
             return None
         text.feed(b"", final=True)
-        return f"sha256:{digest.hexdigest()}", _hidden_character_risks(
-            text.counts, text.tags, relative
-        )
+        return f"sha256:{digest.hexdigest()}", [
+            *_hidden_character_risks(text.counts, text.tags, relative),
+            *_line_separator_risks(text.line_separators, relative),
+        ]
 
     def _scan_instruction_file(
         self, path: Path, rel_path: str, prompt_type: str, raw: bytes, text: str

@@ -1,7 +1,10 @@
 """One pinned stdio process for descriptor observation and authorized tool calls.
 
-The launcher must be independently approved by the operator. This module does
-not sandbox the process, authenticate the workload, or prove backend behavior.
+The launcher must be independently approved by the operator. By default a kernel
+PID namespace is required before execution. An explicit operator isolation_off()
+context accepts best-effort cleanup in an independently isolated worker instead.
+Neither mode is a filesystem or network sandbox, and it does not authenticate the
+workload or prove backend behavior.
 
 Once ``tools/call`` has been written, a failure is never reported as an
 authorization denial: a JSON-RPC error reply raises ``ToolCallError`` and any
@@ -11,11 +14,9 @@ and the one-use approval has been spent.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import selectors
-import signal
 import subprocess
 import tempfile
 import time
@@ -24,7 +25,12 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Any, TypeVar
 
-from nexus_symbiote.core.hashing import open_regular_file
+from nexus_symbiote.live.pinned_process import (
+    PinnedProcessError,
+    spawn_pinned,
+    stage_pinned_executable,
+    terminate_process_group,
+)
 from nexus_symbiote.live.stdio import DEADLINE_SECONDS, MAX_TOOLS, PROTOCOL, _frames, _ready
 from nexus_symbiote.runtime import (
     AuthorizationError,
@@ -101,32 +107,9 @@ class PinnedStdioSession:
         self._used = True
         self._directory = tempfile.TemporaryDirectory(prefix="nexus-runtime-")
         work = Path(self._directory.name)
-        staged = work / "server"
         try:
-            hasher = hashlib.sha256()
-            budget = 128 * 1024 * 1024
-            with open_regular_file(Path(self.command)) as source, staged.open("xb") as out:
-                if os.fstat(source.fileno()).st_size > budget:
-                    raise AuthorizationError("launcher exceeds byte budget")
-                while chunk := source.read(1024 * 1024):
-                    budget -= len(chunk)
-                    if budget < 0:
-                        raise AuthorizationError("launcher exceeds byte budget")
-                    hasher.update(chunk)
-                    out.write(chunk)
-            if self.sha256 != "sha256:" + hasher.hexdigest():
-                raise AuthorizationError("launcher differs from approved digest")
-            staged.chmod(0o500)
-            self._process = subprocess.Popen(  # noqa: S603
-                [str(staged)],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                cwd=work,
-                env={"PATH": os.defpath},
-                start_new_session=True,
-                bufsize=0,
-            )
+            staged = stage_pinned_executable(self.command, self.sha256, work)
+            self._process = spawn_pinned(staged, work)
             assert self._process.stdin is not None and self._process.stdout is not None
             os.set_blocking(self._process.stdin.fileno(), False)
             os.set_blocking(self._process.stdout.fileno(), False)
@@ -153,6 +136,9 @@ class PinnedStdioSession:
                 raise AuthorizationError("MCP tool capability not negotiated")
             self._send({"method": "notifications/initialized"})
             return self
+        except PinnedProcessError as exc:
+            self.__exit__(None, None, None)
+            raise AuthorizationError(str(exc)) from exc
         except BaseException:
             self.__exit__(None, None, None)
             raise
@@ -275,11 +261,7 @@ class PinnedStdioSession:
         try:
             if proc is not None:
                 try:
-                    try:
-                        os.killpg(proc.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        # The process group already exited; wait() still reaps it.
-                        pass
+                    terminate_process_group(proc)
                     proc.wait(timeout=5)
                 finally:
                     if proc.stdin is not None:
