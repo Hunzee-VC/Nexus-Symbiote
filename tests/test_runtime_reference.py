@@ -33,7 +33,16 @@ def test_worked_example_runs_as_written(tmp_path, monkeypatch):
     blocks = re.findall(r"^```python\n(.*?)^```$", section("Worked example"), re.M | re.S)
     assert len(blocks) == 1
     monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
-    exec(compile(blocks[0], str(REFERENCE), "exec"), {"__name__": "runtime_example"})  # noqa: S102
+    namespace = {"__name__": "runtime_example"}
+    exec(compile(blocks[0], str(REFERENCE), "exec"), namespace)  # noqa: S102
+    assert namespace["execution_attempts"] == [{"sent_to": "team@example.test"}]
+    assert [(item.admitted, item.reason) for item in namespace["decisions"]] == [
+        (True, "admitted"),
+        (False, "approval-replayed"),
+        (True, "admitted"),
+        (False, "approval-replayed"),
+        (False, "snapshot-superseded"),
+    ]
 
 
 def test_reason_code_table_lists_exactly_the_codes_the_code_raises():

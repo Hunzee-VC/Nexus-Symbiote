@@ -97,15 +97,19 @@ class TestFullPipeline:
         scan2 = runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_v2)])
         assert scan2.exit_code == 0
 
-        diff = runner.invoke(main, ["diff", str(bom_v1), str(bom_v2), "--json-output"])
+        diff = runner.invoke(
+            main, ["diff", str(bom_v1), str(bom_v2), "--json-output", "--no-fail-on-alert"]
+        )
         assert diff.exit_code == 0
         diff_data = json.loads(diff.output)
         assert diff_data["has_changes"] is True
-        assert {c["bom_ref"] for c in diff_data["components_modified"]} == {
+        modified = diff_data["components_modified"]
+        assert {c["bom_ref"] for c in modified if c["bom_ref"].startswith("registry:")} == {
             "registry:pypi/langchain",
             "registry:pypi/openai",
             "registry:pypi/transformers",
         }
+        assert any("unbound" in " ".join(c["details"]) for c in modified)
         assert [c["bom_ref"] for c in diff_data["components_added"]] == ["registry:pypi/chromadb"]
         assert diff_data["components_removed"] == []
 

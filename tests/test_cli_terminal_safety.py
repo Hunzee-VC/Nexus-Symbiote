@@ -36,6 +36,9 @@ from tests.test_live_mcp import (
 )
 from tests.test_verify_live_scope import launcher
 
+pytestmark = pytest.mark.usefixtures("nonisolated_pinned_fixtures")
+
+
 MARKUP = "[link=https://attacker.example/approve]docs[/link][conceal]"
 CONTROLS = "\x1b]8;;https://attacker.example\x07x\x1b]8;;\x07\x1b[1A\x1b[2K\rfake\u202egpj.exe"
 

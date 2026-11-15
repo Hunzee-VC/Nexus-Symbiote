@@ -1,0 +1,45 @@
+{
+  "profile": "nexus-symbiote/rag-source-structure/v2",
+  "source": {
+    "name": "kb",
+    "documents": [
+      "yes"
+    ],
+    "sanitization": true
+  },
+  "digest_input": {
+    "profile": "nexus-symbiote/rag-source-structure/v2",
+    "structure": {
+      "fields": [
+        "documents",
+        "name",
+        "sanitization"
+      ],
+      "name": "kb",
+      "type": null,
+      "store_type": null,
+      "embedding_model": null,
+      "chunking": [
+        null,
+        null
+      ],
+      "identities": {},
+      "source_uris": [],
+      "documents": {
+        "present": true,
+        "count": 1
+      },
+      "controls": {
+        "sanitization": "enabled",
+        "content_filter": "absent"
+      },
+      "values": {
+        "fields": {},
+        "embeddings": {},
+        "controls": {}
+      },
+      "configuration": null
+    }
+  },
+  "static_config_hash": "sha256:ded2b5313317bf1cc7083f7a67778170bdd8856648596ee4958043075f97bbb2"
+}

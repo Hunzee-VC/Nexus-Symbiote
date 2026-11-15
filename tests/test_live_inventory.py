@@ -66,7 +66,9 @@ def record(monkeypatch, tmp_path: Path, name: str, replies: list[HTTPReply], *ex
 
 
 def diff(old: Path, new: Path) -> tuple[int, dict[str, Any]]:
-    result = CliRunner().invoke(main, ["diff", str(old), str(new), "--json-output"])
+    result = CliRunner().invoke(
+        main, ["diff", str(old), str(new), "--json-output", "--no-fail-on-alert"]
+    )
     assert result.exit_code == 0, result.output
     report = json.loads(result.stdout)
     gate = CliRunner().invoke(main, ["diff", str(old), str(new), "--fail-on-alert"])

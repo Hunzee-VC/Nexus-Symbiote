@@ -317,7 +317,11 @@ def test_reviewed_baseline_runs_the_drift_gate_on_a_snapshot(tmp_path):
     calls: list[list[str]] = []
     outputs = tmp_path / "out"
     alerts = {"has_changes": True, "security_alerts": [{"severity": "high", "alert": "x"}]}
-    config = configuration(workspace, SYMBIOTE_REVIEWED_BASELINE=str(baseline))
+    config = configuration(
+        workspace,
+        SYMBIOTE_REVIEWED_BASELINE=str(baseline),
+        SYMBIOTE_SOURCE_BINDING_KEY="k" * 32,
+    )
     assert runner.run(config, command=stub(calls, diff=(1, alerts)), outputs=outputs) == 1
     diff = next(call for call in calls if call[0] == "diff")
     assert diff[3:] == ["--fail-on-alert", "--json-output"]

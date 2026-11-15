@@ -55,6 +55,10 @@ REASONS: dict[str, str] = {
     ),
     "launcher-digest-mismatch": "The launcher bytes differ from the SHA-256 pin in the policy.",
     "launcher-start-failed": "The pinned launcher could not be started.",
+    "isolation-unavailable": (
+        "Kernel PID containment is unavailable; the pinned launcher was not executed. "
+        "Use an independently isolated worker or explicitly accept --no-isolation."
+    ),
     "deadline": (
         "The pinned server's bounded MCP exchange and the checks of its descriptors did "
         "not finish before the deadline."
