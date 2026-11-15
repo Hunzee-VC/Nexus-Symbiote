@@ -571,6 +571,11 @@ HIDDEN_FROM_A_LINE_READER = {
     "backtick in a link destination": "[a](`b) @hidden.md `\n",
     "wide space between HTML attributes": '<a b=c\xa0d="e">\n` @hidden.md `\n',
     "wide space as an HTML attribute value": "<a b=\u3000 c>\n` @hidden.md `\n",
+    "space before an unquoted HTML attribute value": "<img width= 200>\n` @hidden.md `\n",
+    "fence after an HTML tag with an empty value": "<a b=>\n```\n\n```\n@hidden.md\n```\n",
+    "long s in an HTML block tag": "<\u017ftyle>\n```\n</style>\n```\n@hidden.md\n```\n",
+    "Kelvin sign in an HTML block tag": "<lin\u212a>\n```\n\n```\n@hidden.md\n```\n",
+    "long s in an HTML block end": "<style>\n</\u017ftyle>\n` @hidden.md `\n",
 }
 
 
@@ -596,6 +601,8 @@ def test_an_import_that_commonmark_reads_as_text_is_inventoried(tmp_path, text):
         "See [the guide](docs/guide.md), <kbd>Ctrl</kbd> and `@code.md`.\n",
         "- [ ] run `@code.md`\n",
         "<a b=c\xa0=d>\n` @code.md `\n",
+        "See\n<br>\n` @code.md `\n",
+        "> See\n<br>\n` @code.md `\n",
     ],
 )
 def test_an_import_in_code_is_not_inventoried(tmp_path, text):
@@ -705,6 +712,13 @@ TAG_PIECES = (
         ("<a b=c\u205f/d>", True),
         ("<a b=c\xa0=d>", False),
         ("<a b= >", False),
+        ("<a b=>", False),
+        ("<img width= 200>", True),
+        ("<a b=\xa0c>", True),
+        ("<a b=c\xa0d\xa0=e>", True),
+        ("<a b=c\xa0d/x>", True),
+        ("<a b=c\x7f\x85d>", True),
+        ("<a b=c\x1fd>", False),
         ("<a b=c\xa0d", False),
         ('<a b="c"d>', False),
     ],
@@ -714,11 +728,37 @@ def test_an_html_tag_line_with_wide_whitespace_opens_a_block_as_commonmark_js_re
     assert bool(JS_TAG_LINE.match(line)) is opens
 
 
-def test_every_short_html_tag_line_opens_a_block_as_commonmark_js_reads_it():
+@pytest.mark.parametrize("start", ["<a", "<a b=", "<a b=c"])
+def test_every_short_html_tag_line_opens_a_block_as_commonmark_js_reads_it(start):
     for size in range(6):
-        for characters in itertools.product("b.#/ \xa0='\">", repeat=size):
-            line = "<a" + "".join(characters)
+        for characters in itertools.product("bc.#/ \xa0='\">", repeat=size):
+            line = start + "".join(characters)
             assert bool(TAG_LINE.match(line)) == bool(JS_TAG_LINE.match(line)), repr(line)
+
+
+# CPython before 3.11.5 does not restore the position when an iteration of a possessive
+# repeat of a group fails partway, so such repeats are spelled as atomic groups.
+POSSESSIVE_GROUP = re.compile(r"(?<!\\)\)(?:[*+?]|\{\d*,?\d*\})\+")
+
+
+def test_no_markdown_pattern_repeats_a_group_possessively():
+    patterns = [
+        item.pattern
+        for value in vars(markdown).values()
+        for item in (value if isinstance(value, tuple) else (value,))
+        if isinstance(item, re.Pattern)
+    ]
+    assert len(patterns) > 20
+    assert [pattern for pattern in patterns if POSSESSIVE_GROUP.search(pattern)] == []
+
+
+def test_html_block_names_match_only_their_ascii_letters():
+    assert markdown._HTML_BLOCK_STARTS[0].match("<STYLE>")
+    assert markdown._HTML_BLOCK_STARTS[5].match("<LINK>")
+    assert markdown._HTML_BLOCK_ENDS[0].search("</Style>")
+    assert not markdown._HTML_BLOCK_STARTS[0].match("<\u017ftyle>")
+    assert not markdown._HTML_BLOCK_STARTS[5].match("<lin\u212a>")
+    assert not markdown._HTML_BLOCK_ENDS[0].search("</\u017ftyle>")
 
 
 @settings(max_examples=1000)

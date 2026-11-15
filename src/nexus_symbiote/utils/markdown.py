@@ -50,18 +50,20 @@ _ASCII_WHITESPACE = " \t\n\r\x0b\x0c"
 _WIDE_WHITESPACE = "\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
 _WHITESPACE = f"[{_ASCII_WHITESPACE}{_WIDE_WHITESPACE}]"
 # commonmark.js matches an open tag as <name(\s+attribute(\s*=\s*value)?)*\s*/?>, where
-# an unquoted value is a run of anything but quotes, `=<>`, backticks, ASCII whitespace
-# and controls. Whitespace past ASCII can thus end such a value or stay in it, and a
+# an unquoted value is a run of anything but quotes, `=<>`, backticks and U+0000 to
+# U+0020. Whitespace past ASCII can thus end such a value or stay in it, and a
 # backtracking match tries both at each one, in time exponential in the attributes of
 # a line. This pattern matches the same lines without going back: a value takes such
 # whitespace unless an attribute name ends the run after it, and the first such
 # character after `=` is the value itself when only whitespace follows it up to `>`,
-# or whitespace and then such a name.
+# or whitespace and then such a name. Repeated groups are atomic rather than possessive:
+# CPython before 3.11.5 does not restore the position when an iteration of a possessive
+# group fails partway.
 _ATTRIBUTE_NAME = "[a-zA-Z_:][a-zA-Z0-9:._-]*+"
 _NOT_UNQUOTED = r"\"'=<>`\x00-\x20"
 _NAME_ENDS_RUN = rf"{_ATTRIBUTE_NAME}[{_WIDE_WHITESPACE}]*+(?![^{_NOT_UNQUOTED}])"
 _VALUE_PART = rf"[^{_NOT_UNQUOTED}{_WIDE_WHITESPACE}]++"
-_UNQUOTED_VALUE = rf"{_VALUE_PART}(?:[{_WIDE_WHITESPACE}]++(?!{_NAME_ENDS_RUN}){_VALUE_PART})*+"
+_UNQUOTED_VALUE = rf"{_VALUE_PART}(?>(?:[{_WIDE_WHITESPACE}]++(?!{_NAME_ENDS_RUN}){_VALUE_PART})*)"
 _ATTRIBUTE_VALUE = (
     rf"(?>{_WHITESPACE}*+(?:'[^']*+'|\"[^\"]*+\")"
     rf"|[{_ASCII_WHITESPACE}]*+[{_WIDE_WHITESPACE}]"
@@ -70,7 +72,7 @@ _ATTRIBUTE_VALUE = (
 )
 _OPEN_TAG = (
     rf"<[A-Za-z][A-Za-z0-9-]*+"
-    rf"(?:{_WHITESPACE}++{_ATTRIBUTE_NAME}(?:{_WHITESPACE}*+={_ATTRIBUTE_VALUE})?+)*+"
+    rf"(?>(?:{_WHITESPACE}++{_ATTRIBUTE_NAME}(?>(?:{_WHITESPACE}*+={_ATTRIBUTE_VALUE})?))*)"
     rf"{_WHITESPACE}*+/?+>"
 )
 _CLOSE_TAG = rf"</[A-Za-z][A-Za-z0-9-]*+{_WHITESPACE}*+>"
@@ -84,16 +86,16 @@ _BLOCK_TAG_NAMES = (
 # The seven start conditions of an HTML block, and the end conditions of the first five;
 # the last two end at a blank line.
 _HTML_BLOCK_STARTS = (
-    re.compile(rf"<(?:pre|script|style|textarea)(?:{_WHITESPACE}|>|$)", re.I),
+    re.compile(rf"<(?:pre|script|style|textarea)(?:{_WHITESPACE}|>|$)", re.I | re.A),
     re.compile(r"<!--"),
     re.compile(r"<\?"),
     re.compile(r"<![A-Za-z]"),
     re.compile(r"<!\[CDATA\["),
-    re.compile(rf"</?(?:{_BLOCK_TAG_NAMES})(?:{_WHITESPACE}|/?>|$)", re.I),
+    re.compile(rf"</?(?:{_BLOCK_TAG_NAMES})(?:{_WHITESPACE}|/?>|$)", re.I | re.A),
     re.compile(rf"(?:{_OPEN_TAG}|{_CLOSE_TAG}){_WHITESPACE}*+$"),
 )
 _HTML_BLOCK_ENDS: tuple[re.Pattern[str] | str, ...] = (
-    re.compile(r"</(?:pre|script|style|textarea)>", re.I),
+    re.compile(r"</(?:pre|script|style|textarea)>", re.I | re.A),
     "-->",
     "?>",
     ">",
