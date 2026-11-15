@@ -46,8 +46,9 @@ dependency. Their records are checked as an npm record is: the
 `resolved` or `tarball` URL, the exact version, an exact `package.json` version it
 contradicts and the integrity value are collection failures as above (so a Yarn v1
 `sha1-` value is one), and a tarball URL that names another package or version is a
-finding. A missing integrity value and another registry are not findings for them,
-and a range they resolve keeps its `version_pinning` finding. With the lockfiles of
+finding. A missing integrity value is a `missing_lockfile_integrity` finding and
+another registry a `registry_origin` one, as for an npm record, and a range they
+resolve keeps its `version_pinning` finding. With the lockfiles of
 more than one package manager no lockfile evidence is bound, and the conflict is
 reported as an exclusion. Workspace, link, file and git resolutions (and Yarn
 `patch:` and `portal:` ones), `npm:` aliases, which only npm's own records resolve,
@@ -55,7 +56,7 @@ and more than one resolution for the same package are reported as exclusions too
 So is a Yarn Berry `resolution` other than the registry package and version the
 record names (`openai@npm:4.52.0` for a record of `openai` 4.52.0): Berry fetches
 what the resolution names, a tarball URL or a git repository among them, and records
-no URL to check. Yarn Berry `checksum` values are not recorded.
+no URL to check.
 
 `yarn.lock` is tokenized as Yarn 1 reads it: a quoted key, selector or value is a
 JSON string and is decoded, so `"resolved" "https://..."` and `"\u006fpenai@4.0.0":`
@@ -67,32 +68,60 @@ spelling and Yarn Berry the second. So is, in a Yarn 1 lockfile, a stanza of ano
 range of the package, such as `openai@^4.0.0`, with the same `version` as the declared
 spec's stanza and another `resolved`, `integrity` or `checksum`: Yarn 1 reuses the
 first record it resolves with that version, so when a dependency listed earlier in
-`package.json` depends on the other range, Yarn installs the other stanza. A Yarn 1
-`checksum` is not an integrity value, since Yarn 1 does not read it, so a v1 record
-with one and no `integrity` has a `missing_lockfile_integrity` finding; in a Berry
-lockfile (detected from an unquoted or JSON-quoted `__metadata` header), `checksum`
-counts as integrity only when it is a 128-character hexadecimal SHA-512 digest with
-an optional hexadecimal cache-version prefix (`<hex>/<128 hex>`). A line or block
-that Yarn 1, its `js-yaml` fallback, or the YAML reader Yarn
-Berry uses reads differently or not at
-all fails the lockfile as `yarn.lock: invalid or unsupported lockfile`: an empty
-stanza or empty nested mapping, a Yarn 1 nested mapping outside dependency blocks or
-deeper than one level, YAML flow brackets or braces, mixed or disguised Berry
-comma-joined selectors or Berry-only fields without `__metadata`, a single
-quote, a tab, a comment after text or indented, an odd or deeper indentation than
-an object opens, an indented line after an empty or comment line (after one empty
-line Yarn 1 keeps reading the stanza, and after more it stops reading the lockfile), a whitespace-only line, a word Yarn 1 splits into a
-number or `true`/`false` and a string (such as an unquoted `4.0.0`), an invalid
-escape, more than one value, a duplicate key, a selector with surrounding spaces,
-a carriage return that is not followed by a line feed (Yarn 1 ends the line there but
+`package.json` depends on the other range, Yarn installs the other stanza.
+
+Each Yarn reads one digest field. A Yarn 1 `checksum` is not an integrity value, since
+Yarn 1 does not read it, so a v1 record with one and no `integrity` has a
+`missing_lockfile_integrity` finding. Neither is a Berry `integrity`, which Berry does
+not read: it is not recorded and not exported as a hash. A Berry `checksum` counts
+only when Yarn 4 checks the archive it fetches against it, and otherwise the record
+has a `missing_lockfile_integrity` finding. Yarn checks a checksum that names the
+cache key it computes, `10c0` at its default compression level, and accepts an
+archive unchecked when the key differs. So the checksum must be a 128-character
+hexadecimal SHA-512 digest whose key, its own prefix (`10c0/<digest>`) or else the
+lockfile's `__metadata.cacheKey`, is `10c0`, and the lockfile's `cacheKey` must be
+`10c0` too. A lockfile that Yarn 2 or 3 wrote, with `cacheKey: 8`, records no checksum
+that counts. Nor does a record with `conditions`, for a package Yarn installs on some
+platforms only: Yarn does not check its archive when it is an optional dependency.
+Nor does any checksum when the root `.yarnrc.yml` sets `checksumBehavior`
+to another value than `throw`, `compressionLevel` to another value than 0,
+`enableGlobalCache` to another value than `true`, or `globalFolder`: Yarn then
+accepts a mismatching archive, computes another key, or may take the archive from a
+cache folder the project supplies. A `.yarnrc.yml` that cannot be read counts as one
+that sets them. The Berry checksum itself is not recorded; it is the digest of the
+archive Yarn stores, not of the registry's tarball.
+
+A line that Yarn 1, or the YAML reader Yarn Berry uses for a lockfile that starts with
+`__metadata` (unquoted or as a JSON string), reads differently or not at all fails the
+lockfile as `yarn.lock: invalid or unsupported lockfile`: a single quote, a tab, a
+comment after text or indented, an odd or deeper indentation than an object opens, an
+indented line after an empty or comment line (after one empty line Yarn 1 keeps
+reading the stanza, and after more it stops reading the lockfile), a whitespace-only
+line, a word Yarn 1 splits into a number or `true`/`false` and a string (such as an
+unquoted `4.0.0`), an invalid escape, more than one value, a duplicate key, a selector
+with surrounding spaces or other whitespace (Berry splits a key at each comma and the
+spaces around it, and keeps a tab or any other whitespace in the descriptor), a
+carriage return that is not followed by a line feed (Yarn 1 ends the line there but
 reads the spaces after it as no indentation), a `yarn lockfile v<N>` comment with `N`
 above 1 (Yarn 1 refuses it and re-reads the whole file as YAML, where a stanza can be
-a string that names another), a stanza key without a package name, a Berry field without a colon, and a
-`version`, `resolved`, `integrity`, `resolution`, `checksum` or `linkType` that is
-not a string. A Berry value is a JSON string or a YAML plain scalar as Berry writes
-one, inner spaces included (`react: ^16.8.0 || ^17.0.0`, `conditions: os=linux &
-cpu=x64`); a plain value that starts with a YAML indicator such as `>` or `|`, or
-contains `:`, `#`, `,`, a bracket, a brace or a quote, fails the lockfile.
+a string that names another), a stanza key without a package name, a Berry field
+without a colon, and a `version`, `resolved`, `integrity`, `resolution`, `checksum`,
+`linkType`, `conditions` or `cacheKey` that is not a string. A Berry value is a JSON
+string or a YAML plain scalar as Berry writes one, inner spaces included
+(`react: ^16.8.0 || ^17.0.0`, `conditions: os=linux & cpu=x64`); a plain value that
+starts with a YAML indicator such as `>` or `|`, or contains `:`, `#`, `,`, a bracket,
+a brace or a quote, fails the lockfile.
+
+Some constructs that Yarn reads but never writes also fail the lockfile, as
+unsupported, not because Yarn reads them differently: an empty stanza or nested map, a nested map
+in a Yarn 1 stanza other than the `dependencies`, `optionalDependencies`,
+`permissions` and `prebuiltVariants` that Yarn 1 writes, or one inside them, a
+`resolution`, `languageName` or `linkType` field in a Yarn 1 stanza (a dependency of
+that name is read), a quoted Yarn 1 selector that holds a comma list, unless the file
+has a `# yarn lockfile v1` comment and every part names the same package without a
+Berry protocol such as `npm:`, a bracket or brace inside a word, a `yarn lockfile`
+comment in a lockfile that starts with `__metadata`, and a space before the colon of
+a stanza header.
 
 For Python, `uv.lock` or `poetry.lock` in the project root supplies the exact
 version and the index origin of each AI package declared in `requirements*.txt` or

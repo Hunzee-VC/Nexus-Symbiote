@@ -778,7 +778,7 @@ def berry_lock(resolution, *, spec="^4.0.0", version="4.52.0"):
         f'"openai@npm:{spec}":\n'
         f"  version: {version}\n"
         f'  resolution: "{resolution}"\n'
-        "  checksum: 10c0/abc\n"
+        "  checksum: 10c0/" + "ab" * 64 + "\n"
         "  languageName: node\n"
         "  linkType: hard\n"
     )
