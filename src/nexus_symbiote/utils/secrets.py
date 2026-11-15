@@ -12,7 +12,12 @@ from collections.abc import Iterable, Iterator, Mapping
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from nexus_symbiote.utils._legacy_redaction import hidden_spans
+from nexus_symbiote.utils._legacy_redaction import (
+    hidden_spans,
+    origin_sources,
+    redaction,
+    shown_unchanged,
+)
 
 REDACTED = "***"
 # What a known value reads as to the rules on the masked pass: a separator, as its
@@ -461,13 +466,19 @@ def _cookie_spans(value: str, start: int = 0, end: int | None = None) -> Iterabl
 
 
 class _Rewrite:
-    """A URL shown as its origin; ``revealed`` ends the source text the origin repeats."""
+    """A URL shown as its origin.
 
-    __slots__ = ("end", "replacement", "revealed", "start")
+    ``revealed`` ends the source text the origin is read from, and ``removed`` are the
+    spans of the URL the origin does not show: its user info, path, query and fragment.
+    """
 
-    def __init__(self, start: int, end: int, replacement: str, revealed: int) -> None:
+    __slots__ = ("end", "removed", "replacement", "revealed", "start")
+
+    def __init__(
+        self, start: int, end: int, replacement: str, revealed: int, removed: list[Span]
+    ) -> None:
         self.start, self.end = start, end
-        self.replacement, self.revealed = replacement, revealed
+        self.replacement, self.revealed, self.removed = replacement, revealed, removed
 
 
 def _url_rewrite(match: re.Match[str]) -> _Rewrite | None:
@@ -475,13 +486,30 @@ def _url_rewrite(match: re.Match[str]) -> _Rewrite | None:
     shown = redact_url(url)
     if shown == url:
         return None
-    start = match.start()
-    revealed = start
-    if shown != "[redacted-url]":
-        scheme_end = url.index("://") + 3
-        netloc = _NETLOC.match(url, scheme_end)
-        revealed = start + (netloc.end() if netloc else scheme_end)
-    return _Rewrite(start, match.end(), shown, revealed)
+    start, end = match.span()
+    if shown == "[redacted-url]":
+        return _Rewrite(start, end, shown, start, [(start, end)])
+    scheme_end = url.index("://") + 3
+    netloc = _NETLOC.match(url, scheme_end)
+    revealed = start + (netloc.end() if netloc else scheme_end)
+    sources = origin_sources(url, shown)
+    if sources is None:
+        # Not aligned: only what follows the authority counts as removed, so main's
+        # floor marks the rest hidden and the whole URL is redacted.
+        return _Rewrite(start, end, shown, revealed, [(revealed, end)])
+    # What the origin shows as written stays; the rest, a letter it lower-cases among
+    # them, is removed, as main's rewrite of the same URL removed it.
+    removed: list[Span] = []
+    position = start
+    for index in shown_unchanged(url, shown, sources):
+        if index is None:
+            continue
+        if start + index > position:
+            removed.append((position, start + index))
+        position = start + index + 1
+    if end > position:
+        removed.append((position, end))
+    return _Rewrite(start, end, shown, revealed, removed)
 
 
 def _merged(spans: list[Span]) -> list[Span]:
@@ -557,6 +585,9 @@ _VALUE_END = re.compile(r"[\s,;]")
 # own instead, bounded at its end, so an assignment inside one ends there, as
 # `<a href="https://h/cb?token=v">password: w` needs.
 _URL_MASK = "\x00"
+# How far before a URL's start a credential name that runs into it may begin, and how
+# far past it the name may end: longer than any keyword with its suffixes.
+_NAME_REACH = 256
 
 
 def _masked_urls(value: str, url_spans: list[Span]) -> str:
@@ -592,16 +623,23 @@ class _UnquotedRuns:
         return self.end
 
 
-def _value_span(text: str, start: int, limit: int, runs: _UnquotedRuns) -> Span | None:
+def _value_span(
+    text: str, start: int, limit: int, runs: _UnquotedRuns, original: str | None = None
+) -> Span | None:
     if start >= limit or text[start] in ",;" or text[start].isspace():
         return None
     quoted = _QUOTED_VALUE.match(text, start, limit)
     if quoted is not None:
-        return quoted.span()
+        # A URL's mask covers a backslash that escapes the quote after it, so the value is
+        # read in the original text too, and runs to the later end.
+        written = None if original is None else _QUOTED_VALUE.match(original, start, limit)
+        return start, max(quoted.end(), written.end() if written else 0)
     return start, runs.value_end(start)
 
 
-def _every_assignment(text: str, start: int, limit: int) -> Iterable[Span]:
+def _every_assignment(
+    text: str, start: int, limit: int, original: str | None = None
+) -> Iterable[Span]:
     """The value of every assignment whose name starts in ``text[start:limit]``.
 
     Each place a credential name can start is read, not only where the previous
@@ -613,7 +651,7 @@ def _every_assignment(text: str, start: int, limit: int) -> Iterable[Span]:
     position = start
     while (name := _ASSIGNMENT_NAME.search(text, position, limit)) is not None:
         position = name.start() + 1
-        span = _value_span(text, name.end(), limit, runs)
+        span = _value_span(text, name.end(), limit, runs, original)
         if span is not None:
             yield span
 
@@ -625,7 +663,8 @@ def _assignment_spans(value: str, url_spans: list[Span]) -> Iterable[Span]:
     that whitespace or a quote sets off after it, unless that is a scheme word such as
     `Bearer`, which the scheme rule reads.
     """
-    yield from _every_assignment(_masked_urls(value, url_spans), 0, len(value))
+    yield from _every_assignment(_masked_urls(value, url_spans), 0, len(value), value)
+    yield from _straddling_assignments(value, url_spans)
     after_runs = _UnquotedRuns(value, len(value))
     for url_start, url_end in url_spans:
         yield from _every_assignment(value, url_start, url_end)
@@ -640,6 +679,32 @@ def _assignment_spans(value: str, url_spans: list[Span]) -> Iterable[Span]:
         span = _value_span(value, gap, len(value), after_runs)
         if span is not None and value[span[0] : span[1]].lower() not in _AUTH_SCHEMES:
             yield span
+
+
+def _straddling_assignments(value: str, url_spans: list[Span]) -> Iterable[Span]:
+    """Values of credential names that run into a URL's scheme.
+
+    In `api_key:///x>v` the URL is `key:///x`, so masking it takes the name with it. A
+    keyword's parts are those of a scheme but for `_`, so only a URL right after `_` can
+    start inside a name; each such name is read in the original text across the start,
+    in a window no other URL's search reads again.
+    """
+    runs = _UnquotedRuns(value, len(value))
+    searched = 0
+    for url_start, _url_end in url_spans:
+        if url_start == 0 or value[url_start - 1] != "_":
+            continue
+        position = max(searched, url_start - _NAME_REACH)
+        limit = min(len(value), url_start + _NAME_REACH)
+        while (name := _ASSIGNMENT_NAME.search(value, position, limit)) is not None:
+            if name.start() >= url_start:
+                break
+            position = name.start() + 1
+            if name.end() > url_start:
+                span = _value_span(value, name.end(), len(value), runs)
+                if span is not None:
+                    yield span
+        searched = url_start
 
 
 def _rule_matches(
@@ -721,13 +786,14 @@ def _redaction(
     spans, rewrites = _rule_matches(value, identifier=identifier, cookie=cookie)
     # The rules applied one after another, as before this engine, hide some values a
     # union of matches shows; whatever they hide is hidden here too. What a URL rewrite
-    # removes is the rewrite's in both.
+    # removes is the rewrite's in both. With no known value in the text, main replaced
+    # none: a replacement is what could make another value occur.
     spans.extend(
         hidden_spans(
             value,
-            scrubber.values,
+            scrubber.values if known else (),
             identifier=identifier,
-            removed=[(rewrite.revealed, rewrite.end) for rewrite in rewrites],
+            removed=[span for rewrite in rewrites for span in rewrite.removed],
             cookie=cookie,
         )
     )
@@ -793,12 +859,13 @@ def redact_keyed_text(
     if not value:
         return redact_text(value, secrets) if redacted is None else redacted
     cookie = _COOKIE_KEY.fullmatch(key) is not None
+    scrubber = _scrubber(secrets)
     if redacted is not None:
         safe = redacted
     else:
         # The pairs are read in the original value too: a known value redacted first
         # could hide the name that marks the pair after it.
-        spans, rewrites = _redaction(value, _scrubber(secrets), identifier=False, cookie=cookie)
+        spans, rewrites = _redaction(value, scrubber, identifier=False, cookie=cookie)
         safe = _redact(value, spans, rewrites)
     if _AUTHORIZATION_KEY.fullmatch(key):
         parts = _SCHEME_AND_VALUE.fullmatch(value)
@@ -809,8 +876,26 @@ def redact_keyed_text(
     if cookie:
         return safe if redacted is None else _COOKIE_PAIR.sub(_cookie_pair_replacement, safe)
     if _CREDENTIAL_KEY.search(key):
-        return safe if _REFERENCE.fullmatch(value) or _PLAIN_URL.fullmatch(safe) else REDACTED
+        if _REFERENCE.fullmatch(value) or _locator(value, safe, scrubber, redacted is None):
+            return safe
+        return REDACTED
     return safe
+
+
+def _locator(value: str, safe: str, scrubber: SecretScrubber, ours: bool) -> bool:
+    """Whether a credential-keyed ``value``, redacted to ``safe``, is a plain URL to show.
+
+    The whole value must be one URL: a credential glued to a URL after a quote or `<`
+    is no locator. When ``safe`` is this engine's own, main's redaction must read as a
+    plain URL too: hiding what both hid can merge away the `@`, `?` or `#` that made
+    main's text fall back to the marker.
+    """
+    if _URL.fullmatch(value) is None or _PLAIN_URL.fullmatch(safe) is None:
+        return False
+    if not ours:
+        return True
+    values = scrubber.values if scrubber.spans(value) else ()
+    return _PLAIN_URL.fullmatch(redaction(value, values)) is not None
 
 
 def redact_metadata(value: Any, secrets: Iterable[str] | SecretScrubber = ()) -> Any:

@@ -99,3 +99,49 @@ def test_a_cookie_key_hides_what_main_hid() -> None:
     # closing quote was a pair's value; the union keeps that.
     shown = redact_keyed_text("Cookie", f'sig_v="abc\\"def"{SECRET}%PRIMARY_KEY')
     assert SECRET not in shown
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f'token = "https://h/p\\"{SECRET}"',
+        f'{{"password": "https://h\\"{SECRET}"}}',
+        f"password='https://h/p\\'{SECRET}'",
+        f"api_key:///x>{SECRET}",
+    ],
+)
+def test_a_quoted_value_or_a_name_masked_with_a_url_still_hides_its_value(text: str) -> None:
+    # The URL's mask covers the backslash before an escaped quote, or the end of a name
+    # that reads as the URL's scheme; the value is read in the original text as well.
+    assert SECRET not in redact_text(text)
+    assert SECRET not in redact_text(text, identifier=True)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"token= api_key= {SECRET}_secret=x",
+        f"X-Api-Key=\napi_key=\n{SECRET}_secret'=%",
+        f"PRIMARY_KEY=sig_v: {SECRET}",
+        f"token: password: {SECRET}_secret=x",
+    ],
+)
+def test_every_name_start_is_read_as_an_assignment(text: str) -> None:
+    assert SECRET not in redact_text(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"password=Cookie: a={SECRET}",
+        f"token: Cookie: sid={SECRET}; theme=dark",
+        f"see https://h.example/x then password=Cookie: a={SECRET}",
+    ],
+)
+def test_a_cookie_header_inside_an_assignment_value_is_read(text: str) -> None:
+    assert SECRET not in redact_text(text)
+
+
+@pytest.mark.parametrize("unit", ["https://h/?password=>", "https://h/?token:>"])
+def test_a_url_ending_in_a_credential_name_is_read_in_linear_time(unit: str) -> None:
+    assert scaling_ratio(lambda scale: redact_text(unit * (2000 * scale))) < 10

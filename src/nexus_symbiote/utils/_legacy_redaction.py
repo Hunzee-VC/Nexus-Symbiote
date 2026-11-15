@@ -11,6 +11,7 @@ the earlier rules hid.
 
 The constants and replacements below are copied from ``secrets.py`` as it stood before
 the union engine, and must not be changed to follow it: this module is the reference.
+Only the tracking around them is new: how each output character is traced to its source.
 """
 
 from __future__ import annotations
@@ -68,6 +69,13 @@ _COOKIE_ATTRS = frozenset(
 )
 
 Span = tuple[int, int]
+# The authority a URL's origin is taken from, as urlsplit delimits it.
+_NETLOC = re.compile(r"[^/?#]*")
+# What the known-value replay may copy of the text for values holding "*", in characters
+# per character of the text, plus a constant: past it the replay is abandoned and the
+# whole text counts as hidden. Each such value is replayed alone, rebuilding the text.
+_STAR_REPLAY_FACTOR = 16
+_STAR_REPLAY_BASE = 1024
 
 
 def _redact_url(value: str) -> str:
@@ -154,8 +162,55 @@ def _private_key_blocks(value: str) -> list[Span]:
     return blocks
 
 
+def origin_sources(url: str, shown: str) -> list[int] | None:
+    """For each character of ``shown``, the origin a URL rewrite gives ``url``, its index
+    in ``url``; ``None`` when the two do not align.
+
+    The origin repeats the URL's scheme, host and port, lower-cased and without a port's
+    leading zeros, and leaves out the user info before the host. Every other character
+    of the URL is removed by the rewrite, even where the origin still reads like it, and
+    so is one the origin shows only lower-cased: ``shown_unchanged`` keeps the rest.
+    """
+    head = url.find("://") + 3
+    if head < 3 or shown[:head] != url[:head].lower():
+        return None
+    netloc = _NETLOC.match(url, head)
+    netloc_end = head if netloc is None else netloc.end()
+    host_start = url.rfind("@", head, netloc_end) + 1 or head
+    rest = shown[head:]
+    width = rest.find("]") + 1 if rest.startswith("[") else len(rest.partition(":")[0])
+    if width == 0 or host_start + width > netloc_end:
+        return None
+    if url[host_start : host_start + width].lower() != rest[:width]:
+        return None
+    sources = [*range(head), *range(host_start, host_start + width)]
+    port = rest[width:]
+    if port:
+        colon = host_start + width
+        written = url[colon + 1 : netloc_end]
+        digits = port[1:]
+        if url[colon : colon + 1] != ":" or not written.endswith(digits):
+            return None
+        if written[: len(written) - len(digits)].strip("0"):
+            return None
+        sources.append(colon)
+        sources.extend(range(netloc_end - len(digits), netloc_end))
+    return sources
+
+
+def shown_unchanged(url: str, shown: str, sources: list[int]) -> list[int | None]:
+    """For each character of ``shown``, its source in ``url`` if it shows that character as
+    written, else ``None``: an upper-case letter shown lower-cased is not shown."""
+    return [index if shown[offset] == url[index] else None for offset, index in enumerate(sources)]
+
+
+def redaction(value: str, values: tuple[str, ...], *, identifier: bool = False) -> str:
+    """Main's redaction of ``value`` with the known ``values``, longest first."""
+    return _plain(value, values, identifier=identifier)
+
+
 def _plain(value: str, values: tuple[str, ...], *, identifier: bool) -> str:
-    """Main's redaction of ``value``, untracked: only to tell whether it changes anything."""
+    """Main's redaction of ``value``, untracked."""
     for known in values:
         if known in value:
             value = value.replace(known, _REDACTED)
@@ -226,6 +281,31 @@ class _Tracked:
         result.extend(self.source[end - suffix : end])
         return result
 
+    def sub_urls(self) -> None:
+        """Main's URL rewrite, each origin character traced to the URL character it shows."""
+        edits = []
+        for match in _URL.finditer(self.text):
+            url = match.group()
+            replacement = _redact_url(url)
+            if replacement == url:
+                continue
+            start, end = match.span()
+            sources = origin_sources(url, replacement)
+            source = (
+                self.kept(start, end, replacement)
+                if sources is None
+                else array(
+                    "q",
+                    [
+                        -1 if index is None else self.source[start + index]
+                        for index in shown_unchanged(url, replacement, sources)
+                    ],
+                )
+            )
+            edits.append((start, end, replacement, source))
+        if edits:
+            self.replace_spans(edits)
+
     def sub(self, pattern: re.Pattern[str], replace: Callable[[re.Match[str]], str]) -> None:
         edits = []
         for match in pattern.finditer(self.text):
@@ -262,33 +342,92 @@ def hidden_spans(
 ) -> list[Span]:
     """Spans of ``value`` that main's rules hid, apart from the ``removed`` ones.
 
-    ``values`` are the known values, longest first; ``removed`` are what the caller's
-    own URL rewrites already take away, which main's rewrites took too. ``cookie`` adds
+    ``values`` are the known values, longest first, which a caller passes only when one
+    occurs in ``value``: main's known-value pass changes nothing otherwise. ``removed``
+    are what the caller's own URL rewrites already take away, which main's took too. ``cookie`` adds
     main's reading of a ``Cookie`` key's value: every pair of the redacted text.
     """
-    plain = _plain(value, values, identifier=identifier)
-    if cookie:
-        plain = _COOKIE_PAIR.sub(_cookie_pair_replacement, plain)
-    if plain == value:
-        return []
-    return _absent(value, _run(value, values, identifier=identifier, cookie=cookie), removed)
+    if not values:
+        # Without a known value the rules alone decide whether main changed the text,
+        # and they cost much less untracked; a known value main always replaces.
+        plain = _plain(value, values, identifier=identifier)
+        if cookie:
+            plain = _COOKIE_PAIR.sub(_cookie_pair_replacement, plain)
+        if plain == value:
+            return []
+    tracked = _run(value, values, identifier=identifier, cookie=cookie)
+    if tracked is None:
+        return [(0, len(value))] if value else []
+    return _absent(value, tracked, removed)
+
+
+def _stars(edits: list[Span]) -> list[tuple[int, int, str, array[int]]]:
+    return [(start, end, _REDACTED, array("q", [-1, -1, -1])) for start, end in sorted(edits)]
+
+
+def _replace_known(tracked: _Tracked, values: tuple[str, ...]) -> bool:
+    """Main's known-value pass, ``text.replace(known, "***")`` for each value in turn.
+
+    A value without "*" can only match text no earlier value replaced, as a replaced
+    run reads as "*" to it, and it matches there as it would in main's text. So such
+    values are found in a copy of the text where each replaced occurrence keeps its
+    length, filled with a character no value holds, and all of them are applied in one
+    rebuild. A value with "*" can match across a replaced run, so the text is rebuilt
+    and the value replayed alone; each rebuild is charged to a budget of
+    ``_STAR_REPLAY_FACTOR`` texts, and ``False`` is returned once it is spent. Such a
+    value whose parts between its "*"s are not all in the text cannot occur in main's
+    text either, as each part would lie in text no value replaced, so it costs nothing.
+    """
+    star = _REDACTED[0]
+    held = set("".join(values))
+    filler = next(chr(code) for code in range(len(held) + 1) if chr(code) not in held)
+    budget = _STAR_REPLAY_FACTOR * len(tracked.text) + _STAR_REPLAY_BASE
+    pending: list[Span] = []
+    masked = tracked.text
+    for known in values:
+        if star not in known:
+            if known not in masked:
+                continue
+            position = 0
+            while (start := masked.find(known, position)) >= 0:
+                position = start + len(known)
+                pending.append((start, position))
+            masked = masked.replace(known, filler * len(known))
+            continue
+        if not all(part in masked for part in known.split(star)):
+            continue
+        if pending:
+            budget -= len(tracked.text)
+            if budget < 0:
+                return False
+            tracked.replace_spans(_stars(pending))
+            pending = []
+            masked = tracked.text
+        if known not in tracked.text:
+            continue
+        budget -= len(tracked.text)
+        if budget < 0:
+            return False
+        edits = []
+        position = 0
+        while (start := tracked.text.find(known, position)) >= 0:
+            position = start + len(known)
+            edits.append((start, position))
+        tracked.replace_spans(_stars(edits))
+        masked = tracked.text
+    if pending:
+        tracked.replace_spans(_stars(pending))
+    return True
 
 
 def _run(
     value: str, values: tuple[str, ...], *, identifier: bool, cookie: bool = False
-) -> _Tracked:
+) -> _Tracked | None:
+    """Main's rules, tracked; ``None`` when the known-value replay is beyond its bound."""
     tracked = _Tracked(value)
-    for known in values:
-        if known not in tracked.text:
-            continue
-        edits = []
-        position = 0
-        while (start := tracked.text.find(known, position)) >= 0:
-            end = start + len(known)
-            edits.append((start, end, _REDACTED, array("q", [-1, -1, -1])))
-            position = end
-        tracked.replace_spans(edits)
-    tracked.sub(_URL, lambda match: _redact_url(match.group()))
+    if not _replace_known(tracked, values):
+        return None
+    tracked.sub_urls()
     if not identifier:
         tracked.replace_spans(
             (start, stop, _REDACTED, array("q", [-1, -1, -1]))
@@ -309,9 +448,10 @@ def _run(
 
 def tracked_redaction(
     value: str, values: tuple[str, ...], *, identifier: bool, cookie: bool = False
-) -> str:
+) -> str | None:
     """Main's output for ``value``, from the tracked run: for tests of the tracking."""
-    return _run(value, values, identifier=identifier, cookie=cookie).text
+    tracked = _run(value, values, identifier=identifier, cookie=cookie)
+    return None if tracked is None else tracked.text
 
 
 def _absent(value: str, tracked: _Tracked, removed: Iterable[Span]) -> list[Span]:
