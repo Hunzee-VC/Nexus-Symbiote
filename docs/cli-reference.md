@@ -966,16 +966,28 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 | `--no-isolation` | Explicitly allow execution without a PID namespace; printed as a warning. On Linux the launcher is made a child subreaper and is stopped before cleanup, so its descendants are killed with the session while it is alive; a descendant that outlives the launcher can escape, as can one that deliberately evades cleanup. Elsewhere cleanup is best effort. This is not a namespace or sandbox. |
 
 By default the launcher must run as pid 1 of a new user and PID namespace
-(`unshare --user --map-root-user --pid --fork --kill-child`). When the session ends,
-cleanup stops `unshare` so that it cannot reap the launcher, sends the launcher
-SIGKILL directly and waits until the kernel has ended every process in the
-namespace, including nested PID namespaces. It does not rely on `--kill-child` or
-the process group, which a launcher can defeat by clearing its parent-death signal
-and calling `setsid` or `setpgid`. If `unshare` does not stop within 1 second, or
-the namespace has not ended 5 seconds after the SIGKILL, the server fails with
-`isolation-teardown-failed`. A process that the launcher has another service start,
-such as `systemd-run --user`, is outside the namespace and is not ended, and nothing
-ends the namespace if `verify-live` itself is killed before its cleanup runs.
+(`unshare --user --map-root-user --pid --fork --kill-child`). That process first
+runs a short exec wrapper (the running interpreter with `-I -S`), which waits until
+`verify-live` holds a pidfd for it and only then executes the staged launcher with
+the same argument, environment and working directory. The launcher therefore cannot
+leave the process group, kill `unshare` through it or exit before cleanup can reach
+it. When the session ends, cleanup sends the launcher SIGKILL through that pidfd and
+waits until the kernel has ended every process in the namespace, including nested
+PID namespaces. It does not rely on `--kill-child`, the process group or `unshare`,
+which a launcher can defeat by clearing its parent-death signal, calling `setsid` or
+`setpgid`, or killing `unshare` with `kill(0, SIGKILL)` from a child left in that
+group. If no namespace init appears within 5 seconds, the server fails with
+`isolation-unavailable` before the pinned launcher executes. If the namespace has not
+ended 5 seconds after the SIGKILL, it fails with `isolation-teardown-failed`. Without
+a separately runnable interpreter, as in a frozen build, or where the kernel cannot
+open a pidfd, the launcher runs without a pidfd held, and cleanup stops `unshare` so
+that it cannot reap the launcher, kills the launcher it finds as `unshare`'s child
+and waits in the same way; there a server whose `unshare` was killed by a signal
+before cleanup, or did not stop within 1 second, also fails with
+`isolation-teardown-failed`, because the launcher may have outlived it. A process
+that the launcher has another service start, such as `systemd-run --user`, is
+outside the namespace and is not ended, and nothing ends the namespace if
+`verify-live` itself is killed before its cleanup runs.
 Inside the namespace the launcher sees itself as uid 0
 and gid 0, mapped to the invoking user and group; every other uid and gid, including
 the owners of the files it reads and its own supplementary groups, appears as

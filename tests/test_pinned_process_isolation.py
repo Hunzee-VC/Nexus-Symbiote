@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import hashlib
 import json
 import os
@@ -12,6 +13,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -107,8 +109,8 @@ def _host_pid(marker: Path) -> int:
 def _stat(pid: int) -> list[str]:
     """The state, parent and later fields of ``/proc/<pid>/stat``; ``["X"]`` once reaped."""
     try:
-        with open(f"/proc/{pid}/stat", encoding="utf-8") as stat:
-            return stat.read().rpartition(")")[2].split()
+        with open(f"/proc/{pid}/stat", "rb") as stat:
+            return stat.read().rpartition(b")")[2].decode().split()
     except (FileNotFoundError, ProcessLookupError):
         return ["X"]
 
@@ -443,60 +445,84 @@ def test_no_launch_runs_python_between_fork_and_exec(
 # every signal around a fork and clears its mask afterwards, so a later read shows
 # either of those masks, never the one the launcher inherited. The shell applies a
 # redirection to itself while the redirected command runs, so the descriptors are
-# read in a command substitution outside any redirected command.
+# read in a command substitution outside any redirected command. In a PID namespace
+# $$ is 1 while /proc shows host pids, so the host pid comes from /proc/self.
 STATE = r"""#!/bin/sh
+read -r pid rest < /proc/self/stat
 signals=
 while read -r key value; do
   case $key in SigBlk:|SigIgn:) signals="$signals$key $value
 " ;; esac
-done < /proc/$$/status
-fds=$(readlink /proc/$$/cwd /proc/$$/fd/0 /proc/$$/fd/1 /proc/$$/fd/2)
-tr '\0' '\n' < /proc/$$/environ >> OUT
+done < /proc/$pid/status
+fds=$(readlink /proc/$pid/cwd /proc/$pid/fd/0 /proc/$pid/fd/1 /proc/$pid/fd/2)
+tr '\0' '\n' < /proc/$pid/environ >> OUT
 printf '%s' "$signals" >> OUT
-tr '\0' '\n' < /proc/$$/cmdline >> OUT
+tr '\0' '\n' < /proc/$pid/cmdline >> OUT
 printf '%s\n' "$fds" >> OUT
-cat /proc/$$/stat >> OUT
+cat /proc/$pid/stat >> OUT
 """
+# Each wrapper program and the function that selects it; the gate runs only in a namespace.
+_WRAPPERS = {
+    "subreaper": ("_SUBREAPER_EXEC", "_subreaper_argv"),
+    "gate": ("_GATE_EXEC", "_gate_argv"),
+}
 
 
-def _launch_state(tmp_path: Path, name: str) -> list[str]:
+def _launch_state(tmp_path: Path, name: str, *, namespaced: bool = False) -> list[str]:
     out = tmp_path / f"{name}.state"
     script = tmp_path / name
     script.write_text(STATE.replace("OUT", shlex.quote(str(out))))
     script.chmod(0o700)
     pin = "sha256:" + hashlib.sha256(script.read_bytes()).hexdigest()
-    with isolation_off(), pytest.raises(StdioProtocolError):
+    launch = contextlib.nullcontext() if namespaced else isolation_off()
+    with launch, pytest.raises(StdioProtocolError):
         observe_pinned(str(script), pin)
     *lines, stat = out.read_text().splitlines()
     pid = stat.split()[0]
-    assert stat.rpartition(")")[2].split()[2:4] == [pid, pid]
+    # Opted out, the launcher leads its own session; in a namespace, unshare does.
+    assert (stat.rpartition(")")[2].split()[2:4] == [pid, pid]) is not namespaced
     work = re.compile(r"\S*/nexus-live-\w+")
     return [re.sub(r"pipe:\[\d+\]", "pipe", work.sub("WORK", line)) for line in lines]
 
 
 def _wrapped_and_direct(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, wrapper: str = "subreaper"
 ) -> tuple[list[str], list[str], set[int]]:
     """The launch state through the wrapper and by direct exec, and the blocked signals.
 
     The launcher inherits the calling thread's blocked signals, so one is blocked here
     to show that the mask reaches the launcher, and a mask the wrapper adds would not.
     """
+    namespaced = wrapper == "gate"
     previous = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR2})
     try:
-        wrapped = _launch_state(tmp_path, "wrapped")
+        wrapped = _launch_state(tmp_path, "wrapped", namespaced=namespaced)
         with monkeypatch.context() as direct_exec:
-            direct_exec.setattr(pinned_process, "_subreaper_argv", lambda staged: None)
-            direct = _launch_state(tmp_path, "direct")
+            direct_exec.setattr(pinned_process, _WRAPPERS[wrapper][1], lambda staged: None)
+            direct = _launch_state(tmp_path, "direct", namespaced=namespaced)
     finally:
         signal.pthread_sigmask(signal.SIG_SETMASK, previous)
     return wrapped, direct, {*previous, signal.SIGUSR2}
 
 
-def test_the_subreaper_wrapper_hands_over_the_state_of_a_direct_exec(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def _refuses_without_a_namespace(tmp_path: Path) -> bool:
+    """Where the kernel refuses the namespace, check that and report it."""
+    if pinned_process.namespace_available():
+        return False
+    command, digest = _pinned(tmp_path / "refused", "")
+    with pytest.raises(LaunchPolicyError) as denied:
+        observe_pinned(str(command), digest)
+    assert denied.value.reason == "isolation-unavailable"
+    return True
+
+
+@pytest.mark.parametrize("wrapper", sorted(_WRAPPERS))
+def test_each_wrapper_hands_over_the_state_of_a_direct_exec(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, wrapper: str
 ) -> None:
-    wrapped, direct, blocked = _wrapped_and_direct(tmp_path, monkeypatch)
+    if wrapper == "gate" and _refuses_without_a_namespace(tmp_path):
+        return
+    wrapped, direct, blocked = _wrapped_and_direct(tmp_path, monkeypatch, wrapper)
     assert wrapped == direct
     assert wrapped[0] == f"PATH={os.defpath}"
     mask = sum(1 << (number - 1) for number in blocked)
@@ -515,13 +541,17 @@ def test_the_subreaper_wrapper_hands_over_the_state_of_a_direct_exec(
     ],
     ids=["blocked-signal", "ignored-sigpipe", "ignored-sigxfsz", "environment"],
 )
+@pytest.mark.parametrize("wrapper", sorted(_WRAPPERS))
 def test_the_launch_state_comparison_detects_a_wrapper_that_leaks(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, restored: str, leak: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, restored: str, leak: str, wrapper: str
 ) -> None:
-    leaky = pinned_process._SUBREAPER_EXEC.replace(restored, leak)
-    assert leaky != pinned_process._SUBREAPER_EXEC
-    monkeypatch.setattr(pinned_process, "_SUBREAPER_EXEC", leaky)
-    wrapped, direct, _ = _wrapped_and_direct(tmp_path, monkeypatch)
+    if wrapper == "gate" and _refuses_without_a_namespace(tmp_path):
+        return
+    program = _WRAPPERS[wrapper][0]
+    leaky = getattr(pinned_process, program).replace(restored, leak)
+    assert leaky != getattr(pinned_process, program)
+    monkeypatch.setattr(pinned_process, program, leaky)
+    wrapped, direct, _ = _wrapped_and_direct(tmp_path, monkeypatch, wrapper)
     assert wrapped != direct
 
 
@@ -540,8 +570,9 @@ def test_a_stalled_subreaper_wrapper_is_bounded_by_the_protocol_deadline(
 
 
 # A launcher, or a library it loads, can clear the parent-death signal that
-# ``--kill-child`` sets and leave the process group that killpg reaches. Each variant
-# records the host pid of every process it wants to outlive the session.
+# ``--kill-child`` sets and leave the process group that killpg reaches, or kill
+# ``unshare`` through that group. Each variant records the host pid of every process it
+# wants to outlive the session.
 _ESCAPE = """import ctypes
 libc = ctypes.CDLL(None, use_errno=True)
 libc.prctl.argtypes = [ctypes.c_int] + [ctypes.c_ulong] * 4
@@ -578,13 +609,48 @@ if os.fork() == 0:
     time.sleep(60)
     os._exit(0)
 """
+# A child left in unshare's process group kills that group, unshare included, once the
+# init has left it. The init then waits until it has been reparented, comparing with
+# the parent it had before the child could run.
+_GROUP_KILL = """def parent():
+    with open("/proc/self/stat", "rb") as stat:
+        return stat.read().rpartition(b")")[2].split()[1]
+first = parent()
+if os.fork() == 0:
+    for _ in range(500):
+        if os.getpgid(1) == 1:
+            break
+        time.sleep(0.01)
+    os.kill(0, 9)
+os.setsid()
+"""
+_ORPHANED = """deadline = time.monotonic() + 5
+while parent() == first and time.monotonic() < deadline:
+    time.sleep(0.01)
+if parent() != first:
+    open(os.path.join(os.path.dirname(pids), "orphaned"), "w").close()
+"""
+# A command name that is not UTF-8, which the forked child inherits.
+_RENAMED = """os.setsid()
+with open("/proc/self/comm", "wb") as comm:
+    comm.write(b"\\xff\\xfe\\x80name")
+"""
 _ESCAPES = {
     "setsid": ("os.setsid()", "", 1),
     "setpgid": ("os.setpgid(0, 0)", "", 1),
     "setsid-child": ("os.setsid()", _FORKED, 2),
     "setsid-double-fork": ("os.setsid()", _DAEMON, 2),
     "nested-pid-namespace": ("os.setsid()", _NESTED, 2),
+    "process-group-kill": (_GROUP_KILL, _ORPHANED, 1),
+    "undecodable-name": (_RENAMED, _FORKED, 2),
 }
+# Without a pidfd for the init, an unshare killed before cleanup is reported instead.
+_ENDED_ESCAPES = [
+    (variant, held)
+    for variant in sorted(_ESCAPES)
+    for held in (True, False)
+    if held or variant != "process-group-kill"
+]
 
 
 def _escaping_launcher(tmp_path: Path, variant: str) -> tuple[Path, str, Path, int]:
@@ -608,10 +674,19 @@ def _kill_leftovers(pids: Path) -> None:
                 os.kill(pid, signal.SIGKILL)
 
 
+def _without_init_pidfd(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Start the init at once, as without a runnable interpreter, so no pidfd is held."""
+    monkeypatch.setattr(pinned_process, "_gate_argv", lambda staged: None)
+
+
 @pytest.mark.parametrize("entry", ["observe_pinned", "PinnedStdioSession"])
-@pytest.mark.parametrize("variant", sorted(_ESCAPES))
+@pytest.mark.parametrize(
+    ("variant", "held"),
+    _ENDED_ESCAPES,
+    ids=[f"{variant}-{'held' if held else 'unheld'}" for variant, held in _ENDED_ESCAPES],
+)
 def test_a_launcher_that_drops_its_death_signal_and_group_ends_with_the_session(
-    tmp_path: Path, variant: str, entry: str
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variant: str, held: bool, entry: str
 ) -> None:
     command, digest, pids, count = _escaping_launcher(tmp_path, variant)
     if not pinned_process.namespace_available():
@@ -620,20 +695,140 @@ def test_a_launcher_that_drops_its_death_signal_and_group_ends_with_the_session(
         assert denied.value.reason == "isolation-unavailable"
         assert _recorded(pids) == []
         return
+    if not held:
+        _without_init_pidfd(monkeypatch)
     try:
         if entry == "observe_pinned":
             assert [tool["name"] for tool in observe_pinned(str(command), digest).tools] == [
                 "weather"
             ]
         else:
-            with PinnedStdioSession(command=str(command), sha256=digest, server_id="server:mail"):
-                pass
+            session = PinnedStdioSession(
+                command=str(command), sha256=digest, server_id="server:mail"
+            )
+            with session:
+                assert session._process is not None
+                assert (session._process.pid in pinned_process._INITS) is held
         recorded = _recorded(pids)
         assert len(recorded) == count
         # Cleanup returns only once the kernel has ended the namespace, so there is no
         # grace period here.
         states = {pid: _stat(pid)[0] for pid in recorded}
         assert set(states.values()) <= {"Z", "X"}, states
+        assert (tmp_path / "orphaned").exists() is (variant == "process-group-kill")
+        assert not pinned_process._INITS
+    finally:
+        _kill_leftovers(pids)
+
+
+@pytest.mark.parametrize("entry", ["observe_pinned", "PinnedStdioSession"])
+def test_without_an_init_pidfd_a_killed_unshare_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: str
+) -> None:
+    command, digest, pids, _ = _escaping_launcher(tmp_path, "process-group-kill")
+    if not pinned_process.namespace_available():
+        with pytest.raises(LaunchPolicyError) as denied:
+            observe_pinned(str(command), digest)
+        assert denied.value.reason == "isolation-unavailable"
+        return
+    _without_init_pidfd(monkeypatch)
+    try:
+        if entry == "observe_pinned":
+            with pytest.raises(LaunchPolicyError) as failed:
+                observe_pinned(str(command), digest)
+            assert failed.value.reason == "isolation-teardown-failed"
+        else:
+            session = PinnedStdioSession(
+                command=str(command), sha256=digest, server_id="server:mail"
+            )
+            with pytest.raises(AuthorizationError, match="could not be confirmed ended"), session:
+                pass
+        assert (tmp_path / "orphaned").exists()
+    finally:
+        _kill_leftovers(pids)
+
+
+def test_without_pidfd_open_the_init_is_ended_through_a_stopped_unshare(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unsupported(pid: int, flags: int = 0) -> int:
+        raise OSError(errno.ENOSYS, "Function not implemented")
+
+    command, digest, pids, count = _escaping_launcher(tmp_path, "setsid-double-fork")
+    if _refuses_without_a_namespace(tmp_path):
+        return
+    monkeypatch.setattr(pinned_process.os, "pidfd_open", unsupported)
+    try:
+        observe_pinned(str(command), digest)
+        recorded = _recorded(pids)
+        assert len(recorded) == count
+        assert {_stat(pid)[0] for pid in recorded} <= {"Z", "X"}
+    finally:
+        _kill_leftovers(pids)
+
+
+# Not UTF-8, with a newline, and mimicking the fields that follow the name in /proc/<pid>/stat.
+_UNDECODABLE_NAME = b"\xff\n) Z 1 (\xfe"
+
+
+@pytest.fixture
+def undecodable_bystander() -> Iterator[int]:
+    """A process outside every session whose command name is not UTF-8."""
+    proc = subprocess.Popen(  # noqa: S603
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            "-c",
+            "import sys, time\n"
+            "open('/proc/self/comm', 'wb').write(bytes.fromhex(sys.argv[1]))\n"
+            "time.sleep(60)\n",
+            _UNDECODABLE_NAME.hex(),
+        ]
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            with open(f"/proc/{proc.pid}/comm", "rb") as comm:
+                if comm.read() == _UNDECODABLE_NAME + b"\n":
+                    break
+            time.sleep(0.01)
+        yield proc.pid
+    finally:
+        proc.kill()
+        proc.wait(timeout=5)
+
+
+def test_the_process_scan_reads_names_that_are_not_utf8(undecodable_bystander: int) -> None:
+    assert undecodable_bystander in pinned_process._children_by_parent()[os.getpid()]
+    assert pinned_process._parent(undecodable_bystander) == os.getpid()
+    status = pinned_process._status(undecodable_bystander)
+    assert status is not None
+    assert status["PPid"] == str(os.getpid())
+    assert pinned_process._ended(undecodable_bystander) is False
+
+
+@pytest.mark.parametrize("mode", ["held", "unheld", "opted-out"])
+def test_a_process_name_that_is_not_utf8_does_not_stop_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, undecodable_bystander: int, mode: str
+) -> None:
+    if mode == "opted-out":
+        marker = tmp_path / "pid"
+        command, digest = _launcher(tmp_path, marker, detached=True)
+        with isolation_off():
+            observe_pinned(str(command), digest)
+        _assert_dead(_host_pid(marker))
+        return
+    command, digest, pids, count = _escaping_launcher(tmp_path, "setsid-double-fork")
+    if _refuses_without_a_namespace(tmp_path):
+        return
+    if mode == "unheld":
+        _without_init_pidfd(monkeypatch)
+    try:
+        observe_pinned(str(command), digest)
+        recorded = _recorded(pids)
+        assert len(recorded) == count
+        assert {_stat(pid)[0] for pid in recorded} <= {"Z", "X"}
     finally:
         _kill_leftovers(pids)
 
@@ -704,6 +899,74 @@ def test_namespaced_cleanup_kills_an_init_that_left_the_process_group(tmp_path: 
         assert _stat(init)[0] in {"Z", "X"}
         assert proc.pid not in pinned_process._NAMESPACED
     finally:
+        _end_supervised(proc, init)
+
+
+@pytest.mark.parametrize("held", [True, False])
+def test_an_init_that_outlived_a_killed_unshare_is_ended_or_reported(
+    tmp_path: Path, held: bool
+) -> None:
+    # A process left in unshare's process group can kill unshare with kill(0, SIGKILL)
+    # after the init has cleared its parent-death signal and called setsid. unshare
+    # then reports CLD_KILLED, as it does when it re-raises the signal that ended the
+    # init, so only a pidfd taken at launch can still reach the init.
+    proc, init = _supervised(tmp_path)
+    assert init is not None
+    try:
+        if held:
+            pinned_process._INITS[proc.pid] = os.pidfd_open(init)
+        os.kill(proc.pid, signal.SIGKILL)
+        os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOWAIT)
+        assert _stat(init)[0] not in {"Z", "X"}
+        if held:
+            pinned_process.terminate_process_group(proc)
+            assert _stat(init)[0] in {"Z", "X"}
+        else:
+            with pytest.raises(pinned_process.PinnedProcessError) as failed:
+                pinned_process.terminate_process_group(proc)
+            assert failed.value.reason == "isolation-teardown-failed"
+        assert proc.wait(timeout=5) == -signal.SIGKILL
+        assert proc.pid not in pinned_process._INITS
+        assert proc.pid not in pinned_process._NAMESPACED
+    finally:
+        _end_supervised(proc, init)
+
+
+def test_a_held_init_that_does_not_end_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    proc, init = _supervised(tmp_path)
+    assert init is not None
+    try:
+        pinned_process._INITS[proc.pid] = os.pidfd_open(init)
+        monkeypatch.setattr(pinned_process.signal, "pidfd_send_signal", lambda pidfd, sig: None)
+        monkeypatch.setattr(pinned_process, "_TEARDOWN_SECONDS", 0.2)
+        with pytest.raises(pinned_process.PinnedProcessError) as failed:
+            pinned_process.terminate_process_group(proc)
+        assert failed.value.reason == "isolation-teardown-failed"
+        assert proc.wait(timeout=5) == -signal.SIGKILL
+        assert proc.pid not in pinned_process._INITS
+    finally:
+        monkeypatch.undo()
+        _end_supervised(proc, init)
+
+
+def test_an_unexpected_error_while_ending_the_namespace_is_a_teardown_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    proc, init = _supervised(tmp_path)
+
+    def undecodable() -> dict[int, list[int]]:
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    try:
+        monkeypatch.setattr(pinned_process, "_children_by_parent", undecodable)
+        with pytest.raises(pinned_process.PinnedProcessError) as failed:
+            pinned_process.terminate_process_group(proc)
+        assert failed.value.reason == "isolation-teardown-failed"
+        assert proc.wait(timeout=5) == -signal.SIGKILL
+    finally:
+        monkeypatch.undo()
         _end_supervised(proc, init)
 
 
@@ -808,6 +1071,59 @@ def test_the_status_reader_returns_the_fields_of_a_live_and_a_reaped_process() -
     proc = subprocess.Popen(["/bin/true"])  # noqa: S603
     proc.wait(timeout=5)
     assert pinned_process._status(proc.pid) is None
+
+
+@pytest.mark.parametrize(
+    ("stdin", "code"),
+    [(b"", 127), (b'{"jsonrpc": "2.0"}\n', 127), (b'\n{"jsonrpc": "2.0"}\n', 0)],
+    ids=["end-of-input", "other-byte", "released"],
+)
+def test_the_gate_executes_the_launcher_only_once_released(
+    tmp_path: Path, stdin: bytes, code: int
+) -> None:
+    out = tmp_path / "out"
+    script = tmp_path / "server"
+    script.write_text(f"#!/bin/sh\ncat > {shlex.quote(str(out))}\n")
+    script.chmod(0o700)
+    gate = [sys.executable, "-I", "-S", "-B", "-c", pinned_process._GATE_EXEC, str(script)]
+    result = subprocess.run(gate, input=stdin, timeout=30, check=False)  # noqa: S603
+    assert result.returncode == code
+    # The launcher reads exactly what follows the release byte.
+    assert (out.read_bytes() if out.exists() else None) == (stdin[1:] if code == 0 else None)
+
+
+_SAME_NAMESPACE_UNSHARE = """#!/bin/sh
+while [ "$1" != -- ]; do shift; done
+shift
+"$@" &
+wait
+"""
+
+
+@pytest.mark.parametrize("supervisor", ["exits", "same-namespace"])
+def test_no_launcher_runs_unless_its_namespace_init_is_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, supervisor: str
+) -> None:
+    # A stand-in unshare that exits before forking, or forks the gate in the caller's own
+    # PID namespace, never yields an init one namespace deeper, so the gate is never
+    # released and the pinned program never runs.
+    fake = tmp_path / "unshare"
+    fake.write_text("#!/bin/sh\nexit 0\n" if supervisor == "exits" else _SAME_NAMESPACE_UNSHARE)
+    fake.chmod(0o700)
+    monkeypatch.setattr(pinned_process, "namespace_available", lambda: True)
+    monkeypatch.setattr(pinned_process, "_unshare_path", lambda: str(fake))
+    monkeypatch.setattr(pinned_process, "_START_SECONDS", 0.5)
+    marker = tmp_path / "pid"
+    command, digest = _launcher(tmp_path, marker)
+    started = time.monotonic()
+    with pytest.raises(LaunchPolicyError) as denied:
+        observe_pinned(str(command), digest)
+    assert denied.value.reason == "isolation-unavailable"
+    assert time.monotonic() - started < 10
+    assert not pinned_process._NAMESPACED
+    assert not pinned_process._INITS
+    time.sleep(0.2)
+    assert not marker.exists()
 
 
 def test_verify_live_fails_a_server_whose_namespace_did_not_end(

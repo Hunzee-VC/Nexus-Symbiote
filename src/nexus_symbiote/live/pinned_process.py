@@ -3,9 +3,11 @@
 ``live.stdio`` and ``live.session`` both copy the approved bytes and execute that
 private copy. One helper keeps the copy, the digest check and the termination from
 drifting apart. When the kernel allows a user and PID namespace, the launcher is
-pid 1 of that namespace, and cleanup kills it directly and waits until the kernel has
-ended every process in the namespace, or reports that it could not. If the kernel
-refuses the namespace, launch fails before executing the pinned program. On Linux,
+pid 1 of that namespace. It starts only once the caller holds a pidfd for it, and
+cleanup kills it through that pidfd, or, where no pidfd can be held, as the child of a
+stopped ``unshare``. Cleanup then waits until the kernel has ended every process in
+the namespace, or reports that it could not. If the kernel refuses the namespace,
+launch fails before executing the pinned program. On Linux,
 ``--no-isolation`` starts the launcher through a short exec wrapper that makes it a
 child subreaper, and cleanup stops the launcher before it sweeps the tree, so while the
 launcher is alive its descendants are killed with the session, including a double-fork.
@@ -22,6 +24,7 @@ import ctypes
 import hashlib
 import os
 import re
+import select
 import shutil
 import signal
 import subprocess
@@ -39,6 +42,9 @@ _ISOLATION: contextvars.ContextVar[bool] = contextvars.ContextVar(
 _LAUNCHER_BUDGET = 128 * 1024 * 1024
 _NAMESPACE_OK: bool | None = None
 _NAMESPACED: set[int] = set()
+_INITS: dict[int, int] = {}
+_RELEASE = b"\n"
+_START_SECONDS = 5.0
 _STOP_SECONDS = 1.0
 _SWEEP_PASSES = 8
 _TEARDOWN_SECONDS = 5.0
@@ -51,6 +57,17 @@ PR_SET_CHILD_SUBREAPER = 36
 prctl = ctypes.CDLL(None).prctl
 prctl.argtypes = [ctypes.c_int] + [ctypes.c_ulong] * 4
 if prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
+    os._exit(127)
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+signal.signal(signal.SIGXFSZ, signal.SIG_DFL)
+os.execve(sys.argv[1], [sys.argv[1]], {"PATH": os.defpath})
+"""
+# The namespace init runs this before the pinned bytes and waits for one byte on stdin.
+# The caller writes it once it holds a pidfd for the init, so no launcher code can leave
+# unshare's process group, kill unshare through it, or exit before cleanup can reach it.
+_GATE_EXEC = """\
+import os, signal, sys
+if os.read(0, 1) != b"\\n":
     os._exit(127)
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 signal.signal(signal.SIGXFSZ, signal.SIG_DFL)
@@ -168,8 +185,13 @@ def isolated_argv(staged: Path) -> list[str]:
     tree sweep cannot contain children that daemonize and are reparented, so an
     opted-out launch on Linux makes the launcher a child subreaper first.
     """
+    return _launch_argv(staged)[0]
+
+
+def _launch_argv(staged: Path) -> tuple[list[str], bool]:
+    """The argv that runs ``staged``, and whether the namespace init waits to be released."""
     if not isolation_enabled():
-        return _subreaper_argv(staged) or [str(staged)]
+        return _subreaper_argv(staged) or [str(staged)], False
     if not namespace_available():
         raise PinnedProcessError(
             "isolation-unavailable",
@@ -179,18 +201,24 @@ def isolated_argv(staged: Path) -> list[str]:
     tool = _unshare_path()
     if tool is None:
         raise PinnedProcessError("isolation-unavailable", "PID namespace launcher is unavailable")
+    gate = _gate_argv(staged)
     # --kill-child is a parent-death signal, which the launcher can clear, so cleanup
     # kills the namespace init itself; the flag covers an unshare that dies first.
-    return [
-        tool,
-        "--user",
-        "--map-root-user",
-        "--pid",
-        "--fork",
-        "--kill-child",
-        "--",
-        str(staged),
-    ]
+    argv = [tool, "--user", "--map-root-user", "--pid", "--fork", "--kill-child", "--"]
+    return [*argv, *(gate or [str(staged)])], gate is not None
+
+
+def _parent(pid: int) -> int | None:
+    """The parent of ``pid`` from ``/proc/<pid>/stat``, or None if it cannot be read.
+
+    The command name before the last ``)`` is raw bytes that any process can set, so
+    only the fields after it are parsed.
+    """
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as stat:
+            return int(stat.read().rpartition(b")")[2].split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
 
 
 def _children_by_parent() -> dict[int, list[int]]:
@@ -199,17 +227,9 @@ def _children_by_parent() -> dict[int, list[int]]:
     for entry in os.listdir("/proc"):
         if not entry.isdigit():
             continue
-        pid = int(entry)
-        try:
-            with open(f"/proc/{pid}/status", encoding="utf-8") as status:
-                ppid = next(
-                    (int(line.split()[1]) for line in status if line.startswith("PPid:")),
-                    None,
-                )
-        except OSError:
-            continue
-        if ppid is not None:
-            children.setdefault(ppid, []).append(pid)
+        parent = _parent(int(entry))
+        if parent is not None:
+            children.setdefault(parent, []).append(int(entry))
     return children
 
 
@@ -287,9 +307,13 @@ def _stop_launcher(pid: int) -> int | None:
 
 
 def _status(pid: int) -> dict[str, str] | None:
-    """The fields of ``/proc/<pid>/status``, or None once the pid no longer exists."""
+    """The fields of ``/proc/<pid>/status``, or None once the pid no longer exists.
+
+    The kernel escapes newlines, tabs and backslashes in the ``Name`` field but passes
+    other bytes through, so a name that is not UTF-8 is decoded with escapes.
+    """
     try:
-        with open(f"/proc/{pid}/status", encoding="utf-8") as status:
+        with open(f"/proc/{pid}/status", encoding="utf-8", errors="surrogateescape") as status:
             return dict(line.rstrip("\n").split(":\t", 1) for line in status if ":\t" in line)
     except (FileNotFoundError, ProcessLookupError):
         return None
@@ -305,7 +329,7 @@ def _ended(pid: int) -> bool:
     """
     try:
         status = _status(pid)
-    except OSError:
+    except (OSError, ValueError):
         return False
     if status is None:
         return True
@@ -339,6 +363,124 @@ def _end_namespace(supervisor: int) -> bool:
     return True
 
 
+def _end_init(init: int) -> bool:
+    """SIGKILL the namespace init through its pidfd and wait until the namespace has ended.
+
+    The pidfd becomes readable once the init has exited and every thread of it is gone,
+    which the kernel allows only after it has killed and reaped every other process in
+    the namespace. A pidfd keeps naming the init after ``unshare`` has died, even once
+    its pid has been reaped and reused. Returns False when the deadline passes first.
+    """
+    with contextlib.suppress(ProcessLookupError):
+        signal.pidfd_send_signal(init, signal.SIGKILL)
+    poller = select.poll()
+    poller.register(init, select.POLLIN)
+    events = poller.poll(int(_TEARDOWN_SECONDS * 1000))
+    return any(revents & select.POLLIN for _, revents in events)
+
+
+def _end_unheld_namespace(proc: subprocess.Popen[bytes], stop: bool) -> bool:
+    """End a namespace whose init the caller holds no pidfd for, or report that it cannot.
+
+    A stopped ``unshare`` keeps its child's pid from being reaped and reused. If it has
+    already exited, it reaped the init first, so the namespace has ended; if a signal
+    killed it, the init may have cleared its parent-death signal and outlived it.
+    """
+    if not stop:
+        return proc.returncode is not None and proc.returncode >= 0
+    seen = _stop_launcher(proc.pid)
+    if seen == os.CLD_STOPPED:
+        return _end_namespace(proc.pid)
+    return seen == os.CLD_EXITED
+
+
+def _interpreter() -> str | None:
+    """This interpreter, when a fixed exec wrapper can run it, or None."""
+    interpreter = sys.executable
+    if (
+        not sys.platform.startswith("linux")
+        or getattr(sys, "frozen", False)
+        or not interpreter
+        or not Path(interpreter).is_absolute()
+    ):
+        return None
+    return interpreter
+
+
+def _gate_argv(staged: Path) -> list[str] | None:
+    """Run ``staged`` as the namespace init only once it is released, or None.
+
+    The wrapper has the same constraints as the subreaper wrapper. Without a separately
+    runnable interpreter or ``os.pidfd_open``, the init starts at once, and cleanup
+    finds it as the child of a stopped ``unshare`` instead.
+    """
+    interpreter = _interpreter()
+    if interpreter is None or not hasattr(os, "pidfd_open"):
+        return None
+    return [interpreter, "-I", "-S", "-B", "-c", _GATE_EXEC, str(staged)]
+
+
+def _exited(pid: int) -> bool:
+    try:
+        return os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+    except OSError:
+        return False
+
+
+def _namespace_init(supervisor: int, depth: int) -> int | None:
+    """The child of ``supervisor`` that is pid 1 of a PID namespace one level deeper."""
+    for child in _children_by_parent().get(supervisor, []):
+        status = _status(child)
+        nspid = status.get("NSpid", "").split() if status is not None else []
+        if len(nspid) == depth + 1 and nspid[-1] == "1":
+            return child
+    return None
+
+
+def _hold_init(supervisor: int) -> int | None:
+    """A pidfd for the namespace init of ``supervisor``, which waits in the gate.
+
+    The pid is read again after the pidfd is opened: it is still the child of
+    ``unshare``, which forks once, so the pidfd names the init and not a process that
+    reused its pid. Returns None when ``/proc`` or the kernel cannot provide a verified
+    pidfd; cleanup then falls back to stopping ``unshare``. Raises
+    ``PinnedProcessError`` when no init starts, before any launcher code has run.
+    """
+    try:
+        status = _status(supervisor)
+    except OSError:
+        return None
+    depth = len(status.get("NSpid", "").split()) if status is not None else 0
+    if depth == 0:
+        return None
+    deadline = time.monotonic() + _START_SECONDS
+    delay = 0.0005
+    while True:
+        try:
+            init = _namespace_init(supervisor, depth)
+        except OSError:
+            return None
+        if init is not None:
+            break
+        if _exited(supervisor) or time.monotonic() >= deadline:
+            raise PinnedProcessError(
+                "isolation-unavailable",
+                "the PID namespace init did not start; no launcher was executed",
+            )
+        time.sleep(delay)
+        delay = min(delay * 2, 0.02)
+    try:
+        pidfd = os.pidfd_open(init)
+    except OSError:
+        return None
+    if _parent(init) == supervisor:
+        return pidfd
+    os.close(pidfd)
+    raise PinnedProcessError(
+        "isolation-unavailable", "the PID namespace init exited before the launcher was executed"
+    )
+
+
 def _subreaper_argv(staged: Path) -> list[str] | None:
     """Run ``staged`` through an exec wrapper that makes it a child subreaper, or None.
 
@@ -354,13 +496,8 @@ def _subreaper_argv(staged: Path) -> list[str] | None:
     interpreter, an opted-out launch keeps best-effort cleanup. The calling process
     is never marked.
     """
-    interpreter = sys.executable
-    if (
-        not sys.platform.startswith("linux")
-        or getattr(sys, "frozen", False)
-        or not interpreter
-        or not Path(interpreter).is_absolute()
-    ):
+    interpreter = _interpreter()
+    if interpreter is None:
         return None
     try:
         if not hasattr(ctypes.CDLL(None), "prctl"):
@@ -391,12 +528,14 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
 
     No Python runs in the child between fork and exec: that is unsafe in a threaded
     caller, and ``Popen`` would wait for it before any protocol deadline exists. The
-    subreaper wrapper does its work after exec, within the caller's deadline.
+    subreaper wrapper does its work after exec, within the caller's deadline. A
+    namespace init waits in the gate until this process holds a pidfd for it, at most
+    ``_START_SECONDS``.
     """
     if not _executable_image(staged):
         raise PinnedProcessError("launcher-start-failed", "launcher could not be run")
     try:
-        argv = isolated_argv(staged)
+        argv, gated = _launch_argv(staged)
         namespaced = isolation_enabled()
         proc = subprocess.Popen(  # noqa: S603
             argv,
@@ -414,17 +553,45 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
         raise PinnedProcessError("launcher-start-failed", "launcher could not be run") from exc
     if namespaced:
         _NAMESPACED.add(proc.pid)
+    if gated:
+        _release(proc)
     return proc
+
+
+def _release(proc: subprocess.Popen[bytes]) -> None:
+    """Hold the namespace init, then let it execute the launcher; on failure, end it."""
+    assert proc.stdin is not None and proc.stdout is not None
+    init: int | None = None
+    try:
+        init = _hold_init(proc.pid)
+        os.write(proc.stdin.fileno(), _RELEASE)
+    except BaseException as exc:
+        # The init still waits in the gate, with the parent-death signal set, so killing
+        # unshare ends it before any launcher code runs.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        if init is not None:
+            os.close(init)
+        _NAMESPACED.discard(proc.pid)
+        proc.stdin.close()
+        proc.stdout.close()
+        proc.wait()
+        if isinstance(exc, PinnedProcessError) or not isinstance(exc, OSError):
+            raise
+        raise PinnedProcessError("launcher-start-failed", "launcher could not be run") from exc
+    if init is not None:
+        _INITS[proc.pid] = init
 
 
 def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
     """Kill the session and every process the launcher started.
 
-    In a PID namespace, ``unshare`` is stopped so that it cannot reap the namespace
-    init, the init is killed directly, and cleanup waits until the kernel has ended the
-    namespace. If ``unshare`` does not stop, or the namespace has not ended by the
-    deadline, ``unshare`` is still killed and ``PinnedProcessError`` reports
-    ``isolation-teardown-failed``.
+    In a PID namespace, the init is killed through the pidfd taken at launch, and
+    cleanup waits until the kernel has ended the namespace. Without that pidfd,
+    ``unshare`` is stopped so that it cannot reap the init, and the init is found as its
+    child. If the namespace cannot be confirmed ended by the deadline, or ``unshare``
+    was killed before cleanup with no pidfd held, ``unshare`` is still killed and
+    ``PinnedProcessError`` reports ``isolation-teardown-failed``.
 
     Outside a namespace, on Linux, the launcher is a child subreaper, so a double-fork
     is reparented to it instead of pid 1 and the tree sweep still finds it. There the
@@ -434,19 +601,21 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
     adopted outside the tree and is not found.
     """
     namespaced = proc.pid in _NAMESPACED
+    init = _INITS.pop(proc.pid, None)
     # The sweep reads Linux's /proc, and macOS has no os.waitid before Python 3.13. Until
     # it is reaped, the pid is still this launcher's.
     stop = sys.platform.startswith("linux") and proc.returncode is None
     ended = True
     try:
-        if stop:
-            seen = _stop_launcher(proc.pid)
-            if namespaced and seen == os.CLD_STOPPED:
-                ended = _end_namespace(proc.pid)
-            elif namespaced:
-                # unshare exits only after its child, whose death ends the namespace.
-                ended = seen in (os.CLD_EXITED, os.CLD_KILLED, os.CLD_DUMPED)
-        if not namespaced:
+        if namespaced:
+            try:
+                ended = _end_init(init) if init is not None else _end_unheld_namespace(proc, stop)
+            except Exception:
+                # Whatever failed, the namespace was not shown to have ended.
+                ended = False
+        else:
+            if stop:
+                _stop_launcher(proc.pid)
             _kill_descendants(proc.pid)
         try:
             os.killpg(proc.pid, signal.SIGKILL)
@@ -460,6 +629,10 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
         # launcher that is not in a PID namespace, and that launcher would then skip
         # the descendant-tree kill.
         _NAMESPACED.discard(proc.pid)
+        if init is not None:
+            with contextlib.suppress(OSError):
+                signal.pidfd_send_signal(init, signal.SIGKILL)
+            os.close(init)
         if stop:
             # killpg has normally killed it already. If cleanup failed before that, a
             # stopped launcher would never read EOF and the caller's wait() would hang.
