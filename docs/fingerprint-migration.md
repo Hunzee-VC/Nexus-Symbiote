@@ -117,9 +117,10 @@ baseline, including the exported tool names, before approving it.
 
 The same release names client settings whose values the export records only as
 present or redacted: a `cwd` other than the workspace root (`.`, `./`,
-`${workspaceFolder}`, `${workspaceFolder}/` in a root configuration file; nested
-configuration files mark every `cwd` unbound), `envFile`, `watchPaths`, `oauth`, `auth`,
-`dev`, `env_vars`, `bearer_token_env_var`, `env_http_headers`, and tool approval or
+`${workspaceFolder}`, `${workspaceFolder}/` written exactly in a root configuration
+file, so ` .` is another directory; nested configuration files mark every `cwd`
+unbound), `envFile`, `watchPaths`, `oauth`, `auth`, `dev`, `env_vars`,
+`bearer_token_env_var`, `env_http_headers`, and tool approval or
 filter entries altered by redaction (which also record a coverage gap without the key).
 Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a server that declares one carries the low
 `completeness` finding, and `diff --fail-on-alert` raises the medium alert that

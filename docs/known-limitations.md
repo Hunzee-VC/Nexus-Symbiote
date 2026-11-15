@@ -200,10 +200,14 @@ A way around a limit that its entry does not describe is worth a
   values. Without it, `diff` still alerts on a changed command basename, launcher,
   package or version, on added or removed arguments, variables or headers, and on a
   change to which named tools each field auto-approves or filters, and a server whose
-  remaining values (including `cwd`, `envFile`, `watchPaths`, `oauth`, `auth`, `dev`
-  and the Codex environment-name settings) are unbound is a medium alert: argument,
-  environment and endpoint-path drift is undetectable. That alert does not say
-  which value changed. See [source binding](verification-source-binding.md).
+  remaining values are unbound is a medium alert: argument, environment and
+  endpoint-path drift is undetectable. Those values include a `cwd` other than `.`,
+  `./`, `${workspaceFolder}` or `${workspaceFolder}/` written exactly in a root
+  configuration file (` .` is another directory), any `cwd` in a nested one, whose
+  servers start in its own directory, `envFile`, `watchPaths`, `oauth`, `auth`, `dev`,
+  the Codex environment-name settings, and tool list entries that redaction changed
+  (a URL, a token, a scrubbed value), which are exported redacted. That alert does
+  not say which value changed. See [source binding](verification-source-binding.md).
 - **Without the key, the value itself is not compared.** A served directory widened
   from `./notes` to `/`, a changed flag, environment or header value, an endpoint or
   index path changed on the same host, a project resolver setting value, and the
@@ -215,7 +219,19 @@ A way around a limit that its entry does not describe is worth a
 - **Unbound values add to the score.** Each server with such values carries a low
   `completeness` risk that names the key. It is not a gap, but it adds 1 to the
   risk score, so about ten such servers add 10 points toward the default fail
-  threshold of 50.
+  threshold of 50. Redacted tool list entries are the exception: without the key
+  they are also a coverage gap (`tool list entries withheld by redaction`), which
+  fails `scan --check`, because two different entries can export the same text.
+- **Some credentials are scrubbed only whole.** A URL password that reads as a word
+  (`postgres`, `changeme`: under 16 characters, without a digit, punctuation or
+  mixed case) and a URL user name outside the known token formats are scrubbed only
+  as part of the value that holds them, so a tool list entry or text that repeats
+  one alone is exported in clear; a default such as `postgres:postgres` would
+  otherwise withhold every server and package named after the database. The OAuth
+  parameters sent in clear (client id, scopes, audiences, resource, redirect URI,
+  issuer) are not scrubbed. In an inline shell or `cmd` script a credential is found
+  by its shape or in a `NAME=value`, `--name=value` or `--name value` word, which
+  covers cmd's `set NAME=<scheme> <credential>`.
 - **Resolver settings outside the root are not read.** Settings are read from the
   root `.npmrc`, `bunfig.toml`, `.yarnrc.yml`, `.yarnrc`, `.env.yarn`, `uv.toml`
   and the `[tool.uv]` table of `pyproject.toml`. User and global configuration,

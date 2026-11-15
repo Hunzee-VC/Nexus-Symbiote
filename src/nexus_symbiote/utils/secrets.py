@@ -184,6 +184,20 @@ def scheme_credentials(value: str) -> list[str]:
     return [credential]
 
 
+def is_reference(value: str) -> bool:
+    """Whether ``value`` only names a variable (``${NAME}``, ``$NAME``) and holds no secret."""
+    return _REFERENCE.fullmatch(value) is not None
+
+
+def credential_shaped(value: str) -> bool:
+    """Whether a bare word reads as a credential, by the shape rule for scheme values.
+
+    At least 16 characters, or a digit, credential punctuation, or both cases with an
+    upper-case letter after the first: ``postgres`` or ``changeme`` read as words.
+    """
+    return _credential_like(value, "")
+
+
 def _longest_first(value: str) -> tuple[int, str]:
     return (-len(value), value)
 

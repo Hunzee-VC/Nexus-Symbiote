@@ -123,9 +123,10 @@ entries (when an `alwaysAllow`, `autoApprove`, `includeTools`, `excludeTools`,
 holds a scrubbed credential, which also records a coverage gap without the key so
 distinct URLs or secrets cannot collide silently), or the values of the client settings
 `cwd` (working directory, except `.`, `./`, `${workspaceFolder}` and
-`${workspaceFolder}/` in a root configuration file; nested configuration files mark any
-`cwd` unbound), `envFile` (environment file), `watchPaths`, `oauth` and `auth`
-(authentication settings), `dev` (development settings) and the Codex `env_vars`,
+`${workspaceFolder}/` written exactly in a root configuration file, so ` .` is another
+directory; nested configuration files mark any `cwd` unbound), `envFile` (environment
+file), `watchPaths`, `oauth` and `auth` (authentication settings), `dev` (development
+settings) and the Codex `env_vars`,
 `bearer_token_env_var` and `env_http_headers` (forwarded environment variable names),
 which the record exports only as present. A server whose
 arguments are only its recorded launcher package, or with a bare endpoint origin,
