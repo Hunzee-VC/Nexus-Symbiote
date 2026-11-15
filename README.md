@@ -134,7 +134,7 @@ An agent's behavior depends on its configuration as much as its code — MCP ser
 | Tool rug pulls | Fingerprints the tools a [live observation](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/offline-and-live-modes.md#detect-drift-on-a-remote-mcp-server) records, so a changed definition is a critical drift alert; a static scan records declared tools by name and file digest |
 | Endpoint repointing, scope widening | Critical or high drift alert when an MCP or A2A endpoint moves host, or an A2A card's OAuth scopes grow |
 | Executable or unsigned model files | Classifies formats without loading them and validates SafeTensors headers; integrity stays `UNKNOWN` until your [signer policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md#operator-signature-policy) verifies the weights |
-| Hidden instructions | Flags bidi and zero-width characters, and text hidden in HTML comments, in instruction files |
+| Hidden instructions | Flags bidi and zero-width characters, and text hidden in HTML comments or unused link reference definitions, in instruction files |
 | Over-broad agent permissions | Flags `bypassPermissions`, blanket grants such as `Bash(*)` and hook commands; a changed setting is a drift alert, and without the binding key a record whose setting values the redaction removes is a medium drift alert that they are unbound |
 | Credential exposure | Records variable names, never values; redacts known secret patterns |
 

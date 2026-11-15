@@ -23,7 +23,7 @@ from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
 from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection, fold_name
-from nexus_symbiote.utils.markdown import text_outside_code
+from nexus_symbiote.utils.markdown import hidden_text, text_outside_code
 from nexus_symbiote.utils.terminal import neutralize
 
 INVISIBLE_CHARS: dict[str, str] = {
@@ -83,7 +83,6 @@ _FLAG_SEQUENCE = re.compile(
     "\U0001f3f4\U000e0067\U000e0062(?:\U000e0065\U000e006e\U000e0067"
     "|\U000e0073\U000e0063\U000e0074|\U000e0077\U000e006c\U000e0073)\U000e007f"
 )
-_MARKDOWN_COMMENT = re.compile(r"^[ \t]{0,3}\[(?://|comment|#)\]:[ \t]*(?:#|<>)", re.M)
 # Characters of a large text file counted at once when no newline ends a segment sooner.
 _MAX_SEGMENT = 1 << 20
 # In a file with a NUL byte that is not UTF-8, which is binary, only runs this long count:
@@ -539,12 +538,15 @@ def _comment_is_instruction(text: str) -> bool:
 def detect_hidden_markup(content: str, source_name: str) -> list[RiskAssessment]:
     """Report HTML and Markdown comments, which renderers hide but agents read.
 
-    Only counts and lengths are reported, never the hidden text. A comment that
-    carries an imperative (``run`` only when a path, a script, a shell or a listed
-    command follows, possibly after punctuation or markup, or when ``this``, ``these``,
-    ``it`` or ``the following`` follows and one of those comes later in the comment, or
-    when one of those starts a command later in the same sentence), a URL or a path
-    under ``~/`` is high; other comments stay low.
+    Markdown comments are the link reference definitions that no link uses or that
+    repeat a label, and HTML comments include the processing instructions, declarations
+    and CDATA sections that HTML parsers read as comments; see :func:`hidden_text`.
+    Only counts and lengths are reported, never the hidden text. A comment that carries
+    an imperative (``run`` only when a path, a script, a shell or a listed command
+    follows, possibly after punctuation or markup, or when ``this``, ``these``, ``it``
+    or ``the following`` follows and one of those comes later in the comment, or when
+    one of those starts a command later in the same sentence), a URL or a path under
+    ``~/`` is high; other comments stay low.
     """
     count = length = 0
     instructive = False
@@ -556,10 +558,11 @@ def detect_hidden_markup(content: str, source_name: str) -> list[RiskAssessment]
         length += stop - start
         instructive = instructive or _comment_is_instruction(content[start:stop])
         position = stop
-    for line in content.splitlines():
-        if _MARKDOWN_COMMENT.match(line):
-            count += 1
-            instructive = instructive or _comment_is_instruction(line)
+    hidden = hidden_text(content)
+    for part in (*hidden.definitions, *hidden.html):
+        count += 1
+        instructive = instructive or _comment_is_instruction(part)
+    length += sum(map(len, hidden.html))
     if not count:
         return []
     severity = RiskSeverity.HIGH if instructive else RiskSeverity.LOW
