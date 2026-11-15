@@ -266,8 +266,10 @@ def test_onnx_location_keys_outside_parsed_fields_fail_closed(project):
     (project / "model.onnx_data").write_bytes(b"weights")
     result = ModelScanner().scan(project)
     assert result.scan_failures == [
-        "model.onnx: ONNX file holds an external-data key outside the parsed graph; "
-        "external weight files are unknown"
+        (
+            "model.onnx: ONNX file holds an external-data key outside the parsed graph; "
+            "external weight files are unknown"
+        )
     ]
     metadata = onnx_model(onnx_tensor("w"), metadata=(("location", "Paris"),))
     (project / "model.onnx").write_bytes(metadata)
@@ -374,8 +376,10 @@ def test_a_case_variant_of_a_savedmodel_name_is_a_failure(project, name):
     variant = name.partition("/")[0]
     result = ModelScanner().scan(project)
     assert result.scan_failures == [
-        f"export/{variant}: case variant of export/{variant.lower()} is the active file on "
-        "case-insensitive file systems and is not inventoried"
+        (
+            f"export/{variant}: case variant of export/{variant.lower()} is the active file on "
+            "case-insensitive file systems and is not inventoried"
+        )
     ]
     assert not ModelPackages(project.resolve()).observe(Path("export/saved_model.pb")).complete
 
@@ -440,8 +444,10 @@ def test_shard_index_naming_an_uncollected_file_is_a_failure(project, shard):
     (model / "pytorch_model.bin.index.json").write_text(json.dumps({"weight_map": {"a": shard}}))
     result = ModelScanner().scan(project)
     assert result.scan_failures == [
-        "llm/pytorch_model.bin.index.json: model index references a missing, unrecognised "
-        "or out-of-directory weight file"
+        (
+            "llm/pytorch_model.bin.index.json: model index references a missing, unrecognised "
+            "or out-of-directory weight file"
+        )
     ]
 
 
@@ -969,8 +975,10 @@ def test_a_signature_entry_for_the_discovery_report_is_not_unused(tmp_path, proj
     assert not ModelScanner(policies).scan(project).scan_failures
     pinned = write_policy(tmp_path, [pin(project, ".shadowscan/report.json")])
     assert ModelScanner(load_signature_policies(pinned, project)).scan(project).scan_failures == [
-        ".shadowscan/report.json: the ShadowScan report needs a sigstore-message-signature "
-        "entry; a digest pin does not authenticate its producer"
+        (
+            ".shadowscan/report.json: the ShadowScan report needs a sigstore-message-signature "
+            "entry; a digest pin does not authenticate its producer"
+        )
     ]
 
 
@@ -988,8 +996,10 @@ def test_an_entry_for_a_report_location_the_importer_skips_is_unused(tmp_path, p
     }
     policies = load_signature_policies(write_policy(tmp_path, [record], version=1), project)
     assert ModelScanner(policies).scan(project).scan_failures == [
-        "shadowscan.json: signature policy entry names a ShadowScan report location that "
-        "the importer does not read"
+        (
+            "shadowscan.json: signature policy entry names a ShadowScan report location that "
+            "the importer does not read"
+        )
     ]
 
 

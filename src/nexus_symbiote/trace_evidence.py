@@ -56,8 +56,10 @@ LISTED_CANDIDATES = 10
 MAX_DISTINCT_IDENTIFIERS = 100_000
 GATING_KINDS = frozenset({"agent", "mcp-endpoint", "model", "tool"})
 LIMITATIONS = (
-    "Telemetry is emitted by the agent's own instrumentation: it is a report, not an "
-    "independent observation.",
+    (
+        "Telemetry is emitted by the agent's own instrumentation: it is a report, not an "
+        "independent observation."
+    ),
     "Traces can be incomplete, sampled or forged by the code they describe.",
     "A span proves at most that the instrumentation reported an operation.",
     "Absence of a span proves nothing: a declaration that no span mentions may still be used.",
@@ -765,68 +767,84 @@ def coverage_notes(document: Mapping[str, Any]) -> list[tuple[str, str]]:
         notes.append(
             (
                 "warning",
-                "Spans with message, prompt or tool-call content attributes: "
-                f"{coverage['spans_with_content_attributes']}. Protect these trace files.",
+                (
+                    "Spans with message, prompt or tool-call content attributes: "
+                    f"{coverage['spans_with_content_attributes']}. Protect these trace files."
+                ),
             )
         )
     if any(unreadable.values()):
         notes.append(
             (
                 "warning",
-                f"Identifier values not used: {sum(unreadable.values())} (invalid: "
-                f"{unreadable['invalid']}, longer than {MAX_IDENTIFIER_CHARS} characters: "
-                f"{unreadable['oversized']}, withheld as credential-shaped: "
-                f"{unreadable['withheld']}).",
+                (
+                    f"Identifier values not used: {sum(unreadable.values())} (invalid: "
+                    f"{unreadable['invalid']}, longer than {MAX_IDENTIFIER_CHARS} characters: "
+                    f"{unreadable['oversized']}, withheld as credential-shaped: "
+                    f"{unreadable['withheld']})."
+                ),
             )
         )
     if coverage["spans_unclassified"]:
         notes.append(
             (
                 "warning",
-                "Spans whose operation name, MCP method or MCP transport could not be read: "
-                f"{coverage['spans_unclassified']}. What they report cannot be compared with "
-                "the inventory.",
+                (
+                    "Spans whose operation name, MCP method or MCP transport could not be read: "
+                    f"{coverage['spans_unclassified']}. What they report cannot be compared with "
+                    "the inventory."
+                ),
             )
         )
     if coverage["attribute_lists_over_bound"]:
         notes.append(
             (
                 "warning",
-                f"Attribute lists with more than {MAX_ATTRIBUTES} entries: "
-                f"{coverage['attribute_lists_over_bound']}. The entries after the first "
-                f"{MAX_ATTRIBUTES} were not read.",
+                (
+                    f"Attribute lists with more than {MAX_ATTRIBUTES} entries: "
+                    f"{coverage['attribute_lists_over_bound']}. The entries after the first "
+                    f"{MAX_ATTRIBUTES} were not read."
+                ),
             )
         )
     if clients["stdio"]:
         notes.append(
             (
                 "note",
-                f"MCP client spans over a pipe or unix socket: {clients['stdio']}. A trace "
-                "cannot attribute local activity to a configured server.",
+                (
+                    f"MCP client spans over a pipe or unix socket: {clients['stdio']}. A trace "
+                    "cannot attribute local activity to a configured server."
+                ),
             )
         )
     if clients["unattributed"]:
         notes.append(
             (
                 "note",
-                "MCP client spans without a server address, or whose transport could not be "
-                f"read: {clients['unattributed']}. Their endpoint is not attributed.",
+                (
+                    "MCP client spans without a server address, or whose transport could not be "
+                    f"read: {clients['unattributed']}. Their endpoint is not attributed."
+                ),
             )
         )
     if any(missing.values()):
         notes.append(
             (
                 "note",
-                f"Tool spans that name no tool: {missing['tool']}; agent spans that name no "
-                f"agent: {missing['agent']}.",
+                (
+                    f"Tool spans that name no tool: {missing['tool']}; agent spans that name no "
+                    f"agent: {missing['agent']}."
+                ),
             )
         )
     if coverage["legacy_attributes"]["gen_ai.system"]:
         notes.append(
             (
                 "note",
-                "Spans that name their provider with the legacy gen_ai.system attribute: "
-                f"{coverage['legacy_attributes']['gen_ai.system']}.",
+                (
+                    "Spans that name their provider with the legacy gen_ai.system attribute: "
+                    f"{coverage['legacy_attributes']['gen_ai.system']}."
+                ),
             )
         )
     return notes
@@ -909,8 +927,10 @@ def sarif_document(document: Mapping[str, Any], anchor: str) -> dict[str, Any]:
         notes.append(
             (
                 "warning",
-                f"This run has {len(results)} results; GitHub code scanning keeps at most "
-                f"{GITHUB_MAX_RESULTS} per run.",
+                (
+                    f"This run has {len(results)} results; GitHub code scanning keeps at most "
+                    f"{GITHUB_MAX_RESULTS} per run."
+                ),
             )
         )
     notifications = [

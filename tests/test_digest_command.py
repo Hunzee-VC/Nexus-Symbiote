@@ -251,13 +251,17 @@ INVALID: dict[str, tuple[Callable[[Path], Path], str]] = {
     ),
     "unsupported version": (
         _write_text(json.dumps({"metadata": {"spec_version": "1.2.0"}, "components": []})),
-        "Native format version 1.2.0 is not supported by this build (supported: 1.0.x, "
-        "1.1.x); upgrade nexus-symbiote or re-collect the inventory.",
+        (
+            "Native format version 1.2.0 is not supported by this build (supported: 1.0.x, "
+            "1.1.x); upgrade nexus-symbiote or re-collect the inventory."
+        ),
     ),
     "hostile version": (
         _write_text(json.dumps({"metadata": {"spec_version": HOSTILE}, "components": []})),
-        "Native format an unrecognised version is not supported by this build (supported: "
-        "1.0.x, 1.1.x); upgrade nexus-symbiote or re-collect the inventory.",
+        (
+            "Native format an unrecognised version is not supported by this build (supported: "
+            "1.0.x, 1.1.x); upgrade nexus-symbiote or re-collect the inventory."
+        ),
     ),
     "oversized": (
         _write_bytes(b" " * MAX_NATIVE_BYTES + b"{}"),
@@ -265,8 +269,10 @@ INVALID: dict[str, tuple[Callable[[Path], Path], str]] = {
     ),
     "symbolic link": (
         _symlink,
-        "It is reached through a symbolic link or a path component that is not a "
-        "directory; inventories are read without following links, so pass the real path.",
+        (
+            "It is reached through a symbolic link or a path component that is not a "
+            "directory; inventories are read without following links, so pass the real path."
+        ),
     ),
     "fifo": (
         _fifo,

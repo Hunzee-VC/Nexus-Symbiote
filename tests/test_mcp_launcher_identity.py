@@ -603,8 +603,10 @@ def test_shell_parameter_expansion_is_environment_dependent(tmp_path):
     [
         "/opt/my tools/npx",
         "/Users/John Smith/.nvm/versions/node/v20.11.0/bin/npx",
-        "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/../../../../../../"
-        "usr/local/bin/npx",
+        (
+            "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/../../../../../../"
+            "usr/local/bin/npx"
+        ),
         "C:\\Program Files (x86)\\nodejs\\npx.cmd",
         "/usr/bin/nice /usr/local/bin/npx",
     ],

@@ -414,8 +414,10 @@ def _read_explicit_trust_root(
                 None,
                 None,
                 None,
-                "A pinned Sigstore trust-root SHA-256 was supplied without a trust root; "
-                f"set {TRUST_ROOT_ENV} or pass --trust-root",
+                (
+                    "A pinned Sigstore trust-root SHA-256 was supplied without a trust root; "
+                    f"set {TRUST_ROOT_ENV} or pass --trust-root"
+                ),
             )
         return None, None, None, None
     path = Path(raw)

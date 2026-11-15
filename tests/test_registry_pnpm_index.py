@@ -175,15 +175,17 @@ SHARED_GAP = "pnpm-lock.yaml: packages whose names redact to mcp-token=*** are u
     "lock",
     [
         _packages("mcp-token=***@1.0.0"),
-        "lockfileVersion: '9.0'\n"
-        "importers:\n"
-        "  .:\n"
-        "    dependencies:\n"
-        "      'mcp-token=***':\n"
-        "        specifier: ^1.0.0\n"
-        "        version: 1.0.0\n"
-        "packages:\n"
-        f"  'mcp-token=***@1.0.0':\n    resolution: {{integrity: {SHA512}}}\n",
+        (
+            "lockfileVersion: '9.0'\n"
+            "importers:\n"
+            "  .:\n"
+            "    dependencies:\n"
+            "      'mcp-token=***':\n"
+            "        specifier: ^1.0.0\n"
+            "        version: 1.0.0\n"
+            "packages:\n"
+            f"  'mcp-token=***@1.0.0':\n    resolution: {{integrity: {SHA512}}}\n"
+        ),
     ],
 )
 def test_one_record_is_not_bound_to_dependencies_whose_names_redact_alike(tmp_path, lock):

@@ -349,8 +349,10 @@ def _stamp(path: Path, cutoff: str, python: str, digest: str) -> None:
     header = 2 if len(lines) > 1 and lines[1].strip() == f"#    {COMPILE_COMMAND}" else 0
     stamp = [
         f"# Scope: {SCOPES[path.name]}",
-        f"# lock-inputs: uv={UV_VERSION} exclude-newer={cutoff} python={python}"
-        f" pyproject=sha256:{digest}",
+        (
+            f"# lock-inputs: uv={UV_VERSION} exclude-newer={cutoff} python={python}"
+            f" pyproject=sha256:{digest}"
+        ),
     ]
     path.write_text("\n".join([*lines[:header], *stamp, *lines[header:]]) + "\n", "utf-8")
 

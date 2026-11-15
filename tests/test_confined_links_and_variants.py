@@ -130,8 +130,10 @@ def test_missing_fixed_path_reports_its_case_variants(tmp_path):
         assert files.read_text("README.md", missing_ok=True) is None
         assert files.case_variants("agents.md") == [Path("Agents.md")]
     assert failures == [
-        ".Claude/Settings.json: case variant of .claude/settings.json is the active file on "
-        "case-insensitive file systems and is not inventoried"
+        (
+            ".Claude/Settings.json: case variant of .claude/settings.json is the active file on "
+            "case-insensitive file systems and is not inventoried"
+        )
     ]
 
 
@@ -218,10 +220,14 @@ def test_case_variant_below_an_in_root_directory_link_is_reported(tmp_path):
         assert list(files.iter_files(".claude/rules")) == []
         assert files.case_variants(".claude/settings.json") == [Path(".claude/Settings.json")]
     assert failures == [
-        ".claude/Settings.json: case variant of .claude/settings.json is the active file on "
-        "case-insensitive file systems and is not inventoried",
-        ".claude/Rules: case variant of .claude/rules is the active file on "
-        "case-insensitive file systems and is not inventoried",
+        (
+            ".claude/Settings.json: case variant of .claude/settings.json is the active file on "
+            "case-insensitive file systems and is not inventoried"
+        ),
+        (
+            ".claude/Rules: case variant of .claude/rules is the active file on "
+            "case-insensitive file systems and is not inventoried"
+        ),
     ]
 
 
@@ -237,8 +243,10 @@ def test_case_variant_search_follows_one_link_only(tmp_path):
         assert files.case_variants(".claude/settings.json") == []
         assert files.read_json(".claude/settings.json", missing_ok=True) is None
     assert failures == [
-        ".claude/settings.json: symlink target is or passes through another symlink "
-        "or a non-directory"
+        (
+            ".claude/settings.json: symlink target is or passes through another symlink "
+            "or a non-directory"
+        )
     ]
 
 
@@ -338,8 +346,10 @@ def test_lookups_beside_thousands_of_same_folding_directories_stay_fast(tmp_path
             assert files.read_bytes(f"a/m{index}.md", missing_ok=True) is None
     assert time.perf_counter() - start < 10
     assert failures == [
-        "a: more than 16 names in its directory differ from it only by case or "
-        "normalisation and are not checked"
+        (
+            "a: more than 16 names in its directory differ from it only by case or "
+            "normalisation and are not checked"
+        )
     ]
 
 

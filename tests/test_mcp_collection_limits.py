@@ -29,8 +29,10 @@ def scan(tmp_path, servers: dict):
 def test_server_count_limit_is_named(tmp_path):
     result, _ = scan(tmp_path, {f"s{i}": {} for i in range(MAX_SERVERS_PER_FILE + 1)})
     assert result.scan_failures == [
-        f".mcp.json: invalid server map or MCP server limit ({MAX_SERVERS_PER_FILE} per file) "
-        "exceeded"
+        (
+            f".mcp.json: invalid server map or MCP server limit ({MAX_SERVERS_PER_FILE} per file) "
+            "exceeded"
+        )
     ]
     assert not result.components
 
@@ -63,8 +65,10 @@ def test_tool_definition_budget_is_named(tmp_path, shape):
         schema = {"type": "object", "properties": {f"p{i}": {} for i in range(MAX_TOOL_NODES)}}
     result, _ = scan(tmp_path, {"s": {"tools": [{"name": "t", "inputSchema": schema}]}})
     assert result.scan_failures == [
-        f".mcp.json: MCP tool definition limit ({MAX_TOOL_NODES} nodes, {MAX_TOOL_DEPTH} levels) "
-        "exceeded"
+        (
+            f".mcp.json: MCP tool definition limit ({MAX_TOOL_NODES} nodes, {MAX_TOOL_DEPTH} levels) "
+            "exceeded"
+        )
     ]
 
 

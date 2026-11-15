@@ -281,8 +281,10 @@ def test_document_text_and_connection_strings_never_reach_any_export(
                         "name": "azure",
                         "type": "postgres://user:CANARY-TYPE@db.example/vectors",
                         "source_uris": [
-                            "DefaultEndpointsProtocol=https;AccountName=kb;"
-                            "AccountKey=CANARY-KEY==;EndpointSuffix=core.windows.net",
+                            (
+                                "DefaultEndpointsProtocol=https;AccountName=kb;"
+                                "AccountKey=CANARY-KEY==;EndpointSuffix=core.windows.net"
+                            ),
                             "Driver={ODBC Driver 18};Server=tcp:db,1433;Uid=rag;Pwd=CANARY-PWD",
                             "rag:CANARY-USERINFO@db.internal:5432/vectors",
                             "password=CANARY-ASSIGN",
@@ -597,8 +599,10 @@ def test_case_variant_of_a_configuration_name_is_a_failure(tmp_path):
     (tmp_path / "Knowledge_Base.json").write_text(json.dumps([{"title": "data"}]))
     result = RAGScanner().scan(tmp_path)
     assert result.scan_failures == [
-        "configs/Rag_Config.json: case variant of configs/rag_config.json is the active file "
-        "on case-insensitive file systems and is not inventoried"
+        (
+            "configs/Rag_Config.json: case variant of configs/rag_config.json is the active file "
+            "on case-insensitive file systems and is not inventoried"
+        )
     ]
 
 
@@ -608,8 +612,10 @@ def test_case_variant_of_a_knowledge_base_is_read_as_json(tmp_path):
     (tmp_path / "KNOWLEDGE_BASE.JSON").write_text('{\n\t"sources": []\n}\n')
     result = RAGScanner().scan(tmp_path)
     assert result.scan_failures == [
-        "KNOWLEDGE_BASE.JSON: case variant of knowledge_base.json is the active file "
-        "on case-insensitive file systems and is not inventoried"
+        (
+            "KNOWLEDGE_BASE.JSON: case variant of knowledge_base.json is the active file "
+            "on case-insensitive file systems and is not inventoried"
+        )
     ]
 
 

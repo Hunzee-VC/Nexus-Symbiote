@@ -269,7 +269,6 @@ def test_verifier_with_mocked_chain_and_log_rejects_changed_artifact_or_signer(
 
 
 def test_file_hash_refuses_parent_symlink_and_special_file(tmp_path):
-    from nexus_symbiote.utils.crypto import compute_file_hash
 
     actual = tmp_path / "actual"
     actual.mkdir()

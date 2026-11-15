@@ -458,7 +458,7 @@ def test_sign_leaves_no_partial_envelope_when_the_write_fails(tmp_path, monkeypa
 
 
 def test_keygen_names_existing_paths_with_a_reason_code(tmp_path):
-    private, public = keypair(tmp_path, "key")
+    private, _ = keypair(tmp_path, "key")
     again = run("keygen", "--private-key", private, "--public-key", tmp_path / "other.pub")
     assert again.exit_code == 1
     assert "choose distinct, nonexistent key paths (runtime-key-error)" in again.output

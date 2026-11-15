@@ -48,8 +48,10 @@ def test_a_report_reached_only_through_a_symlinked_directory_is_refused(tmp_path
     _link_report_directory(tmp_path)
     result = ShadowScanImporter().scan(tmp_path)
     assert result.scan_failures == [
-        ".shadowscan/report.json: ShadowScan report is reached through a symbolic link; "
-        "not imported"
+        (
+            ".shadowscan/report.json: ShadowScan report is reached through a symbolic link; "
+            "not imported"
+        )
     ]
     assert not result.components
     assert result.source_report_path is None

@@ -423,7 +423,7 @@ def test_project_resolver_redirect_changes_the_binding_and_fails_validation(
     tmp_path, path, content
 ):
     runner = "bunx" if path == "bunfig.toml" else "npx"
-    root, output, config = _baseline(tmp_path, command=runner)
+    root, _, config = _baseline(tmp_path, command=runner)
     config["mcpServers"]["local"]["args"] = ["@acme/files-mcp@1.0.0"]
     (root / ".mcp.json").write_text(json.dumps(config))
     baseline = tmp_path / "pinned.json"
@@ -504,7 +504,6 @@ def test_ordinary_environment_value_cannot_mask_a_repointed_endpoint(tmp_path):
 
 
 def test_short_environment_values_do_not_corrupt_names_or_endpoints(tmp_path, monkeypatch):
-    from nexus_symbiote.core.models import ToolComponent
     from nexus_symbiote.live.stdio import PinnedObservation
     from nexus_symbiote.live.verify import verify_mcp_servers
 

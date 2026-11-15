@@ -414,17 +414,17 @@ def test_a_descendant_that_cannot_be_signalled_does_not_abort_cleanup(
 def test_a_process_name_that_is_not_utf8_does_not_end_the_descendant_scan() -> None:
     """/proc/<pid>/status holds the name as raw bytes, and any process may set its own."""
     rename = "import ctypes, time; ctypes.CDLL(None).prctl(15, b'caf\\xe9', 0, 0, 0); "
-    child = subprocess.Popen(  # noqa: S603
+    with subprocess.Popen(  # noqa: S603
         [sys.executable, "-c", rename + "print('named', flush=True); time.sleep(30)"],
         stdout=subprocess.PIPE,
-    )
-    try:
-        assert child.stdout is not None and child.stdout.readline() == b"named\n"
-        assert Path(f"/proc/{child.pid}/comm").read_bytes() == b"caf\xe9\n"
-        assert child.pid in pinned_process._descendant_pids(os.getpid())
-    finally:
-        child.kill()
-        child.wait(timeout=5)
+    ) as child:
+        try:
+            assert child.stdout is not None and child.stdout.readline() == b"named\n"
+            assert Path(f"/proc/{child.pid}/comm").read_bytes() == b"caf\xe9\n"
+            assert child.pid in pinned_process._descendant_pids(os.getpid())
+        finally:
+            child.kill()
+            child.wait(timeout=5)
 
 
 def test_the_launcher_group_is_killed_when_the_sweep_fails(

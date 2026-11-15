@@ -347,8 +347,10 @@ def test_nested_settings_spelled_another_way_are_failures(tmp_path, variant, can
     _write(tmp_path, variant, _RISKY)
     result = IDEAgentScanner().scan(tmp_path)
     assert result.scan_failures == [
-        f"{variant}: case variant of {canonical} is the active file on case-insensitive "
-        "file systems and is not inventoried"
+        (
+            f"{variant}: case variant of {canonical} is the active file on case-insensitive "
+            "file systems and is not inventoried"
+        )
     ]
     assert all("@" not in component.bom_ref for component in result.components)
 
@@ -375,12 +377,16 @@ def test_nested_settings_behind_a_directory_link_are_recorded(tmp_path):
         "pkg/.claude/settings.json": "shared/claude/settings.json"
     }
     assert sorted(result.scan_failures) == [
-        "api/.claude/Settings.local.json: case variant of api/.claude/settings.local.json is "
-        "the active file on case-insensitive file systems and is not inventoried",
+        (
+            "api/.claude/Settings.local.json: case variant of api/.claude/settings.local.json is "
+            "the active file on case-insensitive file systems and is not inventoried"
+        ),
         "top/.claude/settings.json: symlink target is the collection root",
         "top/.claude/settings.local.json: symlink target is the collection root",
-        "web/.Claude/settings.json: case variant of web/.claude/settings.json is the active "
-        "file on case-insensitive file systems and is not inventoried",
+        (
+            "web/.Claude/settings.json: case variant of web/.claude/settings.json is the active "
+            "file on case-insensitive file systems and is not inventoried"
+        ),
     ]
 
 
@@ -644,8 +650,10 @@ def test_the_credential_helper_finding_names_every_declared_helper(tmp_path):
     assert findings(every) == [
         (
             "medium",
-            "IDE agent 'claude-code' declares apiKeyHelper, awsAuthRefresh, awsCredentialExport, "
-            "gcpAuthRefresh and otelHeadersHelper, commands that run to obtain credentials.",
+            (
+                "IDE agent 'claude-code' declares apiKeyHelper, awsAuthRefresh, awsCredentialExport, "
+                "gcpAuthRefresh and otelHeadersHelper, commands that run to obtain credentials."
+            ),
         )
     ]
     assert every.properties["settings_hashes"] == {
@@ -657,8 +665,10 @@ def test_the_credential_helper_finding_names_every_declared_helper(tmp_path):
     assert findings(two) == [
         (
             "medium",
-            "IDE agent 'claude-code' declares awsAuthRefresh and otelHeadersHelper, commands "
-            "that run to obtain credentials.",
+            (
+                "IDE agent 'claude-code' declares awsAuthRefresh and otelHeadersHelper, commands "
+                "that run to obtain credentials."
+            ),
         )
     ]
     for helper in OTHER_HELPERS:
@@ -667,16 +677,20 @@ def test_the_credential_helper_finding_names_every_declared_helper(tmp_path):
         assert findings(alone) == [
             (
                 "medium",
-                f"IDE agent 'claude-code' declares {helper}, a command that runs to obtain "
-                "credentials.",
+                (
+                    f"IDE agent 'claude-code' declares {helper}, a command that runs to obtain "
+                    "credentials."
+                ),
             )
         ]
     one = _claude(tmp_path / "one", {**BASE, "apiKeyHelper": helpers["apiKeyHelper"]})
     assert findings(one) == [
         (
             "medium",
-            "IDE agent 'claude-code' declares apiKeyHelper, a command that runs to obtain "
-            "credentials.",
+            (
+                "IDE agent 'claude-code' declares apiKeyHelper, a command that runs to obtain "
+                "credentials."
+            ),
         )
     ]
 
@@ -771,29 +785,37 @@ PIN_PLACES: list[tuple[str, str, str]] = [
     (
         ".codex/config.toml",
         "codex",
-        '[model_providers.x]\nexperimental_bearer_token = "{pin}"\n'
-        'query_params = {{ pin = "{pin}" }}\n',
+        (
+            '[model_providers.x]\nexperimental_bearer_token = "{pin}"\n'
+            'query_params = {{ pin = "{pin}" }}\n'
+        ),
     ),
     (
         ".claude/settings.json",
         "claude-code",
-        '{{"permissions": {{"allow": ["Bash(mysql -uroot -p{pin} db:*)"],'
-        ' "deny": ["Bash(curl -H \'X-Pin: {pin}\' x)"], "ask": ["Bash(./unlock --pin {pin})"]}}}}',
+        (
+            '{{"permissions": {{"allow": ["Bash(mysql -uroot -p{pin} db:*)"],'
+            ' "deny": ["Bash(curl -H \'X-Pin: {pin}\' x)"], "ask": ["Bash(./unlock --pin {pin})"]}}}}'
+        ),
     ),
     (
         ".claude/settings.local.json",
         "claude-code",
-        '{{"hooks": {{"PreToolUse": [{{"matcher": "Bash(echo {pin})",'
-        ' "hooks": [{{"type": "command", "command": "check.sh"}}]}}]}}}}',
+        (
+            '{{"hooks": {{"PreToolUse": [{{"matcher": "Bash(echo {pin})",'
+            ' "hooks": [{{"type": "command", "command": "check.sh"}}]}}]}}}}'
+        ),
     ),
     (
         ".gemini/settings.json",
         "gemini",
-        '{{"excludeTools": ["run_shell_command(unlock {pin})"],'
-        ' "tools": {{"core": ["run_shell_command(unlock {pin})"]}},'
-        ' "mcpServers": {{"x": {{"httpUrl": "https://mcp.example/v1",'
-        ' "headers": ["X-Pin: {pin}"], "headersHelper": "get --pin {pin}",'
-        ' "oauth": {{"clientSecret": "{pin}"}}}}}}}}',
+        (
+            '{{"excludeTools": ["run_shell_command(unlock {pin})"],'
+            ' "tools": {{"core": ["run_shell_command(unlock {pin})"]}},'
+            ' "mcpServers": {{"x": {{"httpUrl": "https://mcp.example/v1",'
+            ' "headers": ["X-Pin: {pin}"], "headersHelper": "get --pin {pin}",'
+            ' "oauth": {{"clientSecret": "{pin}"}}}}}}}}'
+        ),
     ),
 ]
 

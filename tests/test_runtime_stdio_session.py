@@ -76,7 +76,7 @@ for line in sys.stdin:
 
 
 def signed_inputs(values, pin):
-    gateway, call, bom, snapshot, status, approval, release, human, trust, executed = values
+    _, _, bom, snapshot, status, approval, release, human, trust, _ = values
     grant = snapshot.tools[0].model_copy(update={"endpoint_identity": "stdio+launcher:" + pin})
     snapshot = snapshot.model_copy(update={"tools": (grant,)})
     approval = approval.model_copy(

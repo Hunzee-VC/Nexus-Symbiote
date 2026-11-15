@@ -16,15 +16,15 @@ def test_a_closed_stdout_is_status_141_without_an_internal_error(tmp_path: Path)
     (project / "CLAUDE.md").write_text("Keep the receipt.\n" * 20000)
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
-    process = subprocess.Popen(  # noqa: S603
+    with subprocess.Popen(  # noqa: S603
         [sys.executable, "-m", "nexus_symbiote", "scan", str(project), "--report-only"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=env,
-    )
-    assert process.stdout is not None
-    process.stdout.close()
-    _, err = process.communicate(timeout=60)
+    ) as process:
+        assert process.stdout is not None
+        process.stdout.close()
+        _, err = process.communicate(timeout=60)
     assert process.returncode == 141
     assert b"internal error" not in err
     assert b"BrokenPipeError" not in err

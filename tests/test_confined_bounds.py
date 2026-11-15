@@ -140,8 +140,10 @@ def test_stream_budget_names_the_bound_that_stopped_it(tmp_path):
         while stream.read(16):
             pass
     assert failures == [
-        "a.bin: model-total-bytes limit of 32 bytes exceeded; "
-        "raise it with --limit model-total-bytes=N"
+        (
+            "a.bin: model-total-bytes limit of 32 bytes exceeded; "
+            "raise it with --limit model-total-bytes=N"
+        )
     ]
 
 

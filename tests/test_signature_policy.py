@@ -141,7 +141,7 @@ def test_oidc_issuer_cannot_embed_credentials_or_use_ambiguous_url(policy_inputs
 
 
 def test_size_limit_and_missing_files_are_explicit_errors(policy_inputs, monkeypatch):
-    project, policy, record = policy_inputs
+    project, policy, _ = policy_inputs
     monkeypatch.setattr("nexus_symbiote.signature_policy.MAX_POLICY_BYTES", 8)
     with pytest.raises(SignaturePolicyError):
         load_signature_policies(policy, project)

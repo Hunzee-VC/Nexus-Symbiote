@@ -279,7 +279,6 @@ class TestMCPClientDetection:
 
 class TestNewComponentTypes:
     def test_new_enums_exist(self):
-        from nexus_symbiote.core.enums import ComponentType
 
         assert ComponentType.MCP_CLIENT == "mcp-client"
         assert ComponentType.A2A_CLIENT == "a2a-client"

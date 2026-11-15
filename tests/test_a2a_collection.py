@@ -123,8 +123,10 @@ def test_a_number_where_the_other_card_declares_a_flag_is_different_content(tmp_
     _write(tmp_path, ".well-known/agent.json", {**CARD, "capabilities": {"streaming": 1}})
     result = A2AScanner().scan(tmp_path)
     assert result.scan_failures == [
-        ".well-known/agent.json: declares the same agent as .well-known/agent-card.json "
-        "with different content"
+        (
+            ".well-known/agent.json: declares the same agent as .well-known/agent-card.json "
+            "with different content"
+        )
     ]
     (server,) = _servers(result)
     assert server.properties["agent_card_paths"] == [".well-known/agent-card.json"]
@@ -310,8 +312,10 @@ def test_card_loaded_from_data_is_covered_by_a_static_card(tmp_path):
         ("from a2a import types\ncard = types.AgentCard.model_validate_json(raw)\n", "loaded"),
         ("from a2a.types import AgentCard\ncard = AgentCard.parse_obj(data)\n", "loaded"),
         (
-            "from a2a.types import AgentCard\n"
-            "card = AgentCard.model_construct(name='x', url='http://evil.example')\n",
+            (
+                "from a2a.types import AgentCard\n"
+                "card = AgentCard.model_construct(name='x', url='http://evil.example')\n"
+            ),
             "built",
         ),
     ],
@@ -457,8 +461,10 @@ def test_card_below_a_well_known_directory_link_is_recorded(tmp_path):
     assert server.agent_card_path == "public/.well-known/agent-card.json"
     assert server.properties["symlink_target"] == "public/wk/agent-card.json"
     assert sorted(result.scan_failures) == [
-        "site/.well-known/Agent.json: case variant of site/.well-known/agent.json is the active "
-        "file on case-insensitive file systems and is not inventoried",
+        (
+            "site/.well-known/Agent.json: case variant of site/.well-known/agent.json is the active "
+            "file on case-insensitive file systems and is not inventoried"
+        ),
         "web/.well-known/agent-card.json: symlink target is the collection root",
         "web/.well-known/agent.json: symlink target is the collection root",
     ]

@@ -87,8 +87,10 @@ def test_sdk_references_are_found_wherever_the_files_are(tmp_path):
     assert client.source_path == "agents/deep/client.py"
     # A client module loaded by require is opaque to the analysis, so it is a gap too.
     assert result.surfaces_excluded == [
-        "cli.js:1 (MCP client SDK loaded by require or dynamic import; servers it starts or "
-        "reaches not inventoried)"
+        (
+            "cli.js:1 (MCP client SDK loaded by require or dynamic import; servers it starts or "
+            "reaches not inventoried)"
+        )
     ]
     assert sorted(result.surfaces_scanned) == [
         "agents/deep/client.py",
@@ -159,8 +161,10 @@ def test_only_candidate_files_are_held_to_the_syntax_limit(tmp_path):
     _write(tmp_path, "pkg/agent.py", CLIENT_PY + "PAD = '" + "x" * 300_000 + "'\n")
     _write(tmp_path, "server.ts", SERVER_TS + "//" + "x" * 300_000 + "\n")
     assert sorted(MCPScanner().scan(tmp_path).scan_failures) == [
-        "pkg/agent.py: syntax-bytes limit of 256 KiB exceeded; "
-        "raise it with --limit syntax-bytes=N",
+        (
+            "pkg/agent.py: syntax-bytes limit of 256 KiB exceeded; "
+            "raise it with --limit syntax-bytes=N"
+        ),
         "server.ts: syntax-bytes limit of 256 KiB exceeded; raise it with --limit syntax-bytes=N",
     ]
     with limits.applied(replace(limits.DEFAULTS, syntax_bytes=512 * limits.KIB)):
@@ -178,8 +182,10 @@ def test_the_source_scan_budget_names_the_first_file_not_searched(tmp_path):
         "source-scan-bytes limit of 1500 bytes exceeded; raise it with --limit source-scan-bytes=N"
     )
     assert failures == [
-        f"m2.py: MCP source references exceed the combined size limit: the rest were not "
-        f"read; {hint}"
+        (
+            f"m2.py: MCP source references exceed the combined size limit: the rest were not "
+            f"read; {hint}"
+        )
     ]
 
 
@@ -270,8 +276,10 @@ def test_an_import_spelled_with_compatibility_characters_is_a_gap(tmp_path):
     )
     result = MCPScanner().scan(tmp_path)
     assert result.surfaces_excluded == [
-        "pkg/server.py: Python MCP server import spelled with compatibility characters; "
-        "its servers and tools are not collected"
+        (
+            "pkg/server.py: Python MCP server import spelled with compatibility characters; "
+            "its servers and tools are not collected"
+        )
     ]
     assert result.surfaces_scanned == ["pkg/server.py"]
     literal = (tmp_path / "pkg" / "server.py").read_text(encoding="utf-8")
@@ -294,8 +302,10 @@ def test_a_framework_import_spelled_with_compatibility_characters_is_a_gap(tmp_p
     _write(tmp_path, "pkg/tools.py", source.format(hidden))
     result = MCPScanner().scan(tmp_path)
     assert result.surfaces_excluded == [
-        "pkg/tools.py: Python agent framework tool import spelled with compatibility "
-        "characters; its tools are not collected"
+        (
+            "pkg/tools.py: Python agent framework tool import spelled with compatibility "
+            "characters; its tools are not collected"
+        )
     ]
     assert result.surfaces_scanned == ["pkg/tools.py"]
     _write(tmp_path, "pkg/tools.py", source.format(module))
@@ -326,8 +336,10 @@ def test_a_qualified_or_star_framework_import_with_compatibility_characters_is_a
     _write(tmp_path, "pkg/tools.py", statement.format(**hidden))
     result = MCPScanner().scan(tmp_path)
     assert result.surfaces_excluded == [
-        "pkg/tools.py: Python agent framework tool import spelled with compatibility "
-        "characters; its tools are not collected"
+        (
+            "pkg/tools.py: Python agent framework tool import spelled with compatibility "
+            "characters; its tools are not collected"
+        )
     ]
     _write(tmp_path, "pkg/tools.py", statement.format(**{name: name for name in packages}))
     result = MCPScanner().scan(tmp_path)
@@ -524,8 +536,10 @@ def test_the_repository_itself_passes_the_mcp_collector():
     # deliberately malformed fixture is the one failure; the source search adds none.
     result = MCPScanner().scan(REPOSITORY)
     assert result.scan_failures == [
-        "benchmarks/fixtures/mcp-malformed-coverage/project/.mcp.json: "
-        "invalid JSON or duplicate keys"
+        (
+            "benchmarks/fixtures/mcp-malformed-coverage/project/.mcp.json: "
+            "invalid JSON or duplicate keys"
+        )
     ]
 
 

@@ -226,7 +226,7 @@ def test_declared_prompts_and_templates_are_compared_after_recording(tmp_path):
 
 def test_record_over_a_changed_tool_needs_accept_drift_and_keeps_the_old_hash(tmp_path):
     policy = launcher(tmp_path, tools=[{**TOOL, "description": "Send weather data out"}])
-    result, target, _ = invoke(tmp_path, inventory(), policy, "--record")
+    result, _, _ = invoke(tmp_path, inventory(), policy, "--record")
     assert result.exit_code == 1
     assert "Drift in server mcp:weather: changed tool weather" in result.stderr
     assert "--accept-drift" in result.stderr

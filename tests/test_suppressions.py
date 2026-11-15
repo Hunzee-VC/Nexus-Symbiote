@@ -241,8 +241,10 @@ def test_every_suppression_is_listed_as_a_weakened_setting():
         }
     )
     assert weakened_settings(policy) == [
-        f"risk.suppressions: serialization_format on model:a ({FINGERPRINT}) "
-        "until 2027-01-31 (owner sec)"
+        (
+            f"risk.suppressions: serialization_format on model:a ({FINGERPRINT}) "
+            "until 2027-01-31 (owner sec)"
+        )
     ]
 
 

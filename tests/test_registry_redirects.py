@@ -172,8 +172,10 @@ def test_a_package_scope_registry_wins_over_the_scope_setting_and_the_default(tm
             [".npmrc:scope=[unresolved]"],
         ),
         (
-            "scope=@${NPM_SCOPE}\n@corp:registry=https://npm.evil.example/\n"
-            "registry=https://npm.other.example/\n",
+            (
+                "scope=@${NPM_SCOPE}\n@corp:registry=https://npm.evil.example/\n"
+                "registry=https://npm.other.example/\n"
+            ),
             [".npmrc:registry=https://npm.other.example", ".npmrc:scope=[unresolved]"],
         ),
         # Whatever scope the environment names, its registry here is the default one.
@@ -407,7 +409,7 @@ def test_bun_and_yarn_registry_settings(tmp_path, name, text, expected):
     "name, make, failure",
     [
         (".npmrc", lambda p: p.symlink_to("/etc/hostname"), ".npmrc: symlink target is absolute"),
-        (".npmrc", lambda p: os.mkfifo(p), ".npmrc: read refused"),
+        (".npmrc", os.mkfifo, ".npmrc: read refused"),
         (".npmrc", lambda p: p.write_bytes(b"registry=\xff\n"), ".npmrc: invalid UTF-8"),
         ("bunfig.toml", lambda p: p.write_text("[install\n"), "bunfig.toml: invalid TOML"),
         (

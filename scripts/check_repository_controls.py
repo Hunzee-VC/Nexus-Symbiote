@@ -240,8 +240,10 @@ def evaluate_soak(landed: datetime | None, now: datetime, override: str) -> list
     if now - landed < SOAK:
         hours = (now - landed).total_seconds() / 3600
         return [
-            f"the release commit reached the branch {hours:.1f} hours ago; PyPI publication"
-            " waits 24 hours (set soak_override with a reason for an urgent fix)"
+            (
+                f"the release commit reached the branch {hours:.1f} hours ago; PyPI publication"
+                " waits 24 hours (set soak_override with a reason for an urgent fix)"
+            )
         ]
     return []
 
@@ -348,8 +350,10 @@ def evaluate_tag_rulesets(
             rule.get("type") == "creation" for rule in ruleset["rules"] if isinstance(rule, dict)
         ):
             return [
-                "release-tag creation must use a separate creation-only ruleset with an"
-                " authorized creator; the no-bypass immutability ruleset must allow creation"
+                (
+                    "release-tag creation must use a separate creation-only ruleset with an"
+                    " authorized creator; the no-bypass immutability ruleset must allow creation"
+                )
             ], []
     unknown_actors = unknown_caller = False
     for ruleset in rulesets:
@@ -368,18 +372,24 @@ def evaluate_tag_rulesets(
         gaps.append(
             (
                 "GitHub did not report whether this token may bypass the release-tag ruleset",
-                "GitHub did not report whether this token may bypass the release-tag ruleset;"
-                " the administrator check (--verify-bypass-actors) shows whether anyone may",
+                (
+                    "GitHub did not report whether this token may bypass the release-tag ruleset;"
+                    " the administrator check (--verify-bypass-actors) shows whether anyone may"
+                ),
             )
         )
     if unknown_actors:
         gaps.append(
             (
-                "this token cannot read who may bypass the release-tag ruleset; run the check"
-                " with a repository administrator's token",
-                "the release-tag ruleset's bypass actors are visible only to administrators, so"
-                " this token could not check them; the administrator check"
-                " (--verify-bypass-actors) does",
+                (
+                    "this token cannot read who may bypass the release-tag ruleset; run the check"
+                    " with a repository administrator's token"
+                ),
+                (
+                    "the release-tag ruleset's bypass actors are visible only to administrators, so"
+                    " this token could not check them; the administrator check"
+                    " (--verify-bypass-actors) does"
+                ),
             )
         )
     if not gaps:

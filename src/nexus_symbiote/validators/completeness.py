@@ -1027,8 +1027,10 @@ def discovery_producer_check(
             ]
         if local.scan_failures or local.surfaces_excluded:
             return "failed", [
-                "ShadowScan report locations could not be read completely; an omitted report "
-                "cannot be ruled out."
+                (
+                    "ShadowScan report locations could not be read completely; an omitted report "
+                    "cannot be ruled out."
+                )
             ]
         return "not-applicable", []
     claim = bom.metadata.completeness
@@ -1109,8 +1111,10 @@ def assurance_problems(
         return []
     if minimum == "verified":
         return [
-            "offline validate cannot establish verified assurance; use subject-bound "
-            "cryptographic verification"
+            (
+                "offline validate cannot establish verified assurance; use subject-bound "
+                "cryptographic verification"
+            )
         ]
     subjects = [
         c

@@ -1237,8 +1237,10 @@ class IDEAgentScanner(Scanner):
                 "plugin_sources",
                 RiskSeverity.LOW,
                 bool(declared["enabled_plugins"] or declared["extra_known_marketplaces"]),
-                "enables plugins or registers plugin marketplaces, which can add commands, "
-                "agents, hooks and MCP servers",
+                (
+                    "enables plugins or registers plugin marketplaces, which can add commands, "
+                    "agents, hooks and MCP servers"
+                ),
             ),
             (
                 "additional_directories",

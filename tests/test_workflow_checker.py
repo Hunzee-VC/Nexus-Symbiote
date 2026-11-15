@@ -713,8 +713,10 @@ def test_a_gate_step_cannot_move_to_another_directory(tmp_path):
     "script,runs",
     [
         (
-            'out=`date`\necho "$(printf "%s)" "a b")" ${HOME:-x}\nfiles=(a "b c")\n'
-            f"exec >log 2>&1\n{LOCKS} &>out <<-EOF\n\tbody\n\tEOF",
+            (
+                'out=`date`\necho "$(printf "%s)" "a b")" ${HOME:-x}\nfiles=(a "b c")\n'
+                f"exec >log 2>&1\n{LOCKS} &>out <<-EOF\n\tbody\n\tEOF"
+            ),
             True,
         ),
         (f"for f in a b; do echo $f; done\nuntil true; do :; done\n{LOCKS}", True),

@@ -165,13 +165,13 @@ def test_cyclonedx_binding_uses_metadata_timestamp():
 
 def test_scan_records_verification_and_not_applicable_without_a_report(tmp_path, monkeypatch):
     _clear_ci(monkeypatch)
-    project, bom = _project(tmp_path)
+    _, bom = _project(tmp_path)
     record = _verification(bom)
     assert record["status"] == "unverified"
     assert record["report_digest"] == _claim(bom)["source_report_digest"]
     assert _claim(bom)["source_report_path"] == ".shadowscan/report.json"
 
-    plain_project, plain_bom = _project(tmp_path / "plain", with_report=False)
+    _, plain_bom = _project(tmp_path / "plain", with_report=False)
     assert _verification(plain_bom)["status"] == "not-applicable"
     assert _verification(plain_bom).get("report_digest") is None
 
@@ -278,8 +278,10 @@ def test_risk_reports_unsigned_evidence_as_unknown_in_ci(tmp_path, monkeypatch):
     assert body["assessment_basis"] == "unsigned-discovery-evidence"
     assert body["overall_score"] is None
     assert body["gate_reasons"] == [
-        "Unsigned ShadowScan discovery evidence in CI; pass "
-        "--allow-unsigned-discovery to accept it explicitly."
+        (
+            "Unsigned ShadowScan discovery evidence in CI; pass "
+            "--allow-unsigned-discovery to accept it explicitly."
+        )
     ]
 
 

@@ -456,8 +456,10 @@ def test_requirement_naming_the_project_or_a_package_stays_complete(tmp_path, li
             "version_pinning",
         ),
         (
-            "ARG BUILDPLATFORM\nFROM --platform=$BUILDPLATFORM ollama/ollama:0.1.0 AS builder\n"
-            "FROM builder\n",
+            (
+                "ARG BUILDPLATFORM\nFROM --platform=$BUILDPLATFORM ollama/ollama:0.1.0 AS builder\n"
+                "FROM builder\n"
+            ),
             "ollama/ollama:0.1.0",
             "mutable_image_tag",
         ),
@@ -511,8 +513,10 @@ def test_requirement_naming_the_project_or_a_package_stays_complete(tmp_path, li
             "mutable_image_tag",
         ),
         (
-            "ONBU\N{LATIN CAPITAL LETTER I WITH DOT ABOVE}LD RUN <<'EOF\\'\nx\nEOF\\\n"
-            "FROM ollama/ollama:0.5.7\n",
+            (
+                "ONBU\N{LATIN CAPITAL LETTER I WITH DOT ABOVE}LD RUN <<'EOF\\'\nx\nEOF\\\n"
+                "FROM ollama/ollama:0.5.7\n"
+            ),
             "ollama/ollama:0.5.7",
             "mutable_image_tag",
         ),

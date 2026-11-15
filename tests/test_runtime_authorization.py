@@ -216,7 +216,7 @@ def autonomous(values):
 
 
 def _denial_setup(values, failure):
-    gateway, call, bom, snapshot, statuses, approval, release, human, status, executed = values
+    gateway, call, bom, snapshot, statuses, approval, release, human, status, _ = values
     context = gateway.authenticate()
     grant = snapshot.tools[0]
     changes = {}

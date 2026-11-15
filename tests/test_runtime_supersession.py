@@ -53,7 +53,7 @@ def test_registered_snapshot_withdraws_a_grant_before_any_call_presents_it(tmp_p
     # Serial 10 lets the agent send to the admin mailbox without approval. The operator
     # removes that by issuing serial 11 and registering it; the agent keeps presenting 10.
     values = list(fixture(tmp_path, serial=10))
-    gateway, call, _, snapshot, _, _, _, _, _, executed = values
+    _, call, _, snapshot, _, _, _, _, _, executed = values
     grant = snapshot.tools[0].model_copy(
         update={"require_approval": False, "resources": ("mailbox:team", "mailbox:admin")}
     )

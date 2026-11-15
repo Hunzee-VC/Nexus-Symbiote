@@ -515,8 +515,10 @@ def assemble_repository_agent(
         ComponentType.VERIFIED_EXTENSION: ("configured-with", _REPOSITORY_ASSOCIATION),
         ComponentType.REGISTRY_ENTRY: (
             "depends-on",
-            "repository manifest dependency; installed artifact, runtime use and authority "
-            "unobserved",
+            (
+                "repository manifest dependency; installed artifact, runtime use and authority "
+                "unobserved"
+            ),
         ),
     }
     registries: dict[str, list[str]] = {}

@@ -220,8 +220,10 @@ def risk_report_lines(
     if suppressed:
         lines.append(
             (
-                f"  - suppressed by project policy: {len(suppressed)} findings "
-                "(reasons, owners and expiry in --json-output)",
+                (
+                    f"  - suppressed by project policy: {len(suppressed)} findings "
+                    "(reasons, owners and expiry in --json-output)"
+                ),
                 "yellow",
             )
         )
@@ -307,8 +309,10 @@ def validation_report_lines(
     elif basis == "supplied-bom":
         lines.append(
             (
-                "Assessment basis: supplied-bom: only the inventory's own claims were checked; "
-                "nothing was compared with a project. Pass --project to reconcile it.",
+                (
+                    "Assessment basis: supplied-bom: only the inventory's own claims were checked; "
+                    "nothing was compared with a project. Pass --project to reconcile it."
+                ),
                 "yellow",
             )
         )
@@ -360,8 +364,10 @@ def validation_report_lines(
         if math.isfinite(claims_omitted) and claims_omitted > 0:
             lines.append(
                 (
-                    f"  ... and {claims_omitted:.0f} further supplier claims omitted, "
-                    "counted in --json-output",
+                    (
+                        f"  ... and {claims_omitted:.0f} further supplier claims omitted, "
+                        "counted in --json-output"
+                    ),
                     None,
                 )
             )

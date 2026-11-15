@@ -49,8 +49,10 @@ def test_reports_at_two_supported_paths_are_a_failure_and_neither_is_imported(tm
     _place(tmp_path, ".shadowscan/report.json", stale)
     result = ShadowScanImporter().scan(tmp_path)
     assert result.scan_failures == [
-        "ShadowScan reports found at more than one supported path "
-        "(.shadowscan/report.json, shadowscan.json); keep exactly one"
+        (
+            "ShadowScan reports found at more than one supported path "
+            "(.shadowscan/report.json, shadowscan.json); keep exactly one"
+        )
     ]
     assert not result.components and result.source_report_digest is None
 

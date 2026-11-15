@@ -408,8 +408,10 @@ def test_a_source_whose_lock_record_names_another_package_is_classified(tmp_path
     "body,gap",
     [
         (
-            '[tool.uv.sources]\nopenai = { git = "https://github.com/attacker/openai-python", '
-            'rev = "abc" }\n',
+            (
+                '[tool.uv.sources]\nopenai = { git = "https://github.com/attacker/openai-python", '
+                'rev = "abc" }\n'
+            ),
             "pyproject.toml: uv source not translated",
         ),
         (
@@ -645,8 +647,10 @@ DIGEST = "a" * 64
             ["mutable_image_tag"],
         ),
         (
-            "x-base: &base\n  image: ollama/ollama:1\nservices:\n"
-            "  a:\n    <<: *base\n    image: ollama/ollama:0.5.7\n",
+            (
+                "x-base: &base\n  image: ollama/ollama:1\nservices:\n"
+                "  a:\n    <<: *base\n    image: ollama/ollama:0.5.7\n"
+            ),
             ["mutable_image_tag"],
         ),
     ],
@@ -718,8 +722,10 @@ def _b64(text: str) -> str:
             "tagged image value not resolved",
         ),
         (
-            "services:\n  a:\n    image: !<tag:yaml.org,2002:binary> "
-            f"{_b64('attacker.example/ollama/ollama:0.5.7')}\n",
+            (
+                "services:\n  a:\n    image: !<tag:yaml.org,2002:binary> "
+                f"{_b64('attacker.example/ollama/ollama:0.5.7')}\n"
+            ),
             "tagged image value not resolved",
         ),
         (
@@ -733,8 +739,10 @@ def _b64(text: str) -> str:
         ),
         (f"models:\n  chat: !!binary {_b64('ai/smollm2')}\n", "tagged image value not resolved"),
         (
-            "services:\n  a:\n    build:\n      dockerfile_inline: !!binary "
-            f"{_b64('FROM ollama/ollama:latest')}\n",
+            (
+                "services:\n  a:\n    build:\n      dockerfile_inline: !!binary "
+                f"{_b64('FROM ollama/ollama:latest')}\n"
+            ),
             "build not followed",
         ),
         (f"services:\n  a:\n    build: !!binary {_b64('.')}\n", "build not followed"),
@@ -941,20 +949,32 @@ def test_a_build_path_over_the_length_bound_is_a_gap(tmp_path, build):
     "build",
     [
         # BuildKit uses a named context in place of the image a FROM line names.
-        'context: .\n      additional_contexts:\n        "python:3.12-slim": '
-        "docker-image://ollama/ollama:0.5.7",
-        "context: .\n      additional_contexts:\n"
-        '        - "python:3.12-slim=docker-image://ollama/ollama:0.5.7"',
-        'context: .\n      additional_contexts:\n        "python:3.12-slim": '
-        "https://github.com/example/ollama-rootfs.git",
+        (
+            'context: .\n      additional_contexts:\n        "python:3.12-slim": '
+            "docker-image://ollama/ollama:0.5.7"
+        ),
+        (
+            "context: .\n      additional_contexts:\n"
+            '        - "python:3.12-slim=docker-image://ollama/ollama:0.5.7"'
+        ),
+        (
+            'context: .\n      additional_contexts:\n        "python:3.12-slim": '
+            "https://github.com/example/ollama-rootfs.git"
+        ),
         "context: .\n      additional_contexts:\n        python: ./rootfs",
-        "dockerfile_inline: |\n        FROM python:3.12-slim\n      additional_contexts:\n"
-        '        "python:3.12-slim": docker-image://vllm/vllm-openai:v0.6.0',
-        "dockerfile_inline: FROM python:3.12-slim\n"
-        "      additional_contexts: [python:3.12-slim=docker-image://vllm/vllm-openai:v0.6.0]",
+        (
+            "dockerfile_inline: |\n        FROM python:3.12-slim\n      additional_contexts:\n"
+            '        "python:3.12-slim": docker-image://vllm/vllm-openai:v0.6.0'
+        ),
+        (
+            "dockerfile_inline: FROM python:3.12-slim\n"
+            "      additional_contexts: [python:3.12-slim=docker-image://vllm/vllm-openai:v0.6.0]"
+        ),
         # docker buildx bake reads named contexts from x-bake in the same file.
-        'context: .\n      x-bake:\n        contexts:\n          "python:3.12-slim": '
-        "docker-image://ollama/ollama:0.5.7",
+        (
+            'context: .\n      x-bake:\n        contexts:\n          "python:3.12-slim": '
+            "docker-image://ollama/ollama:0.5.7"
+        ),
         "context: .\n      x-bake:\n        <<: {contexts: {python: docker-image://ollama/ollama}}",
     ],
 )

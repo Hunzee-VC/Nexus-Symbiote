@@ -163,8 +163,10 @@ def test_a_template_larger_than_the_file_limit_is_digested_and_a_gap(runner, tmp
         result = ModelScanner().scan(project)
     assert not result.scan_failures
     assert result.surfaces_excluded == [
-        "m/chat_template.jinja: chat template not inspected: file-bytes limit of 64 KiB "
-        "exceeded; raise it with --limit file-bytes=N"
+        (
+            "m/chat_template.jinja: chat template not inspected: file-bytes limit of 64 KiB "
+            "exceeded; raise it with --limit file-bytes=N"
+        )
     ]
     (component,) = result.components
     assert component.serialization_safety == SerializationSafety.SAFE
@@ -542,8 +544,10 @@ def test_a_large_template_that_cannot_be_digested_is_a_failure_not_a_gap(tmp_pat
     with limits.applied(limits.resolve(["file-bytes=64KiB", "model-bytes=64KiB"], {})):
         result = ModelScanner().scan(tmp_path)
     assert result.scan_failures == [
-        "m/chat_template.jinja: model-bytes limit of 64 KiB exceeded; "
-        "raise it with --limit model-bytes=N"
+        (
+            "m/chat_template.jinja: model-bytes limit of 64 KiB exceeded; "
+            "raise it with --limit model-bytes=N"
+        )
     ]
     assert not result.surfaces_excluded
 

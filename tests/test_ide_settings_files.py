@@ -167,8 +167,10 @@ def _assert_only_unbound(ide_type: str, run) -> None:
         if line.lstrip().startswith("[") and not line.lstrip().startswith("[NOTE]")
     ]
     assert alerts == [
-        f"[MEDIUM] Medium change in '{ide_type}': {UNBOUND_ALERT} Set "
-        "NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections."
+        (
+            f"[MEDIUM] Medium change in '{ide_type}': {UNBOUND_ALERT} Set "
+            "NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections."
+        )
     ], run.output
     assert not _high_settings_alert(ide_type, run.output), run.output
 
@@ -844,8 +846,10 @@ def test_a_root_marker_spelled_otherwise_is_still_reported(tmp_path):
     result = IDEAgentScanner().scan(project)
     assert result.components == []
     assert result.scan_failures == [
-        "Claude.md: case variant of CLAUDE.md is the active file on case-insensitive file "
-        "systems and is not inventoried"
+        (
+            "Claude.md: case variant of CLAUDE.md is the active file on case-insensitive file "
+            "systems and is not inventoried"
+        )
     ]
 
 

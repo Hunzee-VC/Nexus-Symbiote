@@ -78,8 +78,10 @@ def test_exhausted_budget_is_one_named_gap(tmp_path, monkeypatch):
     )
     failures = MCPScanner().scan(tmp_path).scan_failures
     assert failures == [
-        "app/module_004.py: MCP source references exceed the combined size limit: the rest "
-        f"were not read; {_SPENT}"
+        (
+            "app/module_004.py: MCP source references exceed the combined size limit: the rest "
+            f"were not read; {_SPENT}"
+        )
     ]
 
 
@@ -90,8 +92,10 @@ def test_exhausted_a2a_budget_is_one_named_gap(tmp_path, monkeypatch):
     )
     failures = A2AScanner().scan(tmp_path).scan_failures
     assert failures == [
-        "module_005.py: a2a code references exceed the combined size limit: the rest "
-        f"were not read; {_SPENT}"
+        (
+            "module_005.py: a2a code references exceed the combined size limit: the rest "
+            f"were not read; {_SPENT}"
+        )
     ]
 
 
@@ -104,8 +108,10 @@ def test_exhausted_rag_budget_is_one_named_gap(tmp_path, monkeypatch):
     )
     failures = RAGScanner().scan(tmp_path).scan_failures
     assert failures == [
-        "module_005.py: rag vector-store imports exceed the combined size limit: the rest "
-        f"were not read; {_SPENT}"
+        (
+            "module_005.py: rag vector-store imports exceed the combined size limit: the rest "
+            f"were not read; {_SPENT}"
+        )
     ]
 
 

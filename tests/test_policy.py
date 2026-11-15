@@ -122,7 +122,7 @@ def test_invalid_settings_fail_closed(tmp_path, text):
 
 
 def test_weakened_settings_names_only_relaxations():
-    from nexus_symbiote.policy import Policy, weakened_settings
+    from nexus_symbiote.policy import weakened_settings
 
     assert weakened_settings(Policy()) == []
     relaxed = Policy.model_validate(
@@ -153,7 +153,7 @@ def test_weakened_settings_names_only_relaxations():
 
 
 def test_weakened_settings_include_every_setting_that_changes_reported_results():
-    from nexus_symbiote.policy import Policy, weakened_settings
+    from nexus_symbiote.policy import weakened_settings
 
     relaxed = Policy.model_validate(
         {
@@ -260,7 +260,7 @@ def test_the_reported_policy_is_the_applied_policy(tmp_path, monkeypatch):
 
 
 def test_the_generated_template_loads_to_the_built_in_policy(tmp_path):
-    from nexus_symbiote.policy import DEFAULT_POLICY_YAML, Policy, weakened_settings
+    from nexus_symbiote.policy import DEFAULT_POLICY_YAML, weakened_settings
 
     (tmp_path / ".nexus-symbiote.yaml").write_text(DEFAULT_POLICY_YAML)
     policy = load_policy(tmp_path)

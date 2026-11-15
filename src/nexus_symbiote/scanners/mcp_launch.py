@@ -631,14 +631,18 @@ _PNPM_DLX = _table(
 _YARN_DLX = _table("-q --quiet", "-p --package")
 _BUNX = _table("--bun --silent --verbose --no-install", "-p --package")
 _UV_GLOBAL = (
-    "-q --quiet -v --verbose --offline --no-cache -n --native-tls --no-config --no-progress"
-    " --no-env-file --refresh -U --upgrade --reinstall --no-build --no-sources --preview"
-    " --compile-bytecode --no-python-downloads --no-managed-python --managed-python --isolated",
-    "--cache-dir --directory --project --config-file --color --python-preference"
-    " --allow-insecure-host --index --default-index --index-url -i --extra-index-url"
-    " --find-links -f --index-strategy --keyring-provider --resolution --prerelease"
-    " --exclude-newer --refresh-package --reinstall-package --upgrade-package -P"
-    " --link-mode --config-setting -C --python -p --env-file",
+    (
+        "-q --quiet -v --verbose --offline --no-cache -n --native-tls --no-config --no-progress"
+        " --no-env-file --refresh -U --upgrade --reinstall --no-build --no-sources --preview"
+        " --compile-bytecode --no-python-downloads --no-managed-python --managed-python --isolated"
+    ),
+    (
+        "--cache-dir --directory --project --config-file --color --python-preference"
+        " --allow-insecure-host --index --default-index --index-url -i --extra-index-url"
+        " --find-links -f --index-strategy --keyring-provider --resolution --prerelease"
+        " --exclude-newer --refresh-package --reinstall-package --upgrade-package -P"
+        " --link-mode --config-setting -C --python -p --env-file"
+    ),
 )
 _UV_GLOBAL_TABLE = _table(*_UV_GLOBAL)
 _UV_TOOL_RUN = _table(
@@ -779,8 +783,10 @@ _DENO_RUN = _table(
     flag_patterns=(
         r"--(?:allow|deny)-[a-z-]+",
         r"--unstable-[a-z-]+",
-        r"--(?:reload|lock|node-modules-dir|env-file|inspect|inspect-brk|inspect-wait"
-        r"|allow-scripts|check|watch|watch-hmr|v8-flags|frozen|cached-only)",
+        (
+            r"--(?:reload|lock|node-modules-dir|env-file|inspect|inspect-brk|inspect-wait"
+            r"|allow-scripts|check|watch|watch-hmr|v8-flags|frozen|cached-only)"
+        ),
         r"-r",
     ),
 )

@@ -378,8 +378,10 @@ def test_the_validation_report_states_only_the_basis_it_was_given():
         return line
 
     assert basis_line({"assessment_basis": "project-not-reconciled"}) == (
-        "Assessment basis: project-not-reconciled: the completeness check, and with it the "
-        "comparison with /work/agent, was skipped by policy",
+        (
+            "Assessment basis: project-not-reconciled: the completeness check, and with it the "
+            "comparison with /work/agent, was skipped by policy"
+        ),
         "yellow",
     )
     assert basis_line({"assessment_basis": "supplied-bom"})[0].endswith(

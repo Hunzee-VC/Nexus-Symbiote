@@ -235,7 +235,6 @@ def test_a_seed_that_fails_on_close_leaves_no_partial_root(
 def test_foreign_owned_cache_dir_fails_closed(
     private_cache: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from nexus_symbiote.utils import crypto
 
     path, error = _prepare_sigstore_cache()
     assert error is None and path is not None

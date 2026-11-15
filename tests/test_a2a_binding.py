@@ -156,7 +156,7 @@ AZURE_APP = "api://11111111-2222-3333-4444-555555555555"
     ],
 )
 def test_required_scope_change_fails_the_drift_gate_without_a_key(tmp_path, before, after):
-    run, boms = _drift(tmp_path, _scoped(CARD, before), _scoped(CARD, after))
+    run, _ = _drift(tmp_path, _scoped(CARD, before), _scoped(CARD, after))
     assert run.exit_code == 1, run.output
     alerts = json.loads(run.stdout)["security_alerts"]
     assert any(
@@ -672,8 +672,10 @@ def test_scheme_less_urls_export_their_host_and_unexported_origins_are_unbound(
     gaps = [r.detail for r in server.risks if r.category == "completeness"]
     assert gaps == (
         [
-            "A2A agent 'billing-agent' values not bound in this inventory: security scheme URLs "
-            "beyond their exported origins."
+            (
+                "A2A agent 'billing-agent' values not bound in this inventory: security scheme URLs "
+                "beyond their exported origins."
+            )
         ]
         if unbound
         else []
@@ -1030,43 +1032,51 @@ VECTOR_CLIENT = {"name": "c", "agentCardUrl": "https://a.example/.well-known/age
 VECTORS = [
     (
         "static_card_hash",
-        '{"profile":"nexus-symbiote/a2a-card-structure/v3",'
-        '"structure":{"additional_interfaces":[{"fragment":false,"path_separators":0,'
-        '"plain_path":"","query":false,"userinfo":false}],"authentication_schemes":null,'
-        '"capabilities":{},'
-        '"endpoint":{"fragment":false,"path_separators":1,"plain_path":null,"query":false,'
-        '"userinfo":false},"extensions":[],'
-        '"fields":["additionalInterfaces","name","security","securitySchemes",'
-        '"skills","url"],"provider_url":null,'
-        '"security":[{"k":["role"]},{"o":["https://a.example/scope","s"]}],'
-        '"security_requirements":null,"security_scheme_urls":[{"fragment":false,'
-        '"path_separators":1,"plain_path":null,"query":false,"userinfo":false}],'
-        '"security_schemes":[["k","apiKey"],["o","oauth2"]],"signatures":[],'
-        '"skill_security":[["lookup",'
-        '{"security":[{"o":["t"]}]}]],"supported_interfaces":[]}}',
+        (
+            '{"profile":"nexus-symbiote/a2a-card-structure/v3",'
+            '"structure":{"additional_interfaces":[{"fragment":false,"path_separators":0,'
+            '"plain_path":"","query":false,"userinfo":false}],"authentication_schemes":null,'
+            '"capabilities":{},'
+            '"endpoint":{"fragment":false,"path_separators":1,"plain_path":null,"query":false,'
+            '"userinfo":false},"extensions":[],'
+            '"fields":["additionalInterfaces","name","security","securitySchemes",'
+            '"skills","url"],"provider_url":null,'
+            '"security":[{"k":["role"]},{"o":["https://a.example/scope","s"]}],'
+            '"security_requirements":null,"security_scheme_urls":[{"fragment":false,'
+            '"path_separators":1,"plain_path":null,"query":false,"userinfo":false}],'
+            '"security_schemes":[["k","apiKey"],["o","oauth2"]],"signatures":[],'
+            '"skill_security":[["lookup",'
+            '{"security":[{"o":["t"]}]}]],"supported_interfaces":[]}}'
+        ),
         "sha256:8e16287a6387ae5e87c1fbbb20df0d183b31c0ee3b0ec4e2055347c6946b90d2",
     ),
     (
         "static_value_binding",
-        '{"configuration":{"additionalInterfaces":[{"transport":"GRPC","url":"https://g.example"}],'
-        '"name":"v","security":[{"o":["s","https://a.example/scope"]},{"k":["role"]}],'
-        '"securitySchemes":{"k":{"type":"apiKey"},"o":{"flows":{"clientCredentials":{"scopes":{},'
-        '"tokenUrl":"https://t.example/token"}},"type":"oauth2"}},"skills":[{"id":"l",'
-        '"name":"lookup","security":[{"o":["t"]}]}],"url":"https://a.example/p"},'
-        '"profile":"nexus-symbiote/a2a-card-values/v1"}',
+        (
+            '{"configuration":{"additionalInterfaces":[{"transport":"GRPC","url":"https://g.example"}],'
+            '"name":"v","security":[{"o":["s","https://a.example/scope"]},{"k":["role"]}],'
+            '"securitySchemes":{"k":{"type":"apiKey"},"o":{"flows":{"clientCredentials":{"scopes":{},'
+            '"tokenUrl":"https://t.example/token"}},"type":"oauth2"}},"skills":[{"id":"l",'
+            '"name":"lookup","security":[{"o":["t"]}]}],"url":"https://a.example/p"},'
+            '"profile":"nexus-symbiote/a2a-card-values/v1"}'
+        ),
         "hmac-sha256:b2bf14d445fff1ba138b8f81aba51d13e16ff125b26e3f1dabd5718417d802a8",
     ),
     (
         "static_config_hash",
-        '{"profile":"nexus-symbiote/a2a-client-structure/v1","structure":{"card_url":{'
-        '"fragment":false,"path_separators":2,"plain_path":"/.well-known/agent-card.json",'
-        '"query":false,"userinfo":false},"fields":["agentCardUrl","name"]}}',
+        (
+            '{"profile":"nexus-symbiote/a2a-client-structure/v1","structure":{"card_url":{'
+            '"fragment":false,"path_separators":2,"plain_path":"/.well-known/agent-card.json",'
+            '"query":false,"userinfo":false},"fields":["agentCardUrl","name"]}}'
+        ),
         "sha256:37abbd341b98747178d6d9393bb2343dc6d7f4a2168a0d4fd3dd9d9a56f14d3a",
     ),
     (
         "static_value_binding",
-        '{"configuration":{"agentCardUrl":"https://a.example/.well-known/agent-card.json",'
-        '"name":"c"},"profile":"nexus-symbiote/a2a-client-values/v1"}',
+        (
+            '{"configuration":{"agentCardUrl":"https://a.example/.well-known/agent-card.json",'
+            '"name":"c"},"profile":"nexus-symbiote/a2a-client-values/v1"}'
+        ),
         "hmac-sha256:54acc1cb60bb70eaa929aa3bec0e4d5ce0ccc13728191fdc72412c76d0ff0462",
     ),
 ]

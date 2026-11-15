@@ -253,7 +253,7 @@ class TestRiskScorer:
     def test_fails_gate(self):
         bom = _risky_bom()
         scorer = RiskScorer(fail_threshold=10.0)
-        passed, report = scorer.passes_gate(bom)
+        passed, _ = scorer.passes_gate(bom)
         assert not passed
 
     def test_report_to_dict(self):

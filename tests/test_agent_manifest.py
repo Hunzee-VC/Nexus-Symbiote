@@ -56,7 +56,7 @@ def test_an_instruction_the_collector_reads_is_inventoried_once(tmp_path):
     project.mkdir()
     (project / "CLAUDE.md").write_text("Use read-only tools.\n")
     (project / "agent.yaml").write_text("name: demo\ninstructions: [CLAUDE.md]\n")
-    status, bom = _scan(project, tmp_path / "bom.json")
+    _, bom = _scan(project, tmp_path / "bom.json")
     prompts = _components(bom, "prompt-template")
     assert [p["bom_ref"] for p in prompts] == ["prompt:CLAUDE.md"]
     assert _components(bom, "agent")[0]["prompt_refs"] == ["prompt:CLAUDE.md"]
@@ -373,7 +373,6 @@ def test_published_schema_matches_the_manifest_model():
 
 
 def test_the_documented_example_is_a_valid_manifest():
-    import re
 
     import yaml
     from jsonschema import Draft202012Validator

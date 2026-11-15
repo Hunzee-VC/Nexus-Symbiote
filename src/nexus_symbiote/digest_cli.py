@@ -89,8 +89,10 @@ def digest_command(inventory_path: Path, json_output: bool) -> None:
         raise click.ClickException(
             " ".join(
                 (
-                    f"{neutralize(inventory_path)} is a valid native AIBOM file, but not every "
-                    "digest is defined for it.",
+                    (
+                        f"{neutralize(inventory_path)} is a valid native AIBOM file, but not every "
+                        "digest is defined for it."
+                    ),
                     *digests.unavailable,
                 )
             )

@@ -218,9 +218,6 @@ def test_loader_refuses_links_and_special_files_without_blocking(tmp_path):
 
 
 def test_cli_names_why_an_inventory_could_not_be_opened(tmp_path):
-    from click.testing import CliRunner
-
-    from nexus_symbiote.cli import main
 
     (tmp_path / "real").mkdir()
     AIBOM().save(tmp_path / "real" / "bom.json")

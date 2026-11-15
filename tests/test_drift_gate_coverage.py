@@ -1126,8 +1126,10 @@ def test_an_overlong_report_location_is_clipped_in_the_note():
             None,
             "sha256:" + "a" * 64,
             "medium",
-            "File hash (sha256) became available — first binding of content the baseline "
-            "never pinned.",
+            (
+                "File hash (sha256) became available — first binding of content the baseline "
+                "never pinned."
+            ),
         ),
         ("sha256:" + "a" * 64, "sha256:" + "b" * 64, "high", "File hash (sha256) changed."),
         ("sha256:" + "a" * 64, None, "high", "File hash (sha256) removed — integrity is unknown."),

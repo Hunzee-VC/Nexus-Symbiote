@@ -796,13 +796,17 @@ def test_the_release_evidence_scan_records_the_commit_time_as_documented():
     for page, statement in (
         (
             "releasing.md",
-            "The build job sets `SOURCE_DATE_EPOCH` to the commit time, so `project.cdx.json` "
-            "records that time, not the time of the scan",
+            (
+                "The build job sets `SOURCE_DATE_EPOCH` to the commit time, so `project.cdx.json` "
+                "records that time, not the time of the scan"
+            ),
         ),
         (
             "reproducible-inventories.md",
-            "The release workflow exports the variable, set to the commit time, for its whole "
-            "build job.",
+            (
+                "The release workflow exports the variable, set to the commit time, for its whole "
+                "build job."
+            ),
         ),
     ):
         text = " ".join((ROOT / "docs" / page).read_text(encoding="utf-8").split())

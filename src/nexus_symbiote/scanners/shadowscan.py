@@ -125,6 +125,7 @@ def _recorded_report_path(report_path: Path, root: Path | None) -> str:
         try:
             return report_path.resolve().relative_to(root.resolve()).as_posix()
         except (OSError, RuntimeError, ValueError):
+            # Unresolvable or outside the root: record the bare file name instead.
             pass
     return report_path.name
 

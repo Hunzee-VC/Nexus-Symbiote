@@ -1705,28 +1705,38 @@ def test_every_coverage_gap_has_a_note(tmp_path):
         ),
         (
             "warning",
-            "Identifier values not used: 3 (invalid: 1, longer than 512 characters: 2, withheld "
-            "as credential-shaped: 0).",
+            (
+                "Identifier values not used: 3 (invalid: 1, longer than 512 characters: 2, withheld "
+                "as credential-shaped: 0)."
+            ),
         ),
         (
             "warning",
-            "Spans whose operation name, MCP method or MCP transport could not be read: 2. What "
-            "they report cannot be compared with the inventory.",
+            (
+                "Spans whose operation name, MCP method or MCP transport could not be read: 2. What "
+                "they report cannot be compared with the inventory."
+            ),
         ),
         (
             "warning",
-            "Attribute lists with more than 128 entries: 1. The entries after the first 128 were "
-            "not read.",
+            (
+                "Attribute lists with more than 128 entries: 1. The entries after the first 128 were "
+                "not read."
+            ),
         ),
         (
             "note",
-            "MCP client spans over a pipe or unix socket: 1. A trace cannot attribute local "
-            "activity to a configured server.",
+            (
+                "MCP client spans over a pipe or unix socket: 1. A trace cannot attribute local "
+                "activity to a configured server."
+            ),
         ),
         (
             "note",
-            "MCP client spans without a server address, or whose transport could not be read: 1. "
-            "Their endpoint is not attributed.",
+            (
+                "MCP client spans without a server address, or whose transport could not be read: 1. "
+                "Their endpoint is not attributed."
+            ),
         ),
         ("note", "Tool spans that name no tool: 1; agent spans that name no agent: 0."),
         ("note", "Spans that name their provider with the legacy gen_ai.system attribute: 1."),

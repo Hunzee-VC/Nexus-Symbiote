@@ -306,7 +306,9 @@ def test_a_skill_spelling_over_the_file_limit_stays_a_failure(tmp_path):
     with limits.applied(replace(limits.DEFAULTS, file_bytes=100)):
         result = PromptScanner().scan(root)
     assert result.scan_failures == [
-        ".claude/commands/claude.md: file-bytes limit of 100 bytes exceeded; raise it with "
-        "--limit file-bytes=N",
+        (
+            ".claude/commands/claude.md: file-bytes limit of 100 bytes exceeded; raise it with "
+            "--limit file-bytes=N"
+        ),
         _variant(".claude/commands/claude.md", ".claude/commands/CLAUDE.md"),
     ]

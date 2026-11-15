@@ -309,8 +309,10 @@ def test_a_launcher_that_exits_before_replying_is_refused(tmp_path):
             "unexpected MCP response",
         ),
         (
-            "emit(json.dumps({'jsonrpc': '2.0', 'id': msg['id'], "
-            "'error': {'code': -32603, 'message': 'x'}}))",
+            (
+                "emit(json.dumps({'jsonrpc': '2.0', 'id': msg['id'], "
+                "'error': {'code': -32603, 'message': 'x'}}))"
+            ),
             "unexpected MCP response",
         ),
         ("reply([])", "invalid MCP result"),

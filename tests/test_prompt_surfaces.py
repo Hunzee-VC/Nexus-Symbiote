@@ -414,8 +414,10 @@ def test_import_lookups_are_capped_per_collection(tmp_path):
     _importing_tree(tmp_path, importers=6)
     result = PromptScanner().scan(tmp_path)
     assert result.scan_failures == [
-        "part4.md: @path imports past this file are not inventoried; import-lookups limit "
-        "of 5000 exceeded; raise it with --limit import-lookups=N"
+        (
+            "part4.md: @path imports past this file are not inventoried; import-lookups limit "
+            "of 5000 exceeded; raise it with --limit import-lookups=N"
+        )
     ]
 
 
@@ -473,8 +475,10 @@ def test_imports_of_over_long_resolved_paths_are_gaps(tmp_path, token):
     result = PromptScanner().scan(tmp_path)
     assert not result.scan_failures
     assert result.surfaces_excluded == [
-        "CLAUDE.md: imports a path longer than 4096 bytes or with a name longer than 255 "
-        "bytes, which is not inventoried"
+        (
+            "CLAUDE.md: imports a path longer than 4096 bytes or with a name longer than 255 "
+            "bytes, which is not inventoried"
+        )
     ]
 
 

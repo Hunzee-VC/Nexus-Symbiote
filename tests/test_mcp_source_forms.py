@@ -242,13 +242,17 @@ def test_the_server_class_from_any_other_specifier_of_the_sdk_is_a_gap(tmp_path,
     ("source", "expected"),
     [
         (
-            'import { StdioClientTransport } from "npm:@modelcontextprotocol/sdk/client/stdio.js";\n'
-            'new StdioClientTransport({ command: "npx", args: ["-y", "notes-mcp"] });\n',
+            (
+                'import { StdioClientTransport } from "npm:@modelcontextprotocol/sdk/client/stdio.js";\n'
+                'new StdioClientTransport({ command: "npx", args: ["-y", "notes-mcp"] });\n'
+            ),
             _gap("main.ts", 2, LAUNCHED),
         ),
         (
-            'import * as sdk from "npm:@modelcontextprotocol/sdk@1.17.0/server/mcp.js";\n'
-            "const server = new sdk[name]({});\n",
+            (
+                'import * as sdk from "npm:@modelcontextprotocol/sdk@1.17.0/server/mcp.js";\n'
+                "const server = new sdk[name]({});\n"
+            ),
             _gap("main.ts", 2, NAMESPACE),
         ),
         (
@@ -339,18 +343,24 @@ def test_namespace_uses_the_analysis_cannot_follow_are_gaps(tmp_path, body, expe
             IMPORT_FORM,
         ),
         (
-            'import * as sdk from "@modelcontextprotocol/sdk/dist/esm/server/mcp.js";\n'
-            "const server = new sdk.McpServer({});\n",
+            (
+                'import * as sdk from "@modelcontextprotocol/sdk/dist/esm/server/mcp.js";\n'
+                "const server = new sdk.McpServer({});\n"
+            ),
             IMPORT_FORM,
         ),
         (
-            'import { Server } from "@modelcontextprotocol/sdk/server/index.js";\n'
-            "const server = new Server({}, { capabilities: { tools: {} } });\n",
+            (
+                'import { Server } from "@modelcontextprotocol/sdk/server/index.js";\n'
+                "const server = new Server({}, { capabilities: { tools: {} } });\n"
+            ),
             LOW_LEVEL,
         ),
         (
-            'import * as lowLevel from "@modelcontextprotocol/sdk/server/index.js";\n'
-            "const server = new lowLevel.Server({}, {});\n",
+            (
+                'import * as lowLevel from "@modelcontextprotocol/sdk/server/index.js";\n'
+                "const server = new lowLevel.Server({}, {});\n"
+            ),
             LOW_LEVEL,
         ),
         ('import { Server } from "@modelcontextprotocol/server";\n', LOW_LEVEL),
@@ -509,21 +519,27 @@ def test_reexports_of_sdk_classes_are_gaps(tmp_path, source, expected):
     [
         (
             "client.ts",
-            'import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";\n'
-            'const transport = new StdioClientTransport({ command: "npx", args: ["-y", "x"] });\n',
+            (
+                'import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";\n'
+                'const transport = new StdioClientTransport({ command: "npx", args: ["-y", "x"] });\n'
+            ),
             [_gap("client.ts", 2, LAUNCHED)],
         ),
         (
             "client.mjs",
-            'import * as sse from "@modelcontextprotocol/sdk/client/sse.js";\n'
-            'const transport = new sse.SSEClientTransport(new URL("https://example.com/sse"));\n',
+            (
+                'import * as sse from "@modelcontextprotocol/sdk/client/sse.js";\n'
+                'const transport = new sse.SSEClientTransport(new URL("https://example.com/sse"));\n'
+            ),
             [_gap("client.mjs", 2, REACHED)],
         ),
         (
             "client.js",
-            "import { StreamableHTTPClientTransport as Http } from "
-            '"@modelcontextprotocol/sdk/client/streamableHttp.js";\n'
-            "const transport = new Http(endpoint);\n",
+            (
+                "import { StreamableHTTPClientTransport as Http } from "
+                '"@modelcontextprotocol/sdk/client/streamableHttp.js";\n'
+                "const transport = new Http(endpoint);\n"
+            ),
             [_gap("client.js", 2, REACHED)],
         ),
         (
@@ -533,8 +549,10 @@ def test_reexports_of_sdk_classes_are_gaps(tmp_path, source, expected):
         ),
         (
             "typed.ts",
-            'import type { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";\n'
-            "let transport: StdioClientTransport;\n",
+            (
+                'import type { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";\n'
+                "let transport: StdioClientTransport;\n"
+            ),
             [],
         ),
         (
@@ -582,20 +600,26 @@ def test_the_default_export_of_a_server_or_client_module_is_a_gap(tmp_path, sour
     ("source", "expected"),
     [
         (
-            'import * as stdio from "@modelcontextprotocol/sdk/client/stdio.js";\n'
-            "const T = stdio[Object.keys(stdio)[0]];\n"
-            'new T({ command: "npx", args: ["-y", "notes-mcp"] });\n',
+            (
+                'import * as stdio from "@modelcontextprotocol/sdk/client/stdio.js";\n'
+                "const T = stdio[Object.keys(stdio)[0]];\n"
+                'new T({ command: "npx", args: ["-y", "notes-mcp"] });\n'
+            ),
             _gap("client.mjs", 2, NAMESPACE),
         ),
         (
-            "import { Stdio\\u0043lientTransport as T } from "
-            '"@modelcontextprotocol/sdk/client/stdio.js";\n'
-            'new T({ command: "npx", args: ["-y", "notes-mcp"] });\n',
+            (
+                "import { Stdio\\u0043lientTransport as T } from "
+                '"@modelcontextprotocol/sdk/client/stdio.js";\n'
+                'new T({ command: "npx", args: ["-y", "notes-mcp"] });\n'
+            ),
             _gap("client.mjs", 2, LAUNCHED),
         ),
         (
-            'import * as client from "@modelcontextprotocol/client";\n'
-            'new client[kind]({ command: "npx" });\n',
+            (
+                'import * as client from "@modelcontextprotocol/client";\n'
+                'new client[kind]({ command: "npx" });\n'
+            ),
             _gap("client.mjs", 2, NAMESPACE),
         ),
     ],
@@ -620,8 +644,10 @@ def test_javascript_the_grammar_cannot_read_is_a_gap_and_typescript_a_failure(tm
         },
     )
     assert result.surfaces_excluded == [
-        "broken.mjs: JavaScript the TypeScript grammar cannot parse; servers and tools in the "
-        "file not inventoried",
+        (
+            "broken.mjs: JavaScript the TypeScript grammar cannot parse; servers and tools in the "
+            "file not inventoried"
+        ),
         _gap(
             "compare.js",
             4,
@@ -788,23 +814,35 @@ def test_python_dynamic_imports_of_an_mcp_client_module_are_gaps(tmp_path, sourc
         "from importlib import import_module as im\nload = im\nload('mcp.server.fastmcp')\n",
         "import importlib as il\nload: object = il.import_module\nload('mcp.server')\n",
         "import pkgutil\nif (load := pkgutil.resolve_name):\n    load('mcp.server.fastmcp:FastMCP')\n",
-        "import importlib\ndef make():\n    load = importlib.import_module\n"
-        "    return load('mcp.server.fastmcp')\n",
+        (
+            "import importlib\ndef make():\n    load = importlib.import_module\n"
+            "    return load('mcp.server.fastmcp')\n"
+        ),
         "import importlib\nload, other = importlib.import_module, 1\nload('mcp.server.fastmcp')\n",
-        "import importlib\n[first, (load, *rest)] = 1, [2, importlib.import_module]\n"
-        "load('mcp.server')\n",
+        (
+            "import importlib\n[first, (load, *rest)] = 1, [2, importlib.import_module]\n"
+            "load('mcp.server')\n"
+        ),
         "import importlib\ndef f(load=importlib.import_module):\n    load('mcp.server.fastmcp')\n",
-        "from importlib import import_module\ndef f(a, *, load=import_module):\n"
-        "    load('fastmcp')\n",
+        (
+            "from importlib import import_module\ndef f(a, *, load=import_module):\n"
+            "    load('fastmcp')\n"
+        ),
         "import importlib\nf = lambda load=importlib.import_module: load('mcp.server')\n",
-        "import importlib\nfor load in (importlib.import_module,):\n"
-        "    load('mcp.server.fastmcp')\n",
-        "import importlib\nloaders = [importlib.import_module]\nfor load in loaders:\n"
-        "    load('mcp.server')\n",
+        (
+            "import importlib\nfor load in (importlib.import_module,):\n"
+            "    load('mcp.server.fastmcp')\n"
+        ),
+        (
+            "import importlib\nloaders = [importlib.import_module]\nfor load in loaders:\n"
+            "    load('mcp.server')\n"
+        ),
         "import importlib\n[load('mcp.server') for load in {importlib.import_module}]\n",
-        "import contextlib, importlib\n"
-        "with contextlib.nullcontext(importlib.import_module) as load:\n"
-        "    load('mcp.server.fastmcp')\n",
+        (
+            "import contextlib, importlib\n"
+            "with contextlib.nullcontext(importlib.import_module) as load:\n"
+            "    load('mcp.server.fastmcp')\n"
+        ),
         "import importlib\nwith importlib.import_module as (load, other):\n    load('fastmcp')\n",
     ],
     ids=[
@@ -836,16 +874,26 @@ def test_python_dynamic_imports_through_an_assigned_loader_are_gaps(tmp_path, so
 @pytest.mark.parametrize(
     "source",
     [
-        "import importlib\ndef run(load):\n    return load('mcp.server.fastmcp')\n"
-        "run(importlib.import_module)\n",
-        "import importlib\ndef run(*, load):\n    return load('fastmcp')\n"
-        "run(load=importlib.import_module)\n",
-        "import importlib\nmatch importlib.import_module:\n    case load:\n"
-        "        load('mcp.server.fastmcp')\n",
-        "import importlib\nmatch [importlib.import_module]:\n    case [load]:\n"
-        "        load(name='mcp.server')\n",
-        "import importlib\nloaders = {'x': importlib.import_module}\n"
-        "loaders['x']('mcp.server.fastmcp')\n",
+        (
+            "import importlib\ndef run(load):\n    return load('mcp.server.fastmcp')\n"
+            "run(importlib.import_module)\n"
+        ),
+        (
+            "import importlib\ndef run(*, load):\n    return load('fastmcp')\n"
+            "run(load=importlib.import_module)\n"
+        ),
+        (
+            "import importlib\nmatch importlib.import_module:\n    case load:\n"
+            "        load('mcp.server.fastmcp')\n"
+        ),
+        (
+            "import importlib\nmatch [importlib.import_module]:\n    case [load]:\n"
+            "        load(name='mcp.server')\n"
+        ),
+        (
+            "import importlib\nloaders = {'x': importlib.import_module}\n"
+            "loaders['x']('mcp.server.fastmcp')\n"
+        ),
         "import importlib\nself.load = importlib.import_module\nself.load('mcp.server')\n",
         "def make():\n    return __import__\nmake()('fastmcp.server')\n",
         "load = make_loader()\nload('mcp.server:FastMCP')\n",
@@ -1013,47 +1061,61 @@ def test_python_imports_that_load_no_mcp_server_module_are_not_gaps(tmp_path, so
     ("source", "expected"),
     [
         (
-            "from mcp import ClientSession, StdioServerParameters\n"
-            'params = StdioServerParameters(command="npx", args=["-y", "notes-mcp@1.0.0"])\n',
+            (
+                "from mcp import ClientSession, StdioServerParameters\n"
+                'params = StdioServerParameters(command="npx", args=["-y", "notes-mcp@1.0.0"])\n'
+            ),
             [LAUNCHED],
         ),
         (
-            "from mcp.client.stdio import StdioServerParameters as Params\n"
-            'params = Params(command="uvx", args=["notes-mcp"])\n',
+            (
+                "from mcp.client.stdio import StdioServerParameters as Params\n"
+                'params = Params(command="uvx", args=["notes-mcp"])\n'
+            ),
             [LAUNCHED],
         ),
         ("from mcp import *\nparams = StdioServerParameters(command='npx')\n", [LAUNCHED]),
         ("import mcp\nparams = mcp.StdioServerParameters(command='npx')\n", [LAUNCHED]),
         ("from mcp import StdioServerParameters\nfactory = StdioServerParameters\n", [LAUNCHED]),
         (
-            "from agents.mcp import MCPServerSse, MCPServerStdio\n"
-            "local = MCPServerStdio(params={'command': 'npx', 'args': ['-y', 'notes-mcp']})\n"
-            "remote = MCPServerSse(params={'url': 'https://example.com/sse'})\n",
+            (
+                "from agents.mcp import MCPServerSse, MCPServerStdio\n"
+                "local = MCPServerStdio(params={'command': 'npx', 'args': ['-y', 'notes-mcp']})\n"
+                "remote = MCPServerSse(params={'url': 'https://example.com/sse'})\n"
+            ),
             [LAUNCHED, REACHED],
         ),
         (
-            "from agents import mcp\n"
-            "remote = mcp.MCPServerStreamableHttp(params={'url': 'https://example.com/mcp'})\n",
+            (
+                "from agents import mcp\n"
+                "remote = mcp.MCPServerStreamableHttp(params={'url': 'https://example.com/mcp'})\n"
+            ),
             [REACHED],
         ),
         (
-            "from pydantic_ai.mcp import MCPServerStdio\n"
-            "server = MCPServerStdio('npx', args=['-y', 'notes-mcp'])\n",
+            (
+                "from pydantic_ai.mcp import MCPServerStdio\n"
+                "server = MCPServerStdio('npx', args=['-y', 'notes-mcp'])\n"
+            ),
             [LAUNCHED],
         ),
         (
-            "from langchain_mcp_adapters.client import MultiServerMCPClient\n"
-            "client = MultiServerMCPClient({'notes': {'command': 'npx', 'transport': 'stdio'}})\n",
+            (
+                "from langchain_mcp_adapters.client import MultiServerMCPClient\n"
+                "client = MultiServerMCPClient({'notes': {'command': 'npx', 'transport': 'stdio'}})\n"
+            ),
             [BOTH],
         ),
         (
-            "from mcp.client.sse import sse_client\n"
-            "from mcp.client.streamable_http import streamablehttp_client\n"
-            "async def main():\n"
-            "    async with sse_client('https://example.com/sse') as streams:\n"
-            "        pass\n"
-            "    async with streamablehttp_client('https://example.com/mcp') as streams:\n"
-            "        pass\n",
+            (
+                "from mcp.client.sse import sse_client\n"
+                "from mcp.client.streamable_http import streamablehttp_client\n"
+                "async def main():\n"
+                "    async with sse_client('https://example.com/sse') as streams:\n"
+                "        pass\n"
+                "    async with streamablehttp_client('https://example.com/mcp') as streams:\n"
+                "        pass\n"
+            ),
             [REACHED],
         ),
     ],
@@ -1096,15 +1158,19 @@ def test_python_launcher_names_that_launch_nothing_are_not_gaps(tmp_path, source
 @pytest.mark.parametrize(
     "source",
     [
-        "from mcp import StdioServerParameters\n"
-        "def connect(params: StdioServerParameters) -> StdioServerParameters:\n"
-        "    return params\n",
+        (
+            "from mcp import StdioServerParameters\n"
+            "def connect(params: StdioServerParameters) -> StdioServerParameters:\n"
+            "    return params\n"
+        ),
         "from mcp import StdioServerParameters\n",
         "from pydantic_ai import Agent\nfrom pydantic_ai.mcp import MCPServerStdio\nagent = Agent('m')\n",
         'from agents.mcp import MCPServerStdio\n__all__ = ["MCPServerStdio"]\n',
         "from mcp import StdioServerParameters as StdioServerParameters\n",
-        "try:\n    from agents.mcp import MCPServerStdio as Launcher\nexcept ImportError:\n"
-        "    Launcher = None\n",
+        (
+            "try:\n    from agents.mcp import MCPServerStdio as Launcher\nexcept ImportError:\n"
+            "    Launcher = None\n"
+        ),
     ],
     ids=["annotation", "import-only", "unused", "all", "explicit-re-export", "compat-shim"],
 )
@@ -1157,8 +1223,10 @@ def test_a_python_launcher_reached_through_an_imported_module_is_a_gap(tmp_path,
     [
         "from mcp.server.fastmcp import FastMCP\n",
         "from fastmcp import FastMCP as FastMCP\n",
-        "from mcp.server.fastmcp import FastMCP\ndef build(server: FastMCP) -> FastMCP:\n"
-        "    return server\n",
+        (
+            "from mcp.server.fastmcp import FastMCP\ndef build(server: FastMCP) -> FastMCP:\n"
+            "    return server\n"
+        ),
     ],
     ids=["import-only", "explicit-re-export", "annotation"],
 )

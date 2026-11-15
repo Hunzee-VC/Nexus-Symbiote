@@ -469,8 +469,10 @@ def test_skill_asset_larger_than_total_bytes_names_that_limit(tmp_path):
     with limits.applied(limits.resolve(["file-bytes=64KiB", "total-bytes=1MiB"], {})):
         result = PromptScanner().scan(tmp_path)
     assert result.scan_failures == [
-        ".claude/skills/pdf/sample.bin: total-bytes limit of 1 MiB exceeded; "
-        "raise it with --limit total-bytes=N"
+        (
+            ".claude/skills/pdf/sample.bin: total-bytes limit of 1 MiB exceeded; "
+            "raise it with --limit total-bytes=N"
+        )
     ]
     with limits.applied(limits.resolve(["file-bytes=64KiB", "total-bytes=4MiB"], {})):
         raised = PromptScanner().scan(tmp_path)
