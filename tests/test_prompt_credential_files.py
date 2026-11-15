@@ -14,6 +14,7 @@ from nexus_symbiote import limits
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.hashing import hash_bytes
+from nexus_symbiote.scanners.credential_files import credential_shaped
 from nexus_symbiote.scanners.prompt import PromptScanner
 from nexus_symbiote.utils.confined import ConfinedCollection
 
@@ -292,3 +293,52 @@ def test_a_walk_that_skips_the_credential_check_still_records_no_credential_file
     assert {component.source_path for component in result.components} == {"CLAUDE.md"}
     assert ".claude/rules/guide.md: " + LINKED.format(".env") in result.surfaces_excluded
     assert hash_bytes(SYNTHETIC_CREDENTIAL) not in _published(result)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        ".env",
+        ".env.local",
+        ".env.production",
+        "secret.yaml",
+        "db-password.txt",
+        "api_key.json",
+        "server.pem",
+        "scripts/id_rsa",
+        "secrets/rotate.py",
+        "deploy.key",
+    ],
+)
+def test_names_that_hold_credentials_are_credential_shaped(name):
+    assert credential_shaped(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        ".env.example",
+        ".env.sample",
+        ".env.template",
+        "scripts/rotate_api_key.py",
+        "check_password_strength.sh",
+        "secret_scanner.ts",
+        "docs/secrets-handling.md",
+        "notes.txt",
+    ],
+)
+def test_templates_and_programs_named_for_credentials_are_not(name):
+    assert not credential_shaped(name)
+
+
+def test_a_skill_keeps_its_script_named_for_the_credential_it_handles(tmp_path):
+    skill = tmp_path / ".claude" / "skills" / "ops"
+    (skill / "scripts").mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: ops\ndescription: rotate keys\n---\nRotate.\n")
+    script = skill / "scripts" / "rotate_api_key.py"
+    script.write_text("print('rotate')\n")
+    (skill / ".env.example").write_text("API_KEY=\n")
+    (skill / "secret.yaml").write_text("kind: Secret\n")
+    result = PromptScanner().scan(tmp_path)
+    excluded = [entry for entry in result.surfaces_excluded if "holds credentials" in entry]
+    assert len(excluded) == 1 and "secret.yaml" in excluded[0]

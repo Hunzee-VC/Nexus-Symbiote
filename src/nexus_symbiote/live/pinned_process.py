@@ -203,12 +203,14 @@ def _descendant_pids(root: int) -> set[int]:
             continue
         pid = int(entry)
         try:
-            with open(f"/proc/{pid}/status", encoding="utf-8") as status:
+            # Bytes, not text: the Name line holds whatever bytes a process set as its
+            # name, and one name that is not UTF-8 must not end the scan for every pid.
+            with open(f"/proc/{pid}/status", "rb") as status:
                 ppid = next(
-                    (int(line.split()[1]) for line in status if line.startswith("PPid:")),
+                    (int(line.split()[1]) for line in status if line.startswith(b"PPid:")),
                     None,
                 )
-        except OSError:
+        except (OSError, ValueError, IndexError):
             continue
         if ppid is not None:
             children.setdefault(ppid, []).append(pid)
@@ -371,13 +373,17 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
     try:
         if stop:
             _stop_launcher(proc.pid)
-        if not namespaced:
-            _kill_descendants(proc.pid)
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            # The group already exited; the caller's wait() still reaps the launcher.
-            pass
+            if not namespaced:
+                _kill_descendants(proc.pid)
+        finally:
+            # Whatever the sweep did: a sweep that fails must not leave the launcher's
+            # own group running, which killpg alone always ended.
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                # The group already exited; the caller's wait() still reaps the launcher.
+                pass
         if not namespaced:
             _kill_descendants(proc.pid)
     finally:

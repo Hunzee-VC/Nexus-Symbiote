@@ -342,8 +342,9 @@ def _projected_text(value: str, *, unkeyed: bool) -> str:
 _COMMAND_KEYS = frozenset({"command", "args", "notify", "headershelper"})
 _HEADER_MAPS = frozenset({"headers", "httpheaders", "http_headers", "env_http_headers"})
 # A command word kept by shape: a path or name, quoted or not, that may refer to a
-# variable by name but expands nothing else, so `${PIN:-482913}` is not kept.
-_PROGRAM_WORD = re.compile(r"(?:[\w./~+@%:,*?\[\]-]|\$\w+|\$\{\w+\})+")
+# variable by name but expands nothing else, so `${PIN:-482913}` is not kept. Every
+# quantifier is possessive: `$aa$aa…!` must fail once, not once per way to split it.
+_PROGRAM_WORD = re.compile(r"(?:[\w./~+@%:,*?\[\]-]|\$\w++|\$\{\w++\})++")
 _ASSIGNMENT = re.compile(r"[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=")
 _BLANKS = frozenset(" \t")
 _SEPARATORS = frozenset(";&|\n")

@@ -9,6 +9,7 @@ import pytest
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.models import AgentComponent, RAGSourceComponent
+from nexus_symbiote.diff.differ import AIBOMDiffer
 from nexus_symbiote.generators.recovery import recover_export
 from nexus_symbiote.generators.validation import (
     validate_cyclonedx,
@@ -116,6 +117,61 @@ def test_ordinary_manifest_and_rag_values_are_preserved(tmp_path):
     assert component.source_uris == source["source_uris"]
     assert component.properties["index_identities"] == {"namespace": "notes-v1"}
     assert not any(risk.category == "completeness" for risk in component.risks)
+
+
+OWNERS = ("https://github.com/acme-platform", "https://github.com/another-org")
+
+
+def _manifest_agents(tmp_path):
+    agents = []
+    for owner in OWNERS:
+        (tmp_path / "agent.yaml").write_text(json.dumps({"name": "bot", "owner": owner}))
+        agents.append(assemble_repository_agent(AIBOM(), tmp_path))
+    return agents
+
+
+def test_a_redacted_manifest_field_is_named_as_unbound_without_the_key(tmp_path):
+    before, after = _manifest_agents(tmp_path)
+    # The export cuts the URL to its origin, so the two records show the same owner.
+    assert before.supplier == after.supplier == "https://github.com"
+    for agent in (before, after):
+        assert "static_value_binding" not in agent.properties
+        (finding,) = [risk for risk in agent.risks if risk.category == "completeness"]
+        assert "values not bound in this inventory: owner" in finding.detail
+    report = AIBOMDiffer().diff(_inventory(before), _inventory(after))
+    assert any("unbound" in alert["alert"] for alert in report.security_alerts)
+
+
+def test_keyed_binding_detects_a_redacted_manifest_field_change(tmp_path, monkeypatch):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, "static-export-binding-key-0123456789abcdef")
+    before, after = _manifest_agents(tmp_path)
+    assert before.supplier == after.supplier == "https://github.com"
+    for agent in (before, after):
+        assert not any(risk.category == "completeness" for risk in agent.risks)
+        assert (
+            agent.properties["static_value_binding_profile"]
+            == "nexus-symbiote/agent-manifest-values/v1"
+        )
+    assert before.properties["static_value_binding"] != after.properties["static_value_binding"]
+    report = AIBOMDiffer().diff(_inventory(before), _inventory(after))
+    assert any("static_value_binding changed" in alert["alert"] for alert in report.security_alerts)
+    (same,) = _manifest_agents(tmp_path)[:1]
+    assert same.properties["static_value_binding"] == before.properties["static_value_binding"]
+
+
+def test_a_manifest_that_redaction_leaves_alone_carries_no_binding_or_finding(
+    tmp_path, monkeypatch
+):
+    for key in ("", "static-export-binding-key-0123456789abcdef"):
+        monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, key)
+        (tmp_path / "agent.yaml").write_text(json.dumps({"name": "bot", "owner": "Research team"}))
+        agent = assemble_repository_agent(AIBOM(), tmp_path)
+        assert "static_value_binding" not in agent.properties
+        assert not agent.risks
+
+
+def _inventory(agent):
+    return AIBOM(components=[agent])
 
 
 def test_keyed_binding_still_detects_a_redacted_rag_identifier_change(tmp_path, monkeypatch):

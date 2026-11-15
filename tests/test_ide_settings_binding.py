@@ -954,3 +954,17 @@ def test_a_command_keeps_each_program_and_url_origin(command, shape):
     from nexus_symbiote.scanners.ide_agents import _free_text
 
     assert _free_text(command, program=True, unkeyed=True) == shape
+
+
+def test_a_hook_command_of_repeated_variables_is_read_in_linear_time(tmp_path: Path) -> None:
+    """`$aa$aa…!` is no program word; the match must fail once, not once per split."""
+    from tests.support import scaling_ratio
+
+    def scan(scale: int) -> None:
+        command = "$aa" * (24 * scale) + "!"
+        hooks = {"SessionStart": [{"hooks": [{"type": "command", "command": command}]}]}
+        (tmp_path / ".claude").mkdir(exist_ok=True)
+        (tmp_path / ".claude" / "settings.json").write_text(json.dumps({"hooks": hooks}))
+        IDEAgentScanner().scan(tmp_path)
+
+    assert scaling_ratio(scan, factor=4) < 10
