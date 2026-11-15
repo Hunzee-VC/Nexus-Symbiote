@@ -186,11 +186,14 @@ A way around a limit that its entry does not describe is worth a
 - **Environment that moves a runner's configuration is a gap.** A server's `env`
   that may point `HOME`, `XDG_CONFIG_HOME`, `PREFIX`, `DESTDIR`, `GOENV`,
   `ZDOTDIR`, npm's `userconfig`, `globalconfig` or `prefix` (`npm_config_*` or
-  `pnpm_config_*`, for npm, pnpm, bun and Deno) or a relative `PATH` entry into the
+  `pnpm_config_*`, for every npm, pnpm, bun and Deno launch, `npm run` and
+  `deno run` of a local script included) or a relative `PATH` entry into the
   project, or that replaces the package (`UV_OVERRIDE`, `UV_CONSTRAINT`,
   `PIP_CONSTRAINT`), makes the identity unknown. A location may lie in the project
-  when it is not an absolute path, including `~/...` and an expansion such as
-  `${...}`, or when it has a `..` segment or lies under `/proc` or `/dev/fd`; an
+  when it is not an absolute POSIX path, including `~/...`, an expansion such as
+  `${...}` and a Windows drive path such as `C:\Users\me\AppData\Roaming\npm`
+  (npm's default global prefix on Windows), or when it has a `..` segment or lies
+  under `/proc` or `/dev/fd`; an
   absolute path that leads into the checkout, such as the CI checkout directory, is
   not recognized, and environment a client sets for every server, such as the `env`
   of `.claude/settings.json`, is not read as a server's environment. Other locations
@@ -229,11 +232,18 @@ A way around a limit that its entry does not describe is worth a
   wherever `userconfig`, `globalconfig` and `prefix` point, so one that may lie in
   the project, set in the root `.npmrc` or with `--userconfig`, `--globalconfig`,
   `--prefix` or `-C` before the package as well as in the environment, makes the
-  identity unknown instead; an absolute one is a medium `package_source` finding,
-  and that file's contents are not compared. For runners that read project
-  resolver files, a server that runs in another working directory, or that a
-  configuration file below the root declares, has its package identity withheld
-  (`working-directory=[unresolved]`) and a medium `package_source` risk.
+  identity unknown instead, for a registry package, a full-commit git package and a
+  launch without a package such as `npm run` alike; an absolute one is a medium
+  `package_source` finding, and that file's contents are not compared. For a launch
+  without a package (`npm run`, `pnpm run`, `bun run`, `deno run` of a local
+  script), the root `.npmrc` is read only for those locations: its other settings,
+  such as `script-shell` or `node-options`, are not classified or bound. An `.npmrc`
+  line whose key holds `${...}` is bound as written, so a change to it is detected,
+  but what it expands to is not known; one whose key starts with `//`, such as
+  `//${HOST}/:_authToken`, is an auth setting and is not bound. For runners that
+  read project resolver files, a server that runs in another working directory, or
+  that a configuration file below the root declares, has its package identity
+  withheld (`working-directory=[unresolved]`) and a medium `package_source` risk.
 - **Injected environments are not visible.** Variables from an `envFile`, or from
   `dotenvx`, `doppler`, `infisical` or `op run --env-file`, are not read. A launched
   package then carries `environment-file=[unresolved]` instead of its identity.

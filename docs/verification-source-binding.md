@@ -33,7 +33,10 @@ otherwise, lines end at a carriage return or line feed, keys after the first
 `[section]` line are ignored, and a key containing `${...}` is `[unresolved]`; npm
 expands it, so one that may become `call`, `package`, `userconfig`, `globalconfig` or
 `prefix` (`${E}userconfig`, but not `//${HOST}/:_authToken` or `@${SCOPE}:registry`)
-also makes the launcher identity unknown, as does such an `npm_config_*` name. Its
+also makes the launcher identity unknown, as does such an `npm_config_*` name, and one
+that may become a code-loading setting such as `node-options` is recorded as one.
+Such a line, unless its key starts with `//`, is bound with its key and value as
+written. Its
 registry (and the `@scope:registry` of a configured `scope` for a package without a
 registry of its own, as npm selects it, beside the default registry that pnpm and Bun
 use instead for a launcher other than `npx` and `npm exec`; a `scope` that holds
@@ -46,7 +49,10 @@ a `userconfig`, `globalconfig` or `prefix` that may lie in the project (not an a
 path, or one with a `..` segment or under `/proc` or `/dev/fd`), from `.npmrc`, an
 `npm_config_*` variable or `--userconfig`, `--globalconfig`, `--prefix` or `-C`
 before the package, makes the launcher identity unknown, as `HOME` or `PREFIX` there
-does, because a `call` added to that file would change what runs unseen. Auth
+does, because a `node-options`, `script-shell`, `registry` or `package` added to that
+file would change what runs unseen. This holds for registry and full-commit git
+packages, whose `.npmrc` is read in full, and for an npm, pnpm, Bun or Deno launch
+without a package, whose `.npmrc` is read only for these locations. Auth
 settings (`//host/:...`, `_auth`, `username` and similar) are ignored. For npm and
 pnpm, every setting is classified, from `.npmrc` and from `npm_config_*` or
 `pnpm_config_*` variables alike: `call` and `package` decide what `npm exec` runs, so
