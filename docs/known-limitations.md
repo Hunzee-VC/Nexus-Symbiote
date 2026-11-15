@@ -324,12 +324,23 @@ A way around a limit that its entry does not describe is worth a
   the server in a private variable these lists do not name, importing any private
   name (one leading underscore, not a dunder such as `__version__`) from an `mcp` or
   `fastmcp` module, or reading one as an attribute or literal `getattr(...)` of an SDK
-  module or of a name
-  imported from one, as in `extensions._extension_dispatch_scope`, is a gap too; a
-  private name reached any other way, such as through a dynamic import, is not
-  seen. In `mcp.server.fastmcp.exceptions`, `fastmcp` is a module path of a name bound only
-  by `import mcp...` and not a gap; `fastmcp` on any other object, such as a
-  settings object's `config.fastmcp`, is. In a file that imports from `mcp` or
+  module, of a name imported from one or of a name assigned from either, as in
+  `extensions._extension_dispatch_scope` or `ext._hook` after `ext = extensions`, is a
+  gap too; a private name reached any other way, such as through a dynamic import, is
+  not seen. Only `mcp.server.fastmcp` reached by attributes alone from a name bound only
+  by `import mcp...`, as in `mcp.server.fastmcp.exceptions`, is a module path and not a
+  gap; `fastmcp` on any other object is, such as a settings object's `config.fastmcp`,
+  `getattr(mcp, "missing", ctx).fastmcp`, whose default can be any object, or
+  `mcp.types.carrier.fastmcp`, a value stored on a module. In a file that imports from
+  `mcp` or `fastmcp`, storing or deleting an attribute of an SDK module, of a name
+  imported from one or of a name assigned from either is a gap too, as in
+  `fastmcp.FastMCP.__init__ = hook`, `del S.FastMCP.list_tools` or
+  `fastmcp.settings.debug = True`, because it can change what servers built elsewhere
+  register or carry a context to code that reads it back. For both rules the default
+  of a literal `getattr(...)` counts as its object, as it is returned when the
+  attribute is missing; an SDK module or name reached through any other expression,
+  such as `(obj or fastmcp).FastMCP.__init__ = hook`, and a method call that changes an
+  SDK object are not seen. In a file that imports from `mcp` or
   `fastmcp`, a parameter typed as the SDK `Context` (a `Context` imported from an
   SDK module, a qualified `Context` of an SDK module, `getattr(..., "Context")`, or
   a string forward-reference annotation naming or computing one), and a name bound in
@@ -360,28 +371,54 @@ A way around a limit that its entry does not describe is worth a
   a member of a `|` union, or an argument of a generic of `typing`,
   `typing_extensions` or `collections.abc`, such as `Optional[FastMCP]`, or of a
   built-in generic such as `list[FastMCP]`. Any other part of an annotation, such
-  as a call or another subscript, and string forward-reference expressions in type
-  positions, are analyzed as code, because annotations are
-  evaluated. In a file with a recognized server, an `mcp` or `fastmcp` import, or a PydanticAI agent, this
+  as a call or another subscript, is analyzed as code, because annotations are
+  evaluated. So is a string literal wherever `typing.get_type_hints` and the SDKs
+  evaluate it as a forward reference: the whole annotation, a member of a `|` union,
+  an element of a tuple or list, or an argument of any subscript, since a generic
+  defined anywhere turns a string argument into a forward reference. The arguments of
+  `Literal` and the metadata of `Annotated` are values and are not parsed, each
+  recognized by the name it is imported as from `typing`, `typing_extensions` or
+  `collections.abc`, not the name it is bound to. A string is parsed as
+  `typing.ForwardRef` compiles it, a leading `*` unpacked, so
+  `x: "*(mcp.add_tool(hidden) or [str])"` is code. In a file with a recognized server,
+  an `mcp` or `fastmcp` import, or a PydanticAI agent, such a string that does not
+  parse, perhaps only for the Python that runs the scan, an f-string there, a string
+  longer than 4,096 characters, strings nested four deep and more than 10,000 syntax
+  nodes parsed from the file's annotation strings are gaps. A string that becomes a
+  type another way is code the collector does not see: an annotation that evaluates
+  to a string bound to a name or built at run time, as in `x: NOTE_TYPE`, a `TypeVar`
+  bound, or a field type passed to `TypedDict(...)` or `NamedTuple(...)`. In a file
+  with a recognized server, an `mcp` or `fastmcp` import, or a PydanticAI agent, this
   reflection is a gap even when harmless: a reference by name to `locals`, `globals`,
-  `vars`, `eval`, `exec`, `__import__`, `setattr` or `delattr`; `__builtins__` or an import of the `builtins` module;
-  a reference by name to `getattr`, unless called directly where the object is a
-  literal or a name, or attribute of a name, that the file binds only by import
-  and the attribute is a literal name other than `modules` and those listed next, so
-  `getattr(os, "environ")` is accepted and `getattr(self, "name")` is a gap; the
-  attributes `__self__`, `__closure__`, `__globals__`, `__builtins__`, `__dict__`,
-  `__annotations__`, `__traceback__`, `__getattribute__`, `tb_frame`, `tb_next`,
-  `f_back`, `f_locals`, `f_globals`, `f_builtins`, `gi_frame`, `cr_frame`,
-  `ag_frame`, `_getframe`, `currentframe`, `getouterframes`, `getinnerframes`,
-  `getargvalues` and `getclosurevars`, also imported by name; and a `modules`
+  `vars`, `eval`, `exec`, `__import__`, `setattr` or `delattr`, an alias such as
+  `peek = locals` included, except in the body of a function, not a nested function or
+  class, that has a parameter of that name, so a tool
+  `def render(template: str, vars: dict)` may use `vars` but a local variable named
+  `vars` is a gap; `__builtins__`, `__annotations__` or `__annotate__` bound or read by
+  name, as in a class body's `__annotations__ = {...}`, or an import of the
+  `builtins` module; a reference by name to `getattr`, unless called directly with two
+  or three arguments where the object is a literal or a name, or attribute of a name,
+  that the file binds only by import and the attribute is a literal name other than
+  `modules` and those listed next, so `getattr(os, "environ")` is accepted and
+  `getattr(self, "name")` is a gap, and in a file that imports from `mcp` or `fastmcp`
+  and has no recognized server or agent the object may be anything, because a literal
+  read there is checked as the attribute itself is, so `getattr(block, "text", "")` is
+  accepted; the attributes `__self__`, `__closure__`, `__globals__`, `__builtins__`,
+  `__dict__`, `__annotations__`, `__annotate__`, `__traceback__`, `__getattribute__`,
+  `__setattr__`, `__delattr__`, `__import__`, `import_module`, `attrgetter`,
+  `getattr`, `ForwardRef`, `tb_frame`, `tb_next`, `f_back`, `f_locals`, `f_globals`,
+  `f_builtins`, `gi_frame`, `cr_frame`, `ag_frame`, `_getframe`, `currentframe`,
+  `getouterframes`, `getinnerframes`, `getargvalues` and `getclosurevars`, also
+  imported by name, so `importlib.import_module(...)`,
+  `from operator import attrgetter` and `typing.ForwardRef("...")` are gaps, harmless
+  or not; and a `modules`
   attribute that is not called, as in `sys.modules[__name__]`, or `modules`
   imported from `sys`. A method that only shares a name, such as `model.eval()`
   or `model.modules()`, is not reflection. Other reflection is not recognized,
-  such as a reflective builtin under another name,
-  `importlib.import_module(__name__)`, a module that imports itself, `gc`, or
-  reflection in another file, including on the traceback of an exception that
-  propagated out of a server's run, so a completed scan cannot prove that a
-  server or agent never escaped.
+  such as a reflective builtin reached through another module, a module that
+  imports itself with an import statement, `gc`, or reflection in another file,
+  including on the traceback of an exception that propagated out of a server's run,
+  so a completed scan cannot prove that a server or agent never escaped.
   Any
   call whose first argument, or `name` keyword, is a literal that names `mcp`,
   `mcp.server` or `fastmcp`, or a submodule of the last two, is a gap whatever the

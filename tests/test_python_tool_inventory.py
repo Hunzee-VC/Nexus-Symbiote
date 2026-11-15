@@ -1,4 +1,5 @@
 import json
+import warnings
 from pathlib import Path
 
 import pytest
@@ -799,6 +800,8 @@ FASTMCP2_TOOL = FASTMCP2 + "mcp = FastMCP('x')\n@mcp.tool\n"
         + "def read_note(ctx: \"getattr(c, 'Context')\") -> None:\n    wire(ctx)\n",
         "from __future__ import annotations\nfrom fastmcp.server import context as c\n"
         + "def handler(ctx: \"builtins.getattr(c, 'Context')\") -> None:\n    pass\n",
+        "from mcp.types import TextContent\nfrom pkg import kinds\n"
+        + "def handler(ctx: getattr(kinds, 'Ctx')):\n    wire(ctx)\n",
         "from __future__ import annotations\n"
         + FASTMCP2_TOOL
         + 'def read_note(x: "mcp.add_tool(delete_all) or str") -> str:\n    return x\n',
@@ -861,3 +864,204 @@ def test_context_data_and_plain_constructors_are_not_gaps(tmp_path, source):
     (tmp_path / "CLAUDE.md").write_text("Be helpful.\n")
     checked = CliRunner().invoke(main, ["scan", "--no-project-policy", "--check", str(tmp_path)])
     assert checked.exit_code == 0, checked.output
+
+
+CONTEXT_GAP = "pkg/server.py: Python MCP server reachable through a request context"
+BINDING_GAP = "pkg/server.py: unsupported Python MCP binding or dynamic registration"
+NESTED_STR = repr(repr(repr(repr(repr("str")))))
+LONG_UNION = '"' + "str | " * 600 + 'str"'
+
+
+def assert_gap_fails_check(root: Path, source: str, gap: str) -> None:
+    result, tools = scan(root, source)
+    assert gap in result.surfaces_excluded, (source, result.surfaces_excluded)
+    assert all(tool.name == "read_note" for tool in tools)
+    (root / "CLAUDE.md").write_text("Be helpful.\n")
+    checked = CliRunner().invoke(main, ["scan", "--no-project-policy", "--check", str(root)])
+    assert checked.exit_code == 1, checked.output
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import mcp.types\ndef register(ctx, tool):\n"
+        + "    getattr(mcp, 'missing', ctx).fastmcp.add_tool(tool)\n",
+        "import fastmcp.exceptions\ndef register(ctx, tool):\n"
+        + "    getattr(fastmcp, 'missing', ctx).fastmcp.add_tool(tool)\n",
+        "import mcp.types\n"
+        + FASTMCP2
+        + "server = FastMCP('x')\n@server.custom_route('/health', methods=['GET'])\n"
+        + "async def health(request):\n    for route in request.app.routes:\n"
+        + "        getattr(mcp, 'missing', route.app).fastmcp.add_tool(delete_all)\n"
+        + "@server.tool\ndef read_note() -> str:\n    return 'note'\n",
+        "import mcp.types\ndef register(ctx, tool):\n"
+        + "    mcp.types.carrier = ctx\n    mcp.types.carrier.fastmcp.add_tool(tool)\n",
+        "import mcp.server.fastmcp as fm\ndef register(tool):\n    fm.fastmcp.add_tool(tool)\n",
+        "import mcp\ndef register(tool):\n    mcp.server.fastmcp.fastmcp.add_tool(tool)\n",
+        "import fastmcp\nfastmcp.FastMCP.__init__ = hidden_init\n",
+        "from mcp.server.fastmcp import server as S\ndel S.FastMCP.list_tools\n",
+        "from fastmcp.server import dependencies as D\ndef run_note(value):\n    D.carrier = value\n",
+        "from fastmcp.server import extensions\next = extensions\n"
+        + "def scope():\n    return ext._dispatch_hook_v9.get()\n",
+        "from fastmcp.server import extensions\n"
+        + "def scope(obj):\n    return getattr(obj, 'missing', extensions)._hook_v9.get()\n",
+        "import fastmcp\ngetattr(object, 'missing', fastmcp).FastMCP.__init__ = hidden_init\n",
+    ],
+)
+def test_only_the_sdk_module_path_is_exempt_and_sdk_stores_are_gaps(tmp_path, source):
+    assert_gap_fails_check(tmp_path, source, CONTEXT_GAP)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        FASTMCP2_TOOL
+        + "def read_note(x: '*(mcp.add_tool(delete_all) or [str])') -> str:\n    return 'n'\n",
+        FASTMCP2_TOOL + "def read_note(x: 'not valid python!') -> str:\n    return 'n'\n",
+        "from mcp.types import TextContent\ndef handler(x: 'not valid python!'):\n    pass\n",
+        "from langchain_core.tools import tool\nfrom mcp.types import TextContent\n"
+        + "@tool\ndef read_note(q: 'not valid python!') -> str:\n    '''Read.'''\n    return q\n",
+        "from pkg.kinds import Box\n"
+        + FASTMCP2_TOOL
+        + "def read_note(x: Box['mcp.add_tool(delete_all) or int']) -> str:\n    return 'n'\n",
+        "from pkg.kinds import Box\n"
+        + FASTMCP2_TOOL
+        + "def read_note(x: Box[*['mcp.add_tool(delete_all) or int']]) -> str:\n"
+        + "    return 'n'\n",
+        "from typing import Dict as Literal\n"
+        + FASTMCP2_TOOL
+        + "def read_note(x: Literal[str, 'mcp.add_tool(delete_all) or int']) -> str:\n"
+        + "    return 'n'\n",
+        "from typing import Dict as Annotated\n"
+        + FASTMCP2_TOOL
+        + "def read_note(x: Annotated[str, 'mcp.add_tool(delete_all) or int']) -> str:\n"
+        + "    return 'n'\n",
+        FASTMCP2_TOOL
+        + "def read_note(x: f\"{'mcp'}.add_tool(delete_all) or int\") -> str:\n    return 'n'\n",
+        "from typing import ForwardRef\n"
+        + FASTMCP2_TOOL
+        + "def read_note(x: ForwardRef('mcp.add_tool(delete_all) or int')) -> str:\n"
+        + "    return 'n'\n",
+        FASTMCP2_TOOL
+        + "def read_note() -> str:\n    return 'n'\n"
+        + "class Args:\n    __annotations__ = {'x': 'mcp.add_tool(delete_all) or int'}\n",
+        FASTMCP2_TOOL
+        + "def read_note() -> str:\n    return 'n'\n"
+        + "class Args:\n    def __annotate__(format):\n"
+        + "        return {'x': 'mcp.add_tool(delete_all) or int'}\n",
+        FASTMCP2_TOOL + f"def read_note(x: {NESTED_STR}) -> str:\n    return 'n'\n",
+        FASTMCP2_TOOL
+        + "def read_note("
+        + ", ".join(f"{name}: {LONG_UNION}" for name in "abcde")
+        + ") -> str:\n    return 'n'\n",
+        "from fastmcp.server.dependencies import get_context\npeek = locals\n"
+        + "def run_note():\n    ctx = get_context()\n    wire(peek()['ctx'])\n",
+        "from mcp.types import TextContent\n"
+        + "def run_note(ctx):\n    return __import__('builtins').vars()\n",
+        "import fastmcp.server.dependencies as D\n"
+        + "def run_note(value):\n    setattr(D, 'carrier', value)\n",
+        "from langchain_core.tools import tool\n"
+        + "from fastmcp.server.dependencies import get_context\n"
+        + "@tool\ndef read_note(q: str) -> str:\n    '''Read.'''\n    return q\n"
+        + "def run_note():\n    ctx = get_context()\n"
+        + "    getattr(locals()['ctx'], 'fast' + 'm' + 'cp').add_tool(delete_all)\n",
+        FASTMCP2_TOOL + "def read_note(x: str, vars=vars) -> str:\n    return vars()['x']\n",
+        FASTMCP2_TOOL
+        + "def read_note(vars: dict) -> str:\n    class Probe:\n        seen = vars()\n"
+        + "    return ''\n",
+        FASTMCP2_TOOL
+        + "def read_note(vars: dict) -> str:\n    def probe():\n        return vars()\n"
+        + "    return ''\n",
+        FASTMCP2_TOOL + "def read_note() -> str:\n    return (lambda vars=vars: vars())()\n",
+    ],
+)
+def test_annotation_strings_and_reflective_names_fail_closed(tmp_path, source):
+    assert_gap_fails_check(tmp_path, source, BINDING_GAP)
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    ["'locals() and str'", "'agent.tool_plain(evil) or str'", "'not valid python!'"],
+)
+def test_agent_annotation_strings_fail_closed(tmp_path, annotation):
+    result, tools = scan(
+        tmp_path,
+        AGENT + f"agent = Agent('m')\n@agent.tool_plain\ndef search(q: {annotation}): pass\n",
+    )
+    assert [tool.name for tool in tools] == ["search"]
+    assert result.surfaces_excluded == [
+        "pkg/server.py: unsupported Python SDK tool binding or dynamic registration"
+    ]
+
+
+def test_annotation_compiler_warnings_neither_print_nor_skip_the_string(tmp_path):
+    source = (
+        FASTMCP2_TOOL
+        + "def read_note(x: \"mcp.add_tool(delete_all) or '\\\\q\x1b' and str\") -> str:\n"
+        + "    return 'n'\n"
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        result, _ = scan(tmp_path, source)
+    assert BINDING_GAP in result.surfaces_excluded
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result, _ = scan(tmp_path, source)
+    assert BINDING_GAP in result.surfaces_excluded
+    assert not [warning for warning in caught if "escape" in str(warning.message)]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        FASTMCP2
+        + "mcp = FastMCP('templates')\n@mcp.tool\n"
+        + "def read_note(template: str, vars: dict[str, str]) -> str:\n"
+        + "    return template.format(**vars)\n",
+        FASTMCP2_TOOL
+        + "def read_note(name: str, exec: bool = False) -> str:\n"
+        + "    return [name for _ in range(1) if exec][0]\n",
+        "from typing import Annotated\n"
+        + FASTMCP2_TOOL
+        + "def read_note(\n    values: Annotated[dict[str, str], 'vars'],\n"
+        + "    title: Annotated[str, 'The title, not code!'],\n) -> str:\n"
+        + "    return title\n",
+        "import typing\n"
+        + FASTMCP2_TOOL
+        + "def read_note(mode: typing.Literal['exec', 'plan', 'not code!'] = 'plan') -> str:\n"
+        + "    return mode\n",
+        "from typing import TypeVarTuple\n"
+        + FASTMCP2
+        + "Ts = TypeVarTuple('Ts')\nmcp = FastMCP('x')\n"
+        + "def collect(*args: '*Ts') -> None:\n    pass\n"
+        + "@mcp.tool\ndef read_note() -> 'list[str]':\n    return []\n",
+        "import mcp.shared.exceptions, mcp.server.fastmcp.exceptions as errors\n"
+        + FASTMCP
+        + "server = FastMCP('x')\n@server.tool()\ndef read_note(name: str) -> str:\n"
+        + "    if not name:\n        raise mcp.server.fastmcp.exceptions.ToolError(errors)\n"
+        + "    return name\n",
+    ],
+)
+def test_annotations_and_parameters_that_run_no_code_are_not_gaps(tmp_path, source):
+    result, tools = scan(tmp_path, source)
+    assert [tool.name for tool in tools] == ["read_note"]
+    assert not result.scan_failures and not result.surfaces_excluded
+    (tmp_path / "CLAUDE.md").write_text("Be helpful.\n")
+    checked = CliRunner().invoke(main, ["scan", "--no-project-policy", "--check", str(tmp_path)])
+    assert checked.exit_code == 0, checked.output
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from mcp.types import TextContent\ndef to_text(blocks) -> list[str]:\n"
+        + "    return [getattr(b, 'text', '') for b in blocks if isinstance(b, TextContent)]\n",
+        "from mcp import ClientSession\nasync def titles(session: ClientSession) -> list[str]:\n"
+        + "    result = await session.list_tools()\n"
+        + "    return [getattr(tool, 'title', None) or tool.name for tool in result.tools]\n",
+    ],
+)
+def test_literal_getattr_in_a_file_without_a_server_is_not_a_gap(tmp_path, source):
+    result, tools = scan(tmp_path, source)
+    assert not tools
+    assert not result.scan_failures and not result.surfaces_excluded
