@@ -160,6 +160,9 @@ def test_each_client_name_is_its_own_folded_spelling():
         *(f"pkg/{dialect}" for dialect in NESTED_DIALECTS),
         "pkg/.windsurf/mcp_config.json",
         "pkg/.claude/.vscode/mcp-servers.json",
+        "pkg/.Kiro/claude_desktop_config.json",
+        "pkg/.Kiro/sub/cline_mcp_settings.json",
+        ".Claude/pkg/.mcp.json",
     ],
 )
 def test_exact_spellings_are_read_and_not_variants(tmp_path, path):
@@ -307,3 +310,91 @@ def test_terminal_output_neutralizes_the_variant_name(tmp_path):
     assert not any(line.startswith(("::", "##[")) for line in output.splitlines())
     failures = document["metadata"]["completeness"]["scan_failures"]
     assert _variant("::error::x/MCP.json", "::error::x/mcp.json") in failures
+
+
+GEMINI_OK = OK
+GEMINI_EVIL = {"mcpServers": {"evil": {"command": "npx", "args": ["-y", "evil-gem@1.0.0"]}}}
+CODEX_OK = '[mcp_servers.ok]\ncommand = "node"\n'
+CODEX_EVIL = '[mcp_servers.evil]\ncommand = "npx"\nargs = ["-y", "evil-codex@1.0.0"]\n'
+
+
+def _write_raw(root: Path, files: dict[str, str]) -> Path:
+    for name, text in files.items():
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return root
+
+
+@pytest.mark.parametrize(
+    "exact, variant, ok, evil",
+    [
+        (".gemini/settings.json", ".Gemini/settings.json", GEMINI_OK, GEMINI_EVIL),
+        (".gemini/settings.json", ".gemini/Settings.json", GEMINI_OK, GEMINI_EVIL),
+        (".codex/config.toml", ".Codex/config.toml", CODEX_OK, CODEX_EVIL),
+        (".codex/config.toml", ".codex/Config.toml", CODEX_OK, CODEX_EVIL),
+    ],
+)
+def test_a_root_dialect_variant_beside_its_exact_file_is_a_failure(
+    tmp_path, exact, variant, ok, evil
+):
+    # Gemini CLI settings and Codex configuration have no name in MCP_CONFIG_NAMES, but
+    # are root dialect paths: their variant holds the file a host opens there too.
+    if not _case_sensitive(tmp_path):
+        pytest.skip("needs a case-sensitive file system to hold both spellings")
+    text = {exact: ok, variant: evil}
+    root = _write_raw(
+        tmp_path, {k: v if isinstance(v, str) else json.dumps(v) for k, v in text.items()}
+    )
+    result = MCPScanner().scan(root, config_only=True)
+    assert result.scan_failures == [_variant(variant, exact)]
+    assert _servers(result) == [("ok", exact)]
+
+
+@pytest.mark.parametrize(
+    "path, canonical, text",
+    [
+        (".Gemini/settings.json", ".gemini/settings.json", json.dumps(GEMINI_EVIL)),
+        (".codex/CONFIG.toml", ".codex/config.toml", CODEX_EVIL),
+    ],
+)
+def test_a_root_dialect_variant_alone_is_reported_once(tmp_path, path, canonical, text):
+    root = _write_raw(tmp_path, {path: text})
+    result = MCPScanner().scan(root, config_only=True)
+    assert result.scan_failures == [_variant(path, canonical)]
+    assert _servers(result) == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["pkg/.gemini/settings.json", "pkg/.Gemini/settings.json", "pkg/.codex/Config.toml"],
+)
+def test_nested_gemini_and_codex_files_are_not_checked(tmp_path, path):
+    root = _write_raw(tmp_path, {path: CODEX_EVIL if path.endswith(".toml") else "{}"})
+    result = MCPScanner().scan(root, config_only=True)
+    assert result.scan_failures == []
+    assert _servers(result) == []
+
+
+@pytest.mark.parametrize(
+    "path, canonical",
+    [
+        ("pkg/.Kiro/mcp.json", "pkg/.kiro/mcp.json"),
+        ("pkg/.Gemini/mcp.json", "pkg/.gemini/mcp.json"),
+        ("pkg/.Codex/mcp.json", "pkg/.codex/mcp.json"),
+        ("pkg/.KIRO/mcp_config.json", "pkg/.kiro/mcp_config.json"),
+        ("pkg/.Kiro/sub/mcp-servers.json", "pkg/.kiro/sub/mcp-servers.json"),
+        ("pkg/.Claude/sub/mcp-config.json", "pkg/.claude/sub/mcp-config.json"),
+        ("pkg/.Gemini/.vscode/mcp.json", "pkg/.gemini/.vscode/mcp.json"),
+    ],
+)
+def test_a_host_directory_above_a_one_part_dialect_name_is_folded(tmp_path, path, canonical):
+    # The exact spelling names its client from any host directory above it, so the
+    # variant would be inventoried without that client.
+    exact = _write(tmp_path / "exact", {canonical: EVIL})
+    clients = [c.name for c in MCPScanner().scan(exact, config_only=True).components]
+    assert any(name.endswith("MCP client") for name in clients)
+    root = _write(tmp_path / "variant", {path: EVIL})
+    result = MCPScanner().scan(root, config_only=True)
+    assert result.scan_failures == [_variant(path, canonical)]
+    assert _servers(result) == []

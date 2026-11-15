@@ -141,6 +141,13 @@ _HOST_DIRECTORIES = {
     ".gemini": "gemini-cli",
     ".codex": "codex",
 }
+# A file with one of these names names its client; any other names it from a host
+# directory above it.
+_CLIENTS_BY_NAME = {
+    ".mcp.json": "claude-code",
+    "claude_desktop_config.json": "claude-desktop",
+    "cline_mcp_settings.json": "cline",
+}
 _FOLDED_CONFIG_NAMES = {fold_name(name): name for name in MCP_CONFIG_NAMES}
 _FOLDED_HOST_DIRECTORIES = {fold_name(name): name for name in _HOST_DIRECTORIES}
 # Longest first, so the first match is the dialect _template picks for the exact spelling.
@@ -155,27 +162,35 @@ _FOLDED_TEMPLATES = sorted(
 
 def _client_spelling(path: Path) -> str | None:
     """The client file a host opens as the walked ``path`` on a case-insensitive file
-    system, or ``None`` when its name folds to none of ``MCP_CONFIG_NAMES``.
+    system, or ``None`` when it is none the collector reads.
 
-    The name and the dialect path it ends in, or for a name that ends no dialect path
-    the host directories just above it, take the spelling the collector reads: they
-    decide the dialect, client and launch directory of the exact spelling
-    (:func:`_template`, :func:`_launch_directory`).
+    That is a name that folds to one of ``MCP_CONFIG_NAMES``, or a root dialect path
+    such as ``.gemini/settings.json``. The dialect path it ends in, the host directories
+    just above a name that ends none, and any host directory above a name that does not
+    name its client take the spelling the collector reads: they decide the dialect,
+    launch directory and client of the exact spelling (:func:`_template`,
+    :func:`_launch_directory`, ``_detect_host_from_config``).
     """
-    name = _FOLDED_CONFIG_NAMES.get(fold_name(path.name))
-    if name is None:
-        return None
     parts = list(path.parts)
     folded = [fold_name(part) for part in parts]
+    name = _FOLDED_CONFIG_NAMES.get(folded[-1])
     for template, spelling in _FOLDED_TEMPLATES:
-        if len(template) <= len(parts) and tuple(folded[-len(template) :]) == template:
-            parts[-len(template) :] = spelling
-            return "/".join(parts)
-    parts[-1] = name
-    index = len(parts) - 1
-    while index > 0 and (host := _FOLDED_HOST_DIRECTORIES.get(folded[index - 1])) is not None:
-        index -= 1
-        parts[index] = host
+        size = len(template)
+        if (name is not None or size == len(parts)) and tuple(folded[-size:]) == template:
+            parts[-size:] = spelling
+            break
+    else:
+        if name is None:
+            return None
+        parts[-1] = name
+        index = len(parts) - 1
+        while index > 0 and (host := _FOLDED_HOST_DIRECTORIES.get(folded[index - 1])):
+            index -= 1
+            parts[index] = host
+    if parts[-1] not in _CLIENTS_BY_NAME:
+        for index, part in enumerate(folded[:-1]):
+            if (host := _FOLDED_HOST_DIRECTORIES.get(part)) is not None:
+                parts[index] = host
     return "/".join(parts)
 
 
@@ -2678,12 +2693,7 @@ class MCPScanner(Scanner):
     @staticmethod
     def _detect_host_from_config(config_name: str) -> str | None:
         path = Path(config_name)
-        by_name = {
-            ".mcp.json": "claude-code",
-            "claude_desktop_config.json": "claude-desktop",
-            "cline_mcp_settings.json": "cline",
-        }.get(path.name)
-        return by_name or next(
+        return _CLIENTS_BY_NAME.get(path.name) or next(
             (host for part in path.parts[:-1] if (host := _HOST_DIRECTORIES.get(part))), None
         )
 
