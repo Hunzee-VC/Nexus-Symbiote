@@ -6,7 +6,6 @@ import contextlib
 import json
 import os
 import stat
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,6 +14,7 @@ import click
 from nexus_symbiote import modes
 from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
 from nexus_symbiote.live_cli import review_notice
+from nexus_symbiote.utils.files import create_staging_file
 from nexus_symbiote.utils.terminal import (
     echo_line,
     json_text,
@@ -307,11 +307,9 @@ def register_supply_chain_commands(main: click.Group) -> None:
 
         target = baseline_path.absolute()
         try:
-            fd, temporary = tempfile.mkstemp(prefix=".nexus-baseline-", dir=target.parent)
-        except OSError as exc:
+            staged = create_staging_file(target, ".nexus-baseline-")
+        except (OSError, ValueError) as exc:
             raise output_failure(exc) from exc
-        os.close(fd)
-        staged = Path(temporary)
         ctx.meta[STAGED_INVENTORY] = True
         try:
             ctx.invoke(

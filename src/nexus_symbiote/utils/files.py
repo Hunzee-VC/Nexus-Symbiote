@@ -64,6 +64,24 @@ def _parent(root: Path, relative: Path, create_parents: bool) -> Iterator[int]:
         os.close(parent)
 
 
+def create_staging_file(path: Path, prefix: str) -> Path:
+    """Create an empty private file beside an explicitly selected output, by its path.
+
+    The directory is reached as ``write_output_file`` reaches it, without following a
+    link, so a linked directory is refused before anything is created in its target.
+    """
+    path = path.absolute()
+    root = Path(path.anchor)
+    relative = _relative(root, path, allow_parent=True)
+    if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
+        raise OSError("Secure output requires descriptor-relative no-symlink file operations")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    with _parent(root, relative, create_parents=False) as parent:
+        name = f"{prefix}{secrets.token_hex(16)}.tmp"
+        os.close(os.open(name, flags, 0o600, dir_fd=parent))
+    return path.parent / name
+
+
 def write_output_file(
     path: Path,
     data: str,
