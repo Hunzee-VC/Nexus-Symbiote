@@ -199,7 +199,11 @@ _INDEX = re.compile(r"(?P<base>.+?)\.index(?:\.[A-Za-z0-9_-]+)?\.json", re.IGNOR
 # transformers reads ``repository--module.Class``; a repository need not name an owner.
 _CODE_REFERENCE = re.compile(
     r"(?:[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)?--)?"
-    r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*"
+    r"(?:[A-Za-z_][A-Za-z0-9_]*\.)+[A-Za-z_][A-Za-z0-9_]*"
+)
+_CREDENTIAL_PYTHON_STEM = re.compile(
+    r"(?i)(?:^|[_.-])(?:secrets?|credentials?|tokens?|passwords?|passphrases?"
+    r"|api[_-]?keys?|private[_-]?keys?)(?:$|[_.-])"
 )
 _HUB_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}(?:/[A-Za-z0-9][A-Za-z0-9._-]{0,95})?")
 _CONFIG_STRING_FIELDS = ("peft_type", "quantization_method", "quant_method")
@@ -1824,7 +1828,7 @@ class ModelScanner(Scanner):
             else:
                 _report_variants(files, model_dir / name)
         for path in self._template_directory(files, model_dir):
-            if path.suffix == ".jinja":
+            if path.suffix.lower() in {".jinja", ".jinja2"}:
                 self._template_file(files, path, templates, escapes)
 
         tokenizer_files: list[tuple[Path, str]] = []
@@ -1838,10 +1842,25 @@ class ModelScanner(Scanner):
                 tokenizer_files.append((path, digest))
         custom_code = None
         if declared_in:
+            referenced_modules: set[str] = set()
+            for reference in references:
+                if "--" in reference:
+                    continue
+                mod_parts = reference.split(".")[:-1]
+                if mod_parts:
+                    referenced_modules.add("/".join(mod_parts).lower() + ".py")
+                    for idx in range(1, len(mod_parts)):
+                        referenced_modules.add("/".join(mod_parts[:idx]).lower() + "/__init__.py")
             python_files = [
                 {"path": path.as_posix(), "sha256": digest}
-                for path in tree.children.get(model_dir, ())
-                if path.suffix == ".py" and (digest := self._digest(files, path)) is not None
+                for path in tree.below(model_dir)
+                if path.suffix.lower() == ".py"
+                and (
+                    path.parent == model_dir
+                    or path.relative_to(model_dir).as_posix().lower() in referenced_modules
+                )
+                and not _CREDENTIAL_PYTHON_STEM.search(path.stem)
+                and (digest := self._digest(files, path)) is not None
             ]
             custom_code = {
                 "declared_in": declared_in,

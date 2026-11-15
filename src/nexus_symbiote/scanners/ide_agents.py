@@ -195,6 +195,22 @@ _SCOPED_TOOL_CLASSES = {
 # A specifier made only of these characters names everything: Bash(*), Bash(:*),
 # Edit(//**), Read(~/**), Edit(./**).
 _WILDCARD_SPECIFIER = re.compile(r"[\s*:/~.]*")
+_PWSH_EXEC_FLAG = (
+    r"[-/](?:c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?"
+    r"|e(?:c|n(?:c(?:o(?:d(?:e(?:d(?:c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?)?)?)?)?)?)?)?)"
+)
+_SUBSHELL_SPECIFIER = re.compile(
+    r"(?i)\A(?:(?:/++(?:[A-Za-z0-9._-]++/++)*+)?env(?:\s++(?:-[A-Za-z0-9-]++|[A-Za-z_][A-Za-z0-9_]*+=\S*+))*+\s++)?"
+    r"(?:/++(?:[A-Za-z0-9._-]++/++)*+)?"
+    r"(?:"
+    r"(?:(?:ba|z|da|k|a|c|tc)?sh|busybox|toybox)"
+    r"(?::[\s\S]*|\s++(?:\*|:[\s\S]*|-[A-Za-z]*[cs]\b[\s\S]*|--command\b[\s\S]*))"
+    r"|(?:python[0-9.]*+|node|nodejs|perl|ruby|cmd(?:\.exe)?)"
+    r"(?::[\s\S]*|\s++(?:\*|:[\s\S]*|(?:-[ce]|/c)\b[\s\S]*))"
+    r"|(?:pwsh|powershell)(?:\.exe)?"
+    r"(?::[\s\S]*|\s++(?:\*|:[\s\S]*|" + _PWSH_EXEC_FLAG + r"\b[\s\S]*))"
+    r")\Z"
+)
 _EXTENSION_ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z0-9][a-zA-Z0-9._-]*")
 # Conservatively flag wildcard Bash rules naming these command runners. A fixed script
 # with wildcard arguments also matches; this does not resolve the rule's effective scope.
@@ -247,7 +263,7 @@ def _broad_grants(allowed: list[str]) -> list[str]:
             continue
         broad = specifier is None or bool(_WILDCARD_SPECIFIER.fullmatch(specifier))
         if key == "bash" and specifier is not None:
-            broad |= _runs_any_command(specifier)
+            broad |= _runs_any_command(specifier) or bool(_SUBSHELL_SPECIFIER.fullmatch(specifier))
         if key == "webfetch" and specifier is not None:
             broad |= specifier.replace(" ", "") in {"domain:*", "domain:"}
         if key == "read" and specifier is None:
@@ -901,6 +917,7 @@ _PROMPT_SKIPPING_MODES: dict[str, tuple[RiskSeverity, str]] = {
 # only to rerun a command that failed in the sandbox, outside it.
 _UNPROMPTED_APPROVALS = {
     "never": "that commands never ask for approval",
+    "auto": "that commands run without interactive approval",
     "on-failure": "that commands run without asking for approval unless they fail",
 }
 
@@ -912,13 +929,13 @@ def _series(names: list[str]) -> str:
 
 def _starting_mode_risk(ide_type: str, mode: str | None) -> RiskAssessment | None:
     """The finding for a declared starting mode that skips approval prompts."""
-    if mode == "bypassPermissions":
+    if mode in {"bypassPermissions", "always", "full-access", "danger-full-access"}:
         return RiskAssessment(
             severity=RiskSeverity.HIGH,
             category="permission_scope",
             detail=(
-                f"IDE agent '{ide_type}' declares a starting mode that skips "
-                "permission prompts; effective approval remains unverified."
+                f"IDE agent '{ide_type}' declares a starting mode ('{mode}') that skips "
+                "permission prompts or sandbox confinement; effective approval remains unverified."
             ),
             recommendation=(
                 "Remove the project-level bypass mode, or confine the agent to "
@@ -1400,17 +1417,16 @@ class IDEAgentScanner(Scanner):
             sandbox = None
         properties["approval_policy"] = approval
         properties["sandbox_mode"] = sandbox
+        full_access = sandbox in {"danger-full-access", "full-access"} or approval == "always"
         declared = (
             "an unsandboxed full-access mode"
-            if sandbox == "danger-full-access"
+            if full_access
             else _UNPROMPTED_APPROVALS.get(approval or "")
         )
         if declared is not None:
             risks.append(
                 RiskAssessment(
-                    severity=RiskSeverity.HIGH
-                    if sandbox == "danger-full-access"
-                    else RiskSeverity.MEDIUM,
+                    severity=RiskSeverity.HIGH if full_access else RiskSeverity.MEDIUM,
                     category="permission_scope",
                     detail=(
                         f"IDE agent 'codex' declares {declared}; "

@@ -469,7 +469,8 @@ def gguf_metadata(read: Read, budget: InspectionBudget | None = None) -> GGUFMet
 # not evidence that a template escapes the renderer's sandbox.
 _TEMPLATE_ESCAPE = re.compile(
     r"\.\s*__[A-Za-z0-9_]+__|['\"]__[A-Za-z0-9_]+__['\"]|(?<![A-Za-z0-9_])attr\s*\("
-    r"|['\"]__[A-Za-z0-9_]*['\"]\s*[~+]|[~+]\s*['\"][A-Za-z0-9_]*__['\"]"
+    r"|\|\s*attr\b|\.\s*_(?:globals|builtins)\b"
+    r"|['\"]__?[A-Za-z0-9_]*['\"][\s)]*[~+]|[~+][\s(]*['\"][A-Za-z0-9_]*__?['\"]"
 )
 # The escapes Jinja decodes in a string literal, with an escaped backslash first so
 # that it is consumed whole; every other backslash is kept as written. Jinja turns

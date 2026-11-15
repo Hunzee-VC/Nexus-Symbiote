@@ -54,9 +54,17 @@ def hash_regular_file(path: Path, *, max_bytes: int = MAX_MODEL_BYTES) -> str:
 
 def sanitized_origin(value: str) -> str:
     """Omit paths as well as userinfo, queries and fragments from URL output."""
+    from nexus_symbiote.utils.secrets import TOKEN_SHAPE
+
     try:
         parsed = urlsplit(value)
-        if not parsed.scheme or not parsed.hostname:
+        raw_host = parsed.netloc.rpartition("@")[2]
+        if (
+            not parsed.scheme
+            or not parsed.hostname
+            or "\\" in parsed.netloc
+            or TOKEN_SHAPE.search(raw_host)
+        ):
             return "[redacted]"
         host = parsed.hostname
         host = f"[{host}]" if ":" in host else host

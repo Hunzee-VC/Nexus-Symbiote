@@ -27,13 +27,13 @@ _URL = re.compile(r"(?<![a-zA-Z0-9+.-])[a-zA-Z0-9+.-]+://[^\s\"'<>]+")
 # Possessive and bounded quantifiers keep every attempt linear.
 _CREDENTIAL_KEYWORD = (
     r"(?:api[-_]?key|access[-_]?key|secret[-_]?key|private[-_]?key|account[-_]?key"
-    r"|[a-z0-9]{2,24}[-_]key"
+    r"|[a-z0-9]{2,24}[-_]key|connection[-_]?string"
     r"|token|password|passwd|passphrase|pwd|secret|credentials?|sig)"
     r"(?:\d{1,4})?(?:[-_.][a-z0-9]{1,32}){0,4}"
 )
 _ASSIGNMENT = re.compile(
     rf"(?i)({_CREDENTIAL_KEYWORD}[\"']?\s*+[:=]\s*+)"
-    r"(\"(?:[^\"\\\n]|\\.){0,256}\"|'(?:[^'\\\n]|\\.){0,256}'|[^\s,;]++)"
+    r"(\"(?:[^\"\\\n]|\\.){0,8192}\"|'(?:[^'\\\n]|\\.){0,8192}'|[^\s,;]++)"
 )
 _TRAILING_ASSIGNMENT_KEY = re.compile(rf"(?i)(?:{_CREDENTIAL_KEYWORD})[\"']?[:=]\Z")
 # A mapping key that _ASSIGNMENT would read as the name in `name: value`.
@@ -130,8 +130,14 @@ def redact_url(value: str) -> str:
     """
     try:
         parts = urlsplit(value)
+        raw_host = parts.netloc.rpartition("@")[2]
         # WHATWG parsers, as browsers use, end the host at a backslash; urlsplit does not.
-        if not parts.scheme or not parts.hostname or "\\" in parts.netloc:
+        if (
+            not parts.scheme
+            or not parts.hostname
+            or "\\" in parts.netloc
+            or TOKEN_SHAPE.search(raw_host)
+        ):
             return "[redacted-url]"
         host = parts.hostname
         if ":" in host:
@@ -705,6 +711,9 @@ def redact_keyed_text(
     return safe
 
 
+_JWK_PRIVATE_FIELDS = frozenset({"d", "p", "q", "dp", "dq", "qi", "oth", "k", "priv"})
+
+
 def redact_metadata(value: Any, secrets: Iterable[str] | SecretScrubber = ()) -> Any:
     """Redact textual metadata while retaining its JSON structure."""
     return _redact_metadata(value, _scrubber(secrets))
@@ -714,14 +723,18 @@ def _redact_metadata(value: Any, scrubber: SecretScrubber) -> Any:
     if isinstance(value, str):
         return redact_text(value, scrubber)
     if isinstance(value, dict):
-        return {
-            redact_text(str(key), scrubber): (
-                redact_keyed_text(str(key), item, scrubber)
-                if isinstance(item, str)
-                else _redact_metadata(item, scrubber)
-            )
-            for key, item in value.items()
-        }
+        is_jwk = isinstance(value.get("kty"), str)
+        out: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            redacted_key = redact_text(key_text, scrubber)
+            if is_jwk and key_text in _JWK_PRIVATE_FIELDS and item not in (None, "", [], {}):
+                out[redacted_key] = REDACTED
+            elif isinstance(item, str):
+                out[redacted_key] = redact_keyed_text(key_text, item, scrubber)
+            else:
+                out[redacted_key] = _redact_metadata(item, scrubber)
+        return out
     if isinstance(value, list):
         return [_redact_metadata(item, scrubber) for item in value]
     return value

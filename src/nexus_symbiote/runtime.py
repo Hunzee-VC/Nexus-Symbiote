@@ -2112,23 +2112,3 @@ class ReferenceGateway(Generic[T]):
                 reason="approval-request-mismatch",
             )
         return consent, unrevoked
-
-    def _approval_quorum(self, consent: ActionApproval, scoped: set[str]) -> dict[str, str]:
-        # Two keys enrolled for one approver are one approval, and the named
-        # actor must be one of the signers that still count toward the quorum.
-        bound = {
-            signer: self.approval_actors[signer]
-            for signer in scoped
-            if self.approval_actors.get(signer) is not None
-        }
-        actors = set(bound.values())
-        if len(bound) < self.approval_threshold or consent.actor not in actors:
-            raise AuthorizationError(
-                "approval actor is not bound to its authorized signing key",
-                reason="approval-actor-unbound",
-            )
-        if len(actors) < self.approval_threshold:
-            raise AuthorizationError(
-                "approval quorum requires distinct approvers", reason="approval-quorum-not-met"
-            )
-        return bound
