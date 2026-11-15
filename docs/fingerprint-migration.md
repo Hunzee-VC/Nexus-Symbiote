@@ -91,8 +91,10 @@ against the embedded document.
 
 `nexus-symbiote/mcp-static-values/v4` binds every setting of each project resolver
 file that applies to a launcher, auth settings excepted: all of `uv.toml`,
-`[tool.uv]`, `bunfig.toml`, `.yarnrc.yml`, `deno.json` and `deno.jsonc`, with TOML
-and YAML values typed. Version 3 bound only the settings it classified as sources
+`[tool.uv]` (all of `pyproject.toml` for `uv run` in project mode), `.python-version`,
+`bunfig.toml`, `.yarnrc.yml`, `deno.json` and `deno.jsonc`, with TOML and YAML values
+typed. `uvx` and `uv tool run`, which ignore project uv configuration, keep binding
+only its index, mirror, insecure-host and launched-package `sources` settings. Version 3 bound only the settings it classified as sources
 and Deno's import mappings, so an edited `uv.toml` `cache-dir`, bunfig
 `[install.cache] dir` or `deno.json` `vendor` kept the binding. Recollect and review
 keyed MCP baselines and candidates under v4; v3 and v2 records fail project
@@ -104,8 +106,8 @@ before also changes once; recollect and review those unkeyed MCP baselines too.
 Settings outside the collector's vocabulary, and cache, vendor, `node_modules`,
 mirror, offline and override settings, are package sources now: such a server loses
 its `package_url` and carries a medium `package_source` finding, and a uv override
-or constraint of the launched package, or Deno `links`, makes its launcher identity
-unknown.
+or constraint of the launched package, a `uv run` project requirement that names it
+by URL or path, or Deno `links`, makes its launcher identity unknown.
 
 ## MCP resolver binding v3
 

@@ -197,6 +197,8 @@ class Launch:
     interactive: bool = False
     # A shell in the launch traces its commands (-x), expanding $PS4 before each one.
     xtrace: bool = False
+    # uv run syncs and runs in the project environment that pyproject.toml declares.
+    project: bool = False
 
     def mark(self, flag: str, count: int = 1) -> None:
         self.context[flag] = self.context.get(flag, 0) + count
@@ -2503,7 +2505,7 @@ def _uv(name: str, rest: list[str], launch: Launch) -> None:
         )
     elif subcommand == "run":
         launch.launcher, launch.family = "uv run", "uv-project"
-        _python_runner(
+        run_options = _python_runner(
             remainder,
             launch,
             _UV_RUN,
@@ -2511,6 +2513,9 @@ def _uv(name: str, rest: list[str], launch: Launch) -> None:
             extras={"--with"},
             paths={"--with-editable", "--with-requirements"},
             shorthand=False,
+        )
+        launch.project = not any(
+            option in {"--no-project", "--script", "-s"} for option, _ in run_options or ()
         )
     else:
         launch.fail("uv subcommand is not a supported runner")

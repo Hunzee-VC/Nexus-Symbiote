@@ -26,8 +26,12 @@ similar, and cache or tool directories a prepared copy could serve from:
 prefix, as pip's parser does; an unknown option is a gap) and project-root resolver
 settings that apply to the launched package: `.npmrc` for npm, pnpm, bun and Deno
 `npm:` specifiers, `bunfig.toml` for bun, `deno.json` and `deno.jsonc` for Deno,
-`.yarnrc.yml` for `yarn dlx`, and `uv.toml` and `pyproject.toml` `[tool.uv]` for
-`uv run`, `uvx` and `uv tool run`. `.npmrc` is read as npm reads it: keys
+`.yarnrc.yml` for `yarn dlx`, and `uv.toml`, `pyproject.toml` and
+`.python-version` (or `.python-versions`) for `uv run`. `uvx` and `uv tool run` load
+only user and system configuration; their index, mirror, insecure-host and launched
+package `sources` settings in project `uv.toml` and `[tool.uv]` are still sources, a
+deliberate over-approximation, and no other project setting is read for them.
+`.npmrc` is read as npm reads it: keys
 and values are trimmed, JSON-decoded when quoted and cut at an unescaped `;` or `#`
 otherwise, lines end at a carriage return or line feed, keys after the first
 `[section]` line are ignored, and a key containing `${...}` is `[unresolved]`. Its
@@ -62,13 +66,29 @@ variables, `config-settings`, `exclude-dependencies`, `offline`, `no-index` and
 are sources. `override-dependencies`, `constraint-dependencies` and
 `build-constraint-dependencies`, the file forms of `UV_OVERRIDE`, `UV_CONSTRAINT` and
 `UV_BUILD_CONSTRAINT`, are sources, and an entry that names a launched package, or
-that is not a requirement, makes the launcher identity unknown. Settings that choose
-versions or build and install behaviour, project metadata such as `dev-dependencies`
-and `workspace`, and the `[pip]` table, which uv applies only to `uv pip` commands,
-are not. bunfig settings are named by their table, such as `install.cache.dir`:
+that is not a requirement, makes the launcher identity unknown. Proxy settings,
+`system-certs` other than `false` and `torch-backend` are sources too. Settings that
+choose versions or build and install behaviour, workspace metadata such as
+`workspace` and `default-groups`, and the `[pip]` table, which uv applies only to
+`uv pip` commands, are not. Without `--no-project` (or `--script`), `uv run` first
+syncs the project environment, and a package already there that satisfies `--with`
+is used as is. So in project mode `[project] dependencies`, every
+`[project.optional-dependencies]` extra, every `[dependency-groups]` group and
+`[tool.uv] dev-dependencies` are read as well: an entry that names a launched
+package by URL or path, a project `name` that is a launched package, or an entry that
+is not a requirement makes the launcher identity unknown, any other URL or path
+entry and any `[tool.uv.sources]` entry are sources, and a project that uv builds (it
+has a `[build-system]` table, or `[tool.uv] package = true`, and not `package = false`)
+installs its own code into the environment the server runs in, a medium
+`launch_context` risk. Each line of `.python-version` is a Python request; one that
+names a path runs that interpreter and is a source, as `UV_PYTHON` is.
+bunfig settings are named by their table, such as `install.cache.dir`:
 beside its registries, scopes and CA settings, its cache and global directories
 (`[install.cache] dir`, an `install.cache` other than `false`, `install.globalDir` and
-`install.globalBinDir`) are sources, as `BUN_INSTALL_CACHE_DIR` is; `preload` and `run.preload` make the identity unknown;
+`install.globalBinDir`) are sources, as `BUN_INSTALL_CACHE_DIR` is, although bunx 1.4
+was observed to ignore a project `bunfig.toml`'s install settings, its registry
+included, so this, like the registry, is an over-approximation; `preload` and
+`run.preload` make the identity unknown;
 `run.shell`, `define`, `jsxImportSource` and `[install.security]` change the code that
 runs (a medium `launch_context` risk); install, lockfile, test, logging and display
 settings are not sources. For Deno, `imports`, `scopes` and `importMap` are sources,
@@ -127,8 +147,10 @@ lets anyone holding the BOM test guesses for it offline. Records then also carry
 and the raw values of every setting of each project resolver file that applies to it,
 whether or not it is classified as a source (profile
 `nexus-symbiote/mcp-static-values/v4`), and a key identifier. That is every top-level
-`.npmrc` and `.yarnrc` setting, the text of `.env.yarn`, and the whole of
-`bunfig.toml`, `.yarnrc.yml`, `uv.toml`, `[tool.uv]`, `deno.json` and `deno.jsonc`;
+`.npmrc` and `.yarnrc` setting, the text of `.env.yarn`, each `.python-version`
+request, and the whole of `bunfig.toml`, `.yarnrc.yml`, `uv.toml`, `[tool.uv]` (all of
+`pyproject.toml` for `uv run` in project mode), `deno.json` and `deno.jsonc`; for
+`uvx` and `uv tool run` only the uv settings that are sources;
 TOML and YAML values keep their type, so a date and the same text, or `1` and `1.0`,
 bind differently. Auth settings are excepted: `.npmrc` auth keys, the `token`,
 `username` and `password` of a bunfig registry or scope, and Yarn's `npmAuthToken`,

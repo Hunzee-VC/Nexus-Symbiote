@@ -22,6 +22,10 @@ UV_RUN = {
     "command": "uv",
     "args": ["run", "--no-project", "--with", "mcp-server-fetch==2025.1.17", "mcp-server-fetch"],
 }
+UV_PROJECT = {
+    "command": "uv",
+    "args": ["run", "--with", "mcp-server-fetch==2025.1.17", "mcp-server-fetch"],
+}
 UVX = {"command": "uvx", "args": ["mcp-server-fetch==2025.1.17"]}
 BUNX = {"command": "bunx", "args": ["@modelcontextprotocol/server-everything@2025.1.14"]}
 DENO = {
@@ -82,7 +86,13 @@ EVERYTHING = "pkg:npm/%40modelcontextprotocol/server-everything@2025.1.14"
             'cache-dir = "/var/cache/uv"\noverride-dependencies = '
             '["mcp-server-fetch @ https://evil.example/mcp_server_fetch-9-py3-none-any.whl"]\n',
         ),
-        (UVX, "uv.toml", 'cache-dir = "/var/cache/uv"\n', 'cache-dir = "./.uvcache"\n'),
+        (
+            UV_PROJECT,
+            "pyproject.toml",
+            '[project]\nname = "app"\ndependencies = []\n',
+            '[project]\nname = "app"\ndependencies = []\n[tool.hatch.build]\nhooks = ["x"]\n',
+        ),
+        (UV_PROJECT, ".python-version", "3.12\n", "3.13\n"),
         (
             UV_RUN,
             "pyproject.toml",
@@ -176,7 +186,7 @@ def test_a_redirecting_resolver_edit_fails_diff_and_validation(
         (UV_RUN, "uv.toml", 'cache-dir = "./.uvcache"\n', "uv.toml:cache-dir=[local]"),
         (UV_RUN, "uv.toml", 'cache-dir = "/var/cache/uv"\n', "uv.toml:cache-dir=[local]"),
         (UV_RUN, "uv.toml", 'cache-dir = ""\n', "uv.toml:cache-dir=[set]"),
-        (UVX, "uv.toml", '"cache\\u002ddir" = ".uvcache"\n', "uv.toml:cache-dir=[local]"),
+        (UV_RUN, "uv.toml", '"cache\\u002ddir" = ".uvcache"\n', "uv.toml:cache-dir=[local]"),
         (
             UV_RUN,
             "pyproject.toml",
@@ -296,7 +306,7 @@ def test_cache_vendor_node_modules_and_override_settings_are_sources(
     [
         (UV_RUN, "uv.toml", 'cache_dir = "./.uvcache"\n', "uv.toml:[other]=[local]"),
         (UV_RUN, "uv.toml", '"Cache-Dir" = "./.uvcache"\n', "uv.toml:[other]=[local]"),
-        (UVX, "uv.toml", 'cacheDir = "./.uvcache"\n', "uv.toml:[other]=[local]"),
+        (UV_RUN, "uv.toml", 'cacheDir = "./.uvcache"\n', "uv.toml:[other]=[local]"),
         (
             UV_RUN,
             "pyproject.toml",
@@ -349,7 +359,7 @@ def test_unknown_resolver_settings_are_sources_named_other(tmp_path, config, pat
         ),
     ],
 )
-@pytest.mark.parametrize("config", [UV_RUN, UVX])
+@pytest.mark.parametrize("config", [UV_RUN, UV_PROJECT])
 def test_uv_overrides_of_the_launched_package_make_the_identity_unknown(
     tmp_path, config, path, content
 ):
@@ -427,7 +437,7 @@ def test_resolver_file_settings_match_their_environment_equivalents(tmp_path):
             FETCH,
         ),
         (
-            UVX,
+            UV_RUN,
             "pyproject.toml",
             '[project]\nname = "app"\nversion = "1.0.0"\ndependencies = ["httpx"]\n'
             '[dependency-groups]\ndev = ["pytest>=8"]\n'
@@ -515,6 +525,20 @@ def test_ordinary_resolver_settings_keep_the_package_identity(
             "npmRegistries:\n  //npm.acme.test:\n    npmAuthIdent: fake-ident-one\n",
             "npmRegistries:\n  //npm.acme.test:\n    npmAuthIdent: fake-ident-two\n",
         ),
+        (
+            ".yarnrc.yml",
+            "npmAlwaysAuth: true\nhttpsCertFilePath: /fake-one/c.pem\n"
+            "httpsKeyFilePath: /fake-one/k.pem\n",
+            "npmAlwaysAuth: false\nhttpsCertFilePath: /fake-two/c.pem\n"
+            "httpsKeyFilePath: /fake-two/k.pem\n",
+        ),
+        (
+            ".yarnrc.yml",
+            "npmScopes:\n  acme:\n    npmAlwaysAuth: true\n"
+            "npmRegistries:\n  //npm.acme.test:\n    httpsKeyFilePath: /fake-one/k.pem\n",
+            "npmScopes:\n  acme:\n    npmAlwaysAuth: false\n"
+            "npmRegistries:\n  //npm.acme.test:\n    httpsKeyFilePath: /fake-two/k.pem\n",
+        ),
     ],
 )
 def test_auth_settings_stay_out_of_the_binding(tmp_path, monkeypatch, path, first, second):
@@ -573,13 +597,13 @@ def test_added_settings_change_the_unkeyed_digest_and_are_unbound_without_a_key(
     tmp_path, monkeypatch
 ):
     monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
-    base = _server(tmp_path, UVX, {"uv.toml": "compile-bytecode = true\n"})
+    base = _server(tmp_path, UV_RUN, {"uv.toml": "compile-bytecode = true\n"})
     assert base.properties["resolver_settings"] == ["uv.toml:compile-bytecode"]
     unbound = next(r for r in base.risks if r.category == "completeness")
     assert "project resolver settings" in unbound.detail
-    added = _server(tmp_path, UVX, {"uv.toml": "compile-bytecode = true\nlink-mode = 'copy'\n"})
+    added = _server(tmp_path, UV_RUN, {"uv.toml": "compile-bytecode = true\nlink-mode = 'copy'\n"})
     assert added.properties["static_config_hash"] != base.properties["static_config_hash"]
-    changed = _server(tmp_path, UVX, {"uv.toml": "compile-bytecode = false\n"})
+    changed = _server(tmp_path, UV_RUN, {"uv.toml": "compile-bytecode = false\n"})
     assert changed.properties["static_config_hash"] == base.properties["static_config_hash"]
 
 
@@ -610,3 +634,215 @@ def test_a_resolver_value_the_binding_cannot_encode_fails_collection(tmp_path, m
     output = tmp_path / "bom.json"
     run = CliRunner().invoke(main, ["scan", "--no-project-policy", str(root), "-o", str(output)])
     assert run.exit_code == 1, run.output
+
+
+UV_TOOL_RUN = {"command": "uv", "args": ["tool", "run", "mcp-server-fetch==2025.1.17"]}
+
+
+@pytest.mark.parametrize("config", [UVX, UV_TOOL_RUN])
+@pytest.mark.parametrize(
+    "path,content",
+    [
+        ("uv.toml", 'cache-dir = "./.uvcache"\n'),
+        ("uv.toml", 'constraint-dependencies = ["mcp-server-fetch<2026"]\n'),
+        ("uv.toml", 'cacheDir = "./.uvcache"\nsystem-certs = true\n'),
+        ("pyproject.toml", '[project]\nname = "app"\n[tool.uv]\ndev-dependencies = ["ruff"]\n'),
+        ("pyproject.toml", '[tool.uv]\nconstraint-dependencies = ["urllib3<2"]\n'),
+        (".python-version", "./evilpy/python\n"),
+    ],
+)
+def test_uv_tool_runs_ignore_project_uv_settings_other_than_indexes(
+    tmp_path, monkeypatch, config, path, content
+):
+    # uv tool run and uvx load only user and system configuration.
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV, raising=False)
+    plain = _server(tmp_path / "plain", config, {})
+    server = _server(tmp_path / "file", config, {path: content})
+    assert server.package_url == plain.package_url == FETCH
+    assert "resolver_settings" not in server.properties
+    assert server.properties["static_config_hash"] == plain.properties["static_config_hash"]
+    assert [r.model_dump() for r in server.risks] == [r.model_dump() for r in plain.risks]
+
+
+def test_uv_tool_runs_keep_project_index_settings_as_sources(tmp_path, monkeypatch):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    content = 'index-url = "https://pypi.attacker.test/simple"\ncache-dir = "./a"\n'
+    server = _server(tmp_path, UVX, {"uv.toml": content})
+    _redirected(server, "uv.toml:index-url=https://pypi.attacker.test")
+    assert server.properties["resolver_settings"] == ["uv.toml:index-url"]
+    moved = 'index-url = "https://pypi.attacker.test/simple"\ncache-dir = "./b"\n'
+    assert _binding(tmp_path, UVX, {"uv.toml": moved}) == server.properties["static_value_binding"]
+
+
+WHEEL = "file:///${PROJECT_ROOT}/wheels/mcp_server_fetch-2025.1.17-py3-none-any.whl"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        f'[project]\nname = "proj"\ndependencies = ["mcp-server-fetch @ {WHEEL}"]\n',
+        f'[project]\nname = "p"\n[project.optional-dependencies]\nx = ["mcp-server-fetch @ {WHEEL}"]\n',
+        f'[project]\nname = "proj"\n[dependency-groups]\ndev = ["mcp-server-fetch @ {WHEEL}"]\n',
+        f'[project]\nname = "proj"\n[dependency-groups]\ndev = [{{include-group = "a"}}]\n'
+        f'a = ["MCP_Server.Fetch @ {WHEEL}"]\n',
+        f'[project]\nname = "proj"\n[tool.uv]\ndev-dependencies = ["mcp-server-fetch @ {WHEEL}"]\n',
+        '[project]\nname = "mcp-server-fetch"\nversion = "2025.1.17"\n',
+        '[project]\nname = "proj"\ndependencies = ["not a requirement ;;"]\n',
+        '[project]\nname = "proj"\n[dependency-groups]\ndev = [{ path = "x" }]\n',
+    ],
+)
+def test_a_project_environment_that_may_supply_the_launched_package_is_unknown(tmp_path, content):
+    _write(tmp_path, UV_PROJECT, {"pyproject.toml": content})
+    result = MCPScanner().scan(tmp_path)
+    server = next(c for c in result.components if isinstance(c, MCPServerComponent))
+    assert server.package_url is None and server.version_pinned is False
+    detail = "may supply the launched package"
+    assert any(
+        r.category == "launcher_identity" and r.severity.value == "high" and detail in r.detail
+        for r in server.risks
+    ), server.risks
+    assert any(detail in gap for gap in result.surfaces_excluded)
+    # Without project mode uv reads none of these tables.
+    _unchanged(_server(tmp_path / "np", UV_RUN, {"pyproject.toml": content}), FETCH)
+
+
+@pytest.mark.parametrize(
+    "content,label",
+    [
+        (
+            '[project]\nname = "proj"\ndependencies = ["helper @ file:///${PROJECT_ROOT}/h"]\n',
+            "pyproject.toml:project.dependencies=[unresolved]",
+        ),
+        (
+            '[project]\nname = "proj"\ndependencies = ["helper"]\n'
+            '[tool.uv.sources]\nhelper = { path = "./helper" }\n',
+            "pyproject.toml:[other]=[local]",
+        ),
+    ],
+)
+def test_a_project_dependency_from_a_url_or_path_is_a_source(tmp_path, content, label):
+    _redirected(_server(tmp_path, UV_PROJECT, {"pyproject.toml": content}), label)
+
+
+def test_a_built_project_loads_local_code_into_the_launch(tmp_path):
+    built = (
+        '[project]\nname = "proj"\nversion = "0.1.0"\n'
+        '[build-system]\nrequires = []\nbuild-backend = "evilbackend"\nbackend-path = ["."]\n'
+    )
+    server = _server(tmp_path / "built", UV_PROJECT, {"pyproject.toml": built})
+    assert server.package_url == FETCH
+    assert server.properties["launch_context"]["code_loading_setting"] == 1
+    assert any(
+        r.category == "launch_context" and r.severity.value == "medium" for r in server.risks
+    )
+    forced = '[project]\nname = "proj"\n[tool.uv]\npackage = true\n'
+    assert _server(tmp_path / "forced", UV_PROJECT, {"pyproject.toml": forced}).properties[
+        "launch_context"
+    ] == {"code_loading_setting": 1}
+    virtual = built + "[tool.uv]\npackage = false\n"
+    _unchanged(_server(tmp_path / "virtual", UV_PROJECT, {"pyproject.toml": virtual}), FETCH)
+
+
+def test_an_ordinary_virtual_project_keeps_the_package_identity(tmp_path):
+    content = (
+        '[project]\nname = "app"\nversion = "1.0.0"\ndependencies = ["httpx>=0.27"]\n'
+        '[project.optional-dependencies]\ncli = ["rich"]\n'
+        '[dependency-groups]\ndev = ["pytest>=8", {include-group = "lint"}]\nlint = ["ruff"]\n'
+        '[tool.uv]\ndev-dependencies = ["mypy"]\n[tool.ruff]\nline-length = 100\n'
+    )
+    server = _server(tmp_path, UV_PROJECT, {"pyproject.toml": content})
+    _unchanged(server, FETCH)
+    assert "pyproject.toml:project.dependencies" in server.properties["resolver_settings"]
+
+
+def test_project_mode_binds_the_whole_pyproject(tmp_path, monkeypatch):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    base = '[project]\nname = "app"\n[tool.uv]\npackage = false\n'
+    edited = base + '[tool.setuptools]\npy-modules = ["evil"]\n'
+    first = _binding(tmp_path / "a", UV_PROJECT, {"pyproject.toml": base})
+    assert first != _binding(tmp_path / "b", UV_PROJECT, {"pyproject.toml": edited})
+    assert _binding(tmp_path / "c", UV_RUN, {"pyproject.toml": base}) == _binding(
+        tmp_path / "d", UV_RUN, {"pyproject.toml": edited}
+    )
+
+
+@pytest.mark.parametrize("config", [UV_RUN, UV_PROJECT])
+@pytest.mark.parametrize(
+    "path,content",
+    [
+        (".python-version", "./evilpy/python\n"),
+        (".python-version", "# pinned\n\n~/py/bin/python3\n"),
+        (".python-versions", "3.12\n.venv-evil\\Scripts\\python.exe\n"),
+    ],
+)
+def test_a_python_version_file_naming_an_interpreter_path_is_a_source(
+    tmp_path, config, path, content
+):
+    server = _server(tmp_path, config, {path: content})
+    _redirected(server, f"{path}:python-request=[local]")
+    from_env = _server(tmp_path / "env", {**config, "env": {"UV_PYTHON": "./evilpy/python"}}, {})
+    assert {r.category for r in server.risks} == {r.category for r in from_env.risks}
+
+
+def test_a_python_version_request_is_bound_but_not_a_source(tmp_path, monkeypatch):
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, KEY)
+    server = _server(tmp_path, UV_RUN, {".python-version": "3.12\n"})
+    _unchanged(server, FETCH)
+    assert server.properties["resolver_settings"] == [".python-version:python-request"]
+    other = _binding(tmp_path / "b", UV_RUN, {".python-version": "cpython@3.13\n"})
+    assert other != server.properties["static_value_binding"]
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "system-certs = false\n",
+        'no-sources-package = ["helper"]\n',
+        'preview-features = ["json-output"]\n',
+        "audit = {}\n",
+    ],
+)
+def test_current_uv_settings_that_do_not_move_packages_are_named_and_inert(tmp_path, content):
+    server = _server(tmp_path, UV_RUN, {"uv.toml": content})
+    _unchanged(server, FETCH)
+    assert not any(name.endswith(":[other]") for name in server.properties["resolver_settings"])
+
+
+@pytest.mark.parametrize(
+    "content,label",
+    [
+        ("system-certs = true\n", "uv.toml:system-certs=[local]"),
+        ('https-proxy = "http://proxy.attacker.test:8080"\n', "uv.toml:https-proxy="),
+        ('http-proxy = "http://proxy.attacker.test:8080"\n', "uv.toml:http-proxy="),
+        ('no-proxy = ["pypi.org"]\n', "uv.toml:no-proxy=[local]"),
+        ('torch-backend = "auto"\n', "uv.toml:torch-backend=[local]"),
+    ],
+)
+def test_current_uv_proxy_trust_and_index_settings_are_named_sources(tmp_path, content, label):
+    server = _server(tmp_path, UV_RUN, {"uv.toml": content})
+    assert server.package_url is None
+    assert any(source.startswith(label) for source in server.properties["package_sources"]), (
+        server.properties["package_sources"]
+    )
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "[install]\ncache = false\n",
+        'preload = []\n[run]\npreload = ""\n',
+        '[install]\nca = ""\ncafile = ""\n',
+    ],
+)
+def test_bunfig_settings_at_their_off_value_keep_the_identity(tmp_path, content):
+    _unchanged(_server(tmp_path, BUNX, {"bunfig.toml": content}), EVERYTHING)
+
+
+def test_a_bunfig_registry_is_named_once_and_not_as_another_setting(tmp_path):
+    content = '[install]\nregistry = "https://npm.acme.test/"\n'
+    server = _server(tmp_path, BUNX, {"bunfig.toml": content})
+    assert server.properties["package_sources"] == ["bunfig.toml:registry=https://npm.acme.test"]
+    assert "bunfig.toml:[other]" not in server.properties["resolver_settings"]
+    default = '[install]\nregistry = "https://registry.npmjs.org/"\n'
+    names = _server(tmp_path / "d", BUNX, {"bunfig.toml": default}).properties
+    assert "bunfig.toml:[other]" not in names.get("resolver_settings", [])

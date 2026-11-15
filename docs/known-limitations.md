@@ -216,7 +216,9 @@ A way around a limit that its entry does not describe is worth a
   threshold of 50.
 - **Resolver settings outside the root are not read.** Settings are read from the
   root `.npmrc`, `bunfig.toml`, `deno.json`, `deno.jsonc`, `.yarnrc.yml`, `.yarnrc`,
-  `.env.yarn`, `uv.toml` and the `[tool.uv]` table of `pyproject.toml`. User and
+  `.env.yarn`, `uv.toml`, `.python-version`, `.python-versions` and `pyproject.toml`
+  (its `[tool.uv]` table, and for `uv run` in project mode its requirement lists,
+  name and build, with the whole file bound). User and
   global configuration, parent directories, `pnpm-workspace.yaml` settings and
   corepack's `packageManager` field are not. For runners that read project resolver files, a
   server that runs in another working directory, or that a configuration file below
@@ -233,6 +235,23 @@ A way around a limit that its entry does not describe is worth a
   sources, and adding or removing one does not change the unkeyed digest. The
   contents of a cache, `vendor`, `node_modules` or `links` directory, a lockfile, a
   Deno workspace member's configuration and a bun security scanner are not read.
+- **Some resolver files are read for runners that ignore them.** uv 0.11 `uvx` and
+  `uv tool run` load only user and system configuration, and bunx 1.4 was observed to
+  ignore a project `bunfig.toml`'s install settings. Their index, mirror and
+  launched-package `sources` settings in project `uv.toml` and `[tool.uv]`, and every
+  `bunfig.toml` setting, are still read, so such a setting can withhold an identity
+  that the runner would not change, and, without the key, a bunfig file with any
+  setting makes an unkeyed `diff` raise the medium unbound-values alert.
+- **A `uv run` project environment is read only from `pyproject.toml`.** In project
+  mode every extra and dependency group is assumed to be installed, and a registry
+  requirement is not a source. `uv.lock` (which `--frozen` installs as is), the
+  metadata of a workspace member or path dependency, a build backend's own
+  configuration, and an existing `.venv` are not read: the default exclusions skip
+  `.venv`, and counting its presence would withhold the identity of every `uv run`
+  server in a developer checkout. A committed `.venv` with a `pyvenv.cfg`, whose
+  interpreter uv uses, and whose installed copy of a pinned package satisfies `--with`,
+  runs under the pinned identity; review a `.venv` in a pull request as code. A
+  `.python-version` in a parent directory of the root is not read either.
 - **Injected environments are not visible.** Variables from an `envFile`, or from
   `dotenvx`, `doppler`, `infisical` or `op run --env-file`, are not read. A launched
   package then carries `environment-file=[unresolved]` instead of its identity.

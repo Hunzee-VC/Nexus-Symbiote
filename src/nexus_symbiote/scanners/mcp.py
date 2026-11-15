@@ -805,6 +805,7 @@ _UV_SETTINGS = (
 _UV_SOURCE_SETTINGS = _names(
     "cache-dir python-downloads-json-url dependency-metadata extra-build-dependencies"
     " extra-build-variables config-settings config-settings-package exclude-dependencies"
+    " http-proxy https-proxy no-proxy torch-backend"
 )
 # The file forms of --overrides, --constraints and --build-constraints, which
 # UV_OVERRIDE, UV_CONSTRAINT and UV_BUILD_CONSTRAINT also set.
@@ -816,6 +817,7 @@ _UV_DEFAULTS = {
     "offline": "false",
     "no-index": "false",
     "native-tls": "false",
+    "system-certs": "false",
     "index-strategy": '"first-index"',
     "keyring-provider": '"disabled"',
 }
@@ -829,8 +831,15 @@ _UV_INERT_SETTINGS = _names(
     " python-preference reinstall reinstall-package required-version resolution"
     " trusted-publishing upgrade upgrade-package pip conflicts default-groups dependency-groups"
     " dev-dependencies environments required-environments managed package workspace"
-    " build-backend"
+    " build-backend no-sources-package preview-features audit"
 )
+# In project mode `uv run` first syncs the project environment from these requirement
+# lists (every group and extra is assumed selected), so one may supply the launched
+# package; a project that is built installs its own code there.
+_UV_PROJECT_REQUIREMENTS = _names(
+    "dev-dependencies project.dependencies project.optional-dependencies dependency-groups"
+)
+_UV_PROJECT_SETTINGS = _UV_PROJECT_REQUIREMENTS | {"project.name", "project.package"}
 # Yarn settings that replace or extend yarn with local code, and that redirect or
 # relax where packages come from (.yarnrc.yml for Yarn 2+, .yarnrc for Yarn 1).
 _YARN_CODE_SETTINGS = frozenset({"yarnPath", "plugins", "yarn-path"})
@@ -895,9 +904,10 @@ _RESOLVER_FILES = {
     "deno": (".npmrc", "deno.json", "deno.jsonc"),
     "bun": (".npmrc", "bunfig.toml"),
     "yarn": (".yarnrc.yml", ".yarnrc", ".env.yarn"),
-    "uv-project": ("uv.toml", "pyproject.toml"),
+    "uv-project": ("uv.toml", "pyproject.toml", ".python-version", ".python-versions"),
     "uv-tool": ("uv.toml", "pyproject.toml"),
 }
+_PYTHON_VERSION_FILES = frozenset({".python-version", ".python-versions"})
 # Setting names exported in clear: fixed vocabularies, never a name taken from input.
 _KNOWN_SETTINGS = (
     _NPM_INERT_SETTINGS
@@ -921,6 +931,8 @@ _KNOWN_SETTINGS = (
     | _UV_REPLACEMENT_SETTINGS
     | frozenset(_UV_DEFAULTS)
     | _UV_INERT_SETTINGS
+    | _UV_PROJECT_SETTINGS
+    | {"python-request"}
     | {"registry", "npmRegistryServer", "offline", "prefer-offline", "strict-ssl", "environment"}
     | {"unstable"}
 )
@@ -1120,10 +1132,13 @@ def _yarnrc(text: str) -> tuple[tuple[str, str], ...]:
     return tuple(settings.items())
 
 
-def _file_setting(path: str, family: str, key: str, value: str, launched: set[str]) -> str:
+def _file_setting(
+    path: str, family: str, key: str, value: str, launched: set[str], *, project: bool = False
+) -> str:
     """What a project resolver file setting does: identity, code, source or inert.
 
-    Registry entries are inert here; they apply per package scope.
+    Registry entries are inert here; they apply per package scope. ``project`` is a
+    ``uv run`` in project mode.
     """
     if path == ".npmrc":
         if family != "npm":
@@ -1146,7 +1161,11 @@ def _file_setting(path: str, family: str, key: str, value: str, launched: set[st
     if path in {"deno.json", "deno.jsonc"}:
         return _deno_setting(key, value)
     if path in {"uv.toml", "pyproject.toml"}:
-        return _uv_setting(key, value, launched)
+        if family == "uv-tool":
+            return "source" if not key.startswith("sources.") or key[8:] in launched else "inert"
+        return _uv_setting(key, value, launched, project=project)
+    if path in _PYTHON_VERSION_FILES:
+        return _python_request(value)
     return "unresolved" if path == ".env.yarn" else "inert"
 
 
@@ -1176,26 +1195,55 @@ def _deno_setting(key: str, value: str) -> str:
     return "inert" if key in _DENO_INERT_SETTINGS else "source"
 
 
-def _uv_setting(key: str, value: str, launched: set[str]) -> str:
+def _uv_setting(key: str, value: str, launched: set[str], *, project: bool = False) -> str:
     if key.startswith("sources."):
-        return "source" if key[8:] in launched else "inert"
+        # A sourced project dependency is a local or remote package whose own metadata
+        # may require the launched package from anywhere.
+        return "source" if project or key[8:] in launched else "inert"
     if key in _UV_REPLACEMENT_SETTINGS:
-        requirements = _string_list(value)
-        if requirements is None:
+        return _requirements(value, launched, replaces=True)
+    if project and key in _UV_PROJECT_REQUIREMENTS:
+        return _requirements(value, launched, replaces=False)
+    if project and key == "project.name":
+        try:
+            return "identity" if canonicalize_name(value) in launched else "inert"
+        except (TypeError, ValueError):
             return "identity"
-        names: set[str] = set()
-        for requirement in requirements:
-            try:
-                names.add(canonicalize_name(Requirement(requirement).name))
-            except InvalidRequirement:
-                return "identity"
-        if names & launched:
-            return "identity"
-        return "source" if names else "inert"
+    if project and key == "project.package":
+        return "code" if value == "true" else "inert"
     default = _UV_DEFAULTS.get(key)
     if default is not None:
         return "inert" if value == default else "source"
     return "inert" if key in _UV_INERT_SETTINGS else "source"
+
+
+def _requirements(value: str, launched: set[str], *, replaces: bool) -> str:
+    """What a list of requirements does to a launched package.
+
+    A replacement list (overrides, constraints) of the launched package changes it, and
+    one of any other package is a source. A project dependency changes it only when it
+    names the launched package by URL or path, and any other such dependency is a source.
+    """
+    requirements = _string_list(value)
+    if requirements is None:
+        return "identity"
+    kind = "inert"
+    for text in requirements:
+        try:
+            requirement = Requirement(text)
+        except InvalidRequirement:
+            return "identity"
+        if not replaces and requirement.url is None:
+            continue
+        if canonicalize_name(requirement.name) in launched:
+            return "identity"
+        kind = "source"
+    return kind
+
+
+def _python_request(value: str) -> str:
+    """A uv Python request naming a path runs that interpreter, as UV_PYTHON would."""
+    return "source" if re.search(r"[\\/]", value) or value.startswith((".", "~")) else "inert"
 
 
 def _string_list(value: str) -> list[str] | None:
@@ -1368,6 +1416,44 @@ def _uv_file(settings: dict[str, Any]) -> _ResolverFile:
     return _ResolverFile(tuple(entries), binding_settings=_typed_binding(settings))
 
 
+def _uv_project(document: dict[str, Any], uv: dict[str, Any]) -> _ResolverFile:
+    """pyproject.toml as ``uv run`` reads it in project mode: the project's requirement
+    lists, name and build beside [tool.uv], with the whole file bound."""
+    entries = list(_uv_file(uv).settings)
+    project = document.get("project")
+    table = project if isinstance(project, dict) else {}
+    if "name" in table:
+        entries.append(("project.name", _setting_text(table["name"])))
+    if "dependencies" in table:
+        entries.append(("project.dependencies", json.dumps(table["dependencies"], default=str)))
+    optional = table.get("optional-dependencies")
+    if optional is not None:
+        extras = list(optional.values()) if isinstance(optional, dict) else [optional]
+        flat = [
+            item for extra in extras for item in (extra if isinstance(extra, list) else [extra])
+        ]
+        entries.append(("project.optional-dependencies", json.dumps(flat, default=str)))
+    groups = document.get("dependency-groups")
+    if groups is not None:
+        members = list(groups.values()) if isinstance(groups, dict) else [groups]
+        flat = [
+            item
+            for group in members
+            for item in (group if isinstance(group, list) else [group])
+            if not (
+                isinstance(item, dict)
+                and set(item) == {"include-group"}
+                and isinstance(item["include-group"], str)
+            )
+        ]
+        entries.append(("dependency-groups", json.dumps(flat, default=str)))
+    package = uv.get("package")
+    built = package is True or (package is not False and "build-system" in document)
+    if project is not None or "build-system" in document:
+        entries.append(("project.package", json.dumps(built)))
+    return _ResolverFile(tuple(entries), binding_settings=_typed_binding(document))
+
+
 def _bun_entries(table: dict[str, Any], prefix: str = "") -> list[tuple[str, str]]:
     gated = _BUN_IDENTITY_SETTINGS | _BUN_CODE_SETTINGS | _BUN_SOURCE_SETTINGS
     found: list[tuple[str, str]] = []
@@ -1426,12 +1512,21 @@ class _Resolvers:
         self._files = files
         self._result = result
         self._read_mapping = read_mapping
-        self._loaded: dict[str, _ResolverFile] = {}
+        self._loaded: dict[tuple[str, str], _ResolverFile] = {}
+        self._parsed: dict[str, dict[str, Any]] = {}
 
-    def entries(self, path: str) -> _ResolverFile:
-        if path not in self._loaded:
-            self._loaded[path] = self._read(path)
-        return self._loaded[path]
+    def entries(self, path: str, family: str = "", *, project: bool = False) -> _ResolverFile:
+        """A file's settings; uv files as ``uv run`` reads them, or as uv tool runs do.
+
+        ``uv tool run`` and ``uvx`` load only user and system configuration; their
+        index settings in project files are still sources, an over-approximation.
+        """
+        variant = ""
+        if path in {"uv.toml", "pyproject.toml"}:
+            variant = "tool" if family == "uv-tool" else "project" if project else "run"
+        if (path, variant) not in self._loaded:
+            self._loaded[path, variant] = self._read(path, variant)
+        return self._loaded[path, variant]
 
     def _text(self, path: str) -> str | None:
         text = self._files.read_text(path, missing_ok=True)
@@ -1440,20 +1535,33 @@ class _Resolvers:
         return text
 
     def _toml(self, path: str) -> dict[str, Any]:
+        if path in self._parsed:
+            return self._parsed[path]
         text = self._text(path)
-        if text is None:
-            return {}
-        try:
-            return load_toml(text)
-        except (ValueError, RecursionError, MemoryError):
-            self._result.scan_failures.append(f"{path}: invalid TOML")
-            return {}
+        parsed: dict[str, Any] = {}
+        if text is not None:
+            try:
+                parsed = load_toml(text)
+            except (ValueError, RecursionError, MemoryError):
+                self._result.scan_failures.append(f"{path}: invalid TOML")
+        self._parsed[path] = parsed
+        return parsed
 
-    def _read(self, path: str) -> _ResolverFile:
+    def _read(self, path: str, variant: str = "") -> _ResolverFile:
         if path == ".npmrc":
             return _npmrc(self._text(path) or "")
         if path == ".yarnrc":
             return _ResolverFile(_yarnrc(self._text(path) or ""))
+        if path in _PYTHON_VERSION_FILES:
+            lines = re.split(r"[\r\n]+", self._text(path) or "")
+            requests = [line.strip() for line in lines]
+            return _ResolverFile(
+                tuple(
+                    ("python-request", request)
+                    for request in requests
+                    if request and not request.startswith("#")
+                )
+            )
         if path == ".env.yarn":
             # Yarn 4 loads .env.yarn into its environment by default (injectEnvironmentFiles).
             text = self._text(path)
@@ -1526,10 +1634,15 @@ class _Resolvers:
         settings = self._toml(path)
         if path == "bunfig.toml":
             return self._values(path, lambda: _bun_file(settings))
+        document = settings
         if path == "pyproject.toml":
             tool = settings.get("tool")
             uv = tool.get("uv") if isinstance(tool, dict) else None
             settings = uv if isinstance(uv, dict) else {}
+        if variant == "tool":
+            return self._values(path, lambda: _uv_settings(settings))
+        if variant == "project" and path == "pyproject.toml":
+            return self._values(path, lambda: _uv_project(document, settings))
         return self._values(path, lambda: _uv_file(settings))
 
     def _values(self, path: str, build: Callable[[], _ResolverFile]) -> _ResolverFile:
@@ -2309,8 +2422,9 @@ class MCPScanner(Scanner):
         if relocated:
             # Another working directory may hold its own resolver files.
             view.unresolved.append("working-directory")
+        project = family == "uv-project" and launch.project
         for path in files:
-            file = self._resolvers.entries(path)
+            file = self._resolvers.entries(path, family, project=project)
             if file.unresolved:
                 view.unresolved.append(f"{path}:key")
             settings = dict(file.settings)
@@ -2319,12 +2433,14 @@ class MCPScanner(Scanner):
             for key, value in file.settings:
                 label = f"{path}:{_setting_name(key, launched)}"
                 view.names.append(label)
-                kind = _file_setting(path, family, key, value, launched)
+                kind = _file_setting(path, family, key, value, launched, project=project)
                 if kind == "identity":
                     if path == ".npmrc":
                         view.identity.append(f"npm {key} setting from {path}")
                     elif path == "bunfig.toml":
                         view.identity.append(f"{path} {key} preloads local code")
+                    elif key in _UV_PROJECT_SETTINGS:
+                        view.identity.append(f"{path} {key} may supply the launched package")
                     elif path in {"uv.toml", "pyproject.toml"}:
                         view.identity.append(
                             f"{path} {key} replaces or constrains the launched package"
@@ -2342,6 +2458,8 @@ class MCPScanner(Scanner):
                 elif kind == "unresolved":
                     view.unresolved.append(label)
             if path in {"uv.toml", "pyproject.toml", ".env.yarn", "deno.json", "deno.jsonc"}:
+                continue
+            if path in _PYTHON_VERSION_FILES:
                 continue
             default = "npmRegistryServer" if path == ".yarnrc.yml" else "registry"
             scope_label, scope = (
