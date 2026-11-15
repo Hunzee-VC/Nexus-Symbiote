@@ -572,7 +572,8 @@ A way around a limit that its entry does not describe is worth a
   and footnotes (`[^x]: ...`) that nothing references, which GitHub drops. Text that a
   rendered view hides in other ways is not reported: the title of a link or image,
   shown only on hover, whether written inline or in a definition with another
-  destination that a link with visible text uses, however short that text, and the
+  destination that a link with visible text, or any image, uses, however short that
+  text and even when the image's alt text is empty (`![][label]`), and the
   label of such a definition when only full references, such as `[text][label]`, use
   it; alt text and attribute values; and the content of elements that a sanitizer
   removes or a viewer collapses, such as `<script>`, `<style>`, `<details>` or an
