@@ -442,32 +442,48 @@ def _zip_directory(
 
 
 def _directory_members(data: bytes, begin: int, size: int, end: int) -> list[_ZipMember] | None:
-    """Walk the central directory entries that ``data`` holds from ``begin`` to ``end``."""
+    """Walk the central directory entries that ``data`` holds from ``begin`` to ``end``.
+
+    A pickle member is rated by its name, as the directory lists it, whatever another
+    entry holds: an entry's own lengths lead to the next one even when its ZIP64 field
+    cannot locate its data, and a loader that reads past that field still unpickles
+    the member. ``None`` when the walk cannot go on or a member that is not a pickle
+    cannot be located, and no pickle member is listed.
+    """
     if size > MAX_ZIP_DIRECTORY_BYTES or begin < 0 or begin + size > end:
         return None
     members: list[_ZipMember] = []
+    unlocated = False
     position = begin
     while position < begin + size:
         if position + 46 > begin + size or data[position : position + 4] != b"PK\x01\x02":
-            return members if any(_pickle_member(m.name) for m in members) else None
+            return _listed(members, complete=False)
         name_length = _little(data, position + 28, 2)
         extra_length = _little(data, position + 30, 2)
         name = data[position + 46 : position + 46 + name_length]
         if len(name) < name_length:
-            return members if any(_pickle_member(m.name) for m in members) else None
+            return _listed(members, complete=False)
         extra_at = position + 46 + name_length
+        method = _little(data, position + 10, 2)
         located = _zip64_location(
             data[extra_at : extra_at + extra_length],
             _little(data, position + 24, 4),
             _little(data, position + 20, 4),
             _little(data, position + 42, 4),
         )
-        if located is None:
-            # A pickle member already listed is rated whatever a later entry holds.
-            return members if any(_pickle_member(m.name) for m in members) else None
-        members.append(_ZipMember(name, _little(data, position + 10, 2), *located))
+        if located is not None:
+            members.append(_ZipMember(name, method, *located))
+        elif _pickle_member(name):
+            members.append(_ZipMember(name, method, 0, -1))
+        else:
+            unlocated = True
         position = extra_at + extra_length + _little(data, position + 32, 2)
-    return members
+    return _listed(members, complete=not unlocated)
+
+
+def _listed(members: list[_ZipMember], *, complete: bool) -> list[_ZipMember] | None:
+    """``members`` when they can be rated: every member read, or a pickle member listed."""
+    return members if complete or any(_pickle_member(m.name) for m in members) else None
 
 
 def _zip64_location(

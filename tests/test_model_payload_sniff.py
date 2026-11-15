@@ -282,6 +282,62 @@ def test_a_later_entry_without_its_zip64_field_does_not_hide_a_pickle(tmp_path: 
     assert component is not None and component.serialization_safety is UNSAFE
 
 
+def _short_zip64(archive: bytes, member: bytes) -> bytes:
+    """``archive`` with ``member``'s central entry claiming 0xFFFFFFFF compressed bytes and
+    carrying a ZIP64 field too short to hold them, which ``zipfile`` refuses as corrupt."""
+    with zipfile.ZipFile(io.BytesIO(archive)) as opened:
+        infos = opened.infolist()
+    rebuilt = io.BytesIO()
+    with zipfile.ZipFile(rebuilt, "w") as out:
+        for info in infos:
+            copy = zipfile.ZipInfo(info.filename, info.date_time)
+            if info.filename.encode() == member:
+                copy.extra = b"\x01\x00\x00\x00"
+            with zipfile.ZipFile(io.BytesIO(archive)) as opened:
+                out.writestr(copy, opened.read(info.filename))
+    data = rebuilt.getvalue()
+    entry = data.index(b"PK\x01\x02")
+    while data[entry + 46 : entry + 46 + len(member)] != member:
+        entry = data.index(b"PK\x01\x02", entry + 4)
+    return data[: entry + 20] + b"\xff\xff\xff\xff" + data[entry + 24 :]
+
+
+@pytest.mark.parametrize("unreadable", [b"archive/readme.txt", b"archive/data.pkl"])
+def test_an_entry_whose_zip64_field_is_too_short_does_not_hide_a_pickle(
+    tmp_path: Path, unreadable: bytes
+) -> None:
+    # The first member is not the pickle, so only the central directory names it. The
+    # short field is on an entry listed before the pickle, or on the pickle's own entry.
+    archive = _short_zip64(
+        _zip(
+            [
+                ("archive/version", b"3"),
+                ("archive/readme.txt", b"hi"),
+                ("archive/data.pkl", _reduce_pickle()),
+            ]
+        ),
+        unreadable,
+    )
+    with pytest.raises(zipfile.BadZipFile):
+        zipfile.ZipFile(io.BytesIO(archive)).infolist()
+    (tmp_path / "model.onnx").write_bytes(archive)
+    component = _component(tmp_path, "model.onnx")
+    assert component is not None and component.serialization_safety is UNSAFE
+    assert component.properties["format_inspection"] == ZIP_PICKLE_MEMBER
+    assert _critical(component)
+
+
+def test_an_unlocated_entry_without_a_pickle_leaves_the_archive_unrated(tmp_path: Path) -> None:
+    archive = _short_zip64(
+        _zip([("arr_0.npy", _npy("<f4")), ("arr_1.npy", _npy("<f4"))]), b"arr_0.npy"
+    )
+    (tmp_path / "arrays.npz").write_bytes(archive)
+    component = _component(tmp_path, "arrays.npz")
+    assert component is not None and component.serialization_safety is not UNSAFE
+    assert component.properties["format_inspection"] == ZIP_DIRECTORY_UNREAD
+    assert not _critical(component)
+
+
 def test_a_later_entry_whose_name_runs_past_the_file_does_not_hide_a_pickle(
     tmp_path: Path,
 ) -> None:

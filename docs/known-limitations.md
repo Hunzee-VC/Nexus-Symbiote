@@ -449,7 +449,11 @@ A way around a limit that its entry does not describe is worth a
   is `0xFFFFFFFF` without a ZIP64 field is read as written, as `zipfile` reads it. A
   directory that turns malformed after it lists a pickle-family member, such as with an
   entry whose name runs past the end of the file, still rates the archive
-  `unsafe-code-execution`. A NumPy array's version 1, 2 or 3 header is parsed when it
+  `unsafe-code-execution`. An entry whose ZIP64 field is too short to locate its data,
+  which `zipfile` refuses, is passed over by its own lengths, as a loader that reads
+  past the field does, so it hides no pickle-family member, its own name included;
+  when no such member is listed, an entry that cannot be located leaves the archive
+  `unknown`. A NumPy array's version 1, 2 or 3 header is parsed when it
   is at most 64 KiB long, as every version 1 header is, and
   while the 16,000,000 structure units one scan shares with the ONNX and GGUF readers
   last, at one unit a header byte; only its `descr` value is read for types, so a
