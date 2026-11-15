@@ -105,3 +105,35 @@ def test_a_launcher_that_cannot_be_staged_is_reported_once_with_the_call_facts(t
     # verified tenant and snapshot, which a refusal before the gateway could not.
     assert decision.tenant == "acme"
     assert decision.snapshot_serial == 1
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {"command": "relative/launcher"},
+        {"sha256": "sha256:not-a-digest"},
+        {"call_deadline_seconds": 0},
+    ],
+    ids=["relative-command", "malformed-pin", "no-deadline"],
+)
+@pytest.mark.parametrize("recorded", [True, False], ids=["on-decision", "no-callback"])
+def test_invalid_launcher_settings_are_refused_before_the_gateway_runs(
+    tmp_path, settings, recorded
+):
+    values = fixture(tmp_path)
+    path, pin, started = started_launcher(tmp_path)
+    decisions: list = []
+    if recorded:
+        values[0].on_decision = decisions.append
+    arguments = {"command": str(path), "sha256": pin, **settings}
+    with pytest.raises(AuthorizationError, match="absolute POSIX launcher"):
+        invoke_pinned_stdio(values[0], values[1], **arguments, **signed_inputs(values, pin))
+    assert not started.exists()
+    if recorded:
+        [decision] = decisions
+        assert (decision.admitted, decision.reason) == (False, "denied")
+        # Refused before the gateway verified anything, so only the call labels and the
+        # store are known.
+        assert (decision.server_id, decision.tool_name) == ("server:mail", "send")
+        assert decision.store_id == values[0].state.store_id
+        assert decision.tenant is None and decision.snapshot_serial is None

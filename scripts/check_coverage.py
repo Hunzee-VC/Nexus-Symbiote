@@ -61,13 +61,14 @@ MODULE_FLOORS: dict[str, tuple[int, int | None]] = {
     "nexus_symbiote/inventory_export.py": (98, 98),
     "nexus_symbiote/inventory_export_cli.py": (98, 98),
     # The modules the 2026-11-14 audit found without a floor: the live-mode and pinned
-    # stdio paths, the validation worker's gateway side, safe output writes, collection
-    # limits, advisory queries, launcher classification, the ShadowScan import and the gate
-    # reports. The worker itself runs in an isolated subprocess (-I, PATH only) that
-    # coverage does not trace, so runtime_validation.py measures lower than it is tested.
+    # stdio paths, the validation worker, safe output writes, collection limits, advisory
+    # queries, launcher classification, the ShadowScan import and the gate reports.
     # Measured with the tests added then: 77/74, 93/85, 94/91, 96/90, 95/93, 100/100,
-    # 96/94, 93/87, 96/92, 96/91 and 98/93.
-    "nexus_symbiote/runtime_validation.py": (76, 73),
+    # 96/94, 93/87, 96/92, 96/91 and 98/93. The worker runs in an isolated subprocess
+    # (-I, PATH only) that coverage does not trace, so its code is also run in-process
+    # (tests/test_runtime_validation_in_process.py): runtime_validation.py measured 93/89
+    # with those tests on 2026-11-15.
+    "nexus_symbiote/runtime_validation.py": (92, 88),
     "nexus_symbiote/utils/files.py": (92, 84),
     "nexus_symbiote/live/stdio.py": (92, 89),
     "nexus_symbiote/live/session.py": (95, 88),

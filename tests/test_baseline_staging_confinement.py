@@ -9,11 +9,14 @@ removed, in the link's target directory: outside the location the output rules a
 from __future__ import annotations
 
 import os
+import stat
 
 import pytest
 from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
+from nexus_symbiote.utils import files
+from nexus_symbiote.utils.files import create_staging_file
 from nexus_symbiote.utils.terminal import OUTPUT_REFUSED
 
 
@@ -54,3 +57,21 @@ def test_a_baseline_beside_a_real_directory_leaves_no_staging_file(tmp_path):
     )
     assert result.exit_code == 0, result.output
     assert [path.name for path in out.iterdir()] == ["baseline.json"]
+
+
+def test_a_staging_file_is_private_empty_and_beside_the_output(tmp_path):
+    staged = create_staging_file(tmp_path / "baseline.json", ".nexus-baseline-")
+    assert staged.parent == tmp_path
+    assert staged.name.startswith(".nexus-baseline-")
+    assert staged.read_bytes() == b""
+    assert stat.S_IMODE(staged.stat().st_mode) == 0o600
+
+
+def test_staging_and_output_writes_refuse_without_no_follow_operations(tmp_path, monkeypatch):
+    # The same guard refuses a non-POSIX platform; os.name cannot be faked under pathlib.
+    monkeypatch.delattr(files.os, "O_NOFOLLOW")
+    with pytest.raises(OSError, match="no-symlink"):
+        create_staging_file(tmp_path / "baseline.json", ".nexus-baseline-")
+    with pytest.raises(OSError, match="no-symlink"):
+        files.write_output_file(tmp_path / "baseline.json", "{}")
+    assert list(tmp_path.iterdir()) == []
