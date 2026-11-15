@@ -575,7 +575,9 @@ class DiscoveryVerification(InventoryModel):
     ``metadata.timestamp``, else the report's own ``finished_at`` (else
     ``started_at``). A value the report does not carry reads ``"unknown"`` —
     never a fabricated value; the current ShadowScan report formats carry no
-    repository or commit. Import time is not recorded: ``metadata.timestamp`` is
+    repository or commit. The repository and commit are recorded with credentials
+    redacted: a URL keeps its scheme, host, port and path, and its user information,
+    query and fragment read ``***``. Import time is not recorded: ``metadata.timestamp`` is
     set only when a caller supplies one. A ``verified`` record names the signer
     identity and issuer whose Sigstore bundle was checked over the exact report
     bytes; ``unverified`` means no such check ran at import; ``not-applicable``
@@ -604,14 +606,16 @@ class DiscoveryVerification(InventoryModel):
         default="unknown",
         description=(
             "Repository the report claims (top-level repository, or a CycloneDX report's "
-            "shadowscan:repository property), or 'unknown' when it carries none"
+            "shadowscan:repository property) with credentials redacted, or 'unknown' when "
+            "it carries none"
         ),
     )
     commit: str = Field(
         default="unknown",
         description=(
             "Commit the report claims (top-level commit, or a CycloneDX report's "
-            "shadowscan:commit property), or 'unknown' when it carries none"
+            "shadowscan:commit property) with credentials redacted, or 'unknown' when it "
+            "carries none"
         ),
     )
     report_time: str = Field(

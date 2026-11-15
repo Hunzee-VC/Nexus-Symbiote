@@ -773,7 +773,15 @@ A way around a limit that its entry does not describe is worth a
   the exact report bytes, otherwise `unverified`, with the report digest, the report's own run
   time, and the repository/commit the report carries — currently both `unknown`, because the
   ShadowScan report format carries neither, so the digest and run time are the binding, not a
-  repository claim. A passing producer check of `validate` or `risk` with
+  repository claim. A report that does carry them, as a top-level `repository` and `commit`
+  or CycloneDX `shadowscan:repository` and `shadowscan:commit` properties, has both
+  recorded and shown in the unverified-evidence warning with credentials redacted: a URL
+  keeps its scheme, host, port and path, and its user information, query and fragment
+  become `***`. A credential elsewhere in either value is removed only when the shared
+  redaction recognizes it, and an inventory an earlier release wrote keeps what it
+  recorded, so `verify-discovery --projection` or `--bundle` fails with "BOM does not
+  match the direct native ShadowScan projection" when this redaction changes a value;
+  import the report again. A passing producer check of `validate` or `risk` with
   `--project --signature-policy` counts for that run only and writes no BOM. Unsigned evidence warns
   loudly on `import-shadowscan`, `validate` and `risk`, and fails the run in CI (or with
   `--fail-on-unsigned-discovery`) unless the operator explicitly passes `--allow-unsigned-discovery`.

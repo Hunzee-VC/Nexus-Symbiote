@@ -618,6 +618,48 @@ def redact_text(
     return _redact(value, spans, rewrites)
 
 
+# One URL as urlsplit reads it: scheme, authority, path, optional query and fragment.
+_LOCATOR = re.compile(
+    r"([A-Za-z][A-Za-z0-9+.-]*+)://([^/?#]*+)([^?#]*+)(?:\?([^#]*+))?(?:#(.*+))?", re.DOTALL
+)
+
+
+def _parsed_authority(value: str) -> bool:
+    try:
+        parts = urlsplit(value)
+        return bool(parts.hostname) and (parts.port is None or parts.port >= 0)
+    except ValueError:
+        return False
+
+
+def redact_locator(value: str) -> str:
+    """A locator, such as a repository's clone URL, with its credentials removed.
+
+    A URL keeps its scheme, host, port and path, which name what it locates. Its user
+    information, query and fragment, where a clone URL carries a token, each become the
+    marker, and its host and path are redacted as free text. Anything else, including
+    a URL holding white space or a backslash, which URL parsers read differently, or
+    whose authority does not parse, is redacted as ``redact_text`` redacts free text,
+    which keeps only the origin of a URL in it.
+    """
+    match = _LOCATOR.fullmatch(value)
+    if (
+        match is None
+        or "\\" in value
+        or any(char.isspace() for char in value)
+        or not _parsed_authority(value)
+    ):
+        return redact_text(value)
+    scheme, authority, path, query, fragment = match.groups()
+    _userinfo, at, host = authority.rpartition("@")
+    shown = [scheme, "://", REDACTED + at if at else "", redact_text(host), redact_text(path)]
+    if query is not None:
+        shown.append("?" + (REDACTED if query else ""))
+    if fragment is not None:
+        shown.append("#" + (REDACTED if fragment else ""))
+    return "".join(shown)
+
+
 def redact_keyed_text(
     key: str,
     value: str,

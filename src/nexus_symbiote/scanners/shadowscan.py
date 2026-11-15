@@ -29,6 +29,7 @@ from nexus_symbiote.core.models import (
 )
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.utils.secrets import redact_locator, redact_text
 from nexus_symbiote.utils.terminal import UNSAFE_TEXT
 
 MAX_REPORT_BYTES = 16 * 1024 * 1024
@@ -210,10 +211,12 @@ def _report_binding(data: dict[str, Any]) -> tuple[str, str, str]:
     """Repository, commit and time the report itself carries; ``"unknown"`` when absent.
 
     Native reports carry their run times (``finished_at``, else ``started_at``)
-    and no repository or commit; CycloneDX reports carry ``metadata.timestamp``
-    and may carry ``shadowscan:repository`` / ``shadowscan:commit`` properties.
-    Nothing is invented: a field the report does not carry stays unknown, and
-    the digest in the verification record is what binds those exact bytes.
+    and may carry a top-level ``repository`` and ``commit``; CycloneDX reports carry
+    ``metadata.timestamp`` and may carry ``shadowscan:repository`` /
+    ``shadowscan:commit`` properties. Nothing is invented: a field the report does
+    not carry stays unknown, and the digest in the verification record is what binds
+    those exact bytes. Both values are recorded redacted (``redact_locator``,
+    ``redact_text``): a clone URL can carry a token as user information.
     """
     repository = _clean_binding(data.get("repository"))
     commit = _clean_binding(data.get("commit"))
@@ -225,7 +228,11 @@ def _report_binding(data: dict[str, Any]) -> tuple[str, str, str]:
             repository = _clean_binding(props.get("shadowscan:repository")) or repository
             commit = _clean_binding(props.get("shadowscan:commit")) or commit
             report_time = _report_time(meta.get("timestamp")) or report_time
-    return repository or "unknown", commit or "unknown", report_time or "unknown"
+    return (
+        "unknown" if repository is None else redact_locator(repository),
+        "unknown" if commit is None else redact_text(commit),
+        report_time or "unknown",
+    )
 
 
 def verify_discovery_report(

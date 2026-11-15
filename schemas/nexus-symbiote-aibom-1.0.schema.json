@@ -1667,7 +1667,7 @@
     },
     "DiscoveryVerification": {
       "additionalProperties": false,
-      "description": "How imported ShadowScan discovery evidence was authenticated at import.\n\nThe record binds the imported report to its exact bytes (``report_digest``),\nits normalized content (``report_content_digest``), and whatever\nrepository/commit/time the report itself carries: its top-level ``repository``\nand ``commit``, or a CycloneDX report's ``shadowscan:repository`` and\n``shadowscan:commit`` properties, and as ``report_time`` a CycloneDX report's\n``metadata.timestamp``, else the report's own ``finished_at`` (else\n``started_at``). A value the report does not carry reads ``\"unknown\"`` \u2014\nnever a fabricated value; the current ShadowScan report formats carry no\nrepository or commit. Import time is not recorded: ``metadata.timestamp`` is\nset only when a caller supplies one. A ``verified`` record names the signer\nidentity and issuer whose Sigstore bundle was checked over the exact report\nbytes; ``unverified`` means no such check ran at import; ``not-applicable``\nmeans no discovery report was imported.",
+      "description": "How imported ShadowScan discovery evidence was authenticated at import.\n\nThe record binds the imported report to its exact bytes (``report_digest``),\nits normalized content (``report_content_digest``), and whatever\nrepository/commit/time the report itself carries: its top-level ``repository``\nand ``commit``, or a CycloneDX report's ``shadowscan:repository`` and\n``shadowscan:commit`` properties, and as ``report_time`` a CycloneDX report's\n``metadata.timestamp``, else the report's own ``finished_at`` (else\n``started_at``). A value the report does not carry reads ``\"unknown\"`` \u2014\nnever a fabricated value; the current ShadowScan report formats carry no\nrepository or commit. The repository and commit are recorded with credentials\nredacted: a URL keeps its scheme, host, port and path, and its user information,\nquery and fragment read ``***``. Import time is not recorded: ``metadata.timestamp`` is\nset only when a caller supplies one. A ``verified`` record names the signer\nidentity and issuer whose Sigstore bundle was checked over the exact report\nbytes; ``unverified`` means no such check ran at import; ``not-applicable``\nmeans no discovery report was imported.",
       "properties": {
         "status": {
           "default": "unverified",
@@ -1744,13 +1744,13 @@
         },
         "repository": {
           "default": "unknown",
-          "description": "Repository the report claims (top-level repository, or a CycloneDX report's shadowscan:repository property), or 'unknown' when it carries none",
+          "description": "Repository the report claims (top-level repository, or a CycloneDX report's shadowscan:repository property) with credentials redacted, or 'unknown' when it carries none",
           "title": "Repository",
           "type": "string"
         },
         "commit": {
           "default": "unknown",
-          "description": "Commit the report claims (top-level commit, or a CycloneDX report's shadowscan:commit property), or 'unknown' when it carries none",
+          "description": "Commit the report claims (top-level commit, or a CycloneDX report's shadowscan:commit property) with credentials redacted, or 'unknown' when it carries none",
           "title": "Commit",
           "type": "string"
         },

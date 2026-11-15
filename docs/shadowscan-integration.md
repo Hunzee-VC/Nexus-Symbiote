@@ -299,7 +299,11 @@ the BOM records the verification outcome (`metadata.completeness.discovery_verif
 `verified` with the signer identity and issuer, or `unverified`, together with
 the report digest, the report's own run time, and the repository/commit the
 report carries — currently both `unknown`, because the report format carries
-neither. It does not bind the report to this repository or commit. Anyone who
+neither. A report that carries them (a top-level `repository` and `commit`, or
+CycloneDX `shadowscan:repository` and `shadowscan:commit` properties) has them
+recorded, and shown in the unverified-evidence warning, with credentials redacted:
+a clone URL such as `https://x-access-token:TOKEN@github.com/o/r` is recorded as
+`https://***@github.com/o/r`. It does not bind the report to this repository or commit. Anyone who
 can write to the checkout can substitute an older report, or another
 repository's report, signed by the same identity, for example one from before a
 shadow agent appeared, and regenerate the BOM from it. Give each repository's

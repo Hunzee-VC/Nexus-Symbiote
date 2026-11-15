@@ -365,6 +365,7 @@ def _unsigned_discovery_failure_reason(
     the operator did not explicitly accept unsigned evidence with
     ``--allow-unsigned-discovery``. Interactive runs warn only.
     """
+    from nexus_symbiote.utils.secrets import redact_locator, redact_text
     from nexus_symbiote.validators.completeness import _carries_discovery
 
     if already_verified or not _carries_discovery(bom):
@@ -372,9 +373,11 @@ def _unsigned_discovery_failure_reason(
     claim = bom.metadata.completeness
     record = claim.discovery_verification if claim is not None else None
     if record is not None:
+        # An inventory an earlier release wrote recorded both values as the report held them.
         detail = (
             f"report {record.report_digest}, report time {record.report_time}, "
-            f"repository {record.repository}, commit {record.commit}"
+            f"repository {redact_locator(record.repository)}, "
+            f"commit {redact_text(record.commit)}"
         )
         if record.status != "unverified":
             detail += (
