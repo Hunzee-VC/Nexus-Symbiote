@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import ast
 import re
-from collections import Counter
-from collections.abc import Container
+from collections import Counter, deque
+from collections.abc import Container, Sequence
 from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import quote
@@ -52,11 +52,12 @@ _SERVER_DECORATORS = _names("resource prompt custom_route")
 # called by name, getattr and its kin on an object that could be one, and these
 # attributes, also imported by name, which expose frames, closures, namespaces and
 # bound instances.
-_REFLECTIVE_BUILTINS = _names("locals globals vars eval exec")
-_ATTRIBUTE_BUILTINS = _names("getattr setattr delattr")
+_REFLECTIVE_BUILTINS = _names("locals globals vars eval exec __import__ setattr delattr")
+_ATTRIBUTE_BUILTINS = _names("getattr")
 _REFLECTIVE_ATTRIBUTES = _names(
     "__self__ __closure__ __globals__ __builtins__ __dict__ __annotations__ __traceback__ "
-    "__getattribute__ tb_frame tb_next f_back f_locals f_globals f_builtins gi_frame "
+    "__getattribute__ __setattr__ __delattr__ __import__ import_module attrgetter getattr "
+    "tb_frame tb_next f_back f_locals f_globals f_builtins gi_frame "
     "cr_frame ag_frame _getframe currentframe getouterframes getinnerframes getargvalues "
     "getclosurevars"
 )
@@ -117,14 +118,18 @@ def _safe_receivers(
 
 
 def _plain_attribute(call: ast.Call, imported: set[str]) -> bool:
-    """Whether getattr, setattr or delattr names a literal attribute, not a reflective
-    one, of an object that cannot be a server or agent of this file.
+    """Whether getattr names a literal attribute, not a reflective one, of an object
+    that cannot be a server, context or agent of this file.
 
     Such an object is a literal, or a name, or attribute of a name, that the file binds
     only by import. Anything else, such as a parameter, ``self`` or a call's result,
     could be one.
     """
-    if call.keywords or len(call.args) < 2 or any(isinstance(a, ast.Starred) for a in call.args):
+    if (
+        call.keywords
+        or len(call.args) not in (2, 3)
+        or any(isinstance(a, ast.Starred) for a in call.args)
+    ):
         return False
     target, attribute = call.args[0], call.args[1]
     if not (
@@ -144,9 +149,9 @@ def _plain_attribute(call: ast.Call, imported: set[str]) -> bool:
 def _reflective_access(
     nodes: list[ast.AST], parents: dict[ast.AST, ast.AST], bindings: Counter[str]
 ) -> bool:
-    """Whether reflection can reach a server or agent of the file without naming it.
+    """Whether reflection can reach a server, context or agent of the file without naming it.
 
-    The builtins count when called by their own names and through the builtins
+    The builtins count whenever referenced by their own names and through the builtins
     module; a method that only shares a name, such as ``model.eval()``, does not.
     ``modules`` counts unless it is called, so ``sys.modules[__name__]`` does and
     ``model.modules()`` does not.
@@ -156,9 +161,14 @@ def _reflective_access(
     )
     imported = {name for name, count in imports.items() if bindings[name] == count}
     for node in nodes:
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            if node.func.id in _REFLECTIVE_BUILTINS or (
-                node.func.id in _ATTRIBUTE_BUILTINS and not _plain_attribute(node, imported)
+        if isinstance(node, ast.Name) and node.id == "__builtins__":
+            return True
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            use = parents.get(node)
+            if node.id in _REFLECTIVE_BUILTINS:
+                return True
+            if node.id in _ATTRIBUTE_BUILTINS and not (
+                isinstance(use, ast.Call) and use.func is node and _plain_attribute(use, imported)
             ):
                 return True
         elif isinstance(node, ast.Attribute):
@@ -167,8 +177,6 @@ def _reflective_access(
                 node.attr == "modules" and not (isinstance(use, ast.Call) and use.func is node)
             ):
                 return True
-        elif isinstance(node, ast.Name) and node.id == "__builtins__":
-            return True
         elif isinstance(node, ast.Import):
             if any(alias.name.split(".")[0] == "builtins" for alias in node.names):
                 return True
@@ -472,6 +480,7 @@ def _collect_agent_decorators(
     tree: ast.Module,
     nodes: list[ast.AST],
     parents: dict[ast.AST, ast.AST],
+    parsed: _ParsedAnnotations,
     agent_factories: dict[str, tuple[ast.ImportFrom, str]],
     bindings: Counter[str],
     path: Path,
@@ -612,13 +621,19 @@ def _collect_agent_decorators(
         and isinstance(node.ctx, ast.Load)
         and node.id in agents
         and node not in reached
-        for node in nodes
+        for node in parsed.all_nodes
     )
     if (
         unsupported_factory
         or escaped
         or (candidates - handled)
-        or (agents and _reflective_access(nodes, parents, bindings))
+        or (
+            agents
+            and (
+                parsed.overflow
+                or _reflective_access(parsed.all_nodes, parsed.all_parents, bindings)
+            )
+        )
     ):
         result.surfaces_excluded.append(
             f"{path.as_posix()}: unsupported Python SDK tool binding or dynamic registration"
@@ -906,7 +921,7 @@ def _generic(node: ast.expr, names: set[str], roots: dict[str, str]) -> bool:
     return module in _TYPING_MODULES
 
 
-def _annotation_names(nodes: list[ast.AST]) -> set[ast.AST]:
+def _annotation_names(nodes: list[ast.AST], extra_roots: Sequence[ast.expr] = ()) -> set[ast.AST]:
     """Names, and attributes of names, that annotations use only as types.
 
     Annotations are evaluated, at definition time or later, so only these parts are
@@ -916,7 +931,7 @@ def _annotation_names(nodes: list[ast.AST]) -> set[ast.AST]:
     other subscript and every other expression in an annotation is analyzed as code.
     """
     names, roots = _typing_generics(nodes)
-    pending: list[ast.expr] = []
+    pending: list[ast.expr] = list(extra_roots)
     for node in nodes:
         if isinstance(node, ast.arg) and node.annotation is not None:
             pending.append(node.annotation)
@@ -940,10 +955,93 @@ def _annotation_names(nodes: list[ast.AST]) -> set[ast.AST]:
     return found
 
 
+class _ParsedAnnotations(NamedTuple):
+    all_nodes: list[ast.AST]
+    all_parents: dict[ast.AST, ast.AST]
+    by_arg: dict[ast.arg, list[ast.AST]]
+    roots: tuple[ast.expr, ...]
+    overflow: bool
+
+
+def _is_literal_generic(node: ast.expr) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id == "Literal"
+    return isinstance(node, ast.Attribute) and node.attr == "Literal"
+
+
+def _parse_string_annotations(
+    nodes: list[ast.AST], parents: dict[ast.AST, ast.AST]
+) -> _ParsedAnnotations:
+    """Parse string forward-reference expressions in type positions of annotations."""
+    names, roots = _typing_generics(nodes)
+    pending: list[tuple[ast.expr, ast.arg | None, int]] = []
+    for node in nodes:
+        if isinstance(node, ast.arg) and node.annotation is not None:
+            pending.append((node.annotation, node, 0))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.returns:
+            pending.append((node.returns, None, 0))
+        elif isinstance(node, ast.AnnAssign):
+            pending.append((node.annotation, None, 0))
+    extra_nodes: list[ast.AST] = []
+    extra_parents: dict[ast.AST, ast.AST] = {}
+    by_arg: dict[ast.arg, list[ast.AST]] = {}
+    parsed_roots: list[ast.expr] = []
+    overflow = False
+    while pending:
+        annotation, owner_arg, depth = pending.pop()
+        if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
+            pending.append((annotation.left, owner_arg, depth))
+            pending.append((annotation.right, owner_arg, depth))
+        elif isinstance(annotation, (ast.Tuple, ast.List)):
+            for elt in annotation.elts:
+                pending.append((elt, owner_arg, depth))
+        elif (
+            isinstance(annotation, ast.Subscript)
+            and _generic(annotation.value, names, roots)
+            and not _is_literal_generic(annotation.value)
+        ):
+            pending.append((annotation.slice, owner_arg, depth))
+        elif isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+            text = annotation.value.strip()
+            if not text:
+                continue
+            if len(text) > 4096 or depth >= 4:
+                overflow = True
+                continue
+            try:
+                parsed = ast.parse(text, mode="eval").body
+            except (SyntaxError, ValueError, RecursionError):
+                # Non-expression string notes cannot be evaluated by get_type_hints.
+                continue
+            walked = list(ast.walk(parsed))
+            if len(extra_nodes) + len(walked) > 10_000:
+                overflow = True
+                continue
+            extra_nodes.extend(walked)
+            parsed_roots.append(parsed)
+            for parent_node in walked:
+                for child in ast.iter_child_nodes(parent_node):
+                    extra_parents[child] = parent_node
+            if owner_arg is not None:
+                by_arg.setdefault(owner_arg, []).extend(walked)
+            pending.append((parsed, owner_arg, depth + 1))
+    if not extra_nodes:
+        return _ParsedAnnotations(nodes, parents, by_arg, (), overflow)
+    return _ParsedAnnotations(
+        [*nodes, *extra_nodes],
+        {**parents, **extra_parents},
+        by_arg,
+        tuple(parsed_roots),
+        overflow,
+    )
+
+
 def _has_unsupported_registration(
     tree: ast.Module,
     nodes: list[ast.AST],
     parents: dict[ast.AST, ast.AST],
+    parsed: _ParsedAnnotations,
+    sdk_import: bool,
     calls: set[ast.Call],
     handled: set[ast.AST],
     servers: dict[str, MCPServerComponent],
@@ -951,20 +1049,27 @@ def _has_unsupported_registration(
     bindings: Counter[str],
 ) -> bool:
     """Whether a recognised server or factory escapes the supported forms."""
-    if calls - handled or (servers and _reflective_access(nodes, parents, bindings)):
+    if (
+        parsed.overflow
+        or calls - handled
+        or (
+            (servers or sdk_import)
+            and _reflective_access(parsed.all_nodes, parsed.all_parents, bindings)
+        )
+    ):
         return True
     factory_calls = {call.func for call in calls}
     # A server named in an annotation is exposed through __annotations__.
     safe = {
         node
-        for node in _annotation_names(nodes)
+        for node in _annotation_names(nodes, parsed.roots)
         if not (isinstance(node, ast.Name) and node.id in servers)
     }
     safe |= _safe_receivers(
         nodes, parents, servers, _SERVER_DATA, _SERVER_CALLS, _SERVER_DECORATORS
     )
     safe |= _benign_helper_arguments(tree, nodes, parents, servers, bindings)
-    for node in nodes:
+    for node in parsed.all_nodes:
         if not isinstance(node, ast.Name) or not isinstance(node.ctx, ast.Load) or node in safe:
             continue
         if node.id in servers and node not in handled:
@@ -1009,6 +1114,14 @@ def _sdk_module(module: str | None) -> bool:
     return (module or "").split(".")[0] in _SDK_ROOTS
 
 
+def _imports_mcp_sdk(nodes: list[ast.AST]) -> bool:
+    return any(
+        (isinstance(node, ast.Import) and any(_sdk_module(a.name) for a in node.names))
+        or (isinstance(node, ast.ImportFrom) and not node.level and _sdk_module(node.module))
+        for node in nodes
+    )
+
+
 def _sdk_module_names(nodes: list[ast.AST], bindings: Counter[str]) -> set[str]:
     """Names the file binds only to a module of ``mcp`` or ``fastmcp``."""
     imports: Counter[str] = Counter()
@@ -1020,15 +1133,80 @@ def _sdk_module_names(nodes: list[ast.AST], bindings: Counter[str]) -> set[str]:
     return {name for name, count in imports.items() if bindings[name] == count}
 
 
-def _rooted_at(node: ast.Attribute, names: set[str]) -> bool:
-    chain = _chain(node)
-    return chain is not None and isinstance(chain[-1], ast.Name) and chain[-1].id in names
+def _getattr_attr(node: ast.AST) -> tuple[ast.expr, str] | None:
+    """The target and literal attribute name of ``getattr(target, "attr"[, default])``."""
+    if not (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and not any(isinstance(a, ast.Starred) for a in node.args)
+        and not any(k.arg is None for k in node.keywords)
+    ):
+        return None
+    by_kw = {k.arg: k.value for k in node.keywords if k.arg is not None}
+    target = node.args[0] if len(node.args) >= 1 else by_kw.get("object")
+    attribute = node.args[1] if len(node.args) >= 2 else by_kw.get("name")
+    if (
+        target is not None
+        and isinstance(attribute, ast.Constant)
+        and isinstance(attribute.value, str)
+    ):
+        return target, attribute.value
+    return None
+
+
+def _attribute_access(node: ast.AST) -> tuple[ast.expr, str] | None:
+    if isinstance(node, ast.Attribute):
+        return node.value, node.attr
+    return _getattr_attr(node)
+
+
+def _expr_root(node: ast.expr) -> ast.Name | None:
+    """The root name of a chain of attributes or literal ``getattr`` calls."""
+    while True:
+        if isinstance(node, ast.Attribute):
+            node = node.value
+            continue
+        pair = _getattr_attr(node)
+        if pair is not None:
+            node = pair[0]
+            continue
+        break
+    return node if isinstance(node, ast.Name) else None
+
+
+def _rooted_at_expr(node: ast.expr, names: set[str]) -> bool:
+    root = _expr_root(node)
+    return root is not None and root.id in names
+
+
+def _sdk_roots(nodes: list[ast.AST], modules: set[str]) -> set[str]:
+    """SDK module names, symbols imported from them, and variables assigned from them."""
+    roots = set(modules) | {bound for _, bound in _sdk_imported(nodes)}
+    edges: dict[str, list[str]] = {}
+    for node in nodes:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            src = _expr_root(node.value)
+            if src is not None:
+                edges.setdefault(src.id, []).append(node.targets[0].id)
+    queue = deque(roots)
+    while queue:
+        current = queue.popleft()
+        for target in edges.get(current, ()):
+            if target not in roots:
+                roots.add(target)
+                queue.append(target)
+    return roots
 
 
 def _scope(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> ast.AST | None:
     owner = parents.get(node)
     while owner is not None and not isinstance(
-        owner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+        owner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
     ):
         owner = parents.get(owner)
     return owner
@@ -1047,21 +1225,22 @@ def _sdk_imported(nodes: list[ast.AST]) -> list[tuple[str, str]]:
 def _gets_context(node: ast.AST) -> bool:
     """Whether ``node`` is ``getattr(..., "Context")``, which names the SDK class as
     ``X.Context`` does."""
-    return (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "getattr"
-        and len(node.args) >= 2
-        and isinstance(node.args[1], ast.Constant)
-        and node.args[1].value == "Context"
-    )
+    pair = _getattr_attr(node)
+    return pair is not None and pair[1] == "Context"
 
 
-def _names_context(annotation: ast.expr, types: set[str], roots: set[str]) -> bool:
-    for node in ast.walk(annotation):
+def _names_context(
+    annotation: ast.expr, extra: Sequence[ast.AST], types: set[str], roots: set[str]
+) -> bool:
+    for node in (*ast.walk(annotation), *extra):
         if (isinstance(node, ast.Name) and node.id in types) or _gets_context(node):
             return True
-        if isinstance(node, ast.Attribute) and node.attr == "Context" and _rooted_at(node, roots):
+        access = _attribute_access(node)
+        if access is not None and access[1] == "Context" and _rooted_at_expr(access[0], roots):
+            return True
+        if (isinstance(node, ast.Name) and node.id == "getattr") or (
+            isinstance(node, ast.Attribute) and node.attr == "getattr"
+        ):
             return True
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
             words = set(re.findall(r"[A-Za-z_]\w*", node.value))
@@ -1079,16 +1258,19 @@ def _reads_context(use: ast.Attribute, parents: dict[ast.AST, ast.AST]) -> bool:
 
 
 def _context_bindings(
-    nodes: list[ast.AST], parents: dict[ast.AST, ast.AST], roots: set[str]
+    parsed: _ParsedAnnotations, roots: set[str]
 ) -> tuple[set[tuple[ast.AST | None, str]], bool]:
     """Parameters typed as an SDK context and names bound to ``get_context()``, by scope.
 
     The second value is whether the SDK ``Context`` or ``get_context`` is used other
     than to annotate a parameter, or to read from or bind the result of a call. An
     alias, a subclass or a re-export of ``Context`` can type a parameter in a file the
-    analysis does not follow it into. A name declared ``global`` or ``nonlocal`` is
-    read in scopes the binding is not keyed to, so binding the result to one is a use.
+    analysis does not follow it into. A name declared ``global`` or ``nonlocal``, or
+    assigned in a class or module body, is exposed beyond local function scope, so
+    binding the result to one is a use.
     """
+    nodes = parsed.all_nodes
+    parents = parsed.all_parents
     imported = _sdk_imported(nodes)
     types = {bound for name, bound in imported if name == "Context"}
     getters = {bound for name, bound in imported if name == "get_context"}
@@ -1111,10 +1293,12 @@ def _context_bindings(
             ]:
                 if arg.annotation is None:
                     continue
+                extra = parsed.by_arg.get(arg, ())
                 annotations.update(ast.walk(arg.annotation))
-                if _names_context(arg.annotation, types, roots):
+                annotations.update(extra)
+                if _names_context(arg.annotation, extra, types, roots):
                     bound.add((node, arg.arg))
-    escaped = False
+    escaped = parsed.overflow
     used: set[str] = set()
     for node in nodes:
         if isinstance(node, ast.Name) and node.id in types:
@@ -1123,9 +1307,16 @@ def _context_bindings(
         elif isinstance(node, ast.Constant) and node in annotations and isinstance(node.value, str):
             used.update(re.findall(r"[A-Za-z_]\w*", node.value))
         elif (
-            (isinstance(node, ast.Attribute) and node.attr == "Context" and _rooted_at(node, roots))
-            or _gets_context(node)
-        ) and node not in annotations:
+            (
+                (
+                    (access := _attribute_access(node)) is not None
+                    and access[1] == "Context"
+                    and _rooted_at_expr(access[0], roots)
+                )
+                or _gets_context(node)
+            )
+            and node not in annotations
+        ) or ((pair := _getattr_attr(node)) is not None and pair[1] == "get_context"):
             escaped = True
         elif (isinstance(node, ast.Name) and node.id in getters) or (
             isinstance(node, ast.Attribute) and node.attr == "get_context"
@@ -1137,7 +1328,11 @@ def _context_bindings(
             elif isinstance(use, ast.Assign) and len(use.targets) == 1:
                 target = use.targets[0]
                 scope = _scope(use, parents)
-                if isinstance(target, ast.Name) and (scope, target.id) not in declared:
+                if (
+                    isinstance(target, ast.Name)
+                    and isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))
+                    and (scope, target.id) not in declared
+                ):
                     bound.add((scope, target.id))
                 else:
                     escaped = True
@@ -1186,8 +1381,8 @@ def _names_handle(name: str, sdk_import: bool) -> bool:
 
 
 def _report_context_handles(
-    nodes: list[ast.AST],
-    parents: dict[ast.AST, ast.AST],
+    parsed: _ParsedAnnotations,
+    sdk_import: bool,
     bindings: Counter[str],
     path: Path,
     result: ScanResult,
@@ -1201,30 +1396,33 @@ def _report_context_handles(
     the SDK ``Context``, or returned by ``get_context()``, that is passed on, stored or
     returned can reach code the collector does not read.
     """
-    sdk_import = any(
-        (isinstance(node, ast.Import) and any(_sdk_module(a.name) for a in node.names))
-        or (isinstance(node, ast.ImportFrom) and not node.level and _sdk_module(node.module))
-        for node in nodes
-    )
+    nodes = parsed.all_nodes
+    parents = parsed.all_parents
     modules = _sdk_module_names(nodes, bindings)
-    roots = modules | {bound for _, bound in _sdk_imported(nodes)}
-    handle = any(
-        (
-            isinstance(node, ast.Attribute)
-            and _names_handle(node.attr, sdk_import)
-            and not (node.attr == "fastmcp" and _rooted_at(node, modules))
-        )
-        or (isinstance(node, ast.Attribute) and _private(node.attr) and _rooted_at(node, roots))
-        or (
+    roots = _sdk_roots(nodes, modules)
+    handle = False
+    for node in nodes:
+        access = _attribute_access(node)
+        if access is not None:
+            target, attr = access
+            if _names_handle(attr, sdk_import) and not (
+                attr == "fastmcp" and _rooted_at_expr(target, modules)
+            ):
+                handle = True
+                break
+            if _private(attr) and _rooted_at_expr(target, roots):
+                handle = True
+                break
+        elif (
             isinstance(node, ast.ImportFrom)
             and not node.level
             and _sdk_module(node.module)
             and any(_names_handle(a.name, True) or _private(a.name) for a in node.names)
-        )
-        for node in nodes
-    )
+        ):
+            handle = True
+            break
     if not handle and sdk_import:
-        bound, handle = _context_bindings(nodes, parents, roots)
+        bound, handle = _context_bindings(parsed, roots)
         names = {name for _, name in bound}
         handle = handle or any(
             isinstance(node, ast.Name)
@@ -1294,11 +1492,19 @@ def collect_python_tools(
     }
     bindings = _bindings(nodes)
     parents = {child: node for node in nodes for child in ast.iter_child_nodes(node)}
+    sdk_import = _imports_mcp_sdk(nodes)
+    parsed = _parse_string_annotations(nodes, parents)
     _report_import_scope(imports, nodes, path, result)
-    _report_context_handles(nodes, parents, bindings, path, result)
+    _report_context_handles(parsed, sdk_import, bindings, path, result)
     _report_unused_factories(nodes, factories, path, result)
     if not factories and not decorators and not agent_factories:
         _report_imported_receivers(tree, path, result)
+        if sdk_import and (
+            parsed.overflow or _reflective_access(parsed.all_nodes, parsed.all_parents, bindings)
+        ):
+            result.surfaces_excluded.append(
+                f"{path.as_posix()}: unsupported Python MCP binding or dynamic registration"
+            )
         return
     if any(a.name == "*" for stmt in imports for a in stmt.names):
         result.surfaces_excluded.append(
@@ -1317,6 +1523,7 @@ def collect_python_tools(
             tree,
             nodes,
             parents,
+            parsed,
             agent_factories,
             bindings,
             path,
@@ -1326,6 +1533,12 @@ def collect_python_tools(
         )
     if not factories:
         _report_imported_receivers(tree, path, result)
+        if sdk_import and (
+            parsed.overflow or _reflective_access(parsed.all_nodes, parsed.all_parents, bindings)
+        ):
+            result.surfaces_excluded.append(
+                f"{path.as_posix()}: unsupported Python MCP binding or dynamic registration"
+            )
         return
     top_level = set(tree.body)
     servers: dict[str, MCPServerComponent] = {}
@@ -1358,7 +1571,7 @@ def collect_python_tools(
         elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
             _record_decorated_tools(stmt, servers, handled, path, source_digest, result)
     if _has_unsupported_registration(
-        tree, nodes, parents, calls, handled, servers, factories, bindings
+        tree, nodes, parents, parsed, sdk_import, calls, handled, servers, factories, bindings
     ) or _imported_receivers(tree):
         result.surfaces_excluded.append(
             f"{path.as_posix()}: unsupported Python MCP binding or dynamic registration"

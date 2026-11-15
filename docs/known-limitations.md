@@ -318,11 +318,13 @@ A way around a limit that its entry does not describe is worth a
   `CurrentRequest`, or the context variables and hooks `current_http_request`,
   `extension_dispatch_scope`, `delegated_extension_scope`, `worker_server_resolver`
   and `background_context_factory`, as in `def read_note(server=CurrentFastMCP())`
-  or `get_http_request().app`, each with or without leading underscores, and so is
+  or `get_http_request().app`, each with or without leading underscores or behind a
+  literal `getattr(...)`, and so is
   importing any of these names from `mcp` or `fastmcp`. Because a release can keep
   the server in a private variable these lists do not name, importing any private
   name (one leading underscore, not a dunder such as `__version__`) from an `mcp` or
-  `fastmcp` module, or reading one as an attribute of an SDK module or of a name
+  `fastmcp` module, or reading one as an attribute or literal `getattr(...)` of an SDK
+  module or of a name
   imported from one, as in `extensions._extension_dispatch_scope`, is a gap too; a
   private name reached any other way, such as through a dynamic import, is not
   seen. In `mcp.server.fastmcp.exceptions`, `fastmcp` is a module path of a name bound only
@@ -330,7 +332,8 @@ A way around a limit that its entry does not describe is worth a
   settings object's `config.fastmcp`, is. In a file that imports from `mcp` or
   `fastmcp`, a parameter typed as the SDK `Context` (a `Context` imported from an
   SDK module, a qualified `Context` of an SDK module, `getattr(..., "Context")`, or
-  a string annotation naming one), and a name bound by a plain
+  a string forward-reference annotation naming or computing one), and a name bound in
+  a function body by a plain
   assignment of the result of a `get_context()` call, by name or as an attribute of
   anything, may only be read for `request_id`, `client_id`,
   `session_id`, `session`, `headers`, `protocol_version`, `client_capabilities`,
@@ -340,8 +343,9 @@ A way around a limit that its entry does not describe is worth a
   or visibility method. Passing it to a call, storing, returning or aliasing it,
   reading any other attribute without calling it (a bound method holds the
   context), calling any other method (`model_copy()` returns the context), binding
-  the result of `get_context()` to a name declared `global` or `nonlocal` there, or
-  using `get_context` any other way is a gap, because it can hand the server to a module
+  the result of `get_context()` in a class or module body or to a name declared
+  `global` or `nonlocal` there, or
+  using `get_context` any other way (including `getattr(..., "get_context")`) is a gap, because it can hand the server to a module
   the collector does not read. The imported `Context` itself may only appear in
   parameter annotations: an alias such as `Ctx = Context` or
   `Ctx = getattr(context, "Context")`, a subclass, an
@@ -356,11 +360,12 @@ A way around a limit that its entry does not describe is worth a
   a member of a `|` union, or an argument of a generic of `typing`,
   `typing_extensions` or `collections.abc`, such as `Optional[FastMCP]`, or of a
   built-in generic such as `list[FastMCP]`. Any other part of an annotation, such
-  as a call or another subscript, is analyzed as code, because annotations are
-  evaluated. In a file with a recognized server or PydanticAI agent, this
-  reflection is a gap even when harmless: a call by name of `locals`, `globals`,
-  `vars`, `eval` or `exec`; `__builtins__` or an import of the `builtins` module;
-  a call by name of `getattr`, `setattr` or `delattr`, unless the object is a
+  as a call or another subscript, and string forward-reference expressions in type
+  positions, are analyzed as code, because annotations are
+  evaluated. In a file with a recognized server, an `mcp` or `fastmcp` import, or a PydanticAI agent, this
+  reflection is a gap even when harmless: a reference by name to `locals`, `globals`,
+  `vars`, `eval`, `exec`, `__import__`, `setattr` or `delattr`; `__builtins__` or an import of the `builtins` module;
+  a reference by name to `getattr`, unless called directly where the object is a
   literal or a name, or attribute of a name, that the file binds only by import
   and the attribute is a literal name other than `modules` and those listed next, so
   `getattr(os, "environ")` is accepted and `getattr(self, "name")` is a gap; the
