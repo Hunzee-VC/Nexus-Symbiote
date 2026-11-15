@@ -40,7 +40,7 @@ def _set(words: str) -> frozenset[str]:
 
 def _moves(directory: str) -> bool:
     """Whether a working directory given to a launcher is other than the project root."""
-    return directory.strip() not in {"", ".", "./", ".\\"}
+    return directory not in {"", ".", "./", ".\\"}
 
 
 MAX_WRAPPERS = 4

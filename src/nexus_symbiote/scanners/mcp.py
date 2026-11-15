@@ -381,7 +381,7 @@ def _url_secrets(value: str) -> list[str]:
                 and credential_shaped(candidate)
                 and not is_reference(candidate)
             )
-        elif username is not None:
+        if username is not None:
             for candidate in dict.fromkeys((username, unquote(username))):
                 found.extend(match.group() for match in TOKEN_SHAPE.finditer(candidate))
         for query_name, query_value in parse_qsl(parsed.query):

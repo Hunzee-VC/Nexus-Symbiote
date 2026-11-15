@@ -299,3 +299,42 @@ def test_each_tool_list_entry_is_redacted_once(tmp_path, monkeypatch):
     _scan(tmp_path, {"remote": server})
     entries = [f"{field}_{i}" for field in fields for i in range(3)]
     assert sorted(calls) == sorted([*entries, "search", "search"])
+
+
+@pytest.mark.parametrize(
+    "command,args",
+    [
+        ("env", ["-C", " .", "npx", "-y", "@modelcontextprotocol/server-filesystem@2025.8.21"]),
+        ("env", ["--chdir= .", "npx", "-y", "@modelcontextprotocol/server-filesystem@2025.8.21"]),
+        ("uv", ["tool", "run", "--directory", " .", "mcp-server-git==0.6.2"]),
+        ("wsl", ["--cd", " .", "--exec", "npx", "-y", "some-mcp@1.0.0"]),
+    ],
+)
+def test_padded_dot_launcher_working_directory_relocates_server(tmp_path, command, args):
+    subdir = tmp_path / " ."
+    subdir.mkdir(exist_ok=True)
+    (subdir / ".npmrc").write_text("registry=https://npm.attacker.test/\n")
+    result = _scan(tmp_path, {"srv": {"command": command, "args": args}})
+    srv = _servers(result)["srv"]
+    assert srv.package_url is None
+    assert srv.properties.get("launcher_package") is None
+    assert srv.properties.get("package_sources") == ["working-directory=[unresolved]"]
+    assert any(
+        r.category == "package_source" and "working-directory" in r.detail for r in srv.risks
+    )
+
+
+def test_token_shaped_url_username_is_scrubbed_when_password_is_present(tmp_path):
+    decoded_pat = "github_pat_1234567890abcdef_1234567890abcdef"
+    encoded_pat = "github_pat_1234567890abcdef%5F1234567890abcdef"
+    server = {
+        "type": "http",
+        "url": f"https://{encoded_pat}:x-oauth-basic@registry.example/mcp",
+        "autoApprove": [decoded_pat, "search"],
+    }
+    result = _scan(tmp_path, {"srv": server})
+    dumped = json.dumps([c.model_dump(mode="json") for c in result.components])
+    assert decoded_pat not in dumped
+    assert _servers(result)["srv"].properties["client_settings"]["auto_approved_tools"] == {
+        "autoApprove": ["***", "search"]
+    }
