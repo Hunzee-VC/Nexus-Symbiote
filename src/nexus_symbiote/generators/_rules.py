@@ -208,7 +208,8 @@ RULES: dict[str, RuleInfo] = {
     ),
     "nonregistry_source": RuleInfo(
         "Package from outside a registry",
-        "An npm or PyPI package is declared from a git, URL or path source instead of a registry.",
+        "An npm or PyPI package is declared from a git, URL or path source instead of a registry, "
+        "or a patch applied at install may change an npm package.",
     ),
     "package_alias": RuleInfo(
         "Package alias",

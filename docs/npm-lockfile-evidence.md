@@ -57,6 +57,19 @@ record names (`openai@npm:4.52.0` for a record of `openai` 4.52.0): Berry fetche
 what the resolution names, a tarball URL or a git repository among them, and records
 no URL to check. Yarn Berry `checksum` values are not recorded.
 
+A package that a patch may change at install binds no record from any lockfile, and
+an exact version in `package.json` names no package URL for it: a lockfile's integrity
+value is that of the unpatched tarball. pnpm applies the patches that
+`pnpm.patchedDependencies` in `package.json` or `patchedDependencies` in
+`pnpm-workspace.yaml` name, and records them in `pnpm-lock.yaml` as
+`patchedDependencies`, a `(patch_hash=...)` group after the importer's version, or
+`patched: true` on a lockfile v6 record; Bun applies those of a top-level
+`patchedDependencies`. Any of them naming the package, whatever version it gives, is
+the `patched dependency is unverified` exclusion, with a medium `nonregistry_source`
+finding on the package, as described with the
+[coverage gaps](registry-collector.md#coverage-gaps). A hash in a peer's group, as in
+`0.3.0(openai@4.104.0(patch_hash=...))`, is the peer's, not the package's.
+
 For Python, `uv.lock` or `poetry.lock` in the project root supplies the exact
 version and the index origin of each AI package declared in `requirements*.txt` or
 `pyproject.toml`, the lockfile record's position, and the SHA-256 of the lockfile.

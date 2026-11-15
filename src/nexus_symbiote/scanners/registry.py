@@ -403,6 +403,32 @@ _PYPROJECT_BUDGET = 256 * 1024
 # read limit is about 650,000. The bound refuses denser input before it is parsed.
 _MAX_PNPM_LOCK_TOKENS = 1_000_000
 _PNPM_NAME_END = re.compile("[@/]")
+_PNPM_PATCH_HASH = re.compile(r"\s*patch_hash")
+
+
+def _pnpm_patched(reference: str) -> bool:
+    """Whether a pnpm version reference marks its own package as patched.
+
+    pnpm writes the hash as a group after the version, among the peer groups, as in
+    ``4.0.0(patch_hash=ab)(zod@3.23.8)``; a hash inside a peer's group is that peer's.
+    A hash anywhere else, or in a reference whose parentheses do not balance, counts.
+    """
+    lowered = reference.lower()
+    if "patch_hash" not in lowered:
+        return False
+    depth = 0
+    for index, char in enumerate(lowered):
+        if char == "(":
+            depth += 1
+            if depth == 1 and _PNPM_PATCH_HASH.match(lowered, index + 1):
+                return True
+        elif char == ")":
+            depth -= 1
+            if depth < 0:
+                return True
+        elif depth == 0 and lowered.startswith("patch_hash", index):
+            return True
+    return depth != 0
 
 
 def _parsed(text: str) -> Version | None:
@@ -877,6 +903,8 @@ class RegistryScanner(Scanner):
         # pnpm reads workspace packages, overrides and version catalogs from it.
         "pnpm": "pnpm-workspace.yaml: workspace settings not read",
     }
+    # After the name of the file that patches the package.
+    _PATCHED_GAP = "patched dependency is unverified"
 
     def _npm_lock(
         self, result: ScanResult
@@ -1005,7 +1033,10 @@ class RegistryScanner(Scanner):
         components: list[RegistryEntryComponent] = []
         # Each package fetched from a registry, by the name the registry knows it by.
         fetched: list[tuple[RegistryEntryComponent, str]] = []
+        # Those a pnpm or Yarn record may resolve: fetched and not patched.
+        registry: list[RegistryEntryComponent] = []
         gaps: dict[str, None] = {}
+        selected: list[tuple[str, list[tuple[str, str]], str, str, Any, str]] = []
         for key, specs in sorted(declared.items()):
             spec = specs[-1][1]
             kind, target, version_range = self._npm_spec(spec)
@@ -1022,24 +1053,39 @@ class RegistryScanner(Scanner):
                     # holds; without a lock record naming it, it is not classified.
                     gaps[self._NPM_GAPS["unclassified"]] = None
                 continue
+            selected.append((key, specs, kind, version_range, record, package))
+        patches = self._npm_patches(data, entries, result) if selected else {}
+        for key, specs, kind, version_range, record, package in selected:
             overridden = overrides is None or bool({key.lower(), package.lower()} & overrides[0])
             if overridden:
                 gaps[self._NPM_GAPS["override"]] = None
-            components.append(
-                self._npm_component(
-                    key,
-                    package,
-                    kind,
-                    version_range,
-                    specs,
-                    record,
-                    lock,
-                    overridden or lock_unread,
-                    result,
-                )
+            # Whichever package manager installs applies the patch to the registry
+            # artifact, so no lockfile record or exact spec names what is installed.
+            patched = [
+                source
+                for source, names in patches.items()
+                if names is None or not names.isdisjoint((key.lower(), package.lower()))
+            ]
+            for source in patched:
+                gaps[f"{source}: {self._PATCHED_GAP}"] = None
+            component = self._npm_component(
+                key,
+                package,
+                kind,
+                version_range,
+                specs,
+                None if patched else record,
+                lock,
+                overridden or lock_unread or bool(patched),
+                result,
             )
+            if patched:
+                component.risks.append(self._npm_patch_risk(component.name, patched))
+            components.append(component)
             if kind in ("registry", "alias"):
-                fetched.append((components[-1], package))
+                fetched.append((component, package))
+                if not patched:
+                    registry.append(component)
         if overrides is None or any(self._is_ai_package(t) for t in overrides[1]):
             # Too many overrides to read, or one that installs an AI package under
             # another package's name.
@@ -1055,7 +1101,6 @@ class RegistryScanner(Scanner):
         result.surfaces_excluded.extend(gaps)
         # A pnpm or Yarn record resolves only a package package.json declares from a
         # registry: npm installs a git, URL or path source whatever the record says.
-        registry = [component for component, _ in fetched]
         if registry and other_lock is not None:
             lock_name, raw_lock = other_lock
             if lock_name == "pnpm-lock.yaml":
@@ -1330,6 +1375,19 @@ class RegistryScanner(Scanner):
                 )
             )
         return risks
+
+    @staticmethod
+    def _npm_patch_risk(name: str, sources: list[str]) -> RiskAssessment:
+        """The finding of a package that a patch may change at install: each of
+        ``sources`` names one for it, or could not be read."""
+        return _risk(
+            RiskSeverity.MEDIUM,
+            "nonregistry_source",
+            f"npm package '{name}' may be patched at install ({', '.join(sources)}), so its "
+            "installed code is not known to be the registry artifact.",
+            "Review the patch and what it changes, or remove it and install the registry "
+            "release with lockfile integrity.",
+        )
 
     @staticmethod
     def _npm_source_risk(name: str, kind: str, spec: str) -> RiskAssessment:
@@ -1645,6 +1703,9 @@ class RegistryScanner(Scanner):
             packages = lock_doc.get("packages", {})
             if packages is not None and not isinstance(packages, dict):
                 raise ValueError("unsupported pnpm packages structure")
+            lock_patches = self._patched_names(lock_doc.get("patchedDependencies"))
+            if lock_patches is None:
+                raise ValueError("unsupported pnpm patchedDependencies structure")
         except (ValueError, UnicodeError, PolicyError, RecursionError, yaml.YAMLError):
             result.scan_failures.append("pnpm-lock.yaml: invalid or unsupported lockfile")
             return False
@@ -1678,6 +1739,12 @@ class RegistryScanner(Scanner):
         )
         for comp in components:
             alias = comp.properties.get("npm_alias")
+            names = {comp.name.lower()} if alias is None else {comp.name.lower(), alias.lower()}
+            if not lock_patches.isdisjoint(names):
+                # The record's integrity is the unpatched tarball's, whichever version
+                # the patch names: pnpm refuses a patch it does not apply.
+                self._pnpm_patched_component(comp, result)
+                continue
             if alias is not None:
                 # Only npm's own lockfile record is resolved against an alias's package.
                 if alias in importer_specs:
@@ -1709,6 +1776,9 @@ class RegistryScanner(Scanner):
                 result.surfaces_excluded.append(
                     f"pnpm-lock.yaml: packages whose names redact to {comp.name} are unresolved"
                 )
+                continue
+            if _pnpm_patched(ver_ref):
+                self._pnpm_patched_component(comp, result)
                 continue
             if ver_ref.startswith("npm:"):
                 result.surfaces_excluded.append(
@@ -1752,6 +1822,10 @@ class RegistryScanner(Scanner):
                 if not isinstance(pkg_record, dict):
                     result.scan_failures.append("pnpm-lock.yaml: invalid selected package record")
                     continue
+                if pkg_record.get("patched", False) is not False:
+                    # Lockfile v6 marks the record of a patched package.
+                    self._pnpm_patched_component(comp, result)
+                    continue
                 resolution = pkg_record.get("resolution")
                 if resolution is not None and not isinstance(resolution, dict):
                     result.scan_failures.append("pnpm-lock.yaml: invalid selected package record")
@@ -1785,6 +1859,17 @@ class RegistryScanner(Scanner):
                 result,
             )
         return True
+
+    def _pnpm_patched_component(
+        self, component: RegistryEntryComponent, result: ScanResult
+    ) -> None:
+        """Leave a package the lockfile records as patched unbound, with the gap and
+        finding a patch that package.json names gives it."""
+        component.package_url = None
+        gap = f"pnpm-lock.yaml: {self._PATCHED_GAP}"
+        if gap not in result.surfaces_excluded:
+            result.surfaces_excluded.append(gap)
+        component.risks.append(self._npm_patch_risk(component.name, ["pnpm-lock.yaml"]))
 
     def _resolve_yarn_lockfile(
         self,
@@ -1937,6 +2022,91 @@ class RegistryScanner(Scanner):
 
     _OVERRIDE_FIELDS = (("overrides",), ("resolutions",), ("pnpm", "overrides"))
     _OVERRIDE_ENTRIES = 10_000
+    # Bun patches the packages the top-level field names, and pnpm those of its own.
+    _PATCHED_FIELDS = (("patchedDependencies",), ("pnpm", "patchedDependencies"))
+
+    @classmethod
+    def _patched_names(cls, node: Any) -> frozenset[str] | None:
+        """The lower-case names of the packages a ``patchedDependencies`` map patches.
+
+        A key is a name, or a name and the version or range it patches; any version
+        counts. None when the map is not one, has more entries than are read, or has a
+        key that names no package.
+        """
+        if node is None:
+            return frozenset()
+        if not isinstance(node, dict) or len(node) > cls._OVERRIDE_ENTRIES:
+            return None
+        names: set[str] = set()
+        for key in node:
+            text = str(key).strip().lstrip("/")
+            at = text.find("@", text.find("/") + 1 if text.startswith("@") else 1)
+            name = (text if at < 0 else text[:at]).strip().lower()
+            if not name:
+                return None
+            names.add(name)
+        return frozenset(names)
+
+    def _npm_patches(
+        self, data: dict[str, Any], entries: list[str], result: ScanResult
+    ) -> dict[str, frozenset[str] | None]:
+        """The names each file outside the lockfile patches, by file; None for a file
+        whose names are not known, which then counts for every package."""
+        patches: dict[str, frozenset[str] | None] = {}
+        manifest: frozenset[str] | None = frozenset()
+        for path in self._PATCHED_FIELDS:
+            node: Any = data
+            for part in path:
+                node = node.get(part) if isinstance(node, dict) else None
+            names = self._patched_names(node)
+            manifest = None if names is None or manifest is None else manifest | names
+        if manifest is None or manifest:
+            patches["package.json"] = manifest
+        if "pnpm-workspace.yaml" in entries:
+            workspace = self._workspace_patches(result)
+            if workspace is None or workspace:
+                patches["pnpm-workspace.yaml"] = workspace
+        return patches
+
+    def _workspace_patches(self, result: ScanResult) -> frozenset[str] | None:
+        """The names pnpm-workspace.yaml patches, which pnpm 10 reads there, parsed as
+        pnpm-lock.yaml is; None when the file is not read."""
+        files = self._confined()
+        before = files.failures_recorded, files.exclusions_recorded
+        text = files.read_text("pnpm-workspace.yaml", missing_ok=True)
+        if text is None:
+            unread = (files.failures_recorded, files.exclusions_recorded) != before
+            return None if unread else frozenset()
+        result.surfaces_scanned.append("pnpm-workspace.yaml")
+        try:
+            import yaml
+        except ImportError:
+            result.scan_failures.append("pnpm-workspace.yaml: YAML parser unavailable")
+            return None
+        from nexus_symbiote.policy import PolicyError, parse_yaml_mapping
+
+        frame = (
+            yaml.StreamStartToken,
+            yaml.StreamEndToken,
+            yaml.DocumentStartToken,
+            yaml.DocumentEndToken,
+        )
+        try:
+            empty = True
+            for index, token in enumerate(yaml.scan(text)):
+                if index >= _MAX_PNPM_LOCK_TOKENS or isinstance(
+                    token, (yaml.AliasToken, yaml.AnchorToken, yaml.TagToken)
+                ):
+                    raise ValueError("unsupported YAML graph")
+                empty = empty and isinstance(token, frame)
+            # A file of comments, or an empty document, holds no settings.
+            workspace = {} if empty else parse_yaml_mapping(text)
+        except (ValueError, UnicodeError, PolicyError, RecursionError, yaml.YAMLError):
+            result.scan_failures.append(
+                "pnpm-workspace.yaml: invalid or unsupported workspace file"
+            )
+            return None
+        return self._patched_names(workspace.get("patchedDependencies"))
 
     @classmethod
     def _npm_overrides(cls, data: dict[str, Any]) -> tuple[set[str], set[str], set[str]] | None:

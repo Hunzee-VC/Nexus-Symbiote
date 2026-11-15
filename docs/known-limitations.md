@@ -663,6 +663,16 @@ A way around a limit that its entry does not describe is worth a
 - **Some lockfiles are not read.** `Pipfile.lock`, `pdm.lock`, `bun.lock` and
   `bun.lockb` give each package they may resolve a low `lockfile_unread` finding,
   not a gap.
+- **Patches are recognized, not read.** An npm package that a patch names in
+  `package.json` (`pnpm.patchedDependencies` or Bun's `patchedDependencies`),
+  `pnpm-workspace.yaml` or `pnpm-lock.yaml`, or that a pnpm record marks as patched,
+  binds no package URL or lockfile evidence and is a gap, whatever version the patch
+  names. Without a package URL it is not queried for advisories, although the release
+  it patches may have them. The patch file is not read, so what it changes is not
+  recorded. A patch of a package outside the catalog, such as a transitive dependency
+  of an inventoried package, is not reported. Code that an install runs, such as
+  `patch-package` from a `postinstall` script or a `.pnpmfile.cjs` hook, can change
+  installed packages with no finding.
 - **A pin in any root file resolves a range.** A PyPI range that an exact pin of the
   same package in another root file satisfies is taken as resolved, even when that
   file, such as `requirements-docs.txt`, is never installed.

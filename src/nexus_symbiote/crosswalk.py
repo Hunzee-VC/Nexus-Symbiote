@@ -767,8 +767,9 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
         _ref(ISO_42001, "A.10.3", _SUPPLIER),
     ),
-    # Medium findings also record workspace and local path packages, which can be part of
-    # the project, so every reference holds only for the high findings of remote sources.
+    # Medium findings also record workspace and local path packages and local patches, which
+    # can be part of the project, so every reference holds only for the high findings of
+    # remote sources.
     "nonregistry_source": (
         _ref(
             CWE,
