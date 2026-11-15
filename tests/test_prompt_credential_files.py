@@ -308,6 +308,11 @@ def test_a_walk_that_skips_the_credential_check_still_records_no_credential_file
         "scripts/id_rsa",
         "secrets/rotate.py",
         "deploy.key",
+        "secrets.py",
+        "config/credentials.rb",
+        "api_keys.js",
+        "password.sh",
+        ".env.dist",
     ],
 )
 def test_names_that_hold_credentials_are_credential_shaped(name):
@@ -321,6 +326,7 @@ def test_names_that_hold_credentials_are_credential_shaped(name):
         ".env.sample",
         ".env.template",
         "scripts/rotate_api_key.py",
+        "ROTATE_API_KEY.PY",
         "check_password_strength.sh",
         "secret_scanner.ts",
         "docs/secrets-handling.md",
@@ -342,3 +348,18 @@ def test_a_skill_keeps_its_script_named_for_the_credential_it_handles(tmp_path):
     result = PromptScanner().scan(tmp_path)
     excluded = [entry for entry in result.surfaces_excluded if "holds credentials" in entry]
     assert len(excluded) == 1 and "secret.yaml" in excluded[0]
+
+
+def test_a_skill_file_linked_to_a_store_written_as_a_program_is_a_gap(tmp_path):
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "secrets.py").write_text('WIFI_PASSWORD = "hunter2"\n')
+    skill = tmp_path / ".claude" / "skills" / "ops"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: ops\ndescription: x\n---\nRun helper.py.\n")
+    (skill / "helper.py").symlink_to("../../../config/secrets.py")
+    result = PromptScanner().scan(tmp_path)
+    digest = hash_bytes((tmp_path / "config" / "secrets.py").read_bytes())
+    assert (
+        digest.removeprefix("sha256:") not in AIBOM(components=result.components).model_dump_json()
+    )
+    assert any("holds credentials" in entry for entry in result.surfaces_excluded)
