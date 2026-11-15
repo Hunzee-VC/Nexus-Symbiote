@@ -89,9 +89,11 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 def _tls_context() -> ssl.SSLContext:
-    context = ssl.create_default_context()
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.check_hostname = True
+    context.load_default_certs(ssl.Purpose.SERVER_AUTH)
     context.minimum_version = ssl.TLSVersion.TLSv1_2
-    context.keylog_filename = None  # type: ignore[assignment]
     return context
 
 
@@ -521,10 +523,17 @@ def evaluate_release_tag(
     verification = tag.get("verification")
     if not isinstance(verification, dict) or verification.get("verified") is not True:
         return [f"GitHub does not report a verified signature on the release tag {name}"]
-    signers = _allowed_tag_signers() if allowed_signers is None else allowed_signers
+    if allowed_signers is None:
+        raw_signers = os.environ.get(SIGNER_ENV, "")
+        signers = _allowed_tag_signers(raw_signers)
+        if raw_signers != "" and not signers:
+            return [f"{SIGNER_ENV} is set but names no allowed tag signer"]
+    else:
+        signers = allowed_signers
     if signers:
         tagger = tag.get("tagger")
-        email = str(tagger.get("email", "")).strip().lower() if isinstance(tagger, dict) else ""
+        raw_email = tagger.get("email") if isinstance(tagger, dict) else None
+        email = raw_email.strip().lower() if isinstance(raw_email, str) else ""
         if not email or email not in signers:
             return [f"the release tag {name} was not created by an allowed tag signer"]
     return []

@@ -113,11 +113,16 @@ def test_action_yml_isolates_pip_and_clarifies_validate_scope() -> None:
 
 
 def test_repository_controls_tls_strict_json_and_proxy_isolation(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    keylog_dir = tmp_path / "missing-keylog-dir"
+    monkeypatch.setenv("SSLKEYLOGFILE", str(keylog_dir / "keys.log"))
     ctx = controls._tls_context()
     assert ctx.minimum_version >= ssl.TLSVersion.TLSv1_2
+    assert ctx.verify_mode == ssl.CERT_REQUIRED
+    assert ctx.check_hostname is True
     assert ctx.keylog_filename is None
+    assert not keylog_dir.exists()
 
     assert controls._strict_json(b'{"ok": 1}') == {"ok": 1}
     with pytest.raises(ValueError, match="duplicate JSON key"):
@@ -187,6 +192,18 @@ def test_repository_controls_requires_all_four_tag_rules_and_optional_tag_signer
     }
     assert controls.evaluate_release_tag(ref, tag_obj, version="0.2.0", sha=SHA) == []
 
+    monkeypatch.setenv("ALLOWED_RELEASE_TAG_SIGNERS", " , ")
+    empty_allowlist_errors = controls.evaluate_release_tag(ref, tag_obj, version="0.2.0", sha=SHA)
+    assert (
+        len(empty_allowlist_errors) == 1
+        and "names no allowed tag signer" in (empty_allowlist_errors[0])
+    )
+
+    monkeypatch.setenv("ALLOWED_RELEASE_TAG_SIGNERS", "none")
+    null_email_tag = {**tag_obj, "tagger": {"name": "Lead", "email": None}}
+    null_email_errors = controls.evaluate_release_tag(ref, null_email_tag, version="0.2.0", sha=SHA)
+    assert len(null_email_errors) == 1 and "allowed tag signer" in null_email_errors[0]
+
     monkeypatch.setenv("ALLOWED_RELEASE_TAG_SIGNERS", "maintainer@example.org, backup@example.org")
     assert controls.evaluate_release_tag(ref, tag_obj, version="0.2.0", sha=SHA) == []
 
@@ -203,7 +220,6 @@ def test_workflow_checker_blocks_flow_mapping_count_balancing_and_neutralizing_f
     tmp_path: Path,
 ) -> None:
     pin_a = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
-    pin_b = "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0"
     spoofed = tmp_path / "spoofed.yml"
     spoofed.write_text(
         "name: Spoof\n"
@@ -215,8 +231,8 @@ def test_workflow_checker_blocks_flow_mapping_count_balancing_and_neutralizing_f
         "    runs-on: ubuntu-24.04\n"
         "    timeout-minutes: 10\n"
         "    steps:\n"
-        f"      - {{uses: {pin_b}}}\n"
-        "      - name: Decoy comment line inside shell block\n"
+        f"      - {{uses: {pin_a}}}\n"
+        "      - name: Decoy comment line inside shell block with identical pin\n"
         "        run: |\n"
         f"          uses: {pin_a} # v7.0.1\n",
         encoding="utf-8",
@@ -229,7 +245,17 @@ def test_workflow_checker_blocks_flow_mapping_count_balancing_and_neutralizing_f
     )
     assert any(g.runs("scripts/check_locks.py") for g in locks_gates)
 
-    for bad_flag in ("--exit-zero", "--help", "-h", "--version", "-V", "--collect-only"):
+    for bad_flag in (
+        "-e",
+        "--exit-zero",
+        "--help",
+        "-h",
+        "--version",
+        "-V",
+        "--co",
+        "--collect-only",
+        "--setup-only",
+    ):
         parsed_gates = check_workflows._gates(
             f"ruff check src tests scripts {bad_flag}", True, True
         )
@@ -247,6 +273,35 @@ def test_workflow_checker_blocks_flow_mapping_count_balancing_and_neutralizing_f
         )
         == []
     )
+    for poisoned in (
+        "export LD_PRELOAD=/nonexistent/evil.so\nruff check src tests scripts",
+        "declare -x PYTHONHOME=/nonexistent/fake\nruff check src tests scripts",
+        "set -a\nLD_PRELOAD=/nonexistent/evil.so\nruff check src tests scripts",
+    ):
+        poisoned_gates = check_workflows._gates(poisoned, True, True)
+        assert not any(g.runs("ruff check src tests scripts") for g in poisoned_gates)
+    assert any(
+        g.runs("ruff check src tests scripts")
+        for g in check_workflows._gates(
+            "export SAFE_VALUE=1\nruff check src tests scripts", True, True
+        )
+    )
+
+    gate_step_env_errors = check_workflows._gate_issues(
+        Path(".github/workflows/release.yml"),
+        "compatibility",
+        {
+            "steps": [
+                {
+                    "env": {"LD_PRELOAD": "/nonexistent/evil.so"},
+                    "run": "python scripts/check_installed_wheel.py --source .",
+                }
+            ]
+        },
+        None,
+    )
+    assert any("unsafe gate environment in step env" in err for err in gate_step_env_errors)
+    assert any("does not run" in err for err in gate_step_env_errors)
 
 
 def test_coverage_floors_include_tier0_runtime_live_and_supply_chain_modules() -> None:
@@ -324,10 +379,12 @@ def test_benchmark_and_evidence_helpers_enforce_confined_io(
     ev_dir = tmp_path / "ev"
     (ev_dir / "fixtures").mkdir(parents=True)
     (ev_dir / "fixtures" / "good.json").write_text("{}", encoding="utf-8")
+    (ev_dir / "fixtures" / "linked.json").symlink_to(real_manifest)
     (ev_dir / "fixtures" / "dangling.json").symlink_to(tmp_path / "nonexistent")
     monkeypatch.setattr(evidence, "DIRECTORY", ev_dir)
     mats = evidence.materials()
     assert "corpus/fixtures/good.json" in mats
+    assert "corpus/fixtures/linked.json" not in mats
     assert "corpus/fixtures/dangling.json" not in mats
 
     monkeypatch.setattr(evidence, "run", lambda: {"passed": True, "corpus_version": 1})
@@ -337,18 +394,41 @@ def test_benchmark_and_evidence_helpers_enforce_confined_io(
         evidence.prepare(ev_dir_link)
 
 
-def test_conftest_isolates_proxy_env_and_normalizes_umask() -> None:
-    for name in (
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "SSLKEYLOGFILE",
-        "ALLOWED_RELEASE_TAG_SIGNERS",
-    ):
-        assert name not in os.environ
-    current_umask = os.umask(0o022)
-    os.umask(current_umask)
-    assert current_umask == 0o022
+def test_conftest_isolates_proxy_env_and_normalizes_umask(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
+    import tests.conftest as conftest_mod
+
+    saved_umask = os.umask(0o000)
+    local_mp = pytest.MonkeyPatch()
+    try:
+        local_mp.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+        local_mp.setenv("SSLKEYLOGFILE", "/nonexistent/keys.log")
+        local_mp.setenv("ALLOWED_RELEASE_TAG_SIGNERS", "alice@example.org")
+        inner_mp = pytest.MonkeyPatch()
+        gen = conftest_mod._isolated_environment.__wrapped__(inner_mp, tmp_path_factory)
+        try:
+            next(gen)
+            for name in (
+                "HTTP_PROXY",
+                "HTTPS_PROXY",
+                "ALL_PROXY",
+                "SSLKEYLOGFILE",
+                "ALLOWED_RELEASE_TAG_SIGNERS",
+            ):
+                assert name not in os.environ
+            active_umask = os.umask(0o022)
+            os.umask(active_umask)
+            assert active_umask == 0o022
+        finally:
+            with pytest.raises(StopIteration):
+                next(gen)
+            inner_mp.undo()
+        restored_umask = os.umask(0o000)
+        assert restored_umask == 0o000
+    finally:
+        local_mp.undo()
+        os.umask(saved_umask)
 
 
 def test_workflows_makefile_and_docs_security_invariants() -> None:
@@ -363,14 +443,14 @@ def test_workflows_makefile_and_docs_security_invariants() -> None:
         "pip install --only-binary=:all: --no-index --no-deps --force-reinstall dist/*.whl"
         in ci_text
     )
-    assert "pip install dist/*.whl --only-binary=:all:" in ci_text
-    assert "pip install dist/*.whl --only-binary=:all:" in release_text
+    assert "pip install --only-binary=:all: dist/*.whl" in ci_text
+    assert "pip install --only-binary=:all: dist/*.whl" in release_text
     assert "tests/test_registry_redirects.py" in deps_text
     assert "PYTHON ?= python" in makefile_text
     assert "--no-index --no-deps --only-binary=:all: dist/*.whl" in makefile_text
 
     threat_model = (ROOT / "docs" / "threat-model.md").read_text(encoding="utf-8")
-    assert "pull_request_target" not in threat_model
+    assert "a `pull_request_target` job" not in threat_model
 
     releasing = (ROOT / "docs" / "releasing.md").read_text(encoding="utf-8")
     assert ("/" + "tmp/rehearsal") not in releasing

@@ -230,7 +230,12 @@ def test_release_floating_dependencies_cannot_replace_attestation_or_publication
         for command in step.get("run", "").splitlines():
             if "pip install" in command:
                 assert "--require-hashes" in command or "--no-deps" in command
-    assert any("pip install dist/*.whl" in step.get("run", "") for step in compatibility["steps"])
+    # The wheel resolves its dependencies from the index here, by design, but only as
+    # wheels: a source distribution's build hook would run code in this job.
+    assert any(
+        "pip install --only-binary=:all: dist/*.whl" in step.get("run", "")
+        for step in compatibility["steps"]
+    )
 
     for output, step_id in [("distributions_id", "distributions"), ("evidence_id", "evidence")]:
         assert build["outputs"][output] == "${{ steps." + step_id + ".outputs.artifact-id }}"
