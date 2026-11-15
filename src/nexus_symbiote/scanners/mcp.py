@@ -69,6 +69,7 @@ from nexus_symbiote.scanners.mcp_launch import (
 from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.jsonc import strip_jsonc
 from nexus_symbiote.utils.secrets import (
+    MIN_SECRET_LENGTH,
     REDACTED,
     TOKEN_SHAPE,
     SecretScrubber,
@@ -1413,20 +1414,25 @@ class _Identity:
 
 
 _DIAGNOSTIC_NODES = 4096
+_DIAGNOSTIC_FIELDS = ("command", "args", "url", "serverUrl", "endpoint", "httpUrl", "uri")
 _INLINE_ASSIGNMENT = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)=(.+)", re.DOTALL)
 
 
-def _diagnostic_values(config: dict[str, Any]) -> list[str]:
+def _diagnostic_values(config: dict[str, Any]) -> list[str] | None:
     """User information in this server's URLs, and credentials its `NAME=value` arguments set.
 
-    The walk is bounded: a server that failed validation can be any shape.
+    Only the launch and endpoint fields are read, so a large `tools` value cannot use up
+    the walk before them. ``None`` when even those exceed the bounded walk: a server that
+    failed validation can be any shape, and its name is then not shown.
     """
     values: list[str] = []
-    pending: list[Any] = [config]
+    pending: list[Any] = [config.get(field) for field in _DIAGNOSTIC_FIELDS]
     visited = 0
-    while pending and visited < _DIAGNOSTIC_NODES:
-        node = pending.pop()
+    while pending:
         visited += 1
+        if visited > _DIAGNOSTIC_NODES:
+            return None
+        node = pending.pop()
         if isinstance(node, dict):
             pending.extend(node.values())
         elif isinstance(node, list):
@@ -1438,7 +1444,12 @@ def _diagnostic_values(config: dict[str, Any]) -> list[str]:
                 except ValueError:
                     parts = None
                 if parts is not None:
-                    values.extend(part for part in (parts.username, parts.password) if part)
+                    # A short user name such as `git` is a locator that ordinary names
+                    # repeat; a long one is often a token. A password is one at any length.
+                    if parts.username and len(parts.username) >= MIN_SECRET_LENGTH:
+                        values.append(parts.username)
+                    if parts.password:
+                        values.append(parts.password)
             inline = _INLINE_ASSIGNMENT.fullmatch(node)
             if inline is not None:
                 # As for `env`: only a credential name's value, or a credential-shaped one.
@@ -1624,7 +1635,10 @@ class MCPScanner(Scanner):
         # A name may repeat what only this server's text holds and no rule reads as a
         # credential: URL user information, or `NAME=value` passed to a launcher such
         # as `cross-env`, which the launch analysis does not unwrap.
-        scrubber = scrubber.extended(_diagnostic_values(config))
+        own = _diagnostic_values(config)
+        if own is None:
+            return "[withheld]"
+        scrubber = scrubber.extended(own)
         # Clipping first can truncate a token so its recognizable shape is lost.
         return neutralize(redact_text(name, scrubber)[:256])
 

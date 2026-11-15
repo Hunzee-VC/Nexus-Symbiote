@@ -6,11 +6,12 @@ import json
 from pathlib import Path
 
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.scanners.mcp import MCPScanner
+from nexus_symbiote.scanners.mcp import MCPScanner, _diagnostic_values
 
 STRIPE = "zq9XwV2rT7pL4mN8kJ3h"
 USERINFO = "Pw9xK2mV7qL4"
 INLINE = "Tk3jH8wQ5zR1"
+WORDS = "correcthorsewalrus"
 
 
 def _scan(root: Path, servers: dict[str, object]) -> str:
@@ -58,3 +59,41 @@ def test_a_failure_names_its_server_without_its_own_url_or_inline_values(
     )
     assert USERINFO not in shown and INLINE not in shown
     assert "invalid tool definition for server 'url-***'" in shown
+
+
+def test_a_large_field_does_not_use_up_the_walk_before_the_url(tmp_path: Path) -> None:
+    shown = _scan(
+        tmp_path,
+        {
+            f"url-{WORDS}": {
+                "type": "http",
+                "url": f"https://user:{WORDS}@mcp.example.com/mcp",
+                "metadata": {f"k{index}": "v" for index in range(5000)},
+                "tools": [{"name": 5}],
+            },
+        },
+    )
+    assert WORDS not in shown
+    assert "invalid tool definition for server 'url-***'" in shown
+
+
+def test_launch_fields_too_large_to_walk_are_refused() -> None:
+    # The parser's argument limit refuses such a server first; the walk fails closed too.
+    assert _diagnostic_values({"args": [f"API_TOKEN={WORDS}", *(["x"] * 5000)]}) is None
+
+
+def test_a_short_user_name_is_not_scrubbed_from_names_but_a_short_password_is(
+    tmp_path: Path,
+) -> None:
+    shown = _scan(
+        tmp_path,
+        {
+            "git-mirror-hunter2": {
+                "type": "http",
+                "url": "https://git:hunter2@mcp.example.com/mcp",
+                "tools": [{"name": 5}],
+            },
+        },
+    )
+    assert "hunter2" not in shown
+    assert "invalid tool definition for server 'git-mirror-***'" in shown
