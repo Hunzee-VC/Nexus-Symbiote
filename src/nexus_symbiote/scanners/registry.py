@@ -42,7 +42,7 @@ from nexus_symbiote.scanners.mcp import (
     npm_scope_registry,
 )
 from nexus_symbiote.scanners.mcp_launch import expands
-from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.utils.confined import ConfinedCollection, recorded_count
 from nexus_symbiote.utils.secrets import redact_text, redact_url
 from nexus_symbiote.utils.terminal import UNSAFE_TEXT
 from nexus_symbiote.utils.toml import TOMLBoundsError
@@ -1398,12 +1398,17 @@ class RegistryScanner(Scanner):
             if lock_name == "pnpm-lock.yaml":
                 read = self._resolve_pnpm_lockfile(raw_lock, registry, components, result)
             else:
-                failures = len(result.scan_failures)
-                yarnrc = read_files[".yarnrc.yml"] = self._read_mapping(Path(".yarnrc.yml"), result)
-                # A file that cannot be read leaves Yarn's settings unknown.
-                cache_key = (
-                    _yarn_cache_key(yarnrc) if len(result.scan_failures) == failures else None
+                before = (
+                    recorded_count(result.scan_failures),
+                    recorded_count(result.surfaces_excluded),
                 )
+                yarnrc = read_files[".yarnrc.yml"] = self._read_mapping(Path(".yarnrc.yml"), result)
+                # A file that cannot be read or is excluded leaves Yarn's settings unknown.
+                after = (
+                    recorded_count(result.scan_failures),
+                    recorded_count(result.surfaces_excluded),
+                )
+                cache_key = _yarn_cache_key(yarnrc) if after == before else None
                 read = self._resolve_yarn_lockfile(raw_lock, registry, result, cache_key)
             if not read:
                 for component in registry:

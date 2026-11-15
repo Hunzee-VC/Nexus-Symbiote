@@ -606,6 +606,39 @@ def test_an_unreadable_yarnrc_fails_once_and_leaves_no_integrity(tmp_path):
     assert [r.category for r in comp.risks] == ["missing_lockfile_integrity"]
 
 
+def test_an_excluded_yarnrc_leaves_berry_checksum_unverified(tmp_path):
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"4.0.0"}}')
+    (tmp_path / ".yarnrc.yml").write_text("checksumBehavior: ignore\n")
+    (tmp_path / "yarn.lock").write_text(BERRY_HEAD + BERRY_OPENAI, newline="")
+    scanner = RegistryScanner()
+    scanner.configure(exclude_paths=(".yarnrc.yml",))
+    result = scanner.scan(tmp_path)
+    assert any(".yarnrc.yml" in entry for entry in result.surfaces_excluded)
+    (comp,) = result.components
+    assert [r.category for r in comp.risks] == ["missing_lockfile_integrity"]
+
+
+def test_saturated_scan_failures_still_detect_unreadable_yarnrc(tmp_path, monkeypatch):
+    from nexus_symbiote.utils import confined
+
+    monkeypatch.setattr(confined, "MAX_LISTED_FAILURES", 1)
+    (tmp_path / ".yarnrc.yml").write_text("- not\n- a mapping\n")
+    scanner = RegistryScanner()
+    orig_lock = scanner._npm_lock
+
+    def prefill_and_lock(result):
+        result.scan_failures.append("prefilled-1")
+        result.scan_failures.append("prefilled-2")
+        return orig_lock(result)
+
+    monkeypatch.setattr(scanner, "_npm_lock", prefill_and_lock)
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"4.0.0"}}')
+    (tmp_path / "yarn.lock").write_text(BERRY_HEAD + BERRY_OPENAI, newline="")
+    result = scanner.scan(tmp_path)
+    (comp,) = result.components
+    assert [r.category for r in comp.risks] == ["missing_lockfile_integrity"]
+
+
 @pytest.mark.parametrize(
     "fields",
     [
