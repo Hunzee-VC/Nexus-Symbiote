@@ -620,3 +620,29 @@ def test_a_patch_repeated_under_a_duplicate_manifest_key_is_refused(tmp_path):
     result = RegistryScanner().scan(tmp_path)
     assert result.scan_failures == ["package.json: invalid JSON or duplicate keys"]
     assert all(component.package_url is None for component in result.components)
+
+
+def test_a_case_variant_pnpm_workspace_fails_closed_and_unbinds_packages(tmp_path):
+    manifest = {"dependencies": {"openai": "4.0.0"}}
+    lock = pnpm10_lock(patched=None, version="4.0.0")
+    (tmp_path / "package.json").write_text(json.dumps(manifest))
+    (tmp_path / "pnpm-lock.yaml").write_text(lock)
+    variant = tmp_path / "Pnpm-Workspace.yaml"
+    variant.write_text("patchedDependencies:\n  openai@4.0.0: patches/evil.patch\n")
+    result = RegistryScanner().scan(tmp_path)
+    assert WORKSPACE_UNREAD in result.surfaces_excluded
+    assert WORKSPACE_GAP in result.surfaces_excluded
+    assert result.scan_failures != []
+    (component,) = result.components
+    assert_unbound(component)
+    cli = CliRunner().invoke(main, ["scan", str(tmp_path), "--no-project-policy", "--check"])
+    assert cli.exit_code == 1
+
+
+def test_a_case_variant_pnpm_workspace_at_a_monorepo_root_fails_closed(tmp_path):
+    (tmp_path / "package.json").write_text(json.dumps({"name": "root", "private": True}))
+    (tmp_path / "Pnpm-Workspace.yaml").write_text("packages:\n  - packages/*\n")
+    result = RegistryScanner().scan(tmp_path)
+    assert result.surfaces_excluded == [WORKSPACE_UNREAD]
+    cli = CliRunner().invoke(main, ["scan", str(tmp_path), "--no-project-policy", "--check"])
+    assert cli.exit_code == 1

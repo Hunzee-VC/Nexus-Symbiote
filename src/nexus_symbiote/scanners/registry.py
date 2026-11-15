@@ -1002,7 +1002,8 @@ class RegistryScanner(Scanner):
         return "registry", None, text
 
     def _scan_npm(self, result: ScanResult, entries: list[str]) -> list[RegistryEntryComponent]:
-        if "pnpm-workspace.yaml" in entries:
+        has_pnpm_workspace = any(self._fold(entry) == "pnpm-workspace.yaml" for entry in entries)
+        if has_pnpm_workspace:
             result.surfaces_excluded.append(self._NPM_GAPS["pnpm"])
         data = self._confined().read_json("package.json", missing_ok=True)
         if data is None:
@@ -1056,9 +1057,7 @@ class RegistryScanner(Scanner):
             selected.append((key, specs, kind, version_range, record, package))
         # Without an inventoried npm package, the workspace gap already covers what
         # pnpm-workspace.yaml may patch, so a file pnpm would refuse fails nothing.
-        patches = self._npm_patches(
-            data, result, workspace=bool(selected) and "pnpm-workspace.yaml" in entries
-        )
+        patches = self._npm_patches(data, result, workspace=bool(selected) and has_pnpm_workspace)
         for key, specs, kind, version_range, record, package in selected:
             overridden = overrides is None or bool({key.lower(), package.lower()} & overrides[0])
             if overridden:
