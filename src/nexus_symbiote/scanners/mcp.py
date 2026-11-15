@@ -66,7 +66,7 @@ from nexus_symbiote.scanners.mcp_launch import (
     known_executable,
     origin,
 )
-from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
 from nexus_symbiote.utils.jsonc import strip_jsonc
 from nexus_symbiote.utils.secrets import (
     REDACTED,
@@ -114,6 +114,7 @@ MCP_DIALECTS = (
     McpDialect(".codex/config.toml", "toml", ("mcp_servers",)),
 )
 MCP_CONFIG_FILES = [dialect.path for dialect in MCP_DIALECTS]
+_ROOT_CLIENT_FILES = frozenset(MCP_CONFIG_FILES)
 
 # The same names below the root: a package's own configuration, and the files
 # other hosts read (.vscode/mcp.json, .windsurf/mcp_config.json, ...).
@@ -140,6 +141,42 @@ _HOST_DIRECTORIES = {
     ".gemini": "gemini-cli",
     ".codex": "codex",
 }
+_FOLDED_CONFIG_NAMES = {fold_name(name): name for name in MCP_CONFIG_NAMES}
+_FOLDED_HOST_DIRECTORIES = {fold_name(name): name for name in _HOST_DIRECTORIES}
+# Longest first, so the first match is the dialect _template picks for the exact spelling.
+_FOLDED_TEMPLATES = sorted(
+    (
+        (tuple(fold_name(part) for part in dialect.path.split("/")), dialect.path.split("/"))
+        for dialect in MCP_DIALECTS
+    ),
+    key=lambda template: -len(template[0]),
+)
+
+
+def _client_spelling(path: Path) -> str | None:
+    """The client file a host opens as the walked ``path`` on a case-insensitive file
+    system, or ``None`` when its name folds to none of ``MCP_CONFIG_NAMES``.
+
+    The name and the dialect path it ends in, or for a name that ends no dialect path
+    the host directories just above it, take the spelling the collector reads: they
+    decide the dialect, client and launch directory of the exact spelling
+    (:func:`_template`, :func:`_launch_directory`).
+    """
+    name = _FOLDED_CONFIG_NAMES.get(fold_name(path.name))
+    if name is None:
+        return None
+    parts = list(path.parts)
+    folded = [fold_name(part) for part in parts]
+    for template, spelling in _FOLDED_TEMPLATES:
+        if len(template) <= len(parts) and tuple(folded[-len(template) :]) == template:
+            parts[-len(template) :] = spelling
+            return "/".join(parts)
+    parts[-1] = name
+    index = len(parts) - 1
+    while index > 0 and (host := _FOLDED_HOST_DIRECTORIES.get(folded[index - 1])) is not None:
+        index -= 1
+        parts[index] = host
+    return "/".join(parts)
 
 
 def _template(path: str) -> McpDialect | None:
@@ -1427,10 +1464,7 @@ class MCPScanner(Scanner):
             project_root, result, max_total_bytes=source_collection_bytes()
         ) as files:
             sources = list(files.iter_files())
-            nested = sorted(
-                {path.as_posix() for path in sources if path.name in MCP_CONFIG_NAMES}
-                - set(MCP_CONFIG_FILES)
-            )
+            nested = self._nested_client_files(files, sources)
             try:
                 key, key_error = source_binding_key(), None
             except SourceBindingKeyError as exc:
@@ -1451,6 +1485,25 @@ class MCPScanner(Scanner):
             result.surfaces_scanned.append("mcp-config (no config files found)")
 
         return result
+
+    @staticmethod
+    def _nested_client_files(files: ConfinedCollection, sources: list[Path]) -> list[str]:
+        """The walked client files that are not fixed root paths, in a stable order.
+
+        Another spelling of one is a failure, beside the exact spelling too: a
+        case-insensitive checkout holds one file for both names, with the content of
+        whichever it wrote last.
+        """
+        nested: set[str] = set()
+        for path in sources:
+            spelling = _client_spelling(path)
+            if spelling is None:
+                continue
+            if spelling != path.as_posix():
+                files.report_case_variant(path, spelling)
+            elif spelling not in _ROOT_CLIENT_FILES:
+                nested.add(spelling)
+        return sorted(nested)
 
     def _scan_dialects(
         self,
