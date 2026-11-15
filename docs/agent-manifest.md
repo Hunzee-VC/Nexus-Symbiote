@@ -47,8 +47,14 @@ are checked only when a scan reads the manifest.
 The exported `name`, `version`, `framework` and `owner` use the name rule of the
 shared [redaction](security-model.md#known-false-positive-and-false-negative-classes),
 which keeps an ordinary name such as `sk-research-assistant`, and `purpose` uses
-free-text redaction. Recognized credentials are removed before these values enter
-any inventory or export. Redaction does not recognize every possible secret, so keep credentials
+free-text redaction. So do a hosted model's `provider` and `requested_ref`, which
+become the model component's provider, name and requested alias: an API key pasted
+there is most often an `sk-` key, which the name rule keeps. Recognized credentials
+are removed before these values enter any inventory or export. A `models` key becomes
+the model's component reference and names it in every scan failure, so a key that
+free-text redaction changes, such as one holding a `ghp_` token, an `sk-` key of at
+least 20 characters after `sk-`, a `password=` assignment or a URL with a path, adds no
+component and is a scan failure that names the key as redacted. Redaction does not recognize every possible secret, so keep credentials
 out of these fields and review earlier exports before sharing them.
 
 ## What it changes
@@ -93,11 +99,12 @@ inventory, so the default gate fails and the evidence stays available for review
 | `agent.yaml#/instructions/N: declared instruction is not UTF-8 text` | It cannot be checked for hidden characters |
 | `agent.yaml#/models/KEY: the declared local model has no collected model artifact` | No collected model at that path |
 | `agent.yaml#/models/KEY: the declared local model is unavailable` | The artifact can no longer be opened safely |
+| `agent.yaml#/models/KEY: the key holds a recognized credential` | A local or hosted model key that free-text redaction changes. `KEY` is the redacted key, percent-encoded, such as `%2A%2A%2A` for a key that is a `ghp_` token |
 | `agent.yaml#/models/KEY: the key is too long for a component reference` | A hosted model key that, percent-encoded, makes the model's reference longer than 16,384 characters |
 | `agent.yaml: declares a component reference that is already in use` | A declared instruction or hosted model would take the reference of a different component already in the inventory |
 
-These failures name an entry by its position or its percent-encoded key, never by
-its text: that text comes from the checkout and need not name a file.
+These failures name an entry by its position or its redacted, percent-encoded key,
+never by its text: that text comes from the checkout and need not name a file.
 
 `validate --project` and `risk --project` recollect the manifest and report any of
 these as "Local agent manifest could not be reconciled."

@@ -226,18 +226,27 @@ def _manifest_dependencies(
             )
         )
     for key, model in declared.models.items():
-        locator = f"{MANIFEST}#/models/{_clip(quote(key, safe=''))}"
+        shown = redact_text(key)
+        locator = f"{MANIFEST}#/models/{_clip(quote(shown, safe=''))}"
+        if shown != key:
+            # The key becomes the component's reference and every failure's locator,
+            # which no redaction may change: two keys could then share one.
+            problems.append(f"{locator}: the key holds a recognized credential")
+            continue
         if model.path is None:
             ref = f"model:{agent_ref}/hosted/{quote(key, safe='')}"
             if len(ref) > MAX_REFERENCE_CHARS:
                 problems.append(f"{locator}: the key is too long for a component reference")
                 continue
+            # An API key pasted for a model name is most often an sk- key, which the
+            # name rule keeps, so these use free-text redaction.
+            alias = None if model.requested_ref is None else redact_text(model.requested_ref)
             additions.append(
                 ModelComponent(
                     bom_ref=ref,
-                    name=model.requested_ref or key,
-                    provider=model.provider,
-                    requested_alias=model.requested_ref,
+                    name=alias or key,
+                    provider=None if model.provider is None else redact_text(model.provider),
+                    requested_alias=alias,
                     model_type="hosted",
                     source_path=MANIFEST,
                     claims={
