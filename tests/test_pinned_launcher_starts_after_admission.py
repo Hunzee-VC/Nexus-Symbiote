@@ -20,6 +20,10 @@ from nexus_symbiote.runtime import AuthorizationError, sign_contract
 from tests.test_runtime_authorization import fixture
 from tests.test_runtime_stdio_session import launcher, signed_inputs
 
+# These protocol fixtures run on hosts without kernel PID containment, such as hosted
+# runners; containment has its own default-denial tests.
+pytestmark = pytest.mark.usefixtures("nonisolated_pinned_fixtures")
+
 
 def started_launcher(tmp_path: Path) -> tuple[Path, str, Path]:
     """The suite's launcher, which also records that it started before reading input."""
