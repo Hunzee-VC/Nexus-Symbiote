@@ -323,12 +323,19 @@ class _Options:
     # with "-" and reads that word as an option; a value such a parser may not consume is
     # not taken from the next word.
     dashed_values: bool = True
-    # nopt also reads a literal true or false after a Boolean option as its value, which
-    # moves the next positional word; such a pair is not read.
+    # nopt also reads a value word (_NOPT_BOOLEAN_WORDS) after a Boolean option as its
+    # value, which moves the next positional word; such a pair is not read.
     nopt_booleans: bool = False
     # Letters of the single-letter options, for checking option clusters in C.
     short_flags: frozenset[str] = frozenset()
     short_values: frozenset[str] = frozenset()
+
+
+# Every word nopt reads as the value of a Boolean or [null, Boolean] option written without
+# "=": true and false for any Boolean, null where the type allows null. nopt also takes a
+# number or any word for a [Boolean, Number] or [Boolean, String] option; no flag in a
+# table with nopt_booleans has such a type (see the differential test).
+_NOPT_BOOLEAN_WORDS = frozenset({"true", "false", "null"})
 
 
 def _letters(options: str) -> frozenset[str]:
@@ -394,11 +401,8 @@ def _scan(tokens: list[str], table: _Options) -> tuple[list[tuple[str, str | Non
             if (
                 table.nopt_booleans
                 and not equals
-                and tokens[index + 1 : index + 2]
-                in (
-                    ["true"],
-                    ["false"],
-                )
+                and index + 1 < len(tokens)
+                and tokens[index + 1] in _NOPT_BOOLEAN_WORDS
             ):
                 return None
             seen.append((name, attached if equals else None))
@@ -2694,8 +2698,8 @@ _SOCKETS = ("docker.sock", "podman.sock", "containerd.sock", "crio.sock", "docke
 _SOCKET_DIRECTORIES = re.compile(
     r"/(?:var/)?run(?:/(?:user|containerd|podman|docker|dbus|crio|systemd|k3s|lxd|snapd)(?:/.*)?)?"
 )
-# Engine state: other containers' layers and volumes.
-_ENGINE_STATE = re.compile(r"/var/lib/(?:docker|containers|containerd)(?:/.*)?")
+# Engine state: other containers' layers and volumes, and the kubelet's pod secrets.
+_ENGINE_STATE = re.compile(r"/var/lib/(?:docker|containers|containerd|kubelet)(?:/.*)?")
 # /proc/<pid>/root is that process's root directory, and init's cwd is "/": the host's,
 # for a host process.
 _PROC_ROOT = re.compile(r"/proc/[^/]+/(?:root|cwd)(?=/|$)")
@@ -2722,8 +2726,9 @@ _CONTAINER_CODE_ENVIRONMENT = _set(
     " JDK_JAVA_OPTIONS BASH_ENV ENV SHELLOPTS BASHOPTS PS4 NPM_CONFIG_NODE_OPTIONS"
     " NPM_CONFIG_SCRIPT_SHELL"
 )
-# Variables that move startup and user-site files, into the checkout beside a host mount.
-_CONTAINER_HOME_ENVIRONMENT = _set("HOME ZDOTDIR XDG_CONFIG_HOME PYTHONUSERBASE")
+# Variables that move startup and user-site files, or the search path for the image's
+# command, into the checkout beside a host mount.
+_CONTAINER_HOME_ENVIRONMENT = _set("HOME ZDOTDIR XDG_CONFIG_HOME PYTHONUSERBASE PATH")
 
 
 def _mount_fields(spec: str) -> dict[str, str]:
@@ -2854,12 +2859,27 @@ def _container_context(options: list[tuple[str, str | None]], launch: Launch) ->
 
 
 _CONTAINER_SCRIPT_RUNNERS = re.compile(
-    r"node(?:js)?|python[0-9.]*|deno|bun|ruby|perl|php|(?:ba|da|z|k|mk)?sh|ash"
+    r"node(?:js)?|python[0-9.]*|deno|bun|ruby|perl|php|(?:ba|da|z|k|mk)?sh|ash|env|java"
+    r"|npm|pnpm|yarn|uv"
 )
+# Package managers that run a project's scripts from the working directory.
+_CONTAINER_PACKAGE_RUNNERS = _set("npm pnpm yarn bun uv")
+_CONTAINER_PACKAGE_SCRIPTS = _set("run run-script start test")
+# A file the image runs as its command; a mounted data or configuration file is not code.
+_CONTAINER_SCRIPT_SUFFIX = re.compile(
+    r".+\.(?:sh|bash|zsh|js|mjs|cjs|ts|mts|cts|py|rb|pl|php|jar)", re.IGNORECASE
+)
+# Interpreter options whose separate value is a setting, never a file.
+_CONTAINER_SETTING_OPTIONS = frozenset({"-X", "-W"})
+
+
+def _absolute(path: str) -> str:
+    # normpath keeps a leading "//", which Linux reads as "/".
+    return posixpath.normpath("/" + path.lstrip("/"))
 
 
 def _mounted_command(options: list[tuple[str, str | None]], words: list[str]) -> bool:
-    """Whether the command that replaces the image's CMD is a file from a host mount."""
+    """Whether the command that replaces the image's CMD runs a file from a host mount."""
     targets: list[str] = []
     workdir = ""
     for option, value in options:
@@ -2876,22 +2896,48 @@ def _mounted_command(options: list[tuple[str, str | None]], words: list[str]) ->
         else:
             target = value[len(source) + 1 :].split(":", 1)[0]
         if target and target.startswith("/"):
-            targets.append(posixpath.normpath(target))
+            targets.append(_absolute(target))
     if not targets or not words:
         return False
-    script = words[0]
-    runner = _CONTAINER_SCRIPT_RUNNERS.fullmatch(normalize_command(script))
-    if runner:
-        script = next((word for word in words[1:] if not word.startswith("-")), "")
-    elif "/" not in script or "." not in script.rsplit("/", 1)[-1]:
-        # A path with no file suffix is more often a directory the server is given.
-        return False
-    if not script.startswith("/"):
-        if not workdir.startswith("/"):
-            return False
-        script = posixpath.join(workdir, script)
-    path = posixpath.normpath(script)
-    return any(path == t or path.startswith(t.rstrip("/") + "/") for t in targets)
+
+    def mounted(word: str, *, relative: bool = True) -> bool:
+        if not word.startswith("/"):
+            if not relative or not workdir.startswith("/"):
+                return False
+            word = posixpath.join(workdir, word)
+        path = _absolute(word)
+        return any(path == t or path.startswith(t.rstrip("/") + "/") for t in targets)
+
+    command = normalize_command(words[0])
+    if not _CONTAINER_SCRIPT_RUNNERS.fullmatch(command):
+        # A path with no executable suffix is more often a directory or file the server
+        # is given than its own command.
+        return (
+            "/" in words[0]
+            and bool(_CONTAINER_SCRIPT_SUFFIX.fullmatch(words[0]))
+            and (mounted(words[0]))
+        )
+    if (
+        command in _CONTAINER_PACKAGE_RUNNERS
+        and not _CONTAINER_PACKAGE_SCRIPTS.isdisjoint(words[1:])
+        and mounted(".")
+    ):
+        return True
+    rest = iter(words[1:])
+    for word in rest:
+        if word in _CONTAINER_SETTING_OPTIONS:
+            next(rest, None)
+            continue
+        if word.startswith("-"):
+            name, equals, value = word.partition("=")
+            if equals and name not in _CONTAINER_SETTING_OPTIONS and mounted(value):
+                return True
+            continue
+        # A relative word counts only when it reads as a file path, not as a value.
+        file_like = "/" in word or "." in word.rsplit("/", 1)[-1].strip(".")
+        if mounted(word, relative=file_like):
+            return True
+    return False
 
 
 # Global options that point the client at another engine, store or registry configuration.
