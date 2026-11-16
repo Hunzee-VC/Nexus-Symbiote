@@ -21,6 +21,10 @@ decides the loader's next step: their type, length, whether they hash, and the s
 
 The sample may be a prefix of the file: a read past its end, or past the opcode and
 MARK budget, ends the walk as unread, since the loader's behaviour is not decided.
+A read past the end of the file is decided without the bytes it misses, and so is a
+text argument that the sample cuts short when what it shows already fails, such as a
+STRING that opens with no quote: text that is no pickle ends or fails long before
+either bound, while a pickle padded to reach one is left undecided.
 
 The loader that reads the file may run on any supported CPython, 3.11 to 3.14, and the
 unpicklers differ between them (``VERSION_DIFFERENCES``). Where they do, each flavor
@@ -244,6 +248,44 @@ class Segment:
     crossings: int = 0
 
 
+_Valid = Callable[[bytes], bool]
+_NUMBER_TEXT = re.compile(rb"[ \t\v\f\r\x1c-\x1f]*[0-9A-Za-z_.+\-]*[ \t\v\f\r\x1c-\x1f]*")
+
+
+def _numeric_text(part: bytes) -> bool:
+    """Whether INT, LONG, FLOAT, GET or PUT text that starts with ``part`` may parse.
+
+    Before a NUL, which ends the C unpickler's text, one token of bytes that some
+    ``int()``, ``float()`` or ``strtol`` syntax takes (``1_0``, ``0x1f``, ``-inf``),
+    with white space only around it.
+    """
+    return _NUMBER_TEXT.fullmatch(part.split(b"\x00")[0]) is not None
+
+
+def _utf8_text(part: bytes) -> bool:
+    """Whether a GLOBAL line that starts with ``part`` may decode as UTF-8.
+
+    The unpicklers decode the module and the name and then import the module before
+    they look the name up. ``importlib`` imports a file whose name is no identifier,
+    such as ``ev-il.py``, so only text that cannot decode fails before the import. A
+    multi-byte character that the sample cuts short may still complete.
+    """
+    try:
+        part.decode("utf-8")
+    except UnicodeDecodeError as error:
+        return error.reason == "unexpected end of data" and error.end == len(part)
+    return True
+
+
+def _quoted_text(part: bytes) -> bool:
+    """Whether a STRING argument that starts with ``part`` may open with its quote."""
+    return part[:1] in (b"", b'"', b"'")
+
+
+def _ascii_text(part: bytes) -> bool:
+    return part.isascii()
+
+
 _STRTOL = {
     0: re.compile(rb"[ \t\n\v\f\r]*[+-]?(?:0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)"),
     10: re.compile(rb"[ \t\n\v\f\r]*[+-]?[0-9]+"),
@@ -321,8 +363,15 @@ class _Machine:
     # -- reads -----------------------------------------------------------------------
 
     def _take(self, start: int, end: int) -> bytes:
-        """File bytes ``start:end``; past the sample, unread, or short at the file's end."""
+        """File bytes ``start:end``; past the sample, unread, or short at the file's end.
+
+        A read that ends past the file's end is decided without the bytes it misses: the
+        C unpickler fails it as truncated, and the pure-Python one reads short and then
+        meets the end of the file, so nothing after it runs.
+        """
         if end > len(self.sample) and not self.whole:
+            if end > self.size:
+                raise _LoadError  # pickle data was truncated, or EOFError after it
             raise _UnreadError
         return self.sample[start:end]
 
@@ -354,24 +403,31 @@ class _Machine:
         self.pos += len(data)
         return data
 
-    def _line(self, end: int) -> bytes | None:
-        """The line from ``pos`` if it ends before ``end``; ``None`` if it does not."""
+    def _line(self, end: int, valid: _Valid | None = None) -> bytes | None:
+        """The line from ``pos`` if it ends before ``end``; ``None`` if it does not.
+
+        A line that runs past the sample fails when ``valid`` rejects what it shows, as
+        the opcode rejects any line that starts so.
+        """
         newline = self.sample.find(b"\n", self.pos, end)
         if newline < 0:
+            if valid is not None and not self.whole and not valid(self.sample[self.pos :]):
+                raise _LoadError
             self._take(self.pos, end)
             return None
         data = self.sample[self.pos : newline + 1]
         self.pos = newline + 1
         return data
 
-    def readline(self) -> bytes:
+    def readline(self, valid: _Valid | None = None) -> bytes:
         if self.frame is not None and self.pos < self.frame:
             data = self._line(self.frame)
             if data is not None:
                 return data
             self._cross_frame()
         self.frame = None
-        data = self._line(len(self.sample) + 1)
+        # Not inside a frame, where the C unpickler of 3.11 and 3.12 may read on elsewhere.
+        data = self._line(len(self.sample) + 1, valid)
         if data is None:
             if self.c:
                 raise _LoadError  # pickle data was truncated
@@ -379,9 +435,9 @@ class _Machine:
             self.pos = len(self.sample)
         return data
 
-    def line(self) -> bytes:
+    def line(self, valid: _Valid | None = None) -> bytes:
         """A text argument without its newline; the C unpickler wants a character too."""
-        data = self.readline()
+        data = self.readline(valid)
         if self.c and len(data) < 2:
             raise _LoadError
         return data[:-1]
@@ -515,7 +571,7 @@ class _Machine:
         self.frame = min(self.pos + size, max(self.size, len(self.sample)))
 
     def op_persid(self) -> None:
-        self.readline()[:-1].decode("ascii")
+        self.readline(_ascii_text)[:-1].decode("ascii")
         self.push(_Persistent())
 
     def op_binpersid(self) -> None:
@@ -543,7 +599,7 @@ class _Machine:
         return value
 
     def op_int(self) -> None:
-        data = self.readline()
+        data = self.readline(_numeric_text)
         if self.c and len(data) < 2:
             raise _LoadError
         if data in (b"00\n", b"01\n"):
@@ -561,7 +617,7 @@ class _Machine:
         self.push(self.number(2, "<H"))
 
     def op_long(self) -> None:
-        data = self.line()
+        data = self.line(_numeric_text)
         if data.endswith(b"L"):
             data = data[:-1]
         if self.c:
@@ -578,7 +634,7 @@ class _Machine:
         self.push(int.from_bytes(self.read(count), "little", signed=True))
 
     def op_float(self) -> None:
-        data = self.readline()
+        data = self.readline(_numeric_text)
         if not self.c:
             self.push(float(data[:-1]))
             return
@@ -593,7 +649,7 @@ class _Machine:
         self.push(float(self.number(8, ">d")))
 
     def op_string(self) -> None:
-        data = self.line()
+        data = self.line(_quoted_text)
         if len(data) < 2 or data[0] != data[-1] or data[0] not in b"\"'":
             raise _LoadError  # the STRING opcode argument must be quoted
         self.push(cast(bytes, codecs.escape_decode(data[1:-1])[0]).decode("ascii"))
@@ -792,8 +848,8 @@ class _Machine:
     # -- what resolves or calls ------------------------------------------------------
 
     def op_global(self) -> None:
-        module = self.line().decode("utf-8")
-        self.resolve(module, self.line().decode("utf-8"))
+        module = self.line(_utf8_text).decode("utf-8")
+        self.resolve(module, self.line(_utf8_text).decode("utf-8"))
 
     def op_stack_global(self) -> None:
         name = self.pop()
@@ -825,8 +881,8 @@ class _Machine:
     def op_inst(self) -> None:
         if self.c and not self.marks:
             raise _LoadError  # could not find MARK
-        module = self.line().decode("ascii")
-        self.resolve(module, self.line().decode("ascii"))
+        module = self.line(_ascii_text).decode("ascii")
+        self.resolve(module, self.line(_ascii_text).decode("ascii"))
         klass = self.stack.pop()
         self.pop_mark()
         self._instantiate(klass)
@@ -930,7 +986,7 @@ class _Machine:
         self.push(self.memo[index])
 
     def op_get(self) -> None:
-        self._get(int(self.line()))
+        self._get(int(self.line(_numeric_text)))
 
     def op_binget(self) -> None:
         self._get(self.number(1, "<B"))
@@ -944,7 +1000,7 @@ class _Machine:
         self.memo[index] = self.top()
 
     def op_put(self) -> None:
-        self._put(int(self.line()))
+        self._put(int(self.line(_numeric_text)))
 
     def op_binput(self) -> None:
         self._put(self.number(1, "<B"))
