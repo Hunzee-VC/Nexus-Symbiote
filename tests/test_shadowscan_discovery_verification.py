@@ -536,3 +536,54 @@ def test_bindings_with_disguising_characters_stay_unknown(hostile):
     record = ShadowScanImporter().parse_report(json.dumps(data)).discovery_verification
     assert record is not None
     assert record.repository == "unknown"
+
+
+def _scan_check(project: Path, *args: str, env: dict[str, str] | None = None):
+    return CliRunner().invoke(main, ["scan", str(project), "--check", *args], env=env or {})
+
+
+def test_scan_report_only_does_not_relax_the_unsigned_discovery_gate(tmp_path, monkeypatch):
+    # Audit 2026-11-16 S10-01: report-only relaxes collection and findings, never
+    # the separate discovery-verification gate.
+    _clear_ci(monkeypatch)
+    project, _ = _project(tmp_path)
+    in_ci = _scan_check(project, "--no-project-policy", "--report-only", env={"CI": "true"})
+    assert in_ci.exit_code == 1, in_ci.output
+    assert "report only: exit status 0" not in in_ci.output
+    assert "UNVERIFIED" in in_ci.output
+    allowed = _scan_check(
+        project,
+        "--no-project-policy",
+        "--report-only",
+        "--allow-unsigned-discovery",
+        env={"CI": "true"},
+    )
+    assert allowed.exit_code == 0, allowed.output
+    explicit = _scan_check(
+        project, "--no-project-policy", "--report-only", "--fail-on-unsigned-discovery"
+    )
+    assert explicit.exit_code == 1, explicit.output
+    interactive = _scan_check(project, "--no-project-policy", "--report-only")
+    assert interactive.exit_code == 0, interactive.output
+
+
+def test_project_report_only_policy_cannot_cancel_fail_on_unsigned_discovery(tmp_path, monkeypatch):
+    # Audit 2026-11-16 S10-V02: the scanned checkout chooses report-only and the
+    # operator asks for verified discovery outside detected CI.
+    _clear_ci(monkeypatch)
+    project, _ = _project(tmp_path)
+    (project / ".nexus-symbiote.yaml").write_text(LENIENT + "scan: {failure_mode: report-only}\n")
+    result = _scan_check(project, "--fail-on-unsigned-discovery")
+    assert result.exit_code == 1, result.output
+    assert "report only: exit status 0" not in result.output
+
+
+def test_scan_report_only_does_not_relax_a_failed_producer_check(tmp_path, monkeypatch):
+    _clear_ci(monkeypatch)
+    project, _ = _project(tmp_path)
+    (project / ".nexus-symbiote.yaml").write_text(
+        "validate: {require_integrity: false, require_discovery_signature: true}\n"
+    )
+    result = _scan_check(project, "--report-only")
+    assert result.exit_code == 1, result.output
+    assert "report only: exit status 0" not in result.output

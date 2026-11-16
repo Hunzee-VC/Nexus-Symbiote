@@ -682,7 +682,12 @@ def _render_aibom(aibom: AIBOM, output_format: str, root: Path) -> str:
     ),
 )
 @click.option(
-    "--report-only", is_flag=True, help="Emit findings and collection failures without a CI failure"
+    "--report-only",
+    is_flag=True,
+    help=(
+        "Emit findings and collection failures without a CI failure. With --check, unverified "
+        "discovery evidence and a failed producer check still exit 1."
+    ),
 )
 @click.option(
     "--check",
@@ -921,6 +926,7 @@ def scan(
             "network",
         ],
     )
+    discovery_blocked = False
     if check_only:
         from nexus_symbiote.validators.completeness import (
             carries_discovery_evidence,
@@ -937,6 +943,7 @@ def scan(
             )
             producer_verified = prod_status == "verified" and not prod_problems
             if prod_problems:
+                discovery_blocked = True
                 for problem in prod_problems:
                     scan_failures.append(f"shadowscan: {problem}")
                 failures_by.setdefault("shadowscan", []).extend(prod_problems)
@@ -950,12 +957,17 @@ def scan(
                 already_verified=producer_verified,
             )
             if unsigned_reason is not None:
+                discovery_blocked = True
                 scan_failures.append(f"shadowscan: {unsigned_reason}")
                 failures_by.setdefault("shadowscan", []).append(unsigned_reason)
 
     scorer = RiskScorer.from_policy(policy.risk)
     passed, risk_report = scorer.passes_gate(aibom)
-    report_mode = report_only or policy.scan.failure_mode == "report-only"
+    # Report-only (flag or project policy) relaxes collection and findings only; it
+    # must not cancel the separate discovery-verification gate the operator relies on.
+    report_mode = (
+        report_only or policy.scan.failure_mode == "report-only"
+    ) and not discovery_blocked
     staged = _staged_inventory()
 
     if not check_only:

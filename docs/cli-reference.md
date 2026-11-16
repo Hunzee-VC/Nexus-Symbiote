@@ -143,7 +143,7 @@ What exit status 1 means for each gate:
 
 | Command | Exits 1 when |
 |---|---|
-| `scan` | A collector failed or the scan gate failed, unless `--report-only` or a report-only project policy applies. |
+| `scan` | A collector failed or the scan gate failed, unless `--report-only` or a report-only project policy applies. With `--check`, unverified ShadowScan discovery evidence and a failed producer check exit 1 even then. |
 | `validate` | Completeness, integrity (including integrity that is only unknown), the discovery producer check, the minimum assurance level or the dependency graph failed, or unverified discovery evidence was gated (see below). |
 | `risk` | The risk gate failed, `--project` reconciliation failed, or unverified discovery evidence was gated (see below). |
 | `diff` | The diff reports a security alert; `--no-fail-on-alert` turns this gate off. |
@@ -165,7 +165,8 @@ findings without turning them into exit status 1, as a project policy with
 `baseline` applies the built-in gate whatever the project policy says.
 
 Unverified ShadowScan discovery evidence is gated separately. `import-shadowscan`
-(including `--report-only`), `scan --check`, `baseline`, `validate` and `risk` exit 1 on
+and `scan --check` (including `--report-only` and a report-only project policy, which
+never relax this gate), `baseline`, `validate` and `risk` exit 1 on
 it when a CI variable is set (see [environment variables](#environment-variables)) or
 `--fail-on-unsigned-discovery` is given, unless `--allow-unsigned-discovery` is given.
 Only a producer check made in the same run counts as verification; the outcome recorded
@@ -766,7 +767,7 @@ nexus-symbiote scan [OPTIONS] [PROJECT_PATH]
 | `-o`, `--output` `PATH` | Output file path (default: standard output) |
 | `-f`, `--format` `json\|cyclonedx\|spdx\|sarif` | Output format (default: json, or from .nexus-symbiote.yaml) |
 | `--scanner` `TEXT` | Collector to run, once each: mcp, model, prompt, rag, registry, a2a, ide_agents, shadowscan (default: all, or from .nexus-symbiote.yaml). A collector left out makes coverage partial. (repeatable) |
-| `--report-only` | Emit findings and collection failures without a CI failure |
+| `--report-only` | Emit findings and collection failures without a CI failure. With `--check`, unverified discovery evidence and a failed producer check still exit 1. |
 | `--check` | Collect and apply the scan gate without writing an inventory. Cannot be combined with `-o`. |
 | `--signature-policy` `PATH` | Explicit operator signer policy JSON |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target. |
