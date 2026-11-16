@@ -426,7 +426,11 @@ def test_a_direct_eval_beside_sdk_imports_is_a_gap(tmp_path):
         ("server.mjs", "(eval)(code);\n", True),
         ("server.ts", "(eval as any)(code);\n", True),
         ("server.ts", "eval!(code);\n", True),
+        ("server.ts", "(eval<any>)(code);\n", True),
+        ("server.ts", "(eval /* c */ <any>)(code);\n", True),
+        ("server.ts", "(eval<any> as any)(code);\n", True),
         ("server.mjs", "(0, eval)(code);\n", False),
+        ("server.ts", "(0, eval<any>)(code);\n", False),
     ],
 )
 def test_a_parenthesized_or_asserted_eval_is_still_direct(tmp_path, name, call, direct):

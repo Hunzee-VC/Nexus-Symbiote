@@ -338,6 +338,12 @@ _TOOL_OPTIONS = frozenset(
         "structured_output",
         "icons",
         "enabled",
+        "version",
+        "app",
+        "task",
+        "timeout",
+        "auth",
+        "run_in_thread",
     }
 )
 
@@ -1657,13 +1663,25 @@ def _context_escapes(
     parents: dict[ast.AST, ast.AST],
     scopes: dict[ast.AST, ast.AST | None],
     bound: set[tuple[ast.AST | None, str]],
+    resolved: dict[tuple[ast.AST | None, str], bool],
 ) -> bool:
-    """Whether a use of a context can hand it to code the collector does not read."""
+    """Whether a use of a context can hand it to code the collector does not read.
+
+    ``resolved`` records, for each scope climbed, whether the name there refers to a
+    context, so nested scopes are climbed once in all and not once for each use.
+    """
     scope = scopes.get(name)
-    while (scope, name.id) not in bound:
-        if scope is None:
-            return False
+    climbed: list[tuple[ast.AST | None, str]] = []
+    while (key := (scope, name.id)) not in resolved:
+        if key in bound or scope is None:
+            resolved[key] = key in bound
+            break
+        climbed.append(key)
         scope = scopes.get(scope)
+    for key in climbed:
+        resolved[key] = resolved[(scope, name.id)]
+    if not resolved[(scope, name.id)]:
+        return False
     use = parents.get(name)
     if isinstance(use, ast.Attribute):
         return not _reads_context(use, parents)
@@ -1747,11 +1765,12 @@ def _report_context_handles(
         scopes = _scopes(parents)
         bound, handle = _context_bindings(parsed, roots, rooted, scopes)
         names = {name for _, name in bound}
+        resolved: dict[tuple[ast.AST | None, str], bool] = {}
         handle = handle or any(
             isinstance(node, ast.Name)
             and isinstance(node.ctx, ast.Load)
             and node.id in names
-            and _context_escapes(node, parents, scopes, bound)
+            and _context_escapes(node, parents, scopes, bound, resolved)
             for node in nodes
         )
     if handle:

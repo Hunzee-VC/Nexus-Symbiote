@@ -118,7 +118,8 @@ _COMPUTED_LOAD = (
     "inventoried"
 )
 _NAMED = "MCP SDK module named as a call argument; what the call loads not inventoried"
-# Expressions that evaluate to one operand: `(0, require)`, `require as Loader`, `require!`.
+# Expressions that evaluate to one operand: `(0, require)`, `require as Loader`, `require!`,
+# `eval<any>` (type arguments are erased).
 _WRAPPERS = frozenset(
     {
         "parenthesized_expression",
@@ -127,9 +128,12 @@ _WRAPPERS = frozenset(
         "as_expression",
         "satisfies_expression",
         "non_null_expression",
+        "instantiation_expression",
     }
 )
-_OPERAND_FIRST = frozenset({"as_expression", "satisfies_expression", "non_null_expression"})
+_OPERAND_FIRST = frozenset(
+    {"as_expression", "satisfies_expression", "non_null_expression", "instantiation_expression"}
+)
 # `(eval)(code)` and `eval!(code)` still call eval directly; `(0, eval)(code)` does not.
 _REFERENCE_WRAPPERS = _WRAPPERS - {"sequence_expression"}
 _UNPARSED_JAVASCRIPT = (

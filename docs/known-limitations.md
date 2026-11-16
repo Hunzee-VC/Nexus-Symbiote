@@ -326,7 +326,8 @@ A way around a limit that its entry does not describe is worth a
   builds it, even when the re-exporting module's own server is inventoried.
   A `tool` decorator with a positional argument, or a keyword other than `name`,
   `title`, `description`, `tags`, `annotations`, `output_schema`, `exclude_args`,
-  `meta`, `structured_output`, `icons` and `enabled`, is an unresolved tool name gap,
+  `meta`, `structured_output`, `icons`, `enabled`, `version`, `app`, `task`,
+  `timeout`, `auth` and `run_in_thread`, is an unresolved tool name gap,
   because `fastmcp` also takes the name as `name_or_fn`. A tool given `enabled=False`
   is still inventoried.
   Besides its `tool` decorator on a module-level function, which is inventoried, a

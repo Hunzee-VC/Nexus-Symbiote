@@ -1351,6 +1351,36 @@ def test_context_handle_analysis_is_linear_in_expression_depth(header, unit, cou
     assert scaling_ratio(run, factor=8) < 16
 
 
+def test_context_uses_climb_nested_scopes_once_in_all(monkeypatch):
+    # Review of #243: each use of a context climbed every enclosing lambda to find
+    # the one binding it, so D nested lambdas took D * D scope lookups. The parser
+    # caps the depth, which keeps a timing ratio too close to call; count lookups.
+    from nexus_symbiote.scanners import python_tools
+
+    lookups = 0
+
+    class Counting(dict[ast.AST, ast.AST | None]):
+        def get(self, key, default=None):
+            nonlocal lookups
+            lookups += 1
+            return super().get(key, default)
+
+    real = python_tools._scopes
+    monkeypatch.setattr(python_tools, "_scopes", lambda parents: Counting(real(parents)))
+    source = (
+        "from mcp.server.fastmcp import Context\ndef h(ctx: Context):\n return "
+        + "lambda a=ctx.request_id: " * 2000
+        + "0\n"
+    )
+    tree = ast.parse(source)
+    nodes = list(ast.walk(tree))
+    result = ScanResult(scanner_name="mcp")
+    collect_python_tools(tree, nodes, source, Path("server.py"), result)
+    assert not result.scan_failures
+    assert not result.surfaces_excluded
+    assert lookups < 2 * len(nodes)
+
+
 @pytest.mark.parametrize(
     "options",
     [
@@ -1377,7 +1407,8 @@ def test_tool_decorator_options_that_name_nothing_keep_the_tool(tmp_path):
         "from fastmcp import FastMCP\nmcp = FastMCP('x')\n"
         "@mcp.tool(name='lookup', title='Lookup', description='d', tags={'a'},\n"
         "          annotations=None, output_schema=None, exclude_args=['c'], meta={},\n"
-        "          structured_output=True, icons=[], enabled=True)\n"
+        "          structured_output=True, icons=[], enabled=True, version='1', app=None,\n"
+        "          task=True, timeout=5.0, auth=None, run_in_thread=False)\n"
         "def lookup_impl(c): pass\n",
     )
     assert [tool.name for tool in tools] == ["lookup"]
