@@ -199,7 +199,13 @@ A way around a limit that its entry does not describe is worth a
   without `=` and followed by the word `true`, `false` or `null` is a gap as well, since
   nopt reads that word as a Boolean (or `[null, Boolean]`) option's value; this also
   covers flags that do not take it, such as `-q`, which npm expands to another option. Write `--yes` alone, or put
-  `--` before a command named `true`.
+  `--` before a command named `true`. `npx` steps over the word after `--no`,
+  `--no-yes`, `--no-update-notifier`, `--no-audit` and `--no-fund`, so such a flag
+  followed by `true`, `false` or `null`, or by any word and then an option (as in
+  `npx --no-audit srv@1.2.3 --stdio`, where npm takes `--stdio` for itself), is a gap.
+  A scoped registry (`--@scope:registry`) of `npx` or `npm` written without `=` is a
+  gap too: npm has no type for it, so the next word stays a command or package word.
+  The `yarn dlx` options were not checked against a running Yarn 2 or later.
 - **Container launch context is read from the declared options only.** Mounts are
   rated by their written source: a mount through a link, a client variable other than `${userHome}`,
   `${env:HOME}`, `${env:USERPROFILE}`, `${workspaceFolder}` and `$PWD`, and a
@@ -210,17 +216,24 @@ A way around a limit that its entry does not describe is worth a
   medium finding only beside a host mount. An image command is a medium
   code-loading finding when it runs a file under an absolute `-v` or `--mount`
   target: an interpreter or runner (`node`, `python`, `sh`, `env`, `java`, `npm`,
-  `pnpm`, `yarn`, `bun`, `uv` and similar) with any later word or `--opt=value` that
-  is such a path, a package manager's `run`, `start` or `test` with `-w` under the
-  mount, or a path with a script suffix (`.sh`, `.js`, `.py`, `.jar` and similar),
-  absolute or relative to an absolute `-w`. A word after an interpreter counts even
+  `pnpm`, `yarn`, `bun`, `uv`, `tsx`, `ts-node` and similar, also after `tini`,
+  `dumb-init`, `timeout` or `nice`) with any later word or `--opt=value` that is such
+  a path, a package manager's `run`, `start` or `test`, `make`, or `python -m` with
+  `-w` under the mount, or a path with a script suffix (`.sh`, `.js`, `.py`, `.jar`
+  and similar), absolute or relative to an absolute `-w`. A relative word counts as a
+  path only when it holds a `/` or has a script suffix, so a port, host, version or
+  dotted module name (`--port=8080`, `--host 0.0.0.0`, `v1.2`) or a file such as
+  `notes.txt` is not. A word after an interpreter counts even
   when it is a data argument of the script, so `node /app/s.js /w/data` is rated. A
   file without a script suffix (`/w/server`, `/db/app.sqlite`, `/cfg/config.json`), a
   relative path without `-w` (resolved against the image's own working directory) and
   a link from the image into the mount are not rated, so that an argument such as
-  `mcp/filesystem /data` is not a finding. `HOME`, `ZDOTDIR`, `XDG_CONFIG_HOME`,
-  `PYTHONUSERBASE` and `PATH` passed with `-e` count as code-loading only beside a
-  host mount, whatever their value. Any path component named like a credential
+  `mcp/filesystem /data` is not a finding. A mount over a directory on the default
+  `PATH` (`/usr/local/bin`, `/usr/bin`, `/bin` and their `sbin` and parents) is
+  rated; a mount over another directory of the image's own code (`-v .:/app`) is not.
+  `HOME`, `ZDOTDIR`, `XDG_CONFIG_HOME` and `PYTHONUSERBASE` passed with `-e` count as
+  code-loading only beside a host mount, whatever their value, and `PATH` only when an
+  entry is empty, relative or under a mount target. Any path component named like a credential
   directory counts, also outside a home directory, so `/srv/app/.config` is a broad
   mount.
 - **Environment that moves a runner's configuration is a gap.** A server's `env`

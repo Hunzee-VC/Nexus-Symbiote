@@ -329,6 +329,13 @@ class _Options:
     # Letters of the single-letter options, for checking option clusters in C.
     short_flags: frozenset[str] = frozenset()
     short_values: frozenset[str] = frozenset()
+    # npx (bin/npx-cli.js) steps over the word after a flag outside its switch set, which
+    # holds no --no-<key> spelling, and puts "--" only before the word after that: nopt may
+    # read the stepped-over word as the flag's value, and reads options after it as npm's.
+    stepped_flags: frozenset[str] = frozenset()
+    # nopt has no type for an option matched by value_patterns (--@scope:registry) and reads
+    # it as a Boolean, so it takes a value only after "=".
+    untyped_patterns: bool = False
 
 
 # Every word nopt reads as the value of a Boolean or [null, Boolean] option written without
@@ -352,6 +359,8 @@ def _table(
     boolean_values: bool = False,
     dashed_values: bool = True,
     nopt_booleans: bool = False,
+    stepped_flags: str = "",
+    untyped_patterns: bool = False,
 ) -> _Options:
     return _Options(
         frozenset(flags.split()),
@@ -364,6 +373,8 @@ def _table(
         nopt_booleans,
         _letters(flags),
         _letters(values),
+        frozenset(stepped_flags.split()),
+        untyped_patterns,
     )
 
 
@@ -388,6 +399,8 @@ def _scan(tokens: list[str], table: _Options) -> tuple[list[tuple[str, str | Non
             if not equals:
                 if index + 1 >= len(tokens):
                     return None
+                if table.untyped_patterns and name not in table.values:
+                    return None
                 if not table.dashed_values and tokens[index + 1].startswith("-"):
                     return None
                 index += 1
@@ -405,6 +418,13 @@ def _scan(tokens: list[str], table: _Options) -> tuple[list[tuple[str, str | Non
                 and tokens[index + 1] in _NOPT_BOOLEAN_WORDS
             ):
                 return None
+            if not equals and name in table.stepped_flags and index + 1 < len(tokens):
+                stepped = tokens[index + 1]
+                after = tokens[index + 2] if index + 2 < len(tokens) else "--"
+                if not stepped.startswith("-") and (
+                    stepped in _NOPT_BOOLEAN_WORDS or (after.startswith("-") and after != "--")
+                ):
+                    return None
             seen.append((name, attached if equals else None))
         elif table.combined and not word.startswith("--"):
             consumed = _combined(word, tokens, index, table, seen)
@@ -640,6 +660,7 @@ _NPM_EXEC = _table(
     value_patterns=(_SCOPED_REGISTRY,),
     dashed_values=False,
     nopt_booleans=True,
+    untyped_patterns=True,
 )
 # npx (npm 7 and later, bin/npx-cli.js) removes -n, --node-arg and --npm together with the
 # word that follows each, where npm exec reads -n as --no. Read as a flag, "-n decoy@1.0.0
@@ -654,6 +675,8 @@ _NPX = _table(
     " -n --node-arg --npm",
     value_patterns=(_SCOPED_REGISTRY,),
     dashed_values=False,
+    stepped_flags="--no --no-yes --no-update-notifier --no-audit --no-fund",
+    untyped_patterns=True,
 )
 _PNPM_DLX = _table(
     "-s --silent --reporter-hide-prefix",
@@ -2726,9 +2749,10 @@ _CONTAINER_CODE_ENVIRONMENT = _set(
     " JDK_JAVA_OPTIONS BASH_ENV ENV SHELLOPTS BASHOPTS PS4 NPM_CONFIG_NODE_OPTIONS"
     " NPM_CONFIG_SCRIPT_SHELL"
 )
-# Variables that move startup and user-site files, or the search path for the image's
-# command, into the checkout beside a host mount.
-_CONTAINER_HOME_ENVIRONMENT = _set("HOME ZDOTDIR XDG_CONFIG_HOME PYTHONUSERBASE PATH")
+# Variables that move startup and user-site files into the checkout beside a host mount.
+_CONTAINER_HOME_ENVIRONMENT = _set("HOME ZDOTDIR XDG_CONFIG_HOME PYTHONUSERBASE")
+# Directories on an image's default PATH; a mount over one replaces the programs it runs.
+_CONTAINER_PATH = ("/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin")
 
 
 def _mount_fields(spec: str) -> dict[str, str]:
@@ -2772,6 +2796,7 @@ def _container_context(options: list[tuple[str, str | None]], launch: Launch) ->
         launch.mark("runtime_socket_mount")
         launch.mark("runtime_credentials_forwarded")
     home_environment = False
+    search_path: list[str] = []
     for option, value in options:
         text = (value or "").strip().lower()
         if option == "--privileged" and text in {"", "true", "1"}:
@@ -2802,6 +2827,8 @@ def _container_context(options: list[tuple[str, str | None]], launch: Launch) ->
             ):
                 launch.mark("code_loading_environment")
             home_environment |= bool(equals) and name.upper() in _CONTAINER_HOME_ENVIRONMENT
+            if equals and name.upper() == "PATH":
+                search_path.extend(assigned.split(":"))
         elif option == "--env-file":
             launch.mark("container_environment_file")
         elif option == "--health-cmd" and text not in {"", "none"}:
@@ -2856,12 +2883,22 @@ def _container_context(options: list[tuple[str, str | None]], launch: Launch) ->
         launch.mark("code_loading_option")
     if home_environment and launch.context.get("host_mounts"):
         launch.mark("code_loading_environment")
+    # A relative or empty PATH entry is the working directory, which may be the checkout.
+    targets = _mount_targets(options)
+    if launch.context.get("host_mounts") and any(
+        not entry.startswith("/") or _under(entry, targets) for entry in search_path
+    ):
+        launch.mark("code_loading_environment")
 
 
 _CONTAINER_SCRIPT_RUNNERS = re.compile(
     r"node(?:js)?|python[0-9.]*|deno|bun|ruby|perl|php|(?:ba|da|z|k|mk)?sh|ash|env|java"
-    r"|npm|pnpm|yarn|uv"
+    r"|npm|pnpm|yarn|uv|tsx|ts-node|make|tini|dumb-init|timeout|nice"
 )
+# Programs that run the command in their arguments; the words after them are still read.
+_CONTAINER_WRAPPERS = _set("env tini dumb-init timeout nice")
+# A Python option cluster that ends in -m, which imports the module from the working directory.
+_PYTHON_MODULE = re.compile(r"-[bBdEiIOPqsSuvx]*m.*", re.S)
 # Package managers that run a project's scripts from the working directory.
 _CONTAINER_PACKAGE_RUNNERS = _set("npm pnpm yarn bun uv")
 _CONTAINER_PACKAGE_SCRIPTS = _set("run run-script start test")
@@ -2878,13 +2915,15 @@ def _absolute(path: str) -> str:
     return posixpath.normpath("/" + path.lstrip("/"))
 
 
-def _mounted_command(options: list[tuple[str, str | None]], words: list[str]) -> bool:
-    """Whether the command that replaces the image's CMD runs a file from a host mount."""
+def _under(path: str, targets: list[str]) -> bool:
+    path = _absolute(path)
+    return any(path == t or path.startswith(t.rstrip("/") + "/") for t in targets)
+
+
+def _mount_targets(options: list[tuple[str, str | None]]) -> list[str]:
+    """The absolute container targets of host mounts."""
     targets: list[str] = []
-    workdir = ""
     for option, value in options:
-        if option in {"-w", "--workdir"} and value:
-            workdir = value
         if option not in {"-v", "--volume", "--mount"} or not value:
             continue
         source = _host_source(value, mount=option == "--mount")
@@ -2897,6 +2936,24 @@ def _mounted_command(options: list[tuple[str, str | None]], words: list[str]) ->
             target = value[len(source) + 1 :].split(":", 1)[0]
         if target and target.startswith("/"):
             targets.append(_absolute(target))
+    return targets
+
+
+def _file_like(word: str) -> bool:
+    # A port, host, version or dotted module name is not a path; a file name in the working
+    # directory counts when it has a script suffix.
+    return "/" in word or bool(_CONTAINER_SCRIPT_SUFFIX.fullmatch(word))
+
+
+def _mounted_command(options: list[tuple[str, str | None]], words: list[str]) -> bool:
+    """Whether the command that replaces the image's CMD runs a file from a host mount."""
+    targets = _mount_targets(options)
+    workdir = ""
+    for option, value in options:
+        if option in {"-w", "--workdir"} and value:
+            workdir = value
+    if any(_under(directory, targets) for directory in _CONTAINER_PATH):
+        return True
     if not targets or not words:
         return False
 
@@ -2905,8 +2962,7 @@ def _mounted_command(options: list[tuple[str, str | None]], words: list[str]) ->
             if not relative or not workdir.startswith("/"):
                 return False
             word = posixpath.join(workdir, word)
-        path = _absolute(word)
-        return any(path == t or path.startswith(t.rstrip("/") + "/") for t in targets)
+        return _under(word, targets)
 
     command = normalize_command(words[0])
     if not _CONTAINER_SCRIPT_RUNNERS.fullmatch(command):
@@ -2917,12 +2973,29 @@ def _mounted_command(options: list[tuple[str, str | None]], words: list[str]) ->
             and bool(_CONTAINER_SCRIPT_SUFFIX.fullmatch(words[0]))
             and (mounted(words[0]))
         )
-    if (
-        command in _CONTAINER_PACKAGE_RUNNERS
-        and not _CONTAINER_PACKAGE_SCRIPTS.isdisjoint(words[1:])
-        and mounted(".")
+    program, at = command, 0
+    for index, word in enumerate(words):
+        name = normalize_command(word)
+        if name not in _CONTAINER_WRAPPERS and _CONTAINER_SCRIPT_RUNNERS.fullmatch(name):
+            program, at = name, index
+            break
+    if mounted(".") and (
+        program == "make"
+        or (
+            program in _CONTAINER_PACKAGE_RUNNERS
+            and not _CONTAINER_PACKAGE_SCRIPTS.isdisjoint(words[at + 1 :])
+        )
     ):
         return True
+    if program.startswith("python") and mounted("."):
+        options_before = iter(words[at + 1 :])
+        for word in options_before:
+            if word in _CONTAINER_SETTING_OPTIONS:
+                next(options_before, None)
+            elif not word.startswith("-") or word in {"-", "--"}:
+                break
+            elif _PYTHON_MODULE.fullmatch(word):
+                return True
     rest = iter(words[1:])
     for word in rest:
         if word in _CONTAINER_SETTING_OPTIONS:
@@ -2930,12 +3003,12 @@ def _mounted_command(options: list[tuple[str, str | None]], words: list[str]) ->
             continue
         if word.startswith("-"):
             name, equals, value = word.partition("=")
-            if equals and name not in _CONTAINER_SETTING_OPTIONS and mounted(value):
-                return True
+            if equals and name not in _CONTAINER_SETTING_OPTIONS:
+                if mounted(value, relative=_file_like(value)):
+                    return True
             continue
         # A relative word counts only when it reads as a file path, not as a value.
-        file_like = "/" in word or "." in word.rsplit("/", 1)[-1].strip(".")
-        if mounted(word, relative=file_like):
+        if mounted(word, relative=_file_like(word)):
             return True
     return False
 
