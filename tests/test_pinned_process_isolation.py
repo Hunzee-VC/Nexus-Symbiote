@@ -411,6 +411,49 @@ def test_a_descendant_that_cannot_be_signalled_does_not_abort_cleanup(
     _assert_dead(groups[0])
 
 
+def test_a_process_name_that_is_not_utf8_does_not_end_the_descendant_scan() -> None:
+    """/proc/<pid>/status holds the name as raw bytes, and any process may set its own."""
+    rename = "import ctypes, time; ctypes.CDLL(None).prctl(15, b'caf\\xe9', 0, 0, 0); "
+    child = subprocess.Popen(  # noqa: S603
+        [sys.executable, "-c", rename + "print('named', flush=True); time.sleep(30)"],
+        stdout=subprocess.PIPE,
+    )
+    try:
+        assert child.stdout is not None and child.stdout.readline() == b"named\n"
+        assert Path(f"/proc/{child.pid}/comm").read_bytes() == b"caf\xe9\n"
+        assert child.pid in pinned_process._descendant_pids(os.getpid())
+    finally:
+        child.kill()
+        child.wait(timeout=5)
+
+
+def test_the_launcher_group_is_killed_when_the_sweep_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    killpg = os.killpg
+    groups: list[int] = []
+
+    def record(pgid: int, sig: int) -> None:
+        groups.append(pgid)
+        killpg(pgid, sig)
+
+    def fail(root: int) -> None:
+        raise RuntimeError("sweep failed")
+
+    monkeypatch.setattr(pinned_process, "_kill_descendants", fail)
+    monkeypatch.setattr(pinned_process.os, "killpg", record)
+    proc = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)  # noqa: S603
+    try:
+        with pytest.raises(RuntimeError, match="sweep failed"):
+            pinned_process.terminate_process_group(proc)
+    finally:
+        monkeypatch.undo()
+        with contextlib.suppress(ProcessLookupError):
+            killpg(proc.pid, signal.SIGKILL)
+    assert groups == [proc.pid]
+    assert proc.wait(timeout=5) == -signal.SIGKILL
+
+
 def test_no_launch_runs_python_between_fork_and_exec(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

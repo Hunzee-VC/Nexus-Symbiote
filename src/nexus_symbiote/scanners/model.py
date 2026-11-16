@@ -43,6 +43,7 @@ from nexus_symbiote.core.hashing import (
 )
 from nexus_symbiote.core.models import ClaimEvidence, ModelComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.scanners.credential_files import credential_gap, credential_shaped
 from nexus_symbiote.scanners.shadowscan import REPORT_PATHS
 from nexus_symbiote.utils.confined import MAX_ENTRIES, ConfinedCollection
 from nexus_symbiote.utils.crypto import (
@@ -305,6 +306,23 @@ def manifest_digest(entries: Iterable[tuple[str, str]]) -> str:
     )
 
 
+# Behind a model name such a stream is still rated as the pickle it parses as; as content
+# alone, in a file no model name rates, it is not inventoried.
+TEXT_PICKLE_WITHOUT_CALLABLE = (
+    "Recognized text-protocol pickle opcode stream that names no importable callable; "
+    "object loading can execute code"
+)
+_DOTTED_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
+
+
+def _importable_reference(argument: object) -> bool:
+    """Whether a text GLOBAL or INST argument, ``module name``, names what can be imported."""
+    if not isinstance(argument, str):
+        return False
+    module, _, name = argument.partition(" ")
+    return bool(_DOTTED_IDENTIFIER.fullmatch(module) and _DOTTED_IDENTIFIER.fullmatch(name))
+
+
 def _recognized_pickle(stream: BinaryIO, prefix: bytes, size: int) -> str | None:
     """Recognize bounded pickle instructions without loading objects.
 
@@ -322,17 +340,24 @@ def _recognized_pickle(stream: BinaryIO, prefix: bytes, size: int) -> str | None
     kind = "binary" if binary else "text-protocol"
     recognized = f"Recognized {kind} pickle opcode stream; object loading can execute code"
     seen = marks = 0
+    # A text-protocol stream calls code only through GLOBAL or INST, and a loader can
+    # import only a module and name that are dotted identifiers. Text such as a
+    # `.gitignore` line `checkpoint*` (GLOBAL) or `N.B.` (NONE, STOP) parses as a stream
+    # that names nothing a loader could call.
+    names_callable = binary
     try:
-        for opcode, _, _ in pickletools.genops(sample):
+        for opcode, argument, _ in pickletools.genops(sample):
             seen += 1
             marks += opcode.name == "MARK"
+            if opcode.name in {"GLOBAL", "INST"} and _importable_reference(argument):
+                names_callable = True
             if seen > MAX_PICKLE_OPCODES or marks > MAX_PICKLE_MARKS:
                 break
         else:
             # dis() only checks opcode stack/memo consistency; it never resolves
             # globals, imports artifact code, invokes reducers or constructs objects.
             pickletools.dis(sample, out=io.StringIO())
-            return recognized
+            return recognized if names_callable else TEXT_PICKLE_WITHOUT_CALLABLE
     except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
         pass
     return recognized if binary and seen >= MIN_PICKLE_OPCODES else None
@@ -342,9 +367,18 @@ def _pickle_member(name: bytes) -> bool:
     """Whether a ZIP member's name is a pickle-family file name, wherever the member sits.
 
     ``torch.load`` unpickles ``data.pkl``; a loader handed the archive can open any other
-    member, so a member is rated by its name, as a file on disk is.
+    member, so a member is rated by its name, as a file on disk is. The name is matched
+    as text, not split into suffixes, so ``.pkl`` and ``archive/.pkl``, which
+    ``PurePath`` reads as names without a suffix, count as ``zipfile`` opens them.
     """
-    return _pickle_family(PurePosixPath(name.decode("latin-1")))
+    text = name.decode("latin-1").lower()
+    if text.endswith(tuple(_UNSAFE_SUFFIXES)):
+        return True
+    return any(
+        text.endswith(unsafe + wrapper)
+        for unsafe in _UNSAFE_SUFFIXES
+        for wrapper in _PICKLE_WRAPPERS
+    )
 
 
 def _little(data: bytes, offset: int, width: int) -> int:
@@ -408,31 +442,48 @@ def _zip_directory(
 
 
 def _directory_members(data: bytes, begin: int, size: int, end: int) -> list[_ZipMember] | None:
-    """Walk the central directory entries that ``data`` holds from ``begin`` to ``end``."""
+    """Walk the central directory entries that ``data`` holds from ``begin`` to ``end``.
+
+    A pickle member is rated by its name, as the directory lists it, whatever another
+    entry holds: an entry's own lengths lead to the next one even when its ZIP64 field
+    cannot locate its data, and a loader that reads past that field still unpickles
+    the member. ``None`` when the walk cannot go on or a member that is not a pickle
+    cannot be located, and no pickle member is listed.
+    """
     if size > MAX_ZIP_DIRECTORY_BYTES or begin < 0 or begin + size > end:
         return None
     members: list[_ZipMember] = []
+    unlocated = False
     position = begin
     while position < begin + size:
         if position + 46 > begin + size or data[position : position + 4] != b"PK\x01\x02":
-            return None
+            return _listed(members, complete=False)
         name_length = _little(data, position + 28, 2)
         extra_length = _little(data, position + 30, 2)
         name = data[position + 46 : position + 46 + name_length]
         if len(name) < name_length:
-            return None
+            return _listed(members, complete=False)
         extra_at = position + 46 + name_length
+        method = _little(data, position + 10, 2)
         located = _zip64_location(
             data[extra_at : extra_at + extra_length],
             _little(data, position + 24, 4),
             _little(data, position + 20, 4),
             _little(data, position + 42, 4),
         )
-        if located is None:
-            return None
-        members.append(_ZipMember(name, _little(data, position + 10, 2), *located))
+        if located is not None:
+            members.append(_ZipMember(name, method, *located))
+        elif _pickle_member(name):
+            members.append(_ZipMember(name, method, 0, -1))
+        else:
+            unlocated = True
         position = extra_at + extra_length + _little(data, position + 32, 2)
-    return members
+    return _listed(members, complete=not unlocated)
+
+
+def _listed(members: list[_ZipMember], *, complete: bool) -> list[_ZipMember] | None:
+    """``members`` when they can be rated: every member read, or a pickle member listed."""
+    return members if complete or any(_pickle_member(m.name) for m in members) else None
 
 
 def _zip64_location(
@@ -441,8 +492,10 @@ def _zip64_location(
     """A member's compressed size and local header offset, from ZIP64 when they overflow.
 
     The ZIP64 extra field holds, in this order, each of the uncompressed size, the
-    compressed size and the offset whose 32-bit field is 0xFFFFFFFF. ``None`` when one
-    it must hold is missing, which ``zipfile`` refuses as a corrupt archive.
+    compressed size and the offset whose 32-bit field is 0xFFFFFFFF. ``None`` when the
+    field is there but too short for them, which ``zipfile`` refuses as a corrupt
+    archive. Without the field, ``zipfile`` keeps the 32-bit values as written and reads
+    the archive, so they are kept here too.
     """
     if 0xFFFFFFFF not in (uncompressed, compressed, offset):
         return compressed, offset
@@ -461,7 +514,7 @@ def _zip64_location(
                     cursor += 8
             return values[1], values[2]
         position += 4 + length
-    return None
+    return compressed, offset
 
 
 def _reread(stream: BinaryIO, offset: int, size: int) -> bytes:
@@ -858,7 +911,7 @@ def observe_content(
     """
     budget = budget or InspectionBudget()
     inspected = _inspect_opened(path, stream, budget)
-    if (
+    if inspected.explanation == TEXT_PICKLE_WITHOUT_CALLABLE or (
         inspected.safety != SerializationSafety.UNSAFE_CODE_EXECUTION
         and inspected.explanation not in _CONTENT_UNREAD
     ):
@@ -1653,6 +1706,7 @@ class ModelScanner(Scanner):
         self._tree = ModelTree(())
         self._digests: dict[Path, str | None] = {}
         self._read: set[Path] = set()
+        self._gaps: list[str] = []
         self._budget = InspectionBudget()
         self._bindings = BindingBudget()
         self._shared = BindingBudget(reason=SHARED_DIGESTS_EXHAUSTED)
@@ -1667,6 +1721,7 @@ class ModelScanner(Scanner):
         ) as files:
             self._tree = tree = ModelTree(files.iter_files())
             self._digests, self._read, self._budget = {}, set(), InspectionBudget()
+            self._gaps = []
             self._bindings, self._verified = BindingBudget(), {}
             self._shared = BindingBudget(reason=SHARED_DIGESTS_EXHAUSTED)
             named = sorted(
@@ -1721,6 +1776,7 @@ class ModelScanner(Scanner):
             for label, reason in unused_policy_entries(files, self._policies, covered):
                 files._fail(label, reason)
             result.surfaces_scanned.extend(sorted(path.as_posix() for path in self._read))
+            result.surfaces_excluded.extend(self._gaps)
         return result
 
     def _content_artifact(
@@ -1742,6 +1798,17 @@ class ModelScanner(Scanner):
             self._digests[path] = files.hash_file(path, max_bytes=limits.bound("model-bytes"))
         return self._digests[path]
 
+    def _credential_file(self, files: ConfinedCollection, path: Path) -> bool:
+        """Whether ``path``, or the in-root file a symlink there leads to, is named as
+        holding credentials, such as ``config.json -> ../.env``; it is then a recorded gap
+        and is not read, so no unkeyed digest of it reaches the inventory."""
+        linked = files.in_root_target(path)
+        reason = credential_gap(path.as_posix(), None if linked is None else linked.as_posix())
+        if reason is None:
+            return False
+        self._gaps.append(f"{path.as_posix()}: {reason}; not read or inventoried")
+        return True
+
     def _directory_context(self, files: ConfinedCollection, model_dir: Path) -> _DirectoryContext:
         tree = self._tree
         configs: list[tuple[Path, dict[str, Any]]] = []
@@ -1751,9 +1818,15 @@ class ModelScanner(Scanner):
             if path not in tree.paths:
                 _report_variants(files, path)
                 continue
+            if self._credential_file(files, path):
+                continue
             self._read.add(path)
             raw = files.read_bytes(path)
             if raw is None:
+                continue
+            if (followed := files.link_target(path)) is not None and credential_shaped(followed):
+                # The symlink was replaced after the check above.
+                files._fail(path, "file changed during collection")
                 continue
             config_files.append((path, hash_bytes(raw)))
             try:
@@ -1811,6 +1884,8 @@ class ModelScanner(Scanner):
             path = model_dir / name
             if path not in tree.paths:
                 _report_variants(files, path)
+            elif self._credential_file(files, path):
+                continue
             elif (digest := self._digest(files, path)) is not None:
                 tokenizer_files.append((path, digest))
         custom_code = None
@@ -1899,6 +1974,8 @@ class ModelScanner(Scanner):
         for its digest only, and is a coverage gap because its text was not checked.
         """
         source = path.as_posix()
+        if self._credential_file(files, path):
+            return
         found = files.regular_file(path)
         if found is not None and found[1] <= files.max_file_bytes:
             self._read.add(path)
