@@ -380,6 +380,8 @@ def test_a_text_pickle_that_names_an_importable_global_is_critical(tmp_path: Pat
     (tmp_path / "models" / "payload").write_bytes(b'cos\nsystem\n(S"id"\ntR.')
     component = _component(tmp_path, "models/payload")
     assert component is not None and component.serialization_safety is UNSAFE
+
+
 # Opcodes through which unpickling resolves or calls an object.
 _CODE_OPCODES = {
     "GLOBAL",
