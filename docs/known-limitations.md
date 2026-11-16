@@ -1412,6 +1412,11 @@ A way around a limit that its entry does not describe is worth a
   `verify-live` observes stdio servers only: observe remote servers with
   `discover-mcp --record` and compare with `diff`. A WebSocket server is reported as
   `unsupported-transport`.
+- **The endpoint digest is unkeyed.** The `discover-mcp` report and `--record`
+  inventories show the origin and `observed_endpoint_hash`, an unsalted SHA-256 of the
+  full URL. A reader can recover a short or guessable path token by hashing candidate
+  URLs; a high-entropy API key is not practical to recover this way. Keep reports from
+  servers with low-entropy path secrets as private as the URL.
 - **Launcher pins cover the launcher only.** They do not authenticate the operating
   system, interpreter or libraries. Run launchers in an isolated worker, as
   [security boundaries](../SECURITY.md#security-boundaries) describe.
@@ -1492,7 +1497,10 @@ A way around a limit that its entry does not describe is worth a
   `verify-attestation` does. The check does not authenticate a key or check its owner,
   and a key copied or mounted out of the checkout is accepted; a registrar given such a
   key can still record an attacker's serial, which only deleting rows undoes. Python
-  callers of `ReferenceGateway` pass key objects and get no placement check.
+  callers of `ReferenceGateway` pass key objects and get no placement check. The
+  hard-link rule does not look at where the other names are, so a key in a store that
+  deduplicates by hard links, such as the Nix store after `nix-store --optimise`, is
+  refused too; copy such a key to a file of its own.
 - **Schemas are read in their declared dialect.** A schema without `$schema` is read
   as JSON Schema 2020-12. A constraint that evaluation would skip, or a pattern that
   ECMA-262 and Python read differently, such as a backreference to an optional
