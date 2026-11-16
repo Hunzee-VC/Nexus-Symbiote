@@ -269,21 +269,34 @@ REVIEWED_GATE_STEPS: dict[str, dict[str, dict[str, tuple[str, dict[str, str]]]]]
         },
         "codeql": {
             "scripts/check_codeql_sarif.py": (
-                'python scripts/check_codeql_sarif.py "$SARIF_DIR/python.sarif"'
-                ' --out "$REPORT_DIR/codeql-policy-python.json"\n'
-                'python scripts/check_codeql_sarif.py "$SARIF_DIR/actions.sarif"'
-                ' --out "$REPORT_DIR/codeql-policy-actions.json"\n',
+                'python scripts/check_codeql_sarif.py "$SARIF_PATH" --out "$CODEQL_REPORT"',
                 {
-                    "SARIF_DIR": "${{ runner.temp }}/codeql-sarif",
-                    "REPORT_DIR": "${{ runner.temp }}",
+                    "SARIF_PATH": "${{ runner.temp }}/codeql-sarif/python.sarif",
+                    "CODEQL_REPORT": "${{ runner.temp }}/codeql-policy.json",
                 },
             )
         },
-    }
+    },
+    "codeql.yml": {
+        "analyze": {
+            "scripts/check_codeql_sarif.py": (
+                'python scripts/check_codeql_sarif.py "$SARIF_PATH" --out "$CODEQL_REPORT"',
+                {
+                    "SARIF_PATH": "${{ runner.temp }}/codeql-sarif/${{ matrix.language }}.sarif",
+                    "CODEQL_REPORT": "${{ runner.temp }}/codeql-policy.json",
+                },
+            )
+        },
+    },
 }
-# The languages each CodeQL init step must analyze.
+# The languages each CodeQL job's matrix must analyze, and the events its workflow must run
+# on: code scanning blocks a merge until a pull request has a result for every configuration
+# main holds, so a workflow that uploads on main must run on pull requests too.
 CODEQL_LANGUAGES: dict[str, dict[str, frozenset[str]]] = {
-    "ci.yml": {"codeql": frozenset({"python", "actions"})}
+    "codeql.yml": {"analyze": frozenset({"python", "actions"})}
+}
+CODEQL_TRIGGERS: dict[str, frozenset[str]] = {
+    "codeql.yml": frozenset({"push", "pull_request", "schedule"})
 }
 # The timeout options that leave the command's status intact, alone or with a value.
 TIMEOUT_FLAGS = frozenset({"--foreground", "--preserve-status", "-v", "--verbose"})
@@ -1245,6 +1258,12 @@ def _gate_issues(
     commands = REQUIRED_COMMANDS.get(path.name, {}).get(name, ())
     text_only = REQUIRED_TEXT.get(path.name, {}).get(name, frozenset())
     errors = []
+    if commands and ("container" in job or "services" in job):
+        # A job container supplies its own python, git and HOME, so the gate environment
+        # rules above would not describe what the gate runs with.
+        errors.append(
+            f"{path}: {name} must not run its gates in a job container or beside services"
+        )
     condition = _condition(job)
     reviewed_job = REVIEWED_JOB_CONDITIONS.get(path.name, {}).get(name)
     if commands and condition not in (None, *ALWAYS_RUNS, reviewed_job):
@@ -1268,12 +1287,13 @@ def _gate_issues(
             if command in str(run) and (run != script or step.get("env") != env):
                 errors.append(f"{path}: {name} runs {command} other than in its reviewed step")
     languages = CODEQL_LANGUAGES.get(path.name, {}).get(name, frozenset())
-    for step in _steps(job):
-        if languages and str(step.get("uses", "")).startswith("github/codeql-action/init@"):
-            with_ = step.get("with")
-            value = with_.get("languages") if isinstance(with_, dict) else None
-            for language in sorted(languages - set(re.split(r"[\s,]+", str(value)))):
-                errors.append(f"{path}: {name} must analyze {language} with CodeQL")
+    if languages:
+        strategy = job.get("strategy")
+        matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
+        listed = matrix.get("language") if isinstance(matrix, dict) else None
+        analyzed = {str(item) for item in listed} if isinstance(listed, list) else set()
+        for language in sorted(languages - analyzed):
+            errors.append(f"{path}: {name} must analyze {language} with CodeQL")
     reviewed = REVIEWED_STEP_CONDITIONS.get(path.name, {})
     found: set[str] = set()
     unstructured: set[str] = set()
@@ -1354,6 +1374,8 @@ def _workflow_issues(path: Path, document: dict[Any, Any]) -> list[str]:
     triggers = _triggers(document)
     if not triggers or triggers - ALLOWED_TRIGGERS:
         errors.append(f"{path}: triggers must be among {', '.join(sorted(ALLOWED_TRIGGERS))}")
+    for event in sorted(CODEQL_TRIGGERS.get(path.name, frozenset()) - triggers):
+        errors.append(f"{path}: must run on {event}, or code scanning blocks every merge")
     if "permissions" not in document or not _read_only(document["permissions"]):
         errors.append(f"{path}: top-level permissions must be present and read-only")
     if _schedules_cancel_each_other(document):

@@ -854,27 +854,53 @@ def test_a_variable_family_that_hollows_a_gate_is_unsafe_gate_environment(
     assert any("sets unsafe gate environment in step env" in e for e in errors), errors
 
 
-def test_the_codeql_job_analyzes_python_and_actions(tmp_path):
+@pytest.mark.parametrize("language", ["python", "actions"])
+def test_the_codeql_workflow_analyzes_python_and_actions(tmp_path, language):
     def change(jobs):
-        step_running(jobs["codeql"], "github/codeql-action/init@")["with"]["languages"] = "python"
+        matrix = jobs["analyze"]["strategy"]["matrix"]
+        matrix["language"] = [item for item in matrix["language"] if item != language]
+
+    errors = workflow_errors(tmp_path, "codeql.yml", change)
+    assert any(f"analyze must analyze {language} with CodeQL" in e for e in errors), errors
+
+
+@pytest.mark.parametrize("event", ["pull_request", "push", "schedule"])
+def test_the_codeql_workflow_runs_on_pull_requests_and_main(tmp_path, event):
+    # Code scanning holds a merge until the pull request has a result for every CodeQL
+    # configuration main holds; a workflow that uploads on main only would block them all.
+    workflow = yaml.safe_load((ROOT / ".github/workflows/codeql.yml").read_text())
+    triggers = workflow.get("on", workflow.get(True))
+    del triggers[event]
+    path = tmp_path / "codeql.yml"
+    path.write_text(yaml.safe_dump(workflow))
+    errors = checker.check(path)
+    assert any(f"must run on {event}" in e for e in errors), errors
+
+
+@pytest.mark.parametrize(
+    ("name", "job", "variable", "value"),
+    [
+        ("ci.yml", "codeql", "SARIF_PATH", "/dev/null"),
+        ("codeql.yml", "analyze", "SARIF_PATH", "/dev/null"),
+    ],
+)
+def test_the_codeql_policy_reads_the_analysis_it_gates(tmp_path, name, job, variable, value):
+    def change(jobs):
+        step_running(jobs[job], "scripts/check_codeql_sarif.py")["env"][variable] = value
+
+    errors = workflow_errors(tmp_path, name, change)
+    assert any("scripts/check_codeql_sarif.py other than" in e for e in errors), errors
+
+
+@pytest.mark.parametrize("field", ["container", "services"])
+def test_a_gate_job_cannot_run_in_a_job_container(tmp_path, field):
+    def change(jobs):
+        jobs["quality"][field] = (
+            "ghcr.io/example/python:latest" if field == "container" else {"db": {"image": "x"}}
+        )
 
     errors = workflow_errors(tmp_path, "ci.yml", change)
-    assert any("codeql must analyze actions" in e for e in errors), errors
-
-
-def test_the_codeql_policy_reads_the_actions_sarif(tmp_path):
-    errors = workflow_errors(
-        tmp_path,
-        "ci.yml",
-        edit_run(
-            "codeql",
-            "scripts/check_codeql_sarif.py",
-            'python scripts/check_codeql_sarif.py "$SARIF_DIR/actions.sarif"'
-            ' --out "$REPORT_DIR/codeql-policy-actions.json"\n',
-            "",
-        ),
-    )
-    assert any("scripts/check_codeql_sarif.py other than" in e for e in errors), errors
+    assert any("must not run its gates in a job container" in e for e in errors), errors
 
 
 def test_non_pull_request_platform_runs_never_share_a_concurrency_group():

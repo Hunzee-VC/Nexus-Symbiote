@@ -260,24 +260,21 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-      # actions analyzes the workflows and action.yml, as the weekly CodeQL run does, so
-      # a workflow finding fails the pull request instead of main on the next Monday.
       - name: Initialize CodeQL
         uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
-          languages: python, actions
+          languages: python
           queries: security-and-quality
       - name: Analyze the checked-out workflow commit
         uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
+          category: /language:python
           output: ${{ runner.temp }}/codeql-sarif
       - name: Reject high and critical security findings
         env:
-          SARIF_DIR: ${{ runner.temp }}/codeql-sarif
-          REPORT_DIR: ${{ runner.temp }}
-        run: |
-          python scripts/check_codeql_sarif.py "$SARIF_DIR/python.sarif" --out "$REPORT_DIR/codeql-policy-python.json"
-          python scripts/check_codeql_sarif.py "$SARIF_DIR/actions.sarif" --out "$REPORT_DIR/codeql-policy-actions.json"
+          SARIF_PATH: ${{ runner.temp }}/codeql-sarif/python.sarif
+          CODEQL_REPORT: ${{ runner.temp }}/codeql-policy.json
+        run: python scripts/check_codeql_sarif.py "$SARIF_PATH" --out "$CODEQL_REPORT"
       - name: Retain CodeQL analysis and policy evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -285,7 +282,7 @@ jobs:
           name: codeql-policy-evidence
           path: |
             ${{ runner.temp }}/codeql-sarif/*.sarif
-            ${{ runner.temp }}/codeql-policy-*.json
+            ${{ runner.temp }}/codeql-policy.json
           if-no-files-found: error
           retention-days: 14
   action:

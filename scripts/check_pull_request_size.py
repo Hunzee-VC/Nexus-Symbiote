@@ -61,6 +61,18 @@ def changed_lines(
     return total
 
 
+def _top_level() -> str:
+    """The working tree's top: numstat prints root-relative paths, and every pathspec and
+    tree lookup must read them from there, whatever directory the script starts in."""
+    result = subprocess.run(  # noqa: S603
+        ["git", "rev-parse", "--show-toplevel"],  # noqa: S607
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
 def _git(base: str, *args: str) -> bytes:
     """Output of a git command that reads attributes from the base and prints raw paths."""
     result = subprocess.run(  # noqa: S603
@@ -74,6 +86,7 @@ def _git(base: str, *args: str) -> bytes:
         ],
         check=False,
         capture_output=True,
+        cwd=_top_level(),
     )
     if result.returncode != 0:
         raise SystemExit(result.stderr.decode(errors="replace").strip() or "git failed")

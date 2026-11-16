@@ -177,3 +177,21 @@ def test_a_binary_fixture_with_a_non_ascii_path_under_tests_is_not_counted(
     monkeypatch.chdir(repository)
     assert checker.main(["--base", base]) == 0
     assert "0 lines" in capsys.readouterr().out
+
+
+def test_a_run_from_a_subdirectory_still_refuses_binary_content(
+    repository: Path, monkeypatch, capsys
+) -> None:
+    # numstat prints root-relative paths; read from a subdirectory, the blob lookups and
+    # pathspecs found nothing and counted a binary .png as zero lines.
+    (repository / ".gitattributes").write_text("*.png binary\n")
+    _git(repository, "add", "-A")
+    _git(repository, "commit", "-q", "-m", "attributes")
+    base = _git(repository, "rev-parse", "HEAD").strip()
+    (repository / "src" / "sub").mkdir(parents=True)
+    (repository / "src" / "sub" / "y.png").write_bytes(b"\0\1\2" * 2000)
+    _git(repository, "add", "-A")
+    _git(repository, "commit", "-q", "-m", "blob")
+    monkeypatch.chdir(repository / "src" / "sub")
+    assert checker.main(["--base", base]) == 1
+    assert "cannot be measured" in capsys.readouterr().out
