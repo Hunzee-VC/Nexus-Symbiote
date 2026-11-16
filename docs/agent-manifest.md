@@ -51,6 +51,18 @@ free-text redaction. Recognized credentials are removed before these values ente
 any inventory or export. Redaction does not recognize every possible secret, so keep credentials
 out of these fields and review earlier exports before sharing them.
 
+Redaction also keeps only the origin of a URL, so `owner: https://github.com/acme-platform`
+is exported as `https://github.com`. The agent record binds the written value of each
+field that redaction changed, and only of those: with
+`NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` set, `static_value_binding` is an HMAC-SHA256
+(profile `nexus-symbiote/agent-manifest-values/v1`) over them, so a change to one of
+them changes it, while a change to a field exported as written shows in that field.
+Without the key the record carries a low `completeness` finding that names the fields,
+and `diff` raises its unbound-values alert on every comparison, as it does for the
+other records with withheld values. A manifest whose fields are all exported as written
+carries neither. A URL written with an upper-case host or a trailing slash counts as
+changed, since the export normalizes it.
+
 ## What it changes
 
 - **Identity.** Without `agent.yaml`, or without `id`, the repository agent's
@@ -89,7 +101,8 @@ inventory, so the default gate fails and the evidence stays available for review
 | `agent.yaml#/instructions/N: must be a relative path beneath the repository` or `agent.yaml#/models/KEY: must be a relative path beneath the repository` | An absolute path, a `..` component, a backslash or a NUL character |
 | `agent.yaml#/instructions/N: the declared instruction could not be collected safely` | Missing, a symbolic link other than a relative one to a regular file in the project, not a regular file, or larger than the `file-bytes` [collection limit](collection-limits.md) (4 MiB by default) |
 | `agent.yaml#/instructions/N: names a path inside a directory that collection never reads` or `agent.yaml#/models/KEY: names a path inside a directory that collection never reads` | A path under `.git`, `node_modules`, `__pycache__`, `.venv` or `venv`, in any spelling a case-insensitive file system treats as the same name, such as `Node_Modules` |
-| `agent.yaml#/instructions/N: instruction changed since scanner collection` | The file changed between collection and assembly |
+| `agent.yaml#/instructions/N: instruction changed since scanner collection` | The file changed between collection and assembly. For a file the `prompt` collector recorded without `content_hash`, such as `AGENTS.md` linked to `config/app.json`, the keyed binding is compared instead; without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` nothing recorded its content, so it is not compared |
+| `agent.yaml#/instructions/N: instruction content was bound under another key` or `agent.yaml#/instructions/N: instruction content binding has an unknown profile` | The collector bound a file recorded without `content_hash` under another key or profile, so assembly cannot compare it |
 | `agent.yaml#/instructions/N: declared instruction is not UTF-8 text` | It cannot be checked for hidden characters |
 | `agent.yaml#/models/KEY: the declared local model has no collected model artifact` | No collected model at that path |
 | `agent.yaml#/models/KEY: the declared local model is unavailable` | The artifact can no longer be opened safely |

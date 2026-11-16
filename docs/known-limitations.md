@@ -439,8 +439,22 @@ A way around a limit that its entry does not describe is worth a
   the `model-bytes` limit is a collection failure.
 - **Content recognition is bounded.** A binary pickle is recognized by its PROTO
   opcode and 16 well-formed opcodes in the first 64 KiB, and a text-protocol pickle
-  by a consistent stream of at most 4,096 opcodes. A NumPy array's version 1, 2 or 3
-  header is parsed when it is at most 64 KiB long, as every version 1 header is, and
+  by a consistent stream of at most 4,096 opcodes. In a file inventoried only by its
+  content, a text-protocol stream must also name an importable callable (a `GLOBAL`
+  or `INST` whose module and name are dotted identifiers), so text that only parses as
+  one, such as a `.gitignore` under `checkpoints/`, is not inventoried; text whose
+  first lines happen to read as such a reference, such as `cache`, `logs`, `.`, still
+  is. A ZIP member is a pickle when its name ends in a pickle-family suffix, so `.pkl`
+  and `archive/.pkl` count, and a central directory entry whose 32-bit size or offset
+  is `0xFFFFFFFF` without a ZIP64 field is read as written, as `zipfile` reads it. A
+  directory that turns malformed after it lists a pickle-family member, such as with an
+  entry whose name runs past the end of the file, still rates the archive
+  `unsafe-code-execution`. An entry whose ZIP64 field is too short to locate its data,
+  which `zipfile` refuses, is passed over by its own lengths, as a loader that reads
+  past the field does, so it hides no pickle-family member, its own name included;
+  when no such member is listed, an entry that cannot be located leaves the archive
+  `unknown`. A NumPy array's version 1, 2 or 3 header is parsed when it
+  is at most 64 KiB long, as every version 1 header is, and
   while the 16,000,000 structure units one scan shares with the ONNX and GGUF readers
   last, at one unit a header byte; only its `descr` value is read for types, so a
   field named `O` is not one. A ZIP
@@ -502,9 +516,23 @@ A way around a limit that its entry does not describe is worth a
   gap and is not read, and so is an import, whatever its name, that a symlink
   resolves to such a file, such as `docs/guide.md` linked to `.env`. An imported file is
   inventoried without a content hash unless both the path imported and the file a
-  symlink there leads to, if any, have a Markdown suffix: its exact bytes may hold
-  configuration or secrets, and an unkeyed digest of them could be confirmed by
-  guessing. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` a keyed binding covers the
+  symlink there leads to, if any, have a Markdown suffix (`.md`, `.mdc` or
+  `.markdown`): its exact bytes may hold configuration or secrets, and an unkeyed
+  digest of them could be confirmed by guessing. The same holds for every other file
+  the collector records: an instruction, nested memory, rule, prompt or subagent file
+  keeps its content hash only when its name is Markdown, or is an instruction file name
+  without one (`.cursorrules`, `.clinerules`, `.windsurfrules`, `system_prompt.txt`),
+  or, in a rule, prompt or subagent directory, has no suffix at all; and when a symlink
+  there leads to a file with a Markdown suffix, the same test an import of that file
+  passes. So `AGENTS.md` linked to `config/app.json` or `config/.windsurfrules`,
+  `.cursorrules` linked to `docs/rules.txt` or `shared/.cursorrules`, and
+  `.cursor/rules/x.json` or `.clinerules/style.txt` carry no content hash; a nested
+  `shared/.cursorrules` that the walk records under its own name keeps one there. A
+  file of a skill or command directory is a skill resource that keeps its unkeyed
+  `sha256` digest whatever its name, also when it is a symlink to a file an import
+  inventories without a content hash, such as `.claude/skills/x/app.json` linked to
+  `config/app.json`, so that digest can confirm a guess of the file; keep
+  configuration out of skill directories. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` a keyed binding covers the
   content, which `validate --project` with the same key verifies; without the key the
   component carries a low `completeness` finding saying its values are not bound in
   this inventory, validation counts it as unbound, and a change to the file fails no
@@ -516,16 +544,26 @@ A way around a limit that its entry does not describe is worth a
   paths, an `imports` list is replaced by `imports_count` and `imports_digest`, and an
   `imported_by` list by `imported_by_count`; every file is still inventoried.
 - **Files named as holding credentials are not read.** The `prompt` collector does not
-  read a file without a Markdown suffix whose name says it holds credentials (`.env*`,
+  read a file without a Markdown suffix whose name says it holds credentials (`.env*`
+  other than a template ending in `.example`, `.sample` or `.template`,
   `.netrc`, `.npmrc`, `.pypirc`, `id_rsa`, `id_ecdsa`, `id_ed25519`, the suffixes
   `.pem`, `.key`, `.p12`, `.pfx`, `.der`, `.jks`, `.keystore` and `.token`, or a name
   containing `secret`, `credential`, `password` or an `api key` spelling: `apikey`,
-  `api_key` or `api-key`), or that lies in a directory named exactly one of those words,
+  `api_key` or `api-key`, unless it is a program with the suffix `.py`, `.pyi`, `.sh`,
+  `.bash`, `.zsh`, `.ps1`, `.js`, `.mjs`, `.cjs`, `.ts`, `.rb` or `.go` whose name is
+  more than one of those words, such as `rotate_api_key.py`, which is read and
+  inventoried; a program named only for what it holds, such as `secrets.py` or
+  `credentials.rb`, is still not read. A credential written into a program that this
+  rule reads, such as `client_secret.js` or `local_secrets.py`, or into a `.env`
+  template, is not withheld by it), or that lies in a directory named exactly one of those words,
   singular or plural, with or without a leading dot, such as `secrets/token.txt`. Such a
   file is a gap when a memory file imports it, when an instruction file such as
   `CLAUDE.md` or `.cursorrules`, a rule, prompt or subagent file, an import or a file of
   a skill or command directory is a symlink to it, and when a rule, prompt, subagent,
-  skill or command directory holds it; the directory's other files are inventoried. A
+  skill or command directory holds it; the directory's other files are inventoried. The
+  `model` collector does not read a model directory's configuration, tokenizer or chat
+  template file that is, or is a symlink to, such a file, such as `config.json` linked
+  to `../.env`; it is a gap too. A
   script whose name contains one of those words, such as `scripts/rotate_password.py`,
   is therefore a gap too, and so is every file without a Markdown suffix in a skill
   directory named exactly one of them, such as `.claude/skills/secrets/`. A Markdown
@@ -580,25 +618,41 @@ A way around a limit that its entry does not describe is worth a
 - **Settings digests can confirm guesses of what the redaction keeps.** Every digest
   in `settings_hashes` covers its file after the redaction, with or without
   `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, so it cannot confirm a guess of an `env` value,
-  such as the environment of an MCP server that `.gemini/settings.json` declares, of
-  the command of a credential helper (`apiKeyHelper`, `awsAuthRefresh`,
-  `awsCredentialExport`, `gcpAuthRefresh` or `otelHeadersHelper`), of the value of an `Authorization`, `Cookie` or
-  credential-named key, or of a credential the redaction recognises. A value the
-  redaction leaves in place, such as a password pasted into a hook command, stored
-  under a key whose name does not mark a credential or passed to a command under any
-  setting other than those helpers, can still be confirmed. Keep credentials out of
-  settings files; see [IDE agent settings](verification-source-binding.md#ide-agent-settings).
+  such as the environment of an MCP server that `.gemini/settings.json` declares, or
+  of a Codex `shell_environment_policy.set` value or `query_params` value, of the
+  command of a credential helper (`apiKeyHelper`, `awsAuthRefresh`,
+  `awsCredentialExport`, `gcpAuthRefresh` or `otelHeadersHelper`), of the value of an
+  `Authorization`, `Cookie` or credential-named key, of a Codex
+  `experimental_bearer_token` or an OAuth `clientSecret`, or of a credential the
+  redaction recognises, nor of the words of a command, its arguments or an HTTP header
+  value, such as a PIN passed to a hook as `--password 482913` or sent as
+  `X-Pin: 482913`, nor of the words inside a permission rule or hook matcher, such as
+  `Bash(mysql -uroot -p482913 db:*)`, which the digest covers by shape only (tool
+  names, program words and URL origins), including a PIN in a here document or on a
+  line continued with a backslash (before LF or CRLF). A word that a shell runs as a
+  command, such as `-p482913` at the start of a line of a hook command, is a program
+  word and stays; an all-digit program word is redacted. A line continued in another
+  shell's syntax, such as a Windows `cmd` caret or a PowerShell backtick, is read as a
+  new line, so the word after it stays too. A value the redaction leaves in place
+  elsewhere, such as a password stored under a key whose name does not mark a
+  credential, a `cwd` path or a `model` name, can still be confirmed. Keep
+  credentials out of settings files; see
+  [IDE agent settings](verification-source-binding.md#ide-agent-settings).
 - **Some settings changes alert only with the key.** Every settings file is digested
   after the redaction, so that its digest cannot confirm a guess. Without
   `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a change only to a value the redaction removes,
   such as an `env` value, including an MCP server's environment value, the command of
-  a credential helper, a token, the value of an `Authorization`, `Cookie` or credential-named
-  key such as `password` or `X-Api-Key`, or a URL path, query or userinfo on the same
-  host in a `notify` or hook command, changes no digest; such a record carries a low
-  `completeness` finding, so `diff` raises a medium alert that its values are unbound
-  on every comparison, changed or not, without naming a value, and a keyless
-  `diff --fail-on-alert` fails on that alert rather than on the change. Adding or
-  removing an `env` name or a credential helper still alerts as a settings change. The redaction ends a URL or an assigned value at a shell operator (`;`, `|`,
+  a credential helper, a token, the value of an `Authorization`, `Cookie` or
+  credential-named key such as `password` or `X-Api-Key`, a URL path, query or
+  userinfo on the same host in a `notify` or hook command, an argument of a command,
+  such as an MCP server's pinned version in `args` or an option of a hook command, an
+  HTTP header value, or the words after the program in a permission rule, such as
+  `Bash(npm test)` becoming `Bash(npm publish)`, changes no digest; such a record
+  carries a low `completeness` finding, so `diff` raises a medium alert that its
+  values are unbound on every comparison, changed or not, without naming a value, and
+  a keyless `diff --fail-on-alert` fails on that alert rather than on the change.
+  Adding or removing an `env` name or a credential helper still alerts as a settings
+  change. The redaction ends a URL or an assigned value at a shell operator (`;`, `|`,
   `&`, `$`, `` ` ``, parentheses, braces, `<`, `>` or a line break), and starts a new
   URL at each later scheme such as `https://`, so a command or operator glued to one
   without whitespace, and a host glued to one after an operator or a scheme, as in
