@@ -30,7 +30,11 @@ from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import canonical_json, hash_canonical, parse_json_strict
 from nexus_symbiote.core.models import IDEAgentComponent, RiskAssessment, VerifiedExtensionComponent
 from nexus_symbiote.scanners.base import Scanner, ScanResult
-from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
+from nexus_symbiote.scanners.mcp import (
+    _CODE_LOADING_ENVIRONMENT,
+    SOURCE_BINDING_KEY_ENV,
+    _exported_function,
+)
 from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
 from nexus_symbiote.utils.jsonc import strip_jsonc
@@ -156,6 +160,19 @@ _CREDENTIAL_HELPER_KEYS = (
     "awsCredentialExport",
     "gcpAuthRefresh",
     "otelHeadersHelper",
+)
+# Settings `env` applies to the session and every process it starts. These names send
+# the API key and prompts to another endpoint, proxy or trust store, or replace the
+# credential. Only names are rated; values are never reported.
+_REDIRECTING_ENVIRONMENT = re.compile(
+    r"[A-Z0-9_]*_(?:BASE_URL|API_URL)|ANTHROPIC_AUTH_TOKEN|(?:HTTPS?|ALL)_PROXY"
+    r"|NODE_EXTRA_CA_CERTS|NODE_TLS_REJECT_UNAUTHORIZED|SSL_CERT_(?:FILE|DIR)"
+    r"|REQUESTS_CA_BUNDLE|CURL_CA_BUNDLE"
+)
+# Beyond the names the MCP collector treats as code loading: where programs are found,
+# and the git settings that run a program.
+_SETTINGS_CODE_ENVIRONMENT = re.compile(
+    r"PATH|GIT_(?:SSH|SSH_COMMAND|EXEC_PATH|ASKPASS|TEMPLATE_DIR|CONFIG_[A-Z0-9_]+)|SSH_ASKPASS"
 )
 CODEX_CONFIG = ".codex/config.toml"
 CURSOR_HOOKS = ".cursor/hooks.json"
@@ -656,7 +673,9 @@ def _header_line(value: str, *, unkeyed: bool) -> str:
 # Command words are read once per segment. A name must end its path: in
 # `./bash/process.py` or `tools/sh/lint` it is a directory. `${IFS}` and `$IFS`
 # are both an empty insertion (`c${IFS}url`) and a split (`bash${IFS}/dev/stdin`).
-_SHELL_NAMES = frozenset({"powershell", "pwsh", "bash", "dash", "zsh", "ksh", "ash", "fish", "sh"})
+_SHELL_NAMES = frozenset(
+    {"powershell", "pwsh", "bash", "dash", "zsh", "ksh", "ash", "fish", "sh", "csh", "tcsh", "cmd"}
+)
 _EVAL_NAMES = frozenset({"eval", "source", "."})
 _IEX_NAMES = frozenset({"iex", "invoke-expression"})
 _PYTHON_NAMES = frozenset({"python", "python2", "python3", "py"})
@@ -669,6 +688,9 @@ _STDOUT_NAMES = frozenset({"", "-", "/dev/stdout", "/dev/stderr", "/dev/fd/1", "
 _SEGMENT_BOUNDARY = re.compile(r"[\n|;&]")
 _PREFIX_REDIR = re.compile(r"\d*(?:<<-|<<<|<<|<>|>>|>&|&>|[<>])")
 _SCRIPT_FLAG = re.compile(r"(?i)-c(?:ommand(?:withargs)?)?\Z|-[A-Za-z]*c\Z")
+# An interpreter's flag that takes its program as the next argument: `-e`, `-E`, `-p`,
+# `-r` (PHP) and the long `--eval` and `--print`, alone or after other short flags.
+_CODE_FLAG = re.compile(r"-[A-Za-z]*[eEpr]\Z|--(?:eval|print)\Z")
 _POWERSHELL = re.compile(r"\b(?:powershell|pwsh)(?:\.exe)?\b", re.IGNORECASE)
 # PowerShell takes -, en dash, em dash or horizontal bar before a parameter name. A shell
 # removes quotes and escapes before PowerShell reads the argument. The console host reads
@@ -678,8 +700,11 @@ _POWERSHELL = re.compile(r"\b(?:powershell|pwsh)(?:\.exe)?\b", re.IGNORECASE)
 _ENCODED_PREFIX = (
     "e(?:c|n(?:c(?:o(?:d(?:e(?:d(?:c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?)?)?)?)?)?)?)?"
 )
+# The console host also takes `/` before a parameter name, as in `/enc`; that form must
+# end the argument, so that a script path such as `/e.ps1` is not read as one.
 _ENCODED_COMMAND = re.compile(
-    rf"(?<!\S)[\"'\u2018-\u201e\\^`]*[-\u2013\u2014\u2015]{_ENCODED_PREFIX}\b",
+    rf"(?<!\S)[\"'\u2018-\u201e\\^`]*"
+    rf"(?:[-\u2013\u2014\u2015]{_ENCODED_PREFIX}\b|/{_ENCODED_PREFIX}(?![^\s\"'\u2018-\u201e]))",
     re.IGNORECASE,
 )
 _ARGUMENT = re.compile(r"\S+")
@@ -717,6 +742,9 @@ _POWERSHELL_SWITCHES = _abbreviations(
     ("noprofile", 3), ("nologo", 3), ("noninteractive", 4), ("noexit", 3), ("sta", 3), ("mta", 3)
 )
 _HOOK_URL = re.compile(r"https?://", re.IGNORECASE)
+# A host name or IPv4 address, with an optional port, before a path: what curl and wget
+# fetch over HTTP when the URL has no scheme.
+_HOST_PATH = re.compile(r"(?:[A-Za-z0-9-]+\.)+[A-Za-z0-9-]+(?::[0-9]+)?/")
 _SEVERITY_RANK = {severity: index for index, severity in enumerate(RiskSeverity)}
 
 
@@ -1062,6 +1090,39 @@ def _skip_exec(words: list[str], index: int) -> int:
     return index
 
 
+# Programs that run the command after their options and a fixed number of operands:
+# the options that take a value, and how many operands come before the command.
+_WRAPPERS: dict[str, tuple[frozenset[str], int]] = {
+    "nohup": (frozenset(), 0),
+    "setsid": (frozenset(), 0),
+    "time": (frozenset({"-f", "--format", "-o", "--output"}), 0),
+    "nice": (frozenset({"-n", "--adjustment"}), 0),
+    "ionice": (frozenset({"-c", "--class", "-n", "--classdata", "-t"}), 0),
+    "stdbuf": (frozenset({"-i", "-o", "-e", "--input", "--output", "--error"}), 0),
+    "timeout": (frozenset({"-s", "--signal", "-k", "--kill-after"}), 1),
+    "chroot": (frozenset({"--userspec", "--groups"}), 1),
+    "flock": (frozenset({"-w", "--timeout", "-E", "--conflict-exit-code"}), 1),
+    "taskset": (frozenset(), 1),
+    "xargs": (
+        frozenset({"-a", "--arg-file", "-d", "--delimiter", "-E", "-I", "-L", "-n", "-P", "-s"}),
+        0,
+    ),
+}
+
+
+def _skip_wrapper(words: list[str], index: int, name: str) -> int:
+    with_value, operands = _WRAPPERS[name]
+    while index < len(words):
+        word = _decode_word(words[index], drop_ifs=True)
+        if word == "--":
+            index += 1
+            break
+        if not word.startswith("-") or word == "-":
+            break
+        index += 2 if word in with_value else 1
+    return index + operands
+
+
 def _executable_index(words: list[str]) -> int | None:
     """Index of the command `words` run, after wrappers and grouping. None if not run."""
     index = 0
@@ -1074,7 +1135,11 @@ def _executable_index(words: list[str]) -> int | None:
         if "env" in names:
             index = _skip_env(words, index + 1)
             continue
-        if "sudo" in names:
+        wrapper = next(iter(names & _WRAPPERS.keys()), None)
+        if wrapper is not None:
+            index = _skip_wrapper(words, index + 1, wrapper)
+            continue
+        if names & {"sudo", "doas"}:
             index = _skip_sudo(words, index + 1)
             continue
         if "command" in names:
@@ -1097,44 +1162,39 @@ def _executable_index(words: list[str]) -> int | None:
     return None
 
 
-def _python_reads_stdin(args: list[str]) -> bool:
-    """True when Python reads the program from stdin, including `python3 -`."""
+# Interpreters that run a program read from standard input when given no script: the
+# short flags whose letter takes the program from the command line or a module instead,
+# the long ones that do, and the options that take the next argument as their value.
+_STDIN_INTERPRETERS: dict[str, tuple[str, frozenset[str], frozenset[str]]] = {
+    **{name: ("cm", frozenset(), frozenset({"-W", "-X"})) for name in _PYTHON_NAMES},
+    "perl": ("eE", frozenset(), frozenset()),
+    "node": ("ep", frozenset({"--eval", "--print"}), frozenset({"-r", "--require", "--import"})),
+    "nodejs": ("ep", frozenset({"--eval", "--print"}), frozenset({"-r", "--require", "--import"})),
+    "ruby": ("e", frozenset(), frozenset({"-r", "-I"})),
+    "php": ("rfBRFE", frozenset(), frozenset({"-c", "-d", "-z"})),
+    "lua": ("e", frozenset(), frozenset({"-l"})),
+}
+# Arguments that name standard input as the program.
+_STDIN_PROGRAMS = frozenset({"-", "/dev/stdin", "/dev/fd/0"})
+
+
+def _reads_stdin(interpreter: str, args: list[str]) -> bool:
+    """True when the interpreter reads its program from stdin, as `python3 -` does."""
+    letters, long_code, with_value = _STDIN_INTERPRETERS[interpreter]
     index = 0
     while index < len(args):
         word = _decode_word(args[index], drop_ifs=True)
-        if word in {"-c", "-m"} or (
-            word.startswith("-")
-            and not word.startswith("--")
-            and word[1:2] in {"c", "m"}
-            and len(word) > 2
-        ):
+        if word in _STDIN_PROGRAMS:
+            return True
+        if word.startswith("--"):
+            if word.split("=", 1)[0] in long_code:
+                return False
+        elif word.startswith("-"):
+            if word[1:2] in letters:
+                return False
+        else:
             return False
-        if word in {"-W", "-X"}:
-            index += 2
-            continue
-        if word == "-" or word.startswith("-"):
-            index += 1
-            continue
-        return False
-    return True
-
-
-def _perl_reads_stdin(args: list[str]) -> bool:
-    """True when Perl reads the program from stdin, not from `-e` or a script file."""
-    index = 0
-    while index < len(args):
-        word = _decode_word(args[index], drop_ifs=True)
-        if word in {"-e", "-E"} or (
-            word.startswith("-")
-            and not word.startswith("--")
-            and word[1:2] in {"e", "E"}
-            and len(word) > 2
-        ):
-            return False
-        if word == "-" or word.startswith("-"):
-            index += 1
-            continue
-        return False
+        index += 2 if word in with_value else 1
     return True
 
 
@@ -1147,11 +1207,8 @@ def _segment_executes(segment: str) -> bool:
     names = _name_variants(words[index])
     if names & (_SHELL_NAMES | _IEX_NAMES):
         return True
-    if names & _PYTHON_NAMES:
-        return _python_reads_stdin(words[index + 1 :])
-    if "perl" in names:
-        return _perl_reads_stdin(words[index + 1 :])
-    return False
+    interpreter = next(iter(sorted(names & _STDIN_INTERPRETERS.keys())), None)
+    return interpreter is not None and _reads_stdin(interpreter, words[index + 1 :])
 
 
 def _segment_fetches(segment: str) -> bool:
@@ -1231,6 +1288,12 @@ def _downloader_name(names: set[str]) -> str | None:
     return None
 
 
+# Standard output written to a file: `>`, `>>`, `>|`, `1>` and `&>`, not `2>` or `>&2`.
+_OUTPUT_REDIRECTION = re.compile(
+    r"(?:(?<![0-9&>])1?>>?\|?|&>>?)(?!&)[ \t]*(?P<target>[^\s<>|;&()]+)"
+)
+
+
 def _saved_names(segment: str) -> set[str]:
     """Filenames a downloader in this segment writes, excluding stdout.
 
@@ -1260,6 +1323,9 @@ def _saved_names(segment: str) -> set[str]:
         if found:
             saved.update(_file_keys(found))
         cursor += step
+    if tool is not None:
+        for redirection in _OUTPUT_REDIRECTION.finditer(segment):
+            saved.update(_file_keys(redirection.group("target")))
     return saved
 
 
@@ -1272,10 +1338,10 @@ def _executes_saved(segment: str, saved: set[str]) -> bool:
     if index is None:
         return False
     names = _name_variants(words[index])
-    if _file_keys(words[index]) & saved and not (names & (_SHELL_NAMES | _PYTHON_NAMES | {"perl"})):
+    interpreters = _SHELL_NAMES | _STDIN_INTERPRETERS.keys()
+    if _file_keys(words[index]) & saved and not (names & interpreters):
         return True
-    runners = _SHELL_NAMES | _PYTHON_NAMES | _IEX_NAMES | {"perl", "busybox"}
-    if not (names & runners):
+    if not (names & (interpreters | _IEX_NAMES | _EVAL_NAMES | {"busybox"})):
         return False
     cursor = index + 1
     while cursor < len(words):
@@ -1360,7 +1426,7 @@ def _substitution_at(command: str, index: int) -> bool:
                 end += 1
             flag = command[index:end]
             index = end
-            if _SCRIPT_FLAG.fullmatch(flag):
+            if _SCRIPT_FLAG.fullmatch(flag) or _CODE_FLAG.fullmatch(flag):
                 while index < length and command[index] in " \t":
                     index += 1
                 while index < length and command[index] in "'\"":
@@ -1388,7 +1454,7 @@ def _substitution_exec(pipelines: list[list[str]]) -> bool:
         if index is None:
             continue
         names = _name_variants(words[index])
-        if not (names & (_SHELL_NAMES | _EVAL_NAMES | _IEX_NAMES)):
+        if not (names & (_SHELL_NAMES | _EVAL_NAMES | _IEX_NAMES | _STDIN_INTERPRETERS.keys())):
             continue
         if _substitution_at(segment, spans[index][1]):
             return True
@@ -1512,9 +1578,21 @@ def _command_severity(command: str) -> RiskSeverity:
     """How dangerous a hook command is, without keeping its text."""
     if _fetch_exec(command):
         return RiskSeverity.CRITICAL
-    if _HOOK_URL.search(command):
+    if _HOOK_URL.search(command) or _downloads_from_host(command):
         return RiskSeverity.HIGH
     return RiskSeverity.MEDIUM
+
+
+def _downloads_from_host(command: str) -> bool:
+    """Whether a downloader is given a host without a scheme, as in `curl evil.example/x`."""
+    for segments in _command_pipelines(command):
+        for segment in segments:
+            words = _shell_words(segment)
+            if any(_name_variants(word) & _DOWNLOAD_NAMES for word in words) and any(
+                _HOST_PATH.match(_decode_word(word, drop_ifs=True)) for word in words
+            ):
+                return True
+    return False
 
 
 def _worse(current: RiskSeverity | None, candidate: RiskSeverity | None) -> RiskSeverity | None:
@@ -1542,18 +1620,63 @@ def _hook_command_severity(value: Any, depth: int = 0) -> RiskSeverity | None:
     return found
 
 
-def _hook_detail(count: int, severity: RiskSeverity, ide: str) -> str:
-    base = (
-        f"IDE agent '{ide}' declares {count} hook command(s) that run automatically on agent events"
-    )
+def _severity_clause(severity: RiskSeverity) -> str:
     if severity is RiskSeverity.CRITICAL:
-        return base + (
+        return (
             ", including a command that pipes a download or a decoded payload into a shell"
             " or runs encoded PowerShell."
         )
     if severity is RiskSeverity.HIGH:
-        return base + ", including a command that contacts a network address."
-    return base + "."
+        return ", including a command that contacts a network address."
+    return "."
+
+
+def _hook_detail(count: int, severity: RiskSeverity, ide: str, *, status_line: bool = False) -> str:
+    parts = [f"{count} hook command(s) that run automatically on agent events"] if count else []
+    if status_line:
+        parts.append("a status line command that runs automatically")
+    return f"IDE agent '{ide}' declares {' and '.join(parts)}" + _severity_clause(severity)
+
+
+def _environment_risk(documents: dict[str, dict[str, Any]]) -> RiskAssessment | None:
+    """Rate the names of settings `env` that redirect the agent or load code."""
+    redirecting: set[str] = set()
+    loading: set[str] = set()
+    for data in documents.values():
+        environment = data.get("env")
+        if not isinstance(environment, dict):
+            continue
+        for name, value in environment.items():
+            if not isinstance(name, str):
+                continue
+            upper = name.upper()
+            if _REDIRECTING_ENVIRONMENT.fullmatch(upper):
+                redirecting.add(name)
+            elif (
+                upper in _CODE_LOADING_ENVIRONMENT
+                or _SETTINGS_CODE_ENVIRONMENT.fullmatch(upper)
+                or _exported_function(name, value)
+            ):
+                loading.add(name)
+    if not (redirecting or loading):
+        return None
+    parts = []
+    if redirecting:
+        parts.append(
+            f"{_series(sorted(map(redact_text, redirecting)))}, which can send the API key and "
+            "prompts to another endpoint or proxy, or replace the credential"
+        )
+    if loading:
+        parts.append(
+            f"{_series(sorted(map(redact_text, loading)))}, which can load code into the "
+            "session or the commands it runs"
+        )
+    return RiskAssessment(
+        severity=RiskSeverity.HIGH if redirecting else RiskSeverity.MEDIUM,
+        category="settings_environment",
+        detail=f"IDE agent 'claude-code' sets environment {'; and '.join(parts)}.",
+        recommendation="Remove these variables from project settings, or approve each value.",
+    )
 
 
 def _hook_commands(value: Any, depth: int = 0) -> int:
@@ -1930,6 +2053,9 @@ class IDEAgentScanner(Scanner):
             properties["declared_permission_rule_counts"] = counts
         hook_commands = 0
         hook_severity: RiskSeverity | None = None
+        # The status line and credential helpers run without an agent event, as hooks do.
+        status_line = False
+        helper_severity = RiskSeverity.MEDIUM
         for relative, data in documents.items():
             body = data if relative == CLAUDE_PLUGIN_HOOKS else data.get("hooks")
             try:
@@ -1937,6 +2063,18 @@ class IDEAgentScanner(Scanner):
                 hook_severity = _worse(hook_severity, _hook_command_severity(body))
             except ValueError:
                 result.scan_failures.append(f"{relative}: settings cannot be canonicalized")
+            if relative == CLAUDE_PLUGIN_HOOKS:
+                continue
+            line = data.get("statusLine")
+            if isinstance(line, dict) and isinstance(line.get("command"), str):
+                status_line = True
+                hook_severity = _worse(hook_severity, _command_severity(line["command"]))
+            for key in _CREDENTIAL_HELPER_KEYS:
+                helper = data.get(key)
+                if isinstance(helper, str):
+                    helper_severity = min(
+                        helper_severity, _command_severity(helper), key=_SEVERITY_RANK.__getitem__
+                    )
         declared = {
             "additional_directories": _count(rules.get("additionalDirectories")),
             "enabled_plugins": _count(merged.get("enabledPlugins")),
@@ -1948,17 +2086,25 @@ class IDEAgentScanner(Scanner):
             "enable_all_project_mcp_servers": merged.get("enableAllProjectMcpServers") is True,
         }
         properties["settings_declarations"] = declared
-        if hook_commands:
+        if hook_commands or status_line:
             risks.append(
                 RiskAssessment(
                     severity=hook_severity or RiskSeverity.MEDIUM,
                     category="hook_commands",
                     detail=_hook_detail(
-                        hook_commands, hook_severity or RiskSeverity.MEDIUM, "claude-code"
+                        hook_commands,
+                        hook_severity or RiskSeverity.MEDIUM,
+                        "claude-code",
+                        status_line=status_line,
                     ),
                     recommendation="Review this setting and approve its exact value.",
                 )
             )
+        environment_risk = _environment_risk(
+            {key: value for key, value in documents.items() if key != CLAUDE_PLUGIN_HOOKS}
+        )
+        if environment_risk is not None:
+            risks.append(environment_risk)
         helpers = [key for key in _CREDENTIAL_HELPER_KEYS if merged.get(key) is not None]
         commands = "a command that runs" if len(helpers) == 1 else "commands that run"
         for category, severity, present, detail in (
@@ -1970,9 +2116,10 @@ class IDEAgentScanner(Scanner):
             ),
             (
                 "credential_helper",
-                RiskSeverity.MEDIUM,
+                helper_severity,
                 bool(helpers),
-                f"declares {_series(helpers)}, {commands} to obtain credentials",
+                f"declares {_series(helpers)}, {commands} to obtain credentials"
+                + _severity_clause(helper_severity)[:-1],
             ),
             (
                 "plugin_sources",

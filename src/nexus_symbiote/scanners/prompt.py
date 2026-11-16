@@ -654,6 +654,10 @@ SKILL_DIRECTORIES = [
     ".gemini/skills",
     ".cursor/commands",
     ".gemini/commands",
+    # The scripts hooks conventionally run: settings bind only the program word that
+    # names one, so the script itself is bound here.
+    ".claude/hooks",
+    ".cursor/hooks",
 ]
 _SKILL_PARTS = tuple(PurePosixPath(directory).parts for directory in SKILL_DIRECTORIES)
 

