@@ -407,7 +407,7 @@ def test_known_limitations_state_the_public_coverage_rule():
         *({name: value} for name, value in IMPORTED_MARKERS.items()),
         {"scope": "repository+shadowscan"},
     ],
-    ids=lambda marker: ",".join(marker),
+    ids=",".join,
 )
 def test_recovery_rejects_unknown_coverage_for_a_marker_only_import(marker):
     bom = _one_edge("invokes", None)

@@ -386,7 +386,7 @@ def test_the_directory_itself_must_open(tmp_path, monkeypatch, ancestors):
     workspace.mkdir(parents=True)
     _listing_refused(monkeypatch, *refused, workspace)
     with pytest.raises(PermissionError):
-        open_directory_nofollow(workspace)
+        os.close(open_directory_nofollow(workspace))
 
 
 @pytest.mark.parametrize("refused", ["outer_listing_refused", "link"])
@@ -398,7 +398,7 @@ def test_a_link_at_or_below_a_traverse_only_ancestor_is_refused(tmp_path, monkey
     (outer / "link").symlink_to(outer / "real", target_is_directory=True)
     _listing_refused(monkeypatch, outer if refused == "outer_listing_refused" else outer / "link")
     with pytest.raises(OSError, match="Not a directory"):
-        open_directory_nofollow(outer / "link" / "workspace")
+        os.close(open_directory_nofollow(outer / "link" / "workspace"))
 
 
 def test_a_directory_replaced_between_its_check_and_its_open_is_refused(tmp_path, monkeypatch):
@@ -418,7 +418,7 @@ def test_a_directory_replaced_between_its_check_and_its_open_is_refused(tmp_path
 
     monkeypatch.setattr(os, "lstat", swapped)
     with pytest.raises(OSError, match="changed during open"):
-        open_directory_nofollow(workspace)
+        os.close(open_directory_nofollow(workspace))
 
 
 def test_directories_are_not_opened_without_descriptor_relative_no_follow_support(
@@ -428,7 +428,7 @@ def test_directories_are_not_opened_without_descriptor_relative_no_follow_suppor
 
     monkeypatch.setattr(os, "supports_dir_fd", set())
     with pytest.raises(OSError, match="unavailable"):
-        open_directory_nofollow(tmp_path)
+        os.close(open_directory_nofollow(tmp_path))
 
 
 @pytest.mark.parametrize("firmlink", [True, False])

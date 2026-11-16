@@ -407,7 +407,7 @@ def test_bun_and_yarn_registry_settings(tmp_path, name, text, expected):
     "name, make, failure",
     [
         (".npmrc", lambda p: p.symlink_to("/etc/hostname"), ".npmrc: symlink target is absolute"),
-        (".npmrc", lambda p: os.mkfifo(p), ".npmrc: read refused"),
+        (".npmrc", os.mkfifo, ".npmrc: read refused"),
         (".npmrc", lambda p: p.write_bytes(b"registry=\xff\n"), ".npmrc: invalid UTF-8"),
         ("bunfig.toml", lambda p: p.write_text("[install\n"), "bunfig.toml: invalid TOML"),
         (

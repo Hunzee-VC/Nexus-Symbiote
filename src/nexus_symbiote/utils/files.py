@@ -9,7 +9,6 @@ import secrets
 import stat
 import sys
 from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
 
 from nexus_symbiote.core.hashing import open_directory_nofollow
@@ -31,7 +30,7 @@ def _relative(root: Path, path: Path, *, allow_parent: bool = False) -> Path:
     return relative
 
 
-@contextmanager
+@contextlib.contextmanager
 def _parent(root: Path, relative: Path, create_parents: bool) -> Iterator[int]:
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     parent = open_directory_nofollow(root)

@@ -291,15 +291,13 @@ def test_imported_discovery_never_reaches_sarif(tmp_path, capsys):
     assert "::warning title=Nexus SymBiote::SARIF upload skipped" in capsys.readouterr().err
     refused = configuration(tmp_path, SYMBIOTE_FORMAT="sarif")
     exports.clear()
-    assert (
-        runner.run(
-            refused,
-            command=stub([], native=SHADOWSCAN),
-            export=lambda native, output, fmt: exports.append(fmt),
-            outputs=tmp_path / "refused",
-        )
-        == 1
+    result = runner.run(
+        refused,
+        command=stub([], native=SHADOWSCAN),
+        export=lambda native, output, fmt: exports.append(fmt),
+        outputs=tmp_path / "refused",
     )
+    assert result == 1
     assert exports == [] and published(tmp_path / "refused")["aibom_path"] == ""
 
 

@@ -281,8 +281,10 @@ def test_document_text_and_connection_strings_never_reach_any_export(
                         "name": "azure",
                         "type": "postgres://user:CANARY-TYPE@db.example/vectors",
                         "source_uris": [
-                            "DefaultEndpointsProtocol=https;AccountName=kb;"
-                            "AccountKey=CANARY-KEY==;EndpointSuffix=core.windows.net",
+                            (
+                                "DefaultEndpointsProtocol=https;AccountName=kb;"
+                                "AccountKey=CANARY-KEY==;EndpointSuffix=core.windows.net"
+                            ),
                             "Driver={ODBC Driver 18};Server=tcp:db,1433;Uid=rag;Pwd=CANARY-PWD",
                             "rag:CANARY-USERINFO@db.internal:5432/vectors",
                             "password=CANARY-ASSIGN",

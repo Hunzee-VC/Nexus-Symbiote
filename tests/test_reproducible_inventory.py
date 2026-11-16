@@ -478,8 +478,8 @@ def test_sarif_locations_follow_the_working_directory(tmp_path, monkeypatch):
         for project in (first, second)
         for project_cwd in (project, project / "models", tmp_path / "elsewhere")
     }
-    assert len(neither) == 1
-    assert '"uri": ".mcp.json"' in neither.pop()
+    (only,) = neither
+    assert '"uri": ".mcp.json"' in only
     condition = (
         "relative to the working directory when the scanned directory lies below it, and "
         "relative to the scanned directory otherwise"

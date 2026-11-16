@@ -388,6 +388,7 @@ def _pickle_shape(sample: bytes, binary: bool) -> tuple[SerializationSafety, str
             pickletools.dis(sample, out=io.StringIO())
             return _recognized(binary)
     except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
+        # A truncated or malformed stream is judged by the opcodes read before it failed.
         pass
     return _recognized(binary) if binary and seen >= MIN_PICKLE_OPCODES else None
 

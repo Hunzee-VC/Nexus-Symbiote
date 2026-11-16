@@ -457,8 +457,10 @@ def test_card_below_a_well_known_directory_link_is_recorded(tmp_path):
     assert server.agent_card_path == "public/.well-known/agent-card.json"
     assert server.properties["symlink_target"] == "public/wk/agent-card.json"
     assert sorted(result.scan_failures) == [
-        "site/.well-known/Agent.json: case variant of site/.well-known/agent.json is the active "
-        "file on case-insensitive file systems and is not inventoried",
+        (
+            "site/.well-known/Agent.json: case variant of site/.well-known/agent.json is the active "
+            "file on case-insensitive file systems and is not inventoried"
+        ),
         "web/.well-known/agent-card.json: symlink target is the collection root",
         "web/.well-known/agent.json: symlink target is the collection root",
     ]

@@ -798,7 +798,6 @@ _AMBIGUOUS_SHELL = "shell options before the script are ambiguous"
 # servers. A function or alias defined there replaces any program the script names.
 _STARTUP_FILE = "shell options name a startup file the shell runs before the script"
 # fish reads its options with getopt "+hPilNnvc:C:p:d:f:D:o:" and unique long prefixes.
-_FISH_FLAGS = frozenset("hPilNnv")
 _FISH_FLAG_RUN = re.compile("[hPilNnv]*")
 _FISH_VALUES = frozenset("cCpdfDo")
 _FISH_LONG = {
@@ -3057,8 +3056,6 @@ def _named(quiet: frozenset[str]) -> Callable[[str], bool]:
     return lambda word: bool(_SUBCOMMAND.fullmatch(word)) and word not in quiet
 
 
-_VOCABULARY: tuple[str, ...] = ()
-
 _STARTS: dict[str, _Starts] = {
     "npm": _Starts(
         _NPM_OPTIONS,
@@ -3103,7 +3100,7 @@ _STARTS: dict[str, _Starts] = {
 }
 
 
-_VOCABULARY = tuple(
+_VOCABULARY: tuple[str, ...] = tuple(
     sorted(
         {
             *_PROGRAM_NAMES,

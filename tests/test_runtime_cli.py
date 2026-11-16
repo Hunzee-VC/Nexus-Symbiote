@@ -416,7 +416,7 @@ def test_keygen_refuses_an_unusable_passphrase_before_writing_a_key(
 def test_keygen_removes_the_public_key_when_the_private_key_cannot_be_written(
     tmp_path, monkeypatch
 ):
-    import nexus_symbiote.runtime_cli as runtime_cli
+    from nexus_symbiote import runtime_cli
 
     written = []
     write_new = runtime_cli._write_new

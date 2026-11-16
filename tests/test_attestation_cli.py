@@ -164,8 +164,10 @@ def test_native_inventory_round_trip(runner, setup):
     assert text.exit_code == 0, text.output
     lines = text.stdout.splitlines()
     assert lines[:6] == [
-        "Attestation verified: purpose reviewed, 1 trusted key. It does not establish "
-        "that the file is accurate, complete or safe.",
+        (
+            "Attestation verified: purpose reviewed, 1 trusted key. It does not establish "
+            "that the file is accurate, complete or safe."
+        ),
         f"Signer key ID: {key_id(key.public_key())}",
         f"Subject SHA-256: {signed['subject_sha256']}",
         "Match: bytes",
