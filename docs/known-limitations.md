@@ -75,12 +75,16 @@ A way around a limit that its entry does not describe is worth a
   template file or `additional_chat_templates` directory is absent, a file or
   directory whose name differs only by case or Unicode normalization is a failure,
   because case-insensitive file systems open
-  it. When both exist, only the exact name is read, except for instruction files:
-  another spelling of a fixed instruction path, such as `claude.md` beside
-  `CLAUDE.md`, and of `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` or `.cursorrules` below
-  the root, such as `pkg/claude.md`, is a failure even beside the exact name, as are
-  those of nested `.claude/settings.json` files, because a case-insensitive checkout
-  holds one file for both names. `CODEX.md` and `codex.md` are both read. A spelling
+  it. When both exist, only the exact name is read, except for instruction and MCP
+  client files: another spelling of a fixed instruction path, such as `claude.md`
+  beside `CLAUDE.md`, and of `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` or `.cursorrules`
+  below the root, such as `pkg/claude.md`, is a failure even beside the exact name,
+  as are those of nested `.claude/settings.json` files and of a file with an
+  [MCP client name](#mcp-servers-and-tools) at any depth, such as `.MCP.json` beside
+  `.mcp.json` or `pkg/Mcp-Config.json`, of the client directory that holds one,
+  such as `pkg/.VSCode/mcp.json`, and of a root MCP client path, such as
+  `.Gemini/settings.json` beside `.gemini/settings.json`, because a case-insensitive checkout holds one file
+  for both names. `CODEX.md` and `codex.md` are both read. A spelling
   that a subagent, rule, prompt, skill or command directory walk inventories, such
   as `.claude/agents/gemini.md`, is read there instead. Rename any other such file,
   including a documentation page such as `docs/agents.md`, which case-insensitive
@@ -282,6 +286,19 @@ A way around a limit that its entry does not describe is worth a
 - **Every file with an MCP client name is parsed.** One that does not parse, or
   whose server map is not a map of server objects, is a failure even when it is not
   an MCP configuration. Rename such a file; excluding it records a gap instead.
+  Another spelling of a client name at any depth, such as `pkg/.MCP.json` or
+  `pkg/Mcp.Json`, or of the client directory that holds one, such as
+  `pkg/.VSCode/mcp.json`, `pkg/.kiro/Settings/mcp.json` or
+  `pkg/.Windsurf/mcp_config.json`, or of a host directory above one that does not
+  name its client, such as `pkg/.Kiro/mcp.json`, and of a root path, such as
+  `.Gemini/settings.json` or `.codex/Config.toml`, is a
+  [case-variant failure](#every-collector) and is not read, beside the exact
+  spelling too. Another spelling of a host directory that decides nothing, such as
+  `.VSCode` in `pkg/.VSCode/.mcp.json`, whose name decides its client, is read as
+  the exact spelling. Below the root only the names that the
+  [collector reference](collectors.md#what-each-collector-reads) lists for any depth
+  are read, so a nested `.gemini/settings.json` or `.codex/config.toml`, in any
+  spelling, is neither read nor checked.
 - **Python server forms.** Servers are collected from `FastMCP` imported by name
   from `mcp.server`, `mcp.server.fastmcp`, `mcp.server.fastmcp.server`, `fastmcp`,
   `fastmcp.server` or `fastmcp.server.server`, and from `MCPServer` imported from
