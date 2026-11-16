@@ -973,7 +973,7 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 | `--json-output` | Output the verification report as JSON. |
 | `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools, declarations or the server identity drifted, unless `--accept-drift`. |
 | `--accept-drift` | With `--record`, exit 0 although changed or new tools, declarations or server identity were recorded. |
-| `--no-isolation` | Explicitly allow execution without a PID namespace; printed as a warning. On Linux the launcher runs under a wrapper that stays its parent and adopts its orphans, so every descendant, including a `clone(CLONE_PARENT)` child, stays in one tree, which is stopped before cleanup kills it; the server fails with `isolation-teardown-failed` if the wrapper ended first. A launcher that deliberately evades cleanup can escape. Elsewhere cleanup is best effort. This is not a namespace or sandbox. |
+| `--no-isolation` | Explicitly allow execution without a PID namespace; printed as a warning. On Linux the launcher runs in its own process group under a wrapper that stays its parent as a child subreaper and ignores the signals it can, and cleanup kills the wrapper's whole tree, including a `clone(CLONE_PARENT)` child that has called `setsid` and what a launcher that already exited left behind. A launcher that kills its wrapper with SIGKILL can escape, except from a cgroup v2 child where one can be created, which cleanup also kills; the server then fails with `isolation-teardown-failed`, unless the launcher runs as root or holds `CAP_SYS_PTRACE` or `CAP_SYS_ADMIN`, which can hide the escape. Never opt out as root; doing so prints a second warning. Elsewhere cleanup is best effort. This is not a namespace or sandbox. |
 
 By default the launcher must run as pid 1 of a new user and PID namespace
 (`unshare --user --map-root-user --pid --fork --kill-child`). That process first
@@ -1009,26 +1009,33 @@ before executing the pinned launcher. Only the explicit operator option
 `--no-isolation` permits a launch without this boundary. On that path, on Linux,
 a short wrapper (the running interpreter with `-I -S`) sets
 `PR_SET_CHILD_SUBREAPER`, forks, and executes the staged launcher in the child with
-the same argument, environment and working directory. The wrapper stays the
-launcher's parent until the launcher's whole process tree has exited, then exits
-with the launcher's status, re-raising the signal that killed it as `unshare --fork`
-does. Every descendant therefore stays under the wrapper: a `setsid` child that
-double-forks, a `clone(CLONE_PARENT)` child, whose parent is the launcher's parent,
-and a descendant that outlives the launcher. The wrapper leads the session and
-process group the launcher runs in, and ignores the signals a launcher can send its
-group, other than `SIGKILL` and `SIGSTOP`. Cleanup stops the wrapper and then every
-process in its tree, so none can start another process, such as a helper that a
-watchdog restarts, kills the tree, scanning it again until a scan finds no new
-process, then kills the wrapper's process group and every process left in the
-launch's session. The server fails with `isolation-teardown-failed` when the wrapper
-was ended by a signal before or during cleanup, including when it re-raised the
-signal that killed the launcher, or when the tree could not be emptied, because a
-process from it may then still be running. A launcher running as the same user can
-still escape on purpose, for example by killing the wrapper, which is reported, or
-by forking faster than the tree is scanned, and a descendant running as another user
-cannot be signalled. On other systems, or without a separately runnable interpreter,
-the launcher is executed directly and cleanup is best effort. The option is not a
-PID namespace, and neither form is a filesystem or network sandbox.
+the same argument, environment, signal dispositions and working directory. The
+wrapper stays alive as the launcher's parent, keeps no copy of its streams, reaps
+every child and exits with the launcher's status once none is left, repeating the
+signal that killed the launcher as `unshare --fork` does. The launcher
+leads its own process group in the session the wrapper leads, and the wrapper ignores
+every signal it can and is not dumpable, so the launcher cannot end it with a signal
+to its group or its parent, or trace it, unless it holds `CAP_SYS_PTRACE`; only
+SIGKILL aimed at the wrapper ends it. Every orphan below the wrapper is reparented to
+it, so a `setsid` child that double-forks, a `clone(CLONE_PARENT)` child (whose
+parent is the wrapper) and the descendants of a launcher that already exited all stay
+in the wrapper's tree. Cleanup stops the wrapper and then every process in its tree, so
+none can fork or reap a pid the sweep found, kills the tree in repeated passes,
+so a helper that a watchdog restarts is found as the wrapper's child, then kills each
+child that is still running, including a chain that forks faster than the tree is
+scanned, as it is reparented to the stopped wrapper. It lets the wrapper reap them
+and kills the wrapper's process group, the processes in its session and a private
+cgroup v2 where the current cgroup allows a child. The wrapper reports that it
+exited with no child left; when it does not, because the launcher killed it or a
+descendant could not be killed (one running as another user, or one that stays in
+uninterruptible sleep), or when the wrapper's children cannot be listed, the server fails with `isolation-teardown-failed`, since what
+the wrapper had adopted may still be running, outside that cgroup where none exists.
+The report counts only when the kernel credits it to the wrapper's pid. A launcher
+running as root, or with `CAP_SYS_PTRACE` or `CAP_SYS_ADMIN`, can forge it or trace
+the wrapper, so its escape can go unreported; never opt out as root.
+A launcher or descendant can still evade cleanup another way, for example by moving
+out of the cgroup. On other systems that cleanup is best effort. The option is not a PID namespace,
+and neither form is a filesystem or network sandbox.
 
 Servers whose transport is `sse`, `streamable-http` or `http` and that record no
 launch command are reported as not verifiable by `verify-live` (reason
