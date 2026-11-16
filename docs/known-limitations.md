@@ -823,11 +823,15 @@ A way around a limit that its entry does not describe is worth a
   command name, is medium, as is a downloader given a host without a scheme or a path,
   such as `curl evil.example`. A command given to `su -c` or `script -c` as one quoted
   string is read as one word, which names a shell but no interpreter, so
-  `su -c 'python3 -'` is medium too, as is a download piped to `su` without `-c`, which runs the
-  user's shell on it. A download unpacked and then run, as by `curl x | tar -xz; sh install.sh`,
-  is medium, because the archive's members are not known. A saved download given to a shell
-  as any argument counts as run, so `curl -o d x && bash run.sh d` is critical; an
-  interpreter counts it only as its program or an option's value (`node -r ./d`).
+  `su -c 'python3 -'` is medium too. A download unpacked and then run, as by `curl x | tar -xz; sh install.sh`,
+  is medium, because the archive's members are not known. A file a downloader's `-o`
+  wrote counts as run when it is any argument of a shell, `python` or `perl`, as it did
+  before, so `curl -o d x && bash run.sh d` and `curl -o d x && python3 -m json.tool d`
+  are critical though they may only read it; `node`, `ruby`, `php` and `lua` count it
+  only as their program or an option's value (`node -r ./d`), and after an option the
+  classifier does not know, the next word is also read as its possible program. A file
+  only `base64 -d` decoded counts as run only as a program. A `>(` inside quotes, as in
+  `curl x | tee '>(sh)'`, is read as a process substitution, which fails closed.
   `perl -c` is read as running its program, because it runs BEGIN
   blocks. The Codex `notify` command and the Gemini CLI tool
   discovery and call commands are digested but not rated. Settings `env` is rated by
