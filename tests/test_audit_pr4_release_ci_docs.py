@@ -86,6 +86,20 @@ def test_protect_the_gate_avoids_pull_request_target_head_checkout() -> None:
     assert "ref: ${{ github.event.pull_request.head.sha }}" not in protect
 
 
+def test_protect_the_gate_example_is_keyed_and_skips_fork_pull_requests() -> None:
+    guide = (ROOT / "docs" / "drift-gate.md").read_text(encoding="utf-8")
+    protect = guide.split("\n## Protect the gate\n", 1)[1].split("\n## ", 1)[0]
+    example = yaml.safe_load(protect.split("```yaml\n", 1)[1].split("```", 1)[0])
+    job = example["jobs"]["inventory"]
+    assert job["if"] == "github.event.pull_request.head.repo.full_name == github.repository"
+    (gate,) = [step for step in job["steps"] if "Nexus-Symbiote@" in step.get("uses", "")]
+    key = gate["env"]["NEXUS_SYMBIOTE_SOURCE_BINDING_KEY"]
+    assert key.startswith("${{ secrets.")
+    attestation = (ROOT / "docs" / "inventory-attestation.md").read_text(encoding="utf-8")
+    stricter = attestation.split("For a stricter gate", 1)[1].split("```", 1)[0]
+    assert "NEXUS_SYMBIOTE_SOURCE_BINDING_KEY" in " ".join(stricter.split())
+
+
 def test_benchmark_evidence_rejects_non_object_statement_and_predicate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
