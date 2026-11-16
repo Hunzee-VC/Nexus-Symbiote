@@ -423,36 +423,32 @@ def _children_of(pid: int) -> list[int]:
         return []
 
 
-def _running(pid: int) -> bool:
-    fields = _proc_fields(pid)
-    return fields is not None and fields[0] not in {"Z", "X"}
-
-
 def _drain_children(pid: int) -> bool:
     """SIGKILL each running child of the stopped wrapper until none is left running.
 
     Every orphan below the wrapper is reparented to it, and a stopped wrapper reaps
     nothing, so a pid it lists stays that child's until the wrapper resumes: no signal
-    sent here can reach a process that reused the pid, and a child seen as a zombie
-    stays one. This catches a chain that forks and calls ``setsid`` faster than the tree
-    sweep, one generation per read. Returns False when a child still runs at the
-    deadline: one this process may not signal, or one that does not leave
-    uninterruptible sleep.
+    sent here can reach a process that reused the pid, and a child seen to have ended
+    stays so. A child whose main thread has exited reads as a zombie while its other
+    threads run, so a child has ended only once its thread count has fallen to one.
+    This catches a chain that forks and calls ``setsid`` faster than the tree sweep,
+    one generation per read. Returns False when a child still runs at the deadline:
+    one this process may not signal, or one that does not leave uninterruptible sleep.
     """
     deadline = time.monotonic() + _TEARDOWN_SECONDS
     signalled: set[int] = set()
-    zombies: set[int] = set()
+    ended: set[int] = set()
     quiet = 0
     delay = 0.0005
     while quiet < _QUIET_READS:
         running: set[int] = set()
         for child in _children_of(pid):
-            if child in zombies:
+            if child in ended:
                 continue
-            if _running(child):
-                running.add(child)
+            if _ended(child):
+                ended.add(child)
             else:
-                zombies.add(child)
+                running.add(child)
         if not running:
             quiet += 1
             continue

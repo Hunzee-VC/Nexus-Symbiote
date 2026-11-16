@@ -1494,6 +1494,28 @@ while time.monotonic() < deadline:
 """
 
 
+# A process whose main thread exits while another runs on reads as a zombie in its stat.
+_THREADED = """import ctypes, os, sys, threading, time
+beat = sys.argv[1]
+os.setsid()
+threading.Thread(target=time.sleep, args=(60,)).start()
+with open(beat + ".tmp", "w") as out:
+    out.write(str(os.getpid()))
+os.replace(beat + ".tmp", beat)
+ctypes.CDLL(None).pthread_exit(None)
+"""
+
+
+def _assert_ended(pid: int) -> None:
+    """Wait until every thread of ``pid`` has exited; a running thread still fails."""
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if pinned_process._ended(pid):
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"process {pid} still had a running thread")
+
+
 def _stop_chain(beat: Path) -> None:
     """Kill a fork chain that escaped, one generation at a time, within a few seconds."""
     deadline = time.monotonic() + 5
@@ -1504,7 +1526,7 @@ def _stop_chain(beat: Path) -> None:
 
 
 @_LINUX_ONLY
-@pytest.mark.parametrize("descendant", ["daemon", "fork-chain"])
+@pytest.mark.parametrize("descendant", ["daemon", "fork-chain", "exited-main-thread"])
 def test_what_the_tree_sweep_misses_is_killed_under_the_stopped_wrapper(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, descendant: str
 ) -> None:
@@ -1519,8 +1541,9 @@ def test_what_the_tree_sweep_misses_is_killed_under_the_stopped_wrapper(
             "</dev/null >/dev/null 2>&1 &\n"
         )
     else:
+        program = _CHAIN if descendant == "fork-chain" else _THREADED
         start = (
-            f"{shlex.quote(sys.executable)} -I -S -c {shlex.quote(_CHAIN)} {quoted} "
+            f"{shlex.quote(sys.executable)} -I -S -c {shlex.quote(program)} {quoted} "
             "</dev/null >/dev/null 2>&1 &\n"
         )
     proc = _spawn_opted_out(
@@ -1535,7 +1558,7 @@ def test_what_the_tree_sweep_misses_is_killed_under_the_stopped_wrapper(
         pinned_process.terminate_process_group(proc)
         proc.wait(timeout=10)
         last = beat.read_text()
-        _assert_dead(int(last))
+        _assert_ended(int(last))
         time.sleep(0.2)
         assert beat.read_text() == last
     finally:
