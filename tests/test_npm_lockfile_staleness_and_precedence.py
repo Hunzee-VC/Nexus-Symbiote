@@ -7,6 +7,8 @@ import base64
 import json
 from pathlib import Path
 
+import pytest
+
 from nexus_symbiote.scanners.registry import RegistryScanner
 
 INTEGRITY = "sha512-" + base64.b64encode(b"s" * 64).decode()
@@ -87,3 +89,75 @@ def test_a_range_in_dependencies_and_a_pin_in_dev_dependencies_is_not_a_pin(
     risks = {risk.category: risk for risk in component.risks}
     assert "version_pinning" in risks
     assert "dependencies: ^4.0.0" in risks["version_pinning"].detail
+
+
+@pytest.mark.parametrize(
+    "lock",
+    [
+        # pnpm 6 and 9 record a specifier with each dependency, pnpm 5 a specifiers map:
+        # one that records none was not resolved for package.json.
+        "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n"
+        "      openai:\n        version: 4.0.0\n"
+        f"packages:\n  openai@4.0.0: {{resolution: {{integrity: '{INTEGRITY}'}}}}\n",
+        "lockfileVersion: '6.0'\ndependencies:\n  openai:\n    version: 4.0.0\n"
+        f"packages:\n  /openai@4.0.0: {{resolution: {{integrity: '{INTEGRITY}'}}}}\n",
+        "lockfileVersion: 5.4\ndependencies:\n  openai: 4.0.0\n"
+        f"packages:\n  /openai/4.0.0: {{resolution: {{integrity: '{INTEGRITY}'}}}}\n",
+        "lockfileVersion: 5.4\nspecifiers:\n  zod: ^3.0.0\ndependencies:\n  openai: 4.0.0\n"
+        f"packages:\n  /openai/4.0.0: {{resolution: {{integrity: '{INTEGRITY}'}}}}\n",
+    ],
+    ids=["v9", "v6", "v5-no-map", "v5-no-entry"],
+)
+def test_a_pnpm_lock_that_records_no_specifier_is_not_bound(tmp_path: Path, lock: str) -> None:
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"^5.0.0"}}')
+    (tmp_path / "pnpm-lock.yaml").write_text(lock)
+    result = RegistryScanner().scan(tmp_path)
+    assert f"pnpm-lock.yaml: {STALE}" in result.scan_failures
+    assert _openai(result).package_url is None
+    assert INTEGRITY not in str(_openai(result).model_dump(mode="json"))
+
+
+def test_a_pnpm_lock_resolved_through_an_override_is_bound(tmp_path: Path) -> None:
+    # pnpm 10 writes the override's spec as the importer's specifier, and installs the
+    # lockfile frozen.
+    (tmp_path / "package.json").write_text(
+        '{"dependencies":{"openai":"^4.0.0"},"pnpm":{"overrides":{"openai":"4.52.0"}}}'
+    )
+    lock = _pnpm_lock("4.52.0", "4.52.0").replace(
+        "importers:", "overrides:\n  openai: 4.52.0\nimporters:"
+    )
+    (tmp_path / "pnpm-lock.yaml").write_text(lock)
+    result = RegistryScanner().scan(tmp_path)
+    assert f"pnpm-lock.yaml: {STALE}" not in result.scan_failures
+    assert _openai(result).package_url == "pkg:npm/openai@4.52.0"
+    # A specifier that is neither the override nor package.json's is still stale.
+    (tmp_path / "pnpm-lock.yaml").write_text(lock.replace("specifier: 4.52.0", "specifier: 4.0.0"))
+    result = RegistryScanner().scan(tmp_path)
+    assert f"pnpm-lock.yaml: {STALE}" in result.scan_failures
+    assert _openai(result).package_url is None
+
+
+def test_a_package_lock_without_a_root_entry_is_not_bound(tmp_path: Path) -> None:
+    # npm writes the root entry in every lockfile with packages; without it npm finds
+    # package.json's edges unaccounted for and resolves again.
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"^5.0.0"}}')
+    lock = json.loads(_npm_lock("^4.0.0", "4.52.0"))
+    del lock["packages"][""]
+    (tmp_path / "package-lock.json").write_text(json.dumps(lock))
+    result = RegistryScanner().scan(tmp_path)
+    assert f"package-lock.json: {STALE}" in result.scan_failures
+    assert _openai(result).package_url is None
+
+
+def test_a_dependency_also_listed_as_optional_agrees_with_the_lock_root(tmp_path: Path) -> None:
+    # npm drops the dependencies copy of a name optionalDependencies lists before it
+    # writes the lockfile, and before it compares package.json with the lock root.
+    (tmp_path / "package.json").write_text(
+        '{"dependencies":{"openai":"4.52.0"},"optionalDependencies":{"openai":"4.52.0"}}'
+    )
+    lock = json.loads(_npm_lock("4.52.0", "4.52.0"))
+    lock["packages"][""] = {"optionalDependencies": {"openai": "4.52.0"}}
+    (tmp_path / "package-lock.json").write_text(json.dumps(lock))
+    result = RegistryScanner().scan(tmp_path)
+    assert result.scan_failures == []
+    assert _openai(result).properties["lockfile_integrity"] == INTEGRITY

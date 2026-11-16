@@ -315,6 +315,9 @@ def test_a_walk_that_skips_the_credential_check_still_records_no_credential_file
         "password.sh",
         ".password.sh",
         ".env.dist",
+        "prod.env",
+        "config/app.env",
+        "prod.env.local",
     ],
 )
 def test_names_that_hold_credentials_are_credential_shaped(name):
@@ -327,6 +330,7 @@ def test_names_that_hold_credentials_are_credential_shaped(name):
         ".env.example",
         ".env.sample",
         ".env.template",
+        "prod.env.example",
         "scripts/rotate_api_key.py",
         "ROTATE_API_KEY.PY",
         "check_password_strength.sh",

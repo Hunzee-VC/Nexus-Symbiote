@@ -115,9 +115,10 @@ def _scan(root: Path, dependencies: dict[str, str], lock: str) -> ScanResult:
 
 
 def _packages(*keys: str) -> str:
-    """A lockfile whose root importer lists nothing, so every package is found by key."""
+    """A lockfile whose root importer lists nothing, so every package is found by key:
+    a 5.x lockfile, since 6.x and 9.x always write a root importer."""
     records = "".join(f"  '{key}':\n    resolution: {{integrity: {SHA512}}}\n" for key in keys)
-    return "lockfileVersion: '9.0'\npackages:\n" + records
+    return "lockfileVersion: '5.4'\npackages:\n" + records
 
 
 @pytest.mark.parametrize(
@@ -266,14 +267,14 @@ def test_one_long_separator_dense_key_is_indexed_in_linear_space():
 
 
 def test_a_long_separator_dense_explicit_key_is_the_record_of_one_name(tmp_path):
-    lock = "lockfileVersion: '9.0'\npackages:\n  ? mcp-p0" + "@a" * 50_000 + "\n  : {}\n"
+    lock = "lockfileVersion: '5.4'\npackages:\n  ? mcp-p0" + "@a" * 50_000 + "\n  : {}\n"
     result = _scan(tmp_path, {"mcp-p0": "^1.0.0", "mcp-p0@a": "^1.0.0"}, lock)
     assert result.scan_failures == ["pnpm-lock.yaml: selected package lacks an exact version"]
     assert all("package_resolution" not in c.claims for c in result.components)
 
 
 def _timed_scan(root: Path, dependencies: dict[str, str], keys: list[str]) -> ScanResult:
-    lock = "lockfileVersion: '9.0'\npackages:\n" + "".join(f"  '{key}': {{}}\n" for key in keys)
+    lock = "lockfileVersion: '5.4'\npackages:\n" + "".join(f"  '{key}': {{}}\n" for key in keys)
     started = time.process_time()
     result = _scan(root, dependencies, lock)
     assert time.process_time() - started < 20

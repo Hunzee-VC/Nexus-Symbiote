@@ -47,7 +47,8 @@ def credential_shaped(path: str) -> bool:
     suffix = PurePosixPath(name).suffix
     if name in _CREDENTIAL_NAMES:
         return True
-    if name.startswith(".env"):
+    if name.startswith(".env") or name.endswith(".env") or ".env." in name:
+        # `prod.env` and `app.env.local` hold values as `.env` does.
         return suffix not in _ENV_TEMPLATE_SUFFIXES
     if suffix in _CREDENTIAL_SUFFIXES:
         return True
@@ -63,6 +64,11 @@ def credential_gap(path: str, target: str | None) -> str | None:
     credentials."""
     if credential_shaped(path):
         return "its name says it holds credentials"
+    return link_gap(target)
+
+
+def link_gap(target: str | None) -> str | None:
+    """Why a symlink that leads to ``target`` is not followed, or None."""
     if target is not None and credential_shaped(target):
         return f"a symlink leads to {target}, whose name says it holds credentials"
     return None

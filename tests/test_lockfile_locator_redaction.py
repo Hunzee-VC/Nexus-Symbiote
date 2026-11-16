@@ -178,9 +178,10 @@ def _pnpm_v6(peers: str) -> str:
 
 
 def _pnpm_unlisted(peers: str) -> str:
-    """A lockfile with no root importer, so the record is found by its key."""
+    """A lockfile with no root importer, so the record is found by its key: only a 5.x
+    lockfile is searched so, since 6.x and 9.x always write one."""
     return (
-        "lockfileVersion: '9.0'\n"
+        "lockfileVersion: '5.4'\n"
         "packages:\n"
         f"  {json.dumps('openai@4.0.0' + peers)}:\n"
         f"    resolution: {{integrity: {SHA512}}}\n"

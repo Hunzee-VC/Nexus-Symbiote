@@ -35,7 +35,8 @@ def _scan(project: Path, out: Path, *extra: str) -> tuple[int, dict]:
 
 def _lock(resolved: str, version: str = "4.52.0") -> dict:
     record = {"version": version, "resolved": resolved, "integrity": SHA512}
-    return {"lockfileVersion": 3, "packages": {"node_modules/openai": record}}
+    root = {"dependencies": {"openai": "^4.52.0"}}
+    return {"lockfileVersion": 3, "packages": {"": root, "node_modules/openai": record}}
 
 
 NPMJS = "https://registry.npmjs.org/openai/-/openai-4.52.0.tgz"
@@ -328,12 +329,13 @@ def test_an_ai_package_behind_a_non_ai_alias_is_inventoried_by_its_target(tmp_pa
         files["package-lock.json"] = {
             "lockfileVersion": 3,
             "packages": {
+                "": {"dependencies": {"app-utils": spec}},
                 "node_modules/app-utils": {
                     **record,
                     "version": version,
                     "resolved": tarball,
                     "integrity": SHA512,
-                }
+                },
             },
         }
     project = _write(tmp_path, files)
@@ -357,12 +359,13 @@ def test_a_lock_record_naming_an_ai_package_under_another_key_is_visible(tmp_pat
             "package-lock.json": {
                 "lockfileVersion": 3,
                 "packages": {
+                    "": {"dependencies": {"app-utils": "^1.0.0"}},
                     "node_modules/app-utils": {
                         "name": "openai",
                         "version": "4.52.0",
                         "resolved": NPMJS,
                         "integrity": SHA512,
-                    }
+                    },
                 },
             },
         },

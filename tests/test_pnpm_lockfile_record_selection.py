@@ -85,3 +85,63 @@ def test_an_unknown_lockfile_version_is_a_failure(tmp_path: Path) -> None:
     result, component = _scan(tmp_path, lock)
     assert "pnpm-lock.yaml: invalid or unsupported lockfile" in result.scan_failures
     assert component.package_url is None
+
+
+OTHER = "sha512-" + base64.b64encode(b"h" * 64).decode()
+
+
+@pytest.mark.parametrize(
+    ("version", "key"),
+    [("4.52.0(zod@3.23.8)", "/openai@4.52.0(zod@3.23.8)"), ("4.52.0", "/openai@4.52.0")],
+    ids=["peered", "unpeered"],
+)
+def test_a_v6_lockfile_with_one_version_in_two_peer_contexts_binds_the_importers_record(
+    tmp_path: Path, version: str, key: str
+) -> None:
+    # pnpm 8 writes one record per peer context; both keys are its own spelling, so
+    # neither is a decoy for the other.
+    records = {"/openai@4.52.0(zod@3.23.8)": INTEGRITY, "/openai@4.52.0": OTHER}
+    packages = "".join(
+        f"  '{name}': {{resolution: {{integrity: '{value}'}}}}\n" for name, value in records.items()
+    )
+    lock = _v6(packages).replace("version: 4.52.0(zod@3.23.8)", f"version: {version}")
+    result, component = _scan(tmp_path, lock)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    assert component.package_url == "pkg:npm/openai@4.52.0"
+    assert component.properties["lockfile_integrity"] == records[key]
+
+
+def test_a_v5_lockfile_with_one_version_in_two_peer_contexts_binds_the_importers_record(
+    tmp_path: Path,
+) -> None:
+    lock = (
+        "lockfileVersion: 5.4\n"
+        "specifiers:\n  openai: 4.52.0\n  zod: 3.23.8\n"
+        "dependencies:\n  openai: 4.52.0\n  zod: 3.23.8\n"
+        "packages:\n"
+        f"  /openai/4.52.0: {{resolution: {{integrity: '{INTEGRITY}'}}}}\n"
+        f"  /openai/4.52.0_zod@3.23.8: {{resolution: {{integrity: '{OTHER}'}}}}\n"
+    )
+    result, component = _scan(tmp_path, lock)
+    assert result.scan_failures == [] and result.surfaces_excluded == []
+    assert component.properties["lockfile_integrity"] == INTEGRITY
+
+
+@pytest.mark.parametrize("version", ["9.0", "6.0"])
+def test_a_v6_or_v9_lockfile_without_importers_binds_no_record_by_name(
+    tmp_path: Path, version: str
+) -> None:
+    # pnpm 6 and 9 always list the root's dependencies; a lockfile that does not
+    # resolves nothing pnpm installs, whatever key its records use.
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"^5.0.0"}}')
+    (tmp_path / "pnpm-lock.yaml").write_text(
+        f"lockfileVersion: '{version}'\npackages:\n  /openai@4.0.0: {DECOY}\n"
+    )
+    result = RegistryScanner().scan(tmp_path)
+    (component,) = result.components
+    assert component.package_url is None
+    assert "package_resolution" not in component.claims
+    assert INTEGRITY not in str(component.model_dump(mode="json"))
+    assert "pnpm-lock.yaml: selected package version disagrees with package.json" in (
+        result.scan_failures
+    )

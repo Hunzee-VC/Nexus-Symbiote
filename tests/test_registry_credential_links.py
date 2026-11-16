@@ -74,3 +74,31 @@ def test_a_package_json_that_links_to_a_credential_file_is_a_gap(tmp_path: Path)
         entry.startswith("package.json: a symlink leads to secrets.json")
         for entry in (result.surfaces_excluded)
     )
+
+
+@pytest.mark.parametrize("target", ["prod.env", "app.env", "prod.env.local"])
+def test_requirements_that_link_to_a_named_env_file_are_a_gap(tmp_path: Path, target: str) -> None:
+    value = _value(12)
+    (tmp_path / target).write_text(f"openai_org=org-{value}\n")
+    (tmp_path / "requirements.txt").symlink_to(target)
+    result = RegistryScanner().scan(tmp_path)
+    assert any(
+        entry.startswith(f"requirements.txt: a symlink leads to {target}")
+        for entry in (result.surfaces_excluded)
+    )
+    assert value not in _everything(tmp_path)
+
+
+def test_an_npmrc_that_links_to_another_credential_file_is_a_gap(tmp_path: Path) -> None:
+    # .npmrc is read by its own name for its registry settings only; a link to .env is
+    # not the npm configuration it is read for.
+    value = _value()
+    (tmp_path / ".env").write_text(f"registry=https://npm.example/\nOPENAI_KEY=sk-{value}\n")
+    (tmp_path / ".npmrc").symlink_to(".env")
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"4.52.0"}}')
+    result = RegistryScanner().scan(tmp_path)
+    assert any(
+        entry.startswith(".npmrc: a symlink leads to .env") for entry in (result.surfaces_excluded)
+    )
+    assert ".npmrc" not in result.surfaces_scanned
+    assert value not in _everything(tmp_path)

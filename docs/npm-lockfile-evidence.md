@@ -26,8 +26,11 @@ checked before it is taken:
   decode to its algorithm's length or has only SHA-1, and a version that differs
   from an exact version in `package.json` (which `npm ci` refuses) are collection
   failures. So is a lockfile whose root entry (`packages[""]`) records another spec
-  for the package than `package.json`, section by section: `npm ci` refuses it, and
-  `npm install` resolves again, so the record is not what installs. A record whose
+  for the package than `package.json`, section by section, or that has no root
+  entry, which npm writes in every lockfile with `packages`: `npm ci` refuses it, and
+  `npm install` resolves again, so the record is not what installs. A name
+  `optionalDependencies` also lists is compared without its `dependencies` copy, which
+  npm drops before writing the lockfile. A record whose
   version the recorded spec does not admit is not detected; `npm ci` refuses that
   lockfile too.
 - A missing integrity value, a registry other than the default, and a tarball URL
@@ -50,11 +53,19 @@ dependency. A pnpm record is the one the lockfile format reads: `/<name>/<versio
 in a 5.x lockfile, `/<name>@<version>` with its peers in 6.x and `<name>@<version>`
 without them in 9.x, whose peers are in `snapshots`; another lockfile version is a
 collection failure, and a record of the same package and version under another of
-these spellings, which pnpm never reads, makes the resolution ambiguous. An importer
-`specifier` other than the spec pnpm takes from `package.json` (from
-`optionalDependencies`, then `dependencies`, `devDependencies` and
-`peerDependencies`) is a stale lockfile, which `pnpm install --frozen-lockfile`
-refuses: a collection failure, and nothing is bound. Their records are checked as an npm record is: the
+these spellings that only another lockfile format writes, which pnpm never reads,
+makes the resolution ambiguous. Records of one version in several peer contexts,
+which 5.x and 6.x lockfiles hold, are siblings, and the importer's own is taken. An
+importer `specifier` (a 5.x `specifiers` entry) other than the spec pnpm takes from
+`package.json` (from `optionalDependencies`, then `dependencies`, `devDependencies`
+and `peerDependencies`), or the spec `pnpm.overrides` or `resolutions` gives the whole
+name, which pnpm writes in its place, is a stale lockfile, which
+`pnpm install --frozen-lockfile` refuses: a collection failure, and nothing is
+bound. So is an importer that records no specifier. An override with a range or a
+parent in its selector, or one in `pnpm-workspace.yaml`, is not resolved, so a
+lockfile resolved through one is reported stale. pnpm writes a root importer in every
+6.x and 9.x lockfile, so a record found by name in one records no specifier and
+binds nothing; a 5.x lockfile is still bound by its record alone. Their records are checked as an npm record is: the
 `resolved` or `tarball` URL, the exact version, an exact `package.json` version it
 contradicts and the integrity value are collection failures as above (so a Yarn v1
 `sha1-` value is one), and a tarball URL that names another package or version is a

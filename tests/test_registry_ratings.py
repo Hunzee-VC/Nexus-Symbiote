@@ -349,10 +349,11 @@ def _tree(root: Path) -> Path:
             {
                 "lockfileVersion": 3,
                 "packages": {
+                    "": {"dependencies": {"@anthropic-ai/sdk": "^0.30.0"}},
                     "node_modules/@anthropic-ai/sdk": {
                         "version": "0.30.1",
                         "resolved": "https://registry.npmjs.org/@anthropic-ai/sdk/-/sdk-0.30.1.tgz",
-                    }
+                    },
                 },
             }
         )
