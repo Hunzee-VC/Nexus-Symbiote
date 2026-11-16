@@ -156,7 +156,10 @@ A way around a limit that its entry does not describe is worth a
   argument that only reads like a launch is a gap too.
 - **Text a shell reads again must read as written.** An `sh -c`, `bash -c`,
   `zsh -c` or `fish -c` script, a command line, `env -S`, `wsl` without `-e`,
-  `eval` and `pwsh -Command` are classified only when no word holds a character the
+  `eval`, `pwsh -Command`, the command word of `npx -p` or `npm exec --package`
+  (which npm runs with `sh`, so one that is itself an expansion is a gap too),
+  and the words of `bun exec`, `yarn exec` and `pnpm exec -c` (or `--shell-mode`,
+  or any `-c` among its words) are classified only when no word holds a character the
   reader rewrites: braces, patterns, `~`, `#`, `!`, `^`, `$`, backquotes,
   non-ASCII text or, except for a POSIX shell, quoting. `cmd /c` needs a plain
   program word and no `%`, `!`, `"`, `^` or unusual whitespace; cmd keeps
@@ -186,7 +189,19 @@ A way around a limit that its entry does not describe is worth a
   system paths.
 - **Some ordinary forms are gaps.** `uvx -w` and `uv run -w` (aliases of `--with`)
   and a bare `pwsh server.ps1` are not read and fail the gates; spell `--with` and
-  `-File`.
+  `-File`. An `npx`, `npm` or `pnpm dlx` option that takes a value, followed by a
+  word that starts with `-`, is a gap: npm's parser may give the option an empty
+  value and read that word as an option, so `npx --tag --package=evil@6.6.6
+  decoy@1.0.0` installs `evil`. Attach such values with `=`, as in
+  `--node-options=--max-old-space-size=4096`.
+- **Container launch context is read from the declared options only.** Mounts are
+  rated by their written source: a mount through a link, a client variable other than `${userHome}`,
+  `${env:HOME}`, `${env:USERPROFILE}`, `${workspaceFolder}` and `$PWD`, and a
+  credential directory other than `.ssh`, `.aws`, `.gnupg`, `.kube`, `.docker`,
+  `.config`, `.azure` and `.gcloud` are only `host_mounts`. Variables in an
+  `--env-file`, a `--health-cmd` and a seccomp profile file are a medium finding
+  without being read, and `podman --env-host` is not rated. An `--entrypoint` is a
+  medium finding only beside a host mount.
 - **Environment that moves a runner's configuration is a gap.** A server's `env`
   that may point `HOME`, `XDG_CONFIG_HOME`, `PREFIX`, `DESTDIR`, `GOENV`,
   `ZDOTDIR` or a relative `PATH` entry into the project, or that replaces the

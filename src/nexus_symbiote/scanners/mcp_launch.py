@@ -4,7 +4,9 @@ Commands are matched by normalised basename. Common wrappers (``env``, ``sh -c``
 ``cmd /c``, ``powershell -Command``, ``wsl`` and secret-injection runners such as
 ``op run --``) are unwrapped with bounded parsing. Each recognised package runner
 reads only the options it documents, with a table of the options that take a
-value, so a value, possibly a secret, is never taken for the package. A runner
+value, so a value, possibly a secret, is never taken for the package; where the
+runner's parser may leave a value empty and read the next word as an option, the
+launch is unknown. A runner
 whose arguments do not fit its grammar, or whose package is not a registry name,
 is reported through ``Launch.unknown``; it is never guessed.
 
@@ -317,6 +319,10 @@ class _Options:
     flag_patterns: tuple[re.Pattern[str], ...] = ()
     combined: bool = False
     boolean_values: bool = False
+    # npm's parser (nopt) gives a String option an empty value when the next word starts
+    # with "-" and reads that word as an option; a value such a parser may not consume is
+    # not taken from the next word.
+    dashed_values: bool = True
     # Letters of the single-letter options, for checking option clusters in C.
     short_flags: frozenset[str] = frozenset()
     short_values: frozenset[str] = frozenset()
@@ -334,6 +340,7 @@ def _table(
     flag_patterns: tuple[str, ...] = (),
     combined: bool = False,
     boolean_values: bool = False,
+    dashed_values: bool = True,
 ) -> _Options:
     return _Options(
         frozenset(flags.split()),
@@ -342,6 +349,7 @@ def _table(
         tuple(re.compile(pattern) for pattern in flag_patterns),
         combined,
         boolean_values,
+        dashed_values,
         _letters(flags),
         _letters(values),
     )
@@ -367,6 +375,8 @@ def _scan(tokens: list[str], table: _Options) -> tuple[list[tuple[str, str | Non
         if takes_value:
             if not equals:
                 if index + 1 >= len(tokens):
+                    return None
+                if not table.dashed_values and tokens[index + 1].startswith("-"):
                     return None
                 index += 1
                 attached = tokens[index]
@@ -609,6 +619,7 @@ _NPM_EXEC = _table(
     "-p --package -c --call --registry --cache --userconfig --globalconfig --node-options"
     " --loglevel -w --workspace --prefix -C --tag --before --script-shell --shell",
     value_patterns=(_SCOPED_REGISTRY,),
+    dashed_values=False,
 )
 # npx (npm 7 and later, bin/npx-cli.js) removes -n, --node-arg and --npm together with the
 # word that follows each, where npm exec reads -n as --no. Read as a flag, "-n decoy@1.0.0
@@ -622,11 +633,13 @@ _NPX = _table(
     " --loglevel -w --workspace --prefix -C --tag --before --script-shell --shell"
     " -n --node-arg --npm",
     value_patterns=(_SCOPED_REGISTRY,),
+    dashed_values=False,
 )
 _PNPM_DLX = _table(
     "-s --silent --reporter-hide-prefix",
     "--package --allow-build --reporter --registry --store-dir --cache-dir",
     value_patterns=(_SCOPED_REGISTRY,),
+    dashed_values=False,
 )
 _YARN_DLX = _table("-q --quiet", "-p --package")
 _BUNX = _table("--bun --silent --verbose --no-install", "-p --package")
@@ -2271,7 +2284,22 @@ def _package_runner(
         launch.packages.append(package)
         return
     if position < len(rest):
-        _start(rest[position:], launch, package_entry=True)
+        words: list[str] | None = rest[position:]
+        shell = table is _NPX or table is _NPM_EXEC
+        if shell:
+            # npm exec hands the command word to sh as a script (@npmcli/run-script) and
+            # quotes only the words after it, so that word must be a simple command.
+            script = _split_script(rest[position])
+            words = _script_words(script, launch) if script else None
+            if words is not None:
+                words = [*words, *rest[position + 1 :]]
+            else:
+                launch.mark("inline_shell_code")
+                launch.fail(f"{launch.launcher} command is not a simple command")
+        if words is not None:
+            _start(words, launch, package_entry=True)
+            if shell and expands(words[0]):
+                launch.fail(f"{launch.launcher} command depends on the environment")
     launch.packages.extend(npm_spec(spec) for spec in specs)
 
 
@@ -2311,6 +2339,20 @@ def _local_subcommand(words: list[str], launch: Launch) -> None:
     reason = _embedded_reason(words)
     if reason is not None:
         launch.fail(reason)
+
+
+def _shell_subcommand(words: list[str], launch: Launch) -> None:
+    """A runner subcommand that runs its words through a shell as one command line."""
+    script = _split_script(" ".join(words)) if words else None
+    if script is None:
+        launch.mark("inline_shell_code")
+        launch.fail(f"{launch.launcher} command line is not a simple command")
+        return
+    _local_subcommand(script, launch)
+
+
+# pnpm exec runs its command through a shell with -c or --shell-mode.
+_PNPM_SHELL_MODE = re.compile(r"-[A-Za-z]*c[A-Za-z]*|--shell-mode(?:=.*)?", re.S)
 
 
 def _npm(name: str, rest: list[str], launch: Launch) -> None:
@@ -2366,7 +2408,10 @@ def _pnpm(name: str, rest: list[str], launch: Launch) -> None:
         launch.fail("pnpm subcommand fetches or installs packages")
     else:
         launch.launcher = f"pnpm {subcommand}" if subcommand in {"exec", "run", "start"} else "pnpm"
-        _local_subcommand([subcommand, *remainder], launch)
+        if subcommand == "exec" and any(_PNPM_SHELL_MODE.fullmatch(word) for word in remainder):
+            _shell_subcommand(remainder, launch)
+        else:
+            _local_subcommand([subcommand, *remainder], launch)
 
 
 def _yarn(name: str, rest: list[str], launch: Launch) -> None:
@@ -2389,6 +2434,9 @@ def _yarn(name: str, rest: list[str], launch: Launch) -> None:
         _package_runner(remainder, launch, _YARN_DLX, {"-p", "--package"})
     elif subcommand in _YARN_FETCHES:
         launch.fail("yarn subcommand fetches or installs packages")
+    elif subcommand == "exec":
+        # yarn exec runs its command word as a script in Yarn's portable shell.
+        _shell_subcommand(remainder, launch)
     else:
         _local_subcommand([subcommand, *remainder], launch)
 
@@ -2408,6 +2456,9 @@ def _bun(name: str, rest: list[str], launch: Launch) -> None:
         _package_runner(remainder, launch, _BUNX, {"-p", "--package"})
     elif subcommand in _BUN_FETCHES:
         launch.fail("bun subcommand fetches or installs packages")
+    elif subcommand == "exec":
+        # bun exec runs its words as a Bun Shell script.
+        _shell_subcommand(remainder, launch)
     else:
         _local_subcommand([subcommand, *remainder], launch)
 
@@ -2570,6 +2621,14 @@ def _pip_arguments(value: str, launch: Launch) -> None:
             return
         if name in _PIP_SOURCE:
             launch.sources.append((f"--pip-args --{name}", attached))
+        if name in {"requirement", "editable"}:
+            # pip installs what the file or directory names into the server's environment,
+            # as uvx --with-requirements and --with-editable do.
+            launch.packages.append(Package("path", attached))
+        elif name == "python":
+            # pip re-runs itself under the named interpreter, a path or a file in the
+            # working directory.
+            launch.mark("code_loading_option")
         index += 1
 
 
@@ -2600,10 +2659,28 @@ _DANGEROUS_CAPABILITIES = frozenset(
     {"all", "sys_admin", "net_admin", "sys_ptrace", "sys_module", "dac_read_search", "sys_rawio"}
 )
 _SOCKETS = ("docker.sock", "podman.sock", "containerd.sock", "docker_engine")
+# Directories that hold engine, agent and session-bus sockets (/var/run is /run).
+_SOCKET_DIRECTORIES = re.compile(
+    r"/(?:var/)?run(?:/(?:user|containerd|podman|docker|dbus)(?:/.*)?)?"
+)
+# /proc/<pid>/root is that process's root directory: the host's, for a host process.
+_PROC_ROOT = re.compile(r"/proc/[^/]+/root(?=/|$)")
 _BROAD = re.compile(
-    r"(?:~|\$\{?home\}?|%userprofile%|/home|/users|/root|/etc|/var|/proc|/sys|/dev|/boot|/usr"
+    r"(?:~|\$\{?home\}?|%userprofile%|\$\{?userprofile\}?|\$\{userhome\}"
+    r"|\$\{env:(?:home|userprofile)\}"
+    r"|/home|/users|/root|/etc|/var|/proc|/sys|/dev|/boot|/usr"
     r"|[a-z]:[\\/]users)(?:[\\/][^\\/]*)?[\\/]?$",
     re.IGNORECASE,
+)
+_CREDENTIAL_DIRECTORIES = _set(".ssh .aws .gnupg .kube .docker .config .azure .gcloud")
+# Client variables for the project directory, which a mount source may climb out of.
+_WORKSPACE = re.compile(r"\$\{(?:workspaceFolder|workspaceRoot)\}|\$\{?PWD\}?(?=[\\/]|$)")
+# Variables the image's interpreter reads at start, after the digest is checked.
+_CONTAINER_CODE_ENVIRONMENT = _set(
+    "LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT NODE_OPTIONS NODE_PATH PYTHONPATH PYTHONSTARTUP"
+    " PYTHONHOME PERL5OPT PERL5LIB RUBYOPT RUBYLIB JAVA_TOOL_OPTIONS _JAVA_OPTIONS"
+    " JDK_JAVA_OPTIONS BASH_ENV ENV SHELLOPTS BASHOPTS PS4 NPM_CONFIG_NODE_OPTIONS"
+    " NPM_CONFIG_SCRIPT_SHELL"
 )
 
 
@@ -2618,9 +2695,12 @@ def _host_source(spec: str, *, mount: bool) -> str | None:
         if fields.get("type", "volume").lower() != "bind":
             return None
         return fields.get("source") or fields.get("src") or None
-    if ":" not in spec:
+    # A client variable such as ${env:HOME} holds a colon of its own.
+    variable = re.match(r"\$\{[^}]*\}", spec)
+    skip = variable.end() if variable else 0
+    if ":" not in spec[skip:]:
         return None
-    source = spec.split(":", 1)[0]
+    source = spec[:skip] + spec[skip:].split(":", 1)[0]
     if re.match(r"[A-Za-z]:[\\/]", spec):
         if ":" not in spec[2:]:
             return None
@@ -2657,11 +2737,30 @@ def _container_context(options: list[tuple[str, str | None]], launch: Launch) ->
             r"unconfined|disable|no-new-privileges[:=]false", text
         ):
             launch.mark("security_options_disabled")
+        elif option == "--security-opt" and re.match(r"seccomp[:=]", text):
+            # A profile file, possibly from the checkout, may allow every system call.
+            launch.mark("custom_security_profile")
+        elif option in {"-e", "--env"} and value is not None:
+            name, equals, assigned = value.partition("=")
+            # bash in the image imports BASH_FUNC_<name>%% as a function that replaces a program.
+            if equals and (
+                name.upper() in _CONTAINER_CODE_ENVIRONMENT
+                or name.startswith("BASH_FUNC_")
+                or assigned.startswith("() {")
+            ):
+                launch.mark("code_loading_environment")
+        elif option == "--env-file":
+            launch.mark("container_environment_file")
+        elif option == "--health-cmd" and text not in {"", "none"}:
+            # The engine runs a string health check with /bin/sh -c inside the container.
+            launch.mark("container_command")
         elif option in {"-v", "--volume", "--mount"} and value:
             source = _host_source(value, mount=option == "--mount")
             if source is None:
                 continue
             launch.mark("host_mounts")
+            if _WORKSPACE.match(source):
+                source = _WORKSPACE.sub(".", source, count=1)
             normalized = source.rstrip("/\\") or ("/" if source.startswith("/") else "\\")
             # normpath keeps a leading "//", which Linux and Go's filepath.Clean read as "/".
             canonical = (
@@ -2669,19 +2768,29 @@ def _container_context(options: list[tuple[str, str | None]], launch: Launch) ->
                 if normalized.startswith("/") and "\\" not in normalized
                 else normalized
             )
+            if _PROC_ROOT.match(canonical):
+                canonical = _PROC_ROOT.sub("", canonical, count=1) or "/"
             if canonical in {"/", "\\"} or re.fullmatch(r"[A-Za-z]:[\\/]?", canonical):
                 launch.mark("host_root_mount")
-            elif canonical.lower().endswith(_SOCKETS):
+            elif canonical.lower().endswith(_SOCKETS) or _SOCKET_DIRECTORIES.fullmatch(canonical):
                 launch.mark("runtime_socket_mount")
             elif (
                 _BROAD.fullmatch(canonical)
+                or canonical.startswith("/proc/")
                 or canonical == ".."
                 or canonical.startswith(("../", "..\\"))
                 or posixpath.normpath(normalized.replace("\\", "/")).startswith("..")
+                or (
+                    not canonical.startswith(".")
+                    and not _CREDENTIAL_DIRECTORIES.isdisjoint(re.split(r"[\\/]", canonical))
+                )
             ):
                 launch.mark("broad_host_mount")
         elif option == "--entrypoint":
             launch.mark("entrypoint_override")
+    if launch.context.get("entrypoint_override") and launch.context.get("host_mounts"):
+        # The entrypoint may be a script on a host mount, outside the pinned image.
+        launch.mark("code_loading_option")
 
 
 # Global options that point the client at another engine, store or registry configuration.
@@ -2790,6 +2899,10 @@ def _deno(name: str, rest: list[str], launch: Launch) -> None:
                 launch.fail("explicit Deno import-map selection is not collected")
         elif option in {"--preload", "--require"}:
             launch.mark("preload_module")
+        elif option == "--env-file":
+            # Deno loads the file before it resolves npm: specifiers, so it may set
+            # NPM_CONFIG_REGISTRY or DENO_DIR where the inventory cannot read them.
+            launch.injected_environment = True
     script = rest[position]
     if script == "-" or script.lower().startswith(_INLINE_SOURCES[:1]):
         launch.fail(_inline("deno", launch))
