@@ -11,6 +11,7 @@ import zipfile
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from typing import BinaryIO, cast
 
 import pytest
 
@@ -19,6 +20,7 @@ from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import RiskSeverity, SerializationSafety
 from nexus_symbiote.scanners.model import (
     MAX_PICKLE_INSPECTION_BYTES,
+    MAX_PICKLE_MARKS,
     MAX_PICKLE_OPCODES,
     NUMPY_HEADER_UNREAD,
     NUMPY_OBJECT_ARRAY,
@@ -640,13 +642,132 @@ def test_a_padded_header_pickle_after_a_stop_is_unknown(
 
 def test_text_cut_short_without_an_earlier_stop_is_not_inventoried(tmp_path: Path) -> None:
     (tmp_path / "models").mkdir()
-    # Text-protocol streams that reach a bound before any STOP, or fail before one.
-    (tmp_path / "models" / "list.txt").write_bytes(b"(" + b"I1\n" * MAX_PICKLE_OPCODES)
+    # A text-protocol stream whose sample ends before any STOP, as long text does.
     (tmp_path / "long.dat").write_bytes(b"(S'" + b"x" * MAX_PICKLE_INSPECTION_BYTES + b"'\n")
     # After a STOP, a text segment that fails short of the bound, or ends with the file.
     (tmp_path / "models" / "notes").write_bytes(b"N.(I1\nnot a pickle at all\n")
     (tmp_path / "tail.dat").write_bytes(b"N.(I1\nI2\n")
     assert _components(tmp_path) == {}
+
+
+# builtins.len('x'): an inert call that pickle.load reaches past harmless padding.
+_INERT_CALL = b"cbuiltins\nlen\n(S'x'\ntR."
+_PADDING = b"N0" * (MAX_PICKLE_OPCODES // 2 + 1)  # NONE, POP: past the opcode budget
+# Text-protocol pickles at the start of a file that use up the opcode or MARK budget
+# before the loader's behaviour is decided, well inside the 64 KiB sample.
+_PAST_THE_BUDGET = {
+    "opcodes": (_PADDING + _INERT_CALL, PICKLE_UNREAD),
+    "marks": (b"(" * (MAX_PICKLE_MARKS + 1) + _INERT_CALL, PICKLE_UNREAD),
+    "named": (_INERT_CALL[:14] + _PADDING + _INERT_CALL[14:], PICKLE_NAME_UNCALLED),
+    "no-call": (b"(" + b"I1\n" * MAX_PICKLE_OPCODES, PICKLE_UNREAD),
+}
+
+
+@pytest.mark.parametrize(
+    ("data", "explanation"), list(_PAST_THE_BUDGET.values()), ids=list(_PAST_THE_BUDGET)
+)
+def test_a_text_pickle_past_the_opcode_or_mark_budget_is_unknown_by_content(
+    tmp_path: Path, data: bytes, explanation: str
+) -> None:
+    assert len(data) < MAX_PICKLE_INSPECTION_BYTES
+    if data.endswith(_INERT_CALL[14:]):
+        # pickle.load reads past the padding and calls what the pickle resolved.
+        assert _oracle(data, tmp_path / "oracle.bin") == (True, True)
+    root = tmp_path / "project"
+    (root / "models").mkdir(parents=True)
+    (root / "models" / "weights").write_bytes(data)
+    (root / "weights.dat").write_bytes(data)
+    found = _components(root)
+    assert sorted(found) == ["models/weights", "weights.dat"]
+    for component in found.values():
+        assert component.serialization_safety is SerializationSafety.UNKNOWN
+        assert component.properties["format_inspection"] == explanation
+        assert any(risk.category == "serialization_format_unknown" for risk in component.risks)
+
+
+def test_the_interpreter_tells_a_spent_budget_from_the_end_of_the_sample() -> None:
+    def first(data: bytes, size: int, opcodes: int = 10, marks: int = 2) -> pickle_load.Segment:
+        budget = pickle_load.Budget(opcodes, marks)
+        return pickle_load.load_segment(data, size, 0, "c", budget)
+
+    assert first(b"N0" * 6 + b"N.", 14).exhausted
+    assert first(b"(((N.", 5).exhausted
+    # The sample holds the file's first bytes; a read past them is the sample's end.
+    cut = first(b"S'abc", 1000)
+    assert cut.outcome == "unread" and not cut.exhausted
+    assert first(b"N.", 2).outcome == "stop"
+
+
+def _frame_stop(tail: bytes) -> bytes:
+    """A FRAME holding ``N.`` then ``tail``: a STOP with bytes left in its frame."""
+    body = b"N." + tail
+    return b"\x95" + len(body).to_bytes(8, "little") + body
+
+
+def test_each_place_a_pickle_resumes_is_read_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The C unpickler resumes after a STOP inside a frame both at the frame's end and
+    # right after the STOP, and from there "N." reaches the same frame end: each such
+    # frame doubles the walks of everything after it. Read once each, the budget lasts
+    # to the call that a buffered file's C unpickler reaches after the first STOP.
+    data = _frame_stop(_INERT_CALL) + _frame_stop(b"N.") * 12
+    assert _oracle(data, tmp_path / "oracle.bin")[1]
+    walks: dict[tuple[str, int], int] = {}
+    load_segments = pickle_load.load_segments
+
+    def counted(
+        sample: bytes, size: int, start: int, flavor: pickle_load.Flavor, budget: pickle_load.Budget
+    ) -> object:
+        walks[flavor, start] = walks.get((flavor, start), 0) + 1
+        return load_segments(sample, size, start, flavor, budget)
+
+    monkeypatch.setattr(pickle_load, "load_segments", counted)
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "weights.dat").write_bytes(data)
+    component = _components(root)["weights.dat"]
+    assert component.serialization_safety is UNSAFE
+    assert max(walks.values()) == 1
+
+
+@pytest.mark.parametrize("relative", ["models/weights", "model.onnx"])
+def test_a_content_check_that_cannot_read_is_not_called_safetensors(
+    tmp_path: Path, relative: str
+) -> None:
+    from nexus_symbiote.scanners.model import INSPECTION_FAILED, inspect_model_format
+
+    path = tmp_path / relative
+    path.parent.mkdir(exist_ok=True)
+    path.write_bytes(_PADDING + _INERT_CALL)
+
+    class _FailsAfterPrefix:
+        """A stream whose reads fail once the eight-byte prefix is read."""
+
+        def __init__(self, raw: io.BufferedReader) -> None:
+            self.raw = raw
+
+        def fileno(self) -> int:
+            return self.raw.fileno()
+
+        def read(self, size: int = -1) -> bytes:
+            if self.raw.tell():
+                raise OSError("read error")
+            return self.raw.read(size)
+
+    with path.open("rb") as raw:
+        stream = cast(BinaryIO, _FailsAfterPrefix(raw))
+        assert inspect_model_format(path, stream=stream) == (
+            SerializationSafety.UNKNOWN,
+            INSPECTION_FAILED,
+        )
+    # A SafeTensors file whose header does not parse keeps the SafeTensors label.
+    tensors = tmp_path / "model.safetensors"
+    tensors.write_bytes((20).to_bytes(8, "little") + b"{not a json header}!")
+    assert inspect_model_format(tensors) == (
+        SerializationSafety.UNKNOWN,
+        "Malformed or unsupported SafeTensors structure",
+    )
 
 
 # A text-protocol and a binary pickle that call exec and end with no STOP: pickle.load

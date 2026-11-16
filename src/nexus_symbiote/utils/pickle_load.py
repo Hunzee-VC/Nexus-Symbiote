@@ -19,6 +19,8 @@ decides the loader's next step: their type, length, whether they hash, and the s
 
 The sample may be a prefix of the file: a read past its end, or past the opcode and
 MARK budget, ends the walk as unread, since the loader's behaviour is not decided.
+``Segment.exhausted`` tells the budget from the sample's end: text that is no pickle
+ends or fails long before the budget, but a pickle can be padded to reach it.
 
 The loader that reads the file may run on any supported CPython, 3.11 to 3.14, and the
 unpicklers differ between them (``VERSION_DIFFERENCES``). Where they do, each flavor
@@ -92,7 +94,11 @@ class _LoadError(Exception):
 
 
 class _UnreadError(Exception):
-    """The loader's next step depends on bytes or opcodes past the inspection bounds."""
+    """The loader's next step depends on bytes past the sample."""
+
+
+class _ExhaustedError(Exception):
+    """The loader's next step comes after the opcode or MARK budget ran out."""
 
 
 class _CallError(Exception):
@@ -225,7 +231,8 @@ class Segment:
     left ``io.BytesIO``, then, when different, right after the STOP, as the C
     unpickler leaves a buffered file it peeked ahead in. ``differs`` names the
     ``VERSION_DIFFERENCES`` the walk relied on, and ``crossings`` counts the frame ends
-    the C unpickler read past, where ``load_segment``'s ``jumps`` choose how.
+    the C unpickler read past, where ``load_segment``'s ``jumps`` choose how. An
+    ``unread`` pickle is ``exhausted`` when the budget, not the sample, ran out.
     """
 
     outcome: Outcome
@@ -235,6 +242,7 @@ class Segment:
     certain: bool = True
     differs: frozenset[str] = frozenset()
     crossings: int = 0
+    exhausted: bool = False
 
 
 _STRTOL = {
@@ -443,7 +451,7 @@ class _Machine:
                 if handler is None:
                     raise _LoadError  # invalid load key
                 if self.budget.opcodes <= 0:
-                    raise _UnreadError
+                    raise _ExhaustedError
                 self.budget.opcodes -= 1
                 if handler is _Machine.op_stop:
                     self.pop()
@@ -451,15 +459,22 @@ class _Machine:
                 handler(self)
         except _CallError as call:
             return self._segment("called", certain=call.certain)
-        except (_UnreadError, RecursionError):
-            # No step here recurses on the input; should one, what the loader does next
-            # is not decided, which is not the same as the loader stopping.
+        except _UnreadError:
             return self._segment("unread")
+        except (_ExhaustedError, RecursionError):
+            # No step here recurses on the input; should one, the interpreter's own bound
+            # ran out, not the sample: what the loader does next is not decided.
+            return self._segment("unread", exhausted=True)
         except (_LoadError, ValueError, UnicodeError, OverflowError, struct.error):
             return self._segment("error")
 
     def _segment(
-        self, outcome: Outcome, resumes: tuple[int, ...] = (), certain: bool = True
+        self,
+        outcome: Outcome,
+        resumes: tuple[int, ...] = (),
+        certain: bool = True,
+        *,
+        exhausted: bool = False,
     ) -> Segment:
         return Segment(
             outcome,
@@ -469,6 +484,7 @@ class _Machine:
             certain,
             frozenset(self.differs),
             self.crossings,
+            exhausted,
         )
 
     def _resumes(self) -> tuple[int, ...]:
@@ -906,7 +922,7 @@ class _Machine:
 
     def op_mark(self) -> None:
         if self.budget.marks <= 0:
-            raise _UnreadError
+            raise _ExhaustedError
         self.budget.marks -= 1
         self.marks.append(len(self.stack))
 
