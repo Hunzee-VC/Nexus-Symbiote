@@ -9,8 +9,9 @@ pass ``--numstat-file`` for a review of a saved ``git diff --numstat`` listing.
 The pull request controls its own ``.gitattributes``, which would let ``src/** -diff``
 report every source change as binary, so git reads attributes from the base instead;
 renames are not detected, so a move out of ``tests/`` counts at its destination. A file
-the base marks ``-diff``, such as a vendored schema, is counted as text; binary content
-anywhere else outside the expected trees still fails. Paths are read NUL-separated and
+the base marks ``-diff``, such as a vendored schema, is counted as text when both
+sides are UTF-8 without a NUL byte; binary content anywhere else outside the expected
+trees still fails, whatever its attributes. Paths are read NUL-separated and
 unquoted, so a non-ASCII path keeps its prefix.
 """
 
@@ -83,8 +84,23 @@ def _fields(output: bytes) -> list[str]:
     return output.decode("utf-8", "surrogateescape").split("\0")[:-1]
 
 
+def _require_text(base: str, path: str) -> None:
+    """Refuse a -diff file whose content is binary: its newline count says nothing."""
+    for revision in (base, "HEAD"):
+        if not _git(base, "ls-tree", "-z", revision, "--", path):
+            continue
+        content = _git(base, "cat-file", "blob", f"{revision}:{path}")
+        try:
+            text = content.decode("utf-8")
+        except UnicodeDecodeError:
+            text = "\0"
+        if "\0" in text:
+            raise UnmeasuredChangeError(f"binary content in a -diff file: {path!r}")
+
+
 def _text_row(base: str, path: str) -> Row:
     """A -diff file's numstat as text: numstat keeps it binary even with --text."""
+    _require_text(base, path)
     patch = _git(
         base,
         "diff",
@@ -117,7 +133,11 @@ def _from_git(base: str) -> list[Row]:
     for record in _fields(_git(base, "diff", "--numstat", "-z", "--no-renames", base, "HEAD")):
         added, deleted, path = record.split("\t", 2)
         rows.append((added, deleted, path))
-    binary = [path for added, deleted, path in rows if "-" in (added, deleted)]
+    binary = [
+        path
+        for added, deleted, path in rows
+        if "-" in (added, deleted) and not path.startswith(BINARY_PREFIXES)
+    ]
     if not binary:
         return rows
     # Only the base's attributes are trusted: a pull request cannot mark its own binary
@@ -135,10 +155,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if (args.base is None) == (args.numstat_file is None):
         parser.error("pass exactly one of --base and --numstat-file")
-    listing: str | list[Row] = (
-        args.numstat_file.read_text(encoding="utf-8") if args.numstat_file else _from_git(args.base)
-    )
     try:
+        listing: str | list[Row] = (
+            args.numstat_file.read_text(encoding="utf-8")
+            if args.numstat_file
+            else _from_git(args.base)
+        )
         total = changed_lines(listing)
     except UnmeasuredChangeError as exc:
         print(f"pull request size cannot be measured: {exc}")

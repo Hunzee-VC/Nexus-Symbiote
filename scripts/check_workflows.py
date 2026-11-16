@@ -235,13 +235,16 @@ UNSAFE_GATE_ENV = frozenset(
         "PS4",
         "ENV",
         "PATH",
+        # The default Python user base is $HOME/.local, so HOME does what PYTHONUSERBASE
+        # does, and HOME and XDG_CONFIG_HOME select git's global config and attributes.
+        "HOME",
     }
 )
 # Families of variables that do the same: bash imports BASH_FUNC_<name>%% as a function
 # that shadows the gate's program, PYTHON* (PYTHONUSERBASE with a committed
 # usercustomize) can run code before the gate, and GIT_* (GIT_DIR) can point git at
 # another history. A name outside [A-Za-z0-9_] is no ordinary variable either.
-UNSAFE_GATE_ENV_PREFIXES = ("BASH_FUNC_", "PYTHON", "GIT_")
+UNSAFE_GATE_ENV_PREFIXES = ("BASH_FUNC_", "PYTHON", "GIT_", "XDG_")
 ENV_NAME = re.compile(r"[A-Za-z0-9_]+")
 # An earlier step that appends to $GITHUB_ENV or $GITHUB_PATH sets the environment of
 # every later step of the job, gates included, out of reach of the env checks; only this

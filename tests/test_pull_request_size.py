@@ -131,6 +131,41 @@ def test_binary_content_the_base_does_not_mark_still_cannot_be_measured(
     assert "cannot be measured" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("content", [b"\0\1\2" * 2000, b"\xff\xfe" * 2000])
+def test_binary_content_in_a_type_the_base_marks_binary_cannot_be_measured(
+    repository: Path, monkeypatch, capsys, content: bytes
+) -> None:
+    # `*.png binary` unsets diff, so the base marks it -diff; content with a NUL byte or
+    # that is not UTF-8 is still binary, and counting its newlines would pass any blob.
+    (repository / ".gitattributes").write_text("*.png binary\n")
+    _git(repository, "add", "-A")
+    _git(repository, "commit", "-q", "-m", "attributes")
+    base = _git(repository, "rev-parse", "HEAD").strip()
+    (repository / "src" / "logo.png").write_bytes(content)
+    _git(repository, "add", "-A")
+    _git(repository, "commit", "-q", "-m", "blob")
+    monkeypatch.chdir(repository)
+    assert checker.main(["--base", base]) == 1
+    assert "cannot be measured" in capsys.readouterr().out
+
+
+def test_an_image_the_base_marks_binary_in_an_expected_tree_is_not_counted(
+    repository: Path, monkeypatch, capsys
+) -> None:
+    (repository / ".gitattributes").write_text("*.png binary\n")
+    _git(repository, "add", "-A")
+    _git(repository, "commit", "-q", "-m", "attributes")
+    base = _git(repository, "rev-parse", "HEAD").strip()
+    (repository / "docs" / "assets").mkdir(parents=True)
+    (repository / "docs" / "assets" / "logo.png").write_bytes(b"\0\1\2" * 2000)
+    (repository / "tests" / "fixture.png").write_bytes(b"\xff\n" * 2000)
+    _git(repository, "add", "-A")
+    _git(repository, "commit", "-q", "-m", "images")
+    monkeypatch.chdir(repository)
+    assert checker.main(["--base", base]) == 0
+    assert "0 lines" in capsys.readouterr().out
+
+
 def test_a_binary_fixture_with_a_non_ascii_path_under_tests_is_not_counted(
     repository: Path, monkeypatch, capsys
 ) -> None:

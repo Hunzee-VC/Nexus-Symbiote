@@ -838,6 +838,9 @@ def test_the_pull_request_size_base_comes_from_the_pull_request(tmp_path):
         ("PYTHONUSERBASE", "scripts/check_locks.py"),
         ("PYTHONSAFEPATH", "scripts/check_workflows.py"),
         ("GIT_DIR", "scripts/check_pull_request_size.py"),
+        ("HOME", "scripts/check_locks.py"),
+        ("XDG_CONFIG_HOME", "scripts/check_pull_request_size.py"),
+        ("XDG_DATA_HOME", "scripts/check_workflows.py"),
         ("A-B", "scripts/check_locks.py"),
     ],
 )

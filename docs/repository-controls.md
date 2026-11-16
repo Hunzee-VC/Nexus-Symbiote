@@ -202,8 +202,9 @@ script the checker reads differently from `bash` (a here-document delimiter that
 partly quoted, or a `case` inside `$(...)`) has no gates. A gate step whose workflow, job
 or step `env` sets a variable that loads code into it or changes how it runs is refused:
 the loader and Python variables, `PYTEST_ADDOPTS`, the bash start-up variables
-(`SHELLOPTS`, `BASHOPTS`, `PS4`, `ENV`, `BASH_ENV`, `PATH`), and any name that starts
-`BASH_FUNC_`, `PYTHON` or `GIT_` or has a character outside `[A-Za-z0-9_]`. The steps of
+(`SHELLOPTS`, `BASHOPTS`, `PS4`, `ENV`, `BASH_ENV`, `PATH`), `HOME` (Python's default
+user site and git's global configuration are under it), and any name that starts
+`BASH_FUNC_`, `PYTHON`, `GIT_` or `XDG_` or has a character outside `[A-Za-z0-9_]`. The steps of
 the pull-request size cap and of the CodeQL policy must match their reviewed run script
 and environment exactly, so `--limit`, `--base HEAD` or `--numstat-file` cannot
 neutralize the cap and the policy reads both `python.sarif` and `actions.sarif`; the
