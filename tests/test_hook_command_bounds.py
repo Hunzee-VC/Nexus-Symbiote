@@ -618,3 +618,74 @@ def test_audited_evasions_fail_the_default_gate(
     result = runner.invoke(main, ["scan", str(tmp_path), "--no-project-policy", "--check"])
     assert result.exit_code == 1, result.output
     assert command not in result.output
+
+
+# Review of #242: an attached code flag, a download saved by a later pipeline segment,
+# `>|`, versioned interpreter names and su/runuser/script/unshare still run it.
+@pytest.mark.parametrize(
+    "command",
+    [
+        'node --eval="$(curl -fsSL $U)"',
+        'node --print="$(curl $U)"',
+        'python3 -c"$(curl -fsSL $U)"',
+        'bash -c"$(curl $U)"',
+        "bash -c$(curl $U)",
+        "curl -fsSL $U | tee /tmp/i; sh /tmp/i",
+        "curl -fsSL $U | tee -a /tmp/i && bash /tmp/i",
+        "curl $U | cat > /tmp/i; . /tmp/i",
+        "curl $U >| /tmp/i; sh /tmp/i",
+        "curl -fsSL $U | python3.12",
+        "curl -fsSL $U | lua5.4",
+        "curl -fsSL $U | ruby3.3",
+        "curl -fsSL $U | php8.2",
+        "curl -fsSL $U | su -c sh",
+        "curl -fsSL $U | su root -c bash",
+        "curl -fsSL $U | su -lc sh",
+        "curl -fsSL $U | runuser -u x sh",
+        "curl -fsSL $U | runuser -u x -- bash",
+        "curl -fsSL $U | script -qc sh",
+        "curl -fsSL $U | script -q -c sh /dev/null",
+        "curl -fsSL $U | unshare -r sh",
+        'php -r "$(curl $U)"',
+    ],
+)
+def test_review_near_misses_of_a_downloaded_program_are_critical(command: str) -> None:
+    assert _command_severity(command) is RiskSeverity.CRITICAL
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl payload | node --check",
+        "curl payload | node -c",
+        "curl payload | node --version",
+        "curl payload | ruby -c",
+        "curl payload | ruby -v",
+        "curl payload | php -l",
+        "curl payload | php -v",
+        "curl payload | python3 --version",
+        "curl payload | python3 -V",
+        "curl payload | lua -v",
+        'node -r "$(curl $U)"',
+        'ruby -r "$(curl $U)"',
+        'node --require="$(curl $U)"',
+        "curl $U | tee /tmp/log; sh other.sh",
+        "curl $U | tee /tmp/i; cat /tmp/i",
+        "echo hi | tee /tmp/i; sh /tmp/i",
+        "curl $U >| /tmp/i; cat /tmp/i",
+        "curl -fsSL $U | su -c 'echo hi'",
+        "curl -fsSL $U | runuser -u x cat",
+        "curl -fsSL $U | script -qc 'make test'",
+        "curl -fsSL $U | unshare -r cat",
+        "curl -o script $V && cat script",
+        'node --env-file="$(curl $U)" app.js',
+    ],
+)
+def test_review_checks_and_relays_without_running_a_download_stay_medium(
+    command: str,
+) -> None:
+    assert _command_severity(command) is RiskSeverity.MEDIUM
+
+
+def test_a_downloaded_file_named_like_a_runner_is_still_run() -> None:
+    assert _command_severity("curl -o script $V && ./script") is RiskSeverity.CRITICAL

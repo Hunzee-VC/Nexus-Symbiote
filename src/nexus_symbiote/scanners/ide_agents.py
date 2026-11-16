@@ -162,10 +162,13 @@ _CREDENTIAL_HELPER_KEYS = (
     "otelHeadersHelper",
 )
 # Settings `env` applies to the session and every process it starts. These names send
-# the API key and prompts to another endpoint, proxy or trust store, or replace the
-# credential. Only names are rated; values are never reported.
+# the API key, prompts or telemetry to another endpoint, proxy or trust store, add
+# headers to API requests, or replace the credential. Only names are rated; values are
+# never reported.
 _REDIRECTING_ENVIRONMENT = re.compile(
-    r"[A-Z0-9_]*_(?:BASE_URL|API_URL)|ANTHROPIC_AUTH_TOKEN|(?:HTTPS?|ALL)_PROXY"
+    r"[A-Z0-9_]*_(?:BASE_URL|API_URL)|ANTHROPIC_(?:AUTH_TOKEN|API_KEY|CUSTOM_HEADERS)"
+    r"|OTEL_EXPORTER_OTLP(?:_[A-Z]+)?_(?:ENDPOINT|HEADERS)|AWS_ENDPOINT_URL(?:_[A-Z0-9_]+)?"
+    r"|(?:HTTPS?|ALL)_PROXY"
     r"|NODE_EXTRA_CA_CERTS|NODE_TLS_REJECT_UNAUTHORIZED|SSL_CERT_(?:FILE|DIR)"
     r"|REQUESTS_CA_BUNDLE|CURL_CA_BUNDLE"
 )
@@ -683,14 +686,20 @@ _DOWNLOAD_NAMES = frozenset(
     {"curl", "wget", "iwr", "irm", "invoke-webrequest", "invoke-restmethod"}
 )
 _STDOUT_NAMES = frozenset({"", "-", "/dev/stdout", "/dev/stderr", "/dev/fd/1", "/dev/fd/2"})
+# `python3.12`, `lua5.4` or `php8.2` is that interpreter.
+_VERSIONED_NAME = re.compile(r"(python|ruby|php|perl|lua|nodejs|node)[0-9][0-9.]*")
 # Each matcher runs once per pipeline segment, so a command of repeated near
 # misses costs linear time whatever its length.
 _SEGMENT_BOUNDARY = re.compile(r"[\n|;&]")
 _PREFIX_REDIR = re.compile(r"\d*(?:<<-|<<<|<<|<>|>>|>&|&>|[<>])")
 _SCRIPT_FLAG = re.compile(r"(?i)-c(?:ommand(?:withargs)?)?\Z|-[A-Za-z]*c\Z")
 # An interpreter's flag that takes its program as the next argument: `-e`, `-E`, `-p`,
-# `-r` (PHP) and the long `--eval` and `--print`, alone or after other short flags.
-_CODE_FLAG = re.compile(r"-[A-Za-z]*[eEpr]\Z|--(?:eval|print)\Z")
+# `-r` (PHP only: node and ruby load a module with it) and the long `--eval` and
+# `--print`, alone or after other short flags.
+_CODE_FLAG = re.compile(r"-[A-Za-z]*[eEp]\Z|--(?:eval|print)\Z")
+_PHP_CODE_FLAG = re.compile(r"-[A-Za-z]*[eEpr]\Z")
+# Where a flag's name ends when its value is attached: `--eval="$(...)"`, `-c"$(...)"`.
+_FLAG_NAME = re.compile(r"-[^\s|&;<>=\"'$`]*")
 _POWERSHELL = re.compile(r"\b(?:powershell|pwsh)(?:\.exe)?\b", re.IGNORECASE)
 # PowerShell takes -, en dash, em dash or horizontal bar before a parameter name. A shell
 # removes quotes and escapes before PowerShell reads the argument. The console host reads
@@ -793,6 +802,11 @@ def _command_pipelines(command: str) -> list[list[str]]:
             continue
         if char in "><" and nxt == "&":
             buf.append(f"{char}&")
+            index += 2
+            continue
+        if char == ">" and nxt == "|":
+            # `>|` writes a file even under noclobber; it is not a pipe.
+            buf.append(">|")
             index += 2
             continue
         if char == "&" and nxt == ">":
@@ -991,6 +1005,9 @@ def _name_variants(word: str) -> set[str]:
         if not name:
             continue
         names.add(name)
+        versioned = _VERSIONED_NAME.fullmatch(name)
+        if versioned is not None:
+            names.add(versioned.group(1))
         for shell in _SHELL_NAMES:
             if not name.startswith(shell) or len(name) == len(shell):
                 continue
@@ -1103,6 +1120,13 @@ _WRAPPERS: dict[str, tuple[frozenset[str], int]] = {
     "chroot": (frozenset({"--userspec", "--groups"}), 1),
     "flock": (frozenset({"-w", "--timeout", "-E", "--conflict-exit-code"}), 1),
     "taskset": (frozenset(), 1),
+    "unshare": (
+        frozenset(
+            {"-S", "--setuid", "-G", "--setgid", "-R", "--root", "-w", "--wd"}
+            | {"--map-user", "--map-group", "--map-users", "--map-groups", "--propagation"}
+        ),
+        0,
+    ),
     "xargs": (
         frozenset({"-a", "--arg-file", "-d", "--delimiter", "-E", "-I", "-L", "-n", "-P", "-s"}),
         0,
@@ -1123,6 +1147,55 @@ def _skip_wrapper(words: list[str], index: int, name: str) -> int:
     return index + operands
 
 
+# Programs that run a command given as an option's value (`su -c sh`, `script -qc sh`)
+# or, after `runuser -u <user>`, as an operand: the options that take a value, and the
+# short flags that may come before `c` in one word. A word naming one of them with no
+# such command is itself the program, as `./script` may be.
+_COMMAND_OPTION_RUNNERS: dict[str, tuple[frozenset[str], str]] = {
+    "su": (frozenset({"-s", "--shell", "-g", "--group", "-G", "--supp-group", "-w"}), "lmpfP"),
+    "runuser": (
+        frozenset({"-s", "--shell", "-g", "--group", "-G", "--supp-group", "-w"}),
+        "lmpfP",
+    ),
+    "script": (
+        frozenset({"-E", "--echo", "-I", "--log-in", "-O", "--log-out", "-B", "--log-io"})
+        | {"-T", "--log-timing", "-m", "--logging-format"},
+        "aefqkw",
+    ),
+}
+
+
+def _option_command(words: list[str], index: int, runner: str) -> int | None:
+    """Index of the command `runner` runs from its `-c` value or `-u` operand, if any."""
+    with_value, bundled = _COMMAND_OPTION_RUNNERS[runner]
+    user = False
+    while index < len(words):
+        word = _decode_word(words[index], drop_ifs=True)
+        if word in {"-c", "--command"} or (
+            len(word) > 2 and word[0] == "-" and word[-1] == "c" and set(word[1:-1]) <= set(bundled)
+        ):
+            return index + 1
+        if word == "--":
+            index += 1
+            if user:
+                return index
+            continue
+        if word in {"-u", "--user"}:
+            user = True
+            index += 2
+            continue
+        if word in with_value:
+            index += 2
+            continue
+        if word.startswith("-"):
+            index += 1
+            continue
+        if user:
+            return index
+        index += 1
+    return None
+
+
 def _executable_index(words: list[str]) -> int | None:
     """Index of the command `words` run, after wrappers and grouping. None if not run."""
     index = 0
@@ -1141,6 +1214,13 @@ def _executable_index(words: list[str]) -> int | None:
             continue
         if names & {"sudo", "doas"}:
             index = _skip_sudo(words, index + 1)
+            continue
+        runner = next(iter(sorted(names & _COMMAND_OPTION_RUNNERS.keys())), None)
+        if runner is not None:
+            found = _option_command(words, index + 1, runner)
+            if found is None:
+                return index
+            index = found
             continue
         if "command" in names:
             nxt = index + 1
@@ -1164,15 +1244,21 @@ def _executable_index(words: list[str]) -> int | None:
 
 # Interpreters that run a program read from standard input when given no script: the
 # short flags whose letter takes the program from the command line or a module instead,
-# the long ones that do, and the options that take the next argument as their value.
+# or only checks syntax or prints a version or help, the long ones that do, and the
+# options that take the next argument as their value. `perl -c` still runs BEGIN blocks.
+_NODE_LONG = frozenset({"--eval", "--print", "--check", "--version", "--help"})
+_NODE_WITH_VALUE = frozenset({"-r", "--require", "--import"})
 _STDIN_INTERPRETERS: dict[str, tuple[str, frozenset[str], frozenset[str]]] = {
-    **{name: ("cm", frozenset(), frozenset({"-W", "-X"})) for name in _PYTHON_NAMES},
+    **{
+        name: ("cmVh", frozenset({"--version", "--help"}), frozenset({"-W", "-X"}))
+        for name in _PYTHON_NAMES
+    },
     "perl": ("eE", frozenset(), frozenset()),
-    "node": ("ep", frozenset({"--eval", "--print"}), frozenset({"-r", "--require", "--import"})),
-    "nodejs": ("ep", frozenset({"--eval", "--print"}), frozenset({"-r", "--require", "--import"})),
-    "ruby": ("e", frozenset(), frozenset({"-r", "-I"})),
-    "php": ("rfBRFE", frozenset(), frozenset({"-c", "-d", "-z"})),
-    "lua": ("e", frozenset(), frozenset({"-l"})),
+    "node": ("epcvh", _NODE_LONG, _NODE_WITH_VALUE),
+    "nodejs": ("epcvh", _NODE_LONG, _NODE_WITH_VALUE),
+    "ruby": ("ecvh", frozenset({"--version", "--help"}), frozenset({"-r", "-I"})),
+    "php": ("rfBRFElvihm", frozenset({"--version", "--help"}), frozenset({"-c", "-d", "-z"})),
+    "lua": ("ev", frozenset(), frozenset({"-l"})),
 }
 # Arguments that name standard input as the program.
 _STDIN_PROGRAMS = frozenset({"-", "/dev/stdin", "/dev/fd/0"})
@@ -1355,15 +1441,39 @@ def _executes_saved(segment: str, saved: set[str]) -> bool:
     return False
 
 
+def _relayed_names(segment: str) -> set[str]:
+    """Files a segment fed a download writes: `tee` operands and output redirections."""
+    words = _shell_words(segment)
+    relayed: set[str] = set()
+    index = _executable_index(words)
+    if index is not None and "tee" in _name_variants(words[index]):
+        for word in words[index + 1 : index + 65]:
+            relayed.update(_file_keys(word))
+    for redirection in _OUTPUT_REDIRECTION.finditer(segment):
+        relayed.update(_file_keys(redirection.group("target")))
+        if len(relayed) >= 64:
+            break
+    return relayed
+
+
 def _download_then_run(pipelines: list[list[str]]) -> bool:
-    """Whether a later command runs a file an earlier download saved (`curl -o a && bash a`)."""
+    """Whether a later command runs a file an earlier download saved (`curl -o a && bash a`).
+
+    A file written by a later segment of the downloader's pipeline, as by `curl x | tee a`
+    or `curl x | cat > a`, holds the download too.
+    """
     saved: set[str] = set()
     for segments in pipelines:
         local = set(saved)
+        fetched = False
         for segment in segments:
             if _executes_saved(segment, local):
                 return True
             local.update(_saved_names(segment))
+            if fetched:
+                local.update(_relayed_names(segment))
+            elif _segment_fetches(segment):
+                fetched = True
         saved = local
     return False
 
@@ -1398,13 +1508,16 @@ def _substitution_downloads(command: str, index: int) -> bool:
     return rest.lstrip(" \t").lower().startswith(("-d", "--decode"))
 
 
-def _substitution_at(command: str, index: int) -> bool:
+def _substitution_at(command: str, index: int, interpreter: str | None = None) -> bool:
     """Whether the script after a shell word is a download substitution.
 
-    Accepts a command flag (`-c`, `-lc`, `-Command`), quotes, and redirections
-    (`sh < <(curl ...)`, `bash <<< $(curl ...)`). A substitution later in a longer
-    script is not the script itself.
+    Accepts a command flag (`-c`, `-lc`, `-Command`), also with its value attached
+    (`-c"$(...)"`, `--eval=$(...)`), quotes, and redirections (`sh < <(curl ...)`,
+    `bash <<< $(curl ...)`). A substitution later in a longer script is not the script
+    itself, nor is the value of an interpreter option such as `node -r`.
     """
+    with_value = _STDIN_INTERPRETERS[interpreter][2] if interpreter else frozenset()
+    code_flag = _PHP_CODE_FLAG if interpreter == "php" else _CODE_FLAG
     length = len(command)
     for _ in range(16):
         while index < length and command[index] in " \t":
@@ -1424,9 +1537,22 @@ def _substitution_at(command: str, index: int) -> bool:
             end = index + 1
             while end < length and command[end] not in " \t\n|&;<>":
                 end += 1
-            flag = command[index:end]
-            index = end
-            if _SCRIPT_FLAG.fullmatch(flag) or _CODE_FLAG.fullmatch(flag):
+            matched = _FLAG_NAME.match(command, index)
+            name_end = matched.end() if matched is not None else end
+            flag = command[index:name_end]
+            if flag in with_value:
+                # The option's value, attached or the next word, is not the program.
+                index = end
+                if name_end == end:
+                    while index < length and command[index] in " \t":
+                        index += 1
+                    while index < length and command[index] not in " \t\n|&;<>":
+                        index += 1
+                continue
+            if _SCRIPT_FLAG.fullmatch(flag) or code_flag.fullmatch(flag):
+                index = name_end
+                if flag.startswith("--") and command.startswith("=", index):
+                    index += 1
                 while index < length and command[index] in " \t":
                     index += 1
                 while index < length and command[index] in "'\"":
@@ -1434,6 +1560,7 @@ def _substitution_at(command: str, index: int) -> bool:
                 if _opens_substitution(command, index):
                     return _substitution_downloads(command, index)
                 return False
+            index = end
             continue
         return False
     return False
@@ -1456,7 +1583,8 @@ def _substitution_exec(pipelines: list[list[str]]) -> bool:
         names = _name_variants(words[index])
         if not (names & (_SHELL_NAMES | _EVAL_NAMES | _IEX_NAMES | _STDIN_INTERPRETERS.keys())):
             continue
-        if _substitution_at(segment, spans[index][1]):
+        interpreter = next(iter(sorted(names & _STDIN_INTERPRETERS.keys())), None)
+        if _substitution_at(segment, spans[index][1], interpreter):
             return True
     return False
 

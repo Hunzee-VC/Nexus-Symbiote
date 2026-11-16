@@ -659,6 +659,9 @@ SKILL_DIRECTORIES = [
     ".claude/hooks",
     ".cursor/hooks",
 ]
+# No agent reads these as instructions: every file is a resource, checked only for
+# hidden characters.
+_RESOURCE_DIRECTORIES = frozenset({".claude/hooks", ".cursor/hooks"})
 _SKILL_PARTS = tuple(PurePosixPath(directory).parts for directory in SKILL_DIRECTORIES)
 
 # Skill and command declarations, read as text, which must be UTF-8; every other file of
@@ -1291,7 +1294,11 @@ class PromptScanner(Scanner):
                 if relative in seen:
                     continue
                 seen.add(relative)
-                read = self._skill_file(path, files, result)
+                declaration = (
+                    skill_dir not in _RESOURCE_DIRECTORIES
+                    and path.suffix.lower() in _DECLARATION_SUFFIXES
+                )
+                read = self._skill_file(path, files, result, declaration=declaration)
                 if read is None:
                     continue
                 digest, risks = read
@@ -1300,11 +1307,7 @@ class PromptScanner(Scanner):
                     SkillPackageComponent(
                         bom_ref=f"skill:{relative}",
                         name=relative,
-                        skill_type=(
-                            "skill"
-                            if path.suffix.lower() in _DECLARATION_SUFFIXES
-                            else "skill-resource"
-                        ),
+                        skill_type="skill" if declaration else "skill-resource",
                         hashes={"sha256": digest},
                         source_path=relative,
                         trust_tier=TrustTier.INTERNAL_UNVERIFIED,
@@ -1317,7 +1320,7 @@ class PromptScanner(Scanner):
 
     @staticmethod
     def _skill_file(
-        path: Path, files: ConfinedCollection, result: ScanResult
+        path: Path, files: ConfinedCollection, result: ScanResult, *, declaration: bool
     ) -> tuple[str, list[RiskAssessment]] | None:
         """A bundle file's digest and the hidden-character findings of its text.
 
@@ -1328,7 +1331,7 @@ class PromptScanner(Scanner):
         is a failure.
         """
         relative = path.as_posix()
-        text_file = path.suffix.lower() in _DECLARATION_SUFFIXES
+        text_file = declaration
         found = None if _credential_shaped(relative) else files.regular_file(path)
         reason = _credential_gap(relative, None if found is None else found[0].as_posix())
         if reason is not None:
@@ -1362,7 +1365,7 @@ class PromptScanner(Scanner):
                 *_line_separator_risks(stream.line_separators, relative),
             ]
         risks = detect_invisible_characters(text, relative)
-        if path.suffix.lower() in _MARKUP_SUFFIXES:
+        if declaration and path.suffix.lower() in _MARKUP_SUFFIXES:
             risks.extend(detect_hidden_markup(text, relative))
         return hash_bytes(content), risks
 
