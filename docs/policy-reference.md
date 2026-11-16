@@ -126,7 +126,7 @@ How a suppression applies:
 | `risk.fail_threshold=VALUE`, `risk.warn_threshold=VALUE` | raised above the built-in value |
 | `risk.ignore_categories=NAMES` | any category is ignored |
 | `risk.suppressions: CATEGORY on REF (FINGERPRINT) until DATE (owner OWNER)` | once per suppression |
-| `scan.failure_mode=report-only` | collection failures never fail `scan` |
+| `scan.failure_mode=report-only` | collection failures and findings never fail `scan`; unverified discovery evidence under `--check` still does |
 | `scan.scanners=NAMES` | fewer collectors than the built-in set |
 | `scan.exclude_paths=PATHS` | paths beyond the always-skipped names (`node_modules`, `.git`, `__pycache__`, `.venv` and `venv`) |
 | `output.default_format=FORMAT` | the project selects an export format other than `json`, which changes what `scan -o` writes without `-f` |

@@ -587,3 +587,28 @@ def test_scan_report_only_does_not_relax_a_failed_producer_check(tmp_path, monke
     result = _scan_check(project, "--report-only")
     assert result.exit_code == 1, result.output
     assert "report only: exit status 0" not in result.output
+
+
+def test_scan_gate_output_says_report_only_does_not_cover_discovery(tmp_path, monkeypatch):
+    _clear_ci(monkeypatch)
+    project, _ = _project(tmp_path)
+    blocked = _scan_check(project, "--no-project-policy", "--report-only", env={"CI": "true"})
+    assert blocked.exit_code == 1, blocked.output
+    assert (
+        "Scan gate failed (report-only does not cover unverified discovery evidence)"
+        in blocked.output
+    )
+    reasons = [line for line in blocked.output.splitlines() if "Unsigned ShadowScan" in line]
+    assert reasons
+    assert all(line.startswith("  - discovery verification: ") for line in reasons)
+    plain = _scan_check(project, "--no-project-policy", env={"CI": "true"})
+    assert plain.exit_code == 1, plain.output
+    assert "report-only does not cover" not in plain.output
+    assert any(
+        line.startswith("  - discovery verification: Unsigned ShadowScan")
+        for line in plain.output.splitlines()
+    )
+    relaxed = _scan_check(project, "--no-project-policy", "--report-only")
+    assert relaxed.exit_code == 0, relaxed.output
+    assert "discovery verification:" not in relaxed.output
+    assert "report-only does not cover" not in relaxed.output

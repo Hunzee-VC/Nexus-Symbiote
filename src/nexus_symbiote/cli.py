@@ -926,7 +926,7 @@ def scan(
             "network",
         ],
     )
-    discovery_blocked = False
+    discovery_failures: list[str] = []
     if check_only:
         from nexus_symbiote.validators.completeness import (
             carries_discovery_evidence,
@@ -943,10 +943,9 @@ def scan(
             )
             producer_verified = prod_status == "verified" and not prod_problems
             if prod_problems:
-                discovery_blocked = True
                 for problem in prod_problems:
                     scan_failures.append(f"shadowscan: {problem}")
-                failures_by.setdefault("shadowscan", []).extend(prod_problems)
+                discovery_failures.extend(prod_problems)
         if carries_discovery_evidence(aibom):
             unsigned_reason = _unsigned_discovery_failure_reason(
                 aibom,
@@ -957,17 +956,15 @@ def scan(
                 already_verified=producer_verified,
             )
             if unsigned_reason is not None:
-                discovery_blocked = True
                 scan_failures.append(f"shadowscan: {unsigned_reason}")
-                failures_by.setdefault("shadowscan", []).append(unsigned_reason)
+                discovery_failures.append(unsigned_reason)
 
     scorer = RiskScorer.from_policy(policy.risk)
     passed, risk_report = scorer.passes_gate(aibom)
     # Report-only (flag or project policy) relaxes collection and findings only; it
     # must not cancel the separate discovery-verification gate the operator relies on.
-    report_mode = (
-        report_only or policy.scan.failure_mode == "report-only"
-    ) and not discovery_blocked
+    report_requested = report_only or policy.scan.failure_mode == "report-only"
+    report_mode = report_requested and not discovery_failures
     staged = _staged_inventory()
 
     if not check_only:
@@ -1001,7 +998,12 @@ def scan(
     if not scan_failures and passed:
         print_lines([("Scan gate passed", "green")], err=True)
         return
-    heading = "Scan gate failed (report only: exit status 0)" if report_mode else "Scan gate failed"
+    if report_mode:
+        heading = "Scan gate failed (report only: exit status 0)"
+    elif report_requested:
+        heading = "Scan gate failed (report-only does not cover unverified discovery evidence)"
+    else:
+        heading = "Scan gate failed"
     document = {
         **risk_report.to_dict(),
         "fail_on_severity": scorer.fail_on_severity,
@@ -1009,7 +1011,12 @@ def scan(
     }
     not_collected = sorted(set(all_scanners) - set(selected))
     gate = scan_gate_lines(
-        document, failures_by, excluded_by, not_collected, recorded=not (check_only or staged)
+        document,
+        failures_by,
+        excluded_by,
+        not_collected,
+        recorded=not (check_only or staged),
+        discovery=discovery_failures,
     )
     print_lines([(heading, "yellow" if report_mode else "red"), *gate], err=True)
     if not report_mode:
