@@ -14,6 +14,7 @@ from nexus_symbiote.utils.secrets import (
     redact_text,
     secret_like,
 )
+from tests.support import scaling_ratio
 
 SECRET = "s3cr3tValue9"  # noqa: S105 - synthetic fixture
 
@@ -334,10 +335,15 @@ def test_new_patterns_stay_linear_on_adversarial_input(text):
 def test_prepared_scrubber_is_linear_in_values_and_strings():
     scrubber = SecretScrubber(f"credential-{i:05d}" for i in range(256))
     metadata = {"examples": [f"value {i} credential-00007" for i in range(20_000)]}
-    started = time.monotonic()
     redacted = redact_metadata(metadata, scrubber)
-    assert time.monotonic() - started < 10
     assert "credential-00007" not in str(redacted)
+
+    def run(scale: int) -> object:
+        examples = [f"value {i} credential-00007" for i in range(2_000 * scale)]
+        return redact_metadata({"examples": examples}, scrubber)
+
+    # CONTRIBUTING: show linear work with a ratio, not a duration the runner sets.
+    assert scaling_ratio(run) < 10
 
 
 @pytest.mark.parametrize(
