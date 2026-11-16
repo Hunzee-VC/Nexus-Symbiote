@@ -10,7 +10,14 @@ from pathlib import Path
 
 import pytest
 
-from nexus_symbiote.live.session import ExecutionOutcomeUnknown, ToolCallError, invoke_pinned_stdio
+from nexus_symbiote.live import session as session_module
+from nexus_symbiote.live.pinned_process import PinnedProcessError
+from nexus_symbiote.live.session import (
+    ExecutionOutcomeUnknown,
+    PinnedStdioSession,
+    ToolCallError,
+    invoke_pinned_stdio,
+)
 from nexus_symbiote.runtime import AuthorizationError
 from tests.test_runtime_authorization import DEFINITION, fixture
 from tests.test_runtime_stdio_session import signed_inputs
@@ -109,3 +116,83 @@ def test_call_deadline_is_separate_from_the_handshake_deadline(tmp_path, monkeyp
     monkeypatch.setattr("nexus_symbiote.live.session.DEADLINE_SECONDS", 1.0)
     outcome, _ = call(tmp_path, "slow", call_deadline_seconds=5)
     assert outcome["content"][0]["text"] == "ok"
+
+
+def _teardown_fails(monkeypatch, ended: list) -> None:
+    """Make cleanup report a PID namespace that did not end, after it has run."""
+    terminate = session_module.terminate_process_group
+
+    def fail(proc):
+        terminate(proc)
+        ended.append(proc)
+        raise PinnedProcessError("isolation-teardown-failed", "the namespace did not end")
+
+    monkeypatch.setattr(session_module, "terminate_process_group", fail)
+
+
+def test_a_namespace_that_did_not_end_after_the_call_is_an_unknown_outcome(tmp_path, monkeypatch):
+    ended: list = []
+    _teardown_fails(monkeypatch, ended)
+    with pytest.raises(ExecutionOutcomeUnknown) as caught:
+        call(tmp_path, "ok")
+    assert isinstance(caught.value.__cause__, PinnedProcessError)
+    assert [
+        json.loads(line)[0] for line in (tmp_path / "calls.jsonl").read_text().splitlines()
+    ] == ["tools/call"]
+    # The launcher is still reaped when its namespace is reported.
+    assert [proc.returncode is not None for proc in ended] == [True]
+
+
+def test_a_namespace_that_did_not_end_before_any_call_is_a_denial(tmp_path, monkeypatch):
+    ended: list = []
+    _teardown_fails(monkeypatch, ended)
+    path, pin, log = launcher(tmp_path, "ok")
+    session = PinnedStdioSession(command=str(path), sha256=pin, server_id="server:mail")
+    with pytest.raises(AuthorizationError) as caught, session:
+        pass
+    assert isinstance(caught.value.__cause__, PinnedProcessError)
+    assert not log.exists()
+    assert [proc.returncode is not None for proc in ended] == [True]
+
+
+def test_unexpected_teardown_error_after_call_reaps_process_and_reports_unknown_outcome(
+    tmp_path, monkeypatch
+):
+    reaped: list = []
+    terminate = session_module.terminate_process_group
+
+    def crash_after_kill(proc):
+        terminate(proc)
+        reaped.append(proc)
+        raise RuntimeError("unexpected cleanup fault")
+
+    monkeypatch.setattr(session_module, "terminate_process_group", crash_after_kill)
+    with pytest.raises(ExecutionOutcomeUnknown) as caught:
+        call(tmp_path, "ok")
+    assert isinstance(caught.value.__cause__, RuntimeError)
+    assert [proc.returncode is not None for proc in reaped] == [True]
+
+
+def test_wait_timeout_after_call_reports_unknown_outcome(tmp_path, monkeypatch):
+    terminate = session_module.terminate_process_group
+
+    def timeout_first_wait(proc):
+        orig_wait = proc.wait
+        calls = 0
+
+        def flaky_wait(timeout=None):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise subprocess.TimeoutExpired(proc.args, timeout or 5)
+            return orig_wait(timeout=timeout)
+
+        monkeypatch.setattr(proc, "wait", flaky_wait)
+        terminate(proc)
+
+    import subprocess
+
+    monkeypatch.setattr(session_module, "terminate_process_group", timeout_first_wait)
+    with pytest.raises(ExecutionOutcomeUnknown) as caught:
+        call(tmp_path, "ok")
+    assert isinstance(caught.value.__cause__, subprocess.TimeoutExpired)

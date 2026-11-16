@@ -145,10 +145,10 @@ names it; one that the launch policy names is verified through its pinned launch
 server with any other transport label fails with reason `unsupported-transport`. A
 run with no stdio server verifies nothing and exits 1. Each failed server carries a
 reason: `missing-launch-policy`, `invalid-launch-policy`, `launcher-unavailable`,
-`launcher-digest-mismatch`, `launcher-start-failed`, `isolation-unavailable`, `deadline`,
-`unsupported-protocol-version`, `protocol`, `invalid-descriptor`,
-`ambiguous-approved-tools`, `ambiguous-transport`, `unsupported-transport` or
-`internal-error`. The 20-second deadline covers each server's MCP exchange and the
+`launcher-digest-mismatch`, `launcher-start-failed`, `isolation-unavailable`,
+`isolation-teardown-failed`, `deadline`, `unsupported-protocol-version`, `protocol`,
+`invalid-descriptor`, `ambiguous-approved-tools`, `ambiguous-transport`,
+`unsupported-transport` or `internal-error`. The 20-second deadline covers each server's MCP exchange and the
 checks of the descriptors it served. The JSON report also records the SHA-256 of
 the inventory and of the launch policy, and each launcher's pin.
 

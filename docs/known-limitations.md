@@ -1409,6 +1409,26 @@ A way around a limit that its entry does not describe is worth a
 - **Launcher pins cover the launcher only.** They do not authenticate the operating
   system, interpreter or libraries. Run launchers in an isolated worker, as
   [security boundaries](../SECURITY.md#security-boundaries) describe.
+- **The PID namespace contains only the launcher's own processes.** Cleanup kills the
+  namespace init and waits until the kernel has ended the namespace, but a process
+  that the launcher has another service start for it, for example through
+  `systemd-run --user`, `at`, `cron` or D-Bus activation, runs outside the namespace
+  and is not ended. If the calling process is killed before its cleanup runs, nothing
+  ends the namespace. A namespace that has not ended 5 seconds after the SIGKILL, for
+  example because a process in it is blocked in the kernel, fails the server with
+  `isolation-teardown-failed`, and that process may still be running. Use a worker
+  whose services and lifetime you control; see [`verify-live`](cli-reference.md#verify-live).
+- **Without a pidfd, a launcher that kills `unshare` outlives the session.** Cleanup
+  reaches the namespace init through a pidfd taken before the launcher runs. Where it
+  cannot take one, because the running interpreter cannot be executed separately (a
+  frozen build) or the kernel cannot open a pidfd (before Linux 5.3, or a seccomp
+  policy that refuses `pidfd_open`), the launcher runs without one. A launcher there that
+  clears its parent-death signal, calls `setsid` and kills `unshare` from a child it
+  leaves in `unshare`'s process group is reparented outside the session, and once
+  `unshare` has died its pid cannot be told from a reused one, so it is not
+  signalled. The server fails with `isolation-teardown-failed`, but the launcher and
+  everything it started keep running. The same reason is reported when the launcher
+  only crashed, because `unshare` ends with the signal that ended the launcher.
 - **Inside some user namespaces, every launch policy is refused.** `verify-live`
   accepts a launch policy only when `/` and every directory above it are owned by root
   or by you. Inside a user namespace that does not map host root and keeps the host's

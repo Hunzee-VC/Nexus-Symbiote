@@ -286,7 +286,12 @@ before `tools/call` is sent. After that, a JSON-RPC error reply raises
 `ToolCallError`, which carries the error `code`, and any other failure raises
 `ExecutionOutcomeUnknown`. Neither means that the gateway refused the call: it was
 admitted and its approval spent, and an unknown outcome means the tool may have
-run, so record it as unknown rather than as not executed. Authenticate the
+run, so record it as unknown rather than as not executed. When the session closes,
+cleanup ends the launcher's PID namespace as it does for
+[`verify-live`](cli-reference.md#verify-live); if the namespace cannot be confirmed
+ended, the session raises `ExecutionOutcomeUnknown` once `tools/call` has been sent,
+even when a result arrived, because a process from the namespace may still be
+running, and `AuthorizationError` before that. Authenticate the
 workload and derive scope using trusted gateway callbacks. Keep all other network
 and process paths from bypassing this gateway.
 
