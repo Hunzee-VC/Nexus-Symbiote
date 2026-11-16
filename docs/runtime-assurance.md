@@ -71,7 +71,12 @@ and never pre-sign trust statuses for later windows.
 
 ## Signing and verification
 
-Create one Ed25519 key pair per purpose, outside scanned repositories. A key in
+Create one Ed25519 key pair per purpose, outside scanned repositories. `runtime verify`
+and `runtime register` refuse, with exit status 2, a public key inside a git working
+tree that holds their envelope, BOM, state or scope files or the current directory, or
+a key file with other hard links, by the rule `verify-attestation` applies to
+[trusted keys](inventory-attestation.md#trusted-keys). The check catches misplacement
+and authenticates no key. A key in
 more than one purpose ring is refused unless the gateway is constructed with
 `allow_shared_keys=True`. Each passphrase file holds its passphrase, at most 1,023
 bytes, on the first line and must belong to the user running the command and give group and others no

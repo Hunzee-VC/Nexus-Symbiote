@@ -1486,6 +1486,13 @@ A way around a limit that its entry does not describe is worth a
   state file, so every gateway that serves the same tenants must share one store.
 - **`runtime verify` does not check revocation.** Revocation and approval bindings
   are checked only by the gateway.
+- **The runtime key placement check is a heuristic.** `runtime verify` and
+  `runtime register` refuse a public key inside a git working tree that holds an input
+  file or the current directory, and a key file with other hard links, as
+  `verify-attestation` does. The check does not authenticate a key or check its owner,
+  and a key copied or mounted out of the checkout is accepted; a registrar given such a
+  key can still record an attacker's serial, which only deleting rows undoes. Python
+  callers of `ReferenceGateway` pass key objects and get no placement check.
 - **Schemas are read in their declared dialect.** A schema without `$schema` is read
   as JSON Schema 2020-12. A constraint that evaluation would skip, or a pattern that
   ECMA-262 and Python read differently, such as a backreference to an optional
