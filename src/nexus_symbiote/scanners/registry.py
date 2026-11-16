@@ -2438,28 +2438,25 @@ class RegistryScanner(Scanner):
                     "pnpm-lock.yaml: selected package lacks an exact version"
                 )
                 continue
-            if matched_pkg_key is not None:
-                pkg_key: str | None = matched_pkg_key
-            else:
-                # pnpm reads one key for an importer's version, by lockfile format; a
-                # record under another format's spelling is one pnpm never writes or
-                # reads, so letting it stand in would let a decoy supply the integrity
-                # and the origin.
-                expected = _PNPM_RECORD_KEYS[family].format(
-                    name=comp.name, ref=ver_ref, version=base_ver
+            # pnpm reads one key for an importer's version, by lockfile format; a
+            # record under another format's spelling is one pnpm never writes or
+            # reads, so letting it stand in would let a decoy supply the integrity
+            # and the origin.
+            expected = _PNPM_RECORD_KEYS[family].format(
+                name=comp.name, ref=ver_ref, version=base_ver
+            )
+            spellings = {
+                spelling: spelling.format(name=comp.name, ref=ver_ref, version=base_ver)
+                for spelling in _PNPM_KEY_SPELLINGS
+            }
+            own = {spellings[spelling] for spelling in _PNPM_OWN_SPELLINGS[family]}
+            if any(key in packages for key in set(spellings.values()) - own):
+                comp.package_url = None
+                result.surfaces_excluded.append(
+                    f"pnpm-lock.yaml: multiple package resolutions for {comp.name} are ambiguous"
                 )
-                spellings = {
-                    spelling: spelling.format(name=comp.name, ref=ver_ref, version=base_ver)
-                    for spelling in _PNPM_KEY_SPELLINGS
-                }
-                own = {spellings[spelling] for spelling in _PNPM_OWN_SPELLINGS[family]}
-                if any(key in packages for key in set(spellings.values()) - own):
-                    comp.package_url = None
-                    result.surfaces_excluded.append(
-                        f"pnpm-lock.yaml: multiple package resolutions for {comp.name} are ambiguous"
-                    )
-                    continue
-                pkg_key = expected if expected in packages else None
+                continue
+            pkg_key: str | None = expected if expected in packages else None
             tarball: Any = None
             integrity: Any = None
             if pkg_key is not None:
