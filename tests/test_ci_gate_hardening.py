@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -129,3 +130,22 @@ def test_a_whole_module_case_is_exercised_by_any_of_its_tests() -> None:
     required.pytest_runtest_logreport(_report(f"{module}x::test_other"))
     other = next(case for case in wheel.CASES if "::" not in case and case != module)
     assert other in required.unexercised(wheel.CASES)
+
+
+@pytest.mark.parametrize("existing", [0o644, None])
+def test_an_installed_lock_keeps_the_mode_a_plain_write_would_give(
+    tmp_path: Path, existing: int | None
+) -> None:
+    # mkstemp creates the staging file 0600; the lock must not become owner-only.
+    target = tmp_path / "requirements-ci.lock"
+    if existing is not None:
+        target.write_text("old\n")
+        target.chmod(existing)
+    source = tmp_path / "resolved.lock"
+    source.write_text("new\n")
+    previous = os.umask(0o022)
+    try:
+        locks._install(source, target)
+    finally:
+        os.umask(previous)
+    assert target.stat().st_mode & 0o777 == 0o644

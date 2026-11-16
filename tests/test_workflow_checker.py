@@ -787,3 +787,96 @@ def test_the_pull_request_size_step_is_a_protected_gate(tmp_path):
         "ci.yml",
         condition("quality", "scripts/check_pull_request_size.py", "github.event_name == 'never'"),
     )
+
+
+@pytest.mark.parametrize(
+    "write",
+    [
+        'echo SHELLOPTS=noexec >> "$(printenv GITHUB_ENV)"',
+        'v=GITHUB_ENV; echo SHELLOPTS=noexec >> "${!v}"',
+        "python -c \"import os; open(os.environ['GITHUB_PATH'], 'a').write('stubs')\"",
+    ],
+)
+def test_naming_the_job_environment_files_ahead_of_a_gate_is_rejected(tmp_path, write):
+    # A tripwire: the bare name catches indirect writes, not every way to reach the file.
+    def change(jobs):
+        jobs["quality"]["steps"].insert(1, {"run": write})
+
+    errors = workflow_errors(tmp_path, "ci.yml", change)
+    assert any("writes the job environment through $GITHUB_ENV" in e for e in errors), errors
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ('"origin/$PR_BASE"', '"origin/$PR_BASE" --limit 99999999'),
+        ('--base "origin/$PR_BASE"', "--base HEAD"),
+        ('--base "origin/$PR_BASE"', "--numstat-file /dev/null"),
+    ],
+)
+def test_the_pull_request_size_arguments_are_pinned(tmp_path, old, new):
+    errors = workflow_errors(
+        tmp_path, "ci.yml", edit_run("quality", "scripts/check_pull_request_size.py", old, new)
+    )
+    assert any("scripts/check_pull_request_size.py other than" in e for e in errors), errors
+
+
+def test_the_pull_request_size_base_comes_from_the_pull_request(tmp_path):
+    def change(jobs):
+        step_running(jobs["quality"], "scripts/check_pull_request_size.py")["env"] = {
+            "PR_BASE": "${{ github.head_ref }}"
+        }
+
+    errors = workflow_errors(tmp_path, "ci.yml", change)
+    assert any("scripts/check_pull_request_size.py other than" in e for e in errors), errors
+
+
+@pytest.mark.parametrize(
+    "variable,command",
+    [
+        ("BASH_FUNC_python%%", "scripts/check_locks.py"),
+        ("PYTHONUSERBASE", "scripts/check_locks.py"),
+        ("PYTHONSAFEPATH", "scripts/check_workflows.py"),
+        ("GIT_DIR", "scripts/check_pull_request_size.py"),
+        ("A-B", "scripts/check_locks.py"),
+    ],
+)
+def test_a_variable_family_that_hollows_a_gate_is_unsafe_gate_environment(
+    tmp_path, variable, command
+):
+    def change(jobs):
+        step_running(jobs["quality"], command).setdefault("env", {})[variable] = "() { true; }"
+
+    errors = workflow_errors(tmp_path, "ci.yml", change)
+    assert any("sets unsafe gate environment in step env" in e for e in errors), errors
+
+
+def test_the_codeql_job_analyzes_python_and_actions(tmp_path):
+    def change(jobs):
+        step_running(jobs["codeql"], "github/codeql-action/init@")["with"]["languages"] = "python"
+
+    errors = workflow_errors(tmp_path, "ci.yml", change)
+    assert any("codeql must analyze actions" in e for e in errors), errors
+
+
+def test_the_codeql_policy_reads_the_actions_sarif(tmp_path):
+    errors = workflow_errors(
+        tmp_path,
+        "ci.yml",
+        edit_run(
+            "codeql",
+            "scripts/check_codeql_sarif.py",
+            'python scripts/check_codeql_sarif.py "$SARIF_DIR/actions.sarif"'
+            ' --out "$REPORT_DIR/codeql-policy-actions.json"\n',
+            "",
+        ),
+    )
+    assert any("scripts/check_codeql_sarif.py other than" in e for e in errors), errors
+
+
+def test_non_pull_request_platform_runs_never_share_a_concurrency_group():
+    # A group keeps one pending run, and a newer queued run cancels it whatever
+    # cancel-in-progress says, so a main push or schedule needs a group of its own.
+    workflow = yaml.safe_load((ROOT / ".github/workflows/platforms.yml").read_text())
+    group = workflow["concurrency"]["group"]
+    assert "github.run_id" in group and "github.event_name == 'pull_request'" in group

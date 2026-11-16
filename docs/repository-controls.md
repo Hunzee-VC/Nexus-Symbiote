@@ -199,7 +199,20 @@ written in any form other than a `uses:` line of its own is rejected, because it
 comment cannot be read.
 A `$VAR` command name counts only while a plain `VAR=value` line still binds it, and a
 script the checker reads differently from `bash` (a here-document delimiter that is
-partly quoted, or a `case` inside `$(...)`) has no gates. The scheduled CodeQL workflow also
+partly quoted, or a `case` inside `$(...)`) has no gates. A gate step whose workflow, job
+or step `env` sets a variable that loads code into it or changes how it runs is refused:
+the loader and Python variables, `PYTEST_ADDOPTS`, the bash start-up variables
+(`SHELLOPTS`, `BASHOPTS`, `PS4`, `ENV`, `BASH_ENV`, `PATH`), and any name that starts
+`BASH_FUNC_`, `PYTHON` or `GIT_` or has a character outside `[A-Za-z0-9_]`. The steps of
+the pull-request size cap and of the CodeQL policy must match their reviewed run script
+and environment exactly, so `--limit`, `--base HEAD` or `--numstat-file` cannot
+neutralize the cap and the policy reads both `python.sarif` and `actions.sarif`; the
+CodeQL job must analyze `python` and `actions`. A job that runs a gate may not name
+`GITHUB_ENV` or `GITHUB_PATH` anywhere in its run scripts, other than the release's
+reviewed `SOURCE_DATE_EPOCH` write. That is a tripwire for the forms a reviewer would
+miss (`printenv`, `${!name}`, `os.environ`), not a boundary: an earlier step can still
+reach those files without naming them, or overwrite a gate script, so earlier steps of a
+gate job need the same line-by-line reading. The scheduled CodeQL workflow also
 analyzes the workflows with CodeQL's `actions` queries. All of these checks live in
 files a pull request can change; read changes to them line by line.
 

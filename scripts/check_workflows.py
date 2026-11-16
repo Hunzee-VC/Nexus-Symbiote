@@ -237,13 +237,51 @@ UNSAFE_GATE_ENV = frozenset(
         "PATH",
     }
 )
+# Families of variables that do the same: bash imports BASH_FUNC_<name>%% as a function
+# that shadows the gate's program, PYTHON* (PYTHONUSERBASE with a committed
+# usercustomize) can run code before the gate, and GIT_* (GIT_DIR) can point git at
+# another history. A name outside [A-Za-z0-9_] is no ordinary variable either.
+UNSAFE_GATE_ENV_PREFIXES = ("BASH_FUNC_", "PYTHON", "GIT_")
+ENV_NAME = re.compile(r"[A-Za-z0-9_]+")
 # An earlier step that appends to $GITHUB_ENV or $GITHUB_PATH sets the environment of
 # every later step of the job, gates included, out of reach of the env checks; only this
-# reviewed write may appear in a job that runs a gate.
-ENVIRONMENT_FILE_WRITES = re.compile(r"\$\{?GITHUB_(?:ENV|PATH)\b")
+# reviewed write may name either file in a job that runs a gate. Matching the bare name
+# also catches printenv, ${!name} and os.environ; it is a tripwire, not a boundary: a
+# step can still reach the file without naming it, or rewrite a gate script.
+ENVIRONMENT_FILE_WRITES = re.compile(r"GITHUB_(?:ENV|PATH)\b")
 REVIEWED_ENVIRONMENT_FILE_WRITES = frozenset(
     {'printf \'SOURCE_DATE_EPOCH=%s\\n\' "$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"'}
 )
+# Gate steps whose arguments decide what the gate checks, pinned to their reviewed run
+# script and environment: --limit, --base HEAD or --numstat-file /dev/null would let the
+# size cap pass anything, and the CodeQL policy must read each analyzed language's SARIF.
+REVIEWED_GATE_STEPS: dict[str, dict[str, dict[str, tuple[str, dict[str, str]]]]] = {
+    "ci.yml": {
+        "quality": {
+            "scripts/check_pull_request_size.py": (
+                'git fetch --no-tags origin "$PR_BASE"\n'
+                'python scripts/check_pull_request_size.py --base "origin/$PR_BASE"\n',
+                {"PR_BASE": "${{ github.base_ref }}"},
+            )
+        },
+        "codeql": {
+            "scripts/check_codeql_sarif.py": (
+                'python scripts/check_codeql_sarif.py "$SARIF_DIR/python.sarif"'
+                ' --out "$REPORT_DIR/codeql-policy-python.json"\n'
+                'python scripts/check_codeql_sarif.py "$SARIF_DIR/actions.sarif"'
+                ' --out "$REPORT_DIR/codeql-policy-actions.json"\n',
+                {
+                    "SARIF_DIR": "${{ runner.temp }}/codeql-sarif",
+                    "REPORT_DIR": "${{ runner.temp }}",
+                },
+            )
+        },
+    }
+}
+# The languages each CodeQL init step must analyze.
+CODEQL_LANGUAGES: dict[str, dict[str, frozenset[str]]] = {
+    "ci.yml": {"codeql": frozenset({"python", "actions"})}
+}
 # The timeout options that leave the command's status intact, alone or with a value.
 TIMEOUT_FLAGS = frozenset({"--foreground", "--preserve-status", "-v", "--verbose"})
 TIMEOUT_VALUED = frozenset({"-k", "--kill-after", "-s", "--signal"})
@@ -1041,7 +1079,7 @@ def _gates(script: str, errexit: bool, pipefail: bool) -> list[_Gate]:
             for assignment in words[:start]:
                 form = ASSIGNMENT.match(assignment)
                 assert form is not None
-                if form[1] in UNSAFE_GATE_ENV and start == len(words):
+                if _unsafe_gate_env(form[1]) and start == len(words):
                     trusted = False
                 if alone and start == len(words) and not form[2] and not form[3]:
                     variables[form[1]] = assignment[form.end() :]
@@ -1070,7 +1108,7 @@ def _gates(script: str, errexit: bool, pipefail: bool) -> list[_Gate]:
             elif program in BINDING_BUILTINS or (program == "printf" and "-v" in args):
                 variables.clear()
                 if any(
-                    arg.split("=", 1)[0].split("[", 1)[0].rstrip("+") in UNSAFE_GATE_ENV
+                    _unsafe_gate_env(arg.split("=", 1)[0].split("[", 1)[0].rstrip("+"))
                     for arg in args
                     if not arg.startswith("-")
                 ):
@@ -1140,7 +1178,7 @@ def _item_gates(item: _Item, pipefail: bool, variables: dict[str, str]) -> list[
         words = command.words
         unsafe_env = False
         while words and (assigned := ASSIGNMENT.match(words[0])):
-            if assigned[1] in UNSAFE_GATE_ENV:
+            if _unsafe_gate_env(assigned[1]):
                 unsafe_env = True
             words = words[1:]
         if unsafe_env:
@@ -1176,6 +1214,14 @@ def _run_setting(
     return None, ""
 
 
+def _unsafe_gate_env(name: str) -> bool:
+    return (
+        name in UNSAFE_GATE_ENV
+        or name.startswith(UNSAFE_GATE_ENV_PREFIXES)
+        or ENV_NAME.fullmatch(name) is None
+    )
+
+
 def _unsafe_env_scope(workflow_env: Any, job_env: Any, step_env: Any) -> str | None:
     for scope, env_map in (
         ("workflow", workflow_env),
@@ -1184,7 +1230,7 @@ def _unsafe_env_scope(workflow_env: Any, job_env: Any, step_env: Any) -> str | N
     ):
         if env_map is None:
             continue
-        if not isinstance(env_map, dict) or (set(map(str, env_map)) & UNSAFE_GATE_ENV):
+        if not isinstance(env_map, dict) or any(map(_unsafe_gate_env, map(str, env_map))):
             return scope
     return None
 
@@ -1212,6 +1258,19 @@ def _gate_issues(
                         f"{path}: {name} writes the job environment through $GITHUB_ENV or "
                         "$GITHUB_PATH ahead of its gates"
                     )
+    pinned = REVIEWED_GATE_STEPS.get(path.name, {}).get(name, {})
+    for step in _steps(job):
+        for command, (script, env) in pinned.items():
+            run = step.get("run")
+            if command in str(run) and (run != script or step.get("env") != env):
+                errors.append(f"{path}: {name} runs {command} other than in its reviewed step")
+    languages = CODEQL_LANGUAGES.get(path.name, {}).get(name, frozenset())
+    for step in _steps(job):
+        if languages and str(step.get("uses", "")).startswith("github/codeql-action/init@"):
+            with_ = step.get("with")
+            value = with_.get("languages") if isinstance(with_, dict) else None
+            for language in sorted(languages - set(re.split(r"[\s,]+", str(value)))):
+                errors.append(f"{path}: {name} must analyze {language} with CodeQL")
     reviewed = REVIEWED_STEP_CONDITIONS.get(path.name, {})
     found: set[str] = set()
     unstructured: set[str] = set()

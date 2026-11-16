@@ -8,7 +8,10 @@ pass ``--numstat-file`` for a review of a saved ``git diff --numstat`` listing.
 
 The pull request controls its own ``.gitattributes``, which would let ``src/** -diff``
 report every source change as binary, so git reads attributes from the base instead;
-renames are not detected, so a move out of ``tests/`` counts at its destination.
+renames are not detected, so a move out of ``tests/`` counts at its destination. A file
+the base marks ``-diff``, such as a vendored schema, is counted as text; binary content
+anywhere else outside the expected trees still fails. Paths are read NUL-separated and
+unquoted, so a non-ASCII path keeps its prefix.
 """
 
 from __future__ import annotations
@@ -27,13 +30,24 @@ class UnmeasuredChangeError(ValueError):
     """A binary change outside the trees where binaries are expected."""
 
 
-def changed_lines(numstat: str, *, skip_prefixes: tuple[str, ...] = SKIP_PREFIXES) -> int:
+Row = tuple[str, str, str]
+
+
+def _rows(numstat: str) -> list[Row]:
+    rows = []
+    for line in numstat.splitlines():
+        if line.strip():
+            added, deleted, path = line.split("\t", 2)
+            rows.append((added, deleted, path))
+    return rows
+
+
+def changed_lines(
+    numstat: str | list[Row], *, skip_prefixes: tuple[str, ...] = SKIP_PREFIXES
+) -> int:
     """Sum insertions and deletions, skipping test trees and binary rows."""
     total = 0
-    for line in numstat.splitlines():
-        if not line.strip():
-            continue
-        added, deleted, path = line.split("\t", 2)
+    for added, deleted, path in _rows(numstat) if isinstance(numstat, str) else numstat:
         if path.startswith(skip_prefixes):
             continue
         if added == "-" or deleted == "-":
@@ -46,16 +60,71 @@ def changed_lines(numstat: str, *, skip_prefixes: tuple[str, ...] = SKIP_PREFIXE
     return total
 
 
-def _from_git(base: str) -> str:
+def _git(base: str, *args: str) -> bytes:
+    """Output of a git command that reads attributes from the base and prints raw paths."""
     result = subprocess.run(  # noqa: S603
-        ["git", f"--attr-source={base}", "diff", "--numstat", "--no-renames", base, "HEAD"],  # noqa: S607
+        [  # noqa: S607
+            "git",
+            "-c",
+            "core.quotePath=false",
+            "--literal-pathspecs",
+            f"--attr-source={base}",
+            *args,
+        ],
         check=False,
         capture_output=True,
-        text=True,
     )
     if result.returncode != 0:
-        raise SystemExit(result.stderr.strip() or "git diff failed")
+        raise SystemExit(result.stderr.decode(errors="replace").strip() or "git failed")
     return result.stdout
+
+
+def _fields(output: bytes) -> list[str]:
+    return output.decode("utf-8", "surrogateescape").split("\0")[:-1]
+
+
+def _text_row(base: str, path: str) -> Row:
+    """A -diff file's numstat as text: numstat keeps it binary even with --text."""
+    patch = _git(
+        base,
+        "diff",
+        "--text",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-renames",
+        "-U0",
+        base,
+        "HEAD",
+        "--",
+        path,
+    )
+    added = deleted = 0
+    in_hunk = False
+    for line in patch.split(b"\n"):
+        if line.startswith(b"diff --git "):
+            in_hunk = False
+        elif line.startswith(b"@@"):
+            in_hunk = True
+        elif in_hunk and line.startswith(b"+"):
+            added += 1
+        elif in_hunk and line.startswith(b"-"):
+            deleted += 1
+    return str(added), str(deleted), path
+
+
+def _from_git(base: str) -> list[Row]:
+    rows: list[Row] = []
+    for record in _fields(_git(base, "diff", "--numstat", "-z", "--no-renames", base, "HEAD")):
+        added, deleted, path = record.split("\t", 2)
+        rows.append((added, deleted, path))
+    binary = [path for added, deleted, path in rows if "-" in (added, deleted)]
+    if not binary:
+        return rows
+    # Only the base's attributes are trusted: a pull request cannot mark its own binary
+    # content -diff to have it measured as text.
+    fields = _fields(_git(base, "check-attr", "-z", "diff", "--", *binary))
+    undiffed = {fields[i] for i in range(0, len(fields), 3) if fields[i + 2] == "unset"}
+    return [_text_row(base, row[2]) if row[2] in undiffed else row for row in rows]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -66,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if (args.base is None) == (args.numstat_file is None):
         parser.error("pass exactly one of --base and --numstat-file")
-    listing = (
+    listing: str | list[Row] = (
         args.numstat_file.read_text(encoding="utf-8") if args.numstat_file else _from_git(args.base)
     )
     try:

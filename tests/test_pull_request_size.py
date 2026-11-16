@@ -98,3 +98,47 @@ def test_a_move_out_of_tests_counts_at_its_destination(
     monkeypatch.chdir(repository)
     assert checker.main(["--base", base, "--limit", "20"]) == 1
     assert "40 lines" in capsys.readouterr().out
+
+
+def test_a_file_the_base_marks_minus_diff_is_counted_not_refused(
+    repository: Path, monkeypatch, capsys
+) -> None:
+    # The vendored schemas are `-diff` in the base, so numstat reports them as binary;
+    # a schema update must be measured as text rather than fail the gate.
+    (repository / ".gitattributes").write_text("src/vendor/*.json -diff\n")
+    (repository / "src" / "vendor").mkdir()
+    (repository / "src" / "vendor" / "s.json").write_text("{}\n")
+    _git(repository, "add", "-A")
+    _git(repository, "commit", "-q", "-m", "schema")
+    base = _git(repository, "rev-parse", "HEAD").strip()
+    (repository / "src" / "vendor" / "s.json").write_text("{\n" + "1,\n" * 30 + "}\n")
+    _git(repository, "add", "-A")
+    _git(repository, "commit", "-q", "-m", "bump")
+    monkeypatch.chdir(repository)
+    assert checker.main(["--base", base, "--limit", "20"]) == 1
+    assert "33 lines" in capsys.readouterr().out
+
+
+def test_binary_content_the_base_does_not_mark_still_cannot_be_measured(
+    repository: Path, monkeypatch, capsys
+) -> None:
+    base = _git(repository, "rev-parse", "HEAD").strip()
+    (repository / "src" / "blob.dat").write_bytes(b"\0\1\2" * 10)
+    _git(repository, "add", "-A")
+    _git(repository, "commit", "-q", "-m", "blob")
+    monkeypatch.chdir(repository)
+    assert checker.main(["--base", base]) == 1
+    assert "cannot be measured" in capsys.readouterr().out
+
+
+def test_a_binary_fixture_with_a_non_ascii_path_under_tests_is_not_counted(
+    repository: Path, monkeypatch, capsys
+) -> None:
+    # core.quotePath would print "tests/fixtur\303\251.bin", which no longer starts tests/.
+    base = _git(repository, "rev-parse", "HEAD").strip()
+    (repository / "tests" / "fixturé.bin").write_bytes(b"\0\1\2" * 10)
+    _git(repository, "add", "-A")
+    _git(repository, "commit", "-q", "-m", "fixture")
+    monkeypatch.chdir(repository)
+    assert checker.main(["--base", base]) == 0
+    assert "0 lines" in capsys.readouterr().out

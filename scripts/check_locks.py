@@ -384,10 +384,18 @@ def _install(source: Path, target: Path) -> None:
     """
     if target.is_symlink():
         raise LockError(f"{target.name} is a symlink; not replaced")
+    try:
+        mode = target.stat().st_mode & 0o7777
+    except FileNotFoundError:
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o666 & ~umask
     descriptor, name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.")
     staged = Path(name)
     try:
         with os.fdopen(descriptor, "wb") as out, source.open("rb") as copied:
+            # mkstemp creates the file 0600; the lock keeps the mode a plain write gives.
+            os.fchmod(out.fileno(), mode)
             shutil.copyfileobj(copied, out)
         os.replace(staged, target)
     finally:
