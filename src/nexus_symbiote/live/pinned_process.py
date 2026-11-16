@@ -368,9 +368,9 @@ def _stop_tree(root: int) -> None:
             return
         for pid in running:
             try:
-                os.kill(pid, signal.SIGSTOP)
-            except ProcessLookupError:
-                pass
+                # A pid that has exited since the scan is no longer running, as wanted.
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGSTOP)
             except PermissionError:
                 refused.add(pid)
         time.sleep(delay)
