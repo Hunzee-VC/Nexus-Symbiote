@@ -72,10 +72,11 @@ _CHANNEL_MESSAGES = 64
 # The interpreter ignores SIGPIPE and SIGXFSZ at startup and adds LC_CTYPE under the C
 # locale, so the wrapper restores both signals and passes the launch environment itself.
 _SUBREAPER_EXEC = """\
-import ctypes, os, signal, sys
+import ctypes, os, select, signal, sys
 # The wrapper writes one byte to this socket once no child of it is left; exec closes it.
 done = int(sys.argv[2])
 os.set_inheritable(done, False)
+PR_SET_PDEATHSIG = 1
 PR_SET_DUMPABLE = 4
 PR_SET_CHILD_SUBREAPER = 36
 prctl = ctypes.CDLL(None).prctl
@@ -126,6 +127,9 @@ parent = int(sys.argv[3])
 if (
     prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0
     or prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0
+    # A stopped wrapper runs no check, so the caller's death resumes it; a running one
+    # ignores this, and the fork clears it for the launcher.
+    or prctl(PR_SET_PDEATHSIG, signal.SIGCONT, 0, 0, 0) != 0
     or os.getppid() != parent
 ):
     finish(127 << 8)
@@ -171,6 +175,10 @@ if launcher:
     # Blocked only here, after the fork, so SIGCHLD can be awaited with a timeout; a
     # child that exited before the block is reaped by the next pass all the same.
     signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGCHLD})
+    # The caller's end of the socket closes when it gives up the launch, as an
+    # interrupted spawn does, or when it dies.
+    watch = select.poll()
+    watch.register(done, getattr(select, "POLLRDHUP", 0))
     status = 0
     while True:
         try:
@@ -182,9 +190,9 @@ if launcher:
                     status = waited
         except ChildProcessError:
             break
-        if os.getppid() != parent:
-            # The process that started the session is gone, a thread exiting is not
-            # enough, and nothing else will end what the launcher started.
+        if os.getppid() != parent or watch.poll(0):
+            # The process that started the session is gone or has given it up, a thread
+            # exiting is not enough, and nothing else will end what the launcher started.
             for child in children():
                 try:
                     os.kill(child, signal.SIGKILL)

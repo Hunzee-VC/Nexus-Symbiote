@@ -442,6 +442,7 @@ def test_cli_requires_an_explicit_opt_out_when_the_namespace_is_unavailable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(pinned_process, "namespace_available", lambda: False)
+    monkeypatch.setattr("nexus_symbiote.supply_chain_cli._running_as_root", lambda: False)
     arguments, _ = command(tmp_path, inventory(), launcher(tmp_path))
     blocked = CliRunner().invoke(main, [*arguments, "--json-output"])
     assert blocked.exit_code == 1, blocked.output
@@ -461,7 +462,7 @@ def test_cli_requires_an_explicit_opt_out_when_the_namespace_is_unavailable(
         assert "Never opt out as root" in text
         assert "cgroup v2" in text
         assert "not a namespace or sandbox" in text
-    assert "--no-isolation as root" not in allowed.stderr or os.geteuid() == 0
+    assert "--no-isolation as root" not in allowed.stderr
 
 
 def test_a_descendant_that_cannot_be_signalled_does_not_abort_cleanup(
@@ -2113,3 +2114,101 @@ def test_opting_out_as_root_prints_a_second_warning(
     allowed = CliRunner().invoke(main, [*arguments, "--json-output", "--no-isolation"])
     assert allowed.exit_code == 0, allowed.output
     assert "warning: --no-isolation as root" in allowed.stderr
+
+
+def _wrapper_status(pid: int) -> dict[str, str]:
+    with open(f"/proc/{pid}/status") as status:
+        return dict(line.rstrip("\n").split(":\t", 1) for line in status if ":\t" in line)
+
+
+@_LINUX_ONLY
+def test_the_wrapper_waits_for_children_with_sigchld_blocked(tmp_path: Path) -> None:
+    # Without the block SIGCHLD is discarded, and every exit is seen only when the
+    # half-second poll ends, which slows each teardown and status by that much. The
+    # kernel unblocks the awaited signal during the wait, so the mask is read as the
+    # wait begins.
+    record = tmp_path / "blocked"
+    observe = f"""import signal
+_wait = signal.sigtimedwait
+def _observed(signals, timeout):
+    with open({str(record)!r}, "a") as out:
+        out.write("1" if signal.SIGCHLD in signal.pthread_sigmask(signal.SIG_BLOCK, []) else "0")
+    return _wait(signals, timeout)
+signal.sigtimedwait = _observed
+"""
+    result, _ = _run_wrapper(tmp_path, observe, "sleep 0.3\nexit 3\n")
+    assert result.returncode == 3
+    assert record.read_text() and set(record.read_text()) == {"1"}
+
+
+@_LINUX_ONLY
+@pytest.mark.parametrize("abandon", ["close", "kill-while-stopped"])
+def test_a_wrapper_whose_caller_gives_up_ends_the_launchers_tree(
+    tmp_path: Path, abandon: str
+) -> None:
+    # A caller interrupted after the fork closes its end of the socket; one that dies
+    # while cleanup has the wrapper stopped leaves it to resume and end the tree.
+    marker = tmp_path / "pids"
+    source = """import os, subprocess, sys, time
+from pathlib import Path
+from nexus_symbiote.live import pinned_process
+work, script, digest, marker, abandon = Path(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+staged = pinned_process.stage_pinned_executable(script, digest, work)
+with pinned_process.isolation_off():
+    proc = pinned_process.spawn_pinned(staged, work)
+while not os.path.exists(marker):
+    time.sleep(0.01)
+if abandon == "close":
+    os.close(pinned_process._OPT_OUT[proc.pid][2])
+    time.sleep(60)
+pinned_process._stop_launcher(proc.pid)
+pinned_process._stop_tree(proc.pid)
+os.kill(os.getpid(), 9)
+"""
+    script = tmp_path / "launcher"
+    script.write_text(
+        "#!/bin/sh\n"
+        "setsid sleep 300 </dev/null >/dev/null 2>&1 &\n"
+        "sleep 300 </dev/null >/dev/null 2>&1 &\n"
+        f"echo $$ > {shlex.quote(str(marker))}.tmp && mv {shlex.quote(str(marker))}.tmp {shlex.quote(str(marker))}\n"
+        "exec sleep 300\n"
+    )
+    script.chmod(0o700)
+    digest = "sha256:" + hashlib.sha256(script.read_bytes()).hexdigest()
+    work = tmp_path / "work"
+    work.mkdir()
+    src = str(Path(pinned_process.__file__).parents[2])
+    host = subprocess.Popen(  # noqa: S603
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            f"import sys; sys.path.insert(0, {src!r})\n" + source,
+            str(work),
+            str(script),
+            digest,
+            str(marker),
+            abandon,
+        ],
+        stdin=subprocess.DEVNULL,
+    )
+    tree: set[int] = set()
+    try:
+        deadline = time.monotonic() + 15
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        launcher = int(marker.read_text())
+        wrapper = pinned_process._parent(launcher)
+        assert wrapper is not None
+        tree = {wrapper, *pinned_process._descendant_pids(wrapper)}
+        if abandon == "kill-while-stopped":
+            host.wait(timeout=15)
+        for pid in tree:
+            _assert_ended(pid)
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            host.kill()
+        host.wait(timeout=10)
+        for pid in tree:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
