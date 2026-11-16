@@ -69,13 +69,14 @@ def test_per_case_regressions_fail_even_without_aggregate_metrics(gate, change):
     assert gate(report, manifest)
 
 
-def lock_entries(path):
-    entries = {}
+def lock_blocks(path):
     for match in re.finditer(r"^([a-zA-Z0-9][^\n]*)(?:\n(?:[ \t].*|$))*", path.read_text(), re.M):
         lines = [line for line in match.group().splitlines() if not line.lstrip().startswith("#")]
-        requirement = Requirement(lines[0].removesuffix(" \\"))
-        entries[canonicalize_name(requirement.name)] = (requirement, "\n".join(lines).rstrip())
-    return entries
+        yield Requirement(lines[0].removesuffix(" \\")), "\n".join(lines).rstrip()
+
+
+def lock_entries(path):
+    return {canonicalize_name(pin.name): (pin, block) for pin, block in lock_blocks(path)}
 
 
 @pytest.mark.locked_only
@@ -126,7 +127,6 @@ def unrequired_installed_pins(lock):
     it holds for the CI lock wherever the CI lock is installed (every Linux test job and the
     release build). A pin whose marker excludes this platform is checked where it installs.
     """
-    pins = lock_entries(lock)
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
     project = pyproject["project"]
     own = canonicalize_name(project["name"])
@@ -156,10 +156,12 @@ def unrequired_installed_pins(lock):
                 requires = importlib.metadata.distribution(name).requires or []
                 pending.extend((dependency, wanted) for dependency in requires)
     reached = {name for name, _ in seen}
+    # Every entry counts: a name pinned under several markers installs wherever any matches.
     return {
         name
-        for name, (pin, _) in pins.items()
-        if (not pin.marker or pin.marker.evaluate(env)) and name not in reached
+        for pin, _ in lock_blocks(lock)
+        if (not pin.marker or pin.marker.evaluate(env))
+        and (name := canonicalize_name(pin.name)) not in reached
     }
 
 
@@ -182,6 +184,15 @@ def test_a_ci_pin_with_a_forged_via_line_is_outside_the_closure(tmp_path):
     assert unrequired_installed_pins(lock) == (
         {"evil-helper"} if default_environment()["sys_platform"] == "win32" else set()
     )
+    # Re-review: a name pinned twice under different markers must not be judged by its
+    # last entry alone, or a pin for this platform hides behind one for another.
+    here = default_environment()["sys_platform"]
+    split = "".join(
+        forged.replace("1.0.0 \\", f"1.0.0 ; sys_platform == '{platform}' \\")
+        for platform in (here, "linux" if here == "win32" else "win32")
+    )
+    lock.write_text(text.replace("email-validator==", split + "email-validator==", 1))
+    assert unrequired_installed_pins(lock) == {"evil-helper"}
 
 
 def test_consumer_action_installs_only_locked_dependencies_before_source():
