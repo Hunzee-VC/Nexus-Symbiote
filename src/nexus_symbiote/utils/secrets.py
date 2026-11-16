@@ -32,17 +32,21 @@ _URL = re.compile(r"(?<![a-zA-Z0-9+.-])[a-zA-Z0-9+.-]+://[^\s\"'<>]+")
 # digits (token2=) may follow the keyword; "max_tokens" and "tokenizer" may not.
 # A backslash escapes the next character of a quoted value, as JSON reads it.
 # Possessive and bounded quantifiers keep every attempt linear.
-_CREDENTIAL_KEYWORD = (
+_CREDENTIAL_WORD = (
     r"(?:api[-_]?key|access[-_]?key|secret[-_]?key|private[-_]?key|account[-_]?key"
     r"|[a-z0-9]{2,24}[-_]key|connection[-_]?string"
     r"|token|password|passwd|passphrase|pwd|secret|credentials?|sig)"
-    r"(?:\d{1,4})?(?:[-_.][a-z0-9]{1,32}){0,4}"
 )
+_CREDENTIAL_KEYWORD = _CREDENTIAL_WORD + r"(?:\d{1,4})?(?:[-_.][a-z0-9]{1,32}){0,4}"
 _ASSIGNMENT = re.compile(
     rf"(?i)({_CREDENTIAL_KEYWORD}[\"']?\s*+[:=]\s*+)"
     r"(\"(?:[^\"\\\n]|\\.){0,8192}\"|'(?:[^'\\\n]|\\.){0,8192}'|[^\s,;]++)"
 )
-_TRAILING_ASSIGNMENT_KEY = re.compile(rf"(?i)(?:{_CREDENTIAL_KEYWORD})[\"']?[:=]\Z")
+# A credential name that ends a URL match, as in `https://h/?a=b,password: value`: the
+# URL rule stops at whitespace, so the name, and the mark when it is glued to the name,
+# are taken with the URL. The group is the mark, empty when it follows the whitespace.
+_TRAILING_ASSIGNMENT_KEY = re.compile(rf"(?i)(?:{_CREDENTIAL_KEYWORD})[\"']?([:=]?)\Z")
+_KEY_SEPARATOR = re.compile(r"\s*+[:=]")
 # A mapping key that _ASSIGNMENT would read as the name in `name: value`.
 _CREDENTIAL_KEY = re.compile(rf"(?i){_CREDENTIAL_KEYWORD}\Z")
 _AUTHORIZATION_KEY = re.compile(r"(?i)(?:proxy-)?authorization")
@@ -704,13 +708,21 @@ def _assignment_spans(value: str, url_spans: list[Span]) -> Iterable[Span]:
     after_runs = _UnquotedRuns(value, len(value))
     for url_start, url_end in url_spans:
         yield from _every_assignment(value, url_start, url_end)
-        if url_end >= len(value) or value[url_end] not in " \t\"'":
+        if url_end >= len(value) or not (value[url_end].isspace() or value[url_end] in "\"'"):
             continue
         window = max(url_start, url_end - 180)
-        if _TRAILING_ASSIGNMENT_KEY.search(value, window, url_end) is None:
+        name = _TRAILING_ASSIGNMENT_KEY.search(value, window, url_end)
+        if name is None:
             continue
         gap = url_end
-        while gap < len(value) and value[gap] in " \t":
+        if not name.group(1):
+            # `password : v`: the mark follows the whitespace that ended the URL.
+            mark = _KEY_SEPARATOR.match(value, gap)
+            if mark is None:
+                continue
+            gap = mark.end()
+        # As _ASSIGNMENT reads it, the value may follow any whitespace, a line end too.
+        while gap < len(value) and value[gap].isspace():
             gap += 1
         span = _value_span(value, gap, len(value), after_runs)
         if span is not None and value[span[0] : span[1]].lower() not in _AUTH_SCHEMES:
