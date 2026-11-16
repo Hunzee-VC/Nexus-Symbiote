@@ -259,7 +259,10 @@ def child(_):
         os.setsid()
     except OSError:
         pass
-    open(marker, "w").write(str(os.getpid()))
+    # Written whole, then renamed, so the supervisor never reads a partial pid.
+    with open(marker + ".tmp", "w") as out:
+        out.write(str(os.getpid()))
+    os.replace(marker + ".tmp", marker)
     time.sleep(60)
     return 0
 callback = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)(child)
@@ -269,14 +272,17 @@ cloned = libc.clone(
 )
 if cloned < 0:
     raise SystemExit(1)
-for _ in range(200):
-    if os.path.exists(marker) and os.path.getsize(marker):
+# The child must have recorded its pid before the session can end, or a loaded runner
+# kills it first and the test learns nothing.
+for _ in range(1000):
+    if os.path.exists(marker):
         break
     time.sleep(0.01)
 """,
     )
     with isolation_off():
         observe_pinned(str(command), digest)
+    assert marker.exists(), "the clone(CLONE_PARENT) child did not start within 10 seconds"
     try:
         _assert_dead(_host_pid(marker))
     finally:
