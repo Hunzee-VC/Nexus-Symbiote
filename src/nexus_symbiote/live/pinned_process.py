@@ -8,15 +8,16 @@ cleanup kills it through that pidfd, or, where no pidfd can be held, as the chil
 stopped ``unshare``. Cleanup then waits until the kernel has ended every process in
 the namespace, or reports that it could not. If the kernel refuses the namespace,
 launch fails before executing the pinned program. On Linux,
-``--no-isolation`` starts the launcher through a short exec wrapper that makes it a
-child subreaper, and cleanup stops the launcher before it sweeps the tree, so while the
-launcher is alive its descendants are killed with the session, including a double-fork.
-A descendant that outlives the launcher can escape. An opted-out launch also joins a
+``--no-isolation`` starts the launcher under a short anchor process, a child subreaper
+that forks it and stays its parent until it has reaped every process under it. Every
+descendant stays in the anchor's tree, whatever its session: a double-fork, a
+``clone(CLONE_PARENT)`` child, whose parent is the anchor, and a process the launcher
+leaves behind when it exits. Cleanup kills that tree while the anchor runs on. A
+process that kills the anchor first can escape. An opted-out launch also joins a
 private cgroup v2 when the current cgroup allows a child, and cleanup writes
-``cgroup.kill``, so a ``clone(CLONE_PARENT)`` child that calls ``setsid`` dies with
-that cgroup; without one, cleanup signals every process still in the launcher's
-session. A process that leaves both can escape. Elsewhere that cleanup is best effort.
-Neither is a PID or filesystem namespace.
+``cgroup.kill``; without one, cleanup also signals every process still in the anchor's
+session. Elsewhere that cleanup is best effort. Neither is a PID or filesystem
+namespace.
 """
 
 from __future__ import annotations
@@ -49,6 +50,8 @@ _RELEASE = b"\n"
 _START_SECONDS = 5.0
 # Opt-out launches only: session id and a private cgroup, recorded while the pid is live.
 _OPT_OUT: dict[int, tuple[int | None, Path | None]] = {}
+# Opt-out launches whose launcher runs under the subreaper anchor of _SUBREAPER_EXEC.
+_ANCHORED: set[int] = set()
 _CGROUP_SEQ = 0
 _STOP_SECONDS = 1.0
 _SWEEP_PASSES = 8
@@ -77,6 +80,25 @@ prctl = ctypes.CDLL(None).prctl
 prctl.argtypes = [ctypes.c_int] + [ctypes.c_ulong] * 4
 if prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
     os._exit(127)
+# Fork rather than exec: a clone(CLONE_PARENT) in the launcher, setsid or not, is then a
+# child of this anchor, inside the tree that cleanup sweeps, and so is every orphan. The
+# anchor exits once it has reaped its last child.
+launcher = os.fork()
+if launcher:
+    # Only the launcher keeps the pipes, so the caller still sees its output end.
+    null = os.open(os.devnull, os.O_RDWR)
+    os.dup2(null, 0)
+    os.dup2(null, 1)
+    code = 0
+    while True:
+        try:
+            pid, status = os.wait()
+        except ChildProcessError:
+            break
+        if pid == launcher:
+            code = os.waitstatus_to_exitcode(status)
+    os._exit(code if code >= 0 else 128 - code)
+os.setsid()  # the launcher leads its own session, as when it is executed directly
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 signal.signal(signal.SIGXFSZ, signal.SIG_DFL)
 os.execve(sys.argv[1], [sys.argv[1]], {"PATH": os.defpath})
@@ -325,6 +347,22 @@ def _stop_launcher(pid: int) -> int | None:
         delay = min(delay * 2, 0.02)
 
 
+def _await_exit(pid: int) -> bool:
+    """Wait, bounded, until the child ``pid`` has exited, leaving it for the caller's wait()."""
+    deadline = time.monotonic() + _STOP_SECONDS
+    delay = 0.0005
+    while True:
+        try:
+            if os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None:
+                return True
+        except OSError:
+            return False
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(delay)
+        delay = min(delay * 2, 0.02)
+
+
 def _status(pid: int) -> dict[str, str] | None:
     """The fields of ``/proc/<pid>/status``, or None once the pid no longer exists.
 
@@ -525,9 +563,8 @@ def _prepare_cgroup(work: Path) -> Path | None:
     """A private child cgroup for one opt-out launch, or None when it cannot be made.
 
     The path is written to ``work/cgroup`` for the exec wrapper, which joins before it
-    runs the pinned bytes. ``cgroup.kill`` then reaches a ``clone(CLONE_PARENT)`` child
-    that has left the process session: its parent is this process, so the descendant
-    walk does not see it, and ``setsid`` takes it out of ``killpg``.
+    runs the pinned bytes. ``cgroup.kill`` then reaches every process of the launch,
+    including one that left the anchor's tree because the anchor was killed.
     """
     global _CGROUP_SEQ
     root = _current_cgroup()
@@ -623,8 +660,8 @@ def _cgroup_members(path: Path) -> list[int]:
 def _reap_adopted(candidates: list[int], except_pid: int) -> None:
     """Reap the killed members of the launcher's cgroup that are this process's children.
 
-    ``clone(CLONE_PARENT)`` makes this process their parent. Only those members are
-    reaped: reaping any zombie child of this process would take the exit status of a
+    The anchor is their parent, so this is a safeguard that normally finds none. Only
+    those members are reaped: reaping any zombie child of this process would take the exit status of a
     subprocess other code started, which its ``wait()`` then reports as 0. A member
     stays this process's child until it is reaped, so its pid cannot be reused first.
     ``waitpid`` on the launcher stays with the caller.
@@ -650,14 +687,14 @@ def _reap_adopted(candidates: list[int], except_pid: int) -> None:
 
 
 def _subreaper_argv(staged: Path) -> list[str] | None:
-    """Run ``staged`` through an exec wrapper that makes it a child subreaper, or None.
+    """Run ``staged`` under an anchor that is a child subreaper, or None.
 
     A double-fork calls ``setsid`` and then exits the intermediate process, so the
-    grandchild's parent would otherwise become pid 1 and leave the descendant tree.
-    The flag is kept across exec, so while the launcher is alive it adopts every
-    orphaned descendant and the tree sweep still finds it. Once the launcher has
-    exited, its descendants are adopted outside that tree and the sweep misses them.
-    The wrapper runs before the pinned bytes, with this interpreter, a fixed program,
+    grandchild's parent would otherwise become pid 1 and leave the descendant tree, and
+    ``clone(CLONE_PARENT)`` gives a child the launcher's parent. The anchor forks the
+    launcher, which leads its own session as under a direct exec, and waits until it has
+    reaped every process under it, so both stay in its tree, as does whatever the
+    launcher leaves running when it exits. The wrapper runs before the pinned bytes, with this interpreter, a fixed program,
     the fixed launch environment and ``-I -S``, so environment variables, the working
     directory and site-packages do not reach it. Only Linux has
     ``PR_SET_CHILD_SUBREAPER``; elsewhere, or without a separately runnable
@@ -706,7 +743,8 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
     # Only the exec wrapper can join before the pinned bytes run. Moving a process that
     # has already forked, then cgroup.kill, would kill the parent and orphan the child
     # ahead of the descendant sweep.
-    cgroup = None if namespaced or _subreaper_argv(staged) is None else _prepare_cgroup(work)
+    anchored = not namespaced and _subreaper_argv(staged) is not None
+    cgroup = _prepare_cgroup(work) if anchored else None
     try:
         argv, gated = _launch_argv(staged)
         proc = subprocess.Popen(  # noqa: S603
@@ -737,6 +775,8 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
         except OSError:
             sid = None
         _OPT_OUT[proc.pid] = (sid, cgroup)
+        if anchored:
+            _ANCHORED.add(proc.pid)
     if gated:
         _release(proc)
     return proc
@@ -778,16 +818,18 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
     was killed before cleanup with no pidfd held, ``unshare`` is still killed and
     ``PinnedProcessError`` reports ``isolation-teardown-failed``.
 
-    Outside a namespace, on Linux, the launcher is a child subreaper, so a double-fork
-    is reparented to it instead of pid 1 and the tree sweep still finds it. There the
-    launcher is stopped first, so it cannot start a process after the sweep, such as a
-    helper that a watchdog restarts, which would be reparented to pid 1 when killpg
-    kills the launcher. A descendant left behind by a launcher that already exited was
-    adopted outside the tree and is not found.
+    Outside a namespace, on Linux, the launcher runs under a subreaper anchor, so a
+    double-fork, a ``clone(CLONE_PARENT)`` child and a process left by a launcher that
+    exited stay in the anchor's tree. The tree is swept while the anchor runs, so it
+    adopts what the sweep orphans and reaps what it kills, and then exits by itself.
+    Without the anchor, the launcher is stopped first, so it cannot start a process
+    after the sweep, such as a helper that a watchdog restarts.
     """
     namespaced = proc.pid in _NAMESPACED
     init = _INITS.pop(proc.pid, None)
     sid, cgroup = _OPT_OUT.pop(proc.pid, (None, None))
+    anchored = proc.pid in _ANCHORED
+    _ANCHORED.discard(proc.pid)
     # The sweep reads Linux's /proc, and macOS has no os.waitid before Python 3.13. Until
     # it is reaped, the pid is still this launcher's.
     stop = sys.platform.startswith("linux") and proc.returncode is None
@@ -803,13 +845,18 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
                 except Exception:
                     # Whatever failed, the namespace was not shown to have ended.
                     ended = False
+            elif anchored and stop:
+                # The anchor runs on through the sweep: it adopts every orphan, so nothing
+                # reaches pid 1, and it reaps each process killed under it, then exits once
+                # it has no child left. killpg below is the backstop if it cannot.
+                _kill_descendants(proc.pid)
+                _await_exit(proc.pid)
             else:
                 if stop:
                     _stop_launcher(proc.pid)
                 _kill_descendants(proc.pid)
-            # After the stopped launcher's tree is swept: the cgroup also holds a
-            # CLONE_PARENT child, which that walk does not see, but killing it first
-            # would kill the launcher and orphan its tree before the walk.
+            # After the tree is swept: the cgroup also holds a process that left the
+            # tree, but killing the cgroup first would orphan the tree before the walk.
             if cgroup is not None:
                 members = _cgroup_members(cgroup)
                 _cgroup_kill(cgroup)

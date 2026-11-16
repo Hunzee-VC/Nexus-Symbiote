@@ -285,6 +285,37 @@ for _ in range(200):
             os.kill(_host_pid(marker), signal.SIGKILL)
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the anchor is Linux-only")
+def test_opt_out_kills_what_a_launcher_that_already_exited_left_running(tmp_path: Path) -> None:
+    """The launcher starts a ``setsid`` child and exits before the session is set up."""
+    marker = tmp_path / "pid"
+    command, digest = _pinned(
+        tmp_path / "launcher",
+        f"""marker = {str(marker)!r}
+if os.fork() == 0:
+    os.setsid()
+    null = os.open(os.devnull, os.O_RDWR)
+    os.dup2(null, 0)
+    os.dup2(null, 1)  # a daemon lets go of the pipes, so the session sees the exit
+    open(marker, "w").write(os.readlink("/proc/self"))
+    time.sleep(60)
+    os._exit(0)
+for _ in range(200):
+    if os.path.exists(marker) and os.path.getsize(marker):
+        break
+    time.sleep(0.01)
+raise SystemExit(0)
+""",
+    )
+    with isolation_off(), pytest.raises(StdioProtocolError):
+        observe_pinned(str(command), digest)
+    try:
+        _assert_dead(_host_pid(marker))
+    finally:
+        with contextlib.suppress(ProcessLookupError, ValueError, OSError):
+            os.kill(_host_pid(marker), signal.SIGKILL)
+
+
 def test_opt_out_stops_the_launcher_before_its_tree_is_swept(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
