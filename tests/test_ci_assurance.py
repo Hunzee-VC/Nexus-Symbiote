@@ -91,6 +91,7 @@ def test_action_lock_reuses_reviewed_hashes_and_closes_runtime_dependencies():
     # own venv, so its lock must close the signing extra as well as the core.
     roots = [*project["dependencies"], *project["optional-dependencies"]["sigstore"], "hatchling"]
     assert {"sigstore", "tuf"} <= action.keys()
+    closure = set()
     for python in ("3.11", "3.12", "3.13", "3.14"):
         env = default_environment()
         env.update(python_version=python, python_full_version=python + ".0", extra="")
@@ -102,6 +103,7 @@ def test_action_lock_reuses_reviewed_hashes_and_closes_runtime_dependencies():
             if requirement.marker and not requirement.marker.evaluate({**env, "extra": extra}):
                 continue
             name = canonicalize_name(requirement.name)
+            closure.add(name)
             locked, _ = action[name]
             version = next(iter(locked.specifier)).version
             assert requirement.specifier.contains(version)
@@ -111,6 +113,9 @@ def test_action_lock_reuses_reviewed_hashes_and_closes_runtime_dependencies():
                     seen.add((name, wanted))
                     requires = importlib.metadata.distribution(name).requires or []
                     pending.extend((dependency, wanted) for dependency in requires)
+    # Audit 2026-11-16 S16-02: the Action installs every line of its lock, so a pin that no
+    # root requires is a package nothing reviewed asked for.
+    assert action.keys() == closure
 
 
 def test_consumer_action_installs_only_locked_dependencies_before_source():
