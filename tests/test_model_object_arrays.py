@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import io
 import pickle
+import random
+import struct
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -16,6 +18,7 @@ from nexus_symbiote.scanners.model import (
     MAX_PICKLE_INSPECTION_BYTES,
     NUMPY_HEADER_UNREAD,
     NUMPY_OBJECT_ARRAY,
+    ZIP_DIRECTORY_UNREAD,
     ZIP_MEMBER_UNREAD,
     ZIP_OBJECT_ARRAY,
     ZIP_PICKLE_MEMBER,
@@ -248,3 +251,166 @@ def test_a_header_that_claims_more_than_it_holds_costs_only_what_it_holds(
     result = ModelScanner().scan(tmp_path)
     assert not result.scan_failures
     assert {c.name: c.serialization_safety for c in result.components} == {"zz.npy": UNSAFE}
+
+
+# Audit 2026-11-16 S4-01: zipfile, which np.load uses, finds the central directory where
+# its end record says it ends, not at the offset it stores, and reads a ZIP64 record
+# whenever a locator precedes the end record. A decoy directory one reader takes must not
+# hide the members another reader lists.
+
+
+def _local(name: bytes, data: bytes) -> bytes:
+    crc = zipfile.crc32(data)
+    fields = (0x04034B50, 20, 0, 0, 0, 0, crc, len(data), len(data), len(name), 0)
+    return struct.pack("<IHHHHHIIIHH", *fields) + name + data
+
+
+def _central(name: bytes, data: bytes, offset: int, comment: bytes = b"") -> bytes:
+    crc = zipfile.crc32(data)
+    fields = (0x02014B50, 20, 20, 0, 0, 0, 0, crc, len(data), len(data), len(name), 0)
+    tail = (len(comment), 0, 0, 0, offset)
+    return struct.pack("<IHHHHHHIIIHHHHHII", *fields, *tail) + name + comment
+
+
+def _end(count: int, size: int, offset: int) -> bytes:
+    return struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, count, count, size, offset, 0)
+
+
+def _concatenated_decoy(decoy: tuple[bytes, bytes], real: tuple[bytes, bytes]) -> bytes:
+    """The end record stores the offset of a decoy directory; zipfile reads the directory
+    of the same size that ends at the end record, and moves its member's offset."""
+    real_local = _local(*real)
+    padding = max(0, len(real_local) - len(_local(*decoy)))
+    decoy = (decoy[0], decoy[1] + b" " * padding)
+    first = _local(*decoy)
+    size = len(_central(*real, 0))
+    listed = _central(*decoy, 0)
+    listed = _central(*decoy, 0, b"c" * (size - len(listed)))
+    shift = size + len(real_local)
+    real_cd = _central(*real, len(first) + size - shift)
+    return first + listed + real_local + real_cd + _end(1, size, len(first))
+
+
+def _zip64_decoy(decoy: tuple[bytes, bytes], real: tuple[bytes, bytes]) -> bytes:
+    """The classic end record names a decoy directory; a ZIP64 locator and record name
+    the real one, which zipfile reads although no classic field is saturated."""
+    first = _local(*decoy)
+    listed = _central(*decoy, 0)
+    real_at = len(first) + len(listed)
+    real_local = _local(*real)
+    real_cd = _central(*real, real_at)
+    record_at = real_at + len(real_local) + len(real_cd)
+    directory_at = real_at + len(real_local)
+    record = struct.pack(
+        "<IQHHIIQQQQ", 0x06064B50, 44, 45, 45, 0, 0, 1, 1, len(real_cd), directory_at
+    )
+    locator = struct.pack("<IIQI", 0x07064B50, 0, record_at, 1)
+    tail = _end(1, len(listed), len(first))
+    return first + listed + real_local + real_cd + record + locator + tail
+
+
+_PICKLE = b"cbuiltins\nexec\n(S'import builtins; builtins.HIT=1'\ntR."
+_DECOYS = {
+    "concatenated-pickle": (_concatenated_decoy, (b"archive/version", b"3\n"), b"archive/data.pkl"),
+    "concatenated-array": (_concatenated_decoy, (b"numbers.npy", _npy("'<f8'")), b"objects.npy"),
+    "zip64-pickle": (_zip64_decoy, (b"archive/version", b"3\n"), b"archive/data.pkl"),
+    "zip64-array": (_zip64_decoy, (b"numbers.npy", _npy("'<f8'")), b"objects.npy"),
+}
+
+
+@pytest.mark.parametrize("case", _DECOYS.values(), ids=_DECOYS)
+def test_a_decoy_directory_does_not_hide_what_zipfile_lists(
+    tmp_path: Path, case: tuple[Any, tuple[bytes, bytes], bytes]
+) -> None:
+    build, decoy, real_name = case
+    pickled = real_name.endswith(b".pkl")
+    payload = _PICKLE if pickled else _npy("'|O'")
+    archive = build(decoy, (real_name, payload))
+    with zipfile.ZipFile(io.BytesIO(archive)) as opened:
+        assert opened.namelist() == [real_name.decode()]
+        assert opened.read(real_name.decode()) == payload
+    expected = ZIP_PICKLE_MEMBER if pickled else ZIP_OBJECT_ARRAY
+    (tmp_path / "models").mkdir()
+    relatives = ["models/archive", "arrays.npz", "archive.dat", "model.onnx"]
+    for relative in relatives:
+        (tmp_path / relative).write_bytes(archive)
+        assert inspect_model_format(tmp_path / relative) == (UNSAFE, expected), relative
+    found = {c.source_path: c for c in ModelScanner().scan(tmp_path).components}
+    assert {r: found[r].serialization_safety for r in relatives} == dict.fromkeys(relatives, UNSAFE)
+
+
+def test_an_archive_that_starts_with_an_end_record_is_read_as_np_load_reads_it(
+    tmp_path: Path,
+) -> None:
+    # np.load hands zipfile a file that starts with PK\x05\x06, as an empty archive does.
+    archive = b"PK\x05\x06" + b"\x00" * 18 + _zip([("objects.npy", _npy("'|O'"))])
+    with zipfile.ZipFile(io.BytesIO(archive)) as opened:
+        assert opened.namelist() == ["objects.npy"]
+    assert _inspect(tmp_path, archive, "arrays.npz") == (UNSAFE, ZIP_OBJECT_ARRAY)
+    assert _inspect(tmp_path, archive) == (UNSAFE, ZIP_OBJECT_ARRAY)
+    pickled = b"PK\x05\x06" + b"\x00" * 18 + _zip([("x.pkl", _PICKLE)])
+    assert _inspect(tmp_path, pickled, "arrays.npz") == (UNSAFE, ZIP_PICKLE_MEMBER)
+
+
+def test_a_directory_past_the_bound_is_unread_whatever_a_decoy_lists(tmp_path: Path) -> None:
+    # The end record stores the offset of a directory listing a pickle, more than the
+    # bound before the end; the directory zipfile reads, which ends at the end record,
+    # is a decoy. What the far one lists is not decided, so the archive stays unread.
+    real = (b"archive/data.pkl", _PICKLE)
+    decoy = (b"archive/version", b"3\n")
+    first = _local(b"README", b"x")
+    real_local = _local(*real)
+    size = len(_central(*real, len(first)))
+    padding = b"\x00" * (2 * model._ZIP_TAIL_BYTES)
+    decoy_at = len(first) + len(real_local) + size + len(padding)
+    decoy_local = _local(*decoy)
+    stored = len(first) + len(real_local)
+    shift = decoy_at + len(decoy_local) - stored
+    listed = _central(*decoy, decoy_at - shift)
+    listed = _central(*decoy, decoy_at - shift, b"c" * (size - len(listed)))
+    head = first + real_local + _central(*real, len(first))
+    archive = head + padding + decoy_local + listed + _end(1, size, stored)
+    with zipfile.ZipFile(io.BytesIO(archive)) as opened:
+        assert opened.namelist() == ["archive/version"]
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models/archive").write_bytes(archive)
+    unread = (SerializationSafety.UNKNOWN, ZIP_DIRECTORY_UNREAD)
+    assert inspect_model_format(tmp_path / "models/archive") == unread
+    found = {c.source_path: c for c in ModelScanner().scan(tmp_path).components}
+    assert found["models/archive"].properties["format_inspection"] == ZIP_DIRECTORY_UNREAD
+
+
+def _mutated(rng: random.Random) -> bytes:
+    names = [f"m{index}.npy" for index in range(rng.randrange(1, 4))]
+    archive = _zip([(name, _npy("'<f8'")) for name in names])
+    choice = rng.randrange(4)
+    if choice == 0:
+        archive = bytes(rng.randrange(256) for _ in range(rng.randrange(1, 64))) + archive
+    elif choice == 1:
+        archive = _concatenated_decoy((b"a.npy", _npy("'<f8'")), (b"b.npy", _npy("'<f8'")))
+    elif choice == 2:
+        archive = _zip64_decoy((b"a.npy", _npy("'<f8'")), (b"b.npy", _npy("'<f8'")))
+    end = archive.rfind(b"PK\x05\x06")
+    for _ in range(rng.randrange(3)):
+        at = rng.randrange(max(0, end - 96), len(archive))
+        archive = archive[:at] + bytes([rng.randrange(256)]) + archive[at + 1 :]
+    return archive
+
+
+def test_the_scanner_lists_every_member_zipfile_lists() -> None:
+    rng = random.Random(20261116)  # noqa: S311 - a reproducible corpus, not a secret
+    compared = 0
+    for _ in range(400):
+        archive = _mutated(rng)
+        try:
+            with zipfile.ZipFile(io.BytesIO(archive)) as opened:
+                listed = {name.encode("cp437") for name in opened.namelist()}
+        except (zipfile.BadZipFile, ValueError, OSError, UnicodeError, NotImplementedError):
+            continue
+        readings = model._zip_directory(io.BytesIO(archive), 0, len(archive))
+        # No reading at all is rated unknown; a reading that lists members lists them all.
+        if readings is not None:
+            compared += 1
+            names = {member.name for members, _ in readings for member in members}
+            assert listed <= names, archive
+    assert compared > 100

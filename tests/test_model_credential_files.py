@@ -61,3 +61,22 @@ def test_a_model_config_linked_to_an_ordinary_file_is_digested(tmp_path):
     assert hash_bytes(config).removeprefix("sha256:") in json.dumps(
         component.model_dump(mode="json")
     ) or hash_bytes(config) in json.dumps(component.model_dump(mode="json"))
+
+
+@pytest.mark.parametrize("module", ["token_utils", "secrets", "api_key"])
+def test_a_custom_code_module_named_as_holding_credentials_is_a_gap(tmp_path, module):
+    # Audit 2026-11-16 S4-07: such a module was left out of python_files with nothing
+    # recorded, so a later change to the code trust_remote_code runs raised no alert.
+    _safetensors(tmp_path / "models/model.safetensors")
+    config = {"auto_map": {"AutoModel": f"{module}.DemoModel"}}
+    (tmp_path / "models/config.json").write_text(json.dumps(config))
+    (tmp_path / f"models/{module}.py").write_bytes(SECRET)
+    (tmp_path / "models/modeling_demo.py").write_text("class DemoModel:\n    pass\n")
+    result = ModelScanner().scan(tmp_path)
+    (component,) = result.components
+    recorded = [entry["path"] for entry in component.properties["custom_code"]["python_files"]]
+    assert recorded == ["models/modeling_demo.py"]
+    assert hash_bytes(SECRET) not in json.dumps(component.model_dump(mode="json"))
+    assert f"models/{module}.py: custom code module named as holding credentials; " in "".join(
+        result.surfaces_excluded
+    )

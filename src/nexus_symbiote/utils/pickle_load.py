@@ -14,10 +14,11 @@ APPEND(S) and ADDITEMS on it, hashing it as a key or set item, iterating or test
 as arguments or state, and the type checks a builtin of the right type would pass. A
 call is ``certain`` when a class that records each of its methods would record one
 there, and not certain when only an object of another type gets past the check.
-``persistent_load``, which ``torch.load`` defines, returns an inert object, as the
-storages it returns run nothing they are given. Builtin values are modelled by what
-decides the loader's next step: their type, length, whether they hash, and the strings
-``STACK_GLOBAL`` takes.
+``persistent_load``, which ``torch.load`` defines, returns an inert object for a
+storage, which runs nothing it is given, and, as its legacy format's does for a
+``("module", obj, ...)`` id, ``obj`` itself, whatever the pickle resolved. Builtin
+values are modelled by what decides the loader's next step: their type, length, whether
+they hash, and the strings ``STACK_GLOBAL`` takes.
 
 The sample may be a prefix of the file: a read past its end, or past the opcode and
 MARK budget, ends the walk as unread, since the loader's behaviour is not decided.
@@ -86,6 +87,14 @@ VERSION_DIFFERENCES: dict[str, str] = {
         " pure-Python load_binstring fails a negative one in every version. The C"
         " flavor reads the unsigned count."
     ),
+    "string-encoding": (
+        "Not a version but a loader argument: STRING, BINSTRING and SHORT_BINSTRING"
+        " decode their bytes by the Unpickler's encoding, 'ASCII' by default, which"
+        " fails a byte over 0x7f; torch.load passes 'utf-8', np.load and"
+        " pandas.read_pickle 'latin1', and 'bytes' keeps them as bytes. The value is"
+        " read as latin-1, which decodes any byte, and READONLY_BUFFER takes it as"
+        " the bytes that 'bytes' leaves."
+    ),
 }
 # Differences that change no step here: find_class resolves a dotted name through
 # _getattribute / get_dotted_path in 3.14, without the '<locals>' check of 3.11-3.13,
@@ -116,6 +125,12 @@ class _CallError(Exception):
 
 class _Opaque:
     """An object that ``find_class`` returned: any attribute of an importable module."""
+
+    __slots__ = ()
+
+
+class _String(str):
+    """A STRING, BINSTRING or SHORT_BINSTRING value: a str, or bytes under ``encoding="bytes"``."""
 
     __slots__ = ()
 
@@ -576,8 +591,17 @@ class _Machine:
 
     def op_binpersid(self) -> None:
         # torch.load's persistent_load indexes the id it is given.
-        _use(self.pop(), certain=False)
-        self.push(_Persistent())
+        saved = self.pop()
+        _use(saved, certain=False)
+        if (
+            isinstance(saved, _Tuple)
+            and len(saved.items) > 1
+            and saved.items[0] in ("module", b"module")
+        ):
+            # torch's legacy persistent_load returns the object a "module" id carries.
+            self.push(saved.items[1])
+        else:
+            self.push(_Persistent())
 
     def op_none(self) -> None:
         self.push(None)
@@ -652,7 +676,12 @@ class _Machine:
         data = self.line(_quoted_text)
         if len(data) < 2 or data[0] != data[-1] or data[0] not in b"\"'":
             raise _LoadError  # the STRING opcode argument must be quoted
-        self.push(cast(bytes, codecs.escape_decode(data[1:-1])[0]).decode("ascii"))
+        self._string(cast(bytes, codecs.escape_decode(data[1:-1])[0]))
+
+    def _string(self, data: bytes) -> None:
+        if not data.isascii():
+            self.differs.add("string-encoding")
+        self.push(_String(data.decode("latin-1")))
 
     def op_binstring(self) -> None:
         count = self.number(4, "<i")
@@ -661,10 +690,10 @@ class _Machine:
                 raise _LoadError  # negative BINSTRING length
             self.differs.add("binstring-count")
             count += 1 << 32
-        self.push(self.read(count).decode("ascii"))
+        self._string(self.read(count))
 
     def op_short_binstring(self) -> None:
-        self.push(self.read(self.number(1, "<B")).decode("ascii"))
+        self._string(self.read(self.number(1, "<B")))
 
     def op_binbytes(self) -> None:
         self.push(self.read(self.number(4, "<I")))
@@ -709,6 +738,9 @@ class _Machine:
         _use(value, certain=False)  # memoryview() of an object with the buffer protocol
         if isinstance(value, _Sized) and value.kind == "bytearray":
             self.stack[-1] = _Sized("view", value.length)
+        elif isinstance(value, _String):
+            self.differs.add("string-encoding")
+            self.stack[-1] = value.encode("latin-1")
         elif not isinstance(value, bytes) and not _kind(value, "view"):
             raise _LoadError  # memoryview() of something without the buffer protocol
 

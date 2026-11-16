@@ -1717,3 +1717,81 @@ def test_the_native_schema_names_every_signing_status_the_collector_emits():
 
     description = ModelComponent.model_fields["signing_status"].description or ""
     assert [status.value for status in SigningStatus if status.value not in description] == []
+
+
+def _length_delimited(field: int, payload: bytes) -> bytes:
+    return bytes([(field << 3) | 2, len(payload)]) + payload
+
+
+def _onnx_with_external_data(location: bytes) -> bytes:
+    entry = _length_delimited(1, b"location") + _length_delimited(2, location)
+    tensor = _length_delimited(13, entry) + bytes([14 << 3, 1])
+    return _length_delimited(7, _length_delimited(5, tensor))
+
+
+_BOUND_LAYOUTS = {
+    "onnx-external-data": (
+        "models/checkpoint",
+        {"models/model.onnx": _onnx_with_external_data(b"checkpoint")},
+    ),
+    "savedmodel-variables": ("models/variables/blob", {"models/saved_model.pb": b"\x08\x01"}),
+}
+
+
+@pytest.mark.parametrize("layout", _BOUND_LAYOUTS.values(), ids=_BOUND_LAYOUTS)
+def test_a_pickle_bound_to_a_model_keeps_its_own_critical_component(
+    project: Path, layout: tuple[str, dict[str, bytes]]
+) -> None:
+    # Audit 2026-11-16 S4-05: a file a model binds was only hashed, so a pickle bound as
+    # ONNX external data or SavedModel variables lost the rating it has on its own.
+    bound, parents = layout
+    payload = b"\x80\x02cbuiltins\nexec\n(X\x01\x00\x00\x001tR."
+    (project / bound).parent.mkdir(parents=True, exist_ok=True)
+    (project / bound).write_bytes(payload)
+    for relative, content in parents.items():
+        (project / relative).write_bytes(content)
+    result = ModelScanner().scan(project)
+    assert not result.scan_failures, result.scan_failures
+    found = {c.source_path: c for c in result.components}
+    (parent,) = parents
+    digest = "sha256:" + hashlib.sha256(payload).hexdigest()
+    assert found[parent].properties["weight_files"] == [{"path": bound, "sha256": digest}]
+    assert found[bound].serialization_safety is SerializationSafety.UNSAFE_CODE_EXECUTION
+    assert found[bound].hashes == {"sha256": digest}
+    assert any(r.severity is RiskSeverity.CRITICAL for r in found[bound].risks)
+    assert sorted(result.surfaces_scanned).count(bound) == 1
+
+
+def test_a_bound_file_that_holds_no_payload_is_only_a_weight_file(project: Path) -> None:
+    (project / "models").mkdir()
+    (project / "models/checkpoint").write_bytes(b"\x00\x01" * 64)
+    (project / "models/model.onnx").write_bytes(_onnx_with_external_data(b"checkpoint"))
+    result = ModelScanner().scan(project)
+    assert not result.scan_failures, result.scan_failures
+    assert [c.source_path for c in result.components] == ["models/model.onnx"]
+
+
+def test_a_pinned_model_is_not_verified_once_the_binding_budget_refuses_it(project: Path) -> None:
+    # Audit 2026-11-16 S4-06: after the budget refused its bindings, a model was verified
+    # on its main file alone, as digest-pinned, though its external data differs from its pin.
+    (project / "a").mkdir()
+    (project / "b").mkdir()
+    (project / "b/model.onnx").write_bytes(_onnx_with_external_data(b"weights.data"))
+    (project / "b/weights.data").write_bytes(b"pinned bytes")
+    pins = [
+        DigestPinPolicy(project / p, sha256(project / p))
+        for p in ("b/model.onnx", "b/weights.data")
+    ]
+    (project / "b/weights.data").write_bytes(b"swapped bytes")
+    index = {"weight_map": {f"t{i}": f"missing-{i}.safetensors" for i in range(25)}}
+    (project / "a/model.safetensors.index.json").write_text(json.dumps(index))
+    with limits.applied(replace(limits.DEFAULTS, entries=10)):
+        result = ModelScanner(digest_pins=pins).scan(project)
+    assert any(f.endswith(model_collector.BINDINGS_EXHAUSTED) for f in result.scan_failures)
+    (component,) = [c for c in result.components if c.source_path == "b/model.onnx"]
+    assert "weight_files" not in component.properties
+    assert component.signing_status == "partially-verified"
+    assert component.trust_tier is TrustTier.UNKNOWN
+    (evidence,) = component.claims.values()
+    assert evidence.assurance.value != "verified"
+    assert model_collector.BINDINGS_EXHAUSTED in (evidence.unknown_reason or "")
