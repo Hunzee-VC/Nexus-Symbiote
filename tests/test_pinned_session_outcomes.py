@@ -196,3 +196,29 @@ def test_wait_timeout_after_call_reports_unknown_outcome(tmp_path, monkeypatch):
     with pytest.raises(ExecutionOutcomeUnknown) as caught:
         call(tmp_path, "ok")
     assert isinstance(caught.value.__cause__, subprocess.TimeoutExpired)
+
+
+def test_an_unexpected_teardown_error_before_any_call_is_raised(tmp_path, monkeypatch):
+    # Cleanup that fails other than by a namespace report is not swallowed.
+    terminate = session_module.terminate_process_group
+
+    def crash_after_kill(proc):
+        terminate(proc)
+        raise RuntimeError("unexpected cleanup fault")
+
+    monkeypatch.setattr(session_module, "terminate_process_group", crash_after_kill)
+    path, pin, log = launcher(tmp_path, "ok")
+    session = PinnedStdioSession(command=str(path), sha256=pin, server_id="server:mail")
+    with pytest.raises(RuntimeError, match="unexpected cleanup fault"), session:
+        pass
+    assert not log.exists()
+
+
+def test_an_error_inside_the_session_is_not_replaced_by_a_teardown_report(tmp_path, monkeypatch):
+    ended: list = []
+    _teardown_fails(monkeypatch, ended)
+    path, pin, log = launcher(tmp_path, "ok")
+    session = PinnedStdioSession(command=str(path), sha256=pin, server_id="server:mail")
+    with pytest.raises(LookupError, match="caller's own failure"), session:
+        raise LookupError("caller's own failure")
+    assert [proc.returncode is not None for proc in ended] == [True]

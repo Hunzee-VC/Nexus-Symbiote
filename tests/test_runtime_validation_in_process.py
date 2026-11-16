@@ -282,3 +282,28 @@ def test_the_worker_does_not_start_when_the_self_check_fails(monkeypatch):
 def test_the_worker_refuses_outside_posix(monkeypatch):
     monkeypatch.setattr(validation.os, "name", "nt")
     assert validation._worker() == 2
+
+
+@pytest.mark.parametrize(
+    ("pattern", "message"),
+    [
+        ("(?<name", "unterminated group name"),
+        ("(?<n>a)(?<n>b)", "duplicate group name"),
+        ("a)", "unbalanced parenthesis"),
+    ],
+)
+def test_ecma_pattern_refuses_malformed_groups(pattern, message):
+    # A pattern ECMA-262 rejects must not reach the worker as a different Python regex.
+    with pytest.raises(re.error, match=message):
+        validation.ecma_pattern(pattern)
+
+
+@pytest.mark.parametrize("pattern", ["a+?b", "a??", "a{1,2}?"])
+def test_ecma_pattern_keeps_a_lazy_quantifier(pattern):
+    assert validation.ecma_pattern(pattern) == pattern
+
+
+def test_a_schema_that_is_not_an_object_is_refused_before_the_worker():
+    with pytest.raises(validation.ValidationBudgetError) as caught:
+        validation.validate_arguments(["not", "an", "object"], {})
+    assert caught.value.reason == "schema-invalid"
