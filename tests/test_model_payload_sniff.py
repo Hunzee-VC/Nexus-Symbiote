@@ -420,6 +420,7 @@ def test_a_pickle_that_imports_a_module_with_any_file_name_is_critical(
         capture_output=True,
         env={"PYTHONPATH": str(lab), "PATH": os.defpath},
         check=False,
+        timeout=60,
     )
     assert (lab / "IMPORTED").exists()
     (tmp_path / "models").mkdir()
