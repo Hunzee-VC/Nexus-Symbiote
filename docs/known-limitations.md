@@ -324,6 +324,11 @@ A way around a limit that its entry does not describe is worth a
   `pydantic_ai.mcp`, a client base class there, is not a gap. So a
   server built from a class a project module re-exports is a gap on the file that
   builds it, even when the re-exporting module's own server is inventoried.
+  A `tool` decorator with a positional argument, or a keyword other than `name`,
+  `title`, `description`, `tags`, `annotations`, `output_schema`, `exclude_args`,
+  `meta`, `structured_output`, `icons` and `enabled`, is an unresolved tool name gap,
+  because `fastmcp` also takes the name as `name_or_fn`. A tool given `enabled=False`
+  is still inventoried.
   Besides its `tool` decorator on a module-level function, which is inventoried, a
   server may be used without a gap only in these ways: reading its `name`,
   `instructions` or `settings`, as in `server.settings.port = 8000`; calling a run
@@ -1057,7 +1062,9 @@ A way around a limit that its entry does not describe is worth a
   of field and scheme names, path depth, whether a query or user information is
   present, and the requirement values of schemes other than OAuth 2.0 and OpenID
   Connect, including a credential pasted there by mistake.
-- **Cards built in code are gaps.** A card built in Python is a gap. Cards are read
+- **Cards built in code are gaps.** A card built in Python is a gap, and so is one
+  loaded from data, as with `AgentCard.model_validate`, also beside a static card:
+  nothing shows that the loaded card is the static one. Cards are read
   only from `.well-known` directories and from `agent.json`, `agent-card.json` and
   `a2a/agent.json` in the root. Direct calls to `AgentCard`, its recognized class
   methods, and aliases imported by name from `a2a` modules are recognized. The

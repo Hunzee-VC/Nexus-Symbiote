@@ -323,6 +323,25 @@ def _bindings(nodes: list[ast.AST]) -> Counter[str]:
     return names
 
 
+# ``.tool`` keywords that do not change the name a tool is registered under. fastmcp
+# also takes the name as ``name_or_fn``, so any keyword not listed here may carry it.
+_TOOL_OPTIONS = frozenset(
+    {
+        "name",
+        "title",
+        "description",
+        "tags",
+        "annotations",
+        "output_schema",
+        "exclude_args",
+        "meta",
+        "structured_output",
+        "icons",
+        "enabled",
+    }
+)
+
+
 def _record_decorator(
     deco: ast.Call | ast.Attribute,
     default_name: str,
@@ -341,6 +360,7 @@ def _record_decorator(
         (isinstance(deco, ast.Call) and deco.args)
         or len(options) != len(keywords)
         or None in options
+        or not options.keys() <= _TOOL_OPTIONS
         or not isinstance(name, str)
         or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", name)
     ):
@@ -1337,6 +1357,27 @@ def _attribute_access(node: ast.AST) -> tuple[ast.expr, str] | None:
     return _getattr_attr(node)
 
 
+def _carried(item: ast.expr) -> list[ast.expr]:
+    """The parts an attribute, literal ``getattr`` or non-call carrier expression
+    takes its value from, other than through a constructor call."""
+    if isinstance(item, (ast.Attribute, ast.Starred, ast.Subscript)):
+        return [item.value]
+    pair = _getattr_attr(item)
+    if pair is not None and isinstance(item, ast.Call):
+        return [pair[0], *item.args[2:]]
+    if isinstance(item, ast.NamedExpr):
+        return [item.target, item.value]
+    if isinstance(item, (ast.Tuple, ast.List, ast.Set)):
+        return list(item.elts)
+    if isinstance(item, ast.Dict):
+        return [val for val in item.values if val is not None]
+    if isinstance(item, ast.BoolOp):
+        return list(item.values)
+    if isinstance(item, ast.IfExp):
+        return [item.body, item.orelse]
+    return []
+
+
 def _expr_roots(node: ast.expr) -> list[ast.Name]:
     """The names an attribute, literal ``getattr`` or non-call carrier expression can
     start from without crossing a constructor call."""
@@ -1344,30 +1385,44 @@ def _expr_roots(node: ast.expr) -> list[ast.Name]:
     roots: list[ast.Name] = []
     while pending:
         item = pending.pop()
-        while isinstance(item, ast.Attribute):
-            item = item.value
-        pair = _getattr_attr(item)
         if isinstance(item, ast.Name):
             roots.append(item)
-        elif pair is not None and isinstance(item, ast.Call):
-            pending.extend((pair[0], *item.args[2:]))
-        elif isinstance(item, ast.NamedExpr):
-            pending.extend((item.target, item.value))
-        elif isinstance(item, (ast.Starred, ast.Subscript)):
-            pending.append(item.value)
-        elif isinstance(item, (ast.Tuple, ast.List, ast.Set)):
-            pending.extend(item.elts)
-        elif isinstance(item, ast.Dict):
-            pending.extend(val for val in item.values if val is not None)
-        elif isinstance(item, ast.BoolOp):
-            pending.extend(item.values)
-        elif isinstance(item, ast.IfExp):
-            pending.extend((item.body, item.orelse))
+        else:
+            pending.extend(_carried(item))
     return roots
 
 
-def _rooted_at_expr(node: ast.expr, names: set[str]) -> bool:
-    return any(root.id in names for root in _expr_roots(node))
+class _RootedAt:
+    """Whether an expression starts from one of ``names``, as ``_expr_roots`` finds.
+
+    Every link of an attribute chain is asked about, and each would walk the rest of
+    the chain again; deciding each node once keeps the work linear in the nodes.
+    """
+
+    def __init__(self, names: set[str]) -> None:
+        self._names = names
+        self._known: dict[ast.AST, bool] = {}
+
+    def __call__(self, node: ast.expr) -> bool:
+        known = self._known
+        stack: list[ast.expr] = [node]
+        while stack:
+            item = stack[-1]
+            if item in known:
+                stack.pop()
+                continue
+            if isinstance(item, ast.Name):
+                known[item] = item.id in self._names
+                stack.pop()
+                continue
+            parts = _carried(item)
+            missing = [part for part in parts if part not in known]
+            if missing:
+                stack.extend(missing)
+                continue
+            known[item] = any(known[part] for part in parts)
+            stack.pop()
+        return known[node]
 
 
 def _target_names(node: ast.expr) -> list[str]:
@@ -1433,13 +1488,28 @@ def _sdk_roots(nodes: list[ast.AST], modules: set[str]) -> set[str]:
     return {name for name in roots if not name.startswith("#")}
 
 
-def _scope(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> ast.AST | None:
-    owner = parents.get(node)
-    while owner is not None and not isinstance(
-        owner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
-    ):
-        owner = parents.get(owner)
-    return owner
+def _scopes(parents: dict[ast.AST, ast.AST]) -> dict[ast.AST, ast.AST | None]:
+    """The function, lambda or class each node is in, or None at module level.
+
+    Climbing from each name separately would take time in the depth of the
+    expression around it; each node is resolved once here.
+    """
+    scopes: dict[ast.AST, ast.AST | None] = {}
+    for node in parents:
+        chain: list[ast.AST] = []
+        item = node
+        while item not in scopes:
+            owner = parents.get(item)
+            if owner is None or isinstance(
+                owner, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+            ):
+                scopes[item] = owner
+                break
+            chain.append(item)
+            item = owner
+        for link in chain:
+            scopes[link] = scopes[item]
+    return scopes
 
 
 def _sdk_imported(nodes: list[ast.AST]) -> list[tuple[str, str]]:
@@ -1460,13 +1530,17 @@ def _gets_context(node: ast.AST) -> bool:
 
 
 def _names_context(
-    annotation: ast.expr, extra: Sequence[ast.AST], types: set[str], roots: set[str]
+    annotation: ast.expr,
+    extra: Sequence[ast.AST],
+    types: set[str],
+    roots: set[str],
+    rooted: _RootedAt,
 ) -> bool:
     for node in (*ast.walk(annotation), *extra):
         if (isinstance(node, ast.Name) and node.id in types) or _gets_context(node):
             return True
         access = _attribute_access(node)
-        if access is not None and access[1] == "Context" and _rooted_at_expr(access[0], roots):
+        if access is not None and access[1] == "Context" and rooted(access[0]):
             return True
         if (isinstance(node, ast.Name) and node.id == "getattr") or (
             isinstance(node, ast.Attribute) and node.attr == "getattr"
@@ -1488,7 +1562,10 @@ def _reads_context(use: ast.Attribute, parents: dict[ast.AST, ast.AST]) -> bool:
 
 
 def _context_bindings(
-    parsed: _ParsedAnnotations, roots: set[str]
+    parsed: _ParsedAnnotations,
+    roots: set[str],
+    rooted: _RootedAt,
+    scopes: dict[ast.AST, ast.AST | None],
 ) -> tuple[set[tuple[ast.AST | None, str]], bool]:
     """Parameters typed as an SDK context and names bound to ``get_context()``, by scope.
 
@@ -1505,7 +1582,7 @@ def _context_bindings(
     types = {bound for name, bound in imported if name == "Context"}
     getters = {bound for name, bound in imported if name == "get_context"}
     declared = {
-        (_scope(node, parents), name)
+        (scopes.get(node), name)
         for node in nodes
         if isinstance(node, (ast.Global, ast.Nonlocal))
         for name in node.names
@@ -1526,7 +1603,7 @@ def _context_bindings(
                 extra = parsed.by_arg.get(arg, ())
                 annotations.update(ast.walk(arg.annotation))
                 annotations.update(extra)
-                if _names_context(arg.annotation, extra, types, roots):
+                if _names_context(arg.annotation, extra, types, roots, rooted):
                     bound.add((node, arg.arg))
     escaped = False
     used: set[str] = set()
@@ -1541,7 +1618,7 @@ def _context_bindings(
                 (
                     (access := _attribute_access(node)) is not None
                     and access[1] == "Context"
-                    and _rooted_at_expr(access[0], roots)
+                    and rooted(access[0])
                 )
                 or _gets_context(node)
             )
@@ -1557,7 +1634,7 @@ def _context_bindings(
                 escaped = True
             elif isinstance(use, ast.Assign) and len(use.targets) == 1:
                 target = use.targets[0]
-                scope = _scope(use, parents)
+                scope = scopes.get(use)
                 if (
                     isinstance(target, ast.Name)
                     and isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))
@@ -1578,14 +1655,15 @@ def _context_bindings(
 def _context_escapes(
     name: ast.Name,
     parents: dict[ast.AST, ast.AST],
+    scopes: dict[ast.AST, ast.AST | None],
     bound: set[tuple[ast.AST | None, str]],
 ) -> bool:
     """Whether a use of a context can hand it to code the collector does not read."""
-    scope = _scope(name, parents)
+    scope = scopes.get(name)
     while (scope, name.id) not in bound:
         if scope is None:
             return False
-        scope = _scope(scope, parents)
+        scope = scopes.get(scope)
     use = parents.get(name)
     if isinstance(use, ast.Attribute):
         return not _reads_context(use, parents)
@@ -1634,6 +1712,7 @@ def _report_context_handles(
     modules = _sdk_module_names(nodes, bindings)
     paths = _module_paths(nodes, modules)
     roots = _sdk_roots(nodes, modules)
+    rooted = _RootedAt(roots)
     handle = False
     for node in nodes:
         access = _attribute_access(node)
@@ -1646,13 +1725,13 @@ def _report_context_handles(
             ):
                 handle = True
                 break
-            if _private(attr) and _rooted_at_expr(target, roots):
+            if _private(attr) and rooted(target):
                 handle = True
                 break
             if (
                 isinstance(node, ast.Attribute)
                 and not isinstance(node.ctx, ast.Load)
-                and _rooted_at_expr(target, roots)
+                and rooted(target)
             ):
                 handle = True
                 break
@@ -1665,13 +1744,14 @@ def _report_context_handles(
             handle = True
             break
     if not handle and sdk_import:
-        bound, handle = _context_bindings(parsed, roots)
+        scopes = _scopes(parents)
+        bound, handle = _context_bindings(parsed, roots, rooted, scopes)
         names = {name for _, name in bound}
         handle = handle or any(
             isinstance(node, ast.Name)
             and isinstance(node.ctx, ast.Load)
             and node.id in names
-            and _context_escapes(node, parents, bound)
+            and _context_escapes(node, parents, scopes, bound)
             for node in nodes
         )
     if handle:
