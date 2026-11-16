@@ -521,3 +521,24 @@ def test_the_trust_root_comes_only_from_the_locked_runtime(tmp_path, monkeypatch
     runner._run(["validate"], private=tmp_path)
     [env] = seen
     assert not any(name in env for name in runner.TRUST_ROOT_ENVS)
+
+
+def test_job_environment_cannot_replace_the_trust_root_or_the_mode(tmp_path, monkeypatch):
+    # An earlier step can write these through GITHUB_ENV; the private HOME alone would
+    # leave the packaged trust root replaceable.
+    ignored = (*runner.TRUST_ROOT_ENVS, "NEXUS_SYMBIOTE_MODE")
+    for name in ignored:
+        monkeypatch.setenv(name, "/planted/value")
+    monkeypatch.setenv("NEXUS_SYMBIOTE_SOURCE_BINDING_KEY", "k" * 40)
+    seen: list[dict[str, str]] = []
+
+    def invoke(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen.append(kwargs["env"])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(runner.subprocess, "run", invoke)
+    runner._run(["scan"], private=tmp_path)
+    assert not set(ignored) & set(seen[0])
+    assert "NEXUS_SYMBIOTE_MODE" in runner.WITHHELD_ENV
+    # The operator's binding key is an input the Action documents; it stays.
+    assert seen[0]["NEXUS_SYMBIOTE_SOURCE_BINDING_KEY"] == "k" * 40
