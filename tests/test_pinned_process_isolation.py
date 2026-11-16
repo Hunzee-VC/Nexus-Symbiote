@@ -189,6 +189,22 @@ def test_a_finished_pid_is_not_remembered_as_namespaced() -> None:
     assert proc.pid not in pinned_process._NAMESPACED
 
 
+def test_teardown_leaves_the_exit_status_of_another_child() -> None:
+    # Code elsewhere in the process, such as the validation worker, trusts its child's
+    # exit status; reaping every zombie child would turn this 3 into 0.
+    other = subprocess.Popen([sys.executable, "-c", "raise SystemExit(3)"])  # noqa: S603
+    if hasattr(os, "waitid"):
+        os.waitid(os.P_PID, other.pid, os.WEXITED | os.WNOWAIT)
+    else:  # pragma: no cover - macOS before Python 3.13
+        time.sleep(1)
+    proc = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)  # noqa: S603
+    try:
+        pinned_process.terminate_process_group(proc)
+    finally:
+        proc.wait(timeout=5)
+    assert other.wait(timeout=5) == 3
+
+
 def test_a_forgotten_pid_is_swept_again_when_reused(monkeypatch: pytest.MonkeyPatch) -> None:
     swept: list[int] = []
     monkeypatch.setattr(pinned_process, "_kill_descendants", swept.append)
@@ -219,6 +235,60 @@ def test_opt_out_kills_a_double_fork_and_a_refused_namespace_never_starts_it(
         observe_pinned(str(blocked_command), blocked_digest)
     assert denied.value.reason == "isolation-unavailable"
     assert not blocked.exists()
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="clone(CLONE_PARENT) is Linux-only"
+)
+def test_opt_out_kills_a_clone_parent_child_that_leaves_the_session(tmp_path: Path) -> None:
+    """``clone(CLONE_PARENT)`` plus ``setsid`` reparents to the supervisor and leaves the group.
+
+    The descendant sweep does not see it, and ``killpg`` does not signal the new session.
+    """
+    marker = tmp_path / "pid"
+    command, digest = _pinned(
+        tmp_path / "launcher",
+        f"""
+import ctypes
+marker = {str(marker)!r}
+CLONE_PARENT = 0x00008000
+stack = ctypes.create_string_buffer(1024 * 1024)
+libc = ctypes.CDLL(None, use_errno=True)
+def child(_):
+    try:
+        os.setsid()
+    except OSError:
+        pass
+    # Written whole, then renamed, so the supervisor never reads a partial pid.
+    with open(marker + ".tmp", "w") as out:
+        out.write(str(os.getpid()))
+    os.replace(marker + ".tmp", marker)
+    time.sleep(60)
+    return 0
+callback = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)(child)
+sys._keep = (callback, stack)
+cloned = libc.clone(
+    callback, ctypes.c_void_p(ctypes.addressof(stack) + len(stack)), CLONE_PARENT, None
+)
+if cloned < 0:
+    raise SystemExit(1)
+# The child must have recorded its pid before the session can end, or a loaded runner
+# kills it first and the test learns nothing.
+for _ in range(1000):
+    if os.path.exists(marker):
+        break
+    time.sleep(0.01)
+""",
+    )
+    with isolation_off():
+        observe_pinned(str(command), digest)
+    assert marker.exists(), "the clone(CLONE_PARENT) child did not start within 10 seconds"
+    try:
+        _assert_dead(_host_pid(marker))
+    finally:
+        # A failed run must not leave the escaped child alive for the rest of the suite.
+        with contextlib.suppress(ProcessLookupError, ValueError, OSError):
+            os.kill(_host_pid(marker), signal.SIGKILL)
 
 
 def test_opt_out_stops_the_launcher_before_its_tree_is_swept(
@@ -378,9 +448,9 @@ def test_cli_requires_an_explicit_opt_out_when_the_namespace_is_unavailable(
     usage = " ".join(CliRunner().invoke(main, ["verify-live", "--help"]).output.split())
     for text in (" ".join(allowed.stderr.split()), usage):
         assert "stopped before cleanup" in text
-        assert "killed with the session while it is alive" in text
-        assert "a descendant that outlives the launcher can escape" in text
-        assert "as can one that deliberately evades cleanup" in text
+        assert "cgroup.kill" in text
+        assert "clone(CLONE_PARENT)" in text
+        assert "leaves that session and the cgroup can escape" in text
         assert "not a namespace or sandbox" in text
 
 
@@ -408,7 +478,9 @@ def test_a_descendant_that_cannot_be_signalled_does_not_abort_cleanup(
             observe_pinned(str(command), digest)
     finally:
         monkeypatch.undo()
-        kill(_host_pid(marker), signal.SIGKILL)
+        # cgroup.kill may already have reaped the child that os.kill was not allowed to signal.
+        with contextlib.suppress(ProcessLookupError):
+            kill(_host_pid(marker), signal.SIGKILL)
     assert len(groups) == 1
     _assert_dead(groups[0])
 
