@@ -101,3 +101,10 @@ def test_text_without_a_credential_assignment_is_unchanged(text: str) -> None:
 )
 def test_marks_chained_names_and_options_stay_linear(unit: str) -> None:
     assert scaling_ratio(lambda scale: redact_text(unit * (2000 * scale))) < 10
+
+
+def test_names_that_end_urls_without_whitespace_stay_linear() -> None:
+    # Each URL here ends in a name and a split mark, so its value runs to the end of the
+    # text; comparing that whole value with the auth schemes once per URL was quadratic.
+    unit = "https://h/?password=>"
+    assert scaling_ratio(lambda scale: redact_text(unit * (2000 * scale)), factor=8) < 16

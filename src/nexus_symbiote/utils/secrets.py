@@ -125,6 +125,16 @@ _AUTH_SCHEMES = frozenset(
         "aws4-hmac-sha256",
     }
 )
+_AUTH_SCHEME_LENGTH = max(map(len, _AUTH_SCHEMES))
+
+
+def _is_auth_scheme(value: str, span: Span) -> bool:
+    # A value can run to the end of the text, once for every URL before it; slicing it
+    # whole each time is quadratic, and no longer value is a scheme.
+    start, end = span
+    return end - start <= _AUTH_SCHEME_LENGTH and value[start:end].lower() in _AUTH_SCHEMES
+
+
 _COOKIE_HEADER = re.compile(r"(?i)(\b(?:set-)?cookie[\"']?\s{0,8}[:=]\s{0,8}[\"']?)([^\r\n\"']++)")
 _COOKIE_PAIR = re.compile(r"([A-Za-z0-9_.-]{1,64}=)([^\s;,\"']++)")
 _COOKIE_ATTRS = frozenset(
@@ -705,7 +715,7 @@ def _assignment_spans(value: str, url_spans: list[Span]) -> Iterable[Span]:
         if tail.group("mark") is None and after.group("mark") is None:
             continue
         span = _value_span(value, after.end(), len(value), after_runs)
-        if span is not None and value[span[0] : span[1]].lower() not in _AUTH_SCHEMES:
+        if span is not None and not _is_auth_scheme(value, span):
             yield span
 
 
