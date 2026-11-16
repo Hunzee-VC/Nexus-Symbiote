@@ -298,7 +298,8 @@ class PinnedStdioSession:
             ):
                 return
             raise ExecutionOutcomeUnknown(
-                "the launcher's PID namespace did not end; the tool may still be running"
+                "the launcher's processes could not be confirmed ended; "
+                "the tool may still be running"
                 if isinstance(teardown, PinnedProcessError)
                 else "launcher cleanup did not complete; the tool may still be running"
             ) from teardown
