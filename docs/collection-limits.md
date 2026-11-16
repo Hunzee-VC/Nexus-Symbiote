@@ -254,6 +254,7 @@ shorten lists whose content is recorded or bound anyway.
 | ONNX structure the model collector reads for external data: nesting, fields in one file, one location; a file beyond them that may name external data is a failure | 64; 4,000,000; 4,096 bytes |
 | Structure units the ONNX and GGUF readers spend in one scan or one validation, shared with NumPy array headers at one unit a byte; a header past them is rated `unknown` | 16,000,000 |
 | Python file the a2a and rag import heuristics parse; a larger file is skipped, and for a2a one that names `AgentCard` is a gap | 262,144 characters |
+| Annotation strings the mcp collector parses as forward references in one Python file: characters of one string, strings nested in strings, and syntax nodes parsed from all of them; past any of them, in a file with a recognized server, a PydanticAI agent or an `mcp` or `fastmcp` import, is a gap | 4,096; 4; 10,000 |
 | Root `requirements*.txt` files, together: text, and logical lines | 4 MiB; 100,000 |
 | MCP servers in one MCP client file | 1,000 |
 | Credential values of all MCP servers in one client file, those assigned inline through a launcher included, each scrubbed from every server's text; a file with more is a named failure and is not collected | 4,096 |

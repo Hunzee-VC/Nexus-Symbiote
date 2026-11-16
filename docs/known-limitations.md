@@ -268,7 +268,14 @@ A way around a limit that its entry does not describe is worth a
   from `mcp.server`, `mcp.server.fastmcp`, `mcp.server.fastmcp.server`, `fastmcp`,
   `fastmcp.server` or `fastmcp.server.server`, and from `MCPServer` imported from
   `mcp.server.mcpserver`. Forms the collector recognizes but cannot follow are
-  gaps: the low-level `Server`, a constructor given `tools=` or `**` arguments, a
+  gaps: the low-level `Server`, a constructor given `tools=`, `tool_serializer=`,
+  `providers=`, `mount=`, `lifespan=`, `middleware=`, `tool_transformations=`,
+  `transforms=`, `extensions=`, `resources=`, `**` arguments, or more positional
+  arguments than the name and instructions (seven for `FastMCP` from `mcp.server` or
+  `mcp.server.fastmcp` and for `MCPServer`, whose further positionals are not handed
+  the server), because the SDK hands a lifespan the server, middleware and
+  transforms can rewrite the tool list and an extension's tools are added to the
+  server, a
   server passed to a helper other than the same-file helper described below, an
   aliased or subclassed factory,
   `FastMCP.from_openapi`, decorators on a server imported from another module, a
@@ -307,37 +314,124 @@ A way around a limit that its entry does not describe is worth a
   (`method = server.run`, `anyio.run(server.run_stdio_async)`), keeping a
   decorator, or naming the server in an annotation. An app or run coroutine still
   holds the server, so code that digs it back out of one other than by the
-  reflection below is not seen. A type in an annotation is the whole annotation,
+  reflection below is not seen. A request context also hands handlers the server,
+  so in any Python file the collector reads, an attribute named `fastmcp` or
+  `fastmcp_server`, with or without leading underscores, as in
+  `ctx.fastmcp.add_tool(...)`, `ctx._fastmcp` or the
+  `request.app.state.fastmcp_server` of a `fastmcp` HTTP app, is a gap. In a file
+  that imports from `mcp` or `fastmcp`, so is an attribute named `fastmcp_context`, `current_context`, `request_ctx`, `request_context` or
+  `mcp_server`, as in a middleware's `context.fastmcp_context` or an `MCPServer`
+  context's `ctx.mcp_server`, or one of the `fastmcp` accessors and dependency
+  defaults `get_server`, `current_server`, `fastmcp_request_ctx`, `CurrentFastMCP`,
+  `CurrentContext`, `OptionalCurrentContext`, `get_http_request` and
+  `CurrentRequest`, or the context variables and hooks `current_http_request`,
+  `extension_dispatch_scope`, `delegated_extension_scope`, `worker_server_resolver`
+  and `background_context_factory`, as in `def read_note(server=CurrentFastMCP())`
+  or `get_http_request().app`, each with or without leading underscores or behind a
+  literal `getattr(...)`, and so is
+  importing any of these names from `mcp` or `fastmcp`. Because a release can keep
+  the server in a private variable these lists do not name, importing any private
+  name (one leading underscore, not a dunder such as `__version__`) from an `mcp` or
+  `fastmcp` module, or reading one as an attribute or literal `getattr(...)` of an SDK
+  module, of a name imported from one or of a name assigned from either, as in
+  `extensions._extension_dispatch_scope` or `ext._hook` after `ext = extensions`, is a
+  gap too; a private name reached any other way, such as through a dynamic import, is
+  not seen. Only `mcp.server.fastmcp` reached by attributes alone from a name bound only
+  by `import mcp...`, as in `mcp.server.fastmcp.exceptions`, is a module path and not a
+  gap; `fastmcp` on any other object is, such as a settings object's `config.fastmcp`,
+  `getattr(mcp, "missing", ctx).fastmcp`, whose default can be any object, or
+  `mcp.types.carrier.fastmcp`, a value stored on a module. In a file that imports from
+  `mcp` or `fastmcp`, storing or deleting an attribute of an SDK module, of a name
+  imported from one or of a name assigned from either is a gap too, as in
+  `fastmcp.FastMCP.__init__ = hook`, `del S.FastMCP.list_tools` or
+  `fastmcp.settings.debug = True`, because it can change what servers built elsewhere
+  register or carry a context to code that reads it back. For both rules the default
+  of a literal `getattr(...)` counts as its object, as it is returned when the
+  attribute is missing; an SDK module or name reached through any other expression,
+  such as `(obj or fastmcp).FastMCP.__init__ = hook`, and a method call that changes an
+  SDK object are not seen. In a file that imports from `mcp` or
+  `fastmcp`, a parameter typed as the SDK `Context` (a `Context` imported from an
+  SDK module, a qualified `Context` of an SDK module, `getattr(..., "Context")`, or
+  a string forward-reference annotation naming or computing one), and a name bound in
+  a function body by a plain
+  assignment of the result of a `get_context()` call, by name or as an attribute of
+  anything, may only be read for `request_id`, `client_id`,
+  `session_id`, `session`, `headers`, `protocol_version`, `client_capabilities`,
+  `transport`, `task_id`, `origin_request_id` or `is_background_task`, compared with
+  `is`, tested, or have a known SDK method called on it: a logging, progress,
+  resource, prompt, elicitation, sampling, roots, state, notification, extension
+  or visibility method. Passing it to a call, storing, returning or aliasing it,
+  reading any other attribute without calling it (a bound method holds the
+  context), calling any other method (`model_copy()` returns the context), binding
+  the result of `get_context()` in a class or module body or to a name declared
+  `global` or `nonlocal` there, or
+  using `get_context` any other way (including `getattr(..., "get_context")`) is a gap, because it can hand the server to a module
+  the collector does not read. The imported `Context` itself may only appear in
+  parameter annotations: an alias such as `Ctx = Context` or
+  `Ctx = getattr(context, "Context")`, a subclass, an
+  `isinstance` check, a return or variable annotation, or importing it without
+  using it, which can re-export it to another module, is a gap. Using a context
+  only to log, report progress or read its request data is not a gap. A context
+  reached in any other way, such as an unannotated middleware context passed on,
+  a coroutine a context method returns, an HTTP request or app (whose state holds
+  the server) passed to code the collector does not read, an SDK module object
+  passed to code the collector does not read, or a context reached by reflection in a file that
+  names no MCP SDK or framework, which is not read, is not seen. A type in an annotation is the whole annotation,
   a member of a `|` union, or an argument of a generic of `typing`,
   `typing_extensions` or `collections.abc`, such as `Optional[FastMCP]`, or of a
   built-in generic such as `list[FastMCP]`. Any other part of an annotation, such
   as a call or another subscript, is analyzed as code, because annotations are
-  evaluated. In a file with a recognized server or PydanticAI agent, this
-  reflection is a gap even when harmless: a reference by name to `locals`,
-  `globals`, `vars`, `eval`, `exec`, `__import__`, `setattr` or `delattr`;
-  `__builtins__` or an import of `builtins`, `__main__`, `_imp`, `imp`,
-  `_frozen_importlib`, `_frozen_importlib_external`, `_importlib` or `runpy`;
-  `getattr` by name, unless it is not rebound and is called directly with two or
-  three positional arguments whose attribute is a literal name other than `modules`
-  and those listed next, on an object that is not a recognized server or agent, so
-  `getattr(self, "name")` and `getattr(os, "environ")` are accepted while
-  `getattr(mcp, "tool")` and `fn = getattr` are gaps; the attributes `__self__`,
-  `__closure__`, `__globals__`, `__builtins__`, `__dict__`, `__annotations__`,
-  `__traceback__`, `__code__`, `__getattribute__`, `__setattr__`, `__delattr__`,
-  `__import__`, `import_module`, `resolve_name`, `attrgetter`, `methodcaller`,
+  evaluated. So is a string literal wherever `typing.get_type_hints` and the SDKs
+  evaluate it as a forward reference: the whole annotation, a member of a `|` union,
+  an element of a tuple or list, or an argument of any subscript, since a generic
+  defined anywhere turns a string argument into a forward reference. The arguments of
+  `Literal` and the metadata of `Annotated` are values and are not parsed, each
+  recognized by the name it is imported as from `typing`, `typing_extensions` or
+  `collections.abc`, not the name it is bound to. A string is parsed as
+  `typing.ForwardRef` compiles it, a leading `*` unpacked, so
+  `x: "*(mcp.add_tool(hidden) or [str])"` is code. In a file with a recognized server,
+  an `mcp` or `fastmcp` import, or a PydanticAI agent, such a string that does not
+  parse, perhaps only for the Python that runs the scan, an f-string there, a string
+  longer than 4,096 characters, strings nested four deep and more than 10,000 syntax
+  nodes parsed from the file's annotation strings are gaps. A string that becomes a
+  type another way is code the collector does not see: an annotation that evaluates
+  to a string bound to a name or built at run time, as in `x: NOTE_TYPE`, a `TypeVar`
+  bound, or a field type passed to `TypedDict(...)` or `NamedTuple(...)`. In a file
+  with a recognized server, an `mcp` or `fastmcp` import, or a PydanticAI agent, this
+  reflection is a gap even when harmless: a reference by name to `locals`, `globals`,
+  `vars`, `eval`, `exec`, `__import__`, `setattr` or `delattr`, an alias such as
+  `peek = locals` included, except in the body of a function, not a nested function or
+  class, that has a parameter of that name, so a tool
+  `def render(template: str, vars: dict)` may use `vars` but a local variable named
+  `vars` is a gap; `__builtins__`, `__annotations__` or `__annotate__` bound or read by
+  name, as in a class body's `__annotations__ = {...}`, or an import of `builtins`,
+  `__main__`, `_imp`, `imp`, `_frozen_importlib`, `_frozen_importlib_external`,
+  `_importlib` or `runpy`; a reference by name to `getattr`, unless it is not rebound and is
+  called directly with two or three positional arguments whose attribute is a literal
+  name other than `modules` and those listed next, on an object that is not a recognized
+  server, typed `Context` or agent (and checked by the same handle, private-attribute
+  and context rules as an attribute read), so `getattr(self, "name")`,
+  `getattr(os, "environ")` and `getattr(block, "text", "")` are accepted while
+  `getattr(mcp, "tool")`, `getattr(ctx, "fastmcp")` and `fn = getattr` are gaps;
+  the attributes `__self__`, `__closure__`, `__globals__`, `__builtins__`,
+  `__dict__`, `__annotations__`, `__annotate__`, `__traceback__`, `__code__`,
+  `__getattribute__`, `__setattr__`, `__delattr__`, `__import__`, `import_module`,
+  `resolve_name`, `attrgetter`, `methodcaller`, `getattr`, `ForwardRef`,
   `exec_module`, `load_module`, `spec_from_file_location`, `_gcd_import`,
-  `_bootstrap`, `_bootstrap_external`, `tb_frame`, `tb_next`, `f_back`, `f_locals`,
-  `f_globals`, `f_builtins`, `gi_frame`, `cr_frame`, `ag_frame`, `_getframe`,
-  `currentframe`, `getouterframes`, `getinnerframes`, `getargvalues`,
-  `getclosurevars`, `getmodule`, `stack`, `trace` and `getattr_static`, also
-  imported by name; and a `modules` attribute that is not called, as in
-  `sys.modules[__name__]`, or `modules` imported from `sys`. A method that only
-  shares a name, such as `model.eval()` or `model.modules()`, is not reflection.
-  Other reflection is not recognized, such as a reflective builtin under another
-  name, a module that imports itself by its own literal name, as `import server`
-  does in `server.py`, `gc`, or reflection in another file, including on the
-  traceback of an exception that propagated out of a server's run, so a completed
-  scan cannot prove that a server or agent never escaped.
+  `_bootstrap`, `_bootstrap_external`, `tb_frame`, `tb_next`, `f_back`, `f_locals`, `f_globals`,
+  `f_builtins`, `gi_frame`, `cr_frame`, `ag_frame`, `_getframe`, `currentframe`,
+  `getouterframes`, `getinnerframes`, `getargvalues`, `getclosurevars`,
+  `getmodule`, `stack`, `trace` and `getattr_static`, also
+  imported by name, so `importlib.import_module(...)`,
+  `from operator import attrgetter` and `typing.ForwardRef("...")` are gaps, harmless
+  or not; and a `modules`
+  attribute that is not called, as in `sys.modules[__name__]`, or `modules`
+  imported from `sys`. A method that only shares a name, such as `model.eval()`
+  or `model.modules()`, is not reflection. Other reflection is not recognized,
+  such as a reflective builtin reached through another module, a module that
+  imports itself by its own literal name, as `import server` does in `server.py`, `gc`, or reflection in another file,
+  including on the traceback of an exception that propagated out of a server's run,
+  so a completed scan cannot prove that a server or agent never escaped.
   Any
   call whose first argument, or `name` keyword, is a literal that names `mcp`,
   `mcp.server` or `fastmcp`, or a submodule of the last two, is a gap whatever the
