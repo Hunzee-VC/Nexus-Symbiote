@@ -2412,8 +2412,9 @@ class RegistryScanner(Scanner):
                 )
                 continue
             # A record found by name records no specifier: pnpm lists the root's
-            # dependencies in every format, so a lockfile that does not is stale.
-            if not self._pnpm_spec_agrees(
+            # dependencies in every format, so a lockfile that does not is stale, whatever
+            # a top-level `specifiers` map claims.
+            if matched_pkg_key is not None or not self._pnpm_spec_agrees(
                 specifiers.get(comp.name),
                 (declared_specs or {}).get(comp.name),
                 (override_specs or {}).get(comp.name),

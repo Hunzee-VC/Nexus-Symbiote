@@ -22,7 +22,24 @@ _ENV_TEMPLATE_SUFFIXES = frozenset({".example", ".sample", ".template"})
 # of the inventory. One named only for what it holds, such as `secrets.py`, is a store
 # written as a program and stays a credential file, as the names and suffixes above do.
 _PROGRAM_SUFFIXES = frozenset(
-    {".py", ".pyi", ".sh", ".bash", ".zsh", ".ps1", ".js", ".mjs", ".cjs", ".ts", ".rb", ".go"}
+    {
+        ".py",
+        ".pyi",
+        ".sh",
+        ".bash",
+        ".zsh",
+        ".ps1",
+        ".js",
+        ".mjs",
+        ".cjs",
+        ".jsx",
+        ".ts",
+        ".mts",
+        ".cts",
+        ".tsx",
+        ".rb",
+        ".go",
+    }
 )
 # Directories named for what the files in them hold, such as `secrets/`. Only a whole
 # name counts, so a skill named `secret-scanner` keeps its scripts.

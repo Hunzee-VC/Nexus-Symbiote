@@ -143,3 +143,23 @@ def test_a_lockfile_without_importers_binds_no_record_by_name(
     assert "pnpm-lock.yaml: selected package version disagrees with package.json" in (
         result.scan_failures
     )
+
+
+@pytest.mark.parametrize("key", ["/openai@4.0.0", "openai@4.0.0", "/openai/4.0.0"])
+@pytest.mark.parametrize("version", ["'9.0'", "'6.0'", "5.4"])
+def test_a_specifiers_map_does_not_let_a_record_found_by_name_bind(
+    tmp_path: Path, version: str, key: str
+) -> None:
+    # A top-level `specifiers` map that agrees with package.json is no root importer:
+    # the record is still found only by name, so the lockfile is stale.
+    (tmp_path / "package.json").write_text('{"dependencies":{"openai":"^5.0.0"}}')
+    (tmp_path / "pnpm-lock.yaml").write_text(
+        f"lockfileVersion: {version}\nspecifiers:\n  openai: ^5.0.0\npackages:\n  {key}: {DECOY}\n"
+    )
+    result = RegistryScanner().scan(tmp_path)
+    (component,) = result.components
+    assert component.package_url is None
+    assert INTEGRITY not in str(component.model_dump(mode="json"))
+    assert "pnpm-lock.yaml: selected package version disagrees with package.json" in (
+        result.scan_failures
+    )

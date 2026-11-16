@@ -345,6 +345,10 @@ def test_names_that_hold_credentials_are_credential_shaped(name):
         "jest.env.js",
         "vite.env.d.ts",
         "app.env.ts",
+        "vitest.env.mts",
+        "app.env.tsx",
+        "jest.env.jsx",
+        "node.env.cts",
     ],
 )
 def test_templates_and_programs_named_for_credentials_are_not(name):
