@@ -823,7 +823,32 @@ A way around a limit that its entry does not describe is worth a
   lower case. The `wheels` and `sdist` URLs of a
   `uv.lock` record are not read, so the recorded origin is the index, not where each
   artifact is downloaded from. Lockfiles of more than one npm package manager, or both
-  `uv.lock` and `poetry.lock`, are a gap and bind no lockfile evidence.
+  `uv.lock` and `poetry.lock`, are a gap and bind no lockfile evidence. `yarn.lock` is
+  read with a strict subset of Yarn 1's lockfile syntax, and of the YAML that Yarn
+  Berry writes: a lockfile edited into another layout that Yarn still accepts, such
+  as one with indented comments or a carriage return without a line feed, is a
+  collection failure, and so is one with a construct Yarn reads but never writes,
+  such as an empty stanza or an unknown nested map in a Yarn 1 stanza. Which of two
+  Yarn 1 stanzas with the same version Yarn installs depends on the order it resolves
+  dependencies in, which is not modeled: when another range's stanza with that version
+  records another URL, integrity or checksum, the package binds no lockfile evidence,
+  even where Yarn would install the declared one. A Yarn Berry lockfile with a record
+  of a package whose name Yarn 4 hashes as it hashes the declared one, such as
+  `@op/enai` for `openai`, binds neither, even for another range that Yarn would keep
+  apart.
+- **A Yarn Berry checksum counts as Yarn 4 checks it.** The collector models the cache
+  key `10c0` that Yarn 4 computes at its default compression level, and reads Yarn's
+  settings from the root `.yarnrc.yml` and the release `package.json` names for
+  Corepack only. A project that runs another Yarn release through the Yarn installed on
+  the runner, with Corepack off or `package.json` naming none, or through a `.yarnrc`
+  `yarn-path` that Yarn 1 follows, may compute another key and accept archives
+  unchecked, and so may user or global configuration, a `.yarnrc.yml` in a parent
+  directory and `YARN_*` environment variables such as `YARN_CHECKSUM_BEHAVIOR` or
+  `YARN_YARN_PATH`, none of which are read. An archive already in the runner's
+  global cache, such as one a CI cache restores, is checked against the lockfile's
+  checksum only, not against the registry. A lockfile that Yarn 2 or 3 wrote, with
+  `cacheKey: 8`, has a `missing_lockfile_integrity` finding even where Yarn 3 installs
+  and checks it.
 - **Some lockfiles are not read.** `Pipfile.lock`, `pdm.lock`, `bun.lock` and
   `bun.lockb` give each package they may resolve a low `lockfile_unread` finding,
   not a gap.
