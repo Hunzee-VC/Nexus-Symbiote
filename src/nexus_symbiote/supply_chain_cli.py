@@ -186,10 +186,12 @@ def register_supply_chain_commands(main: click.Group) -> None:
         is_flag=True,
         help=(
             "Explicitly allow execution without a PID namespace; printed as a warning. On "
-            "Linux the launcher is made a child subreaper and is stopped before cleanup, so "
-            "its descendants are killed with the session while it is alive; a descendant "
-            "that outlives the launcher can escape, as can one that deliberately evades "
-            "cleanup. Elsewhere cleanup is best effort. This is not a namespace or sandbox."
+            "Linux the launcher is made a child subreaper and is stopped before cleanup. "
+            "When a cgroup v2 child can be created, cleanup writes cgroup.kill, which also "
+            "kills a clone(CLONE_PARENT) child that has called setsid. Otherwise cleanup "
+            "kills the descendant tree, the process group, and every process still in the "
+            "launcher's session. A process that leaves that session and the cgroup can "
+            "escape. Elsewhere cleanup is best effort. This is not a namespace or sandbox."
         ),
     )
     def verify_live(
@@ -244,10 +246,12 @@ def register_supply_chain_commands(main: click.Group) -> None:
         if no_isolation:
             click.echo(
                 "warning: --no-isolation: kernel PID containment is disabled. On Linux the "
-                "launcher is a child subreaper and is stopped before cleanup, so its "
-                "descendants are killed with the session while it is alive; a descendant "
-                "that outlives the launcher can escape, as can one that deliberately evades "
-                "cleanup. Elsewhere cleanup is best effort. This is not a namespace or sandbox.",
+                "launcher is a child subreaper and is stopped before cleanup. When a cgroup "
+                "v2 child can be created, cleanup writes cgroup.kill, which also kills a "
+                "clone(CLONE_PARENT) child that has called setsid. Otherwise cleanup kills "
+                "the descendant tree, the process group, and every process still in the "
+                "launcher's session. A process that leaves that session and the cgroup can "
+                "escape. Elsewhere cleanup is best effort. This is not a namespace or sandbox.",
                 err=True,
             )
         with isolation_off() if no_isolation else contextlib.nullcontext():
