@@ -284,6 +284,27 @@ def _state(pid: int) -> bytes:
     return fields[0] if fields else b"X"
 
 
+def _halted(pid: int) -> bool:
+    """Whether no thread of ``pid`` can run: each is stopped or has exited.
+
+    ``/proc/<pid>/stat`` shows the thread-group leader only, and a leader that exited
+    while another thread runs reads as a zombie, so every task is read.
+    """
+    try:
+        tasks = os.listdir(f"/proc/{pid}/task")
+    except OSError:
+        return _state(pid) in _HALTED
+    for task in tasks:
+        try:
+            with open(f"/proc/{pid}/task/{task}/stat", "rb") as stat:
+                fields = stat.read().rpartition(b")")[2].split()
+        except OSError:
+            continue
+        if fields and fields[0] not in _HALTED:
+            return False
+    return True
+
+
 def _children_by_parent() -> dict[int, list[int]]:
     """Each parent pid's children, from one scan of ``/proc``; OSError if it is unreadable."""
     children: dict[int, list[int]] = {}
@@ -363,7 +384,7 @@ def _stop_tree(root: int) -> None:
     deadline = time.monotonic() + _STOP_SECONDS
     delay = 0.0005
     while True:
-        running = [pid for pid in _descendant_pids(root) - refused if _state(pid) not in _HALTED]
+        running = [pid for pid in _descendant_pids(root) - refused if not _halted(pid)]
         if not running or time.monotonic() >= deadline:
             return
         for pid in running:
@@ -699,7 +720,7 @@ def _await_reaped(wrapper: int) -> bool:
         if not tree:
             return True
         if time.monotonic() >= deadline:
-            return all(_state(pid) in {b"Z", b"X"} for pid in tree)
+            return all(_ended(pid) for pid in tree)
         time.sleep(delay)
         delay = min(delay * 2, 0.02)
 

@@ -1659,3 +1659,50 @@ def test_gate_is_disabled_and_init_fd_closes_without_pidfd_send_signal(
             os.close(read_fd)
         monkeypatch.undo()
         _end_supervised(proc, init)
+
+
+# The main thread exits while a second thread sleeps, so the process reads as a zombie
+# in /proc/<pid>/stat although it is still running.
+_EXITED_MAIN_THREAD = (
+    "import ctypes, os, sys, threading, time\n"
+    "threading.Thread(target=time.sleep, args=(60,)).start()\n"
+    "open(sys.argv[1] + '.tmp', 'w').write(str(os.getpid()))\n"
+    "os.replace(sys.argv[1] + '.tmp', sys.argv[1])\n"
+    "ctypes.CDLL(None).pthread_exit(None)\n"
+)
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="the opt-out wrapper is Linux only"
+)
+def test_a_survivor_whose_main_thread_exited_is_not_taken_for_ended(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = tmp_path / "pid"
+    command, digest = _pinned(
+        tmp_path / "launcher",
+        "import subprocess\n"
+        f"subprocess.Popen([{sys.executable!r}, '-I', '-S', '-c', {_EXITED_MAIN_THREAD!r},"
+        f" {str(marker)!r}], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,"
+        " stderr=subprocess.DEVNULL)\n"
+        f"for _ in range(300):\n    if os.path.exists({str(marker)!r}):\n        break\n"
+        "    time.sleep(0.01)\n"
+        "time.sleep(0.2)\n",
+    )
+    kill = os.kill
+
+    def refuse(pid: int, sig: int) -> None:
+        # Stands in for a process of the tree that this user may not signal.
+        if marker.exists() and pid == _host_pid(marker):
+            raise PermissionError(1, "Operation not permitted")
+        kill(pid, sig)
+
+    monkeypatch.setattr(pinned_process.os, "kill", refuse)
+    monkeypatch.setattr(pinned_process, "_TEARDOWN_SECONDS", 0.5)
+    try:
+        with isolation_off(), pytest.raises(LaunchPolicyError) as failed:
+            observe_pinned(str(command), digest)
+        assert failed.value.reason == "isolation-teardown-failed"
+    finally:
+        monkeypatch.undo()
+        _kill_recorded(marker)
