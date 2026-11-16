@@ -9,7 +9,7 @@ import heapq
 import re
 import string
 from collections.abc import Iterable, Iterator, Mapping
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit, urlunsplit
 
 from nexus_symbiote.utils._legacy_redaction import (
@@ -38,11 +38,22 @@ _CREDENTIAL_KEYWORD = (
     r"|token|password|passwd|passphrase|pwd|secret|credentials?|sig)"
     r"(?:\d{1,4})?(?:[-_.][a-z0-9]{1,32}){0,4}"
 )
+# The mark between a name and its value: `:` or `=`, or a two-character operator that
+# starts with one, such as `:=`, `=>`, `::` or `==`. Read as a one-character mark, the
+# operator's second character became the value and the real one stayed in clear.
+_MARK = r"[:=]{1,2}+>?+"
 _ASSIGNMENT = re.compile(
-    rf"(?i)({_CREDENTIAL_KEYWORD}[\"']?\s*+[:=]\s*+)"
+    rf"(?i)({_CREDENTIAL_KEYWORD}[\"']?\s*+{_MARK}\s*+)"
     r"(\"(?:[^\"\\\n]|\\.){0,256}\"|'(?:[^'\\\n]|\\.){0,256}'|[^\s,;]++)"
 )
-_TRAILING_ASSIGNMENT_KEY = re.compile(rf"(?i)(?:{_CREDENTIAL_KEYWORD})[\"']?[:=]\Z")
+_TRAILING_ASSIGNMENT_KEY = re.compile(rf"(?i)(?:{_CREDENTIAL_KEYWORD})[\"']?{_MARK}\Z")
+# A long command-line option named for a credential, with its value as the next word:
+# `--password value`, `--db-password "value"`. A word that starts with `-` is the next
+# option, not a value.
+_FLAG = re.compile(
+    rf"(?i)(?<![\w-])--(?:[a-z0-9]{{1,32}}[-_]){{0,4}}{_CREDENTIAL_KEYWORD}\s++"
+    r"(\"(?:[^\"\\\n]|\\.){0,256}\"|'(?:[^'\\\n]|\\.){0,256}'|(?!-)[^\s,;]++)"
+)
 # A mapping key that _ASSIGNMENT would read as the name in `name: value`.
 _CREDENTIAL_KEY = re.compile(rf"(?i){_CREDENTIAL_KEYWORD}\Z")
 _AUTHORIZATION_KEY = re.compile(r"(?i)(?:proxy-)?authorization")
@@ -576,7 +587,7 @@ def _apply(value: str, spans: list[Span], rewrites: list[_Rewrite]) -> str:
 
 # The name part of an assignment, and the two quoted value forms; an unquoted value runs
 # to the next whitespace, `,` or `;`. The value forms are those of _ASSIGNMENT.
-_ASSIGNMENT_NAME = re.compile(rf"(?i){_CREDENTIAL_KEYWORD}[\"']?\s*+[:=]\s*+")
+_ASSIGNMENT_NAME = re.compile(rf"(?i){_CREDENTIAL_KEYWORD}[\"']?\s*+{_MARK}\s*+")
 _QUOTED_VALUE = re.compile(r"\"(?:[^\"\\\n]|\\.){0,256}\"|'(?:[^'\\\n]|\\.){0,256}'")
 _VALUE_END = re.compile(r"[\s,;]")
 # What stands in for a URL while the rules read the rest of the text. It is no keyword,
@@ -585,6 +596,10 @@ _VALUE_END = re.compile(r"[\s,;]")
 # own instead, bounded at its end, so an assignment inside one ends there, as
 # `<a href="https://h/cb?token=v">password: w` needs.
 _URL_MASK = "\x00"
+# A credential name that ends a URL, with its mark when the URL holds it, and the rest
+# of an assignment after the URL: a closing quote, spaces and the mark.
+_URL_END_NAME = re.compile(rf"(?i)(?:{_CREDENTIAL_KEYWORD})[\"']?(?P<mark>{_MARK})?\Z")
+_AFTER_URL_MARK = re.compile(rf"[\"']?\s*+(?P<mark>{_MARK})?\s*+")
 # How far before a URL's start a credential name that runs into it may begin, and how
 # far past it the name may end: longer than any keyword with its suffixes.
 _NAME_REACH = 256
@@ -668,15 +683,28 @@ def _assignment_spans(value: str, url_spans: list[Span]) -> Iterable[Span]:
     after_runs = _UnquotedRuns(value, len(value))
     for url_start, url_end in url_spans:
         yield from _every_assignment(value, url_start, url_end)
-        if url_end >= len(value) or value[url_end] not in " \t\"'":
+        if url_end >= len(value):
             continue
-        window = max(url_start, url_end - 180)
-        if _TRAILING_ASSIGNMENT_KEY.search(value, window, url_end) is None:
+        tail = _URL_END_NAME.search(value, max(url_start, url_end - 180), url_end)
+        if tail is None:
             continue
+        # The mark is in the URL (`?a,password: v`), after it (`?a,password : v`), or
+        # split by it: a URL ends before `>`, so `?a,API_KEY=>v` and `:>v` leave `>` outside. A
+        # `>` that a name follows ends an autolink instead, as in `<https://h/?p=>token:`.
         gap = url_end
-        while gap < len(value) and value[gap] in " \t":
+        if (
+            tail.group("mark") in ("=", ":")
+            and value[gap] == ">"
+            and _ASSIGNMENT_NAME.match(value, gap + 1) is None
+        ):
             gap += 1
-        span = _value_span(value, gap, len(value), after_runs)
+        elif not (value[gap].isspace() or value[gap] in "\"'"):
+            continue
+        # Every part of the pattern is optional, so it always matches.
+        after = cast(re.Match[str], _AFTER_URL_MARK.match(value, gap))
+        if tail.group("mark") is None and after.group("mark") is None:
+            continue
+        span = _value_span(value, after.end(), len(value), after_runs)
         if span is not None and value[span[0] : span[1]].lower() not in _AUTH_SCHEMES:
             yield span
 
@@ -717,6 +745,7 @@ def _rule_matches(
     if not identifier:
         spans.extend(_private_key_spans(value))
     spans.extend(_assignment_spans(value, url_spans))
+    spans.extend(match.span(1) for match in _FLAG.finditer(value))
     # The scheme, header and cookie rules read the text as it is, where a scheme word or
     # header name inside a URL still marks the credential after it, and again with each
     # URL masked, as main read it with each URL rewritten: a URL then ends the word or
