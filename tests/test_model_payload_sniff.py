@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import io
+import os
 import pickle
 import pickletools
 import random
+import subprocess
+import sys
 import time
 import zipfile
 from collections.abc import Callable
@@ -364,7 +367,6 @@ def test_a_later_entry_whose_name_runs_past_the_file_does_not_hide_a_pickle(
 @pytest.mark.parametrize(
     "text",
     [
-        b"checkpoint*\n*.pth\n.DS_Store\n",
         b"N.B. these weights are converted by convert.py\n",
         b"cached/\nlogs/\n.",
         b"logs/*\n.env\n",
@@ -374,6 +376,56 @@ def test_text_under_a_model_directory_is_not_read_as_a_pickle(tmp_path: Path, te
     (tmp_path / "checkpoints").mkdir()
     (tmp_path / "checkpoints" / ".gitignore").write_bytes(text)
     assert _component(tmp_path, "checkpoints/.gitignore") is None
+
+
+def test_text_that_reads_as_an_importable_global_is_unknown(tmp_path: Path) -> None:
+    # `pickle.load` imports a module named `heckpoint*` when a file `heckpoint*.py` is on
+    # its path, and the module's __getattr__ may answer `*.pth`, so this is a GLOBAL
+    # returned at STOP. A module name that may hold any character a file name may is
+    # the price of not missing `cev-il\nrun\n)R.` beside a committed `ev-il.py`.
+    (tmp_path / "checkpoints").mkdir()
+    (tmp_path / "checkpoints" / ".gitignore").write_bytes(b"checkpoint*\n*.pth\n.DS_Store\n")
+    component = _component(tmp_path, "checkpoints/.gitignore")
+    assert component is not None
+    assert component.serialization_safety is SerializationSafety.UNKNOWN
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"cev-il\nrun\n)R.",
+        b"cevil x\nrun\n)R.",
+        b"\x80\x02cev-il\nrun\n)R.",
+        b"\x80\x04\x95\x00\x00\x00\x00\x00\x00\x00\x00\x8c\x05ev-il\x8c\x03run\x93)R.",
+    ],
+    ids=["global-dash", "global-space", "proto-2", "stack-global"],
+)
+def test_a_pickle_that_imports_a_module_with_any_file_name_is_critical(
+    tmp_path: Path, data: bytes
+) -> None:
+    # find_class imports the module first, and importlib imports `ev-il.py` or
+    # `evil x.py` beside the loader, which runs that file.
+    module = (
+        data.split(b"\x8c\x05")[1][:5]
+        if b"\x93" in data
+        else data.split(b"c", 1)[1].split(b"\n")[0]
+    )
+    lab = tmp_path / "lab"
+    lab.mkdir()
+    (lab / (module.decode() + ".py")).write_text("open('IMPORTED', 'w').write('yes')\nrun = len\n")
+    (lab / "w.bin").write_bytes(data)
+    subprocess.run(  # noqa: S603
+        [sys.executable, "-c", "import pickle; pickle.load(open('w.bin', 'rb'))"],
+        cwd=lab,
+        capture_output=True,
+        env={"PYTHONPATH": str(lab), "PATH": os.defpath},
+        check=False,
+    )
+    assert (lab / "IMPORTED").exists()
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "weights").write_bytes(data)
+    component = _component(tmp_path, "models/weights")
+    assert component is not None and component.serialization_safety is UNSAFE
 
 
 def test_a_text_pickle_that_names_an_importable_global_is_critical(tmp_path: Path) -> None:
@@ -1038,8 +1090,8 @@ def test_a_memo_slot_that_was_stored_is_read_back(tmp_path: Path) -> None:
 # pure-Python unpicklers, with find_class returning a class that records each way it is
 # used instead of importing anything (called, __new__, __setstate__, item assignment,
 # append, extend, add, hashing, iteration, truth, __index__ and keys()), and
-# persistent_load an inert object. find_class fails for a name that is not a dotted
-# identifier, as an import of it does.
+# persistent_load an inert object. find_class fails only for a module that no finder can
+# name, as the import of it does; any other module may be a file of that name.
 
 
 class _Log:
@@ -1083,7 +1135,7 @@ def _unpickler(base: type) -> type:
 
         def find_class(self, module: str, name: str) -> type:
             self.log.resolved = True
-            if not all(part.isidentifier() for part in [*module.split("."), *name.split(".")]):
+            if pickle_load._unimportable(module):
                 raise ImportError(module)
             return _recording(self.log)
 

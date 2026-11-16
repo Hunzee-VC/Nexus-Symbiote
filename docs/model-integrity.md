@@ -38,8 +38,10 @@ the pickle stands or from the frame's end. A call that one supported version rea
 is rated whatever version runs the scan. It never imports, calls or builds an
 object: what `find_class` returns is a placeholder that stands for any attribute of a
 module, a class or a function as well as `os.environ`, `sys.path` or
-`builtins.__dict__`, and a module or name that is not a dotted identifier, which no
-import finds, fails as the import does. A pickle
+`builtins.__dict__`. `find_class` imports the module before it looks the name up, and
+`importlib` imports a file of any name, such as `ev-il.py` or `evil x.py`, so only a
+module that no finder can name fails as the import does: an empty one, one with a NUL,
+or one with a `/` in a dotted part. A pickle
 ends where `pickle.load` would stop: at STOP, where the next one starts, or at the
 first error, such as a byte that is no opcode, PROTO above 5, a stack underflow, a
 MARK that is missing, a read of a memo slot never stored, an unhashable key or the end
@@ -53,7 +55,7 @@ of the file, after which nothing is read. The ratings are:
   or `os.environ['LD_PRELOAD'] = ...` needs no call opcode), and a key, set item,
   argument list, state, buffer or `STACK_GLOBAL` string that is the resolved object
   runs its methods or passes a type check an object of the right type would pass. A
-  call reached only through a name that is not a dotted identifier, or through what a
+  call reached only through a module that no finder can name, or through what a
   loader's `persistent_load` returned, counts for nothing.
 - A pickle that the 64 KiB, opcode or MARK bound cuts short before the loader's
   behaviour is decided is `unknown` when it follows an earlier STOP, when the file

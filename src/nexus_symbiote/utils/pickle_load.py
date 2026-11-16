@@ -3,8 +3,10 @@
 ``load_segment`` reads one pickle from a byte sample the way ``pickle.load`` reads it
 from ``io.BytesIO``, as the C unpickler (``"c"``) or the pure-Python one (``"py"``)
 does: the same reads and frame handling, the same stack, MARK and memo rules and the
-same errors, opcode by opcode. ``find_class`` fails for a module or name that is not a
-dotted identifier, which no import finds; otherwise it returns an opaque object, which
+same errors, opcode by opcode. ``find_class`` imports the module before it looks the
+name up, and ``importlib`` imports a file of any name, so it fails only for a module no
+finder can name (empty, with a NUL, or with a ``/`` in a dotted part); otherwise it
+returns an opaque object, which
 a real import may make any module attribute: a class, a function, ``os.environ``,
 ``builtins.__dict__``. Every opcode that hands that object to anything but the stack
 and the memo ends the walk as a call: calling it, ``__new__``, BUILD, SETITEM(S),
@@ -83,8 +85,13 @@ VERSION_DIFFERENCES: dict[str, str] = {
 }
 # Differences that change no step here: find_class resolves a dotted name through
 # _getattribute / get_dotted_path in 3.14, without the '<locals>' check of 3.11-3.13,
-# and only a dotted identifier resolves here; the C unpickler looks persistent_load up
+# and any module a finder can name resolves here; the C unpickler looks persistent_load up
 # once per load from 3.13 (_pickle.c load) instead of at construction.
+
+
+def _unimportable(module: str) -> bool:
+    """Whether ``__import__(module)`` fails before any module code can run."""
+    return not module or "\x00" in module or any("/" in part for part in module.split("."))
 
 
 class _LoadError(Exception):
@@ -219,7 +226,7 @@ class Segment:
     """How one ``pickle.load`` ends.
 
     ``resolved`` says whether it reached ``find_class`` and ``named`` whether a call
-    of it returned, for a module and name that are dotted identifiers. A ``called``
+    of it returned, for a module that a finder can name. A ``called``
     pickle is ``certain`` unless only an object of the right type gets that far. After
     a STOP, ``resumes`` holds where the next ``pickle.load`` starts: where the loader
     left ``io.BytesIO``, then, when different, right after the STOP, as the C
@@ -424,10 +431,17 @@ class _Machine:
         return self.pop_mark() or None
 
     def resolve(self, module: str, name: str) -> None:
-        """``find_class(module, name)``, which imports nothing a dotted name cannot name."""
+        """``find_class(module, name)``, which imports ``module`` before it reads ``name``.
+
+        ``importlib`` imports a file of any name, such as ``ev-il.py`` or ``e x.py``, and
+        a module's ``__getattr__`` answers any name, so neither has to be an identifier.
+        Only a module that no finder can name fails before an import runs: an empty
+        one, one holding a NUL, or one with a ``/`` in a dotted part, which no file or
+        directory name holds.
+        """
         self.resolved = True
-        if not all(part.isidentifier() for part in [*module.split("."), *name.split(".")]):
-            raise _LoadError  # ModuleNotFoundError, or an AttributeError
+        if _unimportable(module):
+            raise _LoadError  # ValueError or ModuleNotFoundError, before any import runs
         self.named = True
         self.push(_Opaque())
 
