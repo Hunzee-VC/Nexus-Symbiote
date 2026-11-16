@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import io
+import os
 import pickle
 import pickletools
 import random
+import subprocess
+import sys
 import time
 import zipfile
 from collections.abc import Callable
@@ -705,7 +708,11 @@ def test_a_text_pickle_past_a_bound_is_unknown_by_content(
         (b"F-inf", 1000, "unread"),
         (b"cos\nsys", 1000, "unread"),
         (b"cos path\nsys", 1000, "unread"),  # only the module line shows
-        (b"cos\nsys tem", 1000, "error"),
+        # The module is imported before the name is looked up, and a module named
+        # `ev-il` imports, so only text that is not UTF-8 fails a GLOBAL line early.
+        (b"cos\nsys tem", 1000, "unread"),
+        (b"cev-", 1000, "unread"),
+        (b"cos\n\xff", 1000, "error"),
         (b"Pabc", 1000, "unread"),
         (b"Pab\xe9", 1000, "error"),
         (b"Vanything at all", 1000, "unread"),
@@ -1648,3 +1655,33 @@ def test_a_reading_every_version_shares_reports_no_difference() -> None:
             (segment,) = pickle_load.load_segments(data, len(data), 0, flavor, budget)
             assert segment.outcome == "stop", (data, flavor)
             assert not segment.differs, (data, flavor)
+
+
+@pytest.mark.parametrize("module", [b"ev-il", b"e x", b"ev\xc3\xa9il"])
+def test_a_global_cut_by_the_sample_that_may_import_is_unknown(
+    tmp_path: Path, module: bytes
+) -> None:
+    # The module line starts three bytes before the sample ends. The unpicklers import
+    # the module before they look the name up, and importlib imports `ev-il.py` too, so
+    # a visible character that no identifier has does not make the load fail.
+    start = MAX_PICKLE_INSPECTION_BYTES - 3
+    data = b"S'" + b"a" * (start - 6) + b"'\n0" + b"c" + module + b"\nrun\n)R."
+    assert data.index(module) == start
+    lab = tmp_path / "lab"
+    lab.mkdir()
+    (lab / (module.decode() + ".py")).write_text("open('IMPORTED', 'w').write('yes')\nrun = len\n")
+    (lab / "w.bin").write_bytes(data)
+    subprocess.run(  # noqa: S603
+        [sys.executable, "-c", "import pickle; pickle.load(open('w.bin', 'rb'))"],
+        cwd=lab,
+        capture_output=True,
+        env={"PYTHONPATH": str(lab), "PATH": os.defpath},
+        check=False,
+    )
+    assert (lab / "IMPORTED").exists()
+    root = tmp_path / "project"
+    (root / "models").mkdir(parents=True)
+    (root / "models" / "weights").write_bytes(data)
+    found = _components(root)
+    assert sorted(found) == ["models/weights"]
+    assert found["models/weights"].serialization_safety is SerializationSafety.UNKNOWN

@@ -65,8 +65,10 @@ of the file, after which nothing is read. The ratings are:
   fails as truncated and the pure-Python one follows to the end of the file, and a
   text argument whose visible part already fails, such as a STRING that opens with no
   quote (`SIMPLE  = T`), an `INT`, `LONG`, `FLOAT`, `GET` or `PUT` with a character or a
-  space that no number takes (`Infinity and beyond`), a `GLOBAL` or `INST` name with a
-  character no dotted identifier has, or a `PERSID` that is not ASCII. A line that
+  space that no number takes (`Infinity and beyond`), a `GLOBAL` line that is not UTF-8,
+  or an `INST` line or `PERSID` that is not ASCII. Any other module or name line is
+  left undecided: the loaders import the module before they look the name up, and
+  `importlib` imports a file named `ev-il.py` or `evil x.py`. A line that
   starts inside a frame is not decided early. Each offset where a loader resumes is
   read once.
 - A pickle that resolves an importable name and never uses it is `unknown`, as the

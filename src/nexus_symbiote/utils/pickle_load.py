@@ -243,7 +243,6 @@ class Segment:
 
 _Valid = Callable[[bytes], bool]
 _NUMBER_TEXT = re.compile(rb"[ \t\v\f\r\x1c-\x1f]*[0-9A-Za-z_.+\-]*[ \t\v\f\r\x1c-\x1f]*")
-_NAME_TEXT = re.compile(rb"[0-9A-Za-z_.\x80-\xff]*")
 
 
 def _numeric_text(part: bytes) -> bool:
@@ -256,9 +255,19 @@ def _numeric_text(part: bytes) -> bool:
     return _NUMBER_TEXT.fullmatch(part.split(b"\x00")[0]) is not None
 
 
-def _name_text(part: bytes) -> bool:
-    """Whether a GLOBAL or INST line that starts with ``part`` may be a dotted identifier."""
-    return _NAME_TEXT.fullmatch(part) is not None
+def _utf8_text(part: bytes) -> bool:
+    """Whether a GLOBAL line that starts with ``part`` may decode as UTF-8.
+
+    The unpicklers decode the module and the name and then import the module before
+    they look the name up. ``importlib`` imports a file whose name is no identifier,
+    such as ``ev-il.py``, so only text that cannot decode fails before the import. A
+    multi-byte character that the sample cuts short may still complete.
+    """
+    try:
+        part.decode("utf-8")
+    except UnicodeDecodeError as error:
+        return error.reason == "unexpected end of data" and error.end == len(part)
+    return True
 
 
 def _quoted_text(part: bytes) -> bool:
@@ -825,8 +834,8 @@ class _Machine:
     # -- what resolves or calls ------------------------------------------------------
 
     def op_global(self) -> None:
-        module = self.line(_name_text).decode("utf-8")
-        self.resolve(module, self.line(_name_text).decode("utf-8"))
+        module = self.line(_utf8_text).decode("utf-8")
+        self.resolve(module, self.line(_utf8_text).decode("utf-8"))
 
     def op_stack_global(self) -> None:
         name = self.pop()
@@ -858,8 +867,8 @@ class _Machine:
     def op_inst(self) -> None:
         if self.c and not self.marks:
             raise _LoadError  # could not find MARK
-        module = self.line(_name_text).decode("ascii")
-        self.resolve(module, self.line(_name_text).decode("ascii"))
+        module = self.line(_ascii_text).decode("ascii")
+        self.resolve(module, self.line(_ascii_text).decode("ascii"))
         klass = self.stack.pop()
         self.pop_mark()
         self._instantiate(klass)
