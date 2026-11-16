@@ -643,7 +643,9 @@ _VALUE_END = re.compile(r"[\s,;]")
 _URL_MASK = "\x00"
 # A credential name that ends a URL, with its mark when the URL holds it, and the rest
 # of an assignment after the URL: a closing quote, spaces and the mark.
-_URL_END_NAME = re.compile(rf"(?i)(?:{_CREDENTIAL_KEYWORD})[\"']?(?P<mark>{_MARK})?\Z")
+# A backslash may end the URL too: in JSON or shell text written inside a string,
+# `?api_key=\"value\"` escapes the quote that opens the value.
+_URL_END_NAME = re.compile(rf"(?i)(?:{_CREDENTIAL_KEYWORD})[\"']?(?P<mark>{_MARK})?\\?\Z")
 _AFTER_URL_MARK = re.compile(rf"[\"']?\s*+(?P<mark>{_MARK})?\s*+")
 # How far before a URL's start a credential name that runs into it may begin, and how
 # far past it the name may end: longer than any keyword with its suffixes.

@@ -585,11 +585,17 @@ A way around a limit that its entry does not describe is worth a
 - **Content recognition is bounded.** A binary pickle is recognized by its PROTO
   opcode and 16 well-formed opcodes in the first 64 KiB, and a text-protocol pickle
   by a consistent stream of at most 4,096 opcodes. In a file inventoried only by its
-  content, a text-protocol stream must also name an importable callable (a `GLOBAL`
-  or `INST` whose module and name are dotted identifiers), so text that only parses as
-  one, such as a `.gitignore` under `checkpoints/`, is not inventoried; text whose
-  first lines happen to read as such a reference, such as `cache`, `logs`, `.`, still
-  is. A ZIP member is a pickle when its name ends in a pickle-family suffix, so `.pkl`
+  content, a text-protocol stream must also name a module that a finder could import
+  (a `GLOBAL` or `INST` whose module is not empty and has no NUL and no `/` in a dotted
+  part, since `importlib` imports a file of any other name, such as `ev-il.py`), so
+  text that only parses as one, such as `cached/` or `N.B.` under `checkpoints/`, is
+  not inventoried; text whose first lines happen to read as such a reference, such as
+  `cache`, `logs`, `.` or a `.gitignore` starting `checkpoint*`, `*.pth`, `.DS_Store`,
+  still is, as `unknown`. A pickle that the 64 KiB sample or the 4,096-opcode or
+  64-MARK bound cuts short is rated `unknown` there too, so text longer than 64 KiB
+  whose every line up to that point reads as a pickle opcode with a free-text argument
+  (`PATH=...` lines, which read as `PERSID`, or lines starting with `V`, which read as
+  `UNICODE`) is inventoried as `unknown`, a high finding. A ZIP member is a pickle when its name ends in a pickle-family suffix, so `.pkl`
   and `archive/.pkl` count, and a central directory entry whose 32-bit size or offset
   is `0xFFFFFFFF` without a ZIP64 field is read as written, as `zipfile` reads it. A
   directory that turns malformed after it lists a pickle-family member, such as with an
@@ -1434,9 +1440,13 @@ A way around a limit that its entry does not describe is worth a
   can and adopts every orphan below it. A launcher that sends that wrapper SIGKILL
   takes what it started out of the wrapper's tree, and outside a private cgroup v2,
   which cleanup kills where the current cgroup allows one, nothing ends it. The server
-  fails with `isolation-teardown-failed`, but those processes keep running. The same
-  reason is reported when a descendant cannot be killed, such as one running as
-  another user. A launcher running as root, or with `CAP_SYS_PTRACE` or
+  fails with `isolation-teardown-failed`, but those processes keep running. The cgroup
+  does not close this on its own, because a process running as the same user can move
+  itself out of it. The same reason is reported when a descendant cannot be killed,
+  such as one running as another user, when a tree that keeps forking outlasts
+  cleanup, and when the wrapper's children cannot be listed from `/proc`. A launcher
+  that only crashed is not reported: the wrapper reaps its tree and reports it empty
+  before it ends with the launcher's signal. A launcher running as root, or with `CAP_SYS_PTRACE` or
   `CAP_SYS_ADMIN`, can also trace the wrapper or forge the report it gives cleanup,
   so its escape can end with the server reported as verified. Run opted-out launchers
   only in an independently isolated worker, never as root; see

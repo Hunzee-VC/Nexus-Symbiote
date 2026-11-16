@@ -1011,7 +1011,8 @@ a short wrapper (the running interpreter with `-I -S`) sets
 `PR_SET_CHILD_SUBREAPER`, forks, and executes the staged launcher in the child with
 the same argument, environment, signal dispositions and working directory. The
 wrapper stays alive as the launcher's parent, keeps no copy of its streams, reaps
-every child and exits with the launcher's status once none is left. The launcher
+every child and exits with the launcher's status once none is left, repeating the
+signal that killed the launcher as `unshare --fork` does. The launcher
 leads its own process group in the session the wrapper leads, and the wrapper ignores
 every signal it can and is not dumpable, so the launcher cannot end it with a signal
 to its group or its parent, or trace it, unless it holds `CAP_SYS_PTRACE`; only
@@ -1027,7 +1028,7 @@ and kills the wrapper's process group, the processes in its session and a privat
 cgroup v2 where the current cgroup allows a child. The wrapper reports that it
 exited with no child left; when it does not, because the launcher killed it or a
 descendant could not be killed (one running as another user, or one that stays in
-uninterruptible sleep), the server fails with `isolation-teardown-failed`, since what
+uninterruptible sleep), or when the wrapper's children cannot be listed, the server fails with `isolation-teardown-failed`, since what
 the wrapper had adopted may still be running, outside that cgroup where none exists.
 The report counts only when the kernel credits it to the wrapper's pid. A launcher
 running as root, or with `CAP_SYS_PTRACE` or `CAP_SYS_ADMIN`, can forge it or trace

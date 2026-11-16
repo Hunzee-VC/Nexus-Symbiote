@@ -485,17 +485,15 @@ def _children_of(pid: int) -> list[int]:
     """The children of ``pid``, from the kernel's list for its main thread where it exists.
 
     The wrapper runs one thread, so that list holds every child it has. Without
-    ``CONFIG_PROC_CHILDREN`` the list is taken from one scan of ``/proc``.
+    ``CONFIG_PROC_CHILDREN`` the list is taken from one scan of ``/proc``. Raises
+    OSError when neither can be read: no list is not the same as no child.
     """
     try:
         with open(f"/proc/{pid}/task/{pid}/children", "rb") as listing:
             return [int(child) for child in listing.read().split()]
     except (OSError, ValueError):
         pass
-    try:
-        return _children_by_parent().get(pid, [])
-    except OSError:
-        return []
+    return _children_by_parent().get(pid, [])
 
 
 def _drain_children(pid: int) -> bool:
@@ -508,7 +506,8 @@ def _drain_children(pid: int) -> bool:
     threads run, so a child has ended only once its thread count has fallen to one.
     This catches a chain that forks and calls ``setsid`` faster than the tree sweep,
     one generation per read. Returns False when a child still runs at the deadline:
-    one this process may not signal, or one that does not leave uninterruptible sleep.
+    one this process may not signal, or one that does not leave uninterruptible sleep,
+    and when the wrapper's children cannot be listed at all.
     """
     deadline = time.monotonic() + _TEARDOWN_SECONDS
     signalled: set[int] = set()
@@ -520,7 +519,11 @@ def _drain_children(pid: int) -> bool:
     needed = _QUIET_READS if os.path.exists(f"/proc/{pid}/task/{pid}/children") else 3
     while quiet < needed:
         running: set[int] = set()
-        for child in _children_of(pid):
+        try:
+            listed = _children_of(pid)
+        except OSError:
+            return False
+        for child in listed:
             if child in ended:
                 continue
             if _ended(child):
@@ -589,12 +592,17 @@ def _wrapper_contained(pid: int, done: int, seen: int | None, stop: bool) -> boo
     had its children reparented past it before the drain could list them.
     """
     held = seen == os.CLD_STOPPED and _drain_children(pid) and _alive(pid)
-    if held and not _children_of(pid):
+    try:
+        childless = held and not _children_of(pid)
+    except OSError:
+        # Unlisted, it may not have forked yet, so it dies stopped and nothing is confirmed.
+        childless, held = True, False
+    if childless:
         # Stopped before it forked, or once it had reaped everything. Resumed, the first
         # would start the launcher only now, after cleanup began, so it dies stopped.
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.kill(pid, signal.SIGKILL)
-        return True
+        return held
     if stop:
         _let_the_wrapper_reap(pid)
     return held or _wrapper_finished(done, pid)
@@ -928,7 +936,8 @@ def _kill_session(sid: int) -> None:
     ``killpg`` misses a member that called ``setpgid``. A ``setsid`` child has a new
     session and is not found here; the cgroup covers that case.
     """
-    if sid <= 1:
+    # Only a session that start_new_session made for the launch; never the caller's own.
+    if sid <= 1 or sid == os.getsid(0):
         return
     own = os.getpid()
     for _ in range(_SWEEP_PASSES):
@@ -1110,8 +1119,8 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
     restarts during the sweep is its child and is found by the next pass, and what still
     runs after the passes is killed as it is reparented to the stopped wrapper. Resumed,
     the wrapper reaps everything and exits, writing one last byte once it has no child.
-    When something below the stopped wrapper could not be killed, or the wrapper was
-    already dead without having written that byte because the launcher killed it,
+    When something below the stopped wrapper could not be killed or listed, or the
+    wrapper was already dead without having written that byte because the launcher killed it,
     ``PinnedProcessError`` reports ``isolation-teardown-failed``: what the wrapper had
     adopted may have outlived it.
     """

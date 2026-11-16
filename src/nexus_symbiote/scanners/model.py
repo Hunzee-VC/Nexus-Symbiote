@@ -184,6 +184,10 @@ PICKLE_FRAME_TAIL = (
     "pickle opcode stream with bytes after a STOP inside its frame, where loaders resume "
     "at different offsets; no bounded structural validator for this format/loader"
 )
+INSPECTION_FAILED = (
+    "Artifact could not be read or its content inspected; no bounded structural "
+    "validator for this format/loader"
+)
 # Content that a bound left unread: a file no model name rates is inventoried for it.
 _CONTENT_UNREAD = frozenset(
     {
@@ -353,9 +357,14 @@ def _recognized_pickle(
     both after the frame, as ``io.BytesIO`` gives it, and after the STOP, as a buffered
     file gives it to the C unpickler.
 
-    A file found ``by_content``, which no pickle-family name rates, is not rated unknown
-    by a text-protocol first pickle that the bounds cut short or that names something
-    before a flaw: on its own it is as likely prose. Under a model name, a sample is also
+    A pickle that the bounds cut short is rated unknown wherever it starts, in a file
+    found ``by_content`` too: harmless padding, such as NONE and POP repeated or a
+    string longer than the sample, would otherwise hide a call after it. Text ends or
+    fails before a bound, as a read past the end of the file and an argument whose
+    visible part already fails are decided (``utils.pickle_load``). A file found
+    ``by_content``, which no pickle-family name rates, is not rated unknown by a
+    text-protocol first pickle that names something before a flaw: on its own it is
+    as likely prose. Under a model name, a sample is also
     recognized by its shape, as before content was read past a STOP: a binary stream
     of PROTO and ``MIN_PICKLE_OPCODES`` well-formed opcodes, or a stream that passes
     static opcode/stack checks to STOP within the limits.
@@ -404,17 +413,26 @@ def _recognized(binary: bool) -> tuple[SerializationSafety, str]:
 def _pickle_loads(
     sample: bytes, size: int, flavor: pickle_load.Flavor, *, by_content: bool
 ) -> tuple[SerializationSafety, str] | None:
-    """Rate the pickles one unpickler reads from ``sample`` in a loop."""
+    """Rate the pickles one unpickler reads from ``sample`` in a loop.
+
+    Each start is read once: a later walk from it has less budget left, so it reaches
+    nothing the first did not, and paths that meet again, as the two resumes after a
+    STOP inside a frame can, would otherwise double the walks after them.
+    """
     budget = pickle_load.Budget(MAX_PICKLE_OPCODES, MAX_PICKLE_MARKS)
     pending = [0]
+    visited: set[int] = set()
     worst: tuple[SerializationSafety, str] | None = None
     while pending:
         start = pending.pop()
+        if start in visited:
+            continue
+        visited.add(start)
         binary = sample[start : start + 1] == b"\x80"
         for segment in pickle_load.load_segments(sample, size, start, flavor, budget):
             if segment.outcome == "called":
                 return _recognized(binary)
-            if segment.outcome == "unread" and (start or binary or not by_content):
+            if segment.outcome == "unread":
                 unread = PICKLE_NAME_UNCALLED if segment.named else PICKLE_UNREAD
                 worst = _worse(worst, (SerializationSafety.UNKNOWN, unread))
             elif segment.named and (segment.outcome == "stop" or binary or not by_content):
@@ -855,6 +873,9 @@ def inspect_model_format(
 ) -> tuple[SerializationSafety, str]:
     """Inspect bounded structure without deserializing a model or running code.
 
+    A file that cannot be read, or whose content check fails, is unknown: a SafeTensors
+    one as malformed SafeTensors, any other as ``INSPECTION_FAILED``.
+
     ``budget`` is shared with the other files of one scan; NumPy array headers spend it.
     A file that no model name rates is inspected for what it holds, so the collector
     and validation reach the same verdict on it.
@@ -865,13 +886,13 @@ def inspect_model_format(
     """
     if _pickle_family(path):
         return SerializationSafety.UNSAFE_CODE_EXECUTION, "Potential code-executing loader format"
+    safetensors = path.suffix.lower() == ".safetensors"
     try:
         context = nullcontext(stream) if stream is not None else open_regular_file(path)
         with context as opened:
             size = os.fstat(opened.fileno()).st_size
             prefix = opened.read(8)
             length = int.from_bytes(prefix, "little")
-            safetensors = path.suffix.lower() == ".safetensors"
             tensor_candidate = (
                 safetensors
                 and len(prefix) == 8
@@ -899,7 +920,9 @@ def inspect_model_format(
     except HeaderLimitError:
         return SerializationSafety.UNKNOWN, "SafeTensors header exceeds the inspection limit"
     except (OSError, ValueError, RecursionError, UnicodeError):
-        return SerializationSafety.UNKNOWN, "Malformed or unsupported SafeTensors structure"
+        if safetensors:
+            return SerializationSafety.UNKNOWN, "Malformed or unsupported SafeTensors structure"
+        return SerializationSafety.UNKNOWN, INSPECTION_FAILED
 
 
 class _HashingModelReader:
@@ -986,8 +1009,8 @@ def observe_content(
     """Observe a file that no model name rates when its content makes it a model artifact.
 
     That content is a pickle whose inspected opcodes name a callable, a NumPy array with an object dtype, a ZIP archive with a
-    pickle-family member or such an array as a member, or a NumPy array or ZIP archive
-    that a bound left unread. For other content ``None`` is returned once the inspection
+    pickle-family member or such an array as a member, or a pickle, NumPy array or ZIP
+    archive that a bound left unread. For other content ``None`` is returned once the inspection
     has read what it needed, which for a ZIP archive is all of it. An artifact is
     observed from the same stream, so every byte is read, and charged, once. The caller
     holds a confined regular-file context, as for ``observe_model_artifact``.

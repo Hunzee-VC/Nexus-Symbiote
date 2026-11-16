@@ -316,20 +316,22 @@ def test_scrubber_replaces_longest_values_first_and_skips_short_texts():
 
 
 @pytest.mark.parametrize(
-    "text",
+    ("head", "unit", "count"),
     [
-        "eyJ" * 400_000,
-        "-----BEGIN" * 200_000,
-        "Bearer " * 300_000,
-        "password=" * 300_000,
-        "DB_PASSWORD" + "_X" * 400_000,
-        "ghp_" * 300_000,
+        ("", "eyJ", 400_000),
+        ("", "-----BEGIN", 200_000),
+        ("", "Bearer ", 300_000),
+        ("", "password=", 300_000),
+        ("DB_PASSWORD", "_X", 400_000),
+        ("", "ghp_", 300_000),
     ],
 )
-def test_new_patterns_stay_linear_on_adversarial_input(text):
-    started = time.monotonic()
-    redact_text(text)
-    assert time.monotonic() - started < 5
+def test_new_patterns_stay_linear_on_adversarial_input(head, unit, count):
+    # The largest text is the size this test always used. A ratio, unlike a fixed
+    # number of seconds, holds on a slow runner and under coverage tracing: linear work
+    # grows about 8 times from one eighth of it, quadratic work about 64 times.
+    step = count // 8
+    assert scaling_ratio(lambda scale: redact_text(head + unit * (step * scale)), factor=8) < 16
 
 
 def test_prepared_scrubber_is_linear_in_values_and_strings():
