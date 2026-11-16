@@ -12,6 +12,7 @@ import time
 import pytest
 
 from nexus_symbiote.utils.secrets import redact_text
+from tests.support import scaling_ratio
 
 VALUE = "hunter2hunter2"
 
@@ -106,3 +107,25 @@ def test_long_urls_stay_linear() -> None:
     cost(200)
     small, large = min(cost(500) for _ in range(3)), min(cost(4000) for _ in range(3))
     assert large < small * 40
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'curl "https://api.example/v1?api_key=\\"{v}\\""',
+        'https://h.example/?a=b,client_secret::\\"{v}\\" next',
+        'url=https://h/x?token=\\"{v}\\")',
+        '{{"cmd": "run --url https://h/x?password=\\"{v}\\""}}',
+    ],
+)
+def test_an_escaped_quote_after_a_url_ending_name_opens_its_value(text: str) -> None:
+    # JSON or shell text inside a string escapes the quote that opens the value, and the
+    # URL then ends in the backslash.
+    planted = "ZqEscapedValue123"
+    for identifier in (False, True):
+        assert planted not in redact_text(text.format(v=planted), identifier=identifier)
+
+
+@pytest.mark.parametrize("unit", ["https://h/?api_key=\\", 'https://h/?token=\\"x\\" '])
+def test_backslash_ended_url_names_stay_linear(unit: str) -> None:
+    assert scaling_ratio(lambda scale: redact_text(unit * (2000 * scale)), factor=8) < 16

@@ -95,5 +95,6 @@ Reference material: exact behavior, fields and limits.
 | [Pull-request, branch and issue review, 2026-11-03](audits/closed-pr-review-2026-11-03.md) | Pull requests #74–#116, every branch, and the issues still open on 2026-11-03 |
 | [Security audit of the whole repository, 2026-11-14](audits/security-audit-2026-11-14.md) | Every module, script, workflow and page at `4aaf727`: verdict, 35 ranked findings, the controls confirmed under hostile input, and what to do next |
 | [Status of the 2026-11-14 audit findings](audits/security-audit-2026-11-14-status.md) | Each finding on `main` after batch 1 and this branch: fixed and how it was verified, partly fixed, deferred, or awaiting an administrator or a decision |
+| [Repository audit and open pull request review, 2026-11-16](audits/repository-audit-2026-11-16.md) | `main` after #226 and #227, and pull requests #224, #228 and #229: automated checks of the whole tree, eight ranked findings with their fixes, and recommendations |
 
 Documentation changes follow the same review as code. Local links, including links to headings, are checked in CI by `scripts/check_repository_hygiene.py`; run `make hygiene` before you open a pull request.
