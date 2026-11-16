@@ -45,6 +45,7 @@ from nexus_symbiote.core.models import ClaimEvidence, ModelComponent, RiskAssess
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.scanners.credential_files import credential_gap, credential_shaped
 from nexus_symbiote.scanners.shadowscan import REPORT_PATHS
+from nexus_symbiote.utils import pickle_load
 from nexus_symbiote.utils.confined import MAX_ENTRIES, ConfinedCollection
 from nexus_symbiote.utils.crypto import (
     POLICY_REF_PREFIX,
@@ -171,8 +172,29 @@ NUMPY_HEADER_UNREAD = (
     "NumPy array whose header is past the inspection limits; no bounded structural "
     "validator for this format/loader"
 )
+PICKLE_UNREAD = (
+    "pickle opcode stream that names no callable before the inspection limits; "
+    "no bounded structural validator for this format/loader"
+)
+PICKLE_NAME_UNCALLED = (
+    "pickle opcode stream that resolves an importable name and, within the inspection "
+    "limits, never uses it; no bounded structural validator for this format/loader"
+)
+PICKLE_FRAME_TAIL = (
+    "pickle opcode stream with bytes after a STOP inside its frame, where loaders resume "
+    "at different offsets; no bounded structural validator for this format/loader"
+)
 # Content that a bound left unread: a file no model name rates is inventoried for it.
-_CONTENT_UNREAD = frozenset({ZIP_DIRECTORY_UNREAD, ZIP_MEMBER_UNREAD, NUMPY_HEADER_UNREAD})
+_CONTENT_UNREAD = frozenset(
+    {
+        ZIP_DIRECTORY_UNREAD,
+        ZIP_MEMBER_UNREAD,
+        NUMPY_HEADER_UNREAD,
+        PICKLE_UNREAD,
+        PICKLE_NAME_UNCALLED,
+        PICKLE_FRAME_TAIL,
+    }
+)
 _NUMPY_MAGIC = b"\x93NUMPY"
 # Dtype names that make an object dtype: the type code, with the sizes NumPy accepted,
 # and the names that NumPy and its earlier releases accept.
@@ -195,6 +217,8 @@ _UNSAFE_SUFFIXES = {
 # Archive and compression suffixes do not change what a pickle loader unpickles.
 _PICKLE_WRAPPERS = {".tar", ".gz", ".bz2", ".xz", ".lzma", ".zst"}
 _TEXT_PICKLE_START = frozenset(b"(cNILFSV}])KJMUTX")
+# Bytes that start an opcode: pickle.load reads a pickle that starts with any of them.
+_OPCODE_BYTES = frozenset(opcode.code.encode("latin-1")[0] for opcode in pickletools.opcodes)
 _INDEX = re.compile(r"(?P<base>.+?)\.index(?:\.[A-Za-z0-9_-]+)?\.json", re.IGNORECASE)
 # transformers reads ``repository--module.Class``; a repository need not name an owner.
 _CODE_REFERENCE = re.compile(
@@ -310,61 +334,110 @@ def manifest_digest(entries: Iterable[tuple[str, str]]) -> str:
     )
 
 
-# Behind a model name such a stream is still rated as the pickle it parses as; as content
-# alone, in a file no model name rates, it is not inventoried.
-TEXT_PICKLE_WITHOUT_CALLABLE = (
-    "Recognized text-protocol pickle opcode stream that names no importable callable; "
-    "object loading can execute code"
-)
-_DOTTED_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*")
+def _recognized_pickle(
+    stream: BinaryIO, prefix: bytes, size: int, *, by_content: bool = False
+) -> tuple[SerializationSafety, str] | None:
+    """Rate what ``pickle.load`` does with a pickle sample, without loading objects.
 
+    The sample is read as ``pickle.load`` reads it, in a loop, as ``torch.load`` reads
+    the legacy format's header pickles before the one that rebuilds the tensors: by the
+    C and the pure-Python unpicklers both (``utils.pickle_load``), as any supported
+    CPython reads it, within the inspection bounds. A pickle that hands what it resolved to anything but the stack
+    and the memo (calls it, sets items on it, appends to it, hashes it...) is a
+    payload, wherever it starts. One that the bounds cut short before the loader's
+    behaviour is decided is rated unknown (``PICKLE_NAME_UNCALLED`` when it resolved an
+    importable name, else ``PICKLE_UNREAD``), and so is one that resolves an importable
+    name and ends in a STOP or a flaw without using it; one that ends before
+    ``find_class`` returns calls nothing, as the loader stops at the flaw. A STOP inside
+    a FRAME with bytes left in it is rated unknown at least, and the next pickle is read
+    both after the frame, as ``io.BytesIO`` gives it, and after the STOP, as a buffered
+    file gives it to the C unpickler.
 
-def _importable_reference(argument: object) -> bool:
-    """Whether a text GLOBAL or INST argument, ``module name``, names what can be imported."""
-    if not isinstance(argument, str):
-        return False
-    module, _, name = argument.partition(" ")
-    return bool(_DOTTED_IDENTIFIER.fullmatch(module) and _DOTTED_IDENTIFIER.fullmatch(name))
-
-
-def _recognized_pickle(stream: BinaryIO, prefix: bytes, size: int) -> str | None:
-    """Recognize bounded pickle instructions without loading objects.
-
-    PROTO alone is insufficient: valid tensor header lengths can have the same
-    first byte. A binary stream of PROTO and ``MIN_PICKLE_OPCODES`` well-formed
-    opcodes is a pickle whatever follows them: a loader runs what they name before it
-    meets a flaw further on, so the opcode count only bounds the work. A shorter
-    sample, or a text-protocol one, must pass static opcode/stack checks to STOP within
-    the limits; this intentionally leaves other unsupported and truncated samples unknown.
+    A file found ``by_content``, which no pickle-family name rates, is not rated unknown
+    by a text-protocol first pickle that the bounds cut short or that names something
+    before a flaw: on its own it is as likely prose. Under a model name, a sample is also
+    recognized by its shape, as before content was read past a STOP: a binary stream
+    of PROTO and ``MIN_PICKLE_OPCODES`` well-formed opcodes, or a stream that passes
+    static opcode/stack checks to STOP within the limits.
     """
-    binary = len(prefix) >= 2 and prefix[0] == 0x80 and 2 <= prefix[1] <= 5
-    if not binary and (not prefix or prefix[0] not in _TEXT_PICKLE_START):
+    if not prefix or prefix[0] not in _OPCODE_BYTES:
         return None
     sample = prefix + stream.read(max(0, min(size, MAX_PICKLE_INSPECTION_BYTES) - len(prefix)))
-    kind = "binary" if binary else "text-protocol"
-    recognized = f"Recognized {kind} pickle opcode stream; object loading can execute code"
+    binary = len(prefix) >= 2 and prefix[0] == 0x80 and 2 <= prefix[1] <= 5
+    shaped = binary or prefix[0] in _TEXT_PICKLE_START
+    worst = _pickle_shape(sample, binary) if shaped and not by_content else None
+    for flavor in pickle_load.FLAVORS:
+        if worst is not None and worst[0] is SerializationSafety.UNSAFE_CODE_EXECUTION:
+            break
+        worst = _worse(worst, _pickle_loads(sample, size, flavor, by_content=by_content))
+    return worst
+
+
+def _pickle_shape(sample: bytes, binary: bool) -> tuple[SerializationSafety, str] | None:
+    """A pickle by its opcodes alone: what a model name is rated by."""
     seen = marks = 0
-    # A text-protocol stream calls code only through GLOBAL or INST, and a loader can
-    # import only a module and name that are dotted identifiers. Text such as a
-    # `.gitignore` line `checkpoint*` (GLOBAL) or `N.B.` (NONE, STOP) parses as a stream
-    # that names nothing a loader could call.
-    names_callable = binary
     try:
-        for opcode, argument, _ in pickletools.genops(sample):
+        for opcode, _, _ in pickletools.genops(sample):
             seen += 1
             marks += opcode.name == "MARK"
-            if opcode.name in {"GLOBAL", "INST"} and _importable_reference(argument):
-                names_callable = True
             if seen > MAX_PICKLE_OPCODES or marks > MAX_PICKLE_MARKS:
                 break
         else:
             # dis() only checks opcode stack/memo consistency; it never resolves
             # globals, imports artifact code, invokes reducers or constructs objects.
             pickletools.dis(sample, out=io.StringIO())
-            return recognized if names_callable else TEXT_PICKLE_WITHOUT_CALLABLE
+            return _recognized(binary)
     except (ValueError, UnicodeError, OverflowError, RecursionError, IndexError):
         pass
-    return recognized if binary and seen >= MIN_PICKLE_OPCODES else None
+    return _recognized(binary) if binary and seen >= MIN_PICKLE_OPCODES else None
+
+
+def _recognized(binary: bool) -> tuple[SerializationSafety, str]:
+    kind = "binary" if binary else "text-protocol"
+    return (
+        SerializationSafety.UNSAFE_CODE_EXECUTION,
+        f"Recognized {kind} pickle opcode stream; object loading can execute code",
+    )
+
+
+def _pickle_loads(
+    sample: bytes, size: int, flavor: pickle_load.Flavor, *, by_content: bool
+) -> tuple[SerializationSafety, str] | None:
+    """Rate the pickles one unpickler reads from ``sample`` in a loop."""
+    budget = pickle_load.Budget(MAX_PICKLE_OPCODES, MAX_PICKLE_MARKS)
+    pending = [0]
+    worst: tuple[SerializationSafety, str] | None = None
+    while pending:
+        start = pending.pop()
+        binary = sample[start : start + 1] == b"\x80"
+        for segment in pickle_load.load_segments(sample, size, start, flavor, budget):
+            if segment.outcome == "called":
+                return _recognized(binary)
+            if segment.outcome == "unread" and (start or binary or not by_content):
+                unread = PICKLE_NAME_UNCALLED if segment.named else PICKLE_UNREAD
+                worst = _worse(worst, (SerializationSafety.UNKNOWN, unread))
+            elif segment.named and (segment.outcome == "stop" or binary or not by_content):
+                # Text found by content that names something before a flaw is as likely
+                # prose; a pickle that returns what it resolved, or a PROTO one, is not.
+                worst = _worse(worst, (SerializationSafety.UNKNOWN, PICKLE_NAME_UNCALLED))
+            if len(segment.resumes) > 1:
+                worst = _worse(worst, (SerializationSafety.UNKNOWN, PICKLE_FRAME_TAIL))
+            pending.extend(reversed(segment.resumes))
+    return worst
+
+
+def _worse(
+    first: tuple[SerializationSafety, str] | None, second: tuple[SerializationSafety, str] | None
+) -> tuple[SerializationSafety, str] | None:
+    """The rating that ranks higher: code execution, then unknown, then none."""
+    if second is None:
+        return first
+    if first is None or (
+        second[0] is SerializationSafety.UNSAFE_CODE_EXECUTION
+        and first[0] is not SerializationSafety.UNSAFE_CODE_EXECUTION
+    ):
+        return second
+    return first
 
 
 def _pickle_member(name: bytes) -> bool:
@@ -738,7 +811,7 @@ def _object_dtype_string(text: str) -> bool:
 
 
 def _recognized_code_container(
-    stream: BinaryIO, prefix: bytes, size: int, budget: InspectionBudget
+    stream: BinaryIO, prefix: bytes, size: int, budget: InspectionBudget, *, by_content: bool
 ) -> tuple[SerializationSafety, str] | None:
     """A verdict on content a loader can run code from, or ``None`` for content not recognized.
 
@@ -753,8 +826,7 @@ def _recognized_code_container(
             return SerializationSafety.UNKNOWN, NUMPY_HEADER_UNREAD
         return (SerializationSafety.UNSAFE_CODE_EXECUTION, NUMPY_OBJECT_ARRAY) if array else None
     if prefix[:4] != b"PK\x03\x04":
-        pickle = _recognized_pickle(stream, prefix, size)
-        return None if pickle is None else (SerializationSafety.UNSAFE_CODE_EXECUTION, pickle)
+        return _recognized_pickle(stream, prefix, size, by_content=by_content)
     header = prefix + stream.read(22)
     consumed = len(header)
     first = b""
@@ -783,6 +855,8 @@ def inspect_model_format(
     """Inspect bounded structure without deserializing a model or running code.
 
     ``budget`` is shared with the other files of one scan; NumPy array headers spend it.
+    A file that no model name rates is inspected for what it holds, so the collector
+    and validation reach the same verdict on it.
 
     SAFE means the checked file has a supported non-executable tensor container
     layout. It is not a claim about model behavior, parser vulnerabilities,
@@ -804,7 +878,11 @@ def inspect_model_format(
             )
             if not tensor_candidate:
                 container = _recognized_code_container(
-                    opened, prefix, size, budget or InspectionBudget()
+                    opened,
+                    prefix,
+                    size,
+                    budget or InspectionBudget(),
+                    by_content=model_format(path) is None,
                 )
                 if container is not None and (
                     container[0] is SerializationSafety.UNSAFE_CODE_EXECUTION or not safetensors
@@ -906,7 +984,7 @@ def observe_content(
 ) -> ModelArtifactObservation | None:
     """Observe a file that no model name rates when its content makes it a model artifact.
 
-    That content is a pickle, a NumPy array with an object dtype, a ZIP archive with a
+    That content is a pickle whose inspected opcodes name a callable, a NumPy array with an object dtype, a ZIP archive with a
     pickle-family member or such an array as a member, or a NumPy array or ZIP archive
     that a bound left unread. For other content ``None`` is returned once the inspection
     has read what it needed, which for a ZIP archive is all of it. An artifact is
@@ -915,7 +993,7 @@ def observe_content(
     """
     budget = budget or InspectionBudget()
     inspected = _inspect_opened(path, stream, budget)
-    if inspected.explanation == TEXT_PICKLE_WITHOUT_CALLABLE or (
+    if (
         inspected.safety != SerializationSafety.UNSAFE_CODE_EXECUTION
         and inspected.explanation not in _CONTENT_UNREAD
     ):
