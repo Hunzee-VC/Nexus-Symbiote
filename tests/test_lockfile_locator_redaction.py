@@ -317,7 +317,10 @@ def test_an_npm_lockfile_key_is_recorded_as_the_inventory_redacts_the_name(tmp_p
     (tmp_path / "package.json").write_text(json.dumps({"dependencies": {name: "1.0.0"}}))
     lock = {
         "lockfileVersion": 3,
-        "packages": {"": {}, f"node_modules/{name}": {"version": "1.0.0", "integrity": SHA512}},
+        "packages": {
+            "": {"dependencies": {name: "1.0.0"}},
+            f"node_modules/{name}": {"version": "1.0.0", "integrity": SHA512},
+        },
     }
     (tmp_path / "package-lock.json").write_text(json.dumps(lock))
     result = RegistryScanner().scan(tmp_path)
@@ -333,7 +336,10 @@ def test_an_ordinary_npm_lockfile_key_is_kept_as_its_pointer(tmp_path):
     (tmp_path / "package.json").write_text(json.dumps({"dependencies": {name: "1.0.0"}}))
     lock = {
         "lockfileVersion": 3,
-        "packages": {"": {}, f"node_modules/{name}": {"version": "1.0.0", "integrity": SHA512}},
+        "packages": {
+            "": {"dependencies": {name: "1.0.0"}},
+            f"node_modules/{name}": {"version": "1.0.0", "integrity": SHA512},
+        },
     }
     (tmp_path / "package-lock.json").write_text(json.dumps(lock))
     record, _ = _bound(RegistryScanner().scan(tmp_path))

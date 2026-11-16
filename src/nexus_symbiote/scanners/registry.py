@@ -450,6 +450,14 @@ def _plain_pnpm_peers(suffix: str) -> bool:
 _PNPM_PATCH_HASH = re.compile(r"\s*patch_hash")
 
 
+# The order in which pnpm takes a package.json section's spec for a name it finds in
+# several (getSpecFromPackageManifest); npm takes the last of _NPM_SECTIONS instead.
+_PNPM_SECTION_ORDER: Final = (
+    "optionalDependencies",
+    "dependencies",
+    "devDependencies",
+    "peerDependencies",
+)
 # The packages key pnpm reads for an importer's version reference, by lockfile major
 # version: 5.x keys by path, 6.x by the reference with its peers, and 9.x by the exact
 # version alone, its peers moving to the snapshots.
@@ -1491,6 +1499,8 @@ class RegistryScanner(Scanner):
         has_pnpm_workspace = any(self._fold(entry) == "pnpm-workspace.yaml" for entry in entries)
         if has_pnpm_workspace:
             result.surfaces_excluded.append(self._NPM_GAPS["pnpm"])
+        if self._withheld("package.json", result):
+            return []
         data = self._confined().read_json("package.json", missing_ok=True)
         if data is None:
             return []
@@ -1601,7 +1611,9 @@ class RegistryScanner(Scanner):
         if registry and other_lock is not None:
             lock_name, raw_lock = other_lock
             if lock_name == "pnpm-lock.yaml":
-                read = self._resolve_pnpm_lockfile(raw_lock, registry, components, result)
+                read = self._resolve_pnpm_lockfile(
+                    raw_lock, registry, components, result, declared_specs=declared
+                )
             else:
                 before = (
                     recorded_count(result.scan_failures),
@@ -1774,7 +1786,13 @@ class RegistryScanner(Scanner):
             lock_name, _, lock_digest = lock
             # The key as the inventory records the name or alias it installs: redacted.
             locator = f"{lock_name}#/packages/" + _pointer_token("node_modules/" + redact_text(key))
-            if registry:
+            if registry and not self._lock_root_agrees(lock[1], key, specs):
+                # npm ci refuses a lockfile resolved for other specs, and npm install
+                # resolves again: the record is not what installs.
+                result.scan_failures.append(
+                    f"{lock_name}: selected package version disagrees with package.json"
+                )
+            elif registry:
                 resolution = self._npm_resolution(
                     lock_name, key, package, version_range, record, locator, result
                 )
@@ -1810,12 +1828,28 @@ class RegistryScanner(Scanner):
                     "Check that the aliased package is the one the code expects to import.",
                 )
             )
-        if registry and not _npm_exact(version_range) and not (resolution and resolution.resolved):
+        # npm takes the last section's spec, pnpm the first of optional, dependencies,
+        # dev and peer, so a spec counts only when both take the same one.
+        by_section = dict(specs)
+        pnpm_spec = next(
+            by_section[section] for section in _PNPM_SECTION_ORDER if section in by_section
+        )
+        uniform = pnpm_spec == spec
+        if (
+            registry
+            and not (uniform and _npm_exact(version_range))
+            and not (resolution and resolution.resolved)
+        ):
+            shown_spec = (
+                redact_text(spec)
+                if uniform
+                else ", ".join(f"{section}: {redact_text(value)}" for section, value in specs)
+            )
             risks.append(
                 _risk(
                     RiskSeverity.MEDIUM,
                     "version_pinning",
-                    f"npm package '{name}' has a nonexact declared reference: {redact_text(spec)}",
+                    f"npm package '{name}' has a nonexact declared reference: {shown_spec}",
                     "Resolve and verify an immutable artifact with lockfile integrity evidence.",
                 )
             )
@@ -1831,6 +1865,7 @@ class RegistryScanner(Scanner):
             and registry
             and record is None
             and not in_doubt
+            and uniform
             and _npm_exact(version_range)
         ):
             # Only without a lock record: one that was not taken, a lockfile that was
@@ -1850,6 +1885,23 @@ class RegistryScanner(Scanner):
             properties=properties,
             claims=claims,
         )
+
+    @classmethod
+    def _lock_root_agrees(
+        cls, packages: dict[str, Any], key: str, specs: list[tuple[str, str]]
+    ) -> bool:
+        """Whether the lockfile's root entry records the specs package.json declares for
+        ``key``, section by section, as npm ci checks. A lockfile without a root entry
+        records none to compare."""
+        root = packages.get("")
+        if not isinstance(root, dict):
+            return True
+        declared = dict(specs)
+        for section in cls._NPM_SECTIONS:
+            recorded = root.get(section)
+            if (recorded.get(key) if isinstance(recorded, dict) else None) != declared.get(section):
+                return False
+        return True
 
     @classmethod
     def _npm_purl(cls, package: str, version: str, origin: str | None) -> str | None:
@@ -2199,6 +2251,8 @@ class RegistryScanner(Scanner):
         components: list[RegistryEntryComponent],
         declared: list[RegistryEntryComponent],
         result: ScanResult,
+        *,
+        declared_specs: dict[str, list[tuple[str, str]]] | None = None,
     ) -> bool:
         """Bind pnpm records to the components, which package.json declares from a
         registry; ``declared`` is every inventoried npm package. False when the
@@ -2249,6 +2303,9 @@ class RegistryScanner(Scanner):
             else lock_doc
         )
         importer_specs: dict[str, str] = {}
+        # The package.json specs the lockfile was resolved for: pnpm 6 and 9 record one
+        # with each dependency, pnpm 5 in one map.
+        specifiers: dict[str, set[str]] = {}
         dep_keys = ("dependencies", "devDependencies", "optionalDependencies")
         for dep_key in dep_keys:
             dep_map = root_importer.get(dep_key, {})
@@ -2256,8 +2313,15 @@ class RegistryScanner(Scanner):
                 for pkg_name, entry in dep_map.items():
                     if isinstance(entry, dict) and isinstance(entry.get("version"), str):
                         importer_specs[pkg_name] = entry["version"]
+                        if isinstance(entry.get("specifier"), str):
+                            specifiers.setdefault(pkg_name, set()).add(entry["specifier"])
                     elif isinstance(entry, str):
                         importer_specs[pkg_name] = entry
+        listed = root_importer.get("specifiers")
+        if isinstance(listed, dict):
+            for pkg_name, specifier in listed.items():
+                if isinstance(specifier, str):
+                    specifiers.setdefault(pkg_name, set()).add(specifier)
         counts = Counter(c.name for c in declared if c.properties.get("npm_alias") is None)
         # The root importer lists what pnpm installs for package.json; a name it does
         # not list is not resolved by records that other packages' dependencies left.
@@ -2319,6 +2383,13 @@ class RegistryScanner(Scanner):
             if ver_ref.startswith(("link:", "file:", "workspace:", "git+", "http:", "https:")):
                 result.surfaces_excluded.append(
                     "pnpm-lock.yaml: local or non-registry resolution is unverified"
+                )
+                continue
+            if not self._pnpm_spec_agrees(specifiers.get(comp.name), declared_specs, comp.name):
+                # pnpm --frozen-lockfile refuses a lockfile resolved for other specs, and
+                # pnpm install resolves again: the record is not what installs.
+                result.scan_failures.append(
+                    "pnpm-lock.yaml: selected package version disagrees with package.json"
                 )
                 continue
             base_ver = ver_ref.split("(", 1)[0]
@@ -2399,6 +2470,23 @@ class RegistryScanner(Scanner):
                 result,
             )
         return True
+
+    @staticmethod
+    def _pnpm_spec_agrees(
+        recorded: set[str] | None,
+        declared_specs: dict[str, list[tuple[str, str]]] | None,
+        name: str,
+    ) -> bool:
+        """Whether every spec the lockfile records for ``name`` is the one pnpm takes from
+        package.json; a lockfile that records none has nothing to compare."""
+        specs = (declared_specs or {}).get(name)
+        if not recorded or not specs:
+            return True
+        by_section = dict(specs)
+        taken = next(
+            by_section[section] for section in _PNPM_SECTION_ORDER if section in by_section
+        )
+        return recorded == {taken}
 
     def _pnpm_patched_component(
         self, component: RegistryEntryComponent, result: ScanResult

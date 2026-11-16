@@ -63,3 +63,14 @@ def test_an_invalid_requirement_is_redacted_before_its_name_is_removed(tmp_path:
     (tmp_path / "requirements.txt").write_text(f"transformers_token={value}\nopenai==1.0.0\n")
     text = _everything(tmp_path)
     assert value not in text
+
+
+def test_a_package_json_that_links_to_a_credential_file_is_a_gap(tmp_path: Path) -> None:
+    (tmp_path / "secrets.json").write_text('{"dependencies":{"openai":"4.52.0"}}')
+    (tmp_path / "package.json").symlink_to("secrets.json")
+    result = RegistryScanner().scan(tmp_path)
+    assert result.components == []
+    assert any(
+        entry.startswith("package.json: a symlink leads to secrets.json")
+        for entry in (result.surfaces_excluded)
+    )
