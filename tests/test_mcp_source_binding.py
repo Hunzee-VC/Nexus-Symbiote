@@ -1329,6 +1329,17 @@ def test_a_padded_root_cwd_is_a_keyless_diff_alert(tmp_path, monkeypatch):
     assert "No changes detected" not in diff.output
 
 
+def _string_leaves(value: object) -> list[str]:
+    """Every string value in a parsed JSON document."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [leaf for item in value.values() for leaf in _string_leaves(item)]
+    if isinstance(value, list):
+        return [leaf for item in value for leaf in _string_leaves(item)]
+    return []
+
+
 @pytest.mark.parametrize(
     "path,field",
     [
@@ -1401,7 +1412,9 @@ def test_redacted_tool_list_entries_fail_closed_unkeyed_and_bind_raw_items_when_
         assert run.exit_code == 0, run.output
         exported = out.read_text()
         assert "read_only" not in exported and "delete_all" not in exported
-        assert "https://mcp.internal" in exported
+        # The item is exported as its origin alone, as one whole list entry.
+        origin = "https://mcp.internal"
+        assert any(leaf == origin for leaf in _string_leaves(json.loads(exported)))
 
     same_keyed = CliRunner().invoke(main, ["diff", str(keyed_a), str(keyed_a), "--fail-on-alert"])
     assert same_keyed.exit_code == 0, same_keyed.output
