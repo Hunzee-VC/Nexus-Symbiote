@@ -259,17 +259,19 @@ def test_a_header_that_claims_more_than_it_holds_costs_only_what_it_holds(
 # hide the members another reader lists.
 
 
-def _local(name: bytes, data: bytes) -> bytes:
+def _local(name: bytes, data: bytes, extra: bytes = b"") -> bytes:
     crc = zipfile.crc32(data)
-    fields = (0x04034B50, 20, 0, 0, 0, 0, crc, len(data), len(data), len(name), 0)
-    return struct.pack("<IHHHHHIIIHH", *fields) + name + data
+    fields = (0x04034B50, 20, 0, 0, 0, 0, crc, len(data), len(data), len(name), len(extra))
+    return struct.pack("<IHHHHHIIIHH", *fields) + name + extra + data
 
 
-def _central(name: bytes, data: bytes, offset: int, comment: bytes = b"") -> bytes:
+def _central(
+    name: bytes, data: bytes, offset: int, comment: bytes = b"", extra: bytes = b""
+) -> bytes:
     crc = zipfile.crc32(data)
-    fields = (0x02014B50, 20, 20, 0, 0, 0, 0, crc, len(data), len(data), len(name), 0)
+    fields = (0x02014B50, 20, 20, 0, 0, 0, 0, crc, len(data), len(data), len(name), len(extra))
     tail = (len(comment), 0, 0, 0, offset)
-    return struct.pack("<IHHHHHHIIIHHHHHII", *fields, *tail) + name + comment
+    return struct.pack("<IHHHHHHIIIHHHHHII", *fields, *tail) + name + extra + comment
 
 
 def _end(count: int, size: int, offset: int) -> bytes:
@@ -437,6 +439,44 @@ def test_a_pickle_member_named_past_a_nul_is_unsafe(tmp_path: Path) -> None:
         assert opened.namelist() == ["numbers.npy", "x.pkl"]
     assert _inspect(tmp_path, archive, "arrays.npz") == (UNSAFE, ZIP_PICKLE_MEMBER)
     assert not model._pickle_member(b"x.txt\0y.npy")
+
+
+def _unicode_path(shown: bytes, name: bytes, *, version: int = 1, crc: int | None = None) -> bytes:
+    """An Info-ZIP Unicode Path extra field (0x7075) that renames ``shown`` to ``name``."""
+    body = struct.pack("<BL", version, zipfile.crc32(shown) if crc is None else crc) + name
+    return struct.pack("<HH", 0x7075, len(body)) + body
+
+
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [
+        (_unicode_path(b"x.npy", b"x.pkl"), (UNSAFE, ZIP_PICKLE_MEMBER)),
+        (_unicode_path(b"x.npy", b"x.pkl\0y"), (UNSAFE, ZIP_PICKLE_MEMBER)),
+        (
+            _unicode_path(b"x.npy", b"x.pkl", crc=0),
+            (SerializationSafety.UNKNOWN, ZIP_WITHOUT_PICKLE),
+        ),
+        (
+            _unicode_path(b"x.npy", b"x.pkl", version=2),
+            (SerializationSafety.UNKNOWN, ZIP_WITHOUT_PICKLE),
+        ),
+        (_unicode_path(b"x.npy", b"y.npy"), (SerializationSafety.UNKNOWN, ZIP_WITHOUT_PICKLE)),
+    ],
+    ids=["renamed", "renamed-past-nul", "crc-mismatch", "other-version", "harmless-rename"],
+)
+def test_a_pickle_member_renamed_by_a_unicode_path_field_is_unsafe(
+    tmp_path: Path, field: bytes, expected: tuple[SerializationSafety, str]
+) -> None:
+    # zipfile (3.12 and later) lists a member under the name a version-1 Unicode Path
+    # field gives when its CRC matches the stored name, so a loader opens x.pkl.
+    first = _local(b"numbers.npy", _npy("'<f8'"))
+    hidden = _local(b"x.npy", _PICKLE, field)
+    directory = _central(b"numbers.npy", _npy("'<f8'"), 0) + _central(
+        b"x.npy", _PICKLE, len(first), extra=field
+    )
+    archive = first + hidden + directory + _end(2, len(directory), len(first) + len(hidden))
+    for name in ("arrays.npz", "model.onnx"):
+        assert _inspect(tmp_path, archive, name) == expected
 
 
 @pytest.mark.parametrize("starts", [True, False], ids=["entry-signature", "no-signature"])

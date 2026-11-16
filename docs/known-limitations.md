@@ -624,7 +624,9 @@ A way around a limit that its entry does not describe is worth a
   header are rated `unknown`, a high finding. The directory is read with the
   tolerances of `zipfile` and the specification; another reader's, such as the C++
   reader `torch.load` uses, are not modelled. A member name with a NUL byte is
-  matched both whole and as `zipfile` cuts it at the NUL. A pickle hidden otherwise under
+  matched both whole and as `zipfile` cuts it at the NUL, and a member is also
+  matched by the name a version-1 Info-ZIP Unicode Path field (0x7075) with a
+  matching CRC gives it, as `zipfile` from Python 3.12 lists it. A pickle hidden otherwise under
   `.onnx`, `.gguf` or another suffix is rated `unknown` too, and
   `validate --project` still refuses it as unverified.
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat

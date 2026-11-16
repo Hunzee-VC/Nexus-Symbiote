@@ -1820,13 +1820,24 @@ def test_a_pinned_shard_is_not_verified_once_the_budget_refuses_its_index(projec
     assert model_collector.BINDINGS_EXHAUSTED in (evidence.unknown_reason or "")
 
 
-@pytest.mark.parametrize("variant", ["duplicate-keys", "list-weight-map", "too-many-indexes"])
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "duplicate-keys",
+        "list-weight-map",
+        "too-many-indexes",
+        "oversized",
+        "missing-shard",
+        "outside-shard",
+        "empty-weight-map",
+    ],
+)
 def test_a_pinned_shard_is_not_verified_when_its_index_cannot_be_bound(
     project: Path, variant: str
 ) -> None:
-    # An index that cannot be parsed, or one of too many, binds none of its shards; the
-    # shard was then verified alone although its pinned index, which decides what loads,
-    # differs from its pin.
+    # An index that cannot be read or parsed, one of too many, or one that names none of
+    # the collected weight files binds none of its shards; the shard was then verified
+    # alone although its pinned index, which decides what loads, differs from its pin.
     (project / "c").mkdir()
     shard = project / "c/model-00001-of-00001.safetensors"
     header = json.dumps({"t0": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]}}).encode()
@@ -1839,11 +1850,22 @@ def test_a_pinned_shard_is_not_verified_when_its_index_cannot_be_bound(
         index.write_text(f'{{"weight_map": {{{entry}, {entry}}}}}')
     elif variant == "list-weight-map":
         index.write_text(json.dumps({"weight_map": [shard.name]}))
-    else:
+    elif variant == "too-many-indexes":
         index.write_text(json.dumps({"weight_map": {"t0": shard.name, "t1": shard.name}}))
         for number in range(model_collector.MAX_SHARD_INDEXES):
             (project / f"c/m{number}.safetensors.index.json").write_text('{"weight_map": {}}')
-    result = ModelScanner(digest_pins=pins).scan(project)
+    elif variant == "oversized":
+        index.write_text(json.dumps({"weight_map": {"t0": shard.name}, "pad": "x" * 512}))
+    elif variant == "outside-shard":
+        (project / shard.name).write_bytes(shard.read_bytes())
+        index.write_text(json.dumps({"weight_map": {"t0": "../" + shard.name}}))
+    elif variant == "missing-shard":
+        index.write_text(json.dumps({"weight_map": {"t0": "nothere.safetensors"}}))
+    else:
+        index.write_text(json.dumps({"weight_map": {}}))
+    bound = replace(limits.DEFAULTS, file_bytes=256) if variant == "oversized" else limits.DEFAULTS
+    with limits.applied(bound):
+        result = ModelScanner(digest_pins=pins).scan(project)
     assert result.scan_failures
     (component,) = [c for c in result.components if c.source_path == "c/" + shard.name]
     assert component.signing_status == "partially-verified"

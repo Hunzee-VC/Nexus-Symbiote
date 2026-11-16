@@ -169,8 +169,12 @@ its own file alone: where its signer policy entries would
 verify it, its `signing_status` is `partially-verified`, its trust tier `unknown`, and
 its signing claim names the exhausted budget as the reason. The same holds for a
 shard whose directory holds a shard index that could not be read or parsed, or whose
-`weight_map` is not a map of names to files, and for every model in a directory with
-more than 16 shard indexes: the claim names the shard index that could not be bound.
+`weight_map` is not a map of names to files or names no collected weight file, and for
+every model in a directory with more than 16 shard indexes: the claim names the shard
+index that could not be bound. The check is conservative: any such index in the
+directory downgrades every pinned model file there, including one that a loader would
+reach through a different, well-formed index, such as a SafeTensors shard beside a
+broken `pytorch_model.bin.index.json`.
 
 A bound file that is a content candidate, such as ONNX external data named
 `checkpoint` under `models/` or a file below a SavedModel's `variables/`, is rated by

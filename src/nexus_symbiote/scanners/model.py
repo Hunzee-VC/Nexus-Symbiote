@@ -605,8 +605,10 @@ def _directory_members(data: bytes, begin: int, size: int, end: int) -> list[_Zi
             return _listed(members, complete=False)
         name_length = _little(data, position + 28, 2)
         extra_length = _little(data, position + 30, 2)
-        name = data[position + 46 : position + 46 + name_length]
         extra_at = position + 46 + name_length
+        name = _listed_name(
+            data[position + 46 : extra_at], data[extra_at : extra_at + extra_length]
+        )
         method = _little(data, position + 10, 2)
         located = _zip64_location(
             data[extra_at : extra_at + extra_length],
@@ -622,6 +624,30 @@ def _directory_members(data: bytes, begin: int, size: int, end: int) -> list[_Zi
             unlocated = True
         position = extra_at + extra_length + _little(data, position + 32, 2)
     return _listed(members, complete=not unlocated)
+
+
+def _listed_name(name: bytes, extra: bytes) -> bytes:
+    """The name a loader may open a member by: ``name``, or a pickle-family name that an
+    Info-ZIP Unicode Path field (0x7075) gives it.
+
+    ``zipfile`` from Python 3.12 lists a member under a version-1 Unicode Path field's
+    name when the field's CRC32 matches the stored name, and 3.11 under the stored name,
+    so a pickle name either way rates the member.
+    """
+    position = 0
+    while position + 4 <= len(extra):
+        length = _little(extra, position + 2, 2)
+        field = extra[position + 4 : position + 4 + length]
+        if (
+            _little(extra, position, 2) == 0x7075
+            and len(field) >= 5
+            and field[0] == 1
+            and _little(field, 1, 4) == zlib.crc32(name)
+            and _pickle_member(field[5:])
+        ):
+            return field[5:]
+        position += 4 + length
+    return name
 
 
 def _listed(members: list[_ZipMember], *, complete: bool) -> list[_ZipMember] | None:
@@ -1314,6 +1340,7 @@ def index_references(
         names = set(weight_map.values())
         if not budget.charge(index, len(names), partial(files._fail, index)):
             continue
+        bound = False
         for name in sorted(names):
             shard = _local_reference(directory, name)
             if (
@@ -1329,6 +1356,11 @@ def index_references(
                 )
                 continue
             references.setdefault(shard, []).append(index)
+            bound = True
+        if not bound:
+            # An index that names no collected weight file binds no shard, so what it
+            # makes a loader open is unknown, as for one that could not be parsed.
+            budget.unbound.add(index)
     return references, indexes
 
 
