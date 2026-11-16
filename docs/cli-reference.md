@@ -92,17 +92,22 @@ there too, so that standard output can carry the inventory:
 `nexus-symbiote summary bom.json > summary.txt` keeps the summary, and `2>/dev/null`
 hides only diagnostics.
 
+An output option given as `-`, or `./-`, is refused rather than written to a file named
+`-`: leave out `-o` to print to standard output.
+
 Every command prints text taken from an inventory, a checkout or a live server, such as
 names, paths, references and descriptions, literally and inert, in a terminal and in a
 CI log:
 
-- control, format and line-break characters, the noncharacters U+FFFE and U+FFFF,
-  and every other default-ignorable code point (Unicode's
+- control, format and line-break characters, every noncharacter (U+FDD0 to U+FDEF and
+  the last two code points of each plane, such as U+FFFE and U+FFFF), and every other
+  default-ignorable code point (Unicode's
   Default_Ignorable_Code_Point, such as variation selectors and blank fillers like
   U+3164), are replaced with U+FFFD, so such text cannot move the cursor, rewrite
   earlier output, start a new line or carry text a reader cannot see; a tab is
   replaced with one space, so a name stays readable but cannot line text up under a
-  later column;
+  later column; private-use characters are printed as they are, since they cannot move
+  the cursor or hide text, though a font may draw them as any symbol;
 - a `##` that would introduce a CI log command anywhere in a line (GitHub Actions'
   legacy `##[command]`, Azure Pipelines' `##vso[`, TeamCity's `##teamcity[`) is
   followed by U+FFFD;

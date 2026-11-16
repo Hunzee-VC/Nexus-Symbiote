@@ -60,7 +60,7 @@ CycloneDX properties and SPDX `extension_CdxPropertyEntry` records use these nam
 | Name | Where | Value |
 | --- | --- | --- |
 | `nexus-symbiote:document` | Document | The native AgentBOM as UTF-8 JSON with sorted keys and no whitespace (not RFC 8785). |
-| `nexus-symbiote:documentDigest` | Document | `sha256:` and the SHA-256 of the UTF-8 bytes of the `nexus-symbiote:document` value, exactly as embedded. |
+| `nexus-symbiote:documentDigest` | Document | `sha256:` and the SHA-256 of the document's deterministic JSON text (keys sorted, no whitespace, UTF-8), which is what `nexus-symbiote:document` holds as exported. Recovery recomputes it from the parsed value, so the check compares content: an embedded copy that differs only in key order, spacing or escapes still matches. Bind the export's exact bytes with an attestation. |
 | `nexus-symbiote:lossReport` | Document | JSON naming selected native fields the standard fields omit or normalize (profile `nexus-symbiote-export/v2`). |
 | `nexus-symbiote:projection` | Document | The projection version. |
 | `nexus-symbiote:dependency:relationship` | CycloneDX document | One JSON object per native edge: `from`, `to`, `type`, and `"conditional": true` for a conditional edge. |
