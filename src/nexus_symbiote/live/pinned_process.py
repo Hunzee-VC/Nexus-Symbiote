@@ -511,6 +511,12 @@ def _wrapper_contained(pid: int, done: int, seen: int | None, stop: bool) -> boo
     had its children reparented past it before the drain could list them.
     """
     held = seen == os.CLD_STOPPED and _drain_children(pid) and _alive(pid)
+    if held and not _children_of(pid):
+        # Stopped before it forked, or once it had reaped everything. Resumed, the first
+        # would start the launcher only now, after cleanup began, so it dies stopped.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, signal.SIGKILL)
+        return True
     if stop:
         _let_the_wrapper_reap(pid)
     return held or _wrapper_finished(done)
@@ -1035,7 +1041,9 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
             except ProcessLookupError:
                 # The group already exited; the caller's wait() still reaps the launcher.
                 pass
-        if sid is not None:
+        # Only while the launch is unreaped: its pid, which is the session id, cannot
+        # then name a session that a later, unrelated process started.
+        if sid is not None and stop:
             _kill_session(sid)
         if not namespaced:
             _kill_descendants(proc.pid)

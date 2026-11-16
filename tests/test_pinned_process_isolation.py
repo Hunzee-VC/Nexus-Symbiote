@@ -1825,3 +1825,46 @@ def test_the_wrapper_and_a_launcher_that_watches_its_parent_end_with_a_crashed_c
         _kill_marked(marker)
         with contextlib.suppress(ProcessLookupError, ValueError, OSError):
             os.kill(int(wrapper.read_text()), signal.SIGKILL)
+
+
+@_LINUX_ONLY
+def test_cleanup_before_the_wrapper_forks_never_starts_the_launcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A session can end before the wrapper has forked, as when the first write fails.
+    # Resumed so that it could reap, the wrapper would start the launcher only then,
+    # after cleanup began, so it must be killed while it is still stopped.
+    marker = tmp_path / "pid"
+    held = "import time\ntime.sleep(0.3)\n" + pinned_process._SUBREAPER_EXEC
+    monkeypatch.setattr(pinned_process, "_SUBREAPER_EXEC", held)
+    quoted = shlex.quote(str(marker))
+    proc = _spawn_opted_out(tmp_path, f"echo $$ > {quoted}\nexec sleep 60\n")
+    try:
+        pinned_process.terminate_process_group(proc)
+        assert proc.wait(timeout=5) == -signal.SIGKILL
+        time.sleep(1)
+        assert not marker.exists()
+    finally:
+        _kill_marked(marker)
+        for stream in (proc.stdin, proc.stdout):
+            if stream is not None:
+                stream.close()
+
+
+@_LINUX_ONLY
+def test_the_session_is_swept_only_while_the_launch_is_unreaped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The session id is the wrapper's pid. Once the caller has reaped it, the number can
+    # name a session that an unrelated process started, which the sweep would kill.
+    swept: list[int] = []
+    proc = _spawn_opted_out(tmp_path, "exit 0\n")
+    try:
+        assert proc.wait(timeout=10) == 0
+        monkeypatch.setattr(pinned_process, "_kill_session", swept.append)
+        pinned_process.terminate_process_group(proc)
+        assert swept == []
+    finally:
+        for stream in (proc.stdin, proc.stdout):
+            if stream is not None:
+                stream.close()
