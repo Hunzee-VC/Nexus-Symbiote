@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import hmac
 import json
 import os
+import secrets
 import stat
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
@@ -221,10 +224,13 @@ def _private_dir_info_error(
     return None
 
 
+_SEEDED_ROOT_SIDECAR = ".trusted_root.seeded.sha256"
+
+
 def _private_file_info_error(
     info: os.stat_result, parent_mode: int | None, path: Path, *, what: str, remedy: str
 ) -> str | None:
-    """Return an error unless a trust file is user-owned and private.
+    """Return an error unless a trust file is user-owned, unlinked elsewhere, and private.
 
     A group/world-writable file is accepted only when its parent directory
     keeps everyone else from traversing to it: sigstore-python seeds
@@ -234,12 +240,103 @@ def _private_file_info_error(
     """
     if (error := _owner_error(info, path, what=what)) is not None:
         return error
+    if info.st_nlink != 1:
+        return f"{what} {path} must not have other hard links; {remedy}"
     if info.st_mode & 0o022:
         if parent_mode is None or parent_mode & 0o011:
             return (
                 f"{what} {path} is group/world-writable and its directory lets "
                 f"others reach it; make the file private, make its directory private, {remedy}"
             )
+    return None
+
+
+# Every valid uid; (uid_t)-1 is reserved. The initial user namespace maps exactly this.
+_FULL_UID_RANGE = 4_294_967_295
+_DEFAULT_OVERFLOW_UID = 65534
+
+
+def _read_uid_map() -> str | None:
+    """This process's ``/proc/self/uid_map``, or ``None`` where it cannot be read."""
+    try:
+        return Path("/proc/self/uid_map").read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _overflow_uid() -> int:
+    """The uid the kernel shows for an owner unmapped in this user namespace."""
+    try:
+        value = int(Path("/proc/sys/kernel/overflowuid").read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return _DEFAULT_OVERFLOW_UID
+    return value if 0 <= value < _FULL_UID_RANGE else _DEFAULT_OVERFLOW_UID
+
+
+def _parse_uid_map(text: str) -> list[tuple[int, int]] | None:
+    """``(first inside uid, count)`` per ``uid_map`` line, or ``None`` if malformed."""
+    ranges: list[tuple[int, int]] = []
+    for line in text.splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        if len(fields) != 3 or not all(field.isascii() and field.isdigit() for field in fields):
+            return None
+        ranges.append((int(fields[0]), int(fields[2])))
+    return ranges
+
+
+def _trusted_ancestor_uids(uid: int) -> set[int]:
+    """Owners trusted above an unpinned trust root or a signature policy.
+
+    The caller's effective uid, and uid 0 when this user namespace maps it. In a
+    user namespace that does not map every uid, the kernel shows every unmapped
+    owner, host root and other host users alike, as the overflow uid, so that uid
+    is never trusted there, not even when it is the caller's own. Where the map
+    cannot be read on Linux a partial namespace cannot be ruled out and the
+    overflow uid is not trusted either; elsewhere there are no user namespaces.
+    """
+    text = _read_uid_map()
+    ranges = None if text is None else _parse_uid_map(text)
+    if ranges is None:
+        if not sys.platform.startswith("linux"):
+            return {0, uid}
+        return {0, uid} - {_overflow_uid()}
+    allowed = {uid}
+    if any(first <= 0 < first + count for first, count in ranges):
+        allowed.add(0)
+    if sum(count for _first, count in ranges) < _FULL_UID_RANGE:
+        allowed.discard(_overflow_uid())
+    return allowed
+
+
+def _ancestor_error(directory: Path, *, dir_what: str, remedy: str) -> str | None:
+    """Reject non-sticky world-writable or foreign non-root ancestors above an unpinned root."""
+    uid = _current_uid()
+    trusted_uids = _trusted_ancestor_uids(uid) if uid is not None else set()
+    abs_dir = Path(os.path.abspath(directory))
+    parts = list(abs_dir.parts)
+    if (
+        sys.platform == "darwin"
+        and len(parts) > 1
+        and parts[0] == "/"
+        and parts[1] in {"var", "tmp", "etc"}
+    ):
+        link_path = f"/{parts[1]}"
+        with contextlib.suppress(OSError):
+            if os.path.islink(link_path) and os.readlink(link_path) == f"private/{parts[1]}":
+                abs_dir = Path("/", "private", *parts[1:])
+    for ancestor in abs_dir.parents:
+        try:
+            info = os.lstat(ancestor)
+        except OSError:
+            return f"{dir_what} {ancestor} cannot be inspected"
+        if stat.S_ISLNK(info.st_mode):
+            return f"{dir_what} {ancestor} must not be a symlink"
+        if uid is not None and info.st_uid not in trusted_uids:
+            return f"{dir_what} {ancestor} is not owned by the current user"
+        if (info.st_mode & 0o002) and not (info.st_mode & stat.S_ISVTX):
+            return f"{dir_what} {ancestor} is world-writable without sticky protection; {remedy}"
     return None
 
 
@@ -343,7 +440,78 @@ def _read_sigstore_cache() -> tuple[Path | None, bytes | None, str | None]:
     )
     if content is None:
         return None, None, error or f"Sigstore trusted root {trusted_root} cannot be inspected"
+    content = _refresh_seeded_sigstore_cache(trusted_root, content)
     return trusted_root, content, None
+
+
+def _write_raw_nofollow(dir_fd: int, name: str, payload: bytes) -> None:
+    """Write ``payload`` to ``name`` in ``dir_fd`` via raw OS calls without os.fdopen."""
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    temp_name = f".{name}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | cloexec
+    fd = os.open(temp_name, flags, 0o600, dir_fd=dir_fd)
+    try:
+        view = memoryview(payload)
+        written = 0
+        while written < len(view):
+            written += os.write(fd, view[written:])
+    except BaseException:
+        os.close(fd)
+        with contextlib.suppress(OSError):
+            os.unlink(temp_name, dir_fd=dir_fd)
+        raise
+    os.close(fd)
+    try:
+        os.replace(temp_name, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temp_name, dir_fd=dir_fd)
+        raise
+
+
+def _refresh_seeded_sigstore_cache(trusted_root: Path, content: bytes) -> bytes:
+    """Refresh an unmodified previously seeded cache root when sigstore-python upgrades."""
+    try:
+        from sigstore._internal.tuf import DEFAULT_TUF_URL
+        from sigstore._utils import read_embedded
+
+        embedded = read_embedded("trusted_root.json", DEFAULT_TUF_URL)
+    except Exception:
+        return content
+    if content == embedded:
+        return content
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    try:
+        dir_fd = open_directory_nofollow(trusted_root.parent)
+    except OSError:
+        return content
+    try:
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | cloexec
+        sidecar_fd = os.open(_SEEDED_ROOT_SIDECAR, flags, dir_fd=dir_fd)
+        try:
+            info = os.fstat(sidecar_fd)
+            uid = _current_uid()
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or (uid is not None and info.st_uid != uid)
+                or info.st_size > 128
+            ):
+                return content
+            recorded = os.read(sidecar_fd, 129).strip().decode("ascii")
+        finally:
+            os.close(sidecar_fd)
+        current_digest = hashlib.sha256(content).hexdigest()
+        if not hmac.compare_digest(recorded, current_digest):
+            return content
+        new_digest = hashlib.sha256(embedded).hexdigest().encode("ascii")
+        _write_raw_nofollow(dir_fd, trusted_root.name, embedded)
+        _write_raw_nofollow(dir_fd, _SEEDED_ROOT_SIDECAR, new_digest)
+        return embedded
+    except (OSError, UnicodeDecodeError):
+        return content
+    finally:
+        os.close(dir_fd)
 
 
 def _seed_sigstore_cache(trusted_root: Path) -> str | None:
@@ -373,10 +541,14 @@ def _seed_sigstore_cache(trusted_root: Path) -> str | None:
                 from sigstore._internal.tuf import DEFAULT_TUF_URL
                 from sigstore._utils import read_embedded
 
-                stream.write(read_embedded("trusted_root.json", DEFAULT_TUF_URL))
+                embedded = read_embedded("trusted_root.json", DEFAULT_TUF_URL)
+                stream.write(embedded)
         except Exception:
             os.unlink(trusted_root.name, dir_fd=dir_fd)
             return failure
+        with contextlib.suppress(OSError):
+            digest_bytes = hashlib.sha256(embedded).hexdigest().encode("ascii")
+            _write_raw_nofollow(dir_fd, _SEEDED_ROOT_SIDECAR, digest_bytes)
     except OSError:
         return failure
     finally:
@@ -432,7 +604,9 @@ def _read_explicit_trust_root(
                 None,
                 "Pinned Sigstore trust-root SHA-256 must be sha256:<64 lowercase hex characters>",
             )
-    content, error = _read_checked_trust_root(path, private=expected is None)
+    content, error = _read_checked_trust_root(
+        path, private=expected is None, check_ancestors=expected is None
+    )
     if content is None:
         return None, None, None, error
     if expected is not None and not hmac.compare_digest(
@@ -446,6 +620,7 @@ def _read_checked_trust_root(
     path: Path,
     *,
     private: bool,
+    check_ancestors: bool = False,
     what: str = "Explicit Sigstore trust root",
     dir_what: str = "Explicit Sigstore trust-root directory",
     remedy: str = _EXPLICIT_REMEDY,
@@ -489,6 +664,8 @@ def _read_checked_trust_root(
                     error = _private_dir_info_error(
                         dir_info, path.parent, what=dir_what, remedy=remedy
                     )
+                if error is None and check_ancestors:
+                    error = _ancestor_error(path.parent, dir_what=dir_what, remedy=remedy)
                 if error is not None:
                     return None, error
             if info.st_size > MAX_TRUST_ROOT_BYTES:
@@ -538,11 +715,18 @@ def verify_file_hash(
 
 
 def _carries_dsse_envelope(bundle_json: bytes) -> bool:
+    from nexus_symbiote.core.hashing import MAX_JSON_NESTING, json_nesting_exceeds
+
     try:
-        document = json.loads(bundle_json)
+        decoded = bundle_json.decode("utf-8")
+        if json_nesting_exceeds(decoded, MAX_JSON_NESTING):
+            return False
+        document = json.loads(decoded)
     except (ValueError, RecursionError):
         return False
-    return isinstance(document, dict) and "dsseEnvelope" in document
+    return isinstance(document, dict) and (
+        "dsseEnvelope" in document or "dsse_envelope" in document
+    )
 
 
 def verify_sigstore_digest(
@@ -559,6 +743,11 @@ def verify_sigstore_digest(
     The caller must bind this digest to the inspected artifact. This function
     verifies a message signature over the artifact digest. A DSSE envelope signs
     an in-toto statement instead, so such a bundle is refused with a fixed reason.
+
+    The bundle must be UTF-8 JSON, as RFC 8259 requires between systems. A bundle
+    in another encoding, such as UTF-16, is refused as unreadable before any DSSE
+    check (``Sigstore artifact verification failed (UnicodeDecodeError)``), even when
+    it carries a DSSE envelope, so it never reports ``DSSE_UNSUPPORTED``.
 
     The trust root comes from an explicit ``--trust-root``/``NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT``
     override when one is set (verified against a pinned SHA-256 when one is
@@ -585,6 +774,10 @@ def verify_sigstore_digest(
         _, digest = normalize_digest(digest_hex, "sha256")
         if len(bundle_json) > MAX_BUNDLE_BYTES:
             return VerificationResult(False, error="Sigstore bundle exceeds byte limit")
+        from nexus_symbiote.core.hashing import MAX_JSON_NESTING, json_nesting_exceeds
+
+        if json_nesting_exceeds(bundle_json.decode("utf-8"), MAX_JSON_NESTING):
+            raise ValueError("bundle JSON nesting limit exceeded")
         if _carries_dsse_envelope(bundle_json):
             return VerificationResult(False, error=DSSE_UNSUPPORTED)
         from sigstore.hashes import Hashed

@@ -139,8 +139,11 @@ def test_the_record_yarn_installs_is_the_one_bound(tmp_path, lock):
     result, comp = scan(tmp_path, "# yarn lockfile v1\n\n" + lock)
     assert result.scan_failures == [] and result.surfaces_excluded == []
     assert comp.registry_uri == "https://evil.example"
-    assert comp.package_url == "pkg:npm/openai@4.0.0?repository_url=https://evil.example"
-    assert "registry_origin" in [r.category for r in comp.risks]
+    assert comp.properties["lockfile_record"] == "yarn.lock#/openai@4.0.0"
+    # The tarball path is not the npm layout for the package, so no identity is claimed.
+    assert comp.package_url is None
+    categories = [r.category for r in comp.risks]
+    assert "registry_origin" in categories and "lockfile_resolution_mismatch" in categories
 
 
 @pytest.mark.parametrize(

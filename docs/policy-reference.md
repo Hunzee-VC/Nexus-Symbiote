@@ -30,6 +30,7 @@ The built-in policy is what you get with no file, or with `--no-project-policy`.
 - Unknown keys, duplicate keys and values of the wrong type are refused, and the error names the setting, for example `invalid or unsupported settings: risk (warn_threshold cannot exceed fail_threshold)`.
 - Booleans must be YAML booleans (`true`, `false`); the string `"false"` is refused.
 - `version` must be the string `"1.0"`. An unquoted `1.0` is a number and is refused.
+- YAML anchors and aliases are refused, and so is a file with more YAML nodes than the largest policy the settings below allow (every list at its maximum length, 1,000 suppressions); the file is also limited to 1 MiB.
 
 ```yaml
 version: "1.0"
@@ -127,7 +128,7 @@ How a suppression applies:
 | `risk.suppressions: CATEGORY on REF (FINGERPRINT) until DATE (owner OWNER)` | once per suppression |
 | `scan.failure_mode=report-only` | collection failures never fail `scan` |
 | `scan.scanners=NAMES` | fewer collectors than the built-in set |
-| `scan.exclude_paths=PATHS` | paths beyond the four defaults |
+| `scan.exclude_paths=PATHS` | paths beyond the always-skipped names (`node_modules`, `.git`, `__pycache__`, `.venv` and `venv`) |
 | `output.default_format=FORMAT` | the project selects an export format other than `json`, which changes what `scan -o` writes without `-f` |
 
 Stricter values, such as a lower threshold or `fail_on_severity: high`, are not listed. Human-readable `scan`, `validate` and `risk` print the list on stderr as a warning.

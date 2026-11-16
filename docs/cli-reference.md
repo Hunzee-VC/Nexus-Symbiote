@@ -160,10 +160,11 @@ findings without turning them into exit status 1, as a project policy with
 `baseline` applies the built-in gate whatever the project policy says.
 
 Unverified ShadowScan discovery evidence is gated separately. `import-shadowscan`
-(including `--report-only`), `validate` and `risk` exit 1 on it when a CI variable is
-set (see [environment variables](#environment-variables)) or `--fail-on-unsigned-discovery`
-is given, unless `--allow-unsigned-discovery` is given. Only a producer check made in
-the same run counts as verification; the outcome recorded in the BOM is not trusted.
+(including `--report-only`), `scan --check`, `baseline`, `validate` and `risk` exit 1 on
+it when a CI variable is set (see [environment variables](#environment-variables)) or
+`--fail-on-unsigned-discovery` is given, unless `--allow-unsigned-discovery` is given.
+Only a producer check made in the same run counts as verification; the outcome recorded
+in the BOM is not trusted.
 
 ## Environment variables
 
@@ -176,7 +177,7 @@ the same run counts as verification; the outcome recorded in the BOM is not trus
 | `XDG_CACHE_HOME`, `HOME` | Where sigstore-python caches the trusted root that offline Sigstore verification uses; see [known limitations](known-limitations.md#signatures). |
 | `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` | An explicit Sigstore `trusted_root.json` file, or a directory holding one, for offline Sigstore verification. `--trust-root` overrides it. Without a pinned digest the file and its directory must be owned by the user and not writable by group or others. |
 | `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256` | The SHA-256 the explicit trust root's bytes must match. `--trust-root-sha256` overrides it; set without a trust root, it is a usage error. |
-| `CI`, `GITHUB_ACTIONS`, `GITLAB_CI`, `CIRCLECI`, `TF_BUILD`, `JENKINS_URL`, `BUILDKITE`, `DRONE`, `TRAVIS` | Any value other than empty, `0` or `false` marks the run as automated: `import-shadowscan`, `validate` and `risk` then fail on unverified ShadowScan discovery evidence unless `--allow-unsigned-discovery` is given, and `scan`, `validate` and `risk` fail on a project policy that weakens a gate unless `--no-project-policy` or `--accept-project-policy` is given. |
+| `CI`, `GITHUB_ACTIONS`, `GITLAB_CI`, `CIRCLECI`, `TF_BUILD`, `JENKINS_URL`, `BUILDKITE`, `DRONE`, `TRAVIS` | Any value other than empty, `0` or `false` marks the run as automated: `import-shadowscan`, `scan --check`, `baseline`, `validate` and `risk` then fail on unverified ShadowScan discovery evidence unless `--allow-unsigned-discovery` is given, and `scan`, `validate` and `risk` fail on a project policy that weakens a gate unless `--no-project-policy` or `--accept-project-policy` is given. |
 | `TMPDIR` | Where `verify-live` stages the private copy of a pinned launcher. |
 | `_NEXUS_SYMBIOTE_COMPLETE` | Ignored. Shell completion is not offered, because an inherited completion variable would make every command, gates included, exit 0 without running. |
 | `SOURCE_DATE_EPOCH` | A whole number of seconds since 1970-01-01T00:00:00Z: 1 to 12 ASCII digits, at most 253402300799. `scan`, `baseline` and `import-shadowscan` then record that instant as the collection time; without it they record none. The serial number is derived from the content digest either way, so the same inputs give byte-identical native JSON and CycloneDX files, and, with the variable set, byte-identical SPDX files too. Any other value is a usage error whose message does not repeat it. Gates still use the clock, for example to decide whether a suppression has expired. See [reproducible inventories](reproducible-inventories.md). |
@@ -383,7 +384,9 @@ nexus-symbiote baseline [OPTIONS] [PROJECT_PATH]
 | `-o`, `--baseline-path` `PATH` | Where to write the unsigned baseline (default: .nexus-symbiote-baseline.json, in the working directory, not the project). |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target, as scan does. |
 | `--accept-project-policy` | In CI, accept a project policy that weakens the built-in gates explicitly; without it such a policy fails the command there (exit 1). Interactive runs only warn. |
-| `--signature-policy` `FILE` | Explicit operator signer policy JSON, kept outside the project, as for scan. |
+| `--signature-policy` `FILE` | Explicit operator signer policy JSON, kept outside the project, as for scan; also verifies any merged ShadowScan discovery report. |
+| `--fail-on-unsigned-discovery` | Exit with status 1 when the snapshot merges unverified ShadowScan discovery evidence. |
+| `--allow-unsigned-discovery` | Accept unverified ShadowScan discovery evidence explicitly (still warns); required in CI when no `--signature-policy` verifies the report. |
 
 The snapshot must also pass the built-in gate: a project policy cannot relax it.
 When it does not, `baseline` prints each reason and the findings that tripped the gate.
@@ -763,6 +766,8 @@ nexus-symbiote scan [OPTIONS] [PROJECT_PATH]
 | `--signature-policy` `PATH` | Explicit operator signer policy JSON |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target. |
 | `--accept-project-policy` | In CI, accept a project policy that weakens the built-in gates explicitly; without it such a policy fails the command there (exit 1). Interactive runs only warn. |
+| `--fail-on-unsigned-discovery` | With `--check`, exit with status 1 when ShadowScan discovery evidence is unverified. |
+| `--allow-unsigned-discovery` | With `--check`, accept unverified ShadowScan discovery evidence explicitly (still warns); required in CI when no `--signature-policy` verifies the report. |
 
 `PROJECT_PATH` is resolved before collection, because the collectors refuse a root
 reached through a symbolic link. When it resolves through a link, `scan` names the

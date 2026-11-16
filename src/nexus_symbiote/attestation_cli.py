@@ -13,6 +13,7 @@ import functools
 import json
 import os
 import re
+import stat
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -24,7 +25,6 @@ from nexus_symbiote.runtime_cli import (
     _InputTooLargeError,
     _KeyFileError,
     _load_private,
-    _load_public,
     _passphrase,
     _read,
 )
@@ -203,6 +203,51 @@ def attest(
     click.echo(json_text(json.dumps(result)))
 
 
+def _load_trusted_public(path: Path) -> object:
+    from cryptography.exceptions import UnsupportedAlgorithm
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    from nexus_symbiote.core.hashing import (
+        open_directory_nofollow,
+        open_regular_file,
+        pathname_identity,
+    )
+    from nexus_symbiote.runtime_cli import MAX_KEY_BYTES
+    from nexus_symbiote.utils.crypto import _trusted_ancestor_uids
+
+    uid = getattr(os, "geteuid", lambda: None)()
+    trusted_uids = _trusted_ancestor_uids(uid) if uid is not None else set()
+    parent_fd = open_directory_nofollow(path.parent)
+    try:
+        parent_info = os.fstat(parent_fd)
+    finally:
+        os.close(parent_fd)
+    if (parent_info.st_mode & 0o002) and not (
+        (parent_info.st_mode & stat.S_ISVTX) and (uid is None or parent_info.st_uid in trusted_uids)
+    ):
+        raise _KeyFileError("trusted key directory must not be world-writable")
+    with open_regular_file(path) as stream:
+        info = os.fstat(stream.fileno())
+        raw = stream.read(MAX_KEY_BYTES + 1)
+        if (
+            info.st_nlink != 1
+            or (uid is not None and info.st_uid not in trusted_uids)
+            or (info.st_mode & 0o002)
+            or pathname_identity(path) != (info.st_dev, info.st_ino)
+        ):
+            raise _KeyFileError("trusted key file failed ownership, permission, or link checks")
+    if len(raw) > MAX_KEY_BYTES:
+        raise _InputTooLargeError
+    try:
+        public = serialization.load_pem_public_key(raw)
+    except (ValueError, TypeError, UnsupportedAlgorithm) as exc:
+        raise _KeyFileError("public key could not be loaded") from exc
+    if not isinstance(public, Ed25519PublicKey):
+        raise _KeyFileError("only Ed25519 public keys are supported")
+    return public
+
+
 @click.command("verify-attestation")
 @click.argument("subject", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.argument("envelope", type=click.Path(exists=True, dir_okay=False, path_type=Path))
@@ -261,13 +306,20 @@ def verify_attestation(
     purpose and when, by the signer's clock. It does not establish that SUBJECT is
     accurate, complete or safe, or that it is the newest file the signers attested.
     """
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
     from nexus_symbiote import attestation
     from nexus_symbiote.runtime import key_id
 
     _check_trust_anchors(trusted_keys, (subject, envelope))
-    ring = {}
+    ring: dict[str, Ed25519PublicKey] = {}
     for path in trusted_keys:
-        public = _load("verification", "trusted key file", functools.partial(_load_public, path))
+        public = cast(
+            Ed25519PublicKey,
+            _load(
+                "verification", "trusted key file", functools.partial(_load_trusted_public, path)
+            ),
+        )
         ring[key_id(public)] = public
     if threshold > len(ring):
         raise click.BadParameter(

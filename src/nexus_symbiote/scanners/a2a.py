@@ -1037,7 +1037,10 @@ class A2AScanner(Scanner):
         if any(
             url and not url.lower().startswith("https://")
             for url in (endpoint, *aliases, *supported_urls[:1])
-        ) or any("://" in url and not url.lower().startswith("https://") for url in alternatives):
+        ) or any(
+            (url.startswith("//") or "://" in url) and not url.lower().startswith("https://")
+            for url in alternatives
+        ):
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.HIGH,

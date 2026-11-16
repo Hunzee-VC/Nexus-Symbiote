@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 from pathlib import Path, PureWindowsPath
 from typing import Any
 from urllib.parse import urlsplit
@@ -155,7 +156,18 @@ def _read_policy(policy_path: Path, root: Path) -> tuple[bytes, str]:
     resolved = policy_path.resolve()
     if any(resolved.is_relative_to(directory) for directory in untrusted):
         raise SignaturePolicyError(inside)
+    from nexus_symbiote.utils.crypto import _trusted_ancestor_uids
+
+    uid = getattr(os, "geteuid", lambda: None)()
+    trusted_uids = _trusted_ancestor_uids(uid) if uid is not None else set()
     try:
+        from nexus_symbiote.core.hashing import open_directory_nofollow
+
+        parent_fd = open_directory_nofollow(policy_path.parent)
+        try:
+            parent_info = os.fstat(parent_fd)
+        finally:
+            os.close(parent_fd)
         with open_regular_file(policy_path) as stream:
             info = os.fstat(stream.fileno())
             if info.st_size > MAX_POLICY_BYTES:
@@ -163,6 +175,16 @@ def _read_policy(policy_path: Path, root: Path) -> tuple[bytes, str]:
             # Another name for the file could live inside the project it gates.
             if info.st_nlink != 1:
                 raise SignaturePolicyError("Signature policy must not have other hard links")
+            if uid is not None and info.st_uid not in trusted_uids:
+                raise SignaturePolicyError("Signature policy must be owned by the current user")
+            parent_world_writable = bool(parent_info.st_mode & 0o002) and not (
+                bool(parent_info.st_mode & stat.S_ISVTX)
+                and (uid is None or parent_info.st_uid in trusted_uids)
+            )
+            if (info.st_mode & 0o002) or parent_world_writable:
+                raise SignaturePolicyError(
+                    "Signature policy and its directory must not be world-writable"
+                )
             raw = stream.read(MAX_POLICY_BYTES + 1)
             # The open followed no symlink, so these are the file's real ancestors.
             # Their device and inode also reveal the project behind a name that the

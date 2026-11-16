@@ -290,15 +290,15 @@ A way around a limit that its entry does not describe is worth a
   `pkg/Mcp.Json`, or of the client directory that holds one, such as
   `pkg/.VSCode/mcp.json`, `pkg/.kiro/Settings/mcp.json` or
   `pkg/.Windsurf/mcp_config.json`, or of a host directory above one that does not
-  name its client, such as `pkg/.Kiro/mcp.json`, and of a root path, such as
-  `.Gemini/settings.json` or `.codex/Config.toml`, is a
+  name its client, such as `pkg/.Kiro/mcp.json`, and of a dialect path at the root or
+  below it, such as `.Gemini/settings.json` or `pkg/.codex/Config.toml`, is a
   [case-variant failure](#every-collector) and is not read, beside the exact
   spelling too. Another spelling of a host directory that decides nothing, such as
   `.VSCode` in `pkg/.VSCode/.mcp.json`, whose name decides its client, is read as
-  the exact spelling. Below the root only the names that the
+  the exact spelling. Below the root, the names that the
   [collector reference](collectors.md#what-each-collector-reads) lists for any depth
-  are read, so a nested `.gemini/settings.json` or `.codex/config.toml`, in any
-  spelling, is neither read nor checked.
+  are read, and so is a nested copy of a root dialect path, such as
+  `pkg/.gemini/settings.json` or `pkg/.codex/config.toml`, as that dialect.
 - **Python server forms.** Servers are collected from `FastMCP` imported by name
   from `mcp.server`, `mcp.server.fastmcp`, `mcp.server.fastmcp.server`, `fastmcp`,
   `fastmcp.server` or `fastmcp.server.server`, and from `MCPServer` imported from

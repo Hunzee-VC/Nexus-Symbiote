@@ -365,14 +365,26 @@ def test_a_root_dialect_variant_alone_is_reported_once(tmp_path, path, canonical
     assert _servers(result) == []
 
 
-@pytest.mark.parametrize(
-    "path",
-    ["pkg/.gemini/settings.json", "pkg/.Gemini/settings.json", "pkg/.codex/Config.toml"],
-)
-def test_nested_gemini_and_codex_files_are_not_checked(tmp_path, path):
-    root = _write_raw(tmp_path, {path: CODEX_EVIL if path.endswith(".toml") else "{}"})
+def test_a_nested_gemini_file_is_read_in_its_exact_spelling(tmp_path):
+    root = _write_raw(tmp_path, {"pkg/.gemini/settings.json": "{}"})
     result = MCPScanner().scan(root, config_only=True)
     assert result.scan_failures == []
+    assert "pkg/.gemini/settings.json" in result.surfaces_scanned
+
+
+# Nested dialect files are read as their root dialect, so another spelling of one is the
+# active file on a case-insensitive checkout and fails like any other variant.
+@pytest.mark.parametrize(
+    "path, canonical",
+    [
+        ("pkg/.Gemini/settings.json", "pkg/.gemini/settings.json"),
+        ("pkg/.codex/Config.toml", "pkg/.codex/config.toml"),
+    ],
+)
+def test_a_nested_gemini_or_codex_variant_is_reported(tmp_path, path, canonical):
+    root = _write_raw(tmp_path, {path: CODEX_EVIL if path.endswith(".toml") else "{}"})
+    result = MCPScanner().scan(root, config_only=True)
+    assert result.scan_failures == [_variant(path, canonical)]
     assert _servers(result) == []
 
 

@@ -45,6 +45,17 @@ ISOLATED_NAMES = frozenset(
         "TTY_INTERACTIVE",
         "SOURCE_DATE_EPOCH",
         "SOAK_OVERRIDE",
+        "ALLOWED_RELEASE_TAG_SIGNERS",
+        "SSLKEYLOGFILE",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+        "REQUEST_METHOD",
         # The unsigned-discovery gate fails closed when these say the run is automated;
         # a test that needs that sets one itself.
         "CI",
@@ -306,14 +317,16 @@ def _isolated_environment(
     monkeypatch.setattr(socket, "gethostbyaddr", _guarded_gethostbyaddr)
     monkeypatch.setattr(socket, "getnameinfo", _guarded_getnameinfo)
     monkeypatch.setattr(socket, "create_connection", _guarded_create_connection)
-    # Collection limits are process state (the root --limit option sets them): every test
-    # starts at the defaults, and what a test leaves in force never reaches the next one.
+    # Collection limits and umask are process state: normalize umask to 0022 so permission
+    # checks behave identically inside containers with umask 0000, and restore both after.
+    previous_umask = os.umask(0o022)
     try:
         with limits.applied(limits.DEFAULTS):
             yield
             limits_left = limits.current() != limits.DEFAULTS
     finally:
         tempfile.tempdir = None
+        os.umask(previous_umask)
     leaked = modes.current()
     if leaked is not None:
         pytest.fail(f"the test left the {leaked.value} mode enforced", pytrace=False)

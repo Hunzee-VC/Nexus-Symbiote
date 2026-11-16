@@ -344,7 +344,8 @@ def _index_origin(value: object) -> str | None:
     host = (netloc.rsplit(":", 1)[0] if port is not None else netloc).lower()
     if "%" in netloc or not _INDEX_HOST.fullmatch(host):
         return None
-    return f"{parts.scheme}://{host}" + (f":{port}" if port is not None else "")
+    candidate = f"{parts.scheme}://{host}" + (f":{port}" if port is not None else "")
+    return None if redact_url(candidate) == "[redacted-url]" else candidate
 
 
 def _url_origin(url: str) -> str:
@@ -434,6 +435,8 @@ def _plain_pnpm_peers(suffix: str) -> bool:
             return False
         depth, index = depth + 1, match.end()
     return depth == 0 and redact_text(suffix) == suffix
+
+
 _PNPM_PATCH_HASH = re.compile(r"\s*patch_hash")
 
 
@@ -1959,8 +1962,9 @@ class RegistryScanner(Scanner):
     def _tarball_matches(cls, origin: str, path: str, package: str, version: str) -> bool:
         """Whether a registry tarball path names this package and version.
 
-        npm registries serve /<name>/-/<unscoped name>-<version>.tgz. Another layout,
-        such as GitHub Packages' download paths, is not checked.
+        npm registries serve /<name>/-/<unscoped name>-<version>.tgz. Direct archive
+        URLs ending in .tgz or .tar.gz must also name <unscoped name>-<version>; opaque
+        download paths without an archive filename are not checked.
         """
         try:
             decoded = unquote(path, errors="strict")
@@ -1969,7 +1973,14 @@ class RegistryScanner(Scanner):
         tail = f"/{package}/-/{package.rsplit('/', 1)[-1]}-{version}.tgz"
         if cls._default_registry(origin):
             return decoded == tail
-        return "/-/" not in decoded or decoded.endswith(tail)
+        if "/-/" in decoded:
+            return decoded.endswith(tail)
+        lowered = decoded.lower()
+        if lowered.endswith((".tgz", ".tar.gz")):
+            stem = package.rsplit("/", 1)[-1].lower()
+            expected = f"/{stem}-{version.lower()}"
+            return lowered.endswith((f"{expected}.tgz", f"{expected}.tar.gz"))
+        return True
 
     @staticmethod
     def _validate_sri_integrity(integrity: Any) -> bool:
@@ -2035,21 +2046,21 @@ class RegistryScanner(Scanner):
         if integrity is not None and not self._validate_sri_integrity(integrity):
             result.scan_failures.append(f"{lock_name}: invalid selected package integrity")
             return
+        shown = redact_text(component.name)
         if not consistent:
             component.risks.append(
                 _risk(
                     RiskSeverity.HIGH,
                     "lockfile_resolution_mismatch",
-                    f"npm package '{component.name}' has a lockfile record whose tarball URL "
+                    f"npm package '{shown}' has a lockfile record whose tarball URL "
                     "names another package or version.",
                     "Regenerate the lockfile from the registry and review the change.",
                 )
             )
-        component.risks.extend(
-            self._npm_record_risks(
-                component.name, integrity is not None or checksum_recorded, origin
-            )
-        )
+        digest_recorded = integrity is not None or checksum_recorded
+        component.risks.extend(self._npm_record_risks(shown, digest_recorded, origin))
+        if digest_recorded and consistent:
+            component.risks = [r for r in component.risks if r.category != "version_pinning"]
         component.version = version
         component.package_url = (
             self._npm_purl(component.name, version, origin) if consistent else None
@@ -3409,7 +3420,7 @@ class RegistryScanner(Scanner):
                     _risk(
                         RiskSeverity.HIGH if cleartext else RiskSeverity.LOW,
                         "registry_origin",
-                        f"PyPI package '{comp.name}' is resolved from {registry_origin}, "
+                        f"PyPI package '{redact_text(comp.name)}' is resolved from {registry_origin}, "
                         + (
                             "over cleartext HTTP, where a download can be replaced in transit."
                             if cleartext
