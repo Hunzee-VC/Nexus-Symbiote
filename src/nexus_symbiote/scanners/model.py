@@ -357,12 +357,14 @@ def _recognized_pickle(
     both after the frame, as ``io.BytesIO`` gives it, and after the STOP, as a buffered
     file gives it to the C unpickler.
 
-    A file found ``by_content``, which no pickle-family name rates, is not rated unknown
-    by a text-protocol first pickle that the end of the sample cuts short or that names
-    something before a flaw: on its own it is as likely prose. One that the opcode or
-    MARK budget cuts short is rated: prose ends or fails long before either runs out,
-    and harmless padding, such as NONE and POP repeated, would otherwise hide a call
-    after it. Under a model name, a sample is also
+    A pickle that the bounds cut short is rated unknown wherever it starts, in a file
+    found ``by_content`` too: harmless padding, such as NONE and POP repeated or a
+    string longer than the sample, would otherwise hide a call after it. Text ends or
+    fails before a bound, as a read past the end of the file and an argument whose
+    visible part already fails are decided (``utils.pickle_load``). A file found
+    ``by_content``, which no pickle-family name rates, is not rated unknown by a
+    text-protocol first pickle that names something before a flaw: on its own it is
+    as likely prose. Under a model name, a sample is also
     recognized by its shape, as before content was read past a STOP: a binary stream
     of PROTO and ``MIN_PICKLE_OPCODES`` well-formed opcodes, or a stream that passes
     static opcode/stack checks to STOP within the limits.
@@ -430,9 +432,7 @@ def _pickle_loads(
         for segment in pickle_load.load_segments(sample, size, start, flavor, budget):
             if segment.outcome == "called":
                 return _recognized(binary)
-            if segment.outcome == "unread" and (
-                start or binary or segment.exhausted or not by_content
-            ):
+            if segment.outcome == "unread":
                 unread = PICKLE_NAME_UNCALLED if segment.named else PICKLE_UNREAD
                 worst = _worse(worst, (SerializationSafety.UNKNOWN, unread))
             elif segment.named and (segment.outcome == "stop" or binary or not by_content):

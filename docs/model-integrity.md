@@ -56,15 +56,19 @@ of the file, after which nothing is read. The ratings are:
   call reached only through a name that is not a dotted identifier, or through what a
   loader's `persistent_load` returned, counts for nothing.
 - A pickle that the 64 KiB, opcode or MARK bound cuts short before the loader's
-  behaviour is decided is `unknown` when it follows an earlier STOP, when the file
-  starts with PROTO, when the file has a model name, or when the opcode or MARK bound
-  cut it short, and the explanation says whether it had already resolved an importable
-  name. On its own, a text-protocol stream that the 64 KiB sample cuts short is not
-  rated by content: as `N.B.`, `Mar.`, `VERSION`, `.cache` or a list of file names,
-  text reads as such streams. Text ends or fails long before 4,096 opcodes or 64
-  MARKs, while a pickle padded with harmless opcodes, such as `N0` (NONE, POP)
-  repeated before what it calls, reaches those bounds, so they are rated wherever the
-  pickle starts. Each offset where a loader resumes is read once.
+  behaviour is decided is `unknown` wherever it starts, in a file inventoried by its
+  content too, and the explanation says whether it had already resolved an importable
+  name. So a pickle padded with harmless opcodes, such as `N0` (NONE, POP) repeated, or
+  with a string longer than 64 KiB, before what it calls is `unknown` and inventoried.
+  Text ends or fails before a bound, as two reads past the sample are decided without
+  the bytes they miss: one that ends past the end of the file, which the C unpickler
+  fails as truncated and the pure-Python one follows to the end of the file, and a
+  text argument whose visible part already fails, such as a STRING that opens with no
+  quote (`SIMPLE  = T`), an `INT`, `LONG`, `FLOAT`, `GET` or `PUT` with a character or a
+  space that no number takes (`Infinity and beyond`), a `GLOBAL` or `INST` name with a
+  character no dotted identifier has, or a `PERSID` that is not ASCII. A line that
+  starts inside a frame is not decided early. Each offset where a loader resumes is
+  read once.
 - A pickle that resolves an importable name and never uses it is `unknown`, as the
   loader imported the name, when it returns it at STOP (`cos\nsystem\n.`) or, when the
   pickle starts with PROTO or the file has a model name, when it ends at an error. A pickle

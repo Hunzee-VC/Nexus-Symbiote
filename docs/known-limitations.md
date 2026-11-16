@@ -589,10 +589,11 @@ A way around a limit that its entry does not describe is worth a
   or `INST` whose module and name are dotted identifiers), so text that only parses as
   one, such as a `.gitignore` under `checkpoints/`, is not inventoried; text whose
   first lines happen to read as such a reference, such as `cache`, `logs`, `.`, still
-  is. In such a file, a text-protocol first pickle that the 64 KiB sample cuts short
-  before it calls anything, as one that opens with a string longer than 64 KiB does,
-  is not inventoried, since long text reads the same way; one that the 4,096-opcode or
-  64-MARK bound cuts short is rated `unknown`. A ZIP member is a pickle when its name ends in a pickle-family suffix, so `.pkl`
+  is. A pickle that the 64 KiB sample or the 4,096-opcode or 64-MARK bound cuts short
+  is rated `unknown` there too, so text longer than 64 KiB whose every line up to that
+  point reads as a pickle opcode with a free-text argument (`PATH=...` lines, which read
+  as `PERSID`, or lines starting with `V`, which read as `UNICODE`) is inventoried as
+  `unknown`, a high finding. A ZIP member is a pickle when its name ends in a pickle-family suffix, so `.pkl`
   and `archive/.pkl` count, and a central directory entry whose 32-bit size or offset
   is `0xFFFFFFFF` without a ZIP64 field is read as written, as `zipfile` reads it. A
   directory that turns malformed after it lists a pickle-family member, such as with an

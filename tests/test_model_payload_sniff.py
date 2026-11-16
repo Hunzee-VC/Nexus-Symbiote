@@ -642,8 +642,6 @@ def test_a_padded_header_pickle_after_a_stop_is_unknown(
 
 def test_text_cut_short_without_an_earlier_stop_is_not_inventoried(tmp_path: Path) -> None:
     (tmp_path / "models").mkdir()
-    # A text-protocol stream whose sample ends before any STOP, as long text does.
-    (tmp_path / "long.dat").write_bytes(b"(S'" + b"x" * MAX_PICKLE_INSPECTION_BYTES + b"'\n")
     # After a STOP, a text segment that fails short of the bound, or ends with the file.
     (tmp_path / "models" / "notes").write_bytes(b"N.(I1\nnot a pickle at all\n")
     (tmp_path / "tail.dat").write_bytes(b"N.(I1\nI2\n")
@@ -653,23 +651,26 @@ def test_text_cut_short_without_an_earlier_stop_is_not_inventoried(tmp_path: Pat
 # builtins.len('x'): an inert call that pickle.load reaches past harmless padding.
 _INERT_CALL = b"cbuiltins\nlen\n(S'x'\ntR."
 _PADDING = b"N0" * (MAX_PICKLE_OPCODES // 2 + 1)  # NONE, POP: past the opcode budget
-# Text-protocol pickles at the start of a file that use up the opcode or MARK budget
-# before the loader's behaviour is decided, well inside the 64 KiB sample.
-_PAST_THE_BUDGET = {
+_LONG_STRING = b"S'" + b"a" * MAX_PICKLE_INSPECTION_BYTES + b"'\n0"  # STRING, POP
+# Text-protocol pickles at the start of a file that run past the opcode or MARK budget,
+# or past the 64 KiB sample, before the loader's behaviour is decided.
+_PAST_A_BOUND = {
     "opcodes": (_PADDING + _INERT_CALL, PICKLE_UNREAD),
     "marks": (b"(" * (MAX_PICKLE_MARKS + 1) + _INERT_CALL, PICKLE_UNREAD),
     "named": (_INERT_CALL[:14] + _PADDING + _INERT_CALL[14:], PICKLE_NAME_UNCALLED),
     "no-call": (b"(" + b"I1\n" * MAX_PICKLE_OPCODES, PICKLE_UNREAD),
+    "sample": (_LONG_STRING + _INERT_CALL, PICKLE_UNREAD),
+    "sample-named": (_INERT_CALL[:14] + _LONG_STRING + _INERT_CALL[14:], PICKLE_NAME_UNCALLED),
+    "sample-no-call": (b"(S'" + b"x" * MAX_PICKLE_INSPECTION_BYTES + b"'\n", PICKLE_UNREAD),
 }
 
 
 @pytest.mark.parametrize(
-    ("data", "explanation"), list(_PAST_THE_BUDGET.values()), ids=list(_PAST_THE_BUDGET)
+    ("data", "explanation"), list(_PAST_A_BOUND.values()), ids=list(_PAST_A_BOUND)
 )
-def test_a_text_pickle_past_the_opcode_or_mark_budget_is_unknown_by_content(
+def test_a_text_pickle_past_a_bound_is_unknown_by_content(
     tmp_path: Path, data: bytes, explanation: str
 ) -> None:
-    assert len(data) < MAX_PICKLE_INSPECTION_BYTES
     if data.endswith(_INERT_CALL[14:]):
         # pickle.load reads past the padding and calls what the pickle resolved.
         assert _oracle(data, tmp_path / "oracle.bin") == (True, True)
@@ -685,17 +686,49 @@ def test_a_text_pickle_past_the_opcode_or_mark_budget_is_unknown_by_content(
         assert any(risk.category == "serialization_format_unknown" for risk in component.risks)
 
 
-def test_the_interpreter_tells_a_spent_budget_from_the_end_of_the_sample() -> None:
-    def first(data: bytes, size: int, opcodes: int = 10, marks: int = 2) -> pickle_load.Segment:
-        budget = pickle_load.Budget(opcodes, marks)
-        return pickle_load.load_segment(data, size, 0, "c", budget)
+@pytest.mark.parametrize("flavor", pickle_load.FLAVORS)
+@pytest.mark.parametrize(
+    ("sample", "size", "outcome"),
+    [
+        # A count past the end of the file: truncated, or EOF after a short read.
+        (b"The weights", 1000, "error"),
+        (b"T\x00\x01\x00\x00ab", 200, "error"),
+        # A count that ends inside the file but past the sample.
+        (b"T\x00\x01\x00\x00ab", 70_000, "unread"),
+        # A line past the sample: undecided while what it shows may still parse.
+        (b"S'abc", 1000, "unread"),
+        (b"SIMPLE  =    T", 1000, "error"),
+        (b"I12", 1000, "unread"),
+        (b"I 12  ", 1000, "unread"),
+        (b"I12 and more", 1000, "error"),
+        (b"Infinity and beyond", 1000, "error"),
+        (b"F-inf", 1000, "unread"),
+        (b"cos\nsys", 1000, "unread"),
+        (b"cos path\nsys", 1000, "unread"),  # only the module line shows
+        (b"cos\nsys tem", 1000, "error"),
+        (b"Pabc", 1000, "unread"),
+        (b"Pab\xe9", 1000, "error"),
+        (b"Vanything at all", 1000, "unread"),
+    ],
+)
+def test_a_read_past_the_sample_is_decided_where_the_loaders_are(
+    flavor: pickle_load.Flavor, sample: bytes, size: int, outcome: str
+) -> None:
+    budget = pickle_load.Budget(MAX_PICKLE_OPCODES, MAX_PICKLE_MARKS)
+    assert pickle_load.load_segment(sample, size, 0, flavor, budget).outcome == outcome
 
-    assert first(b"N0" * 6 + b"N.", 14).exhausted
-    assert first(b"(((N.", 5).exhausted
-    # The sample holds the file's first bytes; a read past them is the sample's end.
-    cut = first(b"S'abc", 1000)
-    assert cut.outcome == "unread" and not cut.exhausted
-    assert first(b"N.", 2).outcome == "stop"
+
+def test_long_text_past_the_sample_is_not_inventoried(tmp_path: Path) -> None:
+    line = b"The weights in this directory were converted from the original checkpoint.\n"
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "README").write_bytes(line * 3000)
+    (tmp_path / "models" / "header.fits").write_bytes(b"SIMPLE  =    T" + b" " * 200_000)
+    (tmp_path / "models" / "notes").write_bytes(b"Infinity and beyond " * 10_000)
+    (tmp_path / "samples.dat").write_bytes(b"Index of runs, " * 10_000)
+    assert all(
+        len(path.read_bytes()) > MAX_PICKLE_INSPECTION_BYTES for path in tmp_path.rglob("*.*")
+    )
+    assert _components(tmp_path) == {}
 
 
 def _frame_stop(tail: bytes) -> bytes:
