@@ -186,12 +186,14 @@ def register_supply_chain_commands(main: click.Group) -> None:
         is_flag=True,
         help=(
             "Explicitly allow execution without a PID namespace; printed as a warning. On "
-            "Linux the launcher runs under a wrapper that stays its parent as a child "
-            "subreaper, and cleanup kills the wrapper's whole tree, including a "
-            "clone(CLONE_PARENT) child that has called setsid and what a launcher that "
-            "already exited left behind. A launcher that kills its wrapper can escape, "
-            "except from a cgroup v2 child where one can be created, which cleanup also "
-            "kills. Elsewhere cleanup is best effort. This is not a namespace or sandbox."
+            "Linux the launcher runs in its own process group under a wrapper that stays "
+            "its parent as a child subreaper and ignores the signals it can, and cleanup "
+            "kills the wrapper's whole tree, including a clone(CLONE_PARENT) child that has "
+            "called setsid and what a launcher that already exited left behind. A launcher "
+            "that kills its wrapper with SIGKILL can escape, except from a cgroup v2 child "
+            "where one can be created, which cleanup also kills; the server then fails "
+            "with isolation-teardown-failed. Elsewhere cleanup is best effort. This is not "
+            "a namespace or sandbox."
         ),
     )
     def verify_live(
@@ -246,12 +248,14 @@ def register_supply_chain_commands(main: click.Group) -> None:
         if no_isolation:
             click.echo(
                 "warning: --no-isolation: kernel PID containment is disabled. On Linux the "
-                "launcher runs under a wrapper that stays its parent as a child subreaper, "
-                "and cleanup kills the wrapper's whole tree, including a clone(CLONE_PARENT) "
-                "child that has called setsid and what a launcher that already exited left "
-                "behind. A launcher that kills its wrapper can escape, except from a cgroup v2 "
-                "child where one can be created, which cleanup also kills. Elsewhere cleanup "
-                "is best effort. This is not a namespace or sandbox.",
+                "launcher runs in its own process group under a wrapper that stays its parent "
+                "as a child subreaper and ignores the signals it can, and cleanup kills the "
+                "wrapper's whole tree, including a clone(CLONE_PARENT) child that has called "
+                "setsid and what a launcher that already exited left behind. A launcher that "
+                "kills its wrapper with SIGKILL can escape, except from a cgroup v2 child where "
+                "one can be created, which cleanup also kills; the server then fails with "
+                "isolation-teardown-failed. Elsewhere cleanup is best effort. This is not a "
+                "namespace or sandbox.",
                 err=True,
             )
         with isolation_off() if no_isolation else contextlib.nullcontext():
