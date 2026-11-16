@@ -97,6 +97,8 @@ class McpDialect:
     syntax: str
     maps: tuple[str, ...]
     url_transport: str | None = None
+    # Settings that hold one command line the client starts as the server ``mcp``.
+    server_commands: tuple[tuple[str, ...], ...] = ()
 
 
 # Every MCP configuration file is read for both server maps, whichever its client
@@ -110,7 +112,13 @@ MCP_DIALECTS = (
     McpDialect(".cursor/mcp.json", "json", _SERVER_MAPS),
     McpDialect(".claude/mcp.json", "json", _SERVER_MAPS),
     McpDialect(".vscode/mcp.json", "jsonc", _SERVER_MAPS),
-    McpDialect(".gemini/settings.json", "jsonc", ("mcpServers",), "sse"),
+    McpDialect(
+        ".gemini/settings.json",
+        "jsonc",
+        ("mcpServers",),
+        "sse",
+        (("mcpServerCommand",), ("mcp", "serverCommand")),
+    ),
     McpDialect(".roo/mcp.json", "json", _SERVER_MAPS),
     McpDialect(".kiro/settings/mcp.json", "json", _SERVER_MAPS),
     McpDialect(".amazonq/mcp.json", "json", _SERVER_MAPS),
@@ -199,6 +207,33 @@ def _client_spelling(path: Path) -> str | None:
     return "/".join(parts)
 
 
+def _linked_client_files(files: ConfinedCollection, links: list[Path]) -> list[Path]:
+    """Client files a host opens through a directory symlink that the walk met.
+
+    The walk covers a linked directory under its target's name, where a path such as
+    ``pkg/.gemini/settings.json`` names no client file, so each one is looked up
+    through the link: the rest of every client path whose leading directories the
+    link's name ends, and every client name below a linked host directory.
+    """
+    found: list[Path] = []
+    for link in links:
+        folded = tuple(fold_name(part) for part in link.parts)
+        candidates: set[Path] = set()
+        if folded[-1] in _FOLDED_HOST_DIRECTORIES:
+            candidates.update(link / name for name in MCP_CONFIG_NAMES)
+        for template, spelling in (*_FOLDED_TEMPLATES, *_FOLDED_UNPARSED_TEMPLATES):
+            for size in range(1, len(template)):
+                if folded[-size:] == template[:size]:
+                    candidates.add(link.joinpath(*spelling[size:]))
+        for path in sorted(candidates):
+            if files.regular_file(path) is not None:
+                found.append(path)
+            else:
+                # Records a refused link, or another spelling below the link.
+                files.read_bytes(path, missing_ok=True)
+    return found
+
+
 def _template(path: str) -> McpDialect | None:
     """The dialect whose file ``path`` is, at the root or below it; the longest match wins."""
     matches = [
@@ -238,6 +273,10 @@ def _launch_directory(path: str) -> str:
 
 
 _SPACE = re.compile(r"\s*")
+# Gemini CLI splits a server command with shell-quote, which also substitutes
+# environment variables, expands globs and reads quotes and operators; only words
+# whose split cannot depend on that are inventoried.
+_PLAIN_COMMAND = re.compile(r"[A-Za-z0-9_@%+=:,./-]+(?:[ \t]+[A-Za-z0-9_@%+=:,./-]+)*")
 _CAMEL_BOUNDARY = re.compile(r"([a-z0-9])([A-Z])")
 # Fixed width on purpose: "HTTPServer" splits before the capital that starts "Server".
 _ACRONYM_BOUNDARY = re.compile(r"([A-Z])([A-Z][a-z])")
@@ -364,6 +403,15 @@ UNPARSED_CLIENT_FILES = (
     (".junie/mcp/mcp.json", None),
 )
 UNPARSED_CLIENT_DIRECTORIES = (".continue/mcpServers",)
+_FOLDED_UNPARSED_TEMPLATES = [
+    (tuple(fold_name(part) for part in path.split("/")), path.split("/"))
+    for path, _ in UNPARSED_CLIENT_FILES
+]
+_FOLDED_UNPARSED_DIRECTORIES = [
+    (tuple(fold_name(part) for part in path.split("/")), path.split("/"))
+    for path in UNPARSED_CLIENT_DIRECTORIES
+]
+_UNPARSED_MEMBERS = dict(UNPARSED_CLIENT_FILES)
 
 MAX_SERVERS_PER_FILE = 1000
 # Credential values of all servers in one file, each scrubbed from every server's text.
@@ -1844,8 +1892,10 @@ class MCPScanner(Scanner):
         with self._collection(
             project_root, result, max_total_bytes=source_collection_bytes()
         ) as files:
-            sources = list(files.iter_files())
-            nested = self._nested_client_files(files, sources)
+            links: list[Path] = []
+            sources = list(files.iter_files(directory_links=links))
+            walked = [*sources, *_linked_client_files(files, links)]
+            nested = self._nested_client_files(files, walked)
             try:
                 key, key_error = source_binding_key(), None
             except SourceBindingKeyError as exc:
@@ -1858,7 +1908,7 @@ class MCPScanner(Scanner):
             finally:
                 self._resolvers = None
             result.components.extend(clients.values())
-            self._report_unparsed_clients(files, result)
+            self._report_unparsed_clients(files, result, walked, links)
             if not config_only:
                 self._scan_code_mcp_clients(result, sources)
 
@@ -1954,7 +2004,7 @@ class MCPScanner(Scanner):
                 result.components.extend(tool_comps)
                 server_refs.append(mcp_comp.bom_ref)
             host = self._detect_host_from_config(dialect.path)
-            if host and any(key in data for key in dialect.maps):
+            if host and (any(key in data for key in dialect.maps) or server_refs):
                 if host not in clients:
                     clients[host] = MCPClientComponent(
                         bom_ref=f"mcp-client:{host}",
@@ -2069,6 +2119,29 @@ class MCPScanner(Scanner):
                     )
                     continue
                 entries[name] = config
+        commands: list[Any] = []
+        for keys in dialect.server_commands:
+            value: Any = data
+            for key in keys:
+                value = value.get(key) if isinstance(value, dict) else None
+            # The client skips an empty command as it skips an absent one.
+            if value is not None and value != "":
+                commands.append(value)
+        if len(commands) > 1:
+            result.scan_failures.append(
+                f"{dialect.path}: MCP server command declared under more than one setting"
+            )
+        elif commands and not isinstance(commands[0], str):
+            result.scan_failures.append(f"{dialect.path}: invalid MCP server command")
+        elif commands and _PLAIN_COMMAND.fullmatch(commands[0].strip(" \t")) is None:
+            result.scan_failures.append(
+                f"{dialect.path}: MCP server command 'mcp' is not plain words and is not "
+                "inventoried"
+            )
+        elif commands:
+            command, *arguments = commands[0].split()
+            # The client replaces a server map entry of the same name.
+            entries["mcp"] = {"command": command, "args": arguments}
         tools = [
             tool
             for config in entries.values()
@@ -2990,10 +3063,57 @@ class MCPScanner(Scanner):
             )
         return risks
 
-    def _report_unparsed_clients(self, files: ConfinedCollection, result: ScanResult) -> None:
-        """Recognised client files whose MCP declarations this collector does not parse."""
-        for path, member in UNPARSED_CLIENT_FILES:
-            text = files.read_text(path, missing_ok=True)
+    def _report_unparsed_clients(
+        self,
+        files: ConfinedCollection,
+        result: ScanResult,
+        walked: list[Path],
+        links: list[Path],
+    ) -> None:
+        """Recognised client files whose MCP declarations this collector does not parse.
+
+        A client started in a package directory reads that directory's copy, so the
+        walked copies below the root are gaps too, and another spelling of one is a
+        failure, as for the client files that are parsed.
+        """
+        paths: dict[str, str | None] = dict(UNPARSED_CLIENT_FILES)
+        directories = set(UNPARSED_CLIENT_DIRECTORIES)
+        for path in walked:
+            folded = tuple(fold_name(part) for part in path.parts)
+            for template, spelling in _FOLDED_UNPARSED_TEMPLATES:
+                size = len(template)
+                if len(folded) > size and folded[-size:] == template:
+                    exact = "/".join([*path.parts[:-size], *spelling])
+                    if exact != path.as_posix():
+                        files.report_case_variant(path, exact)
+                    else:
+                        paths[exact] = _UNPARSED_MEMBERS["/".join(spelling)]
+            for template, spelling in _FOLDED_UNPARSED_DIRECTORIES:
+                size = len(template)
+                for start in range(1, len(folded) - size):
+                    if folded[start : start + size] == template:
+                        found = Path(*path.parts[: start + size])
+                        canonical = Path(*path.parts[:start], *spelling)
+                        if found != canonical:
+                            files.report_case_variant(found, canonical)
+                        else:
+                            directories.add(canonical.as_posix())
+        for link in links:
+            folded = tuple(fold_name(part) for part in link.parts)
+            for template, spelling in _FOLDED_UNPARSED_DIRECTORIES:
+                for size in range(1, len(template) + 1):
+                    if len(folded) <= size or folded[-size:] != template[:size]:
+                        continue
+                    found = link.joinpath(*spelling[size:])
+                    canonical = Path(*link.parts[:-size], *spelling)
+                    if not files.is_directory(found):
+                        continue
+                    if found != canonical:
+                        files.report_case_variant(found, canonical)
+                    else:
+                        directories.add(canonical.as_posix())
+        for name, member in paths.items():
+            text = files.read_text(name, missing_ok=True)
             if text is None:
                 continue
             if member is not None:
@@ -3003,8 +3123,9 @@ class MCPScanner(Scanner):
                     data = {member: True}
                 if not isinstance(data, dict) or not data.get(member):
                     continue
-            result.surfaces_excluded.append(f"{path}: MCP client configuration not inventoried")
-        for directory in UNPARSED_CLIENT_DIRECTORIES:
+            result.surfaces_excluded.append(f"{name}: MCP client configuration not inventoried")
+        root = set(UNPARSED_CLIENT_DIRECTORIES)
+        for directory in sorted(directories, key=lambda name: (name not in root, name)):
             if next(iter(files.iter_files(directory)), None) is not None:
                 result.surfaces_excluded.append(
                     f"{directory}: MCP client configuration not inventoried"
