@@ -1438,16 +1438,21 @@ A way around a limit that its entry does not describe is worth a
   signalled. The server fails with `isolation-teardown-failed`, but the launcher and
   everything it started keep running. The same reason is reported when the launcher
   only crashed, because `unshare` ends with the signal that ended the launcher.
-- **`--no-isolation` contains a launcher's processes only against accidents.** On
-  Linux, cleanup relies on a wrapper process that runs as your user and keeps the
-  launcher's whole tree under it. A launcher running as the same user can kill that
-  wrapper, after which its processes are adopted by pid 1 and keep running; the
-  server fails with `isolation-teardown-failed`, but nothing ends them. The same
-  reason is reported when the launcher was only killed by a signal, including a
-  crash, because the wrapper re-raises it as `unshare` does, and when a tree that
-  keeps forking outlasts the scans. A delegated cgroup v2 would not close this,
-  because a process running as the same user can move itself out of it. Use
-  `--no-isolation` only inside a worker that is already isolated; see
+- **Under `--no-isolation`, a launcher that kills its wrapper with SIGKILL escapes.**
+  On Linux the opted-out launcher runs under a wrapper that ignores every signal it
+  can and adopts every orphan below it. A launcher that sends that wrapper SIGKILL
+  takes what it started out of the wrapper's tree, and outside a private cgroup v2,
+  which cleanup kills where the current cgroup allows one, nothing ends it. The server
+  fails with `isolation-teardown-failed`, but those processes keep running. The cgroup
+  does not close this on its own, because a process running as the same user can move
+  itself out of it. The same reason is reported when a descendant cannot be killed,
+  such as one running as another user, when a tree that keeps forking outlasts
+  cleanup, and when the wrapper's children cannot be listed from `/proc`. A launcher
+  that only crashed is not reported: the wrapper reaps its tree and reports it empty
+  before it ends with the launcher's signal. A launcher running as root, or with `CAP_SYS_PTRACE` or
+  `CAP_SYS_ADMIN`, can also trace the wrapper or forge the report it gives cleanup,
+  so its escape can end with the server reported as verified. Run opted-out launchers
+  only in an independently isolated worker, never as root; see
   [`verify-live`](cli-reference.md#verify-live).
 - **Inside some user namespaces, every launch policy is refused.** `verify-live`
   accepts a launch policy only when `/` and every directory above it are owned by root
