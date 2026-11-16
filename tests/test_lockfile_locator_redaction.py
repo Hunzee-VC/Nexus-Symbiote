@@ -178,9 +178,10 @@ def _pnpm_v6(peers: str) -> str:
 
 
 def _pnpm_unlisted(peers: str) -> str:
-    """A lockfile with no root importer, so the record is found by its key."""
+    """A lockfile with no root importer, so the record is found by its key and, since
+    pnpm writes one in every lockfile format, is stale and not bound."""
     return (
-        "lockfileVersion: '9.0'\n"
+        "lockfileVersion: '5.4'\n"
         "packages:\n"
         f"  {json.dumps('openai@4.0.0' + peers)}:\n"
         f"    resolution: {{integrity: {SHA512}}}\n"
@@ -224,12 +225,8 @@ UNPLAIN_PEERS = {
 @pytest.mark.parametrize("peers", list(UNPLAIN_PEERS.values()), ids=list(UNPLAIN_PEERS))
 @pytest.mark.parametrize(
     ("lock", "pointer"),
-    [
-        (_pnpm_v6, "~1openai@4.0.0(***)"),
-        (_pnpm_unlisted, "openai@4.0.0(***)"),
-        (_pnpm_slash, "~1openai~14.0.0(***)"),
-    ],
-    ids=["importer", "unlisted", "slash"],
+    [(_pnpm_v6, "~1openai@4.0.0(***)")],
+    ids=["importer"],
 )
 def test_a_pnpm_key_whose_peers_hold_other_text_is_recorded_redacted(
     tmp_path, peers, lock, pointer
@@ -237,6 +234,21 @@ def test_a_pnpm_key_whose_peers_hold_other_text_is_recorded_redacted(
     result = _project(tmp_path, "4.0.0", "pnpm-lock.yaml", lock(peers))
     record, version = _bound(result)
     assert (record, version) == ("pnpm-lock.yaml#/packages/" + pointer, "4.0.0")
+    _assert_clean(result)
+
+
+@pytest.mark.parametrize("peers", list(UNPLAIN_PEERS.values()), ids=list(UNPLAIN_PEERS))
+@pytest.mark.parametrize("lock", [_pnpm_unlisted, _pnpm_slash], ids=["unlisted", "slash"])
+def test_a_pnpm_key_found_by_name_binds_nothing_and_leaks_nothing(tmp_path, peers, lock):
+    result = _project(tmp_path, "4.0.0", "pnpm-lock.yaml", lock(peers))
+    # pnpm writes a root importer in every lockfile format, so the record is stale.
+    assert result.scan_failures == [
+        "pnpm-lock.yaml: selected package version disagrees with package.json"
+    ]
+    assert result.surfaces_excluded == []
+    (component,) = result.components
+    assert "lockfile_record" not in component.properties
+    assert "package_resolution" not in component.claims
     _assert_clean(result)
 
 
@@ -269,12 +281,8 @@ PLAIN_PEERS = [
 @pytest.mark.parametrize("peers", PLAIN_PEERS)
 @pytest.mark.parametrize(
     ("lock", "head"),
-    [
-        (_pnpm_v6, "~1openai@4.0.0"),
-        (_pnpm_unlisted, "openai@4.0.0"),
-        (_pnpm_slash, "~1openai~14.0.0"),
-    ],
-    ids=["importer", "unlisted", "slash"],
+    [(_pnpm_v6, "~1openai@4.0.0")],
+    ids=["importer"],
 )
 def test_a_pnpm_key_of_packages_and_exact_versions_is_kept_as_its_pointer(
     tmp_path, peers, lock, head
@@ -317,7 +325,10 @@ def test_an_npm_lockfile_key_is_recorded_as_the_inventory_redacts_the_name(tmp_p
     (tmp_path / "package.json").write_text(json.dumps({"dependencies": {name: "1.0.0"}}))
     lock = {
         "lockfileVersion": 3,
-        "packages": {"": {}, f"node_modules/{name}": {"version": "1.0.0", "integrity": SHA512}},
+        "packages": {
+            "": {"dependencies": {name: "1.0.0"}},
+            f"node_modules/{name}": {"version": "1.0.0", "integrity": SHA512},
+        },
     }
     (tmp_path / "package-lock.json").write_text(json.dumps(lock))
     result = RegistryScanner().scan(tmp_path)
@@ -333,7 +344,10 @@ def test_an_ordinary_npm_lockfile_key_is_kept_as_its_pointer(tmp_path):
     (tmp_path / "package.json").write_text(json.dumps({"dependencies": {name: "1.0.0"}}))
     lock = {
         "lockfileVersion": 3,
-        "packages": {"": {}, f"node_modules/{name}": {"version": "1.0.0", "integrity": SHA512}},
+        "packages": {
+            "": {"dependencies": {name: "1.0.0"}},
+            f"node_modules/{name}": {"version": "1.0.0", "integrity": SHA512},
+        },
     }
     (tmp_path / "package-lock.json").write_text(json.dumps(lock))
     record, _ = _bound(RegistryScanner().scan(tmp_path))

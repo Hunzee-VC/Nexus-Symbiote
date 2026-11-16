@@ -62,7 +62,12 @@ def _uv_registry(url: str) -> dict[str, str]:
 
 
 def _poetry_legacy(url: str) -> dict[str, str]:
-    return _poetry(f'source = {{ type = "legacy", url = "{url}", reference = "corp" }}')
+    # Poetry writes the reference of the source pyproject.toml declares for the package.
+    files = _poetry(f'source = {{ type = "legacy", url = "{url}", reference = "corp" }}')
+    files["pyproject.toml"] += (
+        f'\n[[tool.poetry.source]]\nname = "corp"\nurl = "{url}"\npriority = "explicit"\n'
+    )
+    return files
 
 
 @pytest.mark.parametrize("lock", [_uv_registry, _poetry_legacy], ids=["uv", "poetry"])

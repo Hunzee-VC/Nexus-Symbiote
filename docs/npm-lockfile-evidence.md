@@ -25,7 +25,14 @@ checked before it is taken:
 - A version that is not an exact SemVer version, an integrity value that does not
   decode to its algorithm's length or has only SHA-1, and a version that differs
   from an exact version in `package.json` (which `npm ci` refuses) are collection
-  failures.
+  failures. So is a lockfile whose root entry (`packages[""]`) records another spec
+  for the package than `package.json`, section by section, or that has no root
+  entry, which npm writes in every lockfile with `packages`: `npm ci` refuses it, and
+  `npm install` resolves again, so the record is not what installs. A name
+  `optionalDependencies` also lists is compared without its `dependencies` copy, which
+  npm drops before writing the lockfile. A record whose
+  version the recorded spec does not admit is not detected; `npm ci` refuses that
+  lockfile too.
 - A missing integrity value, a registry other than the default, and a tarball URL
   that names another package or version are findings.
   A range in `package.json` is resolved, with no `version_pinning` finding, only by a
@@ -38,11 +45,28 @@ checked before it is taken:
 lockfile in the project root (`npm-shrinkwrap.json` and `package-lock.json` count as
 npm's one), for each package that `package.json` declares from a registry: the exact
 version, SRI integrity and tarball origin of the root importer's record, or of the
-stanza for the spec `package.json` declares. A pnpm lockfile with no root importer,
-neither `importers` nor top-level dependency maps, is searched for the package by
-name. A record that only another package's dependency left, such as a stanza for
-another range, is not taken, and neither is a record of a git, URL or path
-dependency. Their records are checked as an npm record is: the
+stanza for the spec `package.json` declares. A record that only another package's
+dependency left, such as a stanza for another range, is not taken, and neither is a
+record of a git, URL or path dependency. A pnpm record is the one the lockfile format
+reads: `/<name>/<version>` in a 5.x lockfile, `/<name>@<version>` with its peers in
+6.x and `<name>@<version>` without them in 9.x, whose peers are in `snapshots`;
+another lockfile version is a collection failure, and a record of the same package and
+version under another of these spellings that only another lockfile format writes,
+which pnpm never reads, makes the resolution ambiguous. Records of one version in
+several peer contexts, which 6.x lockfiles hold, are siblings, and the importer's own
+is taken. A 5.x importer reference with peers, such as `4.52.0_zod@3.23.8`, is not
+parsed: it is a collection failure, and nothing is bound. An importer `specifier` (a
+5.x `specifiers` entry) other than the spec pnpm takes from `package.json` (from
+`optionalDependencies`, then `dependencies`, `devDependencies` and
+`peerDependencies`), or the spec `pnpm.overrides` or `resolutions` gives the whole
+name, which pnpm writes in its place, is a stale lockfile, which `pnpm install
+--frozen-lockfile` refuses: a collection failure, and nothing is bound. So is an
+importer that records no specifier. An override with a range or a parent in its
+selector, or one in `pnpm-workspace.yaml`, is not resolved, so a lockfile resolved
+through one is reported stale. pnpm lists the root's dependencies in every lockfile
+format (5.x at the top level, with `specifiers`), so a lockfile with neither
+`importers` nor top-level dependency maps records no specifier: a record found there
+by name is stale and binds nothing. Their records are checked as an npm record is: the
 `resolved` or `tarball` URL, the exact version, an exact `package.json` version it
 contradicts and the integrity value are collection failures as above (so a Yarn v1
 `sha1-` value is one), and a tarball URL that names another package or version is a
@@ -183,7 +207,11 @@ a package with a local, git or URL source in the lockfile, or for one that a roo
 file declares from a URL, no resolution is bound. A version that a declaration of
 the package does not admit, in any root file and under any marker or group, is a
 collection failure, as for npm: the lockfile is stale, or the file is not installed
-from it. `[build-system]` requires are not compared, because neither lockfile locks
+from it. A `poetry.lock` record with a `reference` is bound only when the reference
+names a source `pyproject.toml` declares, explicit sources included, at the record's
+index origin (PyPI for Poetry's own `PyPI`): Poetry downloads from the source the
+reference names, whatever `url` the record shows. Otherwise the record is an
+exclusion and no package URL is bound. `[build-system]` requires are not compared, because neither lockfile locks
 them.
 
 These are declared resolution claims with unknown trust. The collector does not

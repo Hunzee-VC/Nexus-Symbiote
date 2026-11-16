@@ -22,7 +22,24 @@ _ENV_TEMPLATE_SUFFIXES = frozenset({".example", ".sample", ".template"})
 # of the inventory. One named only for what it holds, such as `secrets.py`, is a store
 # written as a program and stays a credential file, as the names and suffixes above do.
 _PROGRAM_SUFFIXES = frozenset(
-    {".py", ".pyi", ".sh", ".bash", ".zsh", ".ps1", ".js", ".mjs", ".cjs", ".ts", ".rb", ".go"}
+    {
+        ".py",
+        ".pyi",
+        ".sh",
+        ".bash",
+        ".zsh",
+        ".ps1",
+        ".js",
+        ".mjs",
+        ".cjs",
+        ".jsx",
+        ".ts",
+        ".mts",
+        ".cts",
+        ".tsx",
+        ".rb",
+        ".go",
+    }
 )
 # Directories named for what the files in them hold, such as `secrets/`. Only a whole
 # name counts, so a skill named `secret-scanner` keeps its scripts.
@@ -47,8 +64,13 @@ def credential_shaped(path: str) -> bool:
     suffix = PurePosixPath(name).suffix
     if name in _CREDENTIAL_NAMES:
         return True
-    if name.startswith(".env"):
-        return suffix not in _ENV_TEMPLATE_SUFFIXES
+    if suffix not in _ENV_TEMPLATE_SUFFIXES and (
+        name.startswith(".env")
+        # `prod.env` and `app.env.local` hold values as `.env` does; `jest.env.js` is a
+        # program, and a template still falls through to the marker checks below.
+        or ((name.endswith(".env") or ".env." in name) and suffix not in _PROGRAM_SUFFIXES)
+    ):
+        return True
     if suffix in _CREDENTIAL_SUFFIXES:
         return True
     if suffix in _PROGRAM_SUFFIXES:
@@ -63,6 +85,11 @@ def credential_gap(path: str, target: str | None) -> str | None:
     credentials."""
     if credential_shaped(path):
         return "its name says it holds credentials"
+    return link_gap(target)
+
+
+def link_gap(target: str | None) -> str | None:
+    """Why a symlink that leads to ``target`` is not followed, or None."""
     if target is not None and credential_shaped(target):
         return f"a symlink leads to {target}, whose name says it holds credentials"
     return None
