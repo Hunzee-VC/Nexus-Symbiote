@@ -14,6 +14,7 @@ from nexus_symbiote import limits
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.hashing import hash_bytes
+from nexus_symbiote.scanners.credential_files import credential_shaped
 from nexus_symbiote.scanners.prompt import PromptScanner
 from nexus_symbiote.utils.confined import ConfinedCollection
 
@@ -102,21 +103,21 @@ def test_a_credential_named_file_in_a_rule_directory_is_a_gap(tmp_path, name):
 def test_instruction_links_to_other_files_keep_their_content_hash(tmp_path):
     files = {
         "AGENTS.md": "# Shared instructions\n",
-        "docs/cursor-rules.txt": "Prefer small diffs.\n",
+        "docs/cursor-rules.md": "Prefer small diffs.\n",
         "docs/secrets/README.md": "# How this project stores secrets\n",
     }
     for name, text in files.items():
         _write(tmp_path, name, text)
     _write(tmp_path, ".env", SYNTHETIC_CREDENTIAL)
     _link(tmp_path, "CLAUDE.md", "AGENTS.md")
-    _link(tmp_path, ".cursorrules", "docs/cursor-rules.txt")
+    _link(tmp_path, ".cursorrules", "docs/cursor-rules.md")
     _link(tmp_path, "GEMINI.md", "docs/secrets/README.md")
     _link(tmp_path, "AGENTS.override.md", ".env")
     result = PromptScanner().scan(tmp_path)
     components = _components(result)
     for name, target in (
         ("CLAUDE.md", "AGENTS.md"),
-        (".cursorrules", "docs/cursor-rules.txt"),
+        (".cursorrules", "docs/cursor-rules.md"),
         ("GEMINI.md", "docs/secrets/README.md"),
     ):
         linked = components[f"prompt:{name}"]
@@ -292,3 +293,75 @@ def test_a_walk_that_skips_the_credential_check_still_records_no_credential_file
     assert {component.source_path for component in result.components} == {"CLAUDE.md"}
     assert ".claude/rules/guide.md: " + LINKED.format(".env") in result.surfaces_excluded
     assert hash_bytes(SYNTHETIC_CREDENTIAL) not in _published(result)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        ".env",
+        ".env.local",
+        ".env.production",
+        "secret.yaml",
+        "db-password.txt",
+        "api_key.json",
+        "server.pem",
+        "scripts/id_rsa",
+        "secrets/rotate.py",
+        "deploy.key",
+        "secrets.py",
+        ".secrets.py",
+        "config/credentials.rb",
+        "api_keys.js",
+        "password.sh",
+        ".password.sh",
+        ".env.dist",
+    ],
+)
+def test_names_that_hold_credentials_are_credential_shaped(name):
+    assert credential_shaped(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        ".env.example",
+        ".env.sample",
+        ".env.template",
+        "scripts/rotate_api_key.py",
+        "ROTATE_API_KEY.PY",
+        "check_password_strength.sh",
+        "secret_scanner.ts",
+        "docs/secrets-handling.md",
+        "notes.txt",
+    ],
+)
+def test_templates_and_programs_named_for_credentials_are_not(name):
+    assert not credential_shaped(name)
+
+
+def test_a_skill_keeps_its_script_named_for_the_credential_it_handles(tmp_path):
+    skill = tmp_path / ".claude" / "skills" / "ops"
+    (skill / "scripts").mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: ops\ndescription: rotate keys\n---\nRotate.\n")
+    script = skill / "scripts" / "rotate_api_key.py"
+    script.write_text("print('rotate')\n")
+    (skill / ".env.example").write_text("API_KEY=\n")
+    (skill / "secret.yaml").write_text("kind: Secret\n")
+    result = PromptScanner().scan(tmp_path)
+    excluded = [entry for entry in result.surfaces_excluded if "holds credentials" in entry]
+    assert len(excluded) == 1 and "secret.yaml" in excluded[0]
+
+
+def test_a_skill_file_linked_to_a_store_written_as_a_program_is_a_gap(tmp_path):
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "secrets.py").write_text('WIFI_PASSWORD = "hunter2"\n')
+    skill = tmp_path / ".claude" / "skills" / "ops"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("---\nname: ops\ndescription: x\n---\nRun helper.py.\n")
+    (skill / "helper.py").symlink_to("../../../config/secrets.py")
+    result = PromptScanner().scan(tmp_path)
+    digest = hash_bytes((tmp_path / "config" / "secrets.py").read_bytes())
+    assert (
+        digest.removeprefix("sha256:") not in AIBOM(components=result.components).model_dump_json()
+    )
+    assert any("holds credentials" in entry for entry in result.surfaces_excluded)
