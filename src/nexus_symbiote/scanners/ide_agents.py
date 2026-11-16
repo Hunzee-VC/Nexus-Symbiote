@@ -653,25 +653,54 @@ def _header_line(value: str, *, unkeyed: bool) -> str:
     return f"{_projected_text(name, unkeyed=unkeyed)}: {REDACTED}" if colon else REDACTED
 
 
-# sh, bash, zsh, dash, including /bin/sh, /usr/bin/bash and `/usr/bin/env bash`. The
-# name must end its path: in `./bash/process.py` or `tools/sh/lint` it is a directory.
-# An expansion after the name, such as `bash${IFS}/dev/stdin`, may split the word there.
+# sh, bash, zsh, dash, ksh, ash, fish, pwsh and powershell, including /bin/sh,
+# /usr/bin/bash and `/usr/bin/env bash`. The name must end its path: in
+# `./bash/process.py` or `tools/sh/lint` it is a directory. An expansion after the
+# name, such as `bash${IFS}/dev/stdin`, may split the word there. `env` may set
+# variables first (`env FOO=1 bash`).
+_SHELL_NAMES = (
+    "powershell",
+    "pwsh",
+    "bash",
+    "dash",
+    "zsh",
+    "ksh",
+    "ash",
+    "fish",
+    "sh",
+)
 _SHELL = (
-    r"(?:[/\\]?(?:[\w.+-]+[/\\])*)?(?:env\s+)?(?:ba|z|da)?sh\b"
+    r"(?:[/\\]?(?:[\w.+-]+[/\\])*)?(?:env\s+(?:[^\s=]+=\S+\s+)*)?"
+    rf"(?:{'|'.join(_SHELL_NAMES)})(?:\.exe)?\b"
     r"(?![^\s/\\|;&<>()$`]*(?:/|\\(?=\S)))"
 )
 # Each matcher runs once per pipeline segment, so a command of repeated near
 # misses costs linear time whatever its length.
-_PIPE_BOUNDARY = re.compile(r"[|\n]")
 _SEGMENT_BOUNDARY = re.compile(r"[\n|;&]")
-_DOWNLOADER = re.compile(r"(?:curl|wget|iwr|invoke-webrequest)\b", re.IGNORECASE)
+_DOWNLOADER = re.compile(
+    r"(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b",
+    re.IGNORECASE,
+)
 _BASE64_DECODE = re.compile(r"base64\s+(?:-d|--decode)\b", re.IGNORECASE)
 _PIPE_SHELL = re.compile(rf"\s*{_SHELL}", re.IGNORECASE)
+# A shell, eval or source whose next command word is a substitution that downloads.
+# `.` is source only when it is its own word. The match is anchored at the start of a
+# command so `echo $(curl …)` is not one.
+_SUBST_LEADER = re.compile(
+    r"(?i)(?:^|(?<=[\n;&|]))[ \t]*"
+    rf"(?:(?:{'|'.join(_SHELL_NAMES)}|eval|source)(?:\.exe)?(?![\w-])|\.(?=\s))"
+)
+_BARE_SUBST = re.compile(r"(?:^|(?<=[\n;&|]))[ \t]*(?:\$\(|`)[ \t]*")
+# `-c` and PowerShell `-Command` / `-CommandWithArgs`, not `-ConfigurationName`.
+_COMMAND_FLAG = re.compile(r"(?i)-c(?:ommand(?:withargs)?)?(?=\s|['\"]|$)")
 _POWERSHELL = re.compile(r"\b(?:powershell|pwsh)(?:\.exe)?\b", re.IGNORECASE)
 # PowerShell takes -, en dash, em dash or horizontal bar before a parameter name. A shell
-# removes quotes and escapes before PowerShell reads the argument.
+# removes quotes and escapes before PowerShell reads the argument. `-e` alone is shared
+# with -ErrorAction and -ExecutionPolicy; the shortest prefix that is only
+# -EncodedCommand is `-en`. `-ec` is not a prefix of that name.
+_ENCODED_PREFIX = "en(?:c(?:o(?:d(?:e(?:d(?:c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?)?)?)?)?)?)?"
 _ENCODED_COMMAND = re.compile(
-    r"(?<!\S)[\"'\u2018-\u201e\\^`]*[-\u2013\u2014\u2015](?:e|en|enc|encodedcommand)\b",
+    rf"(?<!\S)[\"'\u2018-\u201e\\^`]*[-\u2013\u2014\u2015]{_ENCODED_PREFIX}\b",
     re.IGNORECASE,
 )
 _ARGUMENT = re.compile(r"\S+")
@@ -712,23 +741,127 @@ _HOOK_URL = re.compile(r"https?://", re.IGNORECASE)
 _SEVERITY_RANK = {severity: index for index, severity in enumerate(RiskSeverity)}
 
 
-def _fetch_exec(command: str) -> bool:
-    """Whether a pipeline feeds a download or a decoded payload into a shell.
+def _command_pipelines(command: str) -> list[list[str]]:
+    """Pipelines in ``command``.
 
-    Pipeline segments are checked one at a time, so repeated near misses never
-    make the earlier segments be rescanned.
+    ``|`` and ``|&`` separate segments of one pipeline. ``||`` does not: it is a
+    logical or, as ``&&``, ``;``, a newline and a background ``&`` are command
+    separators. ``>&``, ``<&`` and ``&>`` stay inside a segment.
     """
-    start = 0
-    for boundary in _PIPE_BOUNDARY.finditer(command):
-        if command[boundary.start()] == "|":
-            shell = _PIPE_SHELL.match(command, boundary.end())
-            if shell is not None:
-                segment = command[start : boundary.start()]
-                if _DOWNLOADER.search(segment, segment.rfind(";") + 1):
-                    return True
-                if _BASE64_DECODE.search(segment):
-                    return True
-        start = boundary.end()
+    pipelines: list[list[str]] = []
+    segments: list[str] = []
+    buf: list[str] = []
+    length = len(command)
+    index = 0
+
+    def flush_segment() -> None:
+        segments.append("".join(buf))
+        buf.clear()
+
+    def flush_command() -> None:
+        flush_segment()
+        if any(segment.strip() for segment in segments):
+            pipelines.append(segments.copy())
+        segments.clear()
+
+    while index < length:
+        char = command[index]
+        nxt = command[index + 1] if index + 1 < length else ""
+        if char == "|" and nxt == "|":
+            flush_command()
+            index += 2
+            continue
+        if char == "|" and nxt == "&":
+            flush_segment()
+            index += 2
+            continue
+        if char == "|":
+            flush_segment()
+            index += 1
+            continue
+        if char == "&" and nxt == "&":
+            flush_command()
+            index += 2
+            continue
+        if char in "><" and nxt == "&":
+            buf.append(f"{char}&")
+            index += 2
+            continue
+        if char == "&" and nxt == ">":
+            buf.append("&>")
+            index += 2
+            continue
+        if char in "&;\n":
+            flush_command()
+            index += 1
+            continue
+        buf.append(char)
+        index += 1
+    flush_command()
+    return pipelines
+
+
+def _substitution_at(command: str, index: int) -> bool:
+    """Whether ``command`` from ``index`` runs a downloaded or decoded substitution.
+
+    The opener (`$(`, `<(` or a backtick) is the command word, after an optional
+    `-c` or `-Command` and quotes. A substitution later in a longer script is not.
+    """
+    length = len(command)
+    while index < length and command[index] in " \t":
+        index += 1
+    flag = _COMMAND_FLAG.match(command, index)
+    if flag is not None:
+        index = flag.end()
+        while index < length and command[index] in " \t":
+            index += 1
+    while index < length and command[index] in "'\"":
+        index += 1
+    if command.startswith("$(", index) or command.startswith("<(", index):
+        index += 2
+    elif index < length and command[index] == "`":
+        index += 1
+    else:
+        return False
+    while index < length and command[index] in " \t":
+        index += 1
+    return (
+        _DOWNLOADER.match(command, index) is not None
+        or _BASE64_DECODE.match(command, index) is not None
+    )
+
+
+def _substitution_exec(command: str) -> bool:
+    """Whether a shell, ``eval``, ``source`` or a bare substitution runs a download."""
+    if any(_substitution_at(command, match.end()) for match in _SUBST_LEADER.finditer(command)):
+        return True
+    return any(
+        _DOWNLOADER.match(command, match.end()) is not None
+        or _BASE64_DECODE.match(command, match.end()) is not None
+        for match in _BARE_SUBST.finditer(command)
+    )
+
+
+def _fetch_exec(command: str) -> bool:
+    """Whether a command runs a download or a decoded payload in a shell.
+
+    A pipeline is rated as a whole: a downloader or ``base64 -d`` in any segment and
+    a shell in any later segment. Segments are visited once, so repeated near misses
+    never make the earlier text be rescanned. A command or process substitution that
+    itself downloads is the same shape without a pipe.
+    """
+    if _substitution_exec(command):
+        return True
+    for segments in _command_pipelines(command):
+        # One forward pass: a fetch and a shell later in the same pipeline. Checking
+        # every later segment from every fetch would rescan a command of repeated
+        # near misses.
+        fetched = False
+        for segment in segments:
+            if fetched and _PIPE_SHELL.match(segment) is not None:
+                return True
+            if _DOWNLOADER.search(segment) or _BASE64_DECODE.search(segment):
+                fetched = True
     return _encoded_powershell(command)
 
 
