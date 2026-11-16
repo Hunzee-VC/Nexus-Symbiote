@@ -1818,3 +1818,51 @@ def test_a_pinned_shard_is_not_verified_once_the_budget_refuses_its_index(projec
     (evidence,) = component.claims.values()
     assert evidence.assurance.value != "verified"
     assert model_collector.BINDINGS_EXHAUSTED in (evidence.unknown_reason or "")
+
+
+@pytest.mark.parametrize("variant", ["duplicate-keys", "list-weight-map", "too-many-indexes"])
+def test_a_pinned_shard_is_not_verified_when_its_index_cannot_be_bound(
+    project: Path, variant: str
+) -> None:
+    # An index that cannot be parsed, or one of too many, binds none of its shards; the
+    # shard was then verified alone although its pinned index, which decides what loads,
+    # differs from its pin.
+    (project / "c").mkdir()
+    shard = project / "c/model-00001-of-00001.safetensors"
+    header = json.dumps({"t0": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]}}).encode()
+    shard.write_bytes(len(header).to_bytes(8, "little") + header + b"\0\0\0\0")
+    index = project / "c/model.safetensors.index.json"
+    index.write_text(json.dumps({"weight_map": {"t0": shard.name}}))
+    pins = [DigestPinPolicy(path, sha256(path)) for path in (shard, index)]
+    if variant == "duplicate-keys":
+        entry = json.dumps({"t0": shard.name})[1:-1]
+        index.write_text(f'{{"weight_map": {{{entry}, {entry}}}}}')
+    elif variant == "list-weight-map":
+        index.write_text(json.dumps({"weight_map": [shard.name]}))
+    else:
+        index.write_text(json.dumps({"weight_map": {"t0": shard.name, "t1": shard.name}}))
+        for number in range(model_collector.MAX_SHARD_INDEXES):
+            (project / f"c/m{number}.safetensors.index.json").write_text('{"weight_map": {}}')
+    result = ModelScanner(digest_pins=pins).scan(project)
+    assert result.scan_failures
+    (component,) = [c for c in result.components if c.source_path == "c/" + shard.name]
+    assert component.signing_status == "partially-verified"
+    assert component.trust_tier is TrustTier.UNKNOWN
+    (evidence,) = component.claims.values()
+    assert evidence.assurance.value != "verified"
+    assert model_collector.INDEX_UNBOUND in (evidence.unknown_reason or "")
+
+
+def test_a_pinned_shard_with_a_bound_index_stays_verified(project: Path) -> None:
+    (project / "c").mkdir()
+    shard = project / "c/model-00001-of-00001.safetensors"
+    header = json.dumps({"t0": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]}}).encode()
+    shard.write_bytes(len(header).to_bytes(8, "little") + header + b"\0\0\0\0")
+    index = project / "c/model.safetensors.index.json"
+    index.write_text(json.dumps({"weight_map": {"t0": shard.name}}))
+    pins = [DigestPinPolicy(path, sha256(path)) for path in (shard, index)]
+    result = ModelScanner(digest_pins=pins).scan(project)
+    assert not result.scan_failures, result.scan_failures
+    (component,) = [c for c in result.components if c.source_path == "c/" + shard.name]
+    assert component.signing_status == "digest-pinned"
+    assert component.trust_tier is TrustTier.INTERNAL_VERIFIED

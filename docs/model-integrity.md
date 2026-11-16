@@ -167,7 +167,10 @@ binds nothing more to the remaining models. A model whose bindings were refused,
 whose directory holds a shard index that was refused, is never reported verified on
 its own file alone: where its signer policy entries would
 verify it, its `signing_status` is `partially-verified`, its trust tier `unknown`, and
-its signing claim names the exhausted budget as the reason.
+its signing claim names the exhausted budget as the reason. The same holds for a
+shard whose directory holds a shard index that could not be read or parsed, or whose
+`weight_map` is not a map of names to files, and for every model in a directory with
+more than 16 shard indexes: the claim names the shard index that could not be bound.
 
 A bound file that is a content candidate, such as ONNX external data named
 `checkpoint` under `models/` or a file below a SavedModel's `variables/`, is rated by

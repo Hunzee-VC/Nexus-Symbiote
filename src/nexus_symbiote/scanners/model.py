@@ -258,6 +258,10 @@ MAX_WEIGHT_FILE_BINDINGS = 2 * MAX_ENTRIES
 # digests of its directory, so those records are bounded across one scan as well.
 MAX_SHARED_DIGESTS = 2 * MAX_ENTRIES
 TOO_MANY_INDEXES = "model directory holds more shard indexes than one directory may bind"
+INDEX_UNBOUND = (
+    "a shard index beside this file could not be read, parsed or bound; "
+    "what it makes a loader open is unknown"
+)
 BINDINGS_EXHAUSTED = (
     "weight files bound to models exceed what one collection records; "
     "the bound files of this and later models are unknown"
@@ -466,15 +470,16 @@ def _pickle_member(name: bytes) -> bool:
     member, so a member is rated by its name, as a file on disk is. The name is matched
     as text, not split into suffixes, so ``.pkl`` and ``archive/.pkl``, which
     ``PurePath`` reads as names without a suffix, count as ``zipfile`` opens them.
+    ``zipfile`` cuts a name at its first NUL, so that name is matched as well.
     """
-    text = name.decode("latin-1").lower()
-    if text.endswith(tuple(_UNSAFE_SUFFIXES)):
-        return True
-    return any(
-        text.endswith(unsafe + wrapper)
-        for unsafe in _UNSAFE_SUFFIXES
-        for wrapper in _PICKLE_WRAPPERS
-    )
+    for text in {name.decode("latin-1").lower(), name.split(b"\0")[0].decode("latin-1").lower()}:
+        if text.endswith(tuple(_UNSAFE_SUFFIXES)) or any(
+            text.endswith(unsafe + wrapper)
+            for unsafe in _UNSAFE_SUFFIXES
+            for wrapper in _PICKLE_WRAPPERS
+        ):
+            return True
+    return False
 
 
 def _little(data: bytes, offset: int, width: int) -> int:
@@ -491,7 +496,7 @@ class _ZipMember(NamedTuple):
 
 
 def _zip_directory(
-    stream: BinaryIO, consumed: int, size: int
+    stream: BinaryIO, consumed: int, size: int, read: bytes = b""
 ) -> list[tuple[list[_ZipMember], int]] | None:
     """The members each central directory a ZIP reader can locate lists, and its offset.
 
@@ -507,12 +512,13 @@ def _zip_directory(
 
     The rest of the stream is read in bounded chunks, keeping only the tail that can
     hold the directory within ``MAX_ZIP_DIRECTORY_BYTES``, the end-of-central-directory
-    record with its comment and the ZIP64 records. ``None`` when no directory can be
+    record with its comment and the ZIP64 records. ``read`` holds the bytes that end at
+    ``consumed``, already read from the stream. ``None`` when no directory can be
     read, when any directory that lies within the archive is beyond that bound, as it
     may list what the others do not, or when the stream ends before ``size``.
     """
-    tail: deque[bytes] = deque()
-    held = 0
+    tail: deque[bytes] = deque([read])
+    held = len(read)
     remaining = size - consumed
     while remaining > 0:
         chunk = stream.read(min(65536, remaining))
@@ -890,6 +896,8 @@ def _recognized_code_container(
     if prefix[:4] not in (b"PK\x03\x04", b"PK\x05\x06"):
         return _recognized_pickle(stream, prefix, size, by_content=by_content)
     consumed = len(prefix)
+    # An end record at offset 0 is all an empty archive holds, so the prefix is kept.
+    kept = prefix if prefix[:4] == b"PK\x05\x06" else b""
     if prefix[:4] == b"PK\x03\x04":
         header = prefix + stream.read(22)
         consumed = len(header)
@@ -901,7 +909,7 @@ def _recognized_code_container(
                 consumed += len(first)
         if _pickle_member(first):
             return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_PICKLE_MEMBER
-    readings = _zip_directory(stream, consumed, size)
+    readings = _zip_directory(stream, consumed, size, kept)
     if readings is None:
         return SerializationSafety.UNKNOWN, ZIP_DIRECTORY_UNREAD
     if any(_pickle_member(member.name) for members, _ in readings for member in members):
@@ -1246,6 +1254,8 @@ class BindingBudget:
         self.remaining = 2 * limits.current().entries if units is None else units
         self.reason = reason
         self.refused: set[Path] = set()
+        # Shard indexes, and directories with too many, that bound none of their shards.
+        self.unbound: set[Path] = set()
 
     def charge(self, path: Path, units: int, fail: Callable[[str], None]) -> bool:
         """Spend ``units`` for ``path``, or refuse it and spend nothing."""
@@ -1280,22 +1290,26 @@ def index_references(
     indexes = [path for path in tree.children.get(directory, ()) if _index_base(path) is not None]
     if len(indexes) > MAX_SHARD_INDEXES:
         files._fail(directory, TOO_MANY_INDEXES)
+        budget.unbound.add(directory)
         return references, []
     for index in indexes:
         raw = (read or files.read_bytes)(index)
         if raw is None:
+            budget.unbound.add(index)
             continue
         digests[index] = hash_bytes(raw)
         try:
             document = _json_document(raw)
         except (ValueError, RecursionError):
             files._fail(index, "invalid JSON or duplicate keys")
+            budget.unbound.add(index)
             continue
         weight_map = document.get("weight_map") if isinstance(document, dict) else None
         if not isinstance(weight_map, dict) or not all(
             isinstance(value, str) for value in weight_map.values()
         ):
             files._fail(index, "model index must map tensor names to weight files")
+            budget.unbound.add(index)
             continue
         names = set(weight_map.values())
         if not budget.charge(index, len(names), partial(files._fail, index)):
@@ -1962,18 +1976,24 @@ class ModelScanner(Scanner):
             self._digests[path] = files.hash_file(path, max_bytes=limits.bound("model-bytes"))
         return self._digests[path]
 
-    def _binding_refused(self, path: Path) -> bool:
-        """Whether the budget refused ``path`` or a shard index beside it.
+    def _unbound_reason(self, path: Path) -> str | None:
+        """Why the files a loader opens with ``path`` are unknown, or ``None`` when known.
 
-        A refused index binds none of its shards, which then charge nothing, so the
-        refusal is the shard's too: what its index makes a loader open is unknown.
+        A shard index the budget refused, or one that could not be read, parsed or
+        bound, binds none of its shards, which then charge nothing, so the gap is the
+        shard's too: what its index makes a loader open is unknown.
         """
-        refused = self._bindings.refused
-        return path in refused or any(
-            index in refused
+        bindings = self._bindings
+        indexes = [
+            index
             for index in self._tree.children.get(path.parent, ())
             if _index_base(index) is not None
-        )
+        ]
+        if path in bindings.refused or any(index in bindings.refused for index in indexes):
+            return bindings.reason
+        if path.parent in bindings.unbound or any(index in bindings.unbound for index in indexes):
+            return INDEX_UNBOUND
+        return None
 
     def _companion_digest(self, files: ConfinedCollection, path: Path) -> str | None:
         """The digest of a file a model binds, observed for its content when a file of
@@ -2277,7 +2297,7 @@ class ModelScanner(Scanner):
             files.root,
             self._policies,
             verify=memoized(verify_sigstore_bundle, self._verified),
-            unbound=self._bindings.reason if self._binding_refused(path) else None,
+            unbound=self._unbound_reason(path),
         )
         status = verification.status or self._unverified_status(path)
         if status == SigningStatus.VERIFICATION_UNAVAILABLE:

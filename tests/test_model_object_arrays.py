@@ -425,6 +425,52 @@ def test_an_archive_that_starts_with_an_end_record_is_read_as_np_load_reads_it(
     assert _inspect(tmp_path, pickled, "arrays.npz") == (UNSAFE, ZIP_PICKLE_MEMBER)
 
 
+def test_a_pickle_member_named_past_a_nul_is_unsafe(tmp_path: Path) -> None:
+    # zipfile cuts a member name at its first NUL, so a loader opens x.pkl.
+    first = _local(b"numbers.npy", _npy("'<f8'"))
+    hidden = _local(b"x.pkl\0y", _PICKLE)
+    directory = _central(b"numbers.npy", _npy("'<f8'"), 0) + _central(
+        b"x.pkl\0y", _PICKLE, len(first)
+    )
+    archive = first + hidden + directory + _end(2, len(directory), len(first) + len(hidden))
+    with zipfile.ZipFile(io.BytesIO(archive)) as opened:
+        assert opened.namelist() == ["numbers.npy", "x.pkl"]
+    assert _inspect(tmp_path, archive, "arrays.npz") == (UNSAFE, ZIP_PICKLE_MEMBER)
+    assert not model._pickle_member(b"x.txt\0y.npy")
+
+
+@pytest.mark.parametrize("starts", [True, False], ids=["entry-signature", "no-signature"])
+def test_a_directory_that_starts_but_cannot_be_read_hides_behind_no_decoy(starts: bool) -> None:
+    # The end record stores the offset of a harmless decoy; the directory of the same
+    # size that ends at the end record starts with an entry signature, but its second
+    # entry is cut short. What it lists is not decided, so nothing is read. A directory
+    # without the signature is one no reader takes, and the decoy is read.
+    decoy = _local(b"a.npy", _npy("'<f8'"))
+    listed = _central(b"a.npy", _npy("'<f8'"), 0)
+    other = (b"PK\x01\x02" if starts else b"\0" * 4) + b"\0" * (len(listed) - 4)
+    archive = decoy + listed + other + _end(1, len(listed), len(decoy))
+    readings = model._zip_directory(io.BytesIO(archive), 0, len(archive))
+    if starts:
+        assert readings is None
+    else:
+        assert readings is not None
+        assert [m.name for members, _ in readings for m in members] == [b"a.npy"]
+
+
+@pytest.mark.parametrize("comment", [b"", b"saved by np.savez"], ids=["bare", "commented"])
+def test_an_empty_archive_is_read_not_left_unread(tmp_path: Path, comment: bytes) -> None:
+    # np.savez() with no arrays writes only an end record, at offset 0.
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.comment = comment
+    empty = buffer.getvalue()
+    assert empty.startswith(b"PK\x05\x06")
+    with zipfile.ZipFile(io.BytesIO(empty)) as opened:
+        assert opened.namelist() == []
+    for name in ("arrays.npz", "model.onnx"):
+        assert _inspect(tmp_path, empty, name) == (SerializationSafety.UNKNOWN, ZIP_WITHOUT_PICKLE)
+
+
 def test_a_directory_past_the_bound_is_unread_whatever_a_decoy_lists(tmp_path: Path) -> None:
     # The end record stores the offset of a directory listing a pickle, more than the
     # bound before the end; the directory zipfile reads, which ends at the end record,
