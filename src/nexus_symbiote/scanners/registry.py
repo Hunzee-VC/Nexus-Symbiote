@@ -321,6 +321,15 @@ def parse_image_reference(text: str) -> ImageReference | None:
 _INDEX_HOST = re.compile(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?|\[[0-9a-f:.]{2,45}\]")
 
 
+def _same_index(declared: str, recorded: str | None) -> bool:
+    """Whether two index origins are the same, PyPI's spellings counted as one."""
+    if recorded is None:
+        return False
+    if declared in _PYPI_ORIGINS or declared == _PYPI_ORIGIN:
+        return recorded in _PYPI_ORIGINS or recorded == _PYPI_ORIGIN
+    return declared.removesuffix(":443") == recorded.removesuffix(":443")
+
+
 def _index_origin(value: object) -> str | None:
     """The origin of a lockfile's package index, or None when it cannot be established.
 
@@ -3271,6 +3280,9 @@ class RegistryScanner(Scanner):
     def _scan_pip(self, result: ScanResult, entries: list[str]) -> list[RegistryEntryComponent]:
         packages: dict[str, _Package] = {}
         redirects: set[tuple[str, str]] = set()
+        # Poetry's sources by name, explicit ones included, as pyproject.toml declares
+        # them; None when the table cannot be read.
+        self._poetry_sources: dict[str, str | None] | None = {}
 
         def declare(
             source: str,
@@ -3478,6 +3490,15 @@ class RegistryScanner(Scanner):
                     result.surfaces_excluded.append(
                         f"{lock_name}: package index of the selected record is not a plain "
                         "http(s) URL; its origin is unverified"
+                    )
+                    continue
+                if method == "poetry-lockfile" and not self._poetry_reference_holds(source):
+                    # Poetry downloads from the source the reference names, not from the
+                    # record's url, so a record whose url and named source disagree, or
+                    # whose source pyproject.toml does not declare, has no known origin.
+                    comp.package_url = comp.registry_uri = None
+                    result.surfaces_excluded.append(
+                        f"{lock_name}: package source reference is unverified"
                     )
                     continue
                 registry_origin = (
@@ -3704,6 +3725,7 @@ class RegistryScanner(Scanner):
         self._pdm_declarations(tool.get("pdm", {}), declarations, failures, gaps, strings)
         self._poetry_declarations(tool.get("poetry", {}), declarations, failures, gaps)
         redirects.update(self._uv_redirects(tool.get("uv"), "pyproject.toml:tool.uv."))
+        self._poetry_sources = self._named_sources(tool.get("poetry"))
         for name, shown in (("poetry", "Poetry"), ("pdm", "PDM")):
             found = self._source_redirects(tool.get(name), name)
             if found is None:
@@ -3813,6 +3835,36 @@ class RegistryScanner(Scanner):
                 ]
             found += [(prefix + key, value) for key, value in _uv_settings(chosen).settings]
         return found
+
+    def _poetry_reference_holds(self, source: dict[str, Any]) -> bool:
+        """Whether a poetry.lock record's ``reference`` names a source pyproject.toml
+        declares at the same index origin as the record's ``url``; a record without a
+        reference is read by its url alone, as before Poetry 1.2 wrote one."""
+        reference = source.get("reference")
+        if reference is None:
+            return True
+        sources = getattr(self, "_poetry_sources", None)
+        if not isinstance(reference, str) or not sources or reference.lower() not in sources:
+            return False
+        declared = sources[reference.lower()]
+        declared_origin = _PYPI_ORIGIN if declared is None else _index_origin(declared)
+        recorded = _index_origin(source.get("url"))
+        return declared_origin is not None and _same_index(declared_origin, recorded)
+
+    @staticmethod
+    def _named_sources(table: Any) -> dict[str, str | None] | None:
+        """Each Poetry source's URL by its name in lower case, explicit sources included;
+        ``pypi`` is Poetry's own index. None when the source list cannot be read."""
+        sources = table.get("source", []) if isinstance(table, dict) else []
+        if not isinstance(sources, list) or not all(isinstance(item, dict) for item in sources):
+            return None
+        named: dict[str, str | None] = {"pypi": None}
+        for source in sources:
+            name, url = source.get("name"), source.get("url")
+            if not isinstance(name, str) or not (url is None or isinstance(url, str)):
+                return None
+            named[name.lower()] = url
+        return named
 
     @staticmethod
     def _source_redirects(table: Any, tool: str) -> list[tuple[str, str]] | None:
