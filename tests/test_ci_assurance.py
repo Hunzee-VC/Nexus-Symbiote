@@ -118,6 +118,72 @@ def test_action_lock_reuses_reviewed_hashes_and_closes_runtime_dependencies():
     assert action.keys() == closure
 
 
+def unrequired_installed_pins(lock):
+    """Return the pins of `lock` that this interpreter installs but no declaration requires.
+
+    `make lock-check` trusts uv's `# via` lines, so a pin inserted with a forged `# via
+    pydantic` passes it. This walks the installed metadata from pyproject.toml instead, so
+    it holds for the CI lock wherever the CI lock is installed (every Linux test job and the
+    release build). A pin whose marker excludes this platform is checked where it installs.
+    """
+    pins = lock_entries(lock)
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    project = pyproject["project"]
+    own = canonicalize_name(project["name"])
+    extras = project["optional-dependencies"]
+    roots = [
+        *project["dependencies"],
+        *(text for group in extras.values() for text in group),
+        *pyproject["dependency-groups"]["dev"],
+        *pyproject["build-system"]["requires"],
+    ]
+    env = default_environment()
+    pending = [(root, "") for root in roots]
+    seen = set()
+    while pending:
+        text, extra = pending.pop()
+        requirement = Requirement(text)
+        if requirement.marker and not requirement.marker.evaluate({**env, "extra": extra}):
+            continue
+        name = canonicalize_name(requirement.name)
+        for wanted in ("", *sorted(requirement.extras)):
+            if (name, wanted) in seen:
+                continue
+            seen.add((name, wanted))
+            if name == own:
+                pending.extend((dependency, "") for dependency in extras.get(wanted, ()))
+            else:
+                requires = importlib.metadata.distribution(name).requires or []
+                pending.extend((dependency, wanted) for dependency in requires)
+    reached = {name for name, _ in seen}
+    return {
+        name
+        for name, (pin, _) in pins.items()
+        if (not pin.marker or pin.marker.evaluate(env)) and name not in reached
+    }
+
+
+@pytest.mark.locked_only
+def test_ci_lock_installs_only_the_dependency_closure_of_the_declarations():
+    assert unrequired_installed_pins(ROOT / "requirements-ci.lock") == set()
+
+
+@pytest.mark.locked_only
+def test_a_ci_pin_with_a_forged_via_line_is_outside_the_closure(tmp_path):
+    # Review of Audit 2026-11-16 S16-02: `evil-helper` with `# via pydantic` passes
+    # `make lock-check`, and the release job installs the CI lock before it builds.
+    text = (ROOT / "requirements-ci.lock").read_text()
+    forged = "evil-helper==1.0.0 \\\n    --hash=sha256:" + "a" * 64 + "\n    # via pydantic\n"
+    lock = tmp_path / "requirements-ci.lock"
+    lock.write_text(text.replace("email-validator==", forged + "email-validator==", 1))
+    assert unrequired_installed_pins(lock) == {"evil-helper"}
+    windows_only = forged.replace("1.0.0 \\", "1.0.0 ; sys_platform == 'win32' \\")
+    lock.write_text(text.replace("email-validator==", windows_only + "email-validator==", 1))
+    assert unrequired_installed_pins(lock) == (
+        {"evil-helper"} if default_environment()["sys_platform"] == "win32" else set()
+    )
+
+
 def test_consumer_action_installs_only_locked_dependencies_before_source():
     action = yaml.safe_load((ROOT / "action.yml").read_text())
     install = next(
