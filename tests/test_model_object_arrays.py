@@ -339,6 +339,79 @@ def test_a_decoy_directory_does_not_hide_what_zipfile_lists(
     assert {r: found[r].serialization_safety for r in relatives} == dict.fromkeys(relatives, UNSAFE)
 
 
+def _overlong_name(archive: bytes, extra: int) -> bytes:
+    """The last directory entry's name length set past the directory by ``extra`` bytes.
+
+    ``zipfile`` reads the directory into a buffer of its stated size and cuts the name
+    there, so it still lists the member by its name.
+    """
+    entry = len(archive) - 22 - _little_end_size(archive)
+    name_length = int.from_bytes(archive[entry + 28 : entry + 30], "little")
+    longer = min(0xFFFF, name_length + extra)
+    return archive[: entry + 28] + longer.to_bytes(2, "little") + archive[entry + 30 :]
+
+
+def _little_end_size(archive: bytes) -> int:
+    return int.from_bytes(archive[-22 + 12 : -22 + 16], "little")
+
+
+@pytest.mark.parametrize("extra", [0xFFFF, 10], ids=["past-the-end", "into-the-end-record"])
+@pytest.mark.parametrize("pickled", [True, False], ids=["pickle", "array"])
+def test_a_name_that_runs_past_the_directory_does_not_hide_its_member(
+    tmp_path: Path, extra: int, pickled: bool
+) -> None:
+    # A decoy at the stored offset parsed while the directory zipfile reads, whose last
+    # name runs past it, did not, and was dropped: np.load still unpickled the member.
+    real_name = b"archive/data.pkl" if pickled else b"objects.npy"
+    decoy = (b"archive/version", b"3\n") if pickled else (b"numbers.npy", _npy("'<f8'"))
+    payload = _PICKLE if pickled else _npy("'|O'")
+    archive = _overlong_name(_concatenated_decoy(decoy, (real_name, payload)), extra)
+    with zipfile.ZipFile(io.BytesIO(archive)) as opened:
+        assert opened.namelist() == [real_name.decode()]
+        assert opened.read(real_name.decode()) == payload
+    expected = (UNSAFE, ZIP_PICKLE_MEMBER if pickled else ZIP_OBJECT_ARRAY)
+    (tmp_path / "models").mkdir()
+    relatives = ["models/archive", "arrays.npz", "model.onnx"]
+    for relative in relatives:
+        (tmp_path / relative).write_bytes(archive)
+        assert inspect_model_format(tmp_path / relative) == expected, relative
+    found = {c.source_path: c for c in ModelScanner().scan(tmp_path).components}
+    assert {r: found[r].serialization_safety for r in relatives} == dict.fromkeys(relatives, UNSAFE)
+
+
+def test_a_name_cut_at_the_directory_end_lists_a_harmless_member_as_harmless(
+    tmp_path: Path,
+) -> None:
+    archive = _overlong_name(
+        _concatenated_decoy((b"a.npy", _npy("'<f8'")), (b"b.npy", _npy("'<f8'"))), 0xFFFF
+    )
+    with zipfile.ZipFile(io.BytesIO(archive)) as opened:
+        assert opened.namelist() == ["b.npy"]
+    assert _inspect(tmp_path, archive, "arrays.npz")[1] == ZIP_WITHOUT_PICKLE
+
+
+def _counts_hold_an_end_signature(archive: bytes) -> bytes:
+    """The end record's entry counts set to the bytes ``PK\\x05\\x06``, which ``zipfile``
+    never reads: it takes the last 22 bytes as the end record first."""
+    end = len(archive) - 22
+    return archive[: end + 8] + b"PK\x05\x06" + archive[end + 12 :]
+
+
+@pytest.mark.parametrize("pickled", [True, False], ids=["pickle", "array"])
+def test_an_end_record_is_located_as_zipfile_locates_it(tmp_path: Path, pickled: bool) -> None:
+    member = ("archive/data.pkl", _PICKLE) if pickled else ("objects.npy", _npy("'|O'"))
+    archive = _counts_hold_an_end_signature(_zip([("numbers.npy", _npy("'<f8'")), member]))
+    with zipfile.ZipFile(io.BytesIO(archive)) as opened:
+        assert opened.namelist() == ["numbers.npy", member[0]]
+    expected = (UNSAFE, ZIP_PICKLE_MEMBER if pickled else ZIP_OBJECT_ARRAY)
+    (tmp_path / "models").mkdir()
+    for relative in ("models/archive", "arrays.npz", "model.onnx"):
+        (tmp_path / relative).write_bytes(archive)
+        assert inspect_model_format(tmp_path / relative) == expected, relative
+    harmless = _counts_hold_an_end_signature(_zip([("numbers.npy", _npy("'<f8'"))]))
+    assert _inspect(tmp_path, harmless, "arrays.npz")[1] == ZIP_WITHOUT_PICKLE
+
+
 def test_an_archive_that_starts_with_an_end_record_is_read_as_np_load_reads_it(
     tmp_path: Path,
 ) -> None:
@@ -390,6 +463,8 @@ def _mutated(rng: random.Random) -> bytes:
         archive = _concatenated_decoy((b"a.npy", _npy("'<f8'")), (b"b.npy", _npy("'<f8'")))
     elif choice == 2:
         archive = _zip64_decoy((b"a.npy", _npy("'<f8'")), (b"b.npy", _npy("'<f8'")))
+    if rng.randrange(4) == 0:
+        archive = _overlong_name(archive, rng.choice([1, 10, 0xFFFF]))
     end = archive.rfind(b"PK\x05\x06")
     for _ in range(rng.randrange(3)):
         at = rng.randrange(max(0, end - 96), len(archive))
@@ -411,6 +486,7 @@ def test_the_scanner_lists_every_member_zipfile_lists() -> None:
         # No reading at all is rated unknown; a reading that lists members lists them all.
         if readings is not None:
             compared += 1
-            names = {member.name for members, _ in readings for member in members}
+            # zipfile cuts a name at its first NUL.
+            names = {m.name.split(b"\0")[0] for members, _ in readings for m in members}
             assert listed <= names, archive
     assert compared > 100

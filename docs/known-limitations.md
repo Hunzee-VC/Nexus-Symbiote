@@ -621,7 +621,10 @@ A way around a limit that its entry does not describe is worth a
   header and the start of its stored or DEFLATE-compressed data. A longer array
   header, a longer or malformed directory, a member compressed by another method,
   such as BZIP2 or LZMA, and a member whose data runs past the next member's local
-  header are rated `unknown`, a high finding; a pickle hidden otherwise under
+  header are rated `unknown`, a high finding. The directory is read with the
+  tolerances of `zipfile` and the specification; another reader's, such as the C++
+  reader `torch.load` uses, are not modelled, and a member name with a NUL byte,
+  which `zipfile` cuts there, is matched by its whole name. A pickle hidden otherwise under
   `.onnx`, `.gguf` or another suffix is rated `unknown` too, and
   `validate --project` still refuses it as unverified.
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat

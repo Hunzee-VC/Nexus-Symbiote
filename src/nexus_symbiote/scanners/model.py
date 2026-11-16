@@ -525,7 +525,11 @@ def _zip_directory(
             held -= len(tail.popleft())
     data = b"".join(tail)
     start = size - len(data)
-    end_record = data.rfind(b"PK\x05\x06", max(0, len(data) - 22 - 65_535))
+    # zipfile takes the last 22 bytes as the end record when they hold one without a
+    # comment, before it searches back, so a signature in its count fields is not one.
+    end_record = len(data) - 22
+    if end_record < 0 or data[end_record : end_record + 4] != b"PK\x05\x06" or data[-2:] != b"\0\0":
+        end_record = data.rfind(b"PK\x05\x06", max(0, len(data) - 22 - 65_535))
     if end_record < 0 or end_record + 22 > len(data):
         return None
     # (where the directory ends, its size, its stored offset) for each record a reader takes
@@ -555,9 +559,14 @@ def _zip_directory(
             members = _directory_members(data, begin - start, directory_size, directory_end)
             if members is None and (
                 0 <= begin <= start + directory_end - directory_size
-                and (begin < start or directory_size > MAX_ZIP_DIRECTORY_BYTES)
+                and (
+                    begin < start
+                    or directory_size > MAX_ZIP_DIRECTORY_BYTES
+                    or data[begin - start : begin - start + 4] == b"PK\x01\x02"
+                )
             ):
-                # A directory past the bound may list what a decoy within it does not.
+                # A directory past the bound, or one that starts but cannot be read,
+                # may list what a decoy the other reading takes does not.
                 return None
             if members is not None:
                 shift = begin - directory_offset
@@ -582,14 +591,15 @@ def _directory_members(data: bytes, begin: int, size: int, end: int) -> list[_Zi
     members: list[_ZipMember] = []
     unlocated = False
     position = begin
+    # zipfile reads the directory into a buffer of its stated size, so a name, extra
+    # field or comment that runs past it is cut where the directory ends.
+    data = data[: begin + size]
     while position < begin + size:
         if position + 46 > begin + size or data[position : position + 4] != b"PK\x01\x02":
             return _listed(members, complete=False)
         name_length = _little(data, position + 28, 2)
         extra_length = _little(data, position + 30, 2)
         name = data[position + 46 : position + 46 + name_length]
-        if len(name) < name_length:
-            return _listed(members, complete=False)
         extra_at = position + 46 + name_length
         method = _little(data, position + 10, 2)
         located = _zip64_location(
@@ -1952,6 +1962,19 @@ class ModelScanner(Scanner):
             self._digests[path] = files.hash_file(path, max_bytes=limits.bound("model-bytes"))
         return self._digests[path]
 
+    def _binding_refused(self, path: Path) -> bool:
+        """Whether the budget refused ``path`` or a shard index beside it.
+
+        A refused index binds none of its shards, which then charge nothing, so the
+        refusal is the shard's too: what its index makes a loader open is unknown.
+        """
+        refused = self._bindings.refused
+        return path in refused or any(
+            index in refused
+            for index in self._tree.children.get(path.parent, ())
+            if _index_base(index) is not None
+        )
+
     def _companion_digest(self, files: ConfinedCollection, path: Path) -> str | None:
         """The digest of a file a model binds, observed for its content when a file of
         that name is a content candidate; a payload is kept for its own component."""
@@ -2254,7 +2277,7 @@ class ModelScanner(Scanner):
             files.root,
             self._policies,
             verify=memoized(verify_sigstore_bundle, self._verified),
-            unbound=self._bindings.reason if path in self._bindings.refused else None,
+            unbound=self._bindings.reason if self._binding_refused(path) else None,
         )
         status = verification.status or self._unverified_status(path)
         if status == SigningStatus.VERIFICATION_UNAVAILABLE:

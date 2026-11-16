@@ -1795,3 +1795,26 @@ def test_a_pinned_model_is_not_verified_once_the_binding_budget_refuses_it(proje
     (evidence,) = component.claims.values()
     assert evidence.assurance.value != "verified"
     assert model_collector.BINDINGS_EXHAUSTED in (evidence.unknown_reason or "")
+
+
+def test_a_pinned_shard_is_not_verified_once_the_budget_refuses_its_index(project: Path) -> None:
+    # A refused index binds none of its shards, and a shard then charges nothing, so it
+    # was verified alone although its pinned index, which decides what loads, differs.
+    (project / "c").mkdir()
+    shard = project / "c/model-00001-of-00001.safetensors"
+    header = json.dumps({"t0": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]}}).encode()
+    shard.write_bytes(len(header).to_bytes(8, "little") + header + b"\0\0\0\0")
+    index = project / "c/model.safetensors.index.json"
+    index.write_text(json.dumps({"weight_map": {"t0": shard.name}}))
+    pins = [DigestPinPolicy(path, sha256(path)) for path in (shard, index)]
+    weight_map = {"t0": shard.name, **{f"t{i}": f"missing-{i}.safetensors" for i in range(1, 25)}}
+    index.write_text(json.dumps({"weight_map": weight_map}))
+    with limits.applied(replace(limits.DEFAULTS, entries=10)):
+        result = ModelScanner(digest_pins=pins).scan(project)
+    assert any(f.endswith(model_collector.BINDINGS_EXHAUSTED) for f in result.scan_failures)
+    (component,) = [c for c in result.components if c.source_path == "c/" + shard.name]
+    assert component.signing_status == "partially-verified"
+    assert component.trust_tier is TrustTier.UNKNOWN
+    (evidence,) = component.claims.values()
+    assert evidence.assurance.value != "verified"
+    assert model_collector.BINDINGS_EXHAUSTED in (evidence.unknown_reason or "")
