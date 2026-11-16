@@ -1166,7 +1166,11 @@ _COMMAND_OPTION_RUNNERS: dict[str, tuple[frozenset[str], str]] = {
 
 
 def _option_command(words: list[str], index: int, runner: str) -> int | None:
-    """Index of the command `runner` runs from its `-c` value or `-u` operand, if any."""
+    """Index of the command `runner` runs from its `-c` value or `-u` operand, if any.
+
+    A value attached to the option (`--command=sh`, `-csh`, `-qcsh`) replaces that word
+    in `words`, so the caller reads it as the command.
+    """
     with_value, bundled = _COMMAND_OPTION_RUNNERS[runner]
     user = False
     while index < len(words):
@@ -1175,6 +1179,10 @@ def _option_command(words: list[str], index: int, runner: str) -> int | None:
             len(word) > 2 and word[0] == "-" and word[-1] == "c" and set(word[1:-1]) <= set(bundled)
         ):
             return index + 1
+        attached = re.match(rf"--command=|-[{bundled}]*c(?=.)", word)
+        if attached is not None:
+            words[index] = word[attached.end() :]
+            return index
         if word == "--":
             index += 1
             if user:
@@ -1409,7 +1417,7 @@ def _saved_names(segment: str) -> set[str]:
         if found:
             saved.update(_file_keys(found))
         cursor += step
-    if tool is not None:
+    if tool is not None or _segment_fetches(segment):
         for redirection in _OUTPUT_REDIRECTION.finditer(segment):
             saved.update(_file_keys(redirection.group("target")))
     return saved
@@ -1429,6 +1437,9 @@ def _executes_saved(segment: str, saved: set[str]) -> bool:
         return True
     if not (names & (interpreters | _IEX_NAMES | _EVAL_NAMES | {"busybox"})):
         return False
+    interpreter = next(iter(sorted(names & _STDIN_INTERPRETERS.keys())), None)
+    if interpreter is not None:
+        return _interpreter_program(interpreter, words[index + 1 :], saved)
     cursor = index + 1
     while cursor < len(words):
         word = _decode_word(words[cursor], drop_ifs=True)
@@ -1441,14 +1452,57 @@ def _executes_saved(segment: str, saved: set[str]) -> bool:
     return False
 
 
+def _interpreter_program(interpreter: str, args: list[str], saved: set[str]) -> bool:
+    """Whether the interpreter's program, not a later data argument, is one of `saved`.
+
+    The program is the first operand after the options, or the value of a flag that
+    takes it from the command line (`-c`, `-e`, `php -f`); the arguments after it are
+    the program's own, as in `node build.js data.json`. An option's value counts too,
+    since `node -r`, `ruby -r` and `php -z` load and run the file they name.
+    """
+    letters, long_code, with_value = _STDIN_INTERPRETERS[interpreter]
+    index = 0
+    while index < len(args):
+        word = _decode_word(args[index], drop_ifs=True)
+        if word == "--":
+            index += 1
+            break
+        if not word.startswith("-") or word in _STDIN_PROGRAMS:
+            break
+        option = word.split("=", 1)[0] if word.startswith("--") else word[:2]
+        if option in with_value:
+            attached = word[len(option) :].removeprefix("=")
+            values = [attached] if attached else args[index + 1 : index + 2]
+            if any(_file_keys(value) & saved for value in values):
+                return True
+            index += 1 if attached else 2
+            continue
+        if word.startswith("--") and word.split("=", 1)[0] in long_code:
+            separate = "=" not in word
+        elif not word.startswith("--") and word[1:2] in letters:
+            separate = len(word) == 2
+        else:
+            index += 2 if word in with_value else 1
+            continue
+        nxt = args[index + 1 : index + 2] if separate else []
+        return any(_file_keys(item) & saved for item in nxt)
+    return index < len(args) and bool(_file_keys(args[index]) & saved)
+
+
 def _relayed_names(segment: str) -> set[str]:
-    """Files a segment fed a download writes: `tee` operands and output redirections."""
+    """Files a segment fed a download writes: `tee`/`sponge` operands, `dd of=`, redirections."""
     words = _shell_words(segment)
     relayed: set[str] = set()
     index = _executable_index(words)
-    if index is not None and "tee" in _name_variants(words[index]):
+    names = _name_variants(words[index]) if index is not None else set()
+    if index is not None and names & {"tee", "sponge"}:
         for word in words[index + 1 : index + 65]:
             relayed.update(_file_keys(word))
+    elif index is not None and "dd" in names:
+        for word in words[index + 1 : index + 65]:
+            decoded = _decode_word(word, drop_ifs=True)
+            if decoded.startswith("of="):
+                relayed.update(_file_keys(decoded[3:]))
     for redirection in _OUTPUT_REDIRECTION.finditer(segment):
         relayed.update(_file_keys(redirection.group("target")))
         if len(relayed) >= 64:
@@ -1580,6 +1634,10 @@ def _substitution_exec(pipelines: list[list[str]]) -> bool:
         index = _executable_index(words)
         if index is None:
             continue
+        # The command a wrapper or `su -c` runs may itself be the download.
+        command = words[index].lstrip("'\"")
+        if _opens_substitution(command, 0) and _substitution_downloads(command, 0):
+            return True
         names = _name_variants(words[index])
         if not (names & (_SHELL_NAMES | _EVAL_NAMES | _IEX_NAMES | _STDIN_INTERPRETERS.keys())):
             continue
@@ -1609,7 +1667,24 @@ def _fetch_exec(command: str) -> bool:
                 return True
             if _segment_fetches(segment):
                 fetched = True
+            if fetched and _output_substitution_executes(segment):
+                return True
     return _encoded_powershell(command)
+
+
+def _output_substitution_executes(segment: str) -> bool:
+    """Whether a `>(...)` here, which reads what is written to it, starts a shell or
+    interpreter on it, as `curl x | tee >(sh)` and `curl x > >(sh)` do."""
+    start = segment.find(">(")
+    for _ in range(16):
+        if start == -1:
+            return False
+        end = segment.find(")", start + 2)
+        pipelines = _command_pipelines(segment[start + 2 : end if end != -1 else None])
+        if pipelines and any(_segment_executes(part) for part in pipelines[0]):
+            return True
+        start = segment.find(">(", start + 2)
+    return start != -1
 
 
 def _encoded_powershell(command: str) -> bool:
@@ -1645,7 +1720,11 @@ def _encoded_segment(segment: str) -> bool:
         word = argument.group()
         plain = _PLAIN.fullmatch(word) is not None
         if parameter or value or script:
-            if _ENCODED_COMMAND.match(segment, argument.start()):
+            # After -File alone, `/e` is the script at the root, not the parameter.
+            slash_script = (
+                script and not (parameter or value) and word.lstrip("\"'").startswith("/")
+            )
+            if not slash_script and _ENCODED_COMMAND.match(segment, argument.start()):
                 return True
             if not plain and (parameter or value or not _script_path(word)):
                 return _ENCODED_COMMAND.search(segment, argument.end()) is not None

