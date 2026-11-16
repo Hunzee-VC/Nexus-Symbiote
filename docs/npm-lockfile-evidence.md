@@ -159,6 +159,22 @@ Berry protocol such as `npm:`, a bracket or brace inside a word, a `yarn lockfil
 comment in a lockfile that starts with `__metadata`, and a space before the colon of
 a stanza header.
 
+A package that a patch may change at install binds no record from any lockfile, and
+an exact version in `package.json` names no package URL for it: a lockfile's integrity
+value is that of the unpatched tarball. pnpm applies the patches that
+`pnpm.patchedDependencies` in `package.json` or `patchedDependencies` in
+`pnpm-workspace.yaml` name, and records them in `pnpm-lock.yaml` as
+`patchedDependencies`, a `(patch_hash=...)` group after the importer's version, or
+`patched: true` on a lockfile v6 record; Bun applies those of a top-level
+`patchedDependencies`. Any of them naming the package, whatever version it gives, is
+the `patched dependency is unverified` exclusion, with a medium `nonregistry_source`
+finding on the package, as described with the
+[coverage gaps](registry-collector.md#coverage-gaps). A hash in a peer's group, as in
+the `@langchain/core` version `0.3.0(openai@4.104.0(patch_hash=...))`, is the peer's,
+not the package's. A patch of a catalogued AI package that `package.json` does not
+declare, such as that `openai`, is the same exclusion with no finding:
+`@langchain/core` keeps its record, and no component binds the patched package.
+
 For Python, `uv.lock` or `poetry.lock` in the project root supplies the exact
 version and the index origin of each AI package declared in `requirements*.txt` or
 `pyproject.toml`, the lockfile record's position, and the SHA-256 of the lockfile.

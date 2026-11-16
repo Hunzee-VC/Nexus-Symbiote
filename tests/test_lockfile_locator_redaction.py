@@ -216,7 +216,8 @@ UNPLAIN_PEERS = {
     "unclosed-group": "(react-dom@18.2.0(react@18.2.0)",
     "close-before-open": "(react@18.2.0))(react-dom@18.2.0(react@18.2.0)",
     "text-after": f"(zod@1.0.0)fakeuser:{PASSWORD}",
-    "patch-hash-with-text": f"(patch_hash=abc fakeuser:{PASSWORD})",
+    # In a peer's group: a hash on the package itself unbinds it (see below).
+    "patch-hash-with-text": f"(zod@1.0.0(patch_hash=abc fakeuser:{PASSWORD}))",
 }
 
 
@@ -236,6 +237,19 @@ def test_a_pnpm_key_whose_peers_hold_other_text_is_recorded_redacted(
     result = _project(tmp_path, "4.0.0", "pnpm-lock.yaml", lock(peers))
     record, version = _bound(result)
     assert (record, version) == ("pnpm-lock.yaml#/packages/" + pointer, "4.0.0")
+    _assert_clean(result)
+
+
+@pytest.mark.parametrize(
+    "lock", [_pnpm_v6, _pnpm_unlisted, _pnpm_slash], ids=["importer", "unlisted", "slash"]
+)
+def test_a_pnpm_key_patched_with_text_is_unbound_and_leaks_nothing(tmp_path, lock):
+    result = _project(
+        tmp_path, "4.0.0", "pnpm-lock.yaml", lock(f"(patch_hash=abc fakeuser:{PASSWORD})")
+    )
+    assert "pnpm-lock.yaml: patched dependency is unverified" in result.surfaces_excluded
+    (component,) = result.components
+    assert "lockfile_record" not in component.properties
     _assert_clean(result)
 
 
