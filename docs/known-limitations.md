@@ -1435,6 +1435,17 @@ A way around a limit that its entry does not describe is worth a
   signalled. The server fails with `isolation-teardown-failed`, but the launcher and
   everything it started keep running. The same reason is reported when the launcher
   only crashed, because `unshare` ends with the signal that ended the launcher.
+- **`--no-isolation` contains a launcher's processes only against accidents.** On
+  Linux, cleanup relies on a wrapper process that runs as your user and keeps the
+  launcher's whole tree under it. A launcher running as the same user can kill that
+  wrapper, after which its processes are adopted by pid 1 and keep running; the
+  server fails with `isolation-teardown-failed`, but nothing ends them. The same
+  reason is reported when the launcher was only killed by a signal, including a
+  crash, because the wrapper re-raises it as `unshare` does, and when a tree that
+  keeps forking outlasts the scans. A delegated cgroup v2 would not close this,
+  because a process running as the same user can move itself out of it. Use
+  `--no-isolation` only inside a worker that is already isolated; see
+  [`verify-live`](cli-reference.md#verify-live).
 - **Inside some user namespaces, every launch policy is refused.** `verify-live`
   accepts a launch policy only when `/` and every directory above it are owned by root
   or by you. Inside a user namespace that does not map host root and keeps the host's
