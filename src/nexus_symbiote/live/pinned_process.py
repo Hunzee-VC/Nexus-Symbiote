@@ -11,12 +11,9 @@ launch fails before executing the pinned program. On Linux,
 ``--no-isolation`` starts the launcher through a short exec wrapper that makes it a
 child subreaper, and cleanup stops the launcher before it sweeps the tree, so while the
 launcher is alive its descendants are killed with the session, including a double-fork.
-A descendant that outlives the launcher can escape. An opted-out launch also joins a
-private cgroup v2 when the current cgroup allows a child, and cleanup writes
-``cgroup.kill``, so a ``clone(CLONE_PARENT)`` child that calls ``setsid`` dies with
-that cgroup; without one, cleanup signals every process still in the launcher's
-session. A process that leaves both can escape. Elsewhere that cleanup is best effort.
-Neither is a PID or filesystem namespace.
+A descendant that outlives the launcher can escape, and so can one that deliberately
+evades the sweep. Elsewhere that cleanup is best effort. Neither is a PID or filesystem
+namespace.
 """
 
 from __future__ import annotations
@@ -47,9 +44,6 @@ _NAMESPACED: set[int] = set()
 _INITS: dict[int, int] = {}
 _RELEASE = b"\n"
 _START_SECONDS = 5.0
-# Opt-out launches only: session id and a private cgroup, recorded while the pid is live.
-_OPT_OUT: dict[int, tuple[int | None, Path | None]] = {}
-_CGROUP_SEQ = 0
 _STOP_SECONDS = 1.0
 _SWEEP_PASSES = 8
 _TEARDOWN_SECONDS = 5.0
@@ -58,20 +52,6 @@ _TEARDOWN_SECONDS = 5.0
 # locale, so the wrapper restores both signals and passes the launch environment itself.
 _SUBREAPER_EXEC = """\
 import ctypes, os, signal, sys
-try:
-    handle = open("cgroup", "rb")
-except OSError:
-    handle = None
-if handle is not None:
-    # Join before exec, so a clone(CLONE_PARENT) in the pinned bytes is born here.
-    with handle:
-        raw = handle.read(4096).split(b"\\n", 1)[0]
-    if raw.startswith(b"/") and b".." not in raw.split(b"/"):
-        try:
-            with open(raw + b"/cgroup.procs", "w", encoding="ascii") as procs:
-                procs.write(str(os.getpid()))
-        except OSError:
-            pass
 PR_SET_CHILD_SUBREAPER = 36
 prctl = ctypes.CDLL(None).prctl
 prctl.argtypes = [ctypes.c_int] + [ctypes.c_ulong] * 4
@@ -506,149 +486,6 @@ def _hold_init(supervisor: int) -> int | None:
     )
 
 
-def _current_cgroup() -> Path | None:
-    """This process's cgroup v2 directory, or None when that hierarchy is absent."""
-    try:
-        text = Path("/proc/self/cgroup").read_text(encoding="ascii")
-    except (OSError, ValueError):
-        return None
-    for line in text.splitlines():
-        identity, controllers, path = (line.split(":", 2) + ["", ""])[:3]
-        if identity == "0" and controllers == "" and path.startswith("/"):
-            root = Path("/sys/fs/cgroup" + path)
-            if (root / "cgroup.controllers").is_file() and (root / "cgroup.kill").is_file():
-                return root
-    return None
-
-
-def _prepare_cgroup(work: Path) -> Path | None:
-    """A private child cgroup for one opt-out launch, or None when it cannot be made.
-
-    The path is written to ``work/cgroup`` for the exec wrapper, which joins before it
-    runs the pinned bytes. ``cgroup.kill`` then reaches a ``clone(CLONE_PARENT)`` child
-    that has left the process session: its parent is this process, so the descendant
-    walk does not see it, and ``setsid`` takes it out of ``killpg``.
-    """
-    global _CGROUP_SEQ
-    root = _current_cgroup()
-    if root is None:
-        return None
-    _CGROUP_SEQ += 1
-    path = root / f"nexus-symbiote-{os.getpid()}-{_CGROUP_SEQ}"
-    try:
-        path.mkdir()
-    except OSError:
-        return None
-    if not (path / "cgroup.kill").is_file():
-        path.rmdir()
-        return None
-    try:
-        (work / "cgroup").write_text(str(path), encoding="ascii")
-    except OSError:
-        path.rmdir()
-        return None
-    return path
-
-
-def _move_into_cgroup(path: Path, pid: int) -> None:
-    with contextlib.suppress(OSError):
-        (path / "cgroup.procs").write_text(str(pid), encoding="ascii")
-
-
-def _cgroup_kill(path: Path) -> None:
-    with contextlib.suppress(OSError):
-        (path / "cgroup.kill").write_text("1", encoding="ascii")
-
-
-def _remove_cgroup(path: Path) -> None:
-    with contextlib.suppress(OSError):
-        path.rmdir()
-
-
-def _proc_fields(pid: int) -> list[str] | None:
-    """``state``, ``ppid``, ``pgrp`` and ``session`` from ``/proc/<pid>/stat``.
-
-    The launcher chooses the process name inside the parentheses, which may be any
-    bytes, so it is decoded with escapes: a name must not stop the cleanup sweep.
-    """
-    try:
-        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="surrogateescape") as stat:
-            text = stat.read()
-    except OSError:
-        return None
-    fields = text.rpartition(")")[2].split()
-    return fields if len(fields) >= 4 else None
-
-
-def _kill_session(sid: int) -> None:
-    """SIGKILL every process that still shares ``sid``, for a few bounded passes.
-
-    ``killpg`` misses a member that called ``setpgid``. A ``setsid`` child has a new
-    session and is not found here; the cgroup covers that case.
-    """
-    if sid <= 1:
-        return
-    own = os.getpid()
-    for _ in range(_SWEEP_PASSES):
-        try:
-            entries = os.listdir("/proc")
-        except OSError:
-            return
-        victims: list[int] = []
-        for entry in entries:
-            if not entry.isdigit():
-                continue
-            pid = int(entry)
-            if pid in {own, 1}:
-                continue
-            fields = _proc_fields(pid)
-            if fields is not None and fields[3] == str(sid):
-                victims.append(pid)
-        if not victims:
-            return
-        for pid in victims:
-            with contextlib.suppress(ProcessLookupError, PermissionError):
-                os.kill(pid, signal.SIGKILL)
-
-
-def _cgroup_members(path: Path) -> list[int]:
-    """The pids in the private cgroup ``path``, read before it is killed."""
-    try:
-        text = (path / "cgroup.procs").read_text(encoding="ascii")
-    except (OSError, ValueError):
-        return []
-    return [int(pid) for pid in text.split() if pid.isdigit()]
-
-
-def _reap_adopted(candidates: list[int], except_pid: int) -> None:
-    """Reap the killed members of the launcher's cgroup that are this process's children.
-
-    ``clone(CLONE_PARENT)`` makes this process their parent. Only those members are
-    reaped: reaping any zombie child of this process would take the exit status of a
-    subprocess other code started, which its ``wait()`` then reports as 0. A member
-    stays this process's child until it is reaped, so its pid cannot be reused first.
-    ``waitpid`` on the launcher stays with the caller.
-    """
-    me = str(os.getpid())
-    pending = [pid for pid in dict.fromkeys(candidates) if pid != except_pid]
-    deadline = time.monotonic() + _STOP_SECONDS
-    while pending:
-        running: list[int] = []
-        for pid in pending:
-            fields = _proc_fields(pid)
-            if fields is None or fields[1] != me:
-                continue  # gone, or another process's child
-            if fields[0] == "Z":
-                with contextlib.suppress(ChildProcessError, OSError):
-                    os.waitpid(pid, os.WNOHANG)
-            else:
-                running.append(pid)
-        if not running or time.monotonic() >= deadline:
-            return
-        pending = running
-        time.sleep(0.005)
-
-
 def _subreaper_argv(staged: Path) -> list[str] | None:
     """Run ``staged`` through an exec wrapper that makes it a child subreaper, or None.
 
@@ -702,13 +539,9 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
     """
     if not _executable_image(staged):
         raise PinnedProcessError("launcher-start-failed", "launcher could not be run")
-    namespaced = isolation_enabled()
-    # Only the exec wrapper can join before the pinned bytes run. Moving a process that
-    # has already forked, then cgroup.kill, would kill the parent and orphan the child
-    # ahead of the descendant sweep.
-    cgroup = None if namespaced or _subreaper_argv(staged) is None else _prepare_cgroup(work)
     try:
         argv, gated = _launch_argv(staged)
+        namespaced = isolation_enabled()
         proc = subprocess.Popen(  # noqa: S603
             argv,
             stdin=subprocess.PIPE,
@@ -720,23 +553,11 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
             bufsize=0,
         )
     except PinnedProcessError:
-        if cgroup is not None:
-            _remove_cgroup(cgroup)
         raise
     except OSError as exc:
-        if cgroup is not None:
-            _remove_cgroup(cgroup)
         raise PinnedProcessError("launcher-start-failed", "launcher could not be run") from exc
     if namespaced:
         _NAMESPACED.add(proc.pid)
-    else:
-        if cgroup is not None:
-            _move_into_cgroup(cgroup, proc.pid)
-        try:
-            sid: int | None = os.getsid(proc.pid)
-        except OSError:
-            sid = None
-        _OPT_OUT[proc.pid] = (sid, cgroup)
     if gated:
         _release(proc)
     return proc
@@ -787,12 +608,10 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
     """
     namespaced = proc.pid in _NAMESPACED
     init = _INITS.pop(proc.pid, None)
-    sid, cgroup = _OPT_OUT.pop(proc.pid, (None, None))
     # The sweep reads Linux's /proc, and macOS has no os.waitid before Python 3.13. Until
     # it is reaped, the pid is still this launcher's.
     stop = sys.platform.startswith("linux") and proc.returncode is None
     ended = True
-    members: list[int] = []
     try:
         try:
             if namespaced:
@@ -807,23 +626,14 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
                 if stop:
                     _stop_launcher(proc.pid)
                 _kill_descendants(proc.pid)
-            # After the stopped launcher's tree is swept: the cgroup also holds a
-            # CLONE_PARENT child, which that walk does not see, but killing it first
-            # would kill the launcher and orphan its tree before the walk.
-            if cgroup is not None:
-                members = _cgroup_members(cgroup)
-                _cgroup_kill(cgroup)
         finally:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
                 # The group already exited; the caller's wait() still reaps the launcher.
                 pass
-        if sid is not None:
-            _kill_session(sid)
         if not namespaced:
             _kill_descendants(proc.pid)
-            _reap_adopted(members, proc.pid)
     finally:
         # A finished pid must not stay marked. The kernel can reuse it for a later
         # launcher that is not in a PID namespace, and that launcher would then skip
@@ -837,8 +647,6 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
             finally:
                 with contextlib.suppress(OSError):
                     os.close(init)
-        if cgroup is not None:
-            _remove_cgroup(cgroup)
         if stop:
             # killpg has normally killed it already. If cleanup failed before that, a
             # stopped launcher would never read EOF and the caller's wait() would hang.
