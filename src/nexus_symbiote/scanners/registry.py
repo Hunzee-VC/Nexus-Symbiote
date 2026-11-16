@@ -441,6 +441,25 @@ def _plain_pnpm_peers(suffix: str) -> bool:
 _PNPM_PATCH_HASH = re.compile(r"\s*patch_hash")
 
 
+# The packages key pnpm reads for an importer's version reference, by lockfile major
+# version: 5.x keys by path, 6.x by the reference with its peers, and 9.x by the exact
+# version alone, its peers moving to the snapshots.
+_PNPM_RECORD_KEYS: Final = {
+    "5": "/{name}/{ref}",
+    "6": "/{name}@{ref}",
+    "9": "{name}@{version}",
+}
+# Every spelling of a record for one name and version that any of those formats uses.
+_PNPM_KEY_SPELLINGS: Final = (
+    "{name}@{ref}",
+    "/{name}@{ref}",
+    "{name}@{version}",
+    "/{name}@{version}",
+    "/{name}/{version}",
+    "/{name}/{ref}",
+)
+
+
 def _pnpm_patched(reference: str) -> bool:
     """Whether a pnpm version reference marks its own package as patched.
 
@@ -2197,6 +2216,9 @@ class RegistryScanner(Scanner):
                 or not isinstance(lock_ver, (str, int, float))
             ):
                 raise ValueError("unsupported pnpm lockfile structure")
+            family = str(lock_ver).split(".", 1)[0]
+            if family not in _PNPM_RECORD_KEYS:
+                raise ValueError("unsupported pnpm lockfile version")
             packages = lock_doc.get("packages", {})
             if packages is not None and not isinstance(packages, dict):
                 raise ValueError("unsupported pnpm packages structure")
@@ -2303,18 +2325,26 @@ class RegistryScanner(Scanner):
                     "pnpm-lock.yaml: selected package lacks an exact version"
                 )
                 continue
-            candidates = (
-                (matched_pkg_key,)
-                if matched_pkg_key is not None
-                else (
-                    f"{comp.name}@{ver_ref}",
-                    f"/{comp.name}@{ver_ref}",
-                    f"{comp.name}@{base_ver}",
-                    f"/{comp.name}@{base_ver}",
-                    f"/{comp.name}/{base_ver}",
+            if matched_pkg_key is not None:
+                pkg_key: str | None = matched_pkg_key
+            else:
+                # pnpm reads one key for an importer's version, by lockfile format; a
+                # record under another spelling is one pnpm never reads, so letting it
+                # stand in would let a decoy supply the integrity and the origin.
+                expected = _PNPM_RECORD_KEYS[family].format(
+                    name=comp.name, ref=ver_ref, version=base_ver
                 )
-            )
-            pkg_key = next((c for c in candidates if c in packages), None)
+                spellings = {
+                    key.format(name=comp.name, ref=ver_ref, version=base_ver)
+                    for key in _PNPM_KEY_SPELLINGS
+                }
+                if any(key in packages for key in spellings - {expected}):
+                    comp.package_url = None
+                    result.surfaces_excluded.append(
+                        f"pnpm-lock.yaml: multiple package resolutions for {comp.name} are ambiguous"
+                    )
+                    continue
+                pkg_key = expected if expected in packages else None
             tarball: Any = None
             integrity: Any = None
             if pkg_key is not None:
