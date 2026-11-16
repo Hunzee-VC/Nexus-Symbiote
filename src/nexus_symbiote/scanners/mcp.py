@@ -3107,6 +3107,9 @@ class MCPScanner(Scanner):
                     found = link.joinpath(*spelling[size:])
                     canonical = Path(*link.parts[:-size], *spelling)
                     if not files.is_directory(found):
+                        # The walk sees the target under its own name, so another
+                        # spelling below the link is only found here, as for files.
+                        files.read_bytes(found, missing_ok=True)
                         continue
                     if found != canonical:
                         files.report_case_variant(found, canonical)

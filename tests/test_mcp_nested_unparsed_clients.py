@@ -106,3 +106,30 @@ def test_linked_zed_and_continue_directories_are_gaps(tmp_path: Path) -> None:
         f"pkg/.zed/settings.json: {GAP}",
     ]
     assert not result.scan_failures
+
+
+@pytest.mark.parametrize("spelling", ["MCPServers", "mcpservers"])
+def test_case_variant_below_linked_continue_directory_is_a_failure(
+    tmp_path: Path, spelling: str
+) -> None:
+    server = tmp_path / "shared" / "c" / spelling / "x.yaml"
+    server.parent.mkdir(parents=True)
+    server.write_text("name: x\n", encoding="utf-8")
+    (tmp_path / "pkg").mkdir()
+    os.symlink("../shared/c", tmp_path / "pkg" / ".continue")
+    result = MCPScanner().scan(tmp_path, config_only=True)
+    assert result.surfaces_excluded == []
+    assert [f for f in result.scan_failures if "case variant" in f] == [
+        f"pkg/.continue/{spelling}: case variant of pkg/.continue/mcpServers is the active "
+        "file on case-insensitive file systems and is not inventoried"
+    ], result.scan_failures
+
+
+def test_linked_continue_directory_without_server_directory_is_silent(tmp_path: Path) -> None:
+    (tmp_path / "shared" / "c").mkdir(parents=True)
+    (tmp_path / "shared" / "c" / "config.yaml").write_text("models: []\n", encoding="utf-8")
+    (tmp_path / "pkg").mkdir()
+    os.symlink("../shared/c", tmp_path / "pkg" / ".continue")
+    result = MCPScanner().scan(tmp_path, config_only=True)
+    assert result.surfaces_excluded == []
+    assert result.scan_failures == []
