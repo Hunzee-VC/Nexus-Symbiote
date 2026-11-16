@@ -6,6 +6,7 @@ import io
 import pickle
 import pickletools
 import random
+import time
 import zipfile
 from collections.abc import Callable
 from dataclasses import replace
@@ -379,6 +380,45 @@ def test_a_text_pickle_that_names_an_importable_global_is_critical(tmp_path: Pat
     (tmp_path / "models").mkdir()
     (tmp_path / "models" / "payload").write_bytes(b'cos\nsystem\n(S"id"\ntR.')
     component = _component(tmp_path, "models/payload")
+    assert component is not None and component.serialization_safety is UNSAFE
+
+
+# MARK, NONE, then DUP and TUPLE2 at each level: a tuple whose two items are the tuple
+# below, so the paths through the pickle's 40 levels number 2**40, then FROZENSET hashes it.
+_SHARED_TUPLES = b"(N" + b"2\x86" * 40 + b"\x91."
+
+
+def test_a_frozenset_of_shared_tuples_is_rated_in_linear_time(tmp_path: Path) -> None:
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "shared").write_bytes(_SHARED_TUPLES)
+    started = time.monotonic()
+    assert _component(tmp_path, "models/shared") is None
+    assert time.monotonic() - started < 10
+
+
+def test_a_resolved_object_below_shared_tuples_is_still_hashed(tmp_path: Path) -> None:
+    # hash() reaches the resolved object at the bottom first, which runs its __hash__.
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "shared").write_bytes(b"(cos\nsystem\n" + _SHARED_TUPLES[2:])
+    component = _component(tmp_path, "models/shared")
+    assert component is not None and component.serialization_safety is UNSAFE
+
+
+def test_an_unhashable_item_below_shared_tuples_stops_the_load_first(tmp_path: Path) -> None:
+    # An empty list before the resolved object: hash() fails on it before reaching it.
+    shared = b"(]cos\nsystem\n\x86" + b"2\x86" * 40 + b"\x91."
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "shared").write_bytes(shared)
+    component = _component(tmp_path, "models/shared")
+    assert component is None or component.serialization_safety is not UNSAFE
+
+
+def test_a_deeply_nested_first_pickle_does_not_hide_the_next(tmp_path: Path) -> None:
+    # CPython hashes 1,200 nested tuples and reads on; the next pickle calls code.
+    deep = b"(N" + b"\x85" * 1200 + b"\x91."
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "deep").write_bytes(deep + _reduce_pickle())
+    component = _component(tmp_path, "models/deep")
     assert component is not None and component.serialization_safety is UNSAFE
 
 

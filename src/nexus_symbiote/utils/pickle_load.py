@@ -116,10 +116,18 @@ class _Persistent:
 
 
 class _Tuple:
-    __slots__ = ("items",)
+    """A tuple, with what ``hash()`` of it does, which cannot change once it is built.
+
+    Tuples that share items, as DUP then TUPLE2 builds them, form a graph whose paths
+    double with each level: walking it at each hash would take exponential time for a
+    pickle of a few dozen bytes, and a deep one would exhaust the recursion limit.
+    """
+
+    __slots__ = ("hashed", "items")
 
     def __init__(self, items: tuple[object, ...]) -> None:
         self.items = items
+        self.hashed = _hash_outcome(items)
 
 
 class _Sized:
@@ -143,12 +151,35 @@ def _use(value: object, *, certain: bool = True) -> None:
         raise _CallError(certain)
 
 
+_HashOutcome = Literal["call", "unhashable"] | None
+
+
+def _hash_outcome(items: tuple[object, ...]) -> _HashOutcome:
+    """What ``hash()`` of a tuple of ``items`` meets first, hashing them in order: a
+    resolved object, whose hash runs (``"call"``), an unhashable item, or neither.
+
+    A nested tuple contributes its own outcome, computed when it was built, so this is
+    linear in ``items``. A ``_Sized`` keeps its kind for life, so the outcome holds.
+    """
+    for item in items:
+        if isinstance(item, _Opaque):
+            return "call"
+        if isinstance(item, _Tuple):
+            if item.hashed is not None:
+                return item.hashed
+        elif isinstance(item, _Sized) and item.kind not in ("frozenset", "view"):
+            return "unhashable"
+    return None
+
+
 def _hash(value: object) -> None:
     """``hash(value)``: a tuple hashes its items in order; a resolved object runs its hash."""
     _use(value)
     if isinstance(value, _Tuple):
-        for item in value.items:
-            _hash(item)
+        if value.hashed == "call":
+            raise _CallError(True)
+        if value.hashed == "unhashable":
+            raise _LoadError  # unhashable type
     elif isinstance(value, _Sized) and value.kind not in ("frozenset", "view"):
         raise _LoadError  # unhashable type
 
@@ -420,7 +451,9 @@ class _Machine:
                 handler(self)
         except _CallError as call:
             return self._segment("called", certain=call.certain)
-        except _UnreadError:
+        except (_UnreadError, RecursionError):
+            # No step here recurses on the input; should one, what the loader does next
+            # is not decided, which is not the same as the loader stopping.
             return self._segment("unread")
         except (_LoadError, ValueError, UnicodeError, OverflowError, struct.error):
             return self._segment("error")

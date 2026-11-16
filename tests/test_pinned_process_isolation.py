@@ -189,6 +189,22 @@ def test_a_finished_pid_is_not_remembered_as_namespaced() -> None:
     assert proc.pid not in pinned_process._NAMESPACED
 
 
+def test_teardown_leaves_the_exit_status_of_another_child() -> None:
+    # Code elsewhere in the process, such as the validation worker, trusts its child's
+    # exit status; reaping every zombie child would turn this 3 into 0.
+    other = subprocess.Popen([sys.executable, "-c", "raise SystemExit(3)"])  # noqa: S603
+    if hasattr(os, "waitid"):
+        os.waitid(os.P_PID, other.pid, os.WEXITED | os.WNOWAIT)
+    else:  # pragma: no cover - macOS before Python 3.13
+        time.sleep(1)
+    proc = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)  # noqa: S603
+    try:
+        pinned_process.terminate_process_group(proc)
+    finally:
+        proc.wait(timeout=5)
+    assert other.wait(timeout=5) == 3
+
+
 def test_a_forgotten_pid_is_swept_again_when_reused(monkeypatch: pytest.MonkeyPatch) -> None:
     swept: list[int] = []
     monkeypatch.setattr(pinned_process, "_kill_descendants", swept.append)
@@ -261,7 +277,12 @@ for _ in range(200):
     )
     with isolation_off():
         observe_pinned(str(command), digest)
-    _assert_dead(_host_pid(marker))
+    try:
+        _assert_dead(_host_pid(marker))
+    finally:
+        # A failed run must not leave the escaped child alive for the rest of the suite.
+        with contextlib.suppress(ProcessLookupError, ValueError, OSError):
+            os.kill(_host_pid(marker), signal.SIGKILL)
 
 
 def test_opt_out_stops_the_launcher_before_its_tree_is_swept(

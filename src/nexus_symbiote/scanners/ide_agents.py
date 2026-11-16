@@ -677,8 +677,9 @@ _SHELL = (
 # Each matcher runs once per pipeline segment, so a command of repeated near
 # misses costs linear time whatever its length.
 _SEGMENT_BOUNDARY = re.compile(r"[\n|;&]")
+# A command word, not the end of one: `confirm` and `affirm` do not download.
 _DOWNLOADER = re.compile(
-    r"(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b",
+    r"(?<![\w-])(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b",
     re.IGNORECASE,
 )
 _BASE64_DECODE = re.compile(r"base64\s+(?:-d|--decode)\b", re.IGNORECASE)
@@ -695,10 +696,13 @@ _BARE_SUBST = re.compile(r"(?:^|(?<=[\n;&|]))[ \t]*(?:\$\(|`)[ \t]*")
 _COMMAND_FLAG = re.compile(r"(?i)-c(?:ommand(?:withargs)?)?(?=\s|['\"]|$)")
 _POWERSHELL = re.compile(r"\b(?:powershell|pwsh)(?:\.exe)?\b", re.IGNORECASE)
 # PowerShell takes -, en dash, em dash or horizontal bar before a parameter name. A shell
-# removes quotes and escapes before PowerShell reads the argument. `-e` alone is shared
-# with -ErrorAction and -ExecutionPolicy; the shortest prefix that is only
-# -EncodedCommand is `-en`. `-ec` is not a prefix of that name.
-_ENCODED_PREFIX = "en(?:c(?:o(?:d(?:e(?:d(?:c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?)?)?)?)?)?)?"
+# removes quotes and escapes before PowerShell reads the argument. The console host reads
+# `-e`, `-ec` and every prefix of `-EncodedCommand` as that parameter
+# (CommandLineParameterParser: MatchSwitch(key, "encodedcommand", "e") or "ec");
+# -ExecutionPolicy needs at least `-ex`, and the host has no -ErrorAction switch.
+_ENCODED_PREFIX = (
+    "e(?:c|n(?:c(?:o(?:d(?:e(?:d(?:c(?:o(?:m(?:m(?:a(?:n(?:d)?)?)?)?)?)?)?)?)?)?)?)?)?"
+)
 _ENCODED_COMMAND = re.compile(
     rf"(?<!\S)[\"'\u2018-\u201e\\^`]*[-\u2013\u2014\u2015]{_ENCODED_PREFIX}\b",
     re.IGNORECASE,
@@ -771,13 +775,20 @@ def _command_pipelines(command: str) -> list[list[str]]:
             flush_command()
             index += 2
             continue
-        if char == "|" and nxt == "&":
-            flush_segment()
-            index += 2
-            continue
         if char == "|":
             flush_segment()
-            index += 1
+            index += 2 if nxt == "&" else 1
+            # A pipeline continues past a line end after `|`: `curl $URL |` then `sh` on
+            # the next line is one pipeline, as is a backslash-newline.
+            while index < length:
+                if command[index] in " \t\r\n":
+                    index += 1
+                elif command.startswith("\\\n", index):
+                    index += 2
+                elif command.startswith("\\\r\n", index):
+                    index += 3
+                else:
+                    break
             continue
         if char == "&" and nxt == "&":
             flush_command()
@@ -790,6 +801,10 @@ def _command_pipelines(command: str) -> list[list[str]]:
         if char == "&" and nxt == ">":
             buf.append("&>")
             index += 2
+            continue
+        if char == "\\" and (nxt == "\n" or command.startswith("\r\n", index + 1)):
+            # A line continuation joins the two lines into one command.
+            index += 2 if nxt == "\n" else 3
             continue
         if char in "&;\n":
             flush_command()

@@ -193,6 +193,21 @@ def test_worker_evaluation_cpu_budget_is_capped_by_startup_ceiling(
         "getrusage",
         lambda _who: type("Usage", (), {"ru_utime": user, "ru_stime": system})(),
     )
+    # In-process, _worker would swap jsonschema's regex engine and format checkers for
+    # every later test; its own subprocess undoes nothing because it exits.
+    import jsonschema._format
+    import jsonschema._keywords
+    import jsonschema._legacy_keywords
+    import jsonschema._utils
+
+    for module in (
+        jsonschema._format,
+        jsonschema._keywords,
+        jsonschema._legacy_keywords,
+        jsonschema._utils,
+    ):
+        monkeypatch.setattr(module, "re", module.re)
+    monkeypatch.setattr(runtime_validation, "_disable_unused_format_checkers", lambda: None)
     payload = json.dumps({"schema": {"type": "object"}, "arguments": {}}).encode("utf-8")
     monkeypatch.setattr(sys, "stdin", type("FakeIn", (), {"buffer": io.BytesIO(payload)})())
     monkeypatch.setattr(sys, "stdout", type("FakeOut", (), {"buffer": io.BytesIO()})())

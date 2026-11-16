@@ -7,6 +7,7 @@ mean standard output, so a pipeline that read standard output read nothing.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
@@ -14,11 +15,14 @@ from click.testing import CliRunner
 from nexus_symbiote.cli import main
 from nexus_symbiote.utils.terminal import DASH_OUTPUT
 
+SHADOWSCAN_REPORT = Path(__file__).parent / "fixtures/shadowscan/code-report-0.1.4.json"
+
 ARGUMENTS = {
     "scan": ["scan", "project", "--no-project-policy", "-o", "-"],
     "scan-dot": ["scan", "project", "--no-project-policy", "-o", "./-"],
     "baseline": ["baseline", "project", "--no-project-policy", "-o", "-"],
     "vex": ["vex", "inventory.json", "-o", "-"],
+    "import-shadowscan": ["import-shadowscan", str(SHADOWSCAN_REPORT), "-o", "-"],
 }
 
 

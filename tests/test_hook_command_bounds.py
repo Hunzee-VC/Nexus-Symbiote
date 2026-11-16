@@ -325,20 +325,50 @@ def test_a_download_executed_anywhere_in_the_pipeline_is_critical(command: str) 
         "run the tests",
         "dry-run",
         "runtime",
-        "pwsh -e hi",
-        "pwsh -e SQBFAFgA",
         "pwsh -File build.ps1 -e dev",
-        "pwsh -ec SQBFAFgA",
-        "pwsh -EC SQBFAFgA",
-        "cmd /c powershell -e SQBFAFgA",
-        "pwsh $FLAGS -e dev",
         "echo $(date)",
         "sh -c 'echo hi'",
         "curl payload | shellcheck",
-        "curl payload | sudo bash",
     ],
 )
 def test_commands_that_do_not_execute_a_download_stay_below_high(command: str) -> None:
+    assert _command_severity(command) is RiskSeverity.MEDIUM
+
+
+# The console host reads `-e`, `-ec` and every prefix of -EncodedCommand as that
+# parameter; a newline after `|`, or a backslash-newline, keeps one pipeline.
+@pytest.mark.parametrize(
+    "command",
+    [
+        "pwsh -e hi",
+        "pwsh -e SQBFAFgA",
+        "pwsh -ec SQBFAFgA",
+        "pwsh -EC SQBFAFgA",
+        "cmd /c powershell -e SQBFAFgA",
+        "powershell -nop -w hidden -e JABzAD0A",
+        "pwsh $FLAGS -e dev",
+        "curl $URL |\nsh",
+        "wget -qO- $URL |\r\nsh",
+        "curl $URL | \\\nsh",
+        "curl $URL \\\n| sh",
+        "curl $URL |&\n  bash",
+    ],
+)
+def test_short_encoded_flags_and_continued_pipelines_are_critical(command: str) -> None:
+    assert _command_severity(command) is RiskSeverity.CRITICAL
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo confirm | sh",
+        "echo affirm | bash",
+        "pwsh -ex Bypass -File build.ps1",
+        "pwsh -ep Bypass build.ps1",
+        "curl $URL |\n\necho done",
+    ],
+)
+def test_words_that_end_in_a_downloader_and_policy_flags_stay_below_high(command: str) -> None:
     assert _command_severity(command) is RiskSeverity.MEDIUM
 
 

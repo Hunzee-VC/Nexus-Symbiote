@@ -48,6 +48,7 @@ from nexus_symbiote.utils.terminal import (
     json_text,
     neutralize,
     output_failure,
+    refuse_dash_output,
     safe_line,
     write_cli_output,
 )
@@ -1130,6 +1131,7 @@ def import_shadowscan(
     if unsigned_reason is not None:
         raise click.exceptions.Exit(1)
 
+    refuse_dash_output(output)
     try:
         write_output_file(Path(output), out_data, overwrite=False)
     except FileExistsError as exc:

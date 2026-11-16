@@ -611,27 +611,42 @@ def _kill_session(sid: int) -> None:
                 os.kill(pid, signal.SIGKILL)
 
 
-def _reap_adopted(except_pid: int) -> None:
-    """Reap zombies whose parent is this process, except the launcher itself.
+def _cgroup_members(path: Path) -> list[int]:
+    """The pids in the private cgroup ``path``, read before it is killed."""
+    try:
+        text = (path / "cgroup.procs").read_text(encoding="ascii")
+    except (OSError, ValueError):
+        return []
+    return [int(pid) for pid in text.split() if pid.isdigit()]
 
-    ``clone(CLONE_PARENT)`` makes this process the parent. ``waitpid`` on the launcher
-    stays with the caller.
+
+def _reap_adopted(candidates: list[int], except_pid: int) -> None:
+    """Reap the killed members of the launcher's cgroup that are this process's children.
+
+    ``clone(CLONE_PARENT)`` makes this process their parent. Only those members are
+    reaped: reaping any zombie child of this process would take the exit status of a
+    subprocess other code started, which its ``wait()`` then reports as 0. A member
+    stays this process's child until it is reaped, so its pid cannot be reused first.
+    ``waitpid`` on the launcher stays with the caller.
     """
     me = str(os.getpid())
-    try:
-        entries = os.listdir("/proc")
-    except OSError:
-        return
-    for entry in entries:
-        if not entry.isdigit():
-            continue
-        pid = int(entry)
-        if pid == except_pid:
-            continue
-        fields = _proc_fields(pid)
-        if fields is not None and fields[0] == "Z" and fields[1] == me:
-            with contextlib.suppress(ChildProcessError, OSError):
-                os.waitpid(pid, os.WNOHANG)
+    pending = [pid for pid in dict.fromkeys(candidates) if pid != except_pid]
+    deadline = time.monotonic() + _STOP_SECONDS
+    while pending:
+        running: list[int] = []
+        for pid in pending:
+            fields = _proc_fields(pid)
+            if fields is None or fields[1] != me:
+                continue  # gone, or another process's child
+            if fields[0] == "Z":
+                with contextlib.suppress(ChildProcessError, OSError):
+                    os.waitpid(pid, os.WNOHANG)
+            else:
+                running.append(pid)
+        if not running or time.monotonic() >= deadline:
+            return
+        pending = running
+        time.sleep(0.005)
 
 
 def _subreaper_argv(staged: Path) -> list[str] | None:
@@ -777,11 +792,9 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
     # it is reaped, the pid is still this launcher's.
     stop = sys.platform.startswith("linux") and proc.returncode is None
     ended = True
+    members: list[int] = []
     try:
         try:
-            # Before the descendant walk: a CLONE_PARENT child is not in that tree.
-            if cgroup is not None:
-                _cgroup_kill(cgroup)
             if namespaced:
                 try:
                     ended = (
@@ -794,6 +807,12 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
                 if stop:
                     _stop_launcher(proc.pid)
                 _kill_descendants(proc.pid)
+            # After the stopped launcher's tree is swept: the cgroup also holds a
+            # CLONE_PARENT child, which that walk does not see, but killing it first
+            # would kill the launcher and orphan its tree before the walk.
+            if cgroup is not None:
+                members = _cgroup_members(cgroup)
+                _cgroup_kill(cgroup)
         finally:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
@@ -804,7 +823,7 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
             _kill_session(sid)
         if not namespaced:
             _kill_descendants(proc.pid)
-            _reap_adopted(proc.pid)
+            _reap_adopted(members, proc.pid)
     finally:
         # A finished pid must not stay marked. The kernel can reuse it for a later
         # launcher that is not in a PID namespace, and that launcher would then skip
