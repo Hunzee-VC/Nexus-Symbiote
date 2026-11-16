@@ -31,6 +31,10 @@ if TYPE_CHECKING:
 STAGED_INVENTORY = "nexus_symbiote.staged-inventory"
 
 
+def _running_as_root() -> bool:
+    return hasattr(os, "geteuid") and os.geteuid() == 0
+
+
 def _load_inventory(path: Path) -> AIBOM:
     # Parser and validation messages can quote attacker-controlled input; keep them out.
     try:
@@ -260,7 +264,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 "root. Elsewhere cleanup is best effort. This is not a namespace or sandbox.",
                 err=True,
             )
-            if hasattr(os, "geteuid") and os.geteuid() == 0:
+            if _running_as_root():
                 click.echo(
                     "warning: --no-isolation as root: the pinned launcher runs as root with no "
                     "kernel containment, and can escape cleanup without it being reported.",

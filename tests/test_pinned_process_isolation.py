@@ -2108,7 +2108,7 @@ def test_opting_out_as_root_prints_a_second_warning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(pinned_process, "namespace_available", lambda: False)
-    monkeypatch.setattr("nexus_symbiote.supply_chain_cli.os.geteuid", lambda: 0)
+    monkeypatch.setattr("nexus_symbiote.supply_chain_cli._running_as_root", lambda: True)
     arguments, _ = command(tmp_path, inventory(), launcher(tmp_path))
     allowed = CliRunner().invoke(main, [*arguments, "--json-output", "--no-isolation"])
     assert allowed.exit_code == 0, allowed.output
