@@ -148,6 +148,13 @@ jobs:
       - run: mypy src/nexus_symbiote scripts
       - run: python scripts/check_workflows.py
       - run: python scripts/check_repository_hygiene.py
+      - name: Cap pull request size outside tests
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin "$PR_BASE"
+          python scripts/check_pull_request_size.py --base "origin/$PR_BASE"
       - name: Require the locks to match pyproject.toml and each other
         run: python scripts/check_locks.py
   distribution:
