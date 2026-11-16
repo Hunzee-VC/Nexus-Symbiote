@@ -14,6 +14,9 @@ jobs:
   test:
     name: Tests Python ${{ matrix.python }}
     runs-on: ubuntu-24.04
+    # Hosted runners differ in speed by about 1.6x: one commit's 3.12 suite took over
+    # 20 min and then 12 on a re-run. The budget fits the slow runners; a hung test
+    # still fails at test_timeout.
     timeout-minutes: 35
     strategy:
       fail-fast: false
