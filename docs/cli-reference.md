@@ -1018,7 +1018,8 @@ to its group or its parent, or trace it, unless it holds `CAP_SYS_PTRACE`; only
 SIGKILL aimed at the wrapper ends it. Every orphan below the wrapper is reparented to
 it, so a `setsid` child that double-forks, a `clone(CLONE_PARENT)` child (whose
 parent is the wrapper) and the descendants of a launcher that already exited all stay
-in the wrapper's tree. Cleanup stops the wrapper, kills its tree in repeated passes,
+in the wrapper's tree. Cleanup stops the wrapper and then every process in its tree, so
+none can fork or reap a pid the sweep found, kills the tree in repeated passes,
 so a helper that a watchdog restarts is found as the wrapper's child, then kills each
 child that is still running, including a chain that forks faster than the tree is
 scanned, as it is reparented to the stopped wrapper. It lets the wrapper reap them

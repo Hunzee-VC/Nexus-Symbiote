@@ -1868,3 +1868,35 @@ def test_the_session_is_swept_only_while_the_launch_is_unreaped(
         for stream in (proc.stdin, proc.stdout):
             if stream is not None:
                 stream.close()
+
+
+@_LINUX_ONLY
+def test_opt_out_stops_the_whole_tree_before_it_is_swept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Stopping only the wrapper leaves a watchdog in the launcher free to restart a helper
+    # while the tree is swept, and a running parent free to reap a child the sweep found,
+    # whose pid could then name another process when it is signalled. Ported from #228.
+    helpers = tmp_path / "helpers"
+    helpers.mkdir()
+    command, digest = _watchdog_launcher(tmp_path, helpers)
+    seen: list[dict[int, str]] = []
+    sweep = pinned_process._kill_descendants
+
+    def observed(root: int) -> None:
+        if not seen:
+            tree = {root} | pinned_process._descendant_pids(root)
+            seen.append({pid: _stat(pid)[0] for pid in tree})
+        sweep(root)
+
+    monkeypatch.setattr(pinned_process, "_kill_descendants", observed)
+    try:
+        with isolation_off():
+            observe_pinned(str(command), digest)
+        # The wrapper, the launcher and at least one helper, none of them running.
+        assert len(seen[0]) >= 3, seen
+        assert set(seen[0].values()) <= {"T", "Z"}, seen
+    finally:
+        for entry in helpers.iterdir():
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int(entry.name), signal.SIGKILL)

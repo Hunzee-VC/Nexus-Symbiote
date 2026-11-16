@@ -374,6 +374,37 @@ def _kill_descendants(root: int) -> None:
         signalled |= victims
 
 
+def _stop_tree(root: int) -> None:
+    """SIGSTOP every descendant of the stopped ``root`` until a scan finds none running.
+
+    A stopped process can neither fork nor reap, so a watchdog anywhere in the tree
+    cannot restart a helper that the sweep kills, and no pid the sweep finds is freed
+    for reuse before it is signalled. Bounded like the stop of ``root``: a process that
+    is blocked in the kernel is swept while it may still run, and one this process may
+    not signal is left to the sweep and the drain.
+    """
+    refused: set[int] = set()
+    deadline = time.monotonic() + _STOP_SECONDS
+    delay = 0.0005
+    while True:
+        running = [
+            pid
+            for pid in _descendant_pids(root) - refused
+            if (fields := _proc_fields(pid)) is not None and fields[0] not in {"T", "t", "Z", "X"}
+        ]
+        if not running or time.monotonic() >= deadline:
+            return
+        for pid in running:
+            try:
+                # A pid that exited after the scan is no longer running, as wanted.
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGSTOP)
+            except PermissionError:
+                refused.add(pid)
+        time.sleep(delay)
+        delay = min(delay * 2, 0.02)
+
+
 def _stop_launcher(pid: int) -> int | None:
     """Stop the opted-out wrapper, or ``unshare``, so it cannot fork or reap during cleanup.
 
@@ -1027,6 +1058,8 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
             else:
                 if stop:
                     seen = _stop_launcher(proc.pid)
+                if seen == os.CLD_STOPPED:
+                    _stop_tree(proc.pid)
                 _kill_descendants(proc.pid)
             # Defense in depth after the sweep: the cgroup also holds a process that
             # has left the wrapper's tree, as one does when the launcher kills its
