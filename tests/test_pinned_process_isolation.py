@@ -447,10 +447,10 @@ def test_cli_requires_an_explicit_opt_out_when_the_namespace_is_unavailable(
     assert "kernel PID containment is disabled" in allowed.stderr
     usage = " ".join(CliRunner().invoke(main, ["verify-live", "--help"]).output.split())
     for text in (" ".join(allowed.stderr.split()), usage):
-        assert "stopped before cleanup" in text
-        assert "cgroup.kill" in text
-        assert "clone(CLONE_PARENT)" in text
-        assert "leaves that session and the cgroup can escape" in text
+        assert "cleanup kills the wrapper's whole tree" in text
+        assert "clone(CLONE_PARENT) child that has called setsid" in text
+        assert "A launcher that kills its wrapper can escape" in text
+        assert "cgroup v2" in text
         assert "not a namespace or sandbox" in text
 
 
