@@ -38,6 +38,7 @@ from nexus_symbiote.validators.completeness import (
 )
 from nexus_symbiote.validators.integrity import IntegrityValidator
 from nexus_symbiote.validators.risk import RiskScorer
+from tests.support import scaling_ratio
 
 
 def write_safetensors(path: Path, data: bytes = b"abcd") -> None:
@@ -1130,16 +1131,15 @@ def test_digest_pins_need_no_sigstore_install(tmp_path, project, monkeypatch):
 
 
 def test_many_model_directories_scan_in_linear_time(project):
-    import time
-
-    for index in range(1500):
-        directory = project / f"d{index:04d}"
-        directory.mkdir()
-        (directory / "m.ggml").write_bytes(b"x")
-    started = time.monotonic()
-    result = ModelScanner().scan(project)
-    assert len(result.components) == 1500
-    assert time.monotonic() - started < 15
+    roots = {}
+    for scale in (1, 4):
+        roots[scale] = project / f"scale-{scale}"
+        for index in range(125 * scale):
+            directory = roots[scale] / f"d{index:04d}"
+            directory.mkdir(parents=True)
+            (directory / "m.ggml").write_bytes(b"x")
+    assert scaling_ratio(lambda scale: ModelScanner().scan(roots[scale])) < 10
+    assert len(ModelScanner().scan(roots[4]).components) == 500
 
 
 @pytest.mark.parametrize(
