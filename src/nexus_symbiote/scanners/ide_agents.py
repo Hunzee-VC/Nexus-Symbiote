@@ -653,47 +653,22 @@ def _header_line(value: str, *, unkeyed: bool) -> str:
     return f"{_projected_text(name, unkeyed=unkeyed)}: {REDACTED}" if colon else REDACTED
 
 
-# sh, bash, zsh, dash, ksh, ash, fish, pwsh and powershell, including /bin/sh,
-# /usr/bin/bash and `/usr/bin/env bash`. The name must end its path: in
-# `./bash/process.py` or `tools/sh/lint` it is a directory. An expansion after the
-# name, such as `bash${IFS}/dev/stdin`, may split the word there. `env` may set
-# variables first (`env FOO=1 bash`).
-_SHELL_NAMES = (
-    "powershell",
-    "pwsh",
-    "bash",
-    "dash",
-    "zsh",
-    "ksh",
-    "ash",
-    "fish",
-    "sh",
+# Command words are read once per segment. A name must end its path: in
+# `./bash/process.py` or `tools/sh/lint` it is a directory. `${IFS}` and `$IFS`
+# are both an empty insertion (`c${IFS}url`) and a split (`bash${IFS}/dev/stdin`).
+_SHELL_NAMES = frozenset({"powershell", "pwsh", "bash", "dash", "zsh", "ksh", "ash", "fish", "sh"})
+_EVAL_NAMES = frozenset({"eval", "source", "."})
+_IEX_NAMES = frozenset({"iex", "invoke-expression"})
+_PYTHON_NAMES = frozenset({"python", "python2", "python3", "py"})
+_DOWNLOAD_NAMES = frozenset(
+    {"curl", "wget", "iwr", "irm", "invoke-webrequest", "invoke-restmethod"}
 )
-_SHELL = (
-    r"(?:[/\\]?(?:[\w.+-]+[/\\])*)?(?:env\s+(?:[^\s=]+=\S+\s+)*)?"
-    rf"(?:{'|'.join(_SHELL_NAMES)})(?:\.exe)?\b"
-    r"(?![^\s/\\|;&<>()$`]*(?:/|\\(?=\S)))"
-)
+_STDOUT_NAMES = frozenset({"", "-", "/dev/stdout", "/dev/stderr", "/dev/fd/1", "/dev/fd/2"})
 # Each matcher runs once per pipeline segment, so a command of repeated near
 # misses costs linear time whatever its length.
 _SEGMENT_BOUNDARY = re.compile(r"[\n|;&]")
-# A command word, not the end of one: `confirm` and `affirm` do not download.
-_DOWNLOADER = re.compile(
-    r"(?<![\w-])(?:curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b",
-    re.IGNORECASE,
-)
-_BASE64_DECODE = re.compile(r"base64\s+(?:-d|--decode)\b", re.IGNORECASE)
-_PIPE_SHELL = re.compile(rf"\s*{_SHELL}", re.IGNORECASE)
-# A shell, eval or source whose next command word is a substitution that downloads.
-# `.` is source only when it is its own word. The match is anchored at the start of a
-# command so `echo $(curl …)` is not one.
-_SUBST_LEADER = re.compile(
-    r"(?i)(?:^|(?<=[\n;&|]))[ \t]*"
-    rf"(?:(?:{'|'.join(_SHELL_NAMES)}|eval|source)(?:\.exe)?(?![\w-])|\.(?=\s))"
-)
-_BARE_SUBST = re.compile(r"(?:^|(?<=[\n;&|]))[ \t]*(?:\$\(|`)[ \t]*")
-# `-c` and PowerShell `-Command` / `-CommandWithArgs`, not `-ConfigurationName`.
-_COMMAND_FLAG = re.compile(r"(?i)-c(?:ommand(?:withargs)?)?(?=\s|['\"]|$)")
+_PREFIX_REDIR = re.compile(r"\d*(?:<<-|<<<|<<|<>|>>|>&|&>|[<>])")
+_SCRIPT_FLAG = re.compile(r"(?i)-c(?:ommand(?:withargs)?)?\Z|-[A-Za-z]*c\Z")
 _POWERSHELL = re.compile(r"\b(?:powershell|pwsh)(?:\.exe)?\b", re.IGNORECASE)
 # PowerShell takes -, en dash, em dash or horizontal bar before a parameter name. A shell
 # removes quotes and escapes before PowerShell reads the argument. The console host reads
@@ -748,9 +723,10 @@ _SEVERITY_RANK = {severity: index for index, severity in enumerate(RiskSeverity)
 def _command_pipelines(command: str) -> list[list[str]]:
     """Pipelines in ``command``.
 
-    ``|`` and ``|&`` separate segments of one pipeline. ``||`` does not: it is a
-    logical or, as ``&&``, ``;``, a newline and a background ``&`` are command
-    separators. ``>&``, ``<&`` and ``&>`` stay inside a segment.
+    ``|`` and ``|&`` separate segments of one pipeline. A newline after either stays
+    in that pipeline, as the shell reads it. ``||`` does not: it is a logical or, as
+    ``&&``, ``;``, a newline elsewhere and a background ``&`` are command separators.
+    ``>&``, ``<&`` and ``&>`` stay inside a segment.
     """
     pipelines: list[list[str]] = []
     segments: list[str] = []
@@ -775,20 +751,13 @@ def _command_pipelines(command: str) -> list[list[str]]:
             flush_command()
             index += 2
             continue
+        if char == "|" and nxt == "&":
+            flush_segment()
+            index = _skip_pipe_gap(command, index + 2)
+            continue
         if char == "|":
             flush_segment()
-            index += 2 if nxt == "&" else 1
-            # A pipeline continues past a line end after `|`: `curl $URL |` then `sh` on
-            # the next line is one pipeline, as is a backslash-newline.
-            while index < length:
-                if command[index] in " \t\r\n":
-                    index += 1
-                elif command.startswith("\\\n", index):
-                    index += 2
-                elif command.startswith("\\\r\n", index):
-                    index += 3
-                else:
-                    break
+            index = _skip_pipe_gap(command, index + 1)
             continue
         if char == "&" and nxt == "&":
             flush_command()
@@ -816,66 +785,635 @@ def _command_pipelines(command: str) -> list[list[str]]:
     return pipelines
 
 
-def _substitution_at(command: str, index: int) -> bool:
-    """Whether ``command`` from ``index`` runs a downloaded or decoded substitution.
-
-    The opener (`$(`, `<(` or a backtick) is the command word, after an optional
-    `-c` or `-Command` and quotes. A substitution later in a longer script is not.
-    """
+def _skip_pipe_gap(command: str, index: int) -> int:
+    """Whitespace, including newlines, that a pipe may have before its next command."""
     length = len(command)
-    while index < length and command[index] in " \t":
+    while index < length and command[index] in " \t\r\n":
         index += 1
-    flag = _COMMAND_FLAG.match(command, index)
-    if flag is not None:
-        index = flag.end()
-        while index < length and command[index] in " \t":
+    return index
+
+
+def _shell_word_spans(segment: str) -> list[tuple[int, int]]:
+    """Word spans. Quotes and backslashes keep spaces inside one word."""
+    spans: list[tuple[int, int]] = []
+    start: int | None = None
+    index = 0
+    length = len(segment)
+    quote = ""
+    while index < length:
+        char = segment[index]
+        if quote:
+            if char == quote:
+                quote = ""
+            elif quote == '"' and char == "\\" and index + 1 < length:
+                index += 2
+                continue
             index += 1
-    while index < length and command[index] in "'\"":
+            continue
+        if char in "'\"":
+            if start is None:
+                start = index
+            quote = char
+            index += 1
+            continue
+        if char == "\\" and index + 1 < length:
+            if start is None:
+                start = index
+            index += 2
+            continue
+        if char in "<>":
+            if start is not None:
+                spans.append((start, index))
+                start = None
+            index += 1
+            continue
+        if char.isspace():
+            if start is not None:
+                spans.append((start, index))
+                start = None
+            index += 1
+            continue
+        if start is None:
+            start = index
         index += 1
+    if start is not None:
+        spans.append((start, length))
+    return spans
+
+
+def _shell_words(segment: str) -> list[str]:
+    return [segment[start:end] for start, end in _shell_word_spans(segment)]
+
+
+def _ifs_at(word: str, index: int) -> int:
+    """Length of an unquoted `${IFS}` or `$IFS`, or 0 when this is not one."""
+    if word.startswith("${IFS}", index):
+        return 6
+    if word.startswith("$IFS", index):
+        after = index + 4
+        if after == len(word) or not (word[after].isalnum() or word[after] == "_"):
+            return 4
+    return 0
+
+
+def _decode_word(word: str, *, drop_ifs: bool) -> str:
+    """Remove quotes and backslash escapes. Optionally delete `${IFS}` / `$IFS`.
+
+    Inside single quotes a backslash and `${IFS}` are literal. Outside them,
+    deleting `${IFS}` is the reading where IFS is empty and the letters join.
+    """
+    out: list[str] = []
+    index = 0
+    quote = ""
+    while index < len(word):
+        char = word[index]
+        if quote == "'":
+            if char == "'":
+                quote = ""
+            else:
+                out.append(char)
+            index += 1
+            continue
+        if char == "'" and not quote:
+            quote = "'"
+            index += 1
+            continue
+        if char == '"' and quote == '"':
+            quote = ""
+            index += 1
+            continue
+        if char == '"' and not quote:
+            quote = '"'
+            index += 1
+            continue
+        if char == "\\" and quote != "'":
+            if index + 1 < len(word):
+                if word[index + 1] != "\n":
+                    out.append(word[index + 1])
+                index += 2
+                continue
+        if drop_ifs and quote != "'":
+            skipped = _ifs_at(word, index)
+            if skipped:
+                index += skipped
+                continue
+        out.append(char)
+        index += 1
+    return "".join(out)
+
+
+def _ifs_pieces(word: str) -> list[str]:
+    """Pieces split on `${IFS}` / `$IFS` outside single quotes."""
+    parts: list[str] = []
+    buf: list[str] = []
+    index = 0
+    quote = ""
+    while index < len(word):
+        char = word[index]
+        if quote == "'":
+            buf.append(char)
+            if char == "'":
+                quote = ""
+            index += 1
+            continue
+        if char == "'" and not quote:
+            quote = "'"
+            buf.append(char)
+            index += 1
+            continue
+        if char == '"' and quote == '"':
+            quote = ""
+        elif char == '"' and not quote:
+            quote = '"'
+        if quote != "'":
+            skipped = _ifs_at(word, index)
+            if skipped:
+                parts.append("".join(buf))
+                buf = []
+                index += skipped
+                continue
+        buf.append(char)
+        index += 1
+    parts.append("".join(buf))
+    return [part for part in parts if part]
+
+
+def _command_basename(word: str) -> str:
+    word = word.strip().strip("(){};")
+    word = word.replace("\\", "/")
+    if "/" in word:
+        word = word.rsplit("/", 1)[-1]
+    if word.lower().endswith(".exe"):
+        word = word[: -len(".exe")]
+    return word.lower()
+
+
+def _name_variants(word: str) -> set[str]:
+    """Names this word can be: IFS deleted, or the field before an IFS split.
+
+    A shell prefix at a word boundary counts, so `bash-static` is `bash` and
+    `shellcheck` is not `sh`.
+    """
+    names: set[str] = set()
+    candidates = [_command_basename(_decode_word(word, drop_ifs=True))]
+    candidates.extend(
+        _command_basename(_decode_word(part, drop_ifs=False)) for part in _ifs_pieces(word)
+    )
+    for name in candidates:
+        if not name:
+            continue
+        names.add(name)
+        for shell in _SHELL_NAMES:
+            if not name.startswith(shell) or len(name) == len(shell):
+                continue
+            nxt = name[len(shell)]
+            if not (nxt.isalnum() or nxt == "_"):
+                names.add(shell)
+    return names
+
+
+def _assignment(word: str) -> bool:
+    if not word or word.startswith("-") or "=" not in word:
+        return False
+    name, _, _value = word.partition("=")
+    return bool(name) and all(char.isalnum() or char in "_." for char in name)
+
+
+def _skip_env(words: list[str], index: int) -> int:
+    while index < len(words):
+        word = _decode_word(words[index], drop_ifs=True)
+        if word == "--":
+            return index + 1
+        if word in {"-i", "--ignore-environment", "-0", "--null", "-v", "--debug"}:
+            index += 1
+            continue
+        if word in {"-u", "-C", "-S"}:
+            index += 2
+            continue
+        if word.startswith(("--unset=", "--chdir=", "--split-string=")):
+            index += 1
+            continue
+        if word in {"--unset", "--chdir", "--split-string"}:
+            index += 2
+            continue
+        if _assignment(word):
+            index += 1
+            continue
+        return index
+    return index
+
+
+def _skip_sudo(words: list[str], index: int) -> int:
+    arg_options = {
+        "-u",
+        "-g",
+        "-h",
+        "-p",
+        "-U",
+        "-C",
+        "-D",
+        "-R",
+        "-T",
+        "-r",
+        "-t",
+        "-a",
+        "--user",
+        "--group",
+        "--host",
+        "--prompt",
+        "--chdir",
+        "--role",
+        "--type",
+        "--command-timeout",
+        "--close-from",
+    }
+    while index < len(words):
+        word = _decode_word(words[index], drop_ifs=True)
+        if word == "--":
+            return index + 1
+        if any(word.startswith(f"{flag}=") for flag in arg_options if flag.startswith("--")):
+            index += 1
+            continue
+        if word in arg_options:
+            index += 2
+            continue
+        if word.startswith("-"):
+            index += 1
+            continue
+        if _assignment(word):
+            index += 1
+            continue
+        return index
+    return index
+
+
+def _skip_exec(words: list[str], index: int) -> int:
+    while index < len(words):
+        word = _decode_word(words[index], drop_ifs=True)
+        if word == "--":
+            return index + 1
+        if word in {"-a", "--argv0"}:
+            index += 2
+            continue
+        if word.startswith("-"):
+            index += 1
+            continue
+        return index
+    return index
+
+
+def _executable_index(words: list[str]) -> int | None:
+    """Index of the command `words` run, after wrappers and grouping. None if not run."""
+    index = 0
+    while index < len(words):
+        raw = _decode_word(words[index], drop_ifs=True).strip()
+        if raw in {"(", "{", ")", "}"}:
+            index += 1
+            continue
+        names = _name_variants(words[index])
+        if "env" in names:
+            index = _skip_env(words, index + 1)
+            continue
+        if "sudo" in names:
+            index = _skip_sudo(words, index + 1)
+            continue
+        if "command" in names:
+            nxt = index + 1
+            if nxt < len(words) and _decode_word(words[nxt], drop_ifs=True) in {"-v", "-V"}:
+                return None
+            while nxt < len(words) and _decode_word(words[nxt], drop_ifs=True) in {"-p", "--"}:
+                nxt += 1
+            index = nxt
+            continue
+        if "exec" in names:
+            index = _skip_exec(words, index + 1)
+            continue
+        if "busybox" in names:
+            index += 1
+            if index < len(words) and _decode_word(words[index], drop_ifs=True) == "--":
+                index += 1
+            continue
+        return index
+    return None
+
+
+def _python_reads_stdin(args: list[str]) -> bool:
+    """True when Python reads the program from stdin, including `python3 -`."""
+    index = 0
+    while index < len(args):
+        word = _decode_word(args[index], drop_ifs=True)
+        if word in {"-c", "-m"} or (
+            word.startswith("-")
+            and not word.startswith("--")
+            and word[1:2] in {"c", "m"}
+            and len(word) > 2
+        ):
+            return False
+        if word in {"-W", "-X"}:
+            index += 2
+            continue
+        if word == "-" or word.startswith("-"):
+            index += 1
+            continue
+        return False
+    return True
+
+
+def _perl_reads_stdin(args: list[str]) -> bool:
+    """True when Perl reads the program from stdin, not from `-e` or a script file."""
+    index = 0
+    while index < len(args):
+        word = _decode_word(args[index], drop_ifs=True)
+        if word in {"-e", "-E"} or (
+            word.startswith("-")
+            and not word.startswith("--")
+            and word[1:2] in {"e", "E"}
+            and len(word) > 2
+        ):
+            return False
+        if word == "-" or word.startswith("-"):
+            index += 1
+            continue
+        return False
+    return True
+
+
+def _segment_executes(segment: str) -> bool:
+    """Whether this pipeline segment runs a shell, `iex`, or an interpreter on stdin."""
+    words = _shell_words(segment)
+    index = _executable_index(words)
+    if index is None:
+        return False
+    names = _name_variants(words[index])
+    if names & (_SHELL_NAMES | _IEX_NAMES):
+        return True
+    if names & _PYTHON_NAMES:
+        return _python_reads_stdin(words[index + 1 :])
+    if "perl" in names:
+        return _perl_reads_stdin(words[index + 1 :])
+    return False
+
+
+def _segment_fetches(segment: str) -> bool:
+    """Whether a word downloads or is `base64 -d` / `base64 --decode`."""
+    words = _shell_words(segment)
+    for index, word in enumerate(words):
+        names = _name_variants(word)
+        if names & _DOWNLOAD_NAMES:
+            return True
+        if "base64" in names and index + 1 < len(words):
+            flag = _decode_word(words[index + 1], drop_ifs=True).lower()
+            if flag in {"-d", "--decode"}:
+                return True
+    return False
+
+
+def _file_keys(word: str) -> set[str]:
+    decoded = _decode_word(word, drop_ifs=True)
+    if decoded.startswith("./"):
+        decoded = decoded[2:]
+    base = decoded.rsplit("/", 1)[-1]
+    keys = {decoded, base}
+    return {
+        item for item in keys if item and item not in _STDOUT_NAMES and not item.startswith("-")
+    }
+
+
+def _curl_output(word: str, args: list[str], index: int) -> tuple[str | None, int]:
+    if word in {"-o", "--output"} and index + 1 < len(args):
+        return _decode_word(args[index + 1], drop_ifs=True), 2
+    if word.startswith("--output="):
+        return word.split("=", 1)[1], 1
+    if word.startswith("-o") and not word.startswith("--") and len(word) > 2:
+        return word[2:], 1
+    if (
+        word.startswith("-")
+        and not word.startswith("--")
+        and word.endswith("o")
+        and word != "-o"
+        and index + 1 < len(args)
+    ):
+        return _decode_word(args[index + 1], drop_ifs=True), 2
+    return None, 1
+
+
+def _wget_output(word: str, args: list[str], index: int) -> tuple[str | None, int]:
+    if word in {"-O", "--output-document"} and index + 1 < len(args):
+        return _decode_word(args[index + 1], drop_ifs=True), 2
+    if word.lower().startswith("--output-document="):
+        return word.split("=", 1)[1], 1
+    if word.startswith("-") and not word.startswith("--") and "O" in word[1:]:
+        after = word.split("O", 1)[1]
+        if after:
+            return after, 1
+        if index + 1 < len(args):
+            return _decode_word(args[index + 1], drop_ifs=True), 2
+    return None, 1
+
+
+def _iwr_output(word: str, args: list[str], index: int) -> tuple[str | None, int]:
+    low = word.lower()
+    if low.startswith("-outfile"):
+        if "=" in word:
+            return word.split("=", 1)[1], 1
+        if index + 1 < len(args):
+            return _decode_word(args[index + 1], drop_ifs=True), 2
+    return None, 1
+
+
+def _downloader_name(names: set[str]) -> str | None:
+    if "curl" in names:
+        return "curl"
+    if "wget" in names:
+        return "wget"
+    if names & {"iwr", "irm", "invoke-webrequest", "invoke-restmethod"}:
+        return "iwr"
+    return None
+
+
+def _saved_names(segment: str) -> set[str]:
+    """Filenames a downloader in this segment writes, excluding stdout.
+
+    One forward pass: a segment of repeated downloaders must not rescan its tail.
+    """
+    words = _shell_words(segment)
+    saved: set[str] = set()
+    tool: str | None = None
+    cursor = 0
+    while cursor < len(words) and len(saved) < 64:
+        names = _name_variants(words[cursor])
+        detected = _downloader_name(names)
+        if detected is not None:
+            tool = detected
+            cursor += 1
+            continue
+        if tool is None:
+            cursor += 1
+            continue
+        word = _decode_word(words[cursor], drop_ifs=True)
+        if tool == "curl":
+            found, step = _curl_output(word, words, cursor)
+        elif tool == "wget":
+            found, step = _wget_output(word, words, cursor)
+        else:
+            found, step = _iwr_output(word, words, cursor)
+        if found:
+            saved.update(_file_keys(found))
+        cursor += step
+    return saved
+
+
+def _executes_saved(segment: str, saved: set[str]) -> bool:
+    """Whether this segment runs one of `saved` with a shell, an interpreter, or directly."""
+    if not saved:
+        return False
+    words = _shell_words(segment)
+    index = _executable_index(words)
+    if index is None:
+        return False
+    names = _name_variants(words[index])
+    if _file_keys(words[index]) & saved and not (names & (_SHELL_NAMES | _PYTHON_NAMES | {"perl"})):
+        return True
+    runners = _SHELL_NAMES | _PYTHON_NAMES | _IEX_NAMES | {"perl", "busybox"}
+    if not (names & runners):
+        return False
+    cursor = index + 1
+    while cursor < len(words):
+        word = _decode_word(words[cursor], drop_ifs=True)
+        if _SCRIPT_FLAG.fullmatch(word):
+            cursor += 2
+            continue
+        if _file_keys(words[cursor]) & saved:
+            return True
+        cursor += 1
+    return False
+
+
+def _download_then_run(pipelines: list[list[str]]) -> bool:
+    """Whether a later command runs a file an earlier download saved (`curl -o a && bash a`)."""
+    saved: set[str] = set()
+    for segments in pipelines:
+        local = set(saved)
+        for segment in segments:
+            if _executes_saved(segment, local):
+                return True
+            local.update(_saved_names(segment))
+        saved = local
+    return False
+
+
+def _opens_substitution(command: str, index: int) -> bool:
+    return (
+        command.startswith("$(", index)
+        or command.startswith("<(", index)
+        or (index < len(command) and command[index] == "`")
+    )
+
+
+def _substitution_downloads(command: str, index: int) -> bool:
+    """Whether the substitution that opens at `index` starts by downloading or decoding."""
     if command.startswith("$(", index) or command.startswith("<(", index):
         index += 2
-    elif index < length and command[index] == "`":
+    elif index < len(command) and command[index] == "`":
         index += 1
     else:
         return False
-    while index < length and command[index] in " \t":
+    while index < len(command) and command[index] in " \t":
         index += 1
-    return (
-        _DOWNLOADER.match(command, index) is not None
-        or _BASE64_DECODE.match(command, index) is not None
-    )
-
-
-def _substitution_exec(command: str) -> bool:
-    """Whether a shell, ``eval``, ``source`` or a bare substitution runs a download."""
-    if any(_substitution_at(command, match.end()) for match in _SUBST_LEADER.finditer(command)):
+    end = index
+    while end < len(command) and command[end] not in " \t\n)|&;":
+        end += 1
+    names = _name_variants(command[index:end])
+    if names & _DOWNLOAD_NAMES:
         return True
-    return any(
-        _DOWNLOADER.match(command, match.end()) is not None
-        or _BASE64_DECODE.match(command, match.end()) is not None
-        for match in _BARE_SUBST.finditer(command)
-    )
+    if "base64" not in names:
+        return False
+    rest = command[end:]
+    return rest.lstrip(" \t").lower().startswith(("-d", "--decode"))
+
+
+def _substitution_at(command: str, index: int) -> bool:
+    """Whether the script after a shell word is a download substitution.
+
+    Accepts a command flag (`-c`, `-lc`, `-Command`), quotes, and redirections
+    (`sh < <(curl ...)`, `bash <<< $(curl ...)`). A substitution later in a longer
+    script is not the script itself.
+    """
+    length = len(command)
+    for _ in range(16):
+        while index < length and command[index] in " \t":
+            index += 1
+        if index >= length or command[index] in "\n|&;":
+            return False
+        probe = index
+        while probe < length and command[probe] in "'\"":
+            probe += 1
+        if _opens_substitution(command, probe):
+            return _substitution_downloads(command, probe)
+        redir = _PREFIX_REDIR.match(command, index)
+        if redir is not None and not command.startswith("<(", index):
+            index = redir.end()
+            continue
+        if command[index] == "-":
+            end = index + 1
+            while end < length and command[end] not in " \t\n|&;<>":
+                end += 1
+            flag = command[index:end]
+            index = end
+            if _SCRIPT_FLAG.fullmatch(flag):
+                while index < length and command[index] in " \t":
+                    index += 1
+                while index < length and command[index] in "'\"":
+                    index += 1
+                if _opens_substitution(command, index):
+                    return _substitution_downloads(command, index)
+                return False
+            continue
+        return False
+    return False
+
+
+def _substitution_exec(pipelines: list[list[str]]) -> bool:
+    """Whether a shell, `eval`, `source` or a bare substitution runs a download."""
+    for segments in pipelines:
+        if not segments:
+            continue
+        segment = segments[0]
+        stripped = segment.lstrip(" \t")
+        if _opens_substitution(stripped, 0) and _substitution_downloads(stripped, 0):
+            return True
+        spans = _shell_word_spans(segment)
+        words = [segment[start:end] for start, end in spans]
+        index = _executable_index(words)
+        if index is None:
+            continue
+        names = _name_variants(words[index])
+        if not (names & (_SHELL_NAMES | _EVAL_NAMES | _IEX_NAMES)):
+            continue
+        if _substitution_at(segment, spans[index][1]):
+            return True
+    return False
 
 
 def _fetch_exec(command: str) -> bool:
     """Whether a command runs a download or a decoded payload in a shell.
 
     A pipeline is rated as a whole: a downloader or ``base64 -d`` in any segment and
-    a shell in any later segment. Segments are visited once, so repeated near misses
-    never make the earlier text be rescanned. A command or process substitution that
-    itself downloads is the same shape without a pipe.
+    a shell, ``iex``, or a stdin interpreter in any later segment. Segments are
+    visited once, so repeated near misses never make the earlier text be rescanned.
+    A command or process substitution that itself downloads is the same shape
+    without a pipe, as is saving the download and running that file later.
     """
-    if _substitution_exec(command):
+    pipelines = _command_pipelines(command)
+    if _substitution_exec(pipelines) or _download_then_run(pipelines):
         return True
-    for segments in _command_pipelines(command):
-        # One forward pass: a fetch and a shell later in the same pipeline. Checking
-        # every later segment from every fetch would rescan a command of repeated
-        # near misses.
+    for segments in pipelines:
+        # One forward pass: a fetch and an executor later in the same pipeline.
         fetched = False
         for segment in segments:
-            if fetched and _PIPE_SHELL.match(segment) is not None:
+            if fetched and _segment_executes(segment):
                 return True
-            if _DOWNLOADER.search(segment) or _BASE64_DECODE.search(segment):
+            if _segment_fetches(segment):
                 fetched = True
     return _encoded_powershell(command)
 
