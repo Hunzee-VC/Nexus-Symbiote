@@ -243,6 +243,24 @@ def _satisfied(lock: Lock, requirement: Requirement, errors: list[str]) -> None:
             errors.append(f"{lock.path}: {name}=={version} is outside {requirement.specifier}")
 
 
+CUTOFF = re.compile(r"\d{4}-\d{2}-\d{2}T00:00:00Z")
+
+
+def cutoff_issue(cutoff: str | None, now: datetime | None = None) -> str | None:
+    """Why an upload cut-off is unacceptable: not the form ``make lock`` writes, or less
+    than COOLDOWN_DAYS ago, so that a lock it resolves could take a release that had no
+    week of public scrutiny. None when it is acceptable."""
+    if cutoff is None or not CUTOFF.fullmatch(cutoff):
+        return f"upload cut-off {cutoff!r} is not of the form YYYY-MM-DDT00:00:00Z"
+    try:
+        moment = datetime.strptime(cutoff, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except ValueError:
+        return f"upload cut-off {cutoff!r} is not a date"
+    if moment > (now or datetime.now(UTC)) - timedelta(days=COOLDOWN_DAYS):
+        return f"upload cut-off {cutoff} is less than {COOLDOWN_DAYS} days ago"
+    return None
+
+
 def _inputs_issues(lock: Lock, digest: str, python: str) -> list[str]:
     inputs = lock.inputs
     if not inputs:
@@ -280,6 +298,8 @@ def check(root: Path = ROOT) -> list[str]:
     cutoffs = {lock.inputs.get("cutoff") for lock in locks.values()}
     if len(cutoffs) != 1:
         errors.append("the three locks were resolved with different upload cut-offs")
+    elif (issue := cutoff_issue(next(iter(cutoffs)))) is not None:
+        errors.append(issue)
     for requirement in [*runtime, *build, *dev]:
         _satisfied(ci, requirement, errors)
 
@@ -356,10 +376,27 @@ def _stamp(path: Path, cutoff: str, python: str, digest: str) -> None:
 
 
 def _install(source: Path, target: Path) -> None:
-    """Replace target in one step, so that an interrupted copy leaves the old lock whole."""
-    staged = target.with_name(f".{target.name}.new")
+    """Replace target in one step, so that an interrupted copy leaves the old lock whole.
+
+    The staging file is created new, so a symlink a branch committed at a fixed staging
+    name cannot redirect the write outside the checkout, and a target that is a symlink
+    is refused rather than replaced.
+    """
+    if target.is_symlink():
+        raise LockError(f"{target.name} is a symlink; not replaced")
     try:
-        shutil.copyfile(source, staged)
+        mode = target.stat().st_mode & 0o7777
+    except FileNotFoundError:
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o666 & ~umask
+    descriptor, name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.")
+    staged = Path(name)
+    try:
+        with os.fdopen(descriptor, "wb") as out, source.open("rb") as copied:
+            # mkstemp creates the file 0600; the lock keeps the mode a plain write gives.
+            os.fchmod(out.fileno(), mode)
+            shutil.copyfileobj(copied, out)
         os.replace(staged, target)
     finally:
         staged.unlink(missing_ok=True)
@@ -384,6 +421,8 @@ def regenerate(root: Path, cutoff: str | None, upgrade: bool) -> None:
     if cutoff is None:
         moment = datetime.now(UTC) - timedelta(days=COOLDOWN_DAYS)
         cutoff = moment.strftime("%Y-%m-%dT00:00:00Z")
+    if (issue := cutoff_issue(cutoff)) is not None:
+        raise LockError(issue)
     common = [
         "--default-index",
         INDEX,

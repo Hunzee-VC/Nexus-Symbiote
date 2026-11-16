@@ -80,6 +80,11 @@ def unlocked_installed(locked: list[dict[str, str]]) -> list[dict[str, str]]:
     return [p for p in installed_packages() if (p["name"], p["version"]) not in pinned]
 
 
+WAIVER_ADVISORY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}")
+WAIVER_PACKAGE = re.compile(r"[a-z0-9][a-z0-9-]{0,199}")
+WAIVER_VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+!_-]{0,127}")
+
+
 def load_waivers(path: Path, today: date) -> list[dict[str, str]]:
     """Reviewed, expiring acceptances of one advisory for one exact package version."""
     if not path.exists():
@@ -103,6 +108,19 @@ def load_waivers(path: Path, today: date) -> list[dict[str, str]]:
             )
         if any(not isinstance(value, str) for value in waiver.values()):
             raise ValueError("advisory waiver fields must be strings")
+        # Every field below can reach the CI log, where a newline would start a workflow
+        # command; and a waiver must name a package as the audit does, or it never applies.
+        if not WAIVER_ADVISORY.fullmatch(waiver["advisory_id"]):
+            raise ValueError("an advisory waiver's advisory_id is not an advisory identifier")
+        if not WAIVER_PACKAGE.fullmatch(waiver["package"]) or waiver["package"] != (
+            re.sub(r"[-_.]+", "-", waiver["package"]).lower()
+        ):
+            raise ValueError(
+                f"advisory waiver for {waiver['advisory_id']} names a package that is not"
+                " in canonical form"
+            )
+        if not WAIVER_VERSION.fullmatch(waiver["version"]):
+            raise ValueError(f"advisory waiver for {waiver['advisory_id']} has an invalid version")
         expires = date.fromisoformat(waiver["expires"])
         if expires < today:
             raise ValueError(f"advisory waiver for {waiver['advisory_id']} has expired")

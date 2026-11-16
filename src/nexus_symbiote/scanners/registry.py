@@ -31,6 +31,7 @@ from nexus_symbiote.core.enums import AssuranceLevel, RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import extract_version_pin, hash_bytes, parse_json_strict
 from nexus_symbiote.core.models import ClaimEvidence, RegistryEntryComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.scanners.credential_files import credential_gap, link_gap
 from nexus_symbiote.scanners.mcp import (
     _npmrc,
     _origin_label,
@@ -320,6 +321,15 @@ def parse_image_reference(text: str) -> ImageReference | None:
 _INDEX_HOST = re.compile(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?|\[[0-9a-f:.]{2,45}\]")
 
 
+def _same_index(declared: str, recorded: str | None) -> bool:
+    """Whether two index origins are the same, PyPI's spellings counted as one."""
+    if recorded is None:
+        return False
+    if declared in _PYPI_ORIGINS or declared == _PYPI_ORIGIN:
+        return recorded in _PYPI_ORIGINS or recorded == _PYPI_ORIGIN
+    return declared.removesuffix(":443") == recorded.removesuffix(":443")
+
+
 def _index_origin(value: object) -> str | None:
     """The origin of a lockfile's package index, or None when it cannot be established.
 
@@ -438,6 +448,41 @@ def _plain_pnpm_peers(suffix: str) -> bool:
 
 
 _PNPM_PATCH_HASH = re.compile(r"\s*patch_hash")
+
+
+# The order in which pnpm takes a package.json section's spec for a name it finds in
+# several (getSpecFromPackageManifest); npm takes the last of _NPM_SECTIONS instead.
+_PNPM_SECTION_ORDER: Final = (
+    "optionalDependencies",
+    "dependencies",
+    "devDependencies",
+    "peerDependencies",
+)
+# The packages key pnpm reads for an importer's version reference, by lockfile major
+# version: 5.x keys by path, 6.x by the reference with its peers, and 9.x by the exact
+# version alone, its peers moving to the snapshots.
+_PNPM_RECORD_KEYS: Final = {
+    "5": "/{name}/{ref}",
+    "6": "/{name}@{ref}",
+    "9": "{name}@{version}",
+}
+# Every spelling of a record for one name and version that any of those formats uses.
+_PNPM_KEY_SPELLINGS: Final = (
+    "{name}@{ref}",
+    "/{name}@{ref}",
+    "{name}@{version}",
+    "/{name}@{version}",
+    "/{name}/{version}",
+    "/{name}/{ref}",
+)
+# The spellings each format writes itself. pnpm 5 and 6 keep a record per peer context,
+# so the same version with and without peers are siblings there, not decoys; pnpm 9
+# moves the peers to the snapshots and writes no slash.
+_PNPM_OWN_SPELLINGS: Final = {
+    "5": frozenset({"/{name}/{version}", "/{name}/{ref}"}),
+    "6": frozenset({"/{name}@{ref}", "/{name}@{version}"}),
+    "9": frozenset({"{name}@{version}"}),
+}
 
 
 def _pnpm_patched(reference: str) -> bool:
@@ -1267,12 +1312,47 @@ class RegistryScanner(Scanner):
             raise RuntimeError("registry files read outside a _collection context")
         return self._files
 
+    # Read on purpose although their names say they hold credentials: only the registry
+    # settings of .npmrc and whether .env names COMPOSE_FILE are used, and no value of
+    # either is recorded.
+    _CREDENTIAL_INPUTS = frozenset({".npmrc", ".env"})
+
+    def _withheld(self, name: str, result: ScanResult) -> bool:
+        """Whether the root file ``name``, or the in-root file a symlink there leads to, is
+        named as holding credentials, such as ``requirements-dev.txt -> .env``.
+
+        Such a file is a recorded gap and is not read: a line of ``.env`` that names an
+        AI package would otherwise carry its value into a component's version.
+        """
+        target = self._confined().in_root_target(name)
+        if name in self._CREDENTIAL_INPUTS:
+            # Read by its own name, but not through a link to another credential file,
+            # which is not the configuration it is read for.
+            reason = None if target is None or target.name == name else link_gap(target.as_posix())
+        else:
+            reason = credential_gap(name, None if target is None else target.as_posix())
+        if reason is None:
+            return False
+        message = f"{name}: {reason}; not read or inventoried"
+        if message not in result.surfaces_excluded:
+            result.surfaces_excluded.append(message)
+        return True
+
     def _read(self, name: str, result: ScanResult) -> str | None:
         """A root file by its name, which is also how the inventory records it."""
+        if self._withheld(name, result):
+            return None
         content = self._confined().read_text(name, missing_ok=True)
         if content is not None:
             result.surfaces_scanned.append(name)
         return content
+
+    def _read_mapping(
+        self, path: Path, result: ScanResult, *, missing_ok: bool = True
+    ) -> dict[str, Any] | None:
+        if self._withheld(path.as_posix(), result):
+            return None
+        return super()._read_mapping(path, result, missing_ok=missing_ok)
 
     # Lockfiles of other package managers, which the collector does not read; the
     # npm, pnpm, Yarn, uv and Poetry lockfiles are read below.
@@ -1340,6 +1420,10 @@ class RegistryScanner(Scanner):
         for names in self._NODE_LOCKFILES:
             for name in names:
                 before = files.failures_recorded, files.exclusions_recorded
+                if self._withheld(name, result):
+                    # Present but not read: no other file stands in for it.
+                    found.append((name, None))
+                    break
                 # Parse and bind the same bounded bytes; a second open for hashing could
                 # associate a swapped lockfile with a previously parsed resolution.
                 raw = files.read_bytes(name, missing_ok=True)
@@ -1366,7 +1450,9 @@ class RegistryScanner(Scanner):
         if name not in self._NPM_LOCKFILES:
             return None, (name, raw), False
         try:
-            lock = parse_json_strict(raw)
+            # The operator's file-bytes limit already bounded the read; a fixed parser
+            # cap below it would fail every larger lockfile whatever the limit says.
+            lock = parse_json_strict(raw, max_bytes=files.max_file_bytes)
             if (
                 not isinstance(lock, dict)
                 or not isinstance(lock.get("packages"), dict)
@@ -1424,6 +1510,8 @@ class RegistryScanner(Scanner):
         has_pnpm_workspace = any(self._fold(entry) == "pnpm-workspace.yaml" for entry in entries)
         if has_pnpm_workspace:
             result.surfaces_excluded.append(self._NPM_GAPS["pnpm"])
+        if self._withheld("package.json", result):
+            return []
         data = self._confined().read_json("package.json", missing_ok=True)
         if data is None:
             return []
@@ -1534,7 +1622,14 @@ class RegistryScanner(Scanner):
         if registry and other_lock is not None:
             lock_name, raw_lock = other_lock
             if lock_name == "pnpm-lock.yaml":
-                read = self._resolve_pnpm_lockfile(raw_lock, registry, components, result)
+                read = self._resolve_pnpm_lockfile(
+                    raw_lock,
+                    registry,
+                    components,
+                    result,
+                    declared_specs=declared,
+                    override_specs=self._pnpm_override_specs(data),
+                )
             else:
                 before = (
                     recorded_count(result.scan_failures),
@@ -1707,7 +1802,13 @@ class RegistryScanner(Scanner):
             lock_name, _, lock_digest = lock
             # The key as the inventory records the name or alias it installs: redacted.
             locator = f"{lock_name}#/packages/" + _pointer_token("node_modules/" + redact_text(key))
-            if registry:
+            if registry and not self._lock_root_agrees(lock[1], key, specs):
+                # npm ci refuses a lockfile resolved for other specs, and npm install
+                # resolves again: the record is not what installs.
+                result.scan_failures.append(
+                    f"{lock_name}: selected package version disagrees with package.json"
+                )
+            elif registry:
                 resolution = self._npm_resolution(
                     lock_name, key, package, version_range, record, locator, result
                 )
@@ -1743,12 +1844,28 @@ class RegistryScanner(Scanner):
                     "Check that the aliased package is the one the code expects to import.",
                 )
             )
-        if registry and not _npm_exact(version_range) and not (resolution and resolution.resolved):
+        # npm takes the last section's spec, pnpm the first of optional, dependencies,
+        # dev and peer, so a spec counts only when both take the same one.
+        by_section = dict(specs)
+        pnpm_spec = next(
+            by_section[section] for section in _PNPM_SECTION_ORDER if section in by_section
+        )
+        uniform = pnpm_spec == spec
+        if (
+            registry
+            and not (uniform and _npm_exact(version_range))
+            and not (resolution and resolution.resolved)
+        ):
+            shown_spec = (
+                redact_text(spec)
+                if uniform
+                else ", ".join(f"{section}: {redact_text(value)}" for section, value in specs)
+            )
             risks.append(
                 _risk(
                     RiskSeverity.MEDIUM,
                     "version_pinning",
-                    f"npm package '{name}' has a nonexact declared reference: {redact_text(spec)}",
+                    f"npm package '{name}' has a nonexact declared reference: {shown_spec}",
                     "Resolve and verify an immutable artifact with lockfile integrity evidence.",
                 )
             )
@@ -1764,6 +1881,7 @@ class RegistryScanner(Scanner):
             and registry
             and record is None
             and not in_doubt
+            and uniform
             and _npm_exact(version_range)
         ):
             # Only without a lock record: one that was not taken, a lockfile that was
@@ -1783,6 +1901,32 @@ class RegistryScanner(Scanner):
             properties=properties,
             claims=claims,
         )
+
+    @classmethod
+    def _lock_root_agrees(
+        cls, packages: dict[str, Any], key: str, specs: list[tuple[str, str]]
+    ) -> bool:
+        """Whether the lockfile's root entry records the specs package.json declares for
+        ``key``, section by section, as npm ci checks. npm writes a root entry in every
+        lockfile with packages, so one without it agrees with nothing.
+
+        A name optionalDependencies lists is no dependency on either side: npm drops it
+        from dependencies before writing the lockfile and before comparing."""
+        root = packages.get("")
+        if not isinstance(root, dict):
+            return False
+        declared = dict(specs)
+        optional = root.get("optionalDependencies")
+        if "optionalDependencies" in declared:
+            declared.pop("dependencies", None)
+        for section in cls._NPM_SECTIONS:
+            recorded = root.get(section)
+            value = recorded.get(key) if isinstance(recorded, dict) else None
+            if section == "dependencies" and isinstance(optional, dict) and key in optional:
+                value = None
+            if value != declared.get(section):
+                return False
+        return True
 
     @classmethod
     def _npm_purl(cls, package: str, version: str, origin: str | None) -> str | None:
@@ -2132,6 +2276,9 @@ class RegistryScanner(Scanner):
         components: list[RegistryEntryComponent],
         declared: list[RegistryEntryComponent],
         result: ScanResult,
+        *,
+        declared_specs: dict[str, list[tuple[str, str]]] | None = None,
+        override_specs: dict[str, str] | None = None,
     ) -> bool:
         """Bind pnpm records to the components, which package.json declares from a
         registry; ``declared`` is every inventoried npm package. False when the
@@ -2158,6 +2305,9 @@ class RegistryScanner(Scanner):
                 or not isinstance(lock_ver, (str, int, float))
             ):
                 raise ValueError("unsupported pnpm lockfile structure")
+            family = str(lock_ver).split(".", 1)[0]
+            if family not in _PNPM_RECORD_KEYS:
+                raise ValueError("unsupported pnpm lockfile version")
             packages = lock_doc.get("packages", {})
             if packages is not None and not isinstance(packages, dict):
                 raise ValueError("unsupported pnpm packages structure")
@@ -2179,6 +2329,9 @@ class RegistryScanner(Scanner):
             else lock_doc
         )
         importer_specs: dict[str, str] = {}
+        # The package.json specs the lockfile was resolved for: pnpm 6 and 9 record one
+        # with each dependency, pnpm 5 in one map.
+        specifiers: dict[str, set[str]] = {}
         dep_keys = ("dependencies", "devDependencies", "optionalDependencies")
         for dep_key in dep_keys:
             dep_map = root_importer.get(dep_key, {})
@@ -2186,8 +2339,15 @@ class RegistryScanner(Scanner):
                 for pkg_name, entry in dep_map.items():
                     if isinstance(entry, dict) and isinstance(entry.get("version"), str):
                         importer_specs[pkg_name] = entry["version"]
+                        if isinstance(entry.get("specifier"), str):
+                            specifiers.setdefault(pkg_name, set()).add(entry["specifier"])
                     elif isinstance(entry, str):
                         importer_specs[pkg_name] = entry
+        listed = root_importer.get("specifiers")
+        if isinstance(listed, dict):
+            for pkg_name, specifier in listed.items():
+                if isinstance(specifier, str):
+                    specifiers.setdefault(pkg_name, set()).add(specifier)
         counts = Counter(c.name for c in declared if c.properties.get("npm_alias") is None)
         # The root importer lists what pnpm installs for package.json; a name it does
         # not list is not resolved by records that other packages' dependencies left.
@@ -2251,6 +2411,20 @@ class RegistryScanner(Scanner):
                     "pnpm-lock.yaml: local or non-registry resolution is unverified"
                 )
                 continue
+            # A record found by name records no specifier: pnpm lists the root's
+            # dependencies in every format, so a lockfile that does not is stale, whatever
+            # a top-level `specifiers` map claims.
+            if matched_pkg_key is not None or not self._pnpm_spec_agrees(
+                specifiers.get(comp.name),
+                (declared_specs or {}).get(comp.name),
+                (override_specs or {}).get(comp.name),
+            ):
+                # pnpm --frozen-lockfile refuses a lockfile resolved for other specs, and
+                # pnpm install resolves again: the record is not what installs.
+                result.scan_failures.append(
+                    "pnpm-lock.yaml: selected package version disagrees with package.json"
+                )
+                continue
             base_ver = ver_ref.split("(", 1)[0]
             if base_ver.startswith("/"):
                 pkg_prefix, _, base_ver = base_ver.lstrip("/").rpartition("@")
@@ -2264,18 +2438,25 @@ class RegistryScanner(Scanner):
                     "pnpm-lock.yaml: selected package lacks an exact version"
                 )
                 continue
-            candidates = (
-                (matched_pkg_key,)
-                if matched_pkg_key is not None
-                else (
-                    f"{comp.name}@{ver_ref}",
-                    f"/{comp.name}@{ver_ref}",
-                    f"{comp.name}@{base_ver}",
-                    f"/{comp.name}@{base_ver}",
-                    f"/{comp.name}/{base_ver}",
-                )
+            # pnpm reads one key for an importer's version, by lockfile format; a
+            # record under another format's spelling is one pnpm never writes or
+            # reads, so letting it stand in would let a decoy supply the integrity
+            # and the origin.
+            expected = _PNPM_RECORD_KEYS[family].format(
+                name=comp.name, ref=ver_ref, version=base_ver
             )
-            pkg_key = next((c for c in candidates if c in packages), None)
+            spellings = {
+                spelling: spelling.format(name=comp.name, ref=ver_ref, version=base_ver)
+                for spelling in _PNPM_KEY_SPELLINGS
+            }
+            own = {spellings[spelling] for spelling in _PNPM_OWN_SPELLINGS[family]}
+            if any(key in packages for key in set(spellings.values()) - own):
+                comp.package_url = None
+                result.surfaces_excluded.append(
+                    f"pnpm-lock.yaml: multiple package resolutions for {comp.name} are ambiguous"
+                )
+                continue
+            pkg_key: str | None = expected if expected in packages else None
             tarball: Any = None
             integrity: Any = None
             if pkg_key is not None:
@@ -2321,6 +2502,41 @@ class RegistryScanner(Scanner):
                 result,
             )
         return True
+
+    @staticmethod
+    def _pnpm_spec_agrees(
+        recorded: set[str] | None,
+        specs: list[tuple[str, str]] | None,
+        override: str | None,
+    ) -> bool:
+        """Whether the lockfile records, as its only spec for a dependency, the one pnpm
+        takes from package.json, or the override pnpm writes in its place. A lockfile
+        that records none was not resolved for package.json."""
+        if not specs:
+            return True
+        by_section = dict(specs)
+        taken = next(
+            by_section[section] for section in _PNPM_SECTION_ORDER if section in by_section
+        )
+        return any(recorded == {spec} for spec in (taken, override) if spec is not None)
+
+    @staticmethod
+    def _pnpm_override_specs(data: dict[str, Any]) -> dict[str, str]:
+        """The spec pnpm's overrides give each name they select whole: Yarn's
+        ``resolutions``, then ``pnpm.overrides`` over it, as pnpm merges them. A
+        selector with a range or a parent, or a ``$`` reference, is not resolved here,
+        so a lockfile resolved through one is not bound."""
+        found: dict[str, str] = {}
+        for path in (("resolutions",), ("pnpm", "overrides")):
+            node: Any = data
+            for part in path:
+                node = node.get(part) if isinstance(node, dict) else None
+            for name, spec in node.items() if isinstance(node, dict) else ():
+                if isinstance(spec, str) and not spec.startswith("$"):
+                    found[name] = spec
+                else:
+                    found.pop(name, None)
+        return found
 
     def _pnpm_patched_component(
         self, component: RegistryEntryComponent, result: ScanResult
@@ -2544,6 +2760,8 @@ class RegistryScanner(Scanner):
         pnpm-lock.yaml is; None when the file is not read."""
         files = self._confined()
         before = files.failures_recorded, files.exclusions_recorded
+        if self._withheld("pnpm-workspace.yaml", result):
+            return None
         text = files.read_text("pnpm-workspace.yaml", missing_ok=True)
         if text is None:
             unread = (files.failures_recorded, files.exclusions_recorded) != before
@@ -2679,13 +2897,18 @@ class RegistryScanner(Scanner):
                 message = f"{source}: invalid or unsupported PyPI requirement"
                 if message not in result.scan_failures:
                     result.scan_failures.append(message)
-            spec = _unparsed(reference[len(match.group()) :].strip())
+            # Redacted whole: the name before the value can be what marks it as a
+            # credential, as in COHERE_API_KEY=..., so it must not be cut off first.
+            whole = redact_text(_unparsed(reference))
+            spec = (
+                whole[len(match.group()) :].strip() if whole.startswith(match.group()) else REDACTED
+            )
             return _PipDeclaration(
                 name=name,
                 source=source,
                 reference=reference,
                 recorded=_unparsed(reference),
-                spec=redact_text(spec) or None,
+                spec=spec or None,
                 group=group,
                 untranslated="invalid",
                 hashes=hashes,
@@ -3195,6 +3418,9 @@ class RegistryScanner(Scanner):
     def _scan_pip(self, result: ScanResult, entries: list[str]) -> list[RegistryEntryComponent]:
         packages: dict[str, _Package] = {}
         redirects: set[tuple[str, str]] = set()
+        # Poetry's sources by name, explicit ones included, as pyproject.toml declares
+        # them; None when the table cannot be read.
+        self._poetry_sources: dict[str, str | None] | None = {}
 
         def declare(
             source: str,
@@ -3296,6 +3522,8 @@ class RegistryScanner(Scanner):
         files = self._confined()
         found_locks: list[tuple[str, str, bytes]] = []
         for lock_name, method in (("uv.lock", "uv-lockfile"), ("poetry.lock", "poetry-lockfile")):
+            if self._withheld(lock_name, result):
+                continue
             raw = files.read_bytes(lock_name, missing_ok=True)
             if raw is not None:
                 result.surfaces_scanned.append(lock_name)
@@ -3400,6 +3628,15 @@ class RegistryScanner(Scanner):
                     result.surfaces_excluded.append(
                         f"{lock_name}: package index of the selected record is not a plain "
                         "http(s) URL; its origin is unverified"
+                    )
+                    continue
+                if method == "poetry-lockfile" and not self._poetry_reference_holds(source):
+                    # Poetry downloads from the source the reference names, not from the
+                    # record's url, so a record whose url and named source disagree, or
+                    # whose source pyproject.toml does not declare, has no known origin.
+                    comp.package_url = comp.registry_uri = None
+                    result.surfaces_excluded.append(
+                        f"{lock_name}: package source reference is unverified"
                     )
                     continue
                 registry_origin = (
@@ -3626,6 +3863,7 @@ class RegistryScanner(Scanner):
         self._pdm_declarations(tool.get("pdm", {}), declarations, failures, gaps, strings)
         self._poetry_declarations(tool.get("poetry", {}), declarations, failures, gaps)
         redirects.update(self._uv_redirects(tool.get("uv"), "pyproject.toml:tool.uv."))
+        self._poetry_sources = self._named_sources(tool.get("poetry"))
         for name, shown in (("poetry", "Poetry"), ("pdm", "PDM")):
             found = self._source_redirects(tool.get(name), name)
             if found is None:
@@ -3735,6 +3973,36 @@ class RegistryScanner(Scanner):
                 ]
             found += [(prefix + key, value) for key, value in _uv_settings(chosen).settings]
         return found
+
+    def _poetry_reference_holds(self, source: dict[str, Any]) -> bool:
+        """Whether a poetry.lock record's ``reference`` names a source pyproject.toml
+        declares at the same index origin as the record's ``url``; a record without a
+        reference is read by its url alone, as before Poetry 1.2 wrote one."""
+        reference = source.get("reference")
+        if reference is None:
+            return True
+        sources = getattr(self, "_poetry_sources", None)
+        if not isinstance(reference, str) or not sources or reference.lower() not in sources:
+            return False
+        declared = sources[reference.lower()]
+        declared_origin = _PYPI_ORIGIN if declared is None else _index_origin(declared)
+        recorded = _index_origin(source.get("url"))
+        return declared_origin is not None and _same_index(declared_origin, recorded)
+
+    @staticmethod
+    def _named_sources(table: Any) -> dict[str, str | None] | None:
+        """Each Poetry source's URL by its name in lower case, explicit sources included;
+        ``pypi`` is Poetry's own index. None when the source list cannot be read."""
+        sources = table.get("source", []) if isinstance(table, dict) else []
+        if not isinstance(sources, list) or not all(isinstance(item, dict) for item in sources):
+            return None
+        named: dict[str, str | None] = {"pypi": None}
+        for source in sources:
+            name, url = source.get("name"), source.get("url")
+            if not isinstance(name, str) or not (url is None or isinstance(url, str)):
+                return None
+            named[name.lower()] = url
+        return named
 
     @staticmethod
     def _source_redirects(table: Any, tool: str) -> list[tuple[str, str]] | None:
