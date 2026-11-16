@@ -98,7 +98,8 @@ def content_unbound(component: ComponentBase) -> bool:
     stands in for it, so no fingerprint can tie a finding to the reviewed bytes.
 
     A suppression of a finding on such a component would survive any change of its
-    content, so it never applies: the entry is reported stale instead.
+    content, so it never applies: the entry is reported stale while the component still
+    has a finding in that category, and unused otherwise.
     """
     return bool(component.properties.get("content_hash_withheld")) and (
         component_content_digest(component) is None

@@ -289,8 +289,9 @@ class CompletenessValidator:
                 ComponentType.PROMPT_TEMPLATE,
             ):
                 if not (hasattr(c, "content_hash") and c.content_hash):
-                    # An imported file that is not Markdown is bound only by the operator
-                    # key; integrity verifies that binding or counts it as unbound.
+                    # A prompt file that is not an instruction file, such as an import
+                    # that is not Markdown, is bound only by the operator key; integrity
+                    # verifies that binding or counts it as unbound.
                     if not (hasattr(c, "definition_hash") and c.definition_hash) and not (
                         isinstance(c, PromptComponent) and withholds_content_hash(c)
                     ):
