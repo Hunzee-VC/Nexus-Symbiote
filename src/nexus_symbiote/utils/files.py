@@ -9,7 +9,6 @@ import secrets
 import stat
 import sys
 from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
 
 from nexus_symbiote.core.hashing import open_directory_nofollow
@@ -31,7 +30,7 @@ def _relative(root: Path, path: Path, *, allow_parent: bool = False) -> Path:
     return relative
 
 
-@contextmanager
+@contextlib.contextmanager
 def _parent(root: Path, relative: Path, create_parents: bool) -> Iterator[int]:
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     parent = open_directory_nofollow(root)
@@ -62,6 +61,24 @@ def _parent(root: Path, relative: Path, create_parents: bool) -> Iterator[int]:
         yield parent
     finally:
         os.close(parent)
+
+
+def create_staging_file(path: Path, prefix: str) -> Path:
+    """Create an empty private file beside an explicitly selected output, by its path.
+
+    The directory is reached as ``write_output_file`` reaches it, without following a
+    link, so a linked directory is refused before anything is created in its target.
+    """
+    path = path.absolute()
+    root = Path(path.anchor)
+    relative = _relative(root, path, allow_parent=True)
+    if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
+        raise OSError("Secure output requires descriptor-relative no-symlink file operations")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    with _parent(root, relative, create_parents=False) as parent:
+        name = f"{prefix}{secrets.token_hex(16)}.tmp"
+        os.close(os.open(name, flags, 0o600, dir_fd=parent))
+    return path.parent / name
 
 
 def write_output_file(
@@ -98,7 +115,10 @@ def write_output_file(
             if not (stat.S_ISREG(mode) or (stat.S_ISLNK(mode) and not follow)):
                 raise OutputRefusedError(errno.EINVAL, "output must be a regular file")
         temp = f".nexus-symbiote-{secrets.token_hex(16)}.tmp"
-        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600, dir_fd=parent)
+        open_flags = (
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        )
+        fd = os.open(temp, open_flags, 0o600, dir_fd=parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 stream.write(data)
@@ -107,9 +127,31 @@ def write_output_file(
             if overwrite:
                 os.replace(temp, relative.name, src_dir_fd=parent, dst_dir_fd=parent)
             else:
-                os.link(
-                    temp, relative.name, src_dir_fd=parent, dst_dir_fd=parent, follow_symlinks=False
-                )
+                try:
+                    os.link(
+                        temp,
+                        relative.name,
+                        src_dir_fd=parent,
+                        dst_dir_fd=parent,
+                        follow_symlinks=False,
+                    )
+                except OSError as exc:
+                    if exc.errno not in {
+                        errno.EPERM,
+                        errno.EOPNOTSUPP,
+                        getattr(errno, "ENOTSUP", errno.EOPNOTSUPP),
+                    }:
+                        raise
+                    out_fd = os.open(relative.name, open_flags, 0o600, dir_fd=parent)
+                    try:
+                        with os.fdopen(out_fd, "w", encoding="utf-8") as direct:
+                            direct.write(data)
+                            direct.flush()
+                            os.fsync(direct.fileno())
+                    except BaseException:
+                        with contextlib.suppress(OSError):
+                            os.unlink(relative.name, dir_fd=parent)
+                        raise
         finally:
             # After a rename the name is gone; in a directory that forbids removal
             # (append-only) the temporary file stays. Neither replaces the outcome.

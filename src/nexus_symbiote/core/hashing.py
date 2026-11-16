@@ -39,6 +39,34 @@ _BOM_PREFIXES = (
 )
 
 
+MAX_JSON_NESTING = 850
+
+
+def json_nesting_exceeds(text: str, limit: int = MAX_JSON_NESTING) -> bool:
+    """Return whether JSON container nesting exceeds ``limit`` without recursing."""
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in "{[":
+            depth += 1
+            if depth > limit:
+                return True
+        elif char in "}]" and depth > 0:
+            depth -= 1
+    return False
+
+
 def parse_json_strict(text: str | bytes, *, max_bytes: int = 4 * 1024 * 1024) -> Any:
     """Parse bounded UTF-8 I-JSON, rejecting BOMs, duplicate keys and invalid numbers."""
     if isinstance(text, bytes):
@@ -55,6 +83,9 @@ def parse_json_strict(text: str | bytes, *, max_bytes: int = 4 * 1024 * 1024) ->
         decoded = text
     else:
         raise TypeError("JSON input must be str or bytes")
+
+    if json_nesting_exceeds(decoded, MAX_JSON_NESTING):
+        raise RecursionError("JSON nesting exceeds the configured depth limit")
 
     def object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
@@ -100,13 +131,18 @@ def normalize_digest(expected_hash: str, algorithm: str | None = None) -> tuple[
 def descriptor_binding(info: os.stat_result) -> tuple[int, int, int, int, int, int]:
     """Return the open-descriptor evidence that must stay fixed across one observation.
 
-    Size, mtime and ctime alone cannot detect a rename-over: when the replacement
+    Size and mtime alone cannot detect a rename-over: when the replacement
     lands within the same coarse-grained kernel timestamp tick, the unlinked
-    inode's ctime equals its previous value. The link count of the inode behind
+    inode's mtime equals its previous value. The link count of the inode behind
     the descriptor drops to zero on unlink, so it is compared as well, together
     with the device and inode identity. A replaced inode that is never unlinked,
     such as a file in an overlayfs lower layer, keeps all of these values; only
     the pathname's current identity (``pathname_identity``) reveals that swap.
+
+    Ctime also detects in-place, same-length writes followed by restoring mtime.
+    A ctime-only difference cannot establish that a change was harmless metadata:
+    invalidate cached digests and refuse a changed observation. A later stable
+    observation can succeed, but must read and charge its bytes again.
     """
     return (
         info.st_dev,
@@ -152,13 +188,17 @@ def open_directory_nofollow(directory: Path) -> int:
         if os.path.islink(link_path) and os.readlink(link_path) == f"private/{parts[1]}":
             parts = ["/", "private", *parts[1:]]
 
-    dir_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+    cloexec = getattr(os, "O_CLOEXEC", 0)
+    dir_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | cloexec
+    o_path = getattr(os, "O_PATH", 0)
+    path_flags = (o_path | os.O_DIRECTORY | os.O_NOFOLLOW | cloexec) if o_path else 0
     current_fd: int | None = None
     prefix = Path(parts[0])
     try:
         for index, part in enumerate(parts):
             if index > 0:
                 prefix = prefix / part
+            is_last = index == len(parts) - 1
             if current_fd is not None:
                 try:
                     next_fd = os.open(part, dir_flags, dir_fd=current_fd)
@@ -166,8 +206,17 @@ def open_directory_nofollow(directory: Path) -> int:
                     current_fd = next_fd
                     continue
                 except PermissionError:
-                    if index == len(parts) - 1:
+                    if is_last:
                         raise
+                    if path_flags:
+                        try:
+                            next_fd = os.open(part, path_flags, dir_fd=current_fd)
+                            os.close(current_fd)
+                            current_fd = next_fd
+                            continue
+                        except PermissionError:
+                            # Expected when O_PATH open is also denied; fall back to validated lstat below.
+                            pass
                     os.close(current_fd)
                     current_fd = None
                     st = os.lstat(prefix)
@@ -181,9 +230,14 @@ def open_directory_nofollow(directory: Path) -> int:
             try:
                 fd = os.open(prefix, dir_flags)
             except PermissionError:
-                if index < len(parts) - 1:
+                if is_last:
+                    raise
+                if not path_flags:
                     continue
-                raise
+                try:
+                    fd = os.open(prefix, path_flags)
+                except PermissionError:
+                    continue
             try:
                 opened_st = os.fstat(fd)
                 if not stat.S_ISDIR(opened_st.st_mode) or (
@@ -225,6 +279,8 @@ def pathname_identity(path: Path) -> tuple[int, int] | None:
             os.close(parent_fd)
     except OSError:
         return None
+    if not stat.S_ISREG(info.st_mode):
+        return None
     return (info.st_dev, info.st_ino)
 
 
@@ -251,8 +307,16 @@ def open_regular_file(path: Path) -> BinaryIO:
         raise
 
 
+def _require_secure_algorithm(algorithm: str) -> str:
+    normalized = algorithm.lower()
+    if normalized not in SECURE_HASH_ALGORITHMS:
+        raise ValueError(f"Unsupported security hash algorithm: {algorithm}")
+    return normalized
+
+
 def hash_canonical(data: dict[str, Any], algorithm: str = "sha256") -> str:
     """Hash a dict using JCS canonicalization and the specified algorithm."""
+    algorithm = _require_secure_algorithm(algorithm)
     canon = canonical_json(data)
     h = hashlib.new(algorithm)
     h.update(canon.encode("utf-8"))
@@ -320,19 +384,28 @@ def hash_file(path: Path, algorithm: str = "sha256") -> str | None:
     other failure raises ``OSError``, including a symbolic link, whatever it points to,
     and anything that is not a regular file.
     """
+    algorithm = _require_secure_algorithm(algorithm)
     h = hashlib.new(algorithm)
     try:
         stream = open_regular_file(path)
     except FileNotFoundError:
         return None
     with stream as f:
+        before = os.fstat(f.fileno())
         while chunk := f.read(8192):
             h.update(chunk)
+        after = os.fstat(f.fileno())
+        if descriptor_binding(before) != descriptor_binding(after) or pathname_identity(path) != (
+            after.st_dev,
+            after.st_ino,
+        ):
+            raise OSError("File changed during hashing")
     return f"{algorithm}:{h.hexdigest()}"
 
 
 def hash_bytes(data: bytes, algorithm: str = "sha256") -> str:
     """Hash raw bytes."""
+    algorithm = _require_secure_algorithm(algorithm)
     h = hashlib.new(algorithm)
     h.update(data)
     return f"{algorithm}:{h.hexdigest()}"

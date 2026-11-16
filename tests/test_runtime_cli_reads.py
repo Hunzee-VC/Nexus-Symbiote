@@ -127,3 +127,33 @@ def test_runtime_validation_errors_show_field_names_without_input_values(tmp_pat
     assert expected_field in result.output
     assert "unsupported field" in result.output
     assert "runtime-input-error" in result.output
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX ownership")
+def test_owner_only_file_must_be_owned_by_the_caller(tmp_path, monkeypatch):
+    from nexus_symbiote.runtime_cli import _KeyFileError
+
+    path = tmp_path / "key.pem"
+    path.write_bytes(b"k")
+    path.chmod(0o600)
+    assert _read(path, owner_only="the key file") == b"k"
+    owner = os.stat(path).st_uid
+    monkeypatch.setattr(os, "geteuid", lambda: owner + 1)
+    with pytest.raises(_KeyFileError, match="owned by the user"):
+        _read(path, owner_only="the key file")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX ownership")
+def test_a_root_run_read_refuses_a_key_file_another_user_owns(tmp_path, monkeypatch):
+    from nexus_symbiote.runtime_cli import _KeyFileError
+
+    # A job that runs as root reads a 0600 key that another uid owns, such as a key
+    # mounted into a container from the host. Its mode alone used to let it through.
+    path = tmp_path / "key.pem"
+    path.write_bytes(b"k")
+    path.chmod(0o600)
+    if os.geteuid() == 0:
+        os.chown(path, 4242, 4242)
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    with pytest.raises(_KeyFileError, match="must be owned by the user running the command"):
+        _read(path, owner_only="private key file")

@@ -66,7 +66,10 @@ nexus-symbiote runtime keygen --private-key reviewer.pem --public-key reviewer.p
 ```
 
 Add `--passphrase-file FILE` to encrypt the private key with the first line of a file
-only you can read; `attest` then needs the same `--passphrase-file`.
+you own and that gives group and others no permission; `attest` then needs the same `--passphrase-file`.
+`attest` refuses a private key or passphrase file that the user running it does not
+own, or that its group or others can access, also when it runs as root: a container
+job cannot sign with a key mounted from the host and owned by another user.
 `runtime key-id reviewer.pub` prints the key ID, the lowercase hexadecimal SHA-256 of
 the key's DER SubjectPublicKeyInfo, which `attest` and `verify-attestation` print. Use
 a key pair only for attestations, as the runtime rings use one key per purpose, and
@@ -99,7 +102,7 @@ of this tree's scan of the demo:
 
 ```text
 {"key_id": "04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39", "encrypted": false}
-{"out": "reviewed.json.att", "subject_sha256": "d1954f0add07a8dc7a8776f779147dfbbe46ac14c900b47b89de91bd0b0e1dac", "subject_format": "nexus-symbiote-aibom", "content_digest": "sha256:bfc23ad0c5154a68c8bdefda0d866aabb3b56db4384ac896d773024f035b2165", "purpose": "reviewed", "signers": ["04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39"], "signed": true}
+{"out": "reviewed.json.att", "subject_sha256": "7aa24ad2e0cecd0c7103e8f313640fb7bf070eed5ea84f97f0fdc25b11c9d9fa", "subject_format": "nexus-symbiote-aibom", "content_digest": "sha256:cd54b9ae533148e13cd85f9b6febbc782dc6c949592d34eafd9827ecbe5dd1df", "purpose": "reviewed", "signers": ["04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39"], "signed": true}
 ```
 
 Verify it with the public key:
@@ -111,10 +114,10 @@ nexus-symbiote verify-attestation reviewed.json reviewed.json.att --trusted-key 
 ```text
 Attestation verified: purpose reviewed, 1 trusted key. It does not establish that the file is accurate, complete or safe.
 Signer key ID: 04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39
-Subject SHA-256: d1954f0add07a8dc7a8776f779147dfbbe46ac14c900b47b89de91bd0b0e1dac
+Subject SHA-256: 7aa24ad2e0cecd0c7103e8f313640fb7bf070eed5ea84f97f0fdc25b11c9d9fa
 Match: bytes
 Subject format: nexus-symbiote-aibom 1.1.0
-Content digest: sha256:bfc23ad0c5154a68c8bdefda0d866aabb3b56db4384ac896d773024f035b2165 (nexus-symbiote/inventory-content/v1)
+Content digest: sha256:cd54b9ae533148e13cd85f9b6febbc782dc6c949592d34eafd9827ecbe5dd1df (nexus-symbiote/inventory-content/v1)
 Signed at (signer's clock): 2026-11-12T11:09:57Z
 ```
 
@@ -145,10 +148,10 @@ nexus-symbiote verify-attestation candidate.json reviewed.json.att --trusted-key
 ```text
 Attestation verified: purpose reviewed, 1 trusted key. It does not establish that the file is accurate, complete or safe.
 Signer key ID: 04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39
-Subject SHA-256: 580d0f1ce046ababf650715b9f813d7b25d3d715c095b9ad503bcc88d2b25d18
-Match: content; the attested file's SHA-256 is d1954f0add07a8dc7a8776f779147dfbbe46ac14c900b47b89de91bd0b0e1dac
+Subject SHA-256: d536bc8339edf711fec4c9543414f0a2345cec1d28954a6b68a57c0b3cd384b9
+Match: content; the attested file's SHA-256 is 7aa24ad2e0cecd0c7103e8f313640fb7bf070eed5ea84f97f0fdc25b11c9d9fa
 Subject format: nexus-symbiote-aibom 1.1.0
-Content digest: sha256:bfc23ad0c5154a68c8bdefda0d866aabb3b56db4384ac896d773024f035b2165 (nexus-symbiote/inventory-content/v1)
+Content digest: sha256:cd54b9ae533148e13cd85f9b6febbc782dc6c949592d34eafd9827ecbe5dd1df (nexus-symbiote/inventory-content/v1)
 Signed at (signer's clock): 2026-11-12T11:09:57Z
 ```
 
@@ -403,7 +406,7 @@ same codes. The message never quotes the file, the envelope or a key.
 | `configuration-invalid` | Signers, trusted keys, threshold, purpose, match mode or age limit are invalid |
 | `input-unreadable` | The subject, envelope, key or passphrase file is not a readable regular file reached without symbolic links |
 | `input-too-large` | An input file exceeds its limit: 64 MiB for a subject, 2 MiB for an envelope, 64 KiB for a key, 4 KiB for a passphrase file |
-| `key-invalid` | A key or passphrase file was refused, for example a private key that its group or others can read, an encrypted key without `--passphrase-file`, or a key that is not Ed25519 |
+| `key-invalid` | A key or passphrase file was refused, for example a private key that the user running the command does not own or that gives its group or others any permission, an encrypted key without `--passphrase-file`, or a key that is not Ed25519 |
 | `envelope-invalid` | The envelope is not a DSSE envelope in the form above |
 | `statement-too-large` | The statement exceeds 1 MiB |
 | `signers-insufficient` | Fewer than `--threshold` distinct trusted keys signed the payload |
@@ -454,5 +457,5 @@ nothing is written.
   [trusted keys](#trusted-keys).
 - **The GitHub Action does not sign or verify attestations yet.** Run the commands in
   a workflow step.
-- **POSIX only.** The owner-only check on private keys and the reads that follow no
-  symbolic link need POSIX file APIs.
+- **POSIX only.** The owner and mode checks on private keys and the reads that follow
+  no symbolic link need POSIX file APIs.

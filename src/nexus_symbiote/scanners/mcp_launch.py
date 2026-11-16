@@ -40,7 +40,7 @@ def _set(words: str) -> frozenset[str]:
 
 def _moves(directory: str) -> bool:
     """Whether a working directory given to a launcher is other than the project root."""
-    return directory.strip() not in {"", ".", "./", ".\\"}
+    return directory not in {"", ".", "./", ".\\"}
 
 
 MAX_WRAPPERS = 4
@@ -785,6 +785,7 @@ _DENO_RUN = _table(
     ),
 )
 _SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash", "mksh", "fish"})
+_EXTRA_RUNNER_SHELLS = frozenset({"csh", "tcsh", "busybox", "toybox"})
 # bash's long options, which it also reads after a single dash: -rcfile is --rcfile.
 _BASH_LONG_OPTIONS = _set(
     "debug debugger dump-po-strings dump-strings help init-file login noediting noprofile"
@@ -797,7 +798,6 @@ _AMBIGUOUS_SHELL = "shell options before the script are ambiguous"
 # servers. A function or alias defined there replaces any program the script names.
 _STARTUP_FILE = "shell options name a startup file the shell runs before the script"
 # fish reads its options with getopt "+hPilNnvc:C:p:d:f:D:o:" and unique long prefixes.
-_FISH_FLAGS = frozenset("hPilNnv")
 _FISH_FLAG_RUN = re.compile("[hPilNnv]*")
 _FISH_VALUES = frozenset("cCpdfDo")
 _FISH_LONG = {
@@ -1169,6 +1169,8 @@ def _launches(
     if name in _SHELLS:
         script, _, problem = _shell_script(name, words, start, budget)
         return script is not None or problem is not None
+    if name in _EXTRA_RUNNER_SHELLS:
+        return True
     if name == "cmd":
         return _cmd_runs(words, start)
     if name in {"powershell", "pwsh"}:
@@ -1803,6 +1805,8 @@ def _start(words: list[str], launch: Launch, *, package_entry: bool = False) -> 
             reason = "runner command is a path, not a package entry point"
         elif family is not None:
             reason = f"runner starts {family} instead of a package entry point"
+        elif launch.executable in (_SHELLS | _INJECTORS | _WRAPPERS | _EXTRA_RUNNER_SHELLS):
+            reason = f"runner starts {launch.executable} instead of a package entry point"
     if reason is not None:
         launch.fail(reason)
 
@@ -1817,6 +1821,10 @@ def _program_arguments(words: list[str], launch: Launch) -> None:
 def _package_program(package: Package, words: list[str], launch: Launch) -> None:
     """A package started by its default program, which runners name after the package."""
     implied = package.name.rsplit("/", 1)[-1] if package.name else ""
+    norm = normalize_command(implied) if implied else ""
+    if norm and norm in (_SHELLS | _INJECTORS | _WRAPPERS | _EXTRA_RUNNER_SHELLS):
+        launch.fail(f"runner starts {norm} instead of a package entry point")
+        return
     _program_arguments([implied, *words] if implied else words, launch)
 
 
@@ -2413,6 +2421,8 @@ def _python_options(options: list[tuple[str, str | None]], launch: Launch) -> No
             launch.sources.append((option, value))
         elif option in _UV_LOCATION:
             launch.relocated = launch.relocated or _moves(value)
+        elif option == "--env-file":
+            launch.injected_environment = True
         elif option in {"--python", "-p"} and re.search(r"[\\/]", value):
             # An interpreter path runs local code in place of a managed Python.
             launch.mark("code_loading_option")
@@ -2882,7 +2892,12 @@ _RUNNERS: dict[str, Callable[[str, list[str], Launch], None]] = {
 # Names whose appearance in an argument, followed by words that make it a launch,
 # means a wrapper the grammar does not know may start it.
 _PROGRAM_NAMES = (
-    frozenset(_RUNNERS) | _SHELLS | _INJECTORS | _WRAPPERS | frozenset(_UNCLASSIFIED_RUNNERS)
+    frozenset(_RUNNERS)
+    | _SHELLS
+    | _EXTRA_RUNNER_SHELLS
+    | _INJECTORS
+    | _WRAPPERS
+    | frozenset(_UNCLASSIFIED_RUNNERS)
 )
 
 # npm 10 configuration keys (@npmcli/config definitions), by the values they take.
@@ -3041,8 +3056,6 @@ def _named(quiet: frozenset[str]) -> Callable[[str], bool]:
     return lambda word: bool(_SUBCOMMAND.fullmatch(word)) and word not in quiet
 
 
-_VOCABULARY: tuple[str, ...] = ()
-
 _STARTS: dict[str, _Starts] = {
     "npm": _Starts(
         _NPM_OPTIONS,
@@ -3087,7 +3100,7 @@ _STARTS: dict[str, _Starts] = {
 }
 
 
-_VOCABULARY = tuple(
+_VOCABULARY: tuple[str, ...] = tuple(
     sorted(
         {
             *_PROGRAM_NAMES,

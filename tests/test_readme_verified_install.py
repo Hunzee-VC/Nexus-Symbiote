@@ -81,7 +81,7 @@ def _run(tmp_path: Path, *, tag: str = COMMIT, gh_status: int = 0, gh: bool = Tr
         without_gh.mkdir()
         for directory in ("/bin", "/usr/bin"):
             for tool in Path(directory).iterdir():
-                if tool.name != "gh" and not (without_gh / tool.name).exists():
+                if tool.name != "gh" and not os.path.lexists(without_gh / tool.name):
                     (without_gh / tool.name).symlink_to(tool)
         system = str(without_gh)
     env = {

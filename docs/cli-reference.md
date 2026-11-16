@@ -92,17 +92,22 @@ there too, so that standard output can carry the inventory:
 `nexus-symbiote summary bom.json > summary.txt` keeps the summary, and `2>/dev/null`
 hides only diagnostics.
 
+An output option given as `-`, or `./-`, is refused rather than written to a file named
+`-`: leave out `-o` to print to standard output.
+
 Every command prints text taken from an inventory, a checkout or a live server, such as
 names, paths, references and descriptions, literally and inert, in a terminal and in a
 CI log:
 
-- control, format and line-break characters, the noncharacters U+FFFE and U+FFFF,
-  and every other default-ignorable code point (Unicode's
+- control, format and line-break characters, every noncharacter (U+FDD0 to U+FDEF and
+  the last two code points of each plane, such as U+FFFE and U+FFFF), and every other
+  default-ignorable code point (Unicode's
   Default_Ignorable_Code_Point, such as variation selectors and blank fillers like
   U+3164), are replaced with U+FFFD, so such text cannot move the cursor, rewrite
   earlier output, start a new line or carry text a reader cannot see; a tab is
   replaced with one space, so a name stays readable but cannot line text up under a
-  later column;
+  later column; private-use characters are printed as they are, since they cannot move
+  the cursor or hide text, though a font may draw them as any symbol;
 - a `##` that would introduce a CI log command anywhere in a line (GitHub Actions'
   legacy `##[command]`, Azure Pipelines' `##vso[`, TeamCity's `##teamcity[`) is
   followed by U+FFFD;
@@ -160,10 +165,11 @@ findings without turning them into exit status 1, as a project policy with
 `baseline` applies the built-in gate whatever the project policy says.
 
 Unverified ShadowScan discovery evidence is gated separately. `import-shadowscan`
-(including `--report-only`), `validate` and `risk` exit 1 on it when a CI variable is
-set (see [environment variables](#environment-variables)) or `--fail-on-unsigned-discovery`
-is given, unless `--allow-unsigned-discovery` is given. Only a producer check made in
-the same run counts as verification; the outcome recorded in the BOM is not trusted.
+(including `--report-only`), `scan --check`, `baseline`, `validate` and `risk` exit 1 on
+it when a CI variable is set (see [environment variables](#environment-variables)) or
+`--fail-on-unsigned-discovery` is given, unless `--allow-unsigned-discovery` is given.
+Only a producer check made in the same run counts as verification; the outcome recorded
+in the BOM is not trusted.
 
 ## Environment variables
 
@@ -176,7 +182,7 @@ the same run counts as verification; the outcome recorded in the BOM is not trus
 | `XDG_CACHE_HOME`, `HOME` | Where sigstore-python caches the trusted root that offline Sigstore verification uses; see [known limitations](known-limitations.md#signatures). |
 | `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT` | An explicit Sigstore `trusted_root.json` file, or a directory holding one, for offline Sigstore verification. `--trust-root` overrides it. Without a pinned digest the file and its directory must be owned by the user and not writable by group or others. |
 | `NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256` | The SHA-256 the explicit trust root's bytes must match. `--trust-root-sha256` overrides it; set without a trust root, it is a usage error. |
-| `CI`, `GITHUB_ACTIONS`, `GITLAB_CI`, `CIRCLECI`, `TF_BUILD`, `JENKINS_URL`, `BUILDKITE`, `DRONE`, `TRAVIS` | Any value other than empty, `0` or `false` marks the run as automated: `import-shadowscan`, `validate` and `risk` then fail on unverified ShadowScan discovery evidence unless `--allow-unsigned-discovery` is given, and `scan`, `validate` and `risk` fail on a project policy that weakens a gate unless `--no-project-policy` or `--accept-project-policy` is given. |
+| `CI`, `GITHUB_ACTIONS`, `GITLAB_CI`, `CIRCLECI`, `TF_BUILD`, `JENKINS_URL`, `BUILDKITE`, `DRONE`, `TRAVIS` | Any value other than empty, `0` or `false` marks the run as automated: `import-shadowscan`, `scan --check`, `baseline`, `validate` and `risk` then fail on unverified ShadowScan discovery evidence unless `--allow-unsigned-discovery` is given, and `scan`, `validate` and `risk` fail on a project policy that weakens a gate unless `--no-project-policy` or `--accept-project-policy` is given. |
 | `TMPDIR` | Where `verify-live` stages the private copy of a pinned launcher. |
 | `_NEXUS_SYMBIOTE_COMPLETE` | Ignored. Shell completion is not offered, because an inherited completion variable would make every command, gates included, exit 0 without running. |
 | `SOURCE_DATE_EPOCH` | A whole number of seconds since 1970-01-01T00:00:00Z: 1 to 12 ASCII digits, at most 253402300799. `scan`, `baseline` and `import-shadowscan` then record that instant as the collection time; without it they record none. The serial number is derived from the content digest either way, so the same inputs give byte-identical native JSON and CycloneDX files, and, with the variable set, byte-identical SPDX files too. Any other value is a usage error whose message does not repeat it. Gates still use the clock, for example to decide whether a suppression has expired. See [reproducible inventories](reproducible-inventories.md). |
@@ -187,9 +193,15 @@ the same run counts as verification; the outcome recorded in the BOM is not trus
 
 `--signature-policy` (`scan`, `validate`, `risk`, `baseline`) and the Action's
 `signature-policy` input take a strict JSON file, at most 4 MiB and 1,000 artifacts,
-written by the operator, never by the checkout. A policy inside the scanned project,
-also under another name for the project directory, or one with other hard links is
-refused:
+written by the operator, never by the checkout. The CLI refuses a policy inside the
+scanned project or inside any Git working tree that encloses it, including a
+submodule's superproject, also under another name for any of these directories, or
+one with other hard links. The Action checks its input only against
+`GITHUB_WORKSPACE`: it refuses a path inside the workspace, one that passes through a
+symlink, or a hard link. It then copies the policy into a private directory under
+`RUNNER_TEMP`, or under the system temporary directory when `RUNNER_TEMP` is unset,
+and passes that copy to the CLI, which applies the rules above to the copy; a
+temporary directory inside a Git working tree therefore fails the run.
 
 ```json
 {
@@ -212,6 +224,11 @@ takes these four fields and an optional `expected_sha256`, and `digest-pin` take
 Unknown fields, duplicate keys or artifacts, symbolic links and missing files are
 refused.
 
+Every directory at or above the project with a `.git` entry counts as an enclosing
+repository. So neither a trusted base checkout that encloses the pull request's
+checkout nor a home directory that is itself a repository (`~/.git`) can hold the
+policy for a project below it; keep the policy where no repository encloses it.
+
 ### Launch policy
 
 `verify-live --launch-policy` takes a JSON object, outside the project, that maps each
@@ -230,12 +247,21 @@ stdio MCP server's `bom_ref` to exactly a `command` and a `sha256`:
 of its bytes as `sha256:<64 lowercase hexadecimal characters>`. A server without an
 entry is not started.
 
-The file must lie outside the project and outside the repository (the nearest
-directory with a `.git` entry) that holds the project or the inventory. On POSIX
+The file must lie outside the project and outside every repository (a directory with
+a `.git` entry) that encloses the project or the inventory, including the repository
+around a nested checkout such as a submodule. On POSIX
 systems it must also be a single-link regular file owned by you or root that only its
-owner can write, in a directory owned by you or root that others cannot write unless
-it is sticky. A policy that breaks these rules is a usage error (exit 2). The checks
+owner can write, and every directory above it, up to the file system root, must be
+owned by you or root and not writable by others unless it is sticky: whoever can write
+an ancestor can rename the directory below it and put another policy in its place. A
+policy that breaks these rules is a usage error (exit 2). The checks
 catch a misplaced policy; they do not authenticate it.
+
+The ownership rule includes `/`. Inside a user namespace that does not map host root
+and keeps the host's file system, such as one made with `unshare -r`, `/` and `/tmp`
+appear owned by the overflow user (usually uid 65534), so every launch policy is
+refused, and no option overrides the check. Run `verify-live` where `/` and every
+directory above the policy are owned by root or by you.
 
 ### JSON documents
 
@@ -334,10 +360,10 @@ nexus-symbiote attest [OPTIONS] SUBJECT
 
 | Option | Description |
 |---|---|
-| `--key` `FILE` | Ed25519 private key PEM that only its owner can read; repeat for each signer. (required, repeatable) |
+| `--key` `FILE` | Ed25519 private key PEM that you own and that gives group and others no permission; repeat for each signer. (required, repeatable) |
 | `--purpose` `generated\|reviewed` | generated: you produced SUBJECT; reviewed: you reviewed SUBJECT as a baseline. (required) |
 | `--out` `PATH` | Envelope file to create with mode 0600; must not exist. (required) |
-| `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file, which only its owner may read. |
+| `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file, which you own and which gives group and others no permission. |
 | `--source-revision` `TEXT` | Git commit ID SUBJECT was produced from, 40 or 64 lowercase hexadecimal characters; recorded as your claim and never checked. |
 
 SUBJECT is read once, as a regular file reached without symbolic links, at most
@@ -363,7 +389,9 @@ nexus-symbiote baseline [OPTIONS] [PROJECT_PATH]
 | `-o`, `--baseline-path` `PATH` | Where to write the unsigned baseline (default: .nexus-symbiote-baseline.json, in the working directory, not the project). |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target, as scan does. |
 | `--accept-project-policy` | In CI, accept a project policy that weakens the built-in gates explicitly; without it such a policy fails the command there (exit 1). Interactive runs only warn. |
-| `--signature-policy` `FILE` | Explicit operator signer policy JSON, kept outside the project, as for scan. |
+| `--signature-policy` `FILE` | Explicit operator signer policy JSON, kept outside the project, as for scan; also verifies any merged ShadowScan discovery report. |
+| `--fail-on-unsigned-discovery` | Exit with status 1 when the snapshot merges unverified ShadowScan discovery evidence. |
+| `--allow-unsigned-discovery` | Accept unverified ShadowScan discovery evidence explicitly (still warns); required in CI when no `--signature-policy` verifies the report. |
 
 The snapshot must also pass the built-in gate: a project policy cannot relax it.
 When it does not, `baseline` prints each reason and the findings that tripped the gate.
@@ -479,7 +507,7 @@ nexus-symbiote discover-mcp [OPTIONS] ENDPOINT
 | `--client-name` `TEXT` | `clientInfo` name sent in `initialize` (default: `nexus-symbiote-discovery`); use your production host's so the server cannot single out the observer. |
 | `--client-version` `TEXT` | `clientInfo` version sent in `initialize` (default: the tool version). |
 | `--user-agent` `TEXT` | `User-Agent` header to send; none is sent by default. |
-| `--raw-descriptors` `PATH` | Also write the unredacted server info, capabilities, instructions, tool descriptors, prompts and resource templates to this new file (mode 0600) for review; only the bearer token and session ID are masked. |
+| `--raw-descriptors` `PATH` | Also write the unredacted server info, capabilities, instructions, tool descriptors, prompts and resource templates to this new file (mode 0600) for review; only the bearer token is masked, and a server whose declarations repeat its own session ID (of eight or more characters) ends the observation. |
 
 ### `export-inventory`
 
@@ -628,11 +656,12 @@ nexus-symbiote runtime keygen [OPTIONS]
 |---|---|
 | `--private-key` `PATH` | New PEM private key file, created with mode 0600; must not exist. (required) |
 | `--public-key` `PATH` | New PEM public key file, created with mode 0600; must not exist. (required) |
-| `--passphrase-file` `PATH` | Encrypt the private key with the passphrase on the first line of this file, which only its owner may read. |
+| `--passphrase-file` `PATH` | Encrypt the private key with the passphrase on the first line of this file, which you own and which gives group and others no permission. |
 
 Use one key pair per purpose: snapshot, approval and trust rings must not share keys.
-A passphrase is at most 1,023 bytes, and a passphrase file that its group or others
-can read is refused. If either file cannot be written, neither key is kept.
+A passphrase is at most 1,023 bytes, and a passphrase file that you do not own, or
+that gives its group or others any permission, is refused. If either file cannot be written,
+neither key is kept.
 
 ### `runtime sign`
 
@@ -645,13 +674,15 @@ nexus-symbiote runtime sign [OPTIONS] CONTRACT_PATH
 | Option | Description |
 |---|---|
 | `--kind` `snapshot\|approval\|trust\|model` | Contract purpose; a signature is valid only for this purpose. (required) |
-| `--key` `PATH` | Ed25519 private key PEM that only its owner can access; repeat for multiple signers. (required, repeatable) |
+| `--key` `PATH` | Ed25519 private key PEM that you own and only you can access; repeat for multiple signers. (required, repeatable) |
 | `--out` `PATH` | Signed envelope file to create; must not exist. (required) |
-| `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file, which only its owner may read. |
+| `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file, which you own and which gives group and others no permission. |
 
 A contract that could never verify, because its validity window is longer than its
 purpose allows or has already ended, is refused. The output includes the contract
-`digest` that approvals and revocation lists use.
+`digest` that approvals and revocation lists use. A key or passphrase file owned by
+another user is refused even when the command runs as root, such as a key mounted
+into a container from the host.
 
 ### `runtime verify`
 
@@ -740,6 +771,8 @@ nexus-symbiote scan [OPTIONS] [PROJECT_PATH]
 | `--signature-policy` `PATH` | Explicit operator signer policy JSON |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target. |
 | `--accept-project-policy` | In CI, accept a project policy that weakens the built-in gates explicitly; without it such a policy fails the command there (exit 1). Interactive runs only warn. |
+| `--fail-on-unsigned-discovery` | With `--check`, exit with status 1 when ShadowScan discovery evidence is unverified. |
+| `--allow-unsigned-discovery` | With `--check`, accept unverified ShadowScan discovery evidence explicitly (still warns); required in CI when no `--signature-policy` verifies the report. |
 
 `PROJECT_PATH` is resolved before collection, because the collectors refuse a root
 reached through a symbolic link. When it resolves through a link, `scan` names the
@@ -935,7 +968,7 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 
 | Option | Description |
 |---|---|
-| `--project` `DIRECTORY` | Untrusted project root (required); the launch policy must be outside it and outside the repository that holds the project or the inventory. |
+| `--project` `DIRECTORY` | Untrusted project root (required); the launch policy must be outside it and outside every repository that encloses the project or the inventory. |
 | `--launch-policy` `FILE` | Operator-owned JSON outside the project: exact server references to absolute commands and SHA-256 pins; see [launch policy](#launch-policy). (required) |
 | `--json-output` | Output the verification report as JSON. |
 | `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools, declarations or the server identity drifted, unless `--accept-drift`. |
@@ -943,8 +976,29 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 | `--no-isolation` | Explicitly allow execution without a PID namespace; printed as a warning. On Linux the launcher is made a child subreaper and is stopped before cleanup, so its descendants are killed with the session while it is alive; a descendant that outlives the launcher can escape, as can one that deliberately evades cleanup. Elsewhere cleanup is best effort. This is not a namespace or sandbox. |
 
 By default the launcher must run as pid 1 of a new user and PID namespace
-(`unshare --user --map-root-user --pid --fork --kill-child`), so the kernel ends its
-descendants with the session. Inside the namespace the launcher sees itself as uid 0
+(`unshare --user --map-root-user --pid --fork --kill-child`). That process first
+runs a short exec wrapper (the running interpreter with `-I -S`), which waits until
+`verify-live` holds a pidfd for it and only then executes the staged launcher with
+the same argument, environment and working directory. The launcher therefore cannot
+leave the process group, kill `unshare` through it or exit before cleanup can reach
+it. When the session ends, cleanup sends the launcher SIGKILL through that pidfd and
+waits until the kernel has ended every process in the namespace, including nested
+PID namespaces. It does not rely on `--kill-child`, the process group or `unshare`,
+which a launcher can defeat by clearing its parent-death signal, calling `setsid` or
+`setpgid`, or killing `unshare` with `kill(0, SIGKILL)` from a child left in that
+group. If no namespace init appears within 5 seconds, the server fails with
+`isolation-unavailable` before the pinned launcher executes. If the namespace has not
+ended 5 seconds after the SIGKILL, it fails with `isolation-teardown-failed`. Without
+a separately runnable interpreter, as in a frozen build, or where the kernel cannot
+open a pidfd, the launcher runs without a pidfd held, and cleanup stops `unshare` so
+that it cannot reap the launcher, kills the launcher it finds as `unshare`'s child
+and waits in the same way; there a server whose `unshare` was killed by a signal
+before cleanup, or did not stop within 1 second, also fails with
+`isolation-teardown-failed`, because the launcher may have outlived it. A process
+that the launcher has another service start, such as `systemd-run --user`, is
+outside the namespace and is not ended, and nothing ends the namespace if
+`verify-live` itself is killed before its cleanup runs.
+Inside the namespace the launcher sees itself as uid 0
 and gid 0, mapped to the invoking user and group; every other uid and gid, including
 the owners of the files it reads and its own supplementary groups, appears as
 `nobody`/`nogroup` (65534), and `setgroups` is denied. That grants no privilege

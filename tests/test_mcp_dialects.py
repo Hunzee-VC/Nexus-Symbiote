@@ -166,7 +166,10 @@ def test_codex_project_config_toml_is_inventoried(tmp_path):
     assert not result.scan_failures and not result.surfaces_excluded
     found = servers(result)
     assert found["docs"].launcher_package == "npm:docs-mcp"
-    assert found["docs"].properties["client_settings"] == {"tool_filters": 1}
+    assert found["docs"].properties["client_settings"] == {
+        "tool_filters": 1,
+        "tool_filter_names": {"enabled_tools": ["search"]},
+    }
     assert found["remote"].transport == "streamable-http"
     assert found["remote"].properties["client_settings"] == {"bearer_token_variable": True}
     assert "secret-docs-token-1" not in json.dumps(
@@ -203,7 +206,11 @@ def test_other_project_client_files_are_inventoried(tmp_path, path, host):
     result = scan(tmp_path, {path: json.dumps(config)})
     server = servers(result)["docs"]
     assert server.source_path == path
-    assert server.properties["client_settings"] == {"auto_approve": 1, "disabled": True}
+    assert server.properties["client_settings"] == {
+        "auto_approve": 1,
+        "auto_approved_tools": {"autoApprove": ["search"]},
+        "disabled": True,
+    }
     assert any(r.category == "version_pinning" for r in server.risks)
     assert any(
         c.host_application == host for c in result.components if isinstance(c, MCPClientComponent)
@@ -663,6 +670,7 @@ def test_client_fields_of_other_dialects_are_interpreted(tmp_path):
         "authentication": True,
         "watch_paths": True,
         "tool_filters": 1,
+        "tool_filter_names": {"disabledTools": ["delete"]},
     }
     assert "cursor-oauth-secret-1" not in record.model_dump_json()
 

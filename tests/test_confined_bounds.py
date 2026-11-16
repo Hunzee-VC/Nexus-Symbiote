@@ -145,6 +145,23 @@ def test_stream_budget_names_the_bound_that_stopped_it(tmp_path):
     ]
 
 
+def test_a_stream_reads_again_only_what_it_read_and_charges_it_once(tmp_path):
+    (tmp_path / "a.bin").write_bytes(b"0123456789")
+    failures: list[str] = []
+    with (
+        ConfinedCollection(tmp_path, failures, max_total_bytes=6) as files,
+        files.open_regular("a.bin") as stream,
+    ):
+        assert stream.read(6) == b"012345"
+        assert stream.reread(2, 4) == b"2345"
+        assert stream.reread(0, 6) == b"012345"
+        with pytest.raises(ValueError, match="already read"):
+            stream.reread(4, 3)
+        with pytest.raises(ValueError, match="already read"):
+            stream.reread(-1, 1)
+    assert failures == []
+
+
 def test_a_file_that_does_not_fit_leaves_the_byte_budget_to_files_that_do(tmp_path):
     # The mcp and a2a source searches stop at the first refused file once the budget
     # is spent, so a file refused for its size must not mark it spent.

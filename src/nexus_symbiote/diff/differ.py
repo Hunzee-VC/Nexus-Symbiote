@@ -575,7 +575,7 @@ class AIBOMDiffer:
                     new.properties.get("observed_declaration_hash"),
                 ),
             ):
-                if before and after and before != after:
+                if before and (not after or before != after):
                     modifications.append(
                         {
                             "detail": f"MCP server {label} changed. Review before execution.",

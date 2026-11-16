@@ -84,11 +84,11 @@ Requires Python 3.11 to 3.14, git, curl and the [GitHub CLI](https://cli.github.
 )
 ```
 
-Paste the block as one unit, unchanged. Nothing is installed unless the attestation passes. [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) describes what the attestation does and does not establish.
+Paste the block as one unit, unchanged. The wheel is downloaded, but the package is not installed unless the attestation passes. [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) describes what the attestation does and does not establish.
 
 ### Try it in 60 seconds
 
-From the checkout, inventory the bundled [demo agent](https://github.com/Hunzee-VC/Nexus-Symbiote/tree/main/examples/demo-agent). Nothing is executed and no network is used:
+This walkthrough needs the [source install](#install-from-reviewed-source): the `v0.1.0` wheel has no checkout and does not read the signer policy format used below. From the checkout, inventory the bundled [demo agent](https://github.com/Hunzee-VC/Nexus-Symbiote/tree/main/examples/demo-agent). Nothing is executed and no network is used:
 
 ```bash
 nexus-symbiote scan examples/demo-agent -o demo.aibom.json
@@ -102,11 +102,12 @@ The scan records 11 components across 9 types and eleven findings (risk score 41
 To approve the model, pin its digest in a [signer policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md#operator-signature-policy) you own, kept outside the scanned project. Here the digest comes from the checkout only to show the mechanism; in real use, take it from a source you trust:
 
 ```bash
+policy_dir="$(mktemp -d)"   # outside the checkout: a policy inside the repository is refused
 digest="$(sha256sum examples/demo-agent/models/intent-classifier.safetensors | cut -d' ' -f1)"
 printf '{"version": 2, "artifacts": [{"kind": "digest-pin", "expected_sha256": "sha256:%s",
-  "artifact_path": "models/intent-classifier.safetensors"}]}\n' "$digest" > signers.json
+  "artifact_path": "models/intent-classifier.safetensors"}]}\n' "$digest" > "$policy_dir/signers.json"
 nexus-symbiote validate demo.aibom.json --project examples/demo-agent --no-project-policy \
-  --signature-policy signers.json
+  --signature-policy "$policy_dir/signers.json"
 ```
 
 `validate` now exits 0. The [examples walkthrough](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/examples/README.md) adds drift detection, exports, a ShadowScan import and a comparison with a synthetic runtime trace, all offline.
@@ -133,7 +134,7 @@ An agent's behavior depends on its configuration as much as its code — MCP ser
 | Tool rug pulls | Fingerprints the tools a [live observation](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/offline-and-live-modes.md#detect-drift-on-a-remote-mcp-server) records, so a changed definition is a critical drift alert; a static scan records declared tools by name and file digest |
 | Endpoint repointing, scope widening | Critical or high drift alert when an MCP or A2A endpoint moves host, or an A2A card's OAuth scopes grow |
 | Executable or unsigned model files | Classifies formats without loading them and validates SafeTensors headers; integrity stays `UNKNOWN` until your [signer policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md#operator-signature-policy) verifies the weights |
-| Hidden instructions | Flags bidi and zero-width characters, and text hidden in HTML comments, in instruction files |
+| Hidden instructions | Flags bidi and zero-width characters, and text hidden in HTML comments, unused link reference definitions or unreferenced footnotes, in instruction files |
 | Over-broad agent permissions | Flags `bypassPermissions`, blanket grants such as `Bash(*)` and hook commands; a changed setting is a drift alert, and without the binding key a record whose setting values the redaction removes is a medium drift alert that they are unbound |
 | Credential exposure | Records variable names, never values; redacts known secret patterns |
 
@@ -161,7 +162,7 @@ Every row has limits: [known limitations](https://github.com/Hunzee-VC/Nexus-Sym
 
 1. **Collect.** Each collector reads its surfaces through confined, size-bounded file reads and returns components, findings and coverage status.
 2. **Assemble.** Results merge into one AgentBOM. Every claim keeps its assurance level: declared, observed or verified.
-3. **Gate.** `validate` checks completeness and integrity; `risk` scores findings against your policy. Gaps fail closed.
+3. **Gate.** `validate` checks completeness and recorded local digests, bindings and operator-supplied signature policies for models and discovery reports; it does not authenticate MCP servers, so gate MCP server changes with `diff --fail-on-alert` against a reviewed baseline (see [gates and drift](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md#gates-and-drift)); `risk` scores findings against your policy. Gaps fail closed.
 4. **Compare.** `diff` compares two snapshots semantically and rates each change.
 5. **Export.** Standard formats are generated from the same collection, so every export describes the same evidence.
 
@@ -185,7 +186,7 @@ Nothing a collector reads is executed, imported or loaded. The `mcp`, `rag` and 
 | Command | What it answers |
 | --- | --- |
 | `scan` | Inventory the project → native JSON, CycloneDX, SPDX or SARIF |
-| `validate` | Did every collector finish? Do hashes, signatures and bindings match? |
+| `validate` | Did every collector finish? Do local digests, bindings and operator signer-policy rules match? |
 | `risk` | Does the score or worst severity cross your [policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/policy-reference.md)? |
 | `diff` | What [changed](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/drift-gate.md#what-the-alerts-mean) since the reviewed snapshot, and how much does it matter? |
 | `digest` | Do two inventories record the same [content](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/reproducible-inventories.md#the-content-digest)? |

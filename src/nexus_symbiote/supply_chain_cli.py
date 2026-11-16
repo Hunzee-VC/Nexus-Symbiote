@@ -6,7 +6,6 @@ import contextlib
 import json
 import os
 import stat
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,11 +14,13 @@ import click
 from nexus_symbiote import modes
 from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
 from nexus_symbiote.live_cli import review_notice
+from nexus_symbiote.utils.files import create_staging_file
 from nexus_symbiote.utils.terminal import (
     echo_line,
     json_text,
     neutralize,
     output_failure,
+    refuse_dash_output,
     write_cli_output,
 )
 
@@ -57,55 +58,75 @@ def _refuse_source_overwrite(output: Path | None, source: Path) -> None:
         raise click.BadParameter("output must not overwrite the source inventory")
 
 
-def _repository_root(path: Path) -> Path | None:
-    """The nearest directory at or above ``path`` that holds a ``.git`` entry."""
-    for candidate in (path, *path.parents):
-        if os.path.lexists(candidate / ".git"):
-            return candidate
-    return None
+def _repository_roots(path: Path) -> list[Path]:
+    """Every directory at or above ``path`` that holds a ``.git`` entry."""
+    return [candidate for candidate in (path, *path.parents) if os.path.lexists(candidate / ".git")]
 
 
-def _check_launch_policy(policy: Path, project: Path, inventory: Path) -> None:
+def _safe_stat(path: Path) -> os.stat_result | None:
+    try:
+        return path.stat()
+    except OSError:
+        return None
+
+
+def _check_launch_policy(policy: Path, project: Path, inventory: Path) -> os.stat_result | None:
     """Refuse a launch policy that the change under review could have written.
 
-    The policy must lie outside the project, outside the repositories that hold the
-    project and the inventory, be a single-link regular file owned by the caller or
-    root that only its owner can write, in a directory owned by you or root that
-    others cannot write unless it is sticky. This catches misplacement; it does not
-    authenticate the policy.
+    The policy must lie outside the project, outside every repository that encloses
+    the project or the inventory, be a single-link regular file owned by the caller or
+    root that only its owner can write, in directories owned by you or root that others
+    cannot write unless they are sticky, up to the file system root. This catches
+    misplacement; it does not authenticate the policy.
     """
     resolved = policy.resolve()
     untrusted = [project.resolve()]
     for start in (project.resolve(), inventory.resolve().parent):
-        root = _repository_root(start)
-        if root is not None:
-            untrusted.append(root)
+        # A nested checkout (a submodule or vendored repository) has its own .git, but
+        # the change under review can still edit the repository around it.
+        untrusted.extend(_repository_roots(start))
     if any(resolved.is_relative_to(root) for root in untrusted):
         raise click.UsageError(
             "launch policy must be provisioned outside the untrusted project and outside "
-            "the repository that holds the project or the inventory"
+            "the repository that holds the project or the inventory, and any repository "
+            "enclosing either"
         )
     if os.name != "posix":
-        return
+        return None
     try:
         info = resolved.lstat()
-        parent = resolved.parent.stat()
+        # Whoever can write any directory above the policy can rename the one below it
+        # away and put another policy in its place, so every ancestor is checked.
+        directories = [path.stat() for path in resolved.parents]
     except OSError as exc:
         raise click.UsageError("launch policy cannot be inspected") from exc
+    untrusted_ids = {
+        (st.st_dev, st.st_ino) for root in untrusted if (st := _safe_stat(root)) is not None
+    }
+    if any((entry.st_dev, entry.st_ino) in untrusted_ids for entry in directories):
+        raise click.UsageError(
+            "launch policy must be provisioned outside the untrusted project and outside "
+            "the repository that holds the project or the inventory, and any repository "
+            "enclosing either"
+        )
     owners = {0, os.geteuid()}
     if (
         not stat.S_ISREG(info.st_mode)
         or info.st_nlink != 1
         or info.st_uid not in owners
         or info.st_mode & 0o022
-        or parent.st_uid not in owners
-        or (parent.st_mode & 0o022 and not parent.st_mode & stat.S_ISVTX)
+        or any(
+            directory.st_uid not in owners
+            or (directory.st_mode & 0o022 and not directory.st_mode & stat.S_ISVTX)
+            for directory in directories
+        )
     ):
         raise click.UsageError(
             "launch policy must be a single-link regular file owned by you or root and "
-            "writable only by its owner, in a directory owned by you or root that others "
-            "cannot write unless it is sticky"
+            "writable only by its owner, in directories owned by you or root that others "
+            "cannot write unless they are sticky, up to the file system root"
         )
+    return info
 
 
 def _drift_summary(report: LiveVerifyReport) -> None:
@@ -133,7 +154,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         required=True,
         help=(
             "Untrusted project root; the launch policy must be outside it and outside "
-            "the repository that holds the project or the inventory."
+            "every repository that encloses the project or the inventory."
         ),
     )
     @click.option(
@@ -198,11 +219,18 @@ def register_supply_chain_commands(main: click.Group) -> None:
             raise click.UsageError("choose a candidate BOM or a JSON verification report")
         if accept_drift and not record:
             raise click.UsageError("--accept-drift applies only to --record")
-        _check_launch_policy(launch_policy, Path(project), Path(aibom_path))
+        expected_info = _check_launch_policy(launch_policy, Path(project), Path(aibom_path))
         try:
             with open_regular_file(launch_policy) as stream:
-                if os.fstat(stream.fileno()).st_nlink != 1:
+                finfo = os.fstat(stream.fileno())
+                if not stat.S_ISREG(finfo.st_mode) or finfo.st_nlink != 1:
                     raise ValueError("launch policy has more than one link")
+                if expected_info is not None and (
+                    finfo.st_uid not in {0, os.geteuid()}
+                    or finfo.st_mode & 0o022
+                    or (finfo.st_dev, finfo.st_ino) != (expected_info.st_dev, expected_info.st_ino)
+                ):
+                    raise ValueError("launch policy changed after inspection")
                 policy_bytes = stream.read(4 * 1024 * 1024 + 1)
             policy = parse_json_strict(policy_bytes)
             if not isinstance(policy, dict):
@@ -300,6 +328,16 @@ def register_supply_chain_commands(main: click.Group) -> None:
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
         help="Explicit operator signer policy JSON, kept outside the project, as for scan.",
     )
+    @click.option(
+        "--fail-on-unsigned-discovery",
+        is_flag=True,
+        help="Refuse to promote unverified ShadowScan discovery evidence into a baseline.",
+    )
+    @click.option(
+        "--allow-unsigned-discovery",
+        is_flag=True,
+        help="Accept unverified ShadowScan discovery evidence explicitly in CI (still warns).",
+    )
     @click.pass_context
     def baseline(
         ctx: click.Context,
@@ -308,6 +346,8 @@ def register_supply_chain_commands(main: click.Group) -> None:
         no_project_policy: bool = False,
         accept_project_policy: bool = False,
         signature_policy: Path | None = None,
+        fail_on_unsigned_discovery: bool = False,
+        allow_unsigned_discovery: bool = False,
     ) -> None:
         """Stage a static snapshot for review; publish it only after the scan gate passes.
 
@@ -316,7 +356,19 @@ def register_supply_chain_commands(main: click.Group) -> None:
         the snapshots compared with it under the same policy: pass --no-project-policy
         here when the candidate scan uses it.
         """
+        from nexus_symbiote.policy import PolicyError, default_policy, load_policy_file
+        from nexus_symbiote.signature_policy import SignaturePolicyError, load_signature_policies
+        from nexus_symbiote.validators.completeness import (
+            carries_discovery_evidence,
+            discovery_producer_check,
+            discovery_signature_required,
+        )
         from nexus_symbiote.validators.risk import RiskScorer
+
+        if fail_on_unsigned_discovery and allow_unsigned_discovery:
+            raise click.UsageError(
+                "--fail-on-unsigned-discovery and --allow-unsigned-discovery contradict each other"
+            )
 
         # Resolve the registered command instead of importing cli, which imports this module.
         root = ctx.find_root()
@@ -328,13 +380,12 @@ def register_supply_chain_commands(main: click.Group) -> None:
         if scan is None:
             raise click.ClickException("scan command is unavailable")
 
+        refuse_dash_output(baseline_path)
         target = baseline_path.absolute()
         try:
-            fd, temporary = tempfile.mkstemp(prefix=".nexus-baseline-", dir=target.parent)
-        except OSError as exc:
+            staged = create_staging_file(target, ".nexus-baseline-")
+        except (OSError, ValueError) as exc:
             raise output_failure(exc) from exc
-        os.close(fd)
-        staged = Path(temporary)
         ctx.meta[STAGED_INVENTORY] = True
         try:
             ctx.invoke(
@@ -351,7 +402,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
             # A project policy may select report-only mode; it cannot authorize
             # promotion of incomplete evidence into an approved baseline.
             try:
-                staged_bom = AIBOM.load(staged)
+                staged_bom, staged_bytes = AIBOM.load_with_bytes(staged)
             except NativeFormatError as exc:
                 raise click.ClickException(f"Baseline was not written. {exc}") from exc
             scorer = RiskScorer()
@@ -367,7 +418,66 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 heading = "Built-in scan gate failed; a project policy cannot relax it here:"
                 print_lines([(heading, "red"), *gate_reason_lines(document)], err=True)
                 raise click.ClickException("Baseline was not written: static scan gate failed")
-            write_cli_output(target, staged.read_text(encoding="utf-8"))
+            resolved_root = Path(project_path).resolve()
+            try:
+                loaded_policy = None if no_project_policy else load_policy_file(resolved_root)
+                active_policy = loaded_policy[0] if loaded_policy is not None else default_policy()
+                sig_policies = (
+                    load_signature_policies(signature_policy, project_root=resolved_root)
+                    if signature_policy is not None
+                    else []
+                )
+            except (PolicyError, SignaturePolicyError) as exc:
+                raise click.ClickException(neutralize(exc)) from exc
+            producer_verified = False
+            if discovery_signature_required(
+                active_policy.validation.require_discovery_signature,
+                resolved_root,
+                sig_policies,
+            ):
+                status, problems = discovery_producer_check(
+                    staged_bom,
+                    resolved_root,
+                    sig_policies,
+                    exclude_paths=active_policy.scan.exclude_paths,
+                )
+                if status == "failed" or problems:
+                    for problem in problems:
+                        echo_line("  - ", problem, err=True)
+                    raise click.ClickException(
+                        "Baseline was not written: unverified imported discovery cannot be promoted"
+                    )
+                producer_verified = status == "verified"
+            if carries_discovery_evidence(staged_bom) and not producer_verified:
+                echo_line(
+                    "WARNING: ShadowScan discovery evidence is UNVERIFIED; verify with "
+                    "--signature-policy before promoting.",
+                    err=True,
+                )
+                in_ci = any(
+                    os.environ.get(name) not in (None, "", "0", "false")
+                    for name in (
+                        "CI",
+                        "GITHUB_ACTIONS",
+                        "GITLAB_CI",
+                        "CIRCLECI",
+                        "TF_BUILD",
+                        "JENKINS_URL",
+                        "BUILDKITE",
+                        "DRONE",
+                        "TRAVIS",
+                    )
+                )
+                if (
+                    active_policy.validation.require_discovery_signature
+                    or fail_on_unsigned_discovery
+                    or (in_ci and not allow_unsigned_discovery)
+                ):
+                    raise click.ClickException(
+                        "Baseline was not written: unsigned ShadowScan discovery evidence; "
+                        "verify with --signature-policy or pass --allow-unsigned-discovery"
+                    )
+            write_cli_output(target, staged_bytes.decode("utf-8"))
         finally:
             ctx.meta.pop(STAGED_INVENTORY, None)
             # A directory that forbids removal keeps the staged copy; that must not

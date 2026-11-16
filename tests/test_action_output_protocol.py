@@ -291,15 +291,13 @@ def test_imported_discovery_never_reaches_sarif(tmp_path, capsys):
     assert "::warning title=Nexus SymBiote::SARIF upload skipped" in capsys.readouterr().err
     refused = configuration(tmp_path, SYMBIOTE_FORMAT="sarif")
     exports.clear()
-    assert (
-        runner.run(
-            refused,
-            command=stub([], native=SHADOWSCAN),
-            export=lambda native, output, fmt: exports.append(fmt),
-            outputs=tmp_path / "refused",
-        )
-        == 1
+    result = runner.run(
+        refused,
+        command=stub([], native=SHADOWSCAN),
+        export=lambda native, output, fmt: exports.append(fmt),
+        outputs=tmp_path / "refused",
     )
+    assert result == 1
     assert exports == [] and published(tmp_path / "refused")["aibom_path"] == ""
 
 
@@ -358,6 +356,41 @@ def test_limits_come_only_from_the_input(tmp_path, monkeypatch):
     assert seen == [None, "max_entries=50000"]
     with pytest.raises(ValueError, match="limits"):
         configuration(tmp_path, SYMBIOTE_LIMITS="max_entries=1\nSYMBIOTE_VALIDATE=false")
+
+
+WITHHELD = (
+    "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT",
+    "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256",
+    "NEXUS_SYMBIOTE_MODE",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_URL",
+    "ACTIONS_RUNTIME_TOKEN",
+    "ACTIONS_RUNTIME_URL",
+    "ACTIONS_RESULTS_URL",
+    "ACTIONS_CACHE_URL",
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+)
+
+
+def test_the_job_environment_cannot_replace_trust_or_hand_over_runner_tokens(tmp_path, monkeypatch):
+    for name in WITHHELD:
+        monkeypatch.setenv(name, "from-the-job")
+    monkeypatch.setenv("NEXUS_SYMBIOTE_SOURCE_BINDING_KEY", "k" * 40)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    seen: list[dict[str, str]] = []
+
+    def invoke(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen.append(kwargs["env"])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(runner.subprocess, "run", invoke)
+    runner._run(["scan"], private=tmp_path)
+    (env,) = seen
+    assert not set(WITHHELD) & set(env)
+    # Operator settings the CLI is meant to read still arrive.
+    assert env["NEXUS_SYMBIOTE_SOURCE_BINDING_KEY"] == "k" * 40
+    assert env["GITHUB_ACTIONS"] == "true"
 
 
 def test_scan_path_through_a_symlink_in_the_workspace_is_refused(tmp_path):
@@ -486,3 +519,24 @@ def test_the_trust_root_comes_only_from_the_locked_runtime(tmp_path, monkeypatch
     runner._run(["validate"], private=tmp_path)
     [env] = seen
     assert not any(name in env for name in runner.TRUST_ROOT_ENVS)
+
+
+def test_job_environment_cannot_replace_the_trust_root_or_the_mode(tmp_path, monkeypatch):
+    # An earlier step can write these through GITHUB_ENV; the private HOME alone would
+    # leave the packaged trust root replaceable.
+    ignored = (*runner.TRUST_ROOT_ENVS, "NEXUS_SYMBIOTE_MODE")
+    for name in ignored:
+        monkeypatch.setenv(name, "/planted/value")
+    monkeypatch.setenv("NEXUS_SYMBIOTE_SOURCE_BINDING_KEY", "k" * 40)
+    seen: list[dict[str, str]] = []
+
+    def invoke(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen.append(kwargs["env"])
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(runner.subprocess, "run", invoke)
+    runner._run(["scan"], private=tmp_path)
+    assert not set(ignored) & set(seen[0])
+    assert "NEXUS_SYMBIOTE_MODE" in runner.WITHHELD_ENV
+    # The operator's binding key is an input the Action documents; it stays.
+    assert seen[0]["NEXUS_SYMBIOTE_SOURCE_BINDING_KEY"] == "k" * 40

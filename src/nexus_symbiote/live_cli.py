@@ -91,7 +91,8 @@ def review_notice(names: list[str]) -> None:
     help=(
         "Also write the unredacted server info, capabilities, instructions, tool "
         "descriptors, prompts and resource templates to this new file (mode 0600) for "
-        "review; only the bearer token and session ID are masked."
+        "review; only the bearer token is masked, and a server whose declarations "
+        "repeat its own session ID (of eight or more characters) ends the observation."
     ),
 )
 def discover_mcp(
@@ -118,7 +119,12 @@ def discover_mcp(
     if server_ref is not None and not record:
         raise click.UsageError("--server-ref applies only to --record")
     if raw_descriptors is not None and output is not None:
-        if raw_descriptors.absolute() == output.absolute():
+        same_target = raw_descriptors.absolute() == output.absolute() or raw_descriptors.resolve(
+            strict=False
+        ) == output.resolve(strict=False)
+        if not same_target and raw_descriptors.exists() and output.exists():
+            same_target = os.path.samefile(raw_descriptors, output)
+        if same_target:
             raise click.UsageError("--raw-descriptors must name a different file than --output")
     token = os.environ.get(token_env) if token_env else None
     if token_env and not token:

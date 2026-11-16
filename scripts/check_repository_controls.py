@@ -17,8 +17,10 @@ from __future__ import annotations
 import argparse
 import http.client
 import json
+import math
 import os
 import re
+import ssl
 import sys
 import tomllib
 from datetime import UTC, datetime, timedelta
@@ -26,7 +28,7 @@ from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 
 REQUIRED_CHECKS = frozenset({"Verified CI"})
 GITHUB_ACTIONS_APP_ID = 15368
@@ -40,6 +42,7 @@ CLOCK_SKEW = timedelta(minutes=5)
 MIN_OVERRIDE_REASON = 20
 TAG_PATTERN = "refs/tags/v*"
 TRUSTED_EVENTS = frozenset({"push", "workflow_dispatch"})
+SIGNER_ENV = "ALLOWED_RELEASE_TAG_SIGNERS"
 
 
 def evaluate(metadata: Any, required: frozenset[str] = REQUIRED_CHECKS) -> list[str]:
@@ -86,10 +89,45 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
+def _tls_context() -> ssl.SSLContext:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.check_hostname = True
+    context.load_default_certs(ssl.Purpose.SERVER_AUTH)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    return context
+
+
+def _strict_json(raw: bytes) -> Any:
+    def _pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        obj: dict[str, Any] = {}
+        for key, value in items:
+            if key in obj:
+                raise ValueError("duplicate JSON key in GitHub API response")
+            obj[key] = value
+        return obj
+
+    def _invalid_constant(value: str) -> None:
+        raise ValueError(f"non-finite JSON constant in GitHub API response: {value}")
+
+    def _finite_float(value: str) -> float:
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("non-finite JSON number in GitHub API response")
+        return number
+
+    return json.loads(
+        raw.decode("utf-8"),
+        object_pairs_hook=_pairs,
+        parse_constant=_invalid_constant,
+        parse_float=_finite_float,
+    )
+
+
 def _fetch(repo: str, path: str, token: str) -> Any:
-    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo) is None:
+    if re.fullmatch(r"(?!\.\.?/)[A-Za-z0-9_.-]+/(?!\.\.?$)[A-Za-z0-9_.-]+", repo) is None:
         raise ValueError("repository must be owner/name")
-    if not token or any(c in token for c in "\r\n"):
+    if not token or any(c in token for c in "\r\n\x00"):
         raise ValueError(
             "a GitHub token with repository contents-read and Actions-read access is required"
         )
@@ -102,11 +140,12 @@ def _fetch(repo: str, path: str, token: str) -> Any:
             "User-Agent": "nexus-symbiote-repository-controls",
         },
     )
-    with build_opener(_NoRedirect()).open(request, timeout=15) as response:  # noqa: S310 - fixed HTTPS API origin
+    opener = build_opener(ProxyHandler({}), HTTPSHandler(context=_tls_context()), _NoRedirect())
+    with opener.open(request, timeout=15) as response:  # noqa: S310 - fixed HTTPS API origin
         raw = response.read(MAX_RESPONSE_BYTES + 1)
     if len(raw) > MAX_RESPONSE_BYTES:
         raise ValueError("GitHub response exceeds the size limit")
-    return json.loads(raw)
+    return _strict_json(raw)
 
 
 def fetch_branch(repo: str, branch: str, token: str) -> Any:
@@ -467,7 +506,19 @@ def fetch_release_tag(repo: str, version: str, token: str) -> tuple[Any, Any]:
     return ref, tag
 
 
-def evaluate_release_tag(ref: Any, tag: Any, *, version: str, sha: str) -> list[str]:
+def _allowed_tag_signers(raw: str | None = None) -> frozenset[str]:
+    source = os.environ.get(SIGNER_ENV, "") if raw is None else raw
+    return frozenset(item.strip().lower() for item in source.split(",") if item.strip())
+
+
+def evaluate_release_tag(
+    ref: Any,
+    tag: Any,
+    *,
+    version: str,
+    sha: str,
+    allowed_signers: frozenset[str] | None = None,
+) -> list[str]:
     """The signed, annotated v<version> tag must already point at the commit being published."""
     name = f"v{version}"
     target = ref.get("object") if isinstance(ref, dict) else None
@@ -490,6 +541,19 @@ def evaluate_release_tag(ref: Any, tag: Any, *, version: str, sha: str) -> list[
     verification = tag.get("verification")
     if not isinstance(verification, dict) or verification.get("verified") is not True:
         return [f"GitHub does not report a verified signature on the release tag {name}"]
+    if allowed_signers is None:
+        raw_signers = os.environ.get(SIGNER_ENV, "")
+        signers = _allowed_tag_signers(raw_signers)
+        if raw_signers != "" and not signers:
+            return [f"{SIGNER_ENV} is set but names no allowed tag signer"]
+    else:
+        signers = allowed_signers
+    if signers:
+        tagger = tag.get("tagger")
+        raw_email = tagger.get("email") if isinstance(tagger, dict) else None
+        email = raw_email.strip().lower() if isinstance(raw_email, str) else ""
+        if not email or email not in signers:
+            return [f"the release tag {name} was not created by an allowed tag signer"]
     return []
 
 

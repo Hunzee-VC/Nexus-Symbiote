@@ -3,16 +3,21 @@
 `validate --project` checks a supplied inventory against freshly collected local
 evidence. Static MCP server records carry two kinds of source binding.
 
-`static_config_hash` (profile `nexus-symbiote/mcp-static-config/v3`) is an RFC 8785
+`static_config_hash` (profile `nexus-symbiote/mcp-static-config/v4`) is an RFC 8785
 digest of the server's exported structure: configuration field names, the displayed
 command basename, the classified launcher with its wrappers and effective command,
 the identity, version and pin of every package it launches, package source origins,
 the names of the project resolver settings that apply to it, launch context flags and
 counts, transport, endpoint origin, argument count, environment variable and header
-names, client settings (auto-approval, disabled, tool filters) and declared tool names.
+names, client settings (auto-approval, disabled, tool filters, with the sorted, redacted
+names of the tools that `alwaysAllow`, `autoApprove`, `includeTools`, `excludeTools`,
+`enabled_tools`, `disabled_tools` and `disabledTools` list, one list per field because
+each client reads only some of them) and declared tool names.
 It covers only information the record exports in clear, so it reveals nothing about
 secret values. It detects added or removed arguments, environment variables, headers,
-fields, resolver settings and tools, and changed launchers, package identities and
+fields, resolver settings and tools, a tool swapped into or out of an auto-approval
+or tool filter list at the same count or moved between `alwaysAllow` and
+`autoApprove`, and changed launchers, package identities and
 versions (including dependencies added with `--with`), package source origins, launch
 context and endpoint origins.
 
@@ -112,7 +117,18 @@ Without the key, a server whose values go beyond what the inventory exports carr
 low `completeness` risk that names the key and lists what is unbound: a command path
 (a command with a directory, or one behind a wrapper), launch arguments other than the
 recorded launcher package and `-y`, environment values, header values, an endpoint path,
-query, fragment or user information, or project resolver settings. A server whose
+query, fragment or user information, project resolver settings, redacted tool list
+entries (when an `alwaysAllow`, `autoApprove`, `includeTools`, `excludeTools`,
+`enabled_tools`, `disabled_tools` or `disabledTools` item changes under redaction or
+holds a scrubbed credential, which also records a coverage gap without the key so
+distinct URLs or secrets cannot collide silently), or the values of the client settings
+`cwd` (working directory, except `.`, `./`, `${workspaceFolder}` and
+`${workspaceFolder}/` written exactly in a root configuration file, so ` .` is another
+directory; nested configuration files mark any `cwd` unbound), `envFile` (environment
+file), `watchPaths`, `oauth` and `auth` (authentication settings), `dev` (development
+settings) and the Codex `env_vars`,
+`bearer_token_env_var` and `env_http_headers` (forwarded environment variable names),
+which the record exports only as present. A server whose
 arguments are only its recorded launcher package, or with a bare endpoint origin,
 carries none. `diff --fail-on-alert` treats an MCP server with that finding as a
 medium alert that launch values are unbound, including when the two inventories
@@ -123,7 +139,7 @@ compare the values. The alert does not record the value.
 MCP keyed-value profile v3 replaces v2, which did not retain Deno import-name-to-target
 associations. Old v2 keyed records fail reconciliation and require recollection and
 review; do not copy or relabel their old binding. This keyed-value version is separate
-from the unchanged v3 exported-structure profile.
+from the exported-structure profile, now `mcp-static-config/v4`.
 
 Static configuration profile v1 records (an unkeyed digest over raw configuration, including secret
 values) let anyone holding the BOM confirm guesses for low-entropy secrets. They
@@ -224,6 +240,13 @@ are not exported. The structure digest below covers them instead, so a change su
 as `read:only` to `admin` raises a high `properties.static_card_hash changed` alert
 without a key, in a skill's requirements as in the card's.
 
+Distinct security-scheme names must remain distinct after secret redaction. If
+two names redact identically anywhere in a card's declarations or card/skill
+requirements, collection fails with an explicit coverage gap, including when the
+binding key is set. This prevents loss of the scheme-to-requirement association
+without publishing a guessable hash of the original names. Use distinct,
+non-secret scheme identifiers, then recollect and review the card.
+
 `authentication_required` is true only when the card declares at least one of
 `security`, `securityRequirements` or a legacy `authentication` object, and each
 one it declares passes: every alternative in `security` and `securityRequirements`
@@ -246,7 +269,7 @@ absent, and so does a skill's `null` `security` or `securityRequirements`. These
 declarations: they do not show that an endpoint enforces authentication.
 
 Every A2A server record, and every client record read from an A2A configuration
-file, carries `static_card_hash` (profile `nexus-symbiote/a2a-card-structure/v3`)
+file, carries `static_card_hash` (profile `nexus-symbiote/a2a-card-structure/v4`)
 or `static_config_hash` (profile `nexus-symbiote/a2a-client-structure/v1`); the
 `a2a-server:code-detected` or `a2a-client:code-detected` record created from SDK
 use in Python source carries neither digest nor `source_values_bound`. These RFC
@@ -550,7 +573,7 @@ or chat template digest covers it.
 
 Older static MCP snapshots lack the source binding and configured tool locators,
 and older A2A snapshots lack the structure digests or carry the superseded
-`nexus-symbiote/a2a-card-structure/v1` or `v2` profile; older RAG records carry no
+`nexus-symbiote/a2a-card-structure/v1`, `v2` or `v3` profile; older RAG records carry no
 structure digest or the superseded `nexus-symbiote/rag-source-structure/v1` profile,
 and older IDE agent records no keyed settings binding and no
 `settings_hashes_profile`. Prompt records from earlier builds carry a
@@ -565,6 +588,11 @@ the medium alert for unbound values on every comparison. They cannot establish t
 stronger reconciliation contract. Missing or unknown binding profiles fail
 validation and require recollection; copying a newly calculated digest into an
 old approved snapshot is not a migration.
+
+The v4 A2A card profile refuses ambiguous redacted scheme identifiers. Recollect,
+review and reapprove v3 card baselines even if the card has ordinary names; do not
+copy a new digest into an old approval. A2A client and keyed whole-card profiles
+are unchanged.
 
 ```sh
 nexus-symbiote scan /path/to/project --no-project-policy --report-only -o candidate.json

@@ -788,23 +788,35 @@ def test_python_dynamic_imports_of_an_mcp_client_module_are_gaps(tmp_path, sourc
         "from importlib import import_module as im\nload = im\nload('mcp.server.fastmcp')\n",
         "import importlib as il\nload: object = il.import_module\nload('mcp.server')\n",
         "import pkgutil\nif (load := pkgutil.resolve_name):\n    load('mcp.server.fastmcp:FastMCP')\n",
-        "import importlib\ndef make():\n    load = importlib.import_module\n"
-        "    return load('mcp.server.fastmcp')\n",
+        (
+            "import importlib\ndef make():\n    load = importlib.import_module\n"
+            "    return load('mcp.server.fastmcp')\n"
+        ),
         "import importlib\nload, other = importlib.import_module, 1\nload('mcp.server.fastmcp')\n",
-        "import importlib\n[first, (load, *rest)] = 1, [2, importlib.import_module]\n"
-        "load('mcp.server')\n",
+        (
+            "import importlib\n[first, (load, *rest)] = 1, [2, importlib.import_module]\n"
+            "load('mcp.server')\n"
+        ),
         "import importlib\ndef f(load=importlib.import_module):\n    load('mcp.server.fastmcp')\n",
-        "from importlib import import_module\ndef f(a, *, load=import_module):\n"
-        "    load('fastmcp')\n",
+        (
+            "from importlib import import_module\ndef f(a, *, load=import_module):\n"
+            "    load('fastmcp')\n"
+        ),
         "import importlib\nf = lambda load=importlib.import_module: load('mcp.server')\n",
-        "import importlib\nfor load in (importlib.import_module,):\n"
-        "    load('mcp.server.fastmcp')\n",
-        "import importlib\nloaders = [importlib.import_module]\nfor load in loaders:\n"
-        "    load('mcp.server')\n",
+        (
+            "import importlib\nfor load in (importlib.import_module,):\n"
+            "    load('mcp.server.fastmcp')\n"
+        ),
+        (
+            "import importlib\nloaders = [importlib.import_module]\nfor load in loaders:\n"
+            "    load('mcp.server')\n"
+        ),
         "import importlib\n[load('mcp.server') for load in {importlib.import_module}]\n",
-        "import contextlib, importlib\n"
-        "with contextlib.nullcontext(importlib.import_module) as load:\n"
-        "    load('mcp.server.fastmcp')\n",
+        (
+            "import contextlib, importlib\n"
+            "with contextlib.nullcontext(importlib.import_module) as load:\n"
+            "    load('mcp.server.fastmcp')\n"
+        ),
         "import importlib\nwith importlib.import_module as (load, other):\n    load('fastmcp')\n",
     ],
     ids=[
@@ -836,16 +848,26 @@ def test_python_dynamic_imports_through_an_assigned_loader_are_gaps(tmp_path, so
 @pytest.mark.parametrize(
     "source",
     [
-        "import importlib\ndef run(load):\n    return load('mcp.server.fastmcp')\n"
-        "run(importlib.import_module)\n",
-        "import importlib\ndef run(*, load):\n    return load('fastmcp')\n"
-        "run(load=importlib.import_module)\n",
-        "import importlib\nmatch importlib.import_module:\n    case load:\n"
-        "        load('mcp.server.fastmcp')\n",
-        "import importlib\nmatch [importlib.import_module]:\n    case [load]:\n"
-        "        load(name='mcp.server')\n",
-        "import importlib\nloaders = {'x': importlib.import_module}\n"
-        "loaders['x']('mcp.server.fastmcp')\n",
+        (
+            "import importlib\ndef run(load):\n    return load('mcp.server.fastmcp')\n"
+            "run(importlib.import_module)\n"
+        ),
+        (
+            "import importlib\ndef run(*, load):\n    return load('fastmcp')\n"
+            "run(load=importlib.import_module)\n"
+        ),
+        (
+            "import importlib\nmatch importlib.import_module:\n    case load:\n"
+            "        load('mcp.server.fastmcp')\n"
+        ),
+        (
+            "import importlib\nmatch [importlib.import_module]:\n    case [load]:\n"
+            "        load(name='mcp.server')\n"
+        ),
+        (
+            "import importlib\nloaders = {'x': importlib.import_module}\n"
+            "loaders['x']('mcp.server.fastmcp')\n"
+        ),
         "import importlib\nself.load = importlib.import_module\nself.load('mcp.server')\n",
         "def make():\n    return __import__\nmake()('fastmcp.server')\n",
         "load = make_loader()\nload('mcp.server:FastMCP')\n",
@@ -1096,15 +1118,19 @@ def test_python_launcher_names_that_launch_nothing_are_not_gaps(tmp_path, source
 @pytest.mark.parametrize(
     "source",
     [
-        "from mcp import StdioServerParameters\n"
-        "def connect(params: StdioServerParameters) -> StdioServerParameters:\n"
-        "    return params\n",
+        (
+            "from mcp import StdioServerParameters\n"
+            "def connect(params: StdioServerParameters) -> StdioServerParameters:\n"
+            "    return params\n"
+        ),
         "from mcp import StdioServerParameters\n",
         "from pydantic_ai import Agent\nfrom pydantic_ai.mcp import MCPServerStdio\nagent = Agent('m')\n",
         'from agents.mcp import MCPServerStdio\n__all__ = ["MCPServerStdio"]\n',
         "from mcp import StdioServerParameters as StdioServerParameters\n",
-        "try:\n    from agents.mcp import MCPServerStdio as Launcher\nexcept ImportError:\n"
-        "    Launcher = None\n",
+        (
+            "try:\n    from agents.mcp import MCPServerStdio as Launcher\nexcept ImportError:\n"
+            "    Launcher = None\n"
+        ),
     ],
     ids=["annotation", "import-only", "unused", "all", "explicit-re-export", "compat-shim"],
 )
@@ -1157,8 +1183,10 @@ def test_a_python_launcher_reached_through_an_imported_module_is_a_gap(tmp_path,
     [
         "from mcp.server.fastmcp import FastMCP\n",
         "from fastmcp import FastMCP as FastMCP\n",
-        "from mcp.server.fastmcp import FastMCP\ndef build(server: FastMCP) -> FastMCP:\n"
-        "    return server\n",
+        (
+            "from mcp.server.fastmcp import FastMCP\ndef build(server: FastMCP) -> FastMCP:\n"
+            "    return server\n"
+        ),
     ],
     ids=["import-only", "explicit-re-export", "annotation"],
 )

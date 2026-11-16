@@ -30,12 +30,14 @@ safe. The [worked example](runtime-contract-reference.md#worked-example) shows
 this distinction with a synthetic side effect.
 
 `invoke_pinned_stdio` starts the pinned launcher and completes the MCP `initialize`
-handshake before the gateway checks the trust status, snapshot and approval, because
-the session that describes the tool is the one that executes the call. A caller that
-presents invalid evidence still makes the operator's launcher run up to its tool
-listing; nothing is called. Admit callers to the integration itself, and run launchers
-in the isolated worker the [security boundaries](../SECURITY.md#security-boundaries)
-describe.
+handshake when the gateway first asks for the served descriptor, after it has checked
+the trust status, snapshot, workload context, companion BOM, scope and grant, because
+the session that describes the tool is the one that executes the call. A caller whose
+trust status or snapshot fails those checks never starts the launcher. The approval is
+checked after the descriptor, so a caller holding a valid snapshot and trust status but
+no valid approval still makes the operator's launcher run up to its tool listing;
+nothing is called. Admit callers to the integration itself, and run launchers in the
+isolated worker the [security boundaries](../SECURITY.md#security-boundaries) describe.
 
 The gateway copies the request before scope resolution and rejects a resolver
 that modifies its copy during resolution. A resolver retaining that copy cannot
@@ -72,8 +74,8 @@ and never pre-sign trust statuses for later windows.
 Create one Ed25519 key pair per purpose, outside scanned repositories. A key in
 more than one purpose ring is refused unless the gateway is constructed with
 `allow_shared_keys=True`. Each passphrase file holds its passphrase, at most 1,023
-bytes, on the first line and must be readable only by its owner (mode 0600, for
-example written under `umask 077`):
+bytes, on the first line and must belong to the user running the command and give group and others no
+permission (mode 0600 or 0400, for example written under `umask 077`):
 
 ```sh
 nexus-symbiote runtime keygen --private-key snapshot.pem --public-key snapshot.pub --passphrase-file snapshot.pass
@@ -95,9 +97,10 @@ revocation lists use, and `runtime key-id` prints a key ID. The
 The sign command accepts an explicit contract rather than granting authority
 to a scan result automatically. It refuses a contract that could never verify,
 because its validity window is longer than its purpose allows or has already
-ended, refuses a private key file that its group or others can read, and prints
+ended, refuses a private key file that gives its group or others any permission or that the
+user running the command does not own, even when that user is root, and prints
 the contract digest. `--passphrase-file` encrypts a new private key or unlocks an
-encrypted one; a passphrase file that its group or others can read is refused, and
+encrypted one; a passphrase file is refused on the same terms, and
 `runtime keygen` keeps neither key if either cannot be written. Keys held in a
 KMS, an HSM or an agent sign through `sign_contract` with any object that has
 `sign(data)` and `public_key()`.
@@ -285,7 +288,12 @@ before `tools/call` is sent. After that, a JSON-RPC error reply raises
 `ToolCallError`, which carries the error `code`, and any other failure raises
 `ExecutionOutcomeUnknown`. Neither means that the gateway refused the call: it was
 admitted and its approval spent, and an unknown outcome means the tool may have
-run, so record it as unknown rather than as not executed. Authenticate the
+run, so record it as unknown rather than as not executed. When the session closes,
+cleanup ends the launcher's PID namespace as it does for
+[`verify-live`](cli-reference.md#verify-live); if the namespace cannot be confirmed
+ended, the session raises `ExecutionOutcomeUnknown` once `tools/call` has been sent,
+even when a result arrived, because a process from the namespace may still be
+running, and `AuthorizationError` before that. Authenticate the
 workload and derive scope using trusted gateway callbacks. Keep all other network
 and process paths from bypassing this gateway.
 
@@ -293,8 +301,8 @@ Same-process binding does not establish that a server's implementation or
 remote backend is immutable, safe or honest; a server can change behavior between
 listing and invocation, including during a tool call. The pin covers launcher
 bytes only, not interpreters, shared libraries or dependencies. A launcher is
-executed before the authorization check, so only operator-approved launchers may
-be used. Run it in an externally provisioned sandbox with restricted identity,
+executed before the descriptor and approval checks complete, so only
+operator-approved launchers may be used. Run it in an externally provisioned sandbox with restricted identity,
 filesystem and egress. The adapter does not create that sandbox or mediate other
 calls. `PinnedStdioSession` is a transport primitive and must not be invoked
 directly as an authorization decision.

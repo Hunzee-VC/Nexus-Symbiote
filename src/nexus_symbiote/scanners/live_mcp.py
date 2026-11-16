@@ -36,7 +36,13 @@ from datetime import UTC, datetime
 from typing import Any, NamedTuple, Protocol, cast
 from urllib.parse import urlsplit
 
-from jsonschema import Draft202012Validator
+from jsonschema import (
+    Draft4Validator,
+    Draft6Validator,
+    Draft7Validator,
+    Draft201909Validator,
+    Draft202012Validator,
+)
 
 from nexus_symbiote import __version__
 from nexus_symbiote.core.hashing import (
@@ -46,7 +52,12 @@ from nexus_symbiote.core.hashing import (
     tool_definition_extensions,
 )
 from nexus_symbiote.modes import OfflineViolation
-from nexus_symbiote.runtime_validation import MAX_SCHEMA_BYTES, check_json_budget
+from nexus_symbiote.runtime_validation import (
+    DIALECTS,
+    MAX_SCHEMA_BYTES,
+    check_json_budget,
+    ecma_pattern,
+)
 from nexus_symbiote.utils.secrets import redact_descriptor, redact_metadata, redact_text
 
 # Revisions whose initialize, tools/list, prompts/list and resources/templates/list
@@ -376,7 +387,7 @@ def _resolve_public(host: str, port: int, timeout: float) -> tuple[int, str]:
             answers.put(
                 socket.getaddrinfo(host, port, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP)
             )
-        except OSError:
+        except (OSError, ValueError):
             answers.put(None)
         except OfflineViolation as exc:
             # The guard's violation is a BaseException by design; handed to the caller,
@@ -385,7 +396,12 @@ def _resolve_public(host: str, port: int, timeout: float) -> tuple[int, str]:
         finally:
             _RESOLVER_SLOTS.release()
 
-    threading.Thread(target=resolve, daemon=True, name="nexus-symbiote-mcp-dns").start()
+    worker = threading.Thread(target=resolve, daemon=True, name="nexus-symbiote-mcp-dns")
+    try:
+        worker.start()
+    except BaseException:
+        _RESOLVER_SLOTS.release()
+        raise
     try:
         records = answers.get(timeout=timeout)
     except queue.Empty as exc:
@@ -538,8 +554,11 @@ class PinnedHTTPTransport:
             if normalized.get("content-encoding", "identity").lower() != "identity":
                 raise DiscoveryError("compressed HTTP response refused")
             if "content-length" in normalized:
-                length = int(normalized["content-length"])
-                if length < 0 or length > max_bytes or "transfer-encoding" in normalized:
+                raw_length = normalized["content-length"].strip()
+                if not raw_length.isascii() or not raw_length.isdigit():
+                    raise DiscoveryError("HTTP body length refused")
+                length = int(raw_length)
+                if length > max_bytes or "transfer-encoding" in normalized:
                     raise DiscoveryError("HTTP body length refused")
             if normalized.get("content-type", "").split(";", 1)[0].lower() == "text/event-stream":
                 payload = self._read_sse(response, body, max_bytes)
@@ -763,7 +782,7 @@ def _bounded_unique_items(schema: dict[str, Any]) -> None:
             pending.extend(item)
 
 
-def _checked_dependency_schemas(node: Any) -> Any:
+def _checked_dependency_schemas(node: Any, validator_cls: Any = Draft202012Validator) -> Any:
     """Check each object in a "dependencies" map on its own, then stand in ``true``.
 
     The metaschema reaches those objects through anyOf, which evaluates a whole
@@ -776,30 +795,171 @@ def _checked_dependency_schemas(node: Any) -> Any:
     copy = dict(node)
     for key, value in node.items():
         if key in _SUBSCHEMA_KEYWORDS:
-            copy[key] = _checked_dependency_schemas(value)
+            copy[key] = _checked_dependency_schemas(value, validator_cls)
         elif key in _SUBSCHEMA_LISTS and isinstance(value, list):
-            copy[key] = [_checked_dependency_schemas(item) for item in value]
+            copy[key] = [_checked_dependency_schemas(item, validator_cls) for item in value]
         elif key in _SUBSCHEMA_MAPS and isinstance(value, dict):
-            copy[key] = {name: _checked_dependency_schemas(item) for name, item in value.items()}
+            copy[key] = {
+                name: _checked_dependency_schemas(item, validator_cls)
+                for name, item in value.items()
+            }
         elif key == "dependencies" and isinstance(value, dict):
             copy[key] = {
-                name: _standalone_schema(item) if isinstance(item, dict) else item
+                name: _standalone_schema(item, validator_cls) if isinstance(item, dict) else item
                 for name, item in value.items()
             }
     return copy
 
 
-def _standalone_schema(schema: dict[str, Any]) -> bool:
-    Draft202012Validator.check_schema(_checked_dependency_schemas(schema))
+def _standalone_schema(schema: dict[str, Any], validator_cls: Any = Draft202012Validator) -> bool:
+    validator_cls.check_schema(_checked_dependency_schemas(schema, validator_cls))
     return True
+
+
+_DIALECT_VALIDATORS: dict[str, Any] = {
+    DIALECTS[0]: Draft4Validator,
+    DIALECTS[1]: Draft6Validator,
+    DIALECTS[2]: Draft7Validator,
+    DIALECTS[3]: Draft201909Validator,
+    DIALECTS[4]: Draft202012Validator,
+}
+_ALLOWED_VOCABULARIES_2020_12 = frozenset(
+    {
+        "https://json-schema.org/draft/2020-12/vocab/core",
+        "https://json-schema.org/draft/2020-12/vocab/applicator",
+        "https://json-schema.org/draft/2020-12/vocab/validation",
+        "https://json-schema.org/draft/2020-12/vocab/meta-data",
+        "https://json-schema.org/draft/2020-12/vocab/unevaluated",
+        "https://json-schema.org/draft/2020-12/vocab/format-annotation",
+    }
+)
+_ALLOWED_VOCABULARIES_2019_09 = frozenset(
+    {
+        "https://json-schema.org/draft/2019-09/vocab/core",
+        "https://json-schema.org/draft/2019-09/vocab/applicator",
+        "https://json-schema.org/draft/2019-09/vocab/validation",
+        "https://json-schema.org/draft/2019-09/vocab/meta-data",
+    }
+)
+
+
+def _local_pointer_exists(root: dict[str, Any], pointer: str) -> bool:
+    if pointer == "#":
+        return True
+    if not pointer.startswith("#/"):
+        return False
+    current: Any = root
+    for raw_token in pointer[2:].split("/"):
+        token = raw_token.replace("~1", "/").replace("~0", "~")
+        if isinstance(current, dict) and token in current:
+            current = current[token]
+        elif isinstance(current, list):
+            if (
+                not token.isascii()
+                or not token.isdigit()
+                or (len(token) > 1 and token.startswith("0"))
+            ):
+                return False
+            idx = int(token)
+            if idx >= len(current):
+                return False
+            current = current[idx]
+        else:
+            return False
+    return isinstance(current, (dict, bool))
+
+
+def _check_tool_schema_dialect(schema: dict[str, Any]) -> str:
+    declared = schema.get("$schema", DIALECTS[-1])
+    if not isinstance(declared, str):
+        raise DiscoveryError("invalid JSON Schema $schema declaration")
+    dialect = declared.removesuffix("#")
+    if dialect not in _DIALECT_VALIDATORS:
+        raise DiscoveryError("unsupported JSON Schema $schema dialect")
+
+    subschema_id = "id" if dialect == DIALECTS[0] else "$id"
+    pending: list[tuple[dict[str, Any], int]] = [(schema, 0)]
+    while pending:
+        node, depth = pending.pop()
+        for ref_key in ("$ref", "$dynamicRef", "$recursiveRef"):
+            if ref_key in node:
+                target = node[ref_key]
+                if not isinstance(target, str) or (target != "#" and not target.startswith("#/")):
+                    raise DiscoveryError("non-pointer or external JSON Schema reference refused")
+                if ref_key == "$ref" and not _local_pointer_exists(schema, target):
+                    raise DiscoveryError("dangling JSON Schema local reference")
+        pattern = node.get("pattern")
+        if isinstance(pattern, str):
+            try:
+                re.compile(ecma_pattern(pattern))
+            except (re.error, OverflowError, RecursionError) as exc:
+                raise DiscoveryError("invalid MCP tool JSON Schema") from exc
+        pat_props = node.get("patternProperties")
+        if isinstance(pat_props, dict):
+            for pat_key in pat_props:
+                if isinstance(pat_key, str):
+                    try:
+                        re.compile(ecma_pattern(pat_key))
+                    except (re.error, OverflowError, RecursionError) as exc:
+                        raise DiscoveryError("invalid MCP tool JSON Schema") from exc
+        if depth > 0:
+            for meta_key in ("$schema", subschema_id, "$vocabulary"):
+                if meta_key in node:
+                    if (
+                        meta_key == subschema_id
+                        and dialect in DIALECTS[:3]
+                        and isinstance(node[meta_key], str)
+                        and node[meta_key].startswith("#")
+                    ):
+                        continue
+                    raise DiscoveryError("subschema dialect or base URI override refused")
+        elif "$vocabulary" in node:
+            if dialect not in (DIALECTS[3], DIALECTS[4]):
+                raise DiscoveryError("$vocabulary is unsupported in declared dialect")
+            vocab = node["$vocabulary"]
+            if not isinstance(vocab, dict) or not all(
+                isinstance(k, str) and isinstance(v, bool) for k, v in vocab.items()
+            ):
+                raise DiscoveryError("invalid JSON Schema $vocabulary")
+            allowed = (
+                _ALLOWED_VOCABULARIES_2020_12
+                if dialect == DIALECTS[4]
+                else _ALLOWED_VOCABULARIES_2019_09
+            )
+            validation_vocab = (
+                "https://json-schema.org/draft/2020-12/vocab/validation"
+                if dialect == DIALECTS[4]
+                else "https://json-schema.org/draft/2019-09/vocab/validation"
+            )
+            for uri, enabled in vocab.items():
+                if uri not in allowed:
+                    raise DiscoveryError("unsupported JSON Schema vocabulary")
+                if not enabled and uri.endswith(
+                    ("/core", "/applicator", "/validation", "/unevaluated")
+                ):
+                    raise DiscoveryError("required JSON Schema vocabulary disabled")
+            if vocab.get(validation_vocab) is not True:
+                raise DiscoveryError("JSON Schema validation vocabulary must be enabled")
+        for key, value in node.items():
+            if key in (_SUBSCHEMA_KEYWORDS | {"additionalItems"}) and isinstance(value, dict):
+                pending.append((value, depth + 1))
+            elif key in (_SUBSCHEMA_LISTS | {"items"}) and isinstance(value, list):
+                pending.extend((item, depth + 1) for item in value if isinstance(item, dict))
+            elif key in (_SUBSCHEMA_MAPS | {"dependencies"}) and isinstance(value, dict):
+                pending.extend(
+                    (item, depth + 1) for item in value.values() if isinstance(item, dict)
+                )
+    return dialect
 
 
 def _check_schema(schema: Any) -> None:
     if not isinstance(schema, dict) or schema.get("type") != "object":
         raise DiscoveryError("tool schemas must declare object type")
+    dialect = _check_tool_schema_dialect(schema)
     _bounded_unique_items(schema)
+    validator_cls = _DIALECT_VALIDATORS[dialect]
     try:
-        Draft202012Validator.check_schema(_checked_dependency_schemas(schema))
+        validator_cls.check_schema(_checked_dependency_schemas(schema, validator_cls))
     except Exception as exc:
         # The regex format check runs re.compile, which raises OverflowError and
         # RecursionError besides re.error; any failure means an invalid schema.
@@ -991,6 +1151,27 @@ def _observed_tool(checked: CheckedDescriptor) -> ObservedTool:
     )
 
 
+# A session identifier shorter than this is not a credential worth guarding, and it
+# would occur by chance in ordinary declarations.
+MIN_GUARDED_SESSION_ID = 8
+
+
+def _repeats(value: Any, text: str) -> bool:
+    """Whether ``text`` occurs in any string or key of a JSON value."""
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            if text in item:
+                return True
+        elif isinstance(item, dict):
+            pending.extend(item)
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+    return False
+
+
 def _mask_exact(value: Any, secrets: list[str]) -> Any:
     """Mask only the exact credential values; the raw review copy keeps everything else."""
     if isinstance(value, str):
@@ -1038,8 +1219,10 @@ def discover_tools(
     the identity of the production host, since a server can serve a different
     tool list to a client it recognizes as an observer. A ``raw_sink`` receives the
     unredacted server info, capabilities, instructions, tool descriptors, prompts
-    and resource templates that passed intake, with only the bearer token and
-    session ID masked, for review.
+    and resource templates that passed intake, with only the bearer token masked,
+    for review. The server's session identifier is never masked: a declaration that
+    repeats an identifier of ``MIN_GUARDED_SESSION_ID`` or more characters ends the
+    observation, and a shorter one is not checked.
     """
     result = DiscoveryResult()
     raw: dict[str, Any] = raw_sink if raw_sink is not None else {}
@@ -1196,7 +1379,20 @@ def discover_tools(
                 not 0x21 <= ord(c) <= 0x7E for c in session
             ):
                 raise DiscoveryError("invalid MCP session identifier")
-        secrets = [value for value in (bearer_token, session) if value]
+        # The server chooses its session identifier, so it is never a redaction pattern:
+        # as one, it would let the server blank any text of its own out of the inventory
+        # and the review copy while the fingerprints still bind that text. A declaration
+        # that repeats the identifier ends the observation instead.
+        guarded = (
+            session if session is not None and len(session) >= MIN_GUARDED_SESSION_ID else None
+        )
+
+        def refuse_session(declaration: Any) -> None:
+            if guarded is not None and _repeats(declaration, guarded):
+                raise DiscoveryError("server declaration repeats the session identifier")
+
+        secrets = [bearer_token] if bearer_token else []
+        refuse_session(hello)
         negotiated, server_info, capabilities, instructions, identity = check_server_hello(
             hello, secrets
         )
@@ -1216,6 +1412,7 @@ def discover_tools(
         extensions: dict[str, str] = {}
         for raw_tool in listing("tools/list", "tools"):
             check_deadline()
+            refuse_session(raw_tool)
             checked = check_served_tool(raw_tool, secrets)
             if checked.name in names:
                 raise DiscoveryError("duplicate tool identity across discovery pages")
@@ -1242,6 +1439,7 @@ def discover_tools(
                 return None, None
             for raw_item in raw_items:
                 check_deadline()
+                refuse_session(raw_item)
                 item = check_listed_item(raw_item, identity, secrets)
                 if item.identity in digests:
                     raise DiscoveryError("duplicate list entry identity")
@@ -1266,8 +1464,9 @@ def discover_tools(
         )
         result.complete = True
     except DiscoveryError as exc:
-        # DiscoveryError messages are fixed local diagnostics without payloads.
-        result.failures.append(redact_text(str(exc), [*protected, *([session] if session else [])]))
+        # DiscoveryError messages are fixed local diagnostics without payloads, so the
+        # server's session identifier is not a redaction pattern here either.
+        result.failures.append(redact_text(str(exc), protected))
         result.complete = False
     except (
         OSError,

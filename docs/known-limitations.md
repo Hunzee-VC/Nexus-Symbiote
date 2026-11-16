@@ -66,17 +66,25 @@ A way around a limit that its entry does not describe is worth a
   names it, so the default gates fail. A skill checked out with its own `.git`,
   including a Git submodule, whose `.git` is a file, or one whose script left a
   `__pycache__` beside it, fails them until that entry is removed.
+  Outside those directories the skip is silent, so a file the collectors would
+  otherwise record, such as model weights under `venv/weights/` or an instruction
+  file under `node_modules/`, produces no component, finding or drift alert. Review
+  a pull request that adds tracked files under one of these names.
 - **Case variants.** When a fixed path such as `CLAUDE.md`, `.mcp.json`,
   `.claude/settings.json` or a model directory's configuration, tokenizer or chat
   template file or `additional_chat_templates` directory is absent, a file or
   directory whose name differs only by case or Unicode normalization is a failure,
   because case-insensitive file systems open
-  it. When both exist, only the exact name is read, except for instruction files:
-  another spelling of a fixed instruction path, such as `claude.md` beside
-  `CLAUDE.md`, and of `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` or `.cursorrules` below
-  the root, such as `pkg/claude.md`, is a failure even beside the exact name, as are
-  those of nested `.claude/settings.json` files, because a case-insensitive checkout
-  holds one file for both names. `CODEX.md` and `codex.md` are both read. A spelling
+  it. When both exist, only the exact name is read, except for instruction and MCP
+  client files: another spelling of a fixed instruction path, such as `claude.md`
+  beside `CLAUDE.md`, and of `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` or `.cursorrules`
+  below the root, such as `pkg/claude.md`, is a failure even beside the exact name,
+  as are those of nested `.claude/settings.json` files and of a file with an
+  [MCP client name](#mcp-servers-and-tools) at any depth, such as `.MCP.json` beside
+  `.mcp.json` or `pkg/Mcp-Config.json`, of the client directory that holds one,
+  such as `pkg/.VSCode/mcp.json`, and of a root MCP client path, such as
+  `.Gemini/settings.json` beside `.gemini/settings.json`, because a case-insensitive checkout holds one file
+  for both names. `CODEX.md` and `codex.md` are both read. A spelling
   that a subagent, rule, prompt, skill or command directory walk inventories, such
   as `.claude/agents/gemini.md`, is read there instead. Rename any other such file,
   including a documentation page such as `docs/agents.md`, which case-insensitive
@@ -194,10 +202,16 @@ A way around a limit that its entry does not describe is worth a
   package index URLs as origins. With `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, `diff`
   alerts on any change to a server's command, arguments, environment or header
   values. Without it, `diff` still alerts on a changed command basename, launcher,
-  package or version, and on added or removed arguments, variables or headers, and
-  a server whose remaining values are unbound is a medium alert: argument,
-  environment and endpoint-path drift is undetectable. That alert does not say
-  which value changed. See [source binding](verification-source-binding.md).
+  package or version, on added or removed arguments, variables or headers, and on a
+  change to which named tools each field auto-approves or filters, and a server whose
+  remaining values are unbound is a medium alert: argument, environment and
+  endpoint-path drift is undetectable. Those values include a `cwd` other than `.`,
+  `./`, `${workspaceFolder}` or `${workspaceFolder}/` written exactly in a root
+  configuration file (` .` is another directory), any `cwd` in a nested one, whose
+  servers start in its own directory, `envFile`, `watchPaths`, `oauth`, `auth`, `dev`,
+  the Codex environment-name settings, and tool list entries that redaction changed
+  (a URL, a token, a scrubbed value), which are exported redacted. That alert does
+  not say which value changed. See [source binding](verification-source-binding.md).
 - **Without the key, the value itself is not compared.** A served directory widened
   from `./notes` to `/`, a changed flag, environment or header value, an endpoint or
   index path changed on the same host, a project resolver setting value, and the
@@ -209,7 +223,19 @@ A way around a limit that its entry does not describe is worth a
 - **Unbound values add to the score.** Each server with such values carries a low
   `completeness` risk that names the key. It is not a gap, but it adds 1 to the
   risk score, so about ten such servers add 10 points toward the default fail
-  threshold of 50.
+  threshold of 50. Redacted tool list entries are the exception: without the key
+  they are also a coverage gap (`tool list entries withheld by redaction`), which
+  fails `scan --check`, because two different entries can export the same text.
+- **Some credentials are scrubbed only whole.** A URL password that reads as a word
+  (`postgres`, `changeme`: under 16 characters, without a digit, punctuation or
+  mixed case) and a URL user name outside the known token formats are scrubbed only
+  as part of the value that holds them, so a tool list entry or text that repeats
+  one alone is exported in clear; a default such as `postgres:postgres` would
+  otherwise withhold every server and package named after the database. The OAuth
+  parameters sent in clear (client id, scopes, audiences, resource, redirect URI,
+  issuer) are not scrubbed. In an inline shell or `cmd` script a credential is found
+  by its shape or in a `NAME=value`, `--name=value` or `--name value` word, which
+  covers cmd's `set NAME=<scheme> <credential>`.
 - **Resolver settings outside the root are not read.** Settings are read from the
   root `.npmrc`, `bunfig.toml`, `.yarnrc.yml`, `.yarnrc`, `.env.yarn`, `uv.toml`
   and the `[tool.uv]` table of `pyproject.toml`. User and global configuration,
@@ -260,11 +286,31 @@ A way around a limit that its entry does not describe is worth a
 - **Every file with an MCP client name is parsed.** One that does not parse, or
   whose server map is not a map of server objects, is a failure even when it is not
   an MCP configuration. Rename such a file; excluding it records a gap instead.
+  Another spelling of a client name at any depth, such as `pkg/.MCP.json` or
+  `pkg/Mcp.Json`, or of the client directory that holds one, such as
+  `pkg/.VSCode/mcp.json`, `pkg/.kiro/Settings/mcp.json` or
+  `pkg/.Windsurf/mcp_config.json`, or of a host directory above one that does not
+  name its client, such as `pkg/.Kiro/mcp.json`, and of a dialect path at the root or
+  below it, such as `.Gemini/settings.json` or `pkg/.codex/Config.toml`, is a
+  [case-variant failure](#every-collector) and is not read, beside the exact
+  spelling too. Another spelling of a host directory that decides nothing, such as
+  `.VSCode` in `pkg/.VSCode/.mcp.json`, whose name decides its client, is read as
+  the exact spelling. Below the root, the names that the
+  [collector reference](collectors.md#what-each-collector-reads) lists for any depth
+  are read, and so is a nested copy of a root dialect path, such as
+  `pkg/.gemini/settings.json` or `pkg/.codex/config.toml`, as that dialect.
 - **Python server forms.** Servers are collected from `FastMCP` imported by name
   from `mcp.server`, `mcp.server.fastmcp`, `mcp.server.fastmcp.server`, `fastmcp`,
   `fastmcp.server` or `fastmcp.server.server`, and from `MCPServer` imported from
   `mcp.server.mcpserver`. Forms the collector recognizes but cannot follow are
-  gaps: the low-level `Server`, a constructor given `tools=` or `**` arguments, a
+  gaps: the low-level `Server`, a constructor given `tools=`, `tool_serializer=`,
+  `providers=`, `mount=`, `lifespan=`, `middleware=`, `tool_transformations=`,
+  `transforms=`, `extensions=`, `resources=`, `**` arguments, or more positional
+  arguments than the name and instructions (seven for `FastMCP` from `mcp.server` or
+  `mcp.server.fastmcp` and for `MCPServer`, whose further positionals are not handed
+  the server), because the SDK hands a lifespan the server, middleware and
+  transforms can rewrite the tool list and an extension's tools are added to the
+  server, a
   server passed to a helper other than the same-file helper described below, an
   aliased or subclassed factory,
   `FastMCP.from_openapi`, decorators on a server imported from another module, a
@@ -290,35 +336,137 @@ A way around a limit that its entry does not describe is worth a
   in a statement of its own, which discards it; and passing it to a function of
   the same file, undecorated and bound once, that uses that parameter only in
   these ways and not inside a nested function, lambda, class or comprehension.
+  The server must bind that parameter by the call alone: passed positionally
+  before any `*` spread, or by the keyword of a parameter that is not
+  positional-only; a `**` spread cannot rebind it. A server that may reach
+  another parameter, `*args` or `**kwargs`, as in `configure(*(), server)` or
+  `configure(srv=server)` with `srv` positional-only, is a gap. So is a call to
+  a helper that the file names anywhere other than as the function called, by
+  its name or as an attribute, as in `object.__setattr__(configure, "__code__",
+  code)` or `module.configure = swap`, since that can replace the body the call
+  runs.
   Any other use is a gap, such as saving, passing or dereferencing a bound method
   (`method = server.run`, `anyio.run(server.run_stdio_async)`), keeping a
   decorator, or naming the server in an annotation. An app or run coroutine still
   holds the server, so code that digs it back out of one other than by the
-  reflection below is not seen. A type in an annotation is the whole annotation,
+  reflection below is not seen. A request context also hands handlers the server,
+  so in any Python file the collector reads, an attribute named `fastmcp` or
+  `fastmcp_server`, with or without leading underscores, as in
+  `ctx.fastmcp.add_tool(...)`, `ctx._fastmcp` or the
+  `request.app.state.fastmcp_server` of a `fastmcp` HTTP app, is a gap. In a file
+  that imports from `mcp` or `fastmcp`, so is an attribute named `fastmcp_context`, `current_context`, `request_ctx`, `request_context` or
+  `mcp_server`, as in a middleware's `context.fastmcp_context` or an `MCPServer`
+  context's `ctx.mcp_server`, or one of the `fastmcp` accessors and dependency
+  defaults `get_server`, `current_server`, `fastmcp_request_ctx`, `CurrentFastMCP`,
+  `CurrentContext`, `OptionalCurrentContext`, `get_http_request` and
+  `CurrentRequest`, or the context variables and hooks `current_http_request`,
+  `extension_dispatch_scope`, `delegated_extension_scope`, `worker_server_resolver`
+  and `background_context_factory`, as in `def read_note(server=CurrentFastMCP())`
+  or `get_http_request().app`, each with or without leading underscores or behind a
+  literal `getattr(...)`, and so is
+  importing any of these names from `mcp` or `fastmcp`. Because a release can keep
+  the server in a private variable these lists do not name, importing any private
+  name (one leading underscore, not a dunder such as `__version__`) from an `mcp` or
+  `fastmcp` module, or reading one as an attribute or literal `getattr(...)` of an SDK
+  module, of a name imported from one or of a name assigned from either, as in
+  `extensions._extension_dispatch_scope` or `ext._hook` after `ext = extensions`, is a
+  gap too; a private name reached any other way, such as through a dynamic import, is
+  not seen. Only `mcp.server.fastmcp` reached by attributes alone from a name bound only
+  by `import mcp...`, as in `mcp.server.fastmcp.exceptions`, is a module path and not a
+  gap; `fastmcp` on any other object is, such as a settings object's `config.fastmcp`,
+  `getattr(mcp, "missing", ctx).fastmcp`, whose default can be any object, or
+  `mcp.types.carrier.fastmcp`, a value stored on a module. In a file that imports from
+  `mcp` or `fastmcp`, storing or deleting an attribute of an SDK module, of a name
+  imported from one or of a name assigned from either is a gap too, as in
+  `fastmcp.FastMCP.__init__ = hook`, `del S.FastMCP.list_tools` or
+  `fastmcp.settings.debug = True`, because it can change what servers built elsewhere
+  register or carry a context to code that reads it back. For both rules the default
+  of a literal `getattr(...)` counts as its object, as it is returned when the
+  attribute is missing; an SDK module or name reached through any other expression,
+  such as `(obj or fastmcp).FastMCP.__init__ = hook`, and a method call that changes an
+  SDK object are not seen. In a file that imports from `mcp` or
+  `fastmcp`, a parameter typed as the SDK `Context` (a `Context` imported from an
+  SDK module, a qualified `Context` of an SDK module, `getattr(..., "Context")`, or
+  a string forward-reference annotation naming or computing one), and a name bound in
+  a function body by a plain
+  assignment of the result of a `get_context()` call, by name or as an attribute of
+  anything, may only be read for `request_id`, `client_id`,
+  `session_id`, `session`, `headers`, `protocol_version`, `client_capabilities`,
+  `transport`, `task_id`, `origin_request_id` or `is_background_task`, compared with
+  `is`, tested, or have a known SDK method called on it: a logging, progress,
+  resource, prompt, elicitation, sampling, roots, state, notification, extension
+  or visibility method. Passing it to a call, storing, returning or aliasing it,
+  reading any other attribute without calling it (a bound method holds the
+  context), calling any other method (`model_copy()` returns the context), binding
+  the result of `get_context()` in a class or module body or to a name declared
+  `global` or `nonlocal` there, or
+  using `get_context` any other way (including `getattr(..., "get_context")`) is a gap, because it can hand the server to a module
+  the collector does not read. The imported `Context` itself may only appear in
+  parameter annotations: an alias such as `Ctx = Context` or
+  `Ctx = getattr(context, "Context")`, a subclass, an
+  `isinstance` check, a return or variable annotation, or importing it without
+  using it, which can re-export it to another module, is a gap. Using a context
+  only to log, report progress or read its request data is not a gap. A context
+  reached in any other way, such as an unannotated middleware context passed on,
+  a coroutine a context method returns, an HTTP request or app (whose state holds
+  the server) passed to code the collector does not read, an SDK module object
+  passed to code the collector does not read, or a context reached by reflection in a file that
+  names no MCP SDK or framework, which is not read, is not seen. A type in an annotation is the whole annotation,
   a member of a `|` union, or an argument of a generic of `typing`,
   `typing_extensions` or `collections.abc`, such as `Optional[FastMCP]`, or of a
   built-in generic such as `list[FastMCP]`. Any other part of an annotation, such
   as a call or another subscript, is analyzed as code, because annotations are
-  evaluated. In a file with a recognized server or PydanticAI agent, this
-  reflection is a gap even when harmless: a call by name of `locals`, `globals`,
-  `vars`, `eval` or `exec`; `__builtins__` or an import of the `builtins` module;
-  a call by name of `getattr`, `setattr` or `delattr`, unless the object is a
-  literal or a name, or attribute of a name, that the file binds only by import
-  and the attribute is a literal name other than `modules` and those listed next, so
-  `getattr(os, "environ")` is accepted and `getattr(self, "name")` is a gap; the
-  attributes `__self__`, `__closure__`, `__globals__`, `__builtins__`, `__dict__`,
-  `__annotations__`, `__traceback__`, `__getattribute__`, `tb_frame`, `tb_next`,
-  `f_back`, `f_locals`, `f_globals`, `f_builtins`, `gi_frame`, `cr_frame`,
-  `ag_frame`, `_getframe`, `currentframe`, `getouterframes`, `getinnerframes`,
-  `getargvalues` and `getclosurevars`, also imported by name; and a `modules`
+  evaluated. So is a string literal wherever `typing.get_type_hints` and the SDKs
+  evaluate it as a forward reference: the whole annotation, a member of a `|` union,
+  an element of a tuple or list, or an argument of any subscript, since a generic
+  defined anywhere turns a string argument into a forward reference. The arguments of
+  `Literal` and the metadata of `Annotated` are values and are not parsed, each
+  recognized by the name it is imported as from `typing`, `typing_extensions` or
+  `collections.abc`, not the name it is bound to. A string is parsed as
+  `typing.ForwardRef` compiles it, a leading `*` unpacked, so
+  `x: "*(mcp.add_tool(hidden) or [str])"` is code. In a file with a recognized server,
+  an `mcp` or `fastmcp` import, or a PydanticAI agent, such a string that does not
+  parse, perhaps only for the Python that runs the scan, an f-string there, a string
+  longer than 4,096 characters, strings nested four deep and more than 10,000 syntax
+  nodes parsed from the file's annotation strings are gaps. A string that becomes a
+  type another way is code the collector does not see: an annotation that evaluates
+  to a string bound to a name or built at run time, as in `x: NOTE_TYPE`, a `TypeVar`
+  bound, or a field type passed to `TypedDict(...)` or `NamedTuple(...)`. In a file
+  with a recognized server, an `mcp` or `fastmcp` import, or a PydanticAI agent, this
+  reflection is a gap even when harmless: a reference by name to `locals`, `globals`,
+  `vars`, `eval`, `exec`, `__import__`, `setattr` or `delattr`, an alias such as
+  `peek = locals` included, except in the body of a function, not a nested function or
+  class, that has a parameter of that name, so a tool
+  `def render(template: str, vars: dict)` may use `vars` but a local variable named
+  `vars` is a gap; `__builtins__`, `__annotations__` or `__annotate__` bound or read by
+  name, as in a class body's `__annotations__ = {...}`, or an import of `builtins`,
+  `__main__`, `_imp`, `imp`, `_frozen_importlib`, `_frozen_importlib_external`,
+  `_importlib` or `runpy`; a reference by name to `getattr`, unless it is not rebound and is
+  called directly with two or three positional arguments whose attribute is a literal
+  name other than `modules` and those listed next, on an object that is not a recognized
+  server, typed `Context` or agent (and checked by the same handle, private-attribute
+  and context rules as an attribute read), so `getattr(self, "name")`,
+  `getattr(os, "environ")` and `getattr(block, "text", "")` are accepted while
+  `getattr(mcp, "tool")`, `getattr(ctx, "fastmcp")` and `fn = getattr` are gaps;
+  the attributes `__self__`, `__closure__`, `__globals__`, `__builtins__`,
+  `__dict__`, `__annotations__`, `__annotate__`, `__traceback__`, `__code__`,
+  `__getattribute__`, `__setattr__`, `__delattr__`, `__import__`, `import_module`,
+  `resolve_name`, `attrgetter`, `methodcaller`, `getattr`, `ForwardRef`,
+  `exec_module`, `load_module`, `spec_from_file_location`, `_gcd_import`,
+  `_bootstrap`, `_bootstrap_external`, `tb_frame`, `tb_next`, `f_back`, `f_locals`, `f_globals`,
+  `f_builtins`, `gi_frame`, `cr_frame`, `ag_frame`, `_getframe`, `currentframe`,
+  `getouterframes`, `getinnerframes`, `getargvalues`, `getclosurevars`,
+  `getmodule`, `stack`, `trace` and `getattr_static`, also
+  imported by name, so `importlib.import_module(...)`,
+  `from operator import attrgetter` and `typing.ForwardRef("...")` are gaps, harmless
+  or not; and a `modules`
   attribute that is not called, as in `sys.modules[__name__]`, or `modules`
   imported from `sys`. A method that only shares a name, such as `model.eval()`
   or `model.modules()`, is not reflection. Other reflection is not recognized,
-  such as a reflective builtin under another name,
-  `importlib.import_module(__name__)`, a module that imports itself, `gc`, or
-  reflection in another file, including on the traceback of an exception that
-  propagated out of a server's run, so a completed scan cannot prove that a
-  server or agent never escaped.
+  such as a reflective builtin reached through another module, a module that
+  imports itself by its own literal name, as `import server` does in `server.py`, `gc`, or reflection in another file,
+  including on the traceback of an exception that propagated out of a server's run,
+  so a completed scan cannot prove that a server or agent never escaped.
   Any
   call whose first argument, or `name` keyword, is a literal that names `mcp`,
   `mcp.server` or `fastmcp`, or a submodule of the last two, is a gap whatever the
@@ -329,15 +477,16 @@ A way around a limit that its entry does not describe is worth a
   position, a keyword or an element of a list, tuple, set or dict argument, also
   behind `*` or `**`, so `functools.partial`, `map` and a thread target's `args` or
   `kwargs` are covered too. A call to another
-  function with such a literal is a gap as well, except `logging.getLogger` and a
-  server class imported from its own module, such as `FastMCP("mcp")`. A literal is a string or an
+  function with such a literal is a gap as well, except `logging.getLogger`, a
+  server class imported from its own module, such as `FastMCP("mcp")`, and the
+  attribute name of an unshadowed `getattr` call, such as `getattr(ns, "mcp")`. A literal is a string or an
   f-string without placeholders. A dynamic import (`importlib.import_module`,
   `__import__` or `pkgutil.resolve_name`, or a name bound to one of them by an
   assignment, an unpacking, a `for`, comprehension or `with ... as` target, an
   import alias or a parameter default) counts on any literal argument, and a
   relative name counts once resolved against a literal package or `__import__`
   globals. A module name computed at run time, a relative name given to a loader
-  no such binding shows, and a loader reached through `getattr`, `globals()` or
+  no such binding shows, and a loader reached through a computed `getattr`, `globals()` or
   code in a string are not followed and leave no gap.
 - **Python files without a reference are not examined.** A file that names neither
   `mcp`, a supported agent framework nor an MCP launcher or server class is not parsed.
@@ -418,20 +567,59 @@ A way around a limit that its entry does not describe is worth a
   TFLite, Core ML and ExecuTorch files are rated `unknown`: Keras Lambda layers,
   SavedModel operations and custom operators are not inspected. Each is a high
   finding, which the default gate does not fail on by severity alone.
-- **Some files are not inventoried.** Pickles under names other than the
-  [listed suffixes](model-integrity.md#model-files-and-references), NumPy `.npy` and
-  `.npz` arrays, and `.pb` files other than `saved_model.pb` produce no component.
-- **Pickle recognition under another suffix is bounded.** A binary pickle is
-  recognized by its PROTO opcode and 16 well-formed opcodes in the first 64 KiB, a
-  text-protocol pickle by a consistent stream of at most 4,096 opcodes, and a ZIP
-  archive by a `.pkl` member in its first local header or in a central directory of
-  at most 1 MiB, read from the end of the archive. A pickle hidden otherwise under
-  `.onnx`, `.gguf` or another suffix is rated `unknown`, a high finding, and
+- **Some files are not inventoried.** A file outside the
+  [listed names](model-integrity.md#model-files-and-references) is inventoried by
+  its content only when it is named `.npy`, `.npz` or `.dat` or has any name below a
+  directory named `model`, `models`, `weights`, `checkpoint` or `checkpoints`, and it
+  does not have the name of a model directory's configuration, tokenizer or chat
+  template file, such as `config.json`, and is not a Python or Jinja source. There, a
+  recognized pickle, a NumPy array with an object dtype (which
+  `np.load(allow_pickle=True)` unpickles) and a ZIP archive with a pickle-family
+  member or such an array as a member are rated
+  `unsafe-code-execution`, and a NumPy header or ZIP archive left unread at the
+  bounds below is rated `unknown`. A pickle renamed anywhere else, an unrecognized
+  pickle, a numeric NumPy array, a ZIP archive with neither kind of member, and `.pb`
+  files other than `saved_model.pb` produce no component. A candidate ZIP archive is
+  read to its end and digested, as a model archive is, and a candidate larger than
+  the `model-bytes` limit is a collection failure.
+- **Content recognition is bounded.** A binary pickle is recognized by its PROTO
+  opcode and 16 well-formed opcodes in the first 64 KiB, and a text-protocol pickle
+  by a consistent stream of at most 4,096 opcodes. In a file inventoried only by its
+  content, a text-protocol stream must also name an importable callable (a `GLOBAL`
+  or `INST` whose module and name are dotted identifiers), so text that only parses as
+  one, such as a `.gitignore` under `checkpoints/`, is not inventoried; text whose
+  first lines happen to read as such a reference, such as `cache`, `logs`, `.`, still
+  is. A ZIP member is a pickle when its name ends in a pickle-family suffix, so `.pkl`
+  and `archive/.pkl` count, and a central directory entry whose 32-bit size or offset
+  is `0xFFFFFFFF` without a ZIP64 field is read as written, as `zipfile` reads it. A
+  directory that turns malformed after it lists a pickle-family member, such as with an
+  entry whose name runs past the end of the file, still rates the archive
+  `unsafe-code-execution`. An entry whose ZIP64 field is too short to locate its data,
+  which `zipfile` refuses, is passed over by its own lengths, as a loader that reads
+  past the field does, so it hides no pickle-family member, its own name included;
+  when no such member is listed, an entry that cannot be located leaves the archive
+  `unknown`. A NumPy array's version 1, 2 or 3 header is parsed when it
+  is at most 64 KiB long, as every version 1 header is, and
+  while the 16,000,000 structure units one scan shares with the ONNX and GGUF readers
+  last, at one unit a header byte; only its `descr` value is read for types, so a
+  field named `O` is not one. A ZIP
+  archive is recognized by a pickle-family member in its first local header or in a
+  central directory of at most 1 MiB, read from the end of the archive, including
+  ZIP64, and by an object-dtype array as any member, read from the member's local
+  header and the start of its stored or DEFLATE-compressed data. A longer array
+  header, a longer or malformed directory, a member compressed by another method,
+  such as BZIP2 or LZMA, and a member whose data runs past the next member's local
+  header are rated `unknown`, a high finding; a pickle hidden otherwise under
+  `.onnx`, `.gguf` or another suffix is rated `unknown` too, and
   `validate --project` still refuses it as unverified.
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat
   templates are checked for potential Python-internals access patterns, not evaluated;
-  computed names can evade the heuristic, and a match does not establish a sandbox
-  escape or execution. A template file larger
+  a match does not establish a sandbox escape or execution. Computed names can evade
+  the heuristic: some constructions of dunder names, such as `dict(__class__=1)|first`
+  or `("_"*2) ~ "class" ~ ("_"*2)`, are not found, although direct attribute access such
+  as `obj.__class__` is. Without other unsafe evidence, a SafeTensors model beside an
+  unrecognized template keeps its `safe` serialization rating; that rating does not
+  establish that the template is safe to render. A template file larger
   than the `file-bytes` limit is digested but not checked, and is a coverage gap.
   SafeTensors tensor bytes are hashed but not inspected. See
   [what this does not establish](model-integrity.md#what-this-does-not-establish).
@@ -461,6 +649,12 @@ A way around a limit that its entry does not describe is worth a
   text is searched as written, so more is looked up; a host that reads Markdown
   otherwise, such as with GitHub's table or autolink extensions, can still import a
   file from text read here as code.
+  A reference is read only where `@` starts the text or follows white space, and
+  without the sentence punctuation after it. A host that also starts a reference
+  after inline markup (`**@docs/x.md**`, the text of a link, `<b>@x.md</b>`), keeps that
+  punctuation, decodes an escaped space, or interprets a `#fragment` instead of
+  treating it as part of the literal filename can import a different file that is
+  not inventoried here; which hosts do has not been established by test.
   An import that leaves the project root, names an excluded path or lies deeper than
   the `depth` limit is a gap, so write a path alias such as `@/components` as code. An
   import of a file named as holding credentials, as the next entry lists them, is a
@@ -550,9 +744,67 @@ A way around a limit that its entry does not describe is worth a
   UTF-32 file without a byte-order mark.
 - **Hidden-character detection is character-based.** Lookalike letters are not
   detected, and neither are control characters such as ESC, spaces other than
-  U+0020, such as U+00A0 and U+3000, or private-use characters. HTML and Markdown
-  comments are reported by count, not text, and only in Markdown files and
-  instruction files without a suffix, such as `.cursorrules`.
+  U+0020, such as U+00A0 and U+3000, or private-use characters.
+- **Hidden markup means comments, unused definitions and footnotes.** HTML and
+  Markdown comments are reported by count, not text, and only in Markdown files and
+  instruction files without a suffix, such as `.cursorrules`. They are HTML comments,
+  processing instructions, declarations and CDATA sections outside code, the other
+  forms that HTML parsers read as comments (`<! ...>`, `</ ...>`) in HTML blocks, link
+  reference definitions that no link uses or that repeat a label, definitions written
+  as comments, with a `#` or `<>` destination, used or not and also in HTML blocks,
+  and footnotes (`[^x]: ...`) that nothing references, which GitHub drops. Text that a
+  rendered view hides in other ways is not reported: the title of a link or image,
+  shown only on hover, whether written inline or in a definition with another
+  destination that a link with visible text, or any image, uses, however short that
+  text and even when the image's alt text is empty (`![][label]`), and the
+  label of such a definition when only full references, such as `[text][label]`, use
+  it; alt text and attribute values; and the content of elements that a sanitizer
+  removes or a viewer collapses, such as `<script>`, `<style>`, `<details>` or an
+  element with `hidden`, apart from the comments above. A definition used only by a
+  link inside an image description, which renders as that image's alt text, is not
+  counted either.
+- **The high rating for hidden markup is by shape.** Each comment is rated by its
+  whole text, every line of a title, footnote or HTML comment included, but only a
+  URL, a path under `~/`, one of the words ignore, disregard, exfiltrate, execute,
+  download, upload, send, steal, override, bypass, curl, wget, fetch, eval and
+  install, whole and in any case, or `run` in one of the forms that the
+  [finding catalog](finding-catalog.md) lists makes it high. An instruction in other
+  words or other forms of those, such as `<!-- always answer in French -->` or
+  `ignoring`, is reported by count and rated low, so the Action's default
+  `fail-on-severity: high` passes it.
+- **Hidden markup is read to err toward a finding.** A reference counts as a use of a
+  definition only where every reader makes a link of it that shows: not in code, raw
+  HTML, an autolink, a URL that GitHub makes an autolink of (`https://`, `http://`
+  or `ftp://` after anything but a letter or `[`, or `www.` after a space, `*`, `_`,
+  `~` or `(`, up to a space or `<`), or a link destination, not as a link whose text
+  shows only spaces, ASCII punctuation, entities and tags, as in `[][x]` or `[.][x]`,
+  not with a `|` in its label, which a table cell can split, not right before brackets
+  that nest, as in `[b][[y]]`, and not later in a paragraph than an inline link whose
+  destination nests parentheses twice, or than a link that only markdown-it reads,
+  with tabs between its parts, and that holds a backtick or `<`. A definition used
+  only there is reported as unused, and so is a footnote referenced only there or
+  from a footnote that is not referenced. A line inside a paragraph that has the form
+  of a definition is counted, though CommonMark shows it as text, and so is a
+  definition in the most lenient form a reader takes: cmark-gfm takes a destination
+  with unbalanced parentheses and markdown-it a title right after a pointy
+  destination, and a title runs to the next line that ends with its closing quote or
+  parenthesis. A footnote runs to the next footnote or the end of its paragraph, and
+  takes as its continuation the indented code after it and, as cmark-gfm does, the
+  lines right after that code that start no block, such as a paragraph line or an
+  HTML tag that cannot interrupt a paragraph, even when that code ends with a heading
+  or a closed fence, after which GitHub shows them. Where CommonMark readers
+  disagree about the block structure, as when a line after the definitions that open
+  a paragraph is indented four columns or starts with `2.`, or a block quote is
+  followed by a `>` indented four columns, every line of the file that has the form of
+  a definition or a footnote is counted as unused, used or not and in code and HTML
+  blocks too, and so is every processing instruction, declaration, CDATA section and
+  other form an HTML block can hide, even in prose or a code span, as in
+  ``(`<!`)``. A footnote then runs to the next footnote or blank line and on through
+  each later run of lines whose first line is indented four columns past its block
+  quote marks, a tab counting as four, as cmark-gfm continues it. Each processing
+  instruction, declaration, CDATA section or other such form is counted to the end
+  CommonMark gives it (`?>`, `>` or `]]>`), or to the end of its HTML block when it
+  is not closed, although an HTML parser hides it only up to its first `>`.
 - **Settings alerts do not say what changed.** Rules, hook commands and other
   settings are bound by a digest of each settings file, not recorded. A changed
   value, such as an added hook command or a removed deny rule, raises a high
@@ -664,10 +916,60 @@ A way around a limit that its entry does not describe is worth a
   lower case. The `wheels` and `sdist` URLs of a
   `uv.lock` record are not read, so the recorded origin is the index, not where each
   artifact is downloaded from. Lockfiles of more than one npm package manager, or both
-  `uv.lock` and `poetry.lock`, are a gap and bind no lockfile evidence.
+  `uv.lock` and `poetry.lock`, are a gap and bind no lockfile evidence. `yarn.lock` is
+  read with a strict subset of Yarn 1's lockfile syntax, and of the YAML that Yarn
+  Berry writes: a lockfile edited into another layout that Yarn still accepts, such
+  as one with indented comments or a carriage return without a line feed, is a
+  collection failure, and so is one with a construct Yarn reads but never writes,
+  such as an empty stanza or an unknown nested map in a Yarn 1 stanza. Which of two
+  Yarn 1 stanzas with the same version Yarn installs depends on the order it resolves
+  dependencies in, which is not modeled: when another range's stanza with that version
+  records another URL, integrity or checksum, the package binds no lockfile evidence,
+  even where Yarn would install the declared one. A Yarn Berry lockfile with a record
+  of a package whose name Yarn 4 hashes as it hashes the declared one, such as
+  `@op/enai` for `openai`, binds neither, even for another range that Yarn would keep
+  apart.
+  A pnpm record whose key's peer suffix holds anything but package names, exact
+  versions and patch hashes in balanced parentheses is recorded as
+  `<name>@<version>(***)`, which no JSON pointer resolves; the root importer's
+  `version`, or the lockfile's only record of the package, names the key. A Yarn
+  Berry record is named by the one descriptor the declared spec matched, not by the
+  stanza's whole key. Exact versions are recorded as the lockfile writes them, so a
+  prerelease such as `4.0.0-<text>` keeps its text, credential-shaped or not.
+- **A Yarn Berry checksum counts as Yarn 4 checks it.** The collector models the cache
+  key `10c0` that Yarn 4 computes at its default compression level, and reads Yarn's
+  settings from the root `.yarnrc.yml` and the release `package.json` names for
+  Corepack only. A project that runs another Yarn release through the Yarn installed on
+  the runner, with Corepack off or `package.json` naming none, or through a `.yarnrc`
+  `yarn-path` that Yarn 1 follows, may compute another key and accept archives
+  unchecked, and so may user or global configuration, a `.yarnrc.yml` in a parent
+  directory and `YARN_*` environment variables such as `YARN_CHECKSUM_BEHAVIOR` or
+  `YARN_YARN_PATH`, none of which are read. An archive already in the runner's
+  global cache, such as one a CI cache restores, is checked against the lockfile's
+  checksum only, not against the registry. A lockfile that Yarn 2 or 3 wrote, with
+  `cacheKey: 8`, has a `missing_lockfile_integrity` finding even where Yarn 3 installs
+  and checks it.
 - **Some lockfiles are not read.** `Pipfile.lock`, `pdm.lock`, `bun.lock` and
   `bun.lockb` give each package they may resolve a low `lockfile_unread` finding,
   not a gap.
+- **Patches are recognized, not read.** An npm package that a patch names in
+  `package.json` (`pnpm.patchedDependencies` or Bun's `patchedDependencies`),
+  `pnpm-workspace.yaml` or `pnpm-lock.yaml`, or that a pnpm record marks as patched,
+  binds no package URL or lockfile evidence and is a gap, whatever version the patch
+  names. Without a package URL it is not queried for advisories, although the release
+  it patches may have them. The patch file is not read, so what it changes is not
+  recorded. A patch of a catalogued AI package that `package.json` does not declare,
+  such as the `openai` that `@langchain/openai` depends on, is the same gap with no
+  finding, since no component binds that package, and the packages that depend on it
+  keep their lockfile evidence. A patch that only `pnpm-lock.yaml` names is read only
+  when the lockfile is, which needs an inventoried package that `package.json` declares
+  from a registry and that no other patch names; pnpm 10 applies only the patches its
+  settings name, refuses a frozen install from a lockfile that names others, and drops
+  them from the lockfile otherwise. A patch of a package outside the catalog is not
+  reported, whether `package.json` declares it or it is a transitive dependency of an
+  inventoried package. Code that an install runs, such as `patch-package` from a
+  `postinstall` script or a `.pnpmfile.cjs` hook, can change installed packages with no
+  finding.
 - **A pin in any root file resolves a range.** A PyPI range that an exact pin of the
   same package in another root file satisfies is taken as resolved, even when that
   file, such as `requirements-docs.txt`, is never installed.
@@ -683,6 +985,11 @@ A way around a limit that its entry does not describe is worth a
 
 ## A2A and RAG
 
+- **Ambiguous redacted A2A scheme identifiers are refused.** Distinct scheme names
+  that redact to the same label anywhere in a card, including skill requirements,
+  cause collection failure even with the binding key. Rename them to distinct
+  non-secret identifiers and recollect/review the inventory. Card structure v4
+  supersedes v3; see [snapshot migration](verification-source-binding.md#upgrade-existing-snapshots).
 - **Same-host URL changes need the binding key.** A2A and RAG records export URLs as
   origins. Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a path or query change on the
   same host that keeps the path depth changes no digest, and neither does a changed
@@ -830,7 +1137,8 @@ A way around a limit that its entry does not describe is worth a
 - **The Action's trust root ages.** The Action gives its scans an empty private
   cache, so it uses the root embedded in its hash-locked `sigstore` package. A
   bundle that relies on a key Sigstore introduced later fails until you update the
-  Action pin.
+  Action pin. The reverse holds too: a key that Sigstore has retired or revoked
+  since that package was released stays trusted until you update the pin.
 
 ## Attestations
 
@@ -1101,6 +1409,34 @@ A way around a limit that its entry does not describe is worth a
 - **Launcher pins cover the launcher only.** They do not authenticate the operating
   system, interpreter or libraries. Run launchers in an isolated worker, as
   [security boundaries](../SECURITY.md#security-boundaries) describe.
+- **The PID namespace contains only the launcher's own processes.** Cleanup kills the
+  namespace init and waits until the kernel has ended the namespace, but a process
+  that the launcher has another service start for it, for example through
+  `systemd-run --user`, `at`, `cron` or D-Bus activation, runs outside the namespace
+  and is not ended. If the calling process is killed before its cleanup runs, nothing
+  ends the namespace. A namespace that has not ended 5 seconds after the SIGKILL, for
+  example because a process in it is blocked in the kernel, fails the server with
+  `isolation-teardown-failed`, and that process may still be running. Use a worker
+  whose services and lifetime you control; see [`verify-live`](cli-reference.md#verify-live).
+- **Without a pidfd, a launcher that kills `unshare` outlives the session.** Cleanup
+  reaches the namespace init through a pidfd taken before the launcher runs. Where it
+  cannot take one, because the running interpreter cannot be executed separately (a
+  frozen build) or the kernel cannot open a pidfd (before Linux 5.3, or a seccomp
+  policy that refuses `pidfd_open`), the launcher runs without one. A launcher there that
+  clears its parent-death signal, calls `setsid` and kills `unshare` from a child it
+  leaves in `unshare`'s process group is reparented outside the session, and once
+  `unshare` has died its pid cannot be told from a reused one, so it is not
+  signalled. The server fails with `isolation-teardown-failed`, but the launcher and
+  everything it started keep running. The same reason is reported when the launcher
+  only crashed, because `unshare` ends with the signal that ended the launcher.
+- **Inside some user namespaces, every launch policy is refused.** `verify-live`
+  accepts a launch policy only when `/` and every directory above it are owned by root
+  or by you. Inside a user namespace that does not map host root and keeps the host's
+  file system, such as one made with `unshare -r`, `/` and `/tmp` appear owned by the
+  overflow user (usually uid 65534), so every policy is refused, and no option
+  overrides the check. In a sandbox that binds host directories into such a
+  namespace, such as bubblewrap, a policy below any of them is refused. Isolate the
+  worker in a way that keeps those owners; see [launch policy](cli-reference.md#launch-policy).
 - **The offline guard is a tripwire, not a sandbox.** Native code can bypass it, a
   process `verify-live` starts is not covered, and live mode removes it for the
   three live commands. Add an operating-system network boundary where you need one;

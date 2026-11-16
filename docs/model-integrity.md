@@ -15,6 +15,81 @@ inside an archive or compression suffix, such as `checkpoint.pth.tar` or
 `model.pkl.gz`, counts as pickle family too. TensorFlow graphs named
 `saved_model.pb` or `saved_model.pbtxt` are collected; other `.pb` files are not.
 
+A file that no name above rates is inventoried by its content when it is named
+`.npy`, `.npz` or `.dat`, or has any name below a directory named `model`, `models`,
+`weights`, `checkpoint` or `checkpoints`. A file named as the configuration,
+tokenizer and chat template files that a model directory's readers open are, such
+as `config.json` or `tokenizer.json`, and Python and Jinja sources are not checked
+this way. Such a file is a component when its content is rated
+`unsafe-code-execution` by the checks in the table below, or when the content is a
+NumPy array, a ZIP archive or a pickle that those checks' bounds left unread, which
+is rated `unknown`.
+
+A pickle is rated by what `pickle.load` does with it. The check reads the first
+64 KiB as `pickle.load` reads them from `io.BytesIO`, in a loop, as `torch.load` reads
+the three header pickles of `torch.save`'s legacy format before the main one: once as
+the C unpickler and once as the pure-Python one, opcode by opcode, with the same
+frame handling, stack, MARK and memo rules and the same errors, for at most 4,096
+opcodes and 64 MARKs over all the pickles read. Where the unpicklers of CPython 3.11
+to 3.14 differ, it takes every reading one of them takes: `INT` and `LONG` text in
+base 0, as up to 3.13 (`I0x1f`), and in base 10, as from 3.14 (`I08`), and, for the C
+unpickler of 3.11 and 3.12, a read past the end of a frame, which goes on from where
+the pickle stands or from the frame's end. A call that one supported version reaches
+is rated whatever version runs the scan. It never imports, calls or builds an
+object: what `find_class` returns is a placeholder that stands for any attribute of a
+module, a class or a function as well as `os.environ`, `sys.path` or
+`builtins.__dict__`, and a module or name that is not a dotted identifier, which no
+import finds, fails as the import does. A pickle
+ends where `pickle.load` would stop: at STOP, where the next one starts, or at the
+first error, such as a byte that is no opcode, PROTO above 5, a stack underflow, a
+MARK that is missing, a read of a memo slot never stored, an unhashable key or the end
+of the file, after which nothing is read. The ratings are:
+
+- A pickle that hands what `find_class` returned to anything but the stack and the
+  memo before it ends is `unsafe-code-execution`, wherever it starts and whatever
+  follows: `REDUCE`, `INST`, `OBJ`, `NEWOBJ` and `NEWOBJ_EX` call it, `BUILD` calls its
+  `__setstate__`, `SETITEM`, `SETITEMS`, `APPEND`, `APPENDS` and `ADDITEMS` call its
+  `__setitem__`, `extend`, `append` or `add` (so `builtins.__dict__['len'] = os.system`
+  or `os.environ['LD_PRELOAD'] = ...` needs no call opcode), and a key, set item,
+  argument list, state, buffer or `STACK_GLOBAL` string that is the resolved object
+  runs its methods or passes a type check an object of the right type would pass. A
+  call reached only through a name that is not a dotted identifier, or through what a
+  loader's `persistent_load` returned, counts for nothing.
+- A pickle that the 64 KiB, opcode or MARK bound cuts short before the loader's
+  behaviour is decided is `unknown` when it follows an earlier STOP, when the file
+  starts with PROTO, or when the file has a model name, and the explanation says
+  whether it had already resolved an importable name. On its own, a text-protocol stream cut
+  short is not rated by content: as `N.B.`, `Mar.`, `VERSION`, `.cache` or a list of
+  file names, text reads as such streams.
+- A pickle that resolves an importable name and never uses it is `unknown`, as the
+  loader imported the name, when it returns it at STOP (`cos\nsystem\n.`) or, when the
+  pickle starts with PROTO or the file has a model name, when it ends at an error. A pickle
+  that ends before `find_class` returns, and a text-protocol one found by content that
+  names something before an error, are not components: `VERSION`, `.h`, `cache`,
+  `logs`, `README.md` reads as a pickle whose memo read fails before anything is
+  resolved, and `VERSION`, `.cache`, `build`, `bin` as one whose BUILD has no
+  operands.
+
+A pickle whose STOP falls inside a protocol 4 or 5 FRAME with bytes left in the frame
+is read on from both places a loader resumes: after the frame, as `io.BytesIO` and an
+unbuffered file give the bytes, and right after the STOP, as the C unpickler reading a
+buffered file, such as the one `torch.load` opens for a path, does. The worse reading
+counts, and such a file is rated `unknown` at least. Under a model suffix other than
+the pickle family, content is also recognized by its shape, as before: a binary
+pickle with PROTO and 16 well-formed opcodes in its first 64 KiB, or a stream that
+passes `pickletools` checks to its first STOP, is `unsafe-code-execution`.
+Any other content, such as a numeric NumPy array or a ZIP archive with
+neither a pickle-family member nor an object-dtype array as a member, is not a
+component. Each such file is opened once, after every file that the models with a
+name bind and their directories configure has been read, and only if it is not one
+of those files. Reading stops as soon as its content is known not to be a payload:
+after the first 8 bytes when they can start no pickle, NumPy array or ZIP archive,
+after at most 64 KiB when they can start a pickle, and after the header of a NumPy
+array; a ZIP archive is read to its end, as a model archive is. A component is
+digested from the same read, so each byte is charged once to the `model-total-bytes`
+limit. A file larger than the `model-bytes` limit is a collection failure, as a
+model file is.
+
 Each model file is one component. Its `bom_ref` is `model:` followed by the
 file's path relative to the scanned root, and its `name` and `source_path` are
 that relative path, so the same tree scanned at two locations produces identical
@@ -25,10 +100,10 @@ The serialization rating is:
 
 | Rating | When |
 | --- | --- |
-| `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or content recognized as a binary or text-protocol pickle, or a ZIP archive with a `.pkl` member (as `torch.save` writes `data.pkl`), under any other model suffix. A binary pickle is recognized by its PROTO opcode and at least 16 well-formed opcodes in its first 64 KiB, whatever follows them; a text-protocol one by a consistent opcode stream of at most 4,096 opcodes; a ZIP member by the archive's first local header or by its central directory, read from the end of the archive up to 1 MiB |
+| `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or, under any other model suffix and for a file inventoried by its content, content recognized as a binary or text-protocol pickle, a NumPy array with an object dtype, which `np.load(allow_pickle=True)` unpickles, or a ZIP archive with a pickle-family member (`.pkl`, as `torch.save` writes `data.pkl`, `.pickle`, the other listed suffixes, or such a name inside a compression suffix such as `.pkl.gz`) or with such an array as a member. A pickle is recognized when `pickle.load`, read as [above](#model-files-and-references), calls or changes what it resolved within the first 64 KiB and 4,096 opcodes, before any flaw that ends it, as `pickle.load` runs that call first. Under a model suffix, a binary pickle is also recognized by its PROTO opcode and at least 16 well-formed opcodes in its first 64 KiB, whatever follows them, and a text-protocol one by a consistent opcode stream of at most 4,096 opcodes to its first STOP. An object dtype is found in a NumPy version 1, 2 or 3 header of at most 64 KiB, which holds every version 1 header however it is padded, parsed as `np.load` parses it; only its `descr` value names types, in structured, nested and subarray dtypes too, so a field name is never taken for a type. A ZIP member's name is read from the archive's first local header or from its central directory, read from the end of the archive up to 1 MiB, including ZIP64; every listed member, whatever its name, is checked for an array from its local header and the start of its data, stored or DEFLATE-compressed |
 | `safe` | A SafeTensors file whose header is UTF-8 JSON with string metadata, known dtypes and tensor spans that index the whole data region, with no configured chat template matching the access-pattern heuristic. The rating is not a guarantee that the template is safe; `validate` compares templates only through its completeness check |
 | `unsafe-template-injection` | A GGUF file whose embedded chat template matches the access-pattern heuristic, or a SafeTensors file that would be `safe` in a directory whose Hugging Face chat template matches it. A match does not establish that the renderer executes the pattern or that its sandbox is bypassed |
-| `unknown` | Everything else, including ONNX, GGUF, Keras, HDF5, SavedModel, TFLite, Core ML and ExecuTorch files, and a SafeTensors header over the 1 MiB inspection limit |
+| `unknown` | Everything else, including ONNX, GGUF, Keras, HDF5, SavedModel, TFLite, Core ML and ExecuTorch files, a pickle that the 64 KiB, 4,096-opcode or 64-MARK bound cuts short before `pickle.load` calls anything, where [the check above](#model-files-and-references) rates it, a SafeTensors header over the 1 MiB inspection limit, a NumPy array header over 64 KiB or past the 16,000,000 structure units one scan shares with the ONNX and GGUF readers, at one unit a header byte, and a ZIP archive whose central directory is malformed or over 1 MiB or that has a member that was not checked: one compressed by another method, such as BZIP2 or LZMA, one whose data runs past the next member's local header, or one with an array header past those limits |
 
 ## Files bound to the weights
 
@@ -152,8 +227,8 @@ checked, and is a coverage gap in `surfaces_excluded`.
 
 A GGUF file whose metadata exceeds the reader's bounds (65,536 keys, 16 MiB
 strings, 2,097,152 array items, 128 MiB of metadata, or the 16,000,000
-structure units one scan may spend on ONNX and GGUF files) keeps the rating
-`unknown`, records `properties.gguf_metadata` and is a coverage gap in
+structure units one scan may spend on ONNX and GGUF files and NumPy array headers)
+keeps the rating `unknown`, records `properties.gguf_metadata` and is a coverage gap in
 `surfaces_excluded`, because its chat templates were not inspected.
 
 ## Operator signature policy
@@ -164,10 +239,16 @@ same policy to `scan`, `validate --project`, `risk --project` and `baseline`
 with `--signature-policy`, or to the GitHub Action with `signature-policy`.
 
 Keep the policy outside the checkout: the commands refuse a policy file inside
-the scanned project, also under another name for the project directory such as a
-case variant or a bind mount (compared by device and inode), or one with other
-hard links, and they resolve the project path first, so a symlinked `--project`
-path works for every command. Every entry must name a file beneath the project,
+the scanned project or anywhere in any enclosing Git working tree, including a
+superproject above a nested checkout or submodule (so a
+monorepo's `ci/signers.json` is refused when you scan `services/agent`), also
+under another name for any of these directories such as a case variant or a bind mount
+(compared by device and inode), or one with other hard links, and they resolve the project path first, so a symlinked `--project`
+path works for every command. Every directory at or above the project with a `.git`
+entry counts as an enclosing repository, so two layouts cannot hold the policy: a
+trusted base checkout that encloses the pull request's checkout (the base at the
+workspace root, the pull request in `pr/`), and a home directory that is itself a
+repository (`~/.git`) when the project is below it. Every entry must name a file beneath the project,
 spelled as its directory spells it: another case is refused on every file system,
 also where file names fold case.
 An entry that names neither a collected model weight file nor the ShadowScan
@@ -219,7 +300,10 @@ Version 2 names a `kind` on every entry and rejects unknown kinds and fields:
 - `digest-pin` recomputes the file's SHA-256 through the collector's confined
   reader and compares it with `expected_sha256`. You are the trust root, as you
   are for the policy itself; no Sigstore install is needed. Compute the value
-  with `sha256sum`.
+  with `sha256sum`. Note that `models/onnx/model.onnx_data` above illustrates
+  `digest-pin` syntax on an auxiliary shard: `validate`'s model integrity gate
+  still requires model weights to use SafeTensors format (`*.safetensors`) and
+  pass structural validation alongside a matching signature or digest pin.
 
 OpenSSF Model Signing signatures (`model.sig`) are not verified yet: they are
 Sigstore bundles whose DSSE envelope signs an in-toto statement listing every
@@ -260,8 +344,13 @@ not make a verified model look mismatched or changed.
 A pin or a signature shows that the bytes are the ones the operator or signer
 approved, not that the model is benign. Formats rated `unknown` have no
 structural validator: Keras Lambda layers, SavedModel operations and custom
-TensorRT or TFLite operators are not inspected. Pickles under names other than
-those listed above, and NumPy `.npy` and `.npz` arrays, are not inventoried. SafeTensors
+TensorRT or TFLite operators are not inspected. A file under a name other than
+those listed above is inventoried only by its content, and only under the names and
+directories [listed above](#model-files-and-references): a pickle renamed outside
+them, such as `assets/blob`, is not inventoried, nor is a pickle that the bounded
+check does not recognize, such as a binary pickle whose first 64 KiB hold neither 16
+opcodes nor its end, or a pickle inventoried by its content that calls nothing before
+`pickle.load` would stop. SafeTensors
 tensor bytes are hashed but not inspected, so a payload that also parses as
 another format is not flagged. The chat template check is a heuristic, not template
 analysis: a name assembled through variables, formatting, filters, nested expressions

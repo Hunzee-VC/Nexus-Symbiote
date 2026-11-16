@@ -21,7 +21,7 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Mapping
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -255,23 +255,58 @@ class PinnedStdioSession:
                 "tools/call was sent but no valid result arrived; the tool may have run"
             ) from exc
 
-    def __exit__(self, *_: object) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        *_: object,
+    ) -> None:
         proc = self._process
         self._process = None
+        teardown: Exception | None = None
         try:
             if proc is not None:
                 try:
-                    terminate_process_group(proc)
-                    proc.wait(timeout=5)
+                    try:
+                        terminate_process_group(proc)
+                    except Exception as err:
+                        teardown = err
                 finally:
-                    if proc.stdin is not None:
-                        proc.stdin.close()
-                    if proc.stdout is not None:
-                        proc.stdout.close()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired as err:
+                        with suppress(ProcessLookupError, PermissionError):
+                            proc.kill()
+                        with suppress(subprocess.TimeoutExpired):
+                            proc.wait(timeout=1)
+                        if teardown is None:
+                            teardown = err
+                    finally:
+                        if proc.stdin is not None:
+                            proc.stdin.close()
+                        if proc.stdout is not None:
+                            proc.stdout.close()
         finally:
             if self._directory is not None:
                 self._directory.cleanup()
                 self._directory = None
+        if teardown is None:
+            return
+        if self._called:
+            if isinstance(exc, ExecutionOutcomeUnknown) and not isinstance(
+                teardown, PinnedProcessError
+            ):
+                return
+            raise ExecutionOutcomeUnknown(
+                "the launcher's PID namespace did not end; the tool may still be running"
+                if isinstance(teardown, PinnedProcessError)
+                else "launcher cleanup did not complete; the tool may still be running"
+            ) from teardown
+        if exc is not None:
+            return
+        if isinstance(teardown, PinnedProcessError):
+            raise AuthorizationError(str(teardown)) from teardown
+        raise teardown
 
 
 def invoke_pinned_stdio(
@@ -291,38 +326,46 @@ def invoke_pinned_stdio(
     Raises ``AuthorizationError`` only before ``tools/call`` is sent. After that,
     ``ToolCallError`` reports a JSON-RPC error reply and ``ExecutionOutcomeUnknown``
     any other failure. Neither is a denial: the approval has been spent, and an
-    unknown outcome means the tool may have run. A launcher that cannot be staged
-    or started, or a failed ``initialize`` handshake, happens before the gateway
-    runs; it is reported to ``on_decision`` as the gateway reports a failing
-    adapter: ``AuthorizationError`` with its reason, anything else as ``adapter-error``.
+    unknown outcome means the tool may have run. The launcher is staged and started,
+    and the ``initialize`` handshake completed, only when the gateway asks for the
+    served descriptor, after the trust status, snapshot, workload context, companion
+    BOM, scope and grant have been checked. A launcher that cannot be staged or
+    started, or a failed handshake, is then reported by the gateway as a failing
+    ``describe`` adapter: ``AuthorizationError`` with its reason, anything else as
+    ``adapter-error``. Invalid launcher settings are refused before the gateway runs.
     """
-    with ExitStack() as stack:
-        try:
-            session = stack.enter_context(
-                PinnedStdioSession(
-                    command=command,
-                    sha256=sha256,
+    try:
+        session = PinnedStdioSession(
+            command=command,
+            sha256=sha256,
+            server_id=call.server_id,
+            call_deadline_seconds=call_deadline_seconds,
+        )
+    except Exception as exc:
+        reason = exc.reason if isinstance(exc, AuthorizationError) else "adapter-error"
+        if gateway.on_decision is not None:
+            gateway.on_decision(
+                Decision(
+                    admitted=False,
+                    reason=reason,
+                    time=gateway.clock(),
                     server_id=call.server_id,
-                    call_deadline_seconds=call_deadline_seconds,
+                    tool_name=call.tool_name,
+                    action=call.action,
+                    resource=call.resource,
+                    store_id=getattr(gateway.state, "store_id", None),
                 )
             )
-        except Exception as exc:
-            reason = exc.reason if isinstance(exc, AuthorizationError) else "adapter-error"
-            if gateway.on_decision is not None:
-                gateway.on_decision(
-                    Decision(
-                        admitted=False,
-                        reason=reason,
-                        time=gateway.clock(),
-                        server_id=call.server_id,
-                        tool_name=call.tool_name,
-                        action=call.action,
-                        resource=call.resource,
-                        store_id=getattr(gateway.state, "store_id", None),
-                    )
-                )
-            raise
+        raise
+    with ExitStack() as stack:
+        # Starting the launcher lazily keeps a caller whose trust status or snapshot
+        # fails verification from running it at all (audit 2026-11-14 L25). The
+        # approval is checked after the descriptor (verification order step 9), so a
+        # caller holding a valid snapshot and trust status still starts it.
+        def describe(server_id: str, tool_name: str) -> ServedTool:
+            return stack.enter_context(session).describe(server_id, tool_name)
+
         # bind_adapters keeps every gateway setting (signer scopes, on_decision,
         # allow_shared_keys, canonical_arguments) and swaps only describe/execute.
-        bound = gateway.bind_adapters(describe=session.describe, execute=session.execute)
+        bound = gateway.bind_adapters(describe=describe, execute=session.execute)
         return bound.invoke(call, snapshot=snapshot, trust=trust, bom=bom, approval=approval)

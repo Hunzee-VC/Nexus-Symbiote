@@ -281,8 +281,10 @@ def test_document_text_and_connection_strings_never_reach_any_export(
                         "name": "azure",
                         "type": "postgres://user:CANARY-TYPE@db.example/vectors",
                         "source_uris": [
-                            "DefaultEndpointsProtocol=https;AccountName=kb;"
-                            "AccountKey=CANARY-KEY==;EndpointSuffix=core.windows.net",
+                            (
+                                "DefaultEndpointsProtocol=https;AccountName=kb;"
+                                "AccountKey=CANARY-KEY==;EndpointSuffix=core.windows.net"
+                            ),
                             "Driver={ODBC Driver 18};Server=tcp:db,1433;Uid=rag;Pwd=CANARY-PWD",
                             "rag:CANARY-USERINFO@db.internal:5432/vectors",
                             "password=CANARY-ASSIGN",
@@ -735,3 +737,15 @@ def test_control_value_urls_are_digested_exported_and_checked(tmp_path):
     text = _source(tmp_path / "t", {**BASE, "content_filter": "strict"})
     (gap,) = [r for r in text.risks if r.category == "completeness"]
     assert "field values that the record does not export" in gap.detail
+
+
+def test_a_declared_source_cannot_take_a_reserved_evidence_ref(tmp_path):
+    (tmp_path / "rag_config.json").write_text(
+        json.dumps({"sources": [{"name": "import-chroma", "type": "vector-store"}]})
+    )
+    (tmp_path / "app.py").write_text("import chromadb\n")
+    result = RAGScanner().scan(tmp_path)
+    assert not result.scan_failures, result.scan_failures
+    refs = {c.bom_ref for c in result.components}
+    assert "rag:declared-import-chroma" in refs
+    assert "rag:import-chroma" in refs

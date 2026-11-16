@@ -506,8 +506,11 @@ other code is permanent for the evidence presented.
 are recorded as `denied`. A session deadline or protocol error before `tools/call` is
 sent is recorded as `adapter-error`. In both cases `tools/call` is never sent. This
 includes a launcher that cannot be read or differs from its pin and a failed
-`initialize` handshake, which happen before the gateway runs; their records hold
-only the time, the call labels and `store_id`.
+`initialize` handshake, which happen at the descriptor step (step 8), when the
+gateway first calls `describe`; their records carry the facts verified up to that
+step. Launcher settings that `PinnedStdioSession` refuses, such as a relative path or
+a malformed pin, are refused before the gateway runs; their records hold only the
+time, the call labels and `store_id`.
 
 The `runtime` commands print the code in parentheses at the end of the error,
 next to their own codes: `runtime-input-error` for a contract that does not
@@ -619,9 +622,13 @@ fresh snapshot before restarting.
 - **Generate** one key pair per purpose: `runtime keygen` writes both files with
   mode 0600 and, with `--passphrase-file`, encrypts the private key with the
   file's first line, at most 1,023 bytes. `runtime sign` refuses a private key
-  file, and both commands refuse a passphrase file, that its group or others can
-  read. A key held in a KMS, an HSM or an agent can sign through `sign_contract`
-  by implementing `ContractSigner`: `sign(data) -> bytes` and `public_key()`.
+  file, and both commands refuse a passphrase file, that the user running the
+  command does not own or that gives its group or others any permission. Root is no
+  exception: a job that runs as root, such as a container job, cannot use a key
+  mounted from the host and owned by another user; give the file to the user
+  that runs the command. A key held in a KMS, an HSM or an agent can sign
+  through `sign_contract` by implementing `ContractSigner`: `sign(data) -> bytes`
+  and `public_key()`.
 - **Distribute** public keys to every gateway's rings and give each approval key
   its holder in `approval_actors`. Trust statuses expire after an hour and
   snapshots after a day, so their signing keys must be available to automation;

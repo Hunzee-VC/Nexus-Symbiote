@@ -4,13 +4,25 @@ from __future__ import annotations
 
 import base64
 import binascii
+import bisect
 import heapq
 import re
-from collections.abc import Iterable, Mapping
-from typing import Any
+import string
+from collections.abc import Iterable, Iterator, Mapping
+from typing import Any, cast
 from urllib.parse import urlsplit, urlunsplit
 
+from nexus_symbiote.utils._legacy_redaction import (
+    hidden_spans,
+    origin_sources,
+    redaction,
+    shown_unchanged,
+)
+
 REDACTED = "***"
+# What a known value reads as to the rules on the masked pass: a separator, as its
+# redaction was, that no token, scheme value or header value contains.
+_MASK = REDACTED[0]
 # Shorter environment values are flags such as "1", "en" or "info", not credentials;
 # scrubbing them out of free text would corrupt ordinary names and descriptions.
 MIN_SECRET_LENGTH = 8
@@ -20,14 +32,26 @@ _URL = re.compile(r"(?<![a-zA-Z0-9+.-])[a-zA-Z0-9+.-]+://[^\s\"'<>]+")
 # digits (token2=) may follow the keyword; "max_tokens" and "tokenizer" may not.
 # A backslash escapes the next character of a quoted value, as JSON reads it.
 # Possessive and bounded quantifiers keep every attempt linear.
-_CREDENTIAL_KEYWORD = (
+_CREDENTIAL_WORD = (
     r"(?:api[-_]?key|access[-_]?key|secret[-_]?key|private[-_]?key|account[-_]?key"
+    r"|[a-z0-9]{2,24}[-_]key|connection[-_]?string"
     r"|token|password|passwd|passphrase|pwd|secret|credentials?|sig)"
-    r"(?:\d{1,4})?(?:[-_.][a-z0-9]{1,32}){0,4}"
 )
+_CREDENTIAL_KEYWORD = _CREDENTIAL_WORD + r"(?:\d{1,4})?(?:[-_.][a-z0-9]{1,32}){0,4}"
+# The mark between a name and its value: `:` or `=`, or a two-character operator that
+# starts with one, such as `:=`, `=>`, `::` or `==`. Read as a one-character mark, the
+# operator's second character became the value and the real one stayed in clear.
+_MARK = r"[:=]{1,2}+>?+"
 _ASSIGNMENT = re.compile(
-    rf"(?i)({_CREDENTIAL_KEYWORD}[\"']?\s*+[:=]\s*+)"
-    r"(\"(?:[^\"\\\n]|\\.){0,256}\"|'(?:[^'\\\n]|\\.){0,256}'|[^\s,;]++)"
+    rf"(?i)({_CREDENTIAL_KEYWORD}[\"']?\s*+{_MARK}\s*+)"
+    r"(\"(?:[^\"\\\n]|\\.){0,8192}\"|'(?:[^'\\\n]|\\.){0,8192}'|[^\s,;]++)"
+)
+# A long command-line option named for a credential, with its value as the next word:
+# `--password value`, `--db-password "value"`. A word that starts with `-` is the next
+# option, not a value.
+_FLAG = re.compile(
+    rf"(?i)(?<![\w-])--(?:[a-z0-9]{{1,32}}[-_]){{0,4}}{_CREDENTIAL_KEYWORD}\s++"
+    r"(\"(?:[^\"\\\n]|\\.){0,8192}\"|'(?:[^'\\\n]|\\.){0,8192}'|(?!-)[^\s,;]++)"
 )
 # A mapping key that _ASSIGNMENT would read as the name in `name: value`.
 _CREDENTIAL_KEY = re.compile(rf"(?i){_CREDENTIAL_KEYWORD}\Z")
@@ -46,6 +70,10 @@ _AUTHORIZATION_LOOKBACK = 40
 # A prose word after a scheme ("Bearer authentication") is shorter than this; a value
 # this long after Bearer, Token, Bot, ApiKey or Api-Key is redacted whatever its shape.
 LONG_CREDENTIAL_LENGTH = 16
+_ASCII_DIGITS = frozenset(string.digits)
+_ASCII_UPPER = frozenset(string.ascii_uppercase)
+_ASCII_LOWER = frozenset(string.ascii_lowercase)
+_CREDENTIAL_PUNCTUATION = frozenset("._~+/=-")
 # Formats distinctive enough to stand out inside a name (AWS_AKIA..., X_glpat-...).
 # Each stops at the end of its own run or matches the rest, so starting one after
 # every "_" or "-" keeps the scan linear. An AWS key id must end there, or
@@ -60,6 +88,11 @@ _DISTINCT_SHAPES = (
     r"|pcsk_[A-Za-z0-9_]{20,}+|gsk_[A-Za-z0-9]{20,}+|r8_[A-Za-z0-9]{20,}+"
     r"|pplx-[A-Za-z0-9]{20,}+|xai-[A-Za-z0-9]{20,}+|lsv2_(?:pt|sk)_[A-Za-z0-9_]{20,}+"
     r"|tvly-[A-Za-z0-9-]{20,}+|fw_[A-Za-z0-9]{20,}+"
+    r"|SG\.[\w-]{16,}+\.[\w-]{16,}+|dckr_pat_[\w-]{20,}+|shp(?:at|ss|ca)_[0-9a-fA-F]{32}"
+    r"|SK[0-9a-f]{32}(?![A-Za-z0-9])"
+    r"|shppa_[0-9a-fA-F]{32}|dapi[0-9a-f]{32}|xapp-[\w-]{20,}+|PMAK-[0-9a-f]{24}-[0-9a-f]{34}"
+    # A Doppler service token may name its config first: dp.st.<config>.<token>.
+    r"|dp\.(?:pt|ct|sa|scim|audit|st(?:\.[a-z0-9_-]{2,35}+)?)\.[A-Za-z0-9]{40,}+"
 )
 # A JWT can fail only at its first dot, so it starts only at a word boundary: started
 # after every "_" its first segment would be rescanned once per position.
@@ -91,6 +124,16 @@ _AUTH_SCHEMES = frozenset(
         "aws4-hmac-sha256",
     }
 )
+_AUTH_SCHEME_LENGTH = max(map(len, _AUTH_SCHEMES))
+
+
+def _is_auth_scheme(value: str, span: Span) -> bool:
+    # A value can run to the end of the text, once for every URL before it; slicing it
+    # whole each time is quadratic, and no longer value is a scheme.
+    start, end = span
+    return end - start <= _AUTH_SCHEME_LENGTH and value[start:end].lower() in _AUTH_SCHEMES
+
+
 _COOKIE_HEADER = re.compile(r"(?i)(\b(?:set-)?cookie[\"']?\s{0,8}[:=]\s{0,8}[\"']?)([^\r\n\"']++)")
 _COOKIE_PAIR = re.compile(r"([A-Za-z0-9_.-]{1,64}=)([^\s;,\"']++)")
 _COOKIE_ATTRS = frozenset(
@@ -102,6 +145,8 @@ _CREDENTIAL_NAME = re.compile(
 )
 _URL_USERINFO = re.compile(r"://[^/\s@?#]*@")
 _PLAIN_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s@?#]+")
+# The authority a URL's shown origin is taken from, as urlsplit delimits it.
+_NETLOC = re.compile(r"[^/?#]*")
 
 
 def redact_url(value: str) -> str:
@@ -112,8 +157,14 @@ def redact_url(value: str) -> str:
     """
     try:
         parts = urlsplit(value)
+        raw_host = parts.netloc.rpartition("@")[2]
         # WHATWG parsers, as browsers use, end the host at a backslash; urlsplit does not.
-        if not parts.scheme or not parts.hostname or "\\" in parts.netloc:
+        if (
+            not parts.scheme
+            or not parts.hostname
+            or "\\" in parts.netloc
+            or TOKEN_SHAPE.search(raw_host)
+        ):
             return "[redacted-url]"
         host = parts.hostname
         if ":" in host:
@@ -143,31 +194,108 @@ def secret_like(name: str, value: str) -> bool:
 
 
 def secret_values(variables: Mapping[str, Any]) -> list[str]:
-    """The string values of ``variables`` that ``secret_like`` selects."""
-    return [
-        value
-        for name, value in variables.items()
-        if isinstance(name, str) and isinstance(value, str) and secret_like(name, value)
-    ]
+    """The string values of ``variables`` that ``secret_like`` selects.
+
+    A value such as ``Bearer <token>`` also yields the credential after the scheme
+    word, so a text that repeats the bare token without the scheme is scrubbed too.
+    """
+    values = []
+    for name, value in variables.items():
+        if isinstance(name, str) and isinstance(value, str) and secret_like(name, value):
+            values.append(value)
+            values.extend(scheme_credentials(value))
+    return values
+
+
+def scheme_credentials(value: str) -> list[str]:
+    """The credential of ``value`` when it is an auth scheme word, whitespace and a credential."""
+    parts = _SCHEME_AND_VALUE.fullmatch(value.strip())
+    if parts is None or parts.group(1).lower() not in _AUTH_SCHEMES:
+        return []
+    credential = parts.group(3).strip()
+    if len(credential) < MIN_SECRET_LENGTH or _REFERENCE.fullmatch(credential):
+        return []
+    return [credential]
+
+
+def is_reference(value: str) -> bool:
+    """Whether ``value`` only names a variable (``${NAME}``, ``$NAME``) and holds no secret."""
+    return _REFERENCE.fullmatch(value) is not None
+
+
+def credential_shaped(value: str) -> bool:
+    """Whether a bare word reads as a credential, by the shape rule for scheme values.
+
+    At least 16 characters, or a digit, credential punctuation, or both cases with an
+    upper-case letter after the first: ``postgres`` or ``changeme`` read as words.
+    """
+    return _credential_like(value, "")
 
 
 def _longest_first(value: str) -> tuple[int, str]:
     return (-len(value), value)
 
 
+def _smallest_period(value: str) -> int:
+    """The smallest shift at which ``value`` overlaps itself, its length when none does."""
+    border = 0
+    borders = [0] * len(value)
+    for index in range(1, len(value)):
+        while border and value[index] != value[border]:
+            border = borders[border - 1]
+        if value[index] == value[border]:
+            border += 1
+        borders[index] = border
+    return len(value) - (borders[-1] if value else 0)
+
+
+Span = tuple[int, int]
+
+
+def _periodic_end(text: str, end: int, period: int) -> int:
+    """Extend ``end`` while ``text`` repeats itself ``period`` characters back.
+
+    Galloping, then halving, compares slices in C, so a run costs its length and only
+    the logarithm of it in interpreted steps. Steps are powers of two, so halving the
+    first one that fails tries every length below it.
+    """
+    step = 1
+    while text.startswith(text[end - period : end - period + step], end):
+        end += step
+        step *= 2
+    while step > 1:
+        step //= 2
+        if text.startswith(text[end - period : end - period + step], end):
+            end += step
+    return end
+
+
+_COVERED = re.compile(rb"\x01+")
+
+
 class SecretScrubber:
     """Known secret values, prepared once per source and applied linearly per text.
 
-    Each value is located with one substring search, longest first, so scrubbing a
-    text costs its length times the number of values, never values times every
-    string of a document. Texts shorter than the shortest value are skipped.
+    Every occurrence of every value is located in the original text, overlapping ones
+    included, so one value can never hide part of another. Each value costs a search
+    of the text in C. Values go longest first and mark what they cover: a run of a
+    value overlapping itself is measured along its smallest period, an occurrence
+    wholly inside covered text is passed over to the next uncovered character, and
+    every occurrence found otherwise covers a new one, so the interpreted steps grow
+    with the text, not with the number of values times their occurrences. Values
+    that are parts of one another, repeated between uncovered gaps, could still make
+    each value pass over every repetition; past ``len(text) // 8`` passes and a few
+    per value, the cover is every value's greedy replacement widened by the longest
+    value on each side, which holds every overlapping occurrence. Texts shorter than
+    the shortest value are skipped.
     """
 
-    __slots__ = ("_shortest", "_values")
+    __slots__ = ("_periods", "_shortest", "_values")
 
     def __init__(self, values: Iterable[str] = ()) -> None:
         unique = {value for value in values if value}
         self._values = tuple(sorted(unique, key=_longest_first))
+        self._periods = {value: _smallest_period(value) for value in self._values}
         self._shortest = len(self._values[-1]) if self._values else 0
 
     def __bool__(self) -> bool:
@@ -176,13 +304,18 @@ class SecretScrubber:
     def __len__(self) -> int:
         return len(self._values)
 
+    @property
+    def values(self) -> tuple[str, ...]:
+        """The known values, longest first."""
+        return self._values
+
     def extended(self, values: Iterable[str]) -> SecretScrubber:
         """This scrubber with ``values`` added, merged without sorting its own again.
 
         A file's values are prepared once and each server adds its own few, so the
         cost per server grows with the file's values, not with their sort.
         """
-        known = set(self._values)
+        known = self._periods
         extra = sorted(
             {value for value in values if value and value not in known}, key=_longest_first
         )
@@ -190,6 +323,7 @@ class SecretScrubber:
             return self
         merged = SecretScrubber()
         merged._values = tuple(heapq.merge(self._values, extra, key=_longest_first))
+        merged._periods = {**known, **{value: _smallest_period(value) for value in extra}}
         merged._shortest = len(merged._values[-1])
         return merged
 
@@ -198,13 +332,81 @@ class SecretScrubber:
             return False
         return any(value in text for value in self._values)
 
-    def scrub(self, text: str) -> str:
+    def spans(self, text: str) -> list[Span]:
+        """Where known values occur in ``text``: sorted, disjoint, touching runs joined."""
         if not self._values or len(text) < self._shortest:
-            return text
+            return []
+        covered = self._covered(text)
+        return [] if covered is None else [run.span() for run in _COVERED.finditer(covered)]
+
+    def _covered(self, text: str) -> bytearray | None:
+        covered: bytearray | None = None
+        passes = len(text) // 8 + 4 * len(self._values) + 1024
+        # Only an occurrence reaching an uncovered character, between the first and
+        # the last, can add to the cover.
+        first, last_free = 0, len(text) - 1
         for value in self._values:
-            if value in text:
-                text = text.replace(value, REDACTED)
-        return text
+            # A value the text does not hold adds nothing to the cover; testing that
+            # first keeps the per-value bookkeeping below off the common path.
+            if value not in text:
+                continue
+            size = len(value)
+            period = self._periods[value]
+            # An occurrence overlapping a run at a shift that is not a multiple of the
+            # period starts past both the period and size - period (Fine and Wilf).
+            resume = min(size, max(period, size - period) + 1)
+            if covered is not None:
+                first = covered.find(0, first)
+                if first < 0:
+                    break
+                last_free = covered.rfind(0, 0, last_free + 1)
+            bound = last_free + size
+            start = text.find(value, max(0, first - size + 1), bound)
+            while start >= 0:
+                if covered is None:
+                    covered = bytearray(len(text))
+                elif covered.find(0, start, start + size) < 0:
+                    # Every occurrence starting before the next uncovered character
+                    # lies wholly in covered text.
+                    passes -= 1
+                    if passes < 0:
+                        return self._widened_greedy(text)
+                    free = covered.find(0, start + size)
+                    if free < 0:
+                        break
+                    start = text.find(value, max(start + 1, free - size + 1), bound)
+                    continue
+                end = _periodic_end(text, start + size, period)
+                last = start + (end - size - start) // period * period
+                covered[start : last + size] = b"\x01" * (last + size - start)
+                start = text.find(value, last + resume, bound)
+        return covered
+
+    def _widened_greedy(self, text: str) -> bytearray:
+        """Every value replaced in turn, each run then widened by the longest value.
+
+        An occurrence the replacements skip overlaps a replaced one, so it lies within
+        the longest value's length of a run. A marker no value holds keeps a replaced
+        run from matching a shorter value; one the text holds only widens the cover.
+        """
+        covered = bytearray(len(text))
+        held = set("".join(self._values))
+        marker = next((chr(code) for code in range(0x110000) if chr(code) not in held), None)
+        if marker is None:
+            covered[:] = b"\x01" * len(text)
+            return covered
+        replaced = text
+        for value in self._values:
+            replaced = replaced.replace(value, marker * len(value))
+        reach = len(self._values[0]) - 1
+        for run in re.finditer(re.escape(marker) + "+", replaced):
+            start, end = max(0, run.start() - reach), min(len(text), run.end() + reach)
+            covered[start:end] = b"\x01" * (end - start)
+        return covered
+
+    def scrub(self, text: str) -> str:
+        spans = self.spans(text)
+        return _apply(text, spans, []) if spans else text
 
 
 def _scrubber(secrets: Iterable[str] | SecretScrubber) -> SecretScrubber:
@@ -220,31 +422,51 @@ def _credential_like(token: str, scheme: str) -> bool:
             return b":" in base64.b64decode(padded, validate=True)
         except (binascii.Error, ValueError):
             return False
+    if len(token) >= LONG_CREDENTIAL_LENGTH:
+        return True
+    if token.isascii():
+        # Set checks run in C: a text of scheme words is one match per word.
+        return (
+            not _ASCII_DIGITS.isdisjoint(token)
+            or not _CREDENTIAL_PUNCTUATION.isdisjoint(token)
+            or (not _ASCII_UPPER.isdisjoint(token[1:]) and not _ASCII_LOWER.isdisjoint(token))
+        )
     return (
-        len(token) >= LONG_CREDENTIAL_LENGTH
-        or any(char.isdigit() for char in token)
+        any(char.isdigit() for char in token)
         or (any(char.isupper() for char in token[1:]) and any(char.islower() for char in token))
-        or any(char in "._~+/=-" for char in token)
+        or any(char in _CREDENTIAL_PUNCTUATION for char in token)
     )
 
 
-def _auth_replacement(match: re.Match[str]) -> str:
-    scheme, space, token = match.groups()
+def _authorization_scheme_credential(match: re.Match[str]) -> bool:
+    scheme, _space, token = match.groups()
     start = match.start()
     header = _AUTHORIZATION_HEADER.search(
         match.string, max(0, start - _AUTHORIZATION_LOOKBACK), start
     )
-    if header is not None or _credential_like(token, scheme):
-        return scheme + space + REDACTED
-    return match.group()
+    return header is not None or _credential_like(token, scheme)
 
 
-def _redact_private_keys(value: str) -> str:
-    """Replace PEM private key blocks, including unterminated ones, in one pass."""
+def _scheme_matches(value: str) -> Iterator[re.Match[str]]:
+    """Scheme matches, each search resuming where the previous credential starts.
+
+    A scheme word can end a credential and start the next (``x=Bearer``, then the
+    value after it). Applied one after another, the rules used to find it once an
+    earlier rule had redacted the first scheme. A credential holds no whitespace and
+    a scheme is followed by some, so a resumed search reads each credential twice at
+    most.
+    """
+    position = 0
+    while (match := _AUTH.search(value, position)) is not None:
+        yield match
+        position = match.start(3)
+
+
+def _private_key_spans(value: str) -> Iterable[Span]:
+    """PEM private key blocks, including unterminated ones, in one pass."""
     if "-----BEGIN" not in value:
-        return value
-    parts: list[str] = []
-    copied = search = 0
+        return
+    search = 0
     while (start := value.find("-----BEGIN", search)) >= 0:
         label_end = value.find("-----", start + 10)
         if label_end < 0:
@@ -253,36 +475,418 @@ def _redact_private_keys(value: str) -> str:
             # The closing dashes may open the next BEGIN line.
             search = label_end
             continue
-        end = value.find("-----END", label_end + 5)
-        close = -1 if end < 0 else value.find("-----", end + 8)
-        stop = len(value) if close < 0 else close + 5
-        parts.extend((value[copied:start], REDACTED))
-        copied = search = stop
+        cursor = label_end + 5
+        while True:
+            end = value.find("-----END", cursor)
+            if end < 0:
+                search = len(value)
+                break
+            close = value.find("-----", end + 8)
+            if close < 0:
+                search = len(value)
+                break
+            end_label = value[end + 8 : close]
+            if "\n" not in end_label and "\r" not in end_label and "PRIVATE KEY" in end_label:
+                search = close + 5
+                break
+            # The closing dashes of a non-matching END marker may open another marker.
+            cursor = close
+        yield start, search
+
+
+def _raw_auth_span(match: re.Match[str]) -> Span | None:
+    _prefix, scheme, _space, _credential, token = match.groups()
+    if scheme is not None:
+        return match.span(4)
+    if token.lower() in _AUTH_SCHEMES or not _credential_like(token, "token"):
+        return None
+    return match.span(5)
+
+
+def _cookie_pair_secret(match: re.Match[str]) -> bool:
+    name_eq, val = match.groups()
+    if name_eq[:-1].lower() in _COOKIE_ATTRS:
+        return False
+    return len(val) >= MIN_SECRET_LENGTH or _credential_like(val, "token")
+
+
+def _cookie_pair_replacement(match: re.Match[str]) -> str:
+    return match.group(1) + REDACTED if _cookie_pair_secret(match) else match.group()
+
+
+def _cookie_spans(value: str, start: int = 0, end: int | None = None) -> Iterable[Span]:
+    stop = len(value) if end is None else end
+    for pair in _COOKIE_PAIR.finditer(value, start, stop):
+        if _cookie_pair_secret(pair):
+            yield pair.span(2)
+
+
+class _Rewrite:
+    """A URL shown as its origin.
+
+    ``revealed`` ends the source text the origin is read from, and ``removed`` are the
+    spans of the URL the origin does not show: its user info, path, query and fragment.
+    """
+
+    __slots__ = ("end", "removed", "replacement", "revealed", "start")
+
+    def __init__(
+        self, start: int, end: int, replacement: str, revealed: int, removed: list[Span]
+    ) -> None:
+        self.start, self.end = start, end
+        self.replacement, self.revealed, self.removed = replacement, revealed, removed
+
+
+def _url_rewrite(match: re.Match[str]) -> _Rewrite | None:
+    url = match.group()
+    shown = redact_url(url)
+    if shown == url:
+        return None
+    start, end = match.span()
+    if shown == "[redacted-url]":
+        return _Rewrite(start, end, shown, start, [(start, end)])
+    scheme_end = url.index("://") + 3
+    netloc = _NETLOC.match(url, scheme_end)
+    revealed = start + (netloc.end() if netloc else scheme_end)
+    sources = origin_sources(url, shown)
+    if sources is None:
+        # Not aligned: only what follows the authority counts as removed, so main's
+        # floor marks the rest hidden and the whole URL is redacted.
+        return _Rewrite(start, end, shown, revealed, [(revealed, end)])
+    # What the origin shows as written stays; the rest, a letter it lower-cases among
+    # them, is removed, as main's rewrite of the same URL removed it.
+    removed: list[Span] = []
+    position = start
+    for index in shown_unchanged(url, shown, sources):
+        if index is None:
+            continue
+        if start + index > position:
+            removed.append((position, start + index))
+        position = start + index + 1
+    if end > position:
+        removed.append((position, end))
+    return _Rewrite(start, end, shown, revealed, removed)
+
+
+def _merged(spans: list[Span]) -> list[Span]:
+    """Sorted, disjoint spans; touching spans become one."""
+    spans.sort()
+    merged: list[Span] = []
+    for start, end in spans:
+        if merged and start <= merged[-1][1]:
+            if end > merged[-1][1]:
+                merged[-1] = (merged[-1][0], end)
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _apply(value: str, spans: list[Span], rewrites: list[_Rewrite]) -> str:
+    """Replace each maximal union of ``spans`` and ``rewrites`` in one pass.
+
+    ``spans`` are disjoint and sorted. A rewrite whose revealed origin no span touches,
+    and which no span extends past, is shown as rewritten; any other union of a
+    rewrite and spans is redacted as a whole, so a rewrite never shows a known value.
+    """
+    items: list[tuple[int, int, _Rewrite | None]] = [(start, end, None) for start, end in spans]
+    for rewrite in rewrites:
+        # The last span starting inside the revealed origin is the only one that can
+        # reach into it: the spans are disjoint and sorted.
+        index = bisect.bisect_left(spans, (rewrite.revealed, -1))
+        touched = (
+            rewrite.revealed > rewrite.start and index > 0 and spans[index - 1][1] > rewrite.start
+        )
+        items.append((rewrite.start, rewrite.end, None if touched else rewrite))
+    items.sort(key=lambda item: (item[0], -item[1]))
+    parts: list[str] = []
+    copied = 0
+    group_start = group_end = -1
+    shown: list[_Rewrite] = []
+
+    def flush() -> None:
+        if len(shown) == 1 and (group_start, group_end) == (shown[0].start, shown[0].end):
+            parts.append(shown[0].replacement)
+        else:
+            parts.append(REDACTED)
+
+    for start, end, shape in items:
+        if group_end >= 0 and (
+            start < group_end or (start == group_end and shape is None and not shown)
+        ):
+            group_end = max(group_end, end)
+        else:
+            if group_end >= 0:
+                flush()
+                copied = group_end
+            parts.append(value[copied:start])
+            group_start, group_end = start, end
+            shown = []
+        if shape is not None:
+            shown.append(shape)
+    if group_end < 0:
+        return value
+    flush()
+    parts.append(value[group_end:])
+    return "".join(parts)
+
+
+# The name part of an assignment, and the two quoted value forms; an unquoted value runs
+# to the next whitespace, `,` or `;`. The value forms are those of _ASSIGNMENT.
+_ASSIGNMENT_NAME = re.compile(rf"(?i){_CREDENTIAL_KEYWORD}[\"']?\s*+{_MARK}\s*+")
+_QUOTED_VALUE = re.compile(r"\"(?:[^\"\\\n]|\\.){0,8192}\"|'(?:[^'\\\n]|\\.){0,8192}'")
+_VALUE_END = re.compile(r"[\s,;]")
+# What stands in for a URL while the rules read the rest of the text. It is no keyword,
+# separator, quote or space, so a value that runs into a URL is not cut short and no
+# rule reads a URL's path or query, which its rewrite removes. Each URL is read on its
+# own instead, bounded at its end, so an assignment inside one ends there, as
+# `<a href="https://h/cb?token=v">password: w` needs.
+_URL_MASK = "\x00"
+# A credential name that ends a URL, with its mark when the URL holds it, and the rest
+# of an assignment after the URL: a closing quote, spaces and the mark.
+_URL_END_NAME = re.compile(rf"(?i)(?:{_CREDENTIAL_KEYWORD})[\"']?(?P<mark>{_MARK})?\Z")
+_AFTER_URL_MARK = re.compile(rf"[\"']?\s*+(?P<mark>{_MARK})?\s*+")
+# How far before a URL's start a credential name that runs into it may begin, and how
+# far past it the name may end: longer than any keyword with its suffixes.
+_NAME_REACH = 256
+
+
+def _masked_urls(value: str, url_spans: list[Span]) -> str:
+    if not url_spans:
+        return value
+    parts: list[str] = []
+    position = 0
+    for start, end in url_spans:
+        parts.append(value[position:start])
+        parts.append(_URL_MASK * (end - start))
+        position = end
+    parts.append(value[position:])
+    return "".join(parts)
+
+
+class _UnquotedRuns:
+    """The end of the unquoted value that starts at a position, found once per run.
+
+    Values are asked for in nondecreasing order. One that starts inside the run found
+    for an earlier value ends where that run does, as no whitespace, `,` or `;` lies between,
+    so a run is never scanned twice however many names lead into it.
+    """
+
+    __slots__ = ("end", "limit", "text")
+
+    def __init__(self, text: str, limit: int) -> None:
+        self.text, self.limit, self.end = text, limit, -1
+
+    def value_end(self, start: int) -> int:
+        if start >= self.end:
+            stop = _VALUE_END.search(self.text, start, self.limit)
+            self.end = self.limit if stop is None else stop.start()
+        return self.end
+
+
+def _value_span(
+    text: str, start: int, limit: int, runs: _UnquotedRuns, original: str | None = None
+) -> Span | None:
+    if start >= limit or text[start] in ",;" or text[start].isspace():
+        return None
+    quoted = _QUOTED_VALUE.match(text, start, limit)
+    if quoted is not None:
+        # A URL's mask covers a backslash that escapes the quote after it, so the value is
+        # read in the original text too, and runs to the later end.
+        written = None if original is None else _QUOTED_VALUE.match(original, start, limit)
+        return start, max(quoted.end(), written.end() if written else 0)
+    return start, runs.value_end(start)
+
+
+def _every_assignment(
+    text: str, start: int, limit: int, original: str | None = None
+) -> Iterable[Span]:
+    """The value of every assignment whose name starts in ``text[start:limit]``.
+
+    Each place a credential name can start is read, not only where the previous
+    assignment ended, so a value that holds another name, as in `sort_key = token = v`,
+    `PRIMARY_KEY=sig_v: v` or `signing_key:` with `password: v` below it, cannot hide
+    that name's own value. Values end at ``limit``.
+    """
+    runs = _UnquotedRuns(text, limit)
+    position = start
+    while (name := _ASSIGNMENT_NAME.search(text, position, limit)) is not None:
+        position = name.start() + 1
+        span = _value_span(text, name.end(), limit, runs, original)
+        if span is not None:
+            yield span
+
+
+def _assignment_spans(value: str, url_spans: list[Span]) -> Iterable[Span]:
+    """Assignment value spans: read with every URL masked, and in each URL on its own.
+
+    A credential name that ends a URL, as in `https://h/?a=b,password: v`, takes the value
+    that whitespace or a quote sets off after it, unless that is a scheme word such as
+    `Bearer`, which the scheme rule reads.
+    """
+    yield from _every_assignment(_masked_urls(value, url_spans), 0, len(value), value)
+    yield from _straddling_assignments(value, url_spans)
+    after_runs = _UnquotedRuns(value, len(value))
+    for url_start, url_end in url_spans:
+        yield from _every_assignment(value, url_start, url_end)
+        if url_end >= len(value):
+            continue
+        tail = _URL_END_NAME.search(value, max(url_start, url_end - 180), url_end)
+        if tail is None:
+            continue
+        # The mark is in the URL (`?a,password: v`), after it (`?a,password : v`), or
+        # split by it: a URL ends before `>`, so `?a,API_KEY=>v` and `:>v` leave `>` outside. A
+        # `>` that a name follows ends an autolink instead, as in `<https://h/?p=>token:`.
+        gap = url_end
+        if (
+            tail.group("mark") in ("=", ":")
+            and value[gap] == ">"
+            and _ASSIGNMENT_NAME.match(value, gap + 1) is None
+        ):
+            gap += 1
+        elif not (value[gap].isspace() or value[gap] in "\"'"):
+            continue
+        # Every part of the pattern is optional, so it always matches.
+        after = cast(re.Match[str], _AFTER_URL_MARK.match(value, gap))
+        if tail.group("mark") is None and after.group("mark") is None:
+            continue
+        span = _value_span(value, after.end(), len(value), after_runs)
+        if span is not None and not _is_auth_scheme(value, span):
+            yield span
+
+
+def _straddling_assignments(value: str, url_spans: list[Span]) -> Iterable[Span]:
+    """Values of credential names that run into a URL's scheme.
+
+    In `api_key:///x>v` the URL is `key:///x`, so masking it takes the name with it. A
+    keyword's parts are those of a scheme but for `_`, so only a URL right after `_` can
+    start inside a name; each such name is read in the original text across the start,
+    in a window no other URL's search reads again.
+    """
+    runs = _UnquotedRuns(value, len(value))
+    searched = 0
+    for url_start, _url_end in url_spans:
+        if url_start == 0 or value[url_start - 1] != "_":
+            continue
+        position = max(searched, url_start - _NAME_REACH)
+        limit = min(len(value), url_start + _NAME_REACH)
+        while (name := _ASSIGNMENT_NAME.search(value, position, limit)) is not None:
+            if name.start() >= url_start:
+                break
+            position = name.start() + 1
+            if name.end() > url_start:
+                span = _value_span(value, name.end(), len(value), runs)
+                if span is not None:
+                    yield span
+        searched = url_start
+
+
+def _rule_matches(
+    value: str, *, identifier: bool, cookie: bool
+) -> tuple[list[Span], list[_Rewrite]]:
+    url_matches = list(_URL.finditer(value))
+    url_spans = [match.span() for match in url_matches]
+    rewrites = [rewrite for match in url_matches if (rewrite := _url_rewrite(match)) is not None]
+    spans: list[Span] = []
+    if not identifier:
+        spans.extend(_private_key_spans(value))
+    spans.extend(_assignment_spans(value, url_spans))
+    spans.extend(match.span(1) for match in _FLAG.finditer(value))
+    # The scheme, header and cookie rules read the text as it is, where a scheme word or
+    # header name inside a URL still marks the credential after it, and again with each
+    # URL masked, as main read it with each URL rewritten: a URL then ends the word or
+    # header before it, so a credential glued to a URL is still a credential.
+    masked = _masked_urls(value, url_spans)
+    readings = (value, masked) if url_spans else (value,)
+    for reading in readings:
+        spans.extend(
+            match.span(3)
+            for match in _scheme_matches(reading)
+            if _authorization_scheme_credential(match)
+        )
+    if identifier:
+        spans.extend(match.span() for match in _NAMED_TOKEN.finditer(value))
+        return spans, rewrites
+    for reading in readings:
+        for match in _RAW_AUTH_HEADER.finditer(reading):
+            if (span := _raw_auth_span(match)) is not None:
+                spans.append(span)
+    spans.extend(_url_clipped_cookie_spans(value, url_spans))
+    if url_spans:
+        for match in _COOKIE_HEADER.finditer(masked):
+            spans.extend(_cookie_spans(value, *match.span(2)))
+    spans.extend(match.span() for match in TOKEN_SHAPE.finditer(value))
+    if cookie:
+        spans.extend(_cookie_spans(value))
+    return spans, rewrites
+
+
+def _url_clipped_cookie_spans(value: str, url_spans: list[Span]) -> Iterable[Span]:
+    """The pairs of each ``Cookie`` header in the text as it is, cut at the end of a URL
+    the header starts in, where the URL's own query is not a header's value."""
+    url_index = 0
+    for match in _COOKIE_HEADER.finditer(value):
+        start, end = match.span(2)
+        while url_index < len(url_spans) and url_spans[url_index][1] <= match.start():
+            url_index += 1
+        if url_index < len(url_spans) and url_spans[url_index][0] <= match.start():
+            end = min(end, url_spans[url_index][1])
+        if start < end:
+            yield from _cookie_spans(value, start, end)
+
+
+def _masked(value: str, spans: list[Span]) -> str:
+    """``value`` with each span replaced by as many marker characters, offsets kept."""
+    parts: list[str] = []
+    copied = 0
+    for start, end in spans:
+        parts.append(value[copied:start])
+        parts.append(_MASK * (end - start))
+        copied = end
     parts.append(value[copied:])
     return "".join(parts)
 
 
-def _raw_auth_replacement(match: re.Match[str]) -> str:
-    prefix, scheme, space, _credential, token = match.groups()
-    if scheme is not None:
-        return prefix + scheme + space + REDACTED
-    if token.lower() in _AUTH_SCHEMES or not _credential_like(token, "token"):
-        return match.group()
-    return prefix + REDACTED
+def _redaction(
+    value: str, scrubber: SecretScrubber, *, identifier: bool, cookie: bool = False
+) -> tuple[list[Span], list[_Rewrite]]:
+    """Every rule's and every known value's match in ``value``.
+
+    The rules read the original text, where a known value cannot erase the context
+    they need, and again the text with each known value masked, where a value's edge
+    separates words as its redaction did: a token, header or URL right next to a known
+    value still matches. ``cookie`` reads the whole value as cookie pairs.
+    """
+    known = scrubber.spans(value)
+    spans, rewrites = _rule_matches(value, identifier=identifier, cookie=cookie)
+    # The rules applied one after another, as before this engine, hide some values a
+    # union of matches shows; whatever they hide is hidden here too. What a URL rewrite
+    # removes is the rewrite's in both. With no known value in the text, main replaced
+    # none: a replacement is what could make another value occur.
+    spans.extend(
+        hidden_spans(
+            value,
+            scrubber.values if known else (),
+            identifier=identifier,
+            removed=[span for rewrite in rewrites for span in rewrite.removed],
+            cookie=cookie,
+        )
+    )
+    if known:
+        masked_spans, masked_rewrites = _rule_matches(
+            _masked(value, known), identifier=identifier, cookie=cookie
+        )
+        spans.extend(masked_spans)
+        spans.extend(known)
+        # A masked URL runs on through a known value holding a space or quote, so it
+        # replaces the shorter URL read at the same place.
+        starts = {rewrite.start: rewrite for rewrite in rewrites}
+        starts.update((rewrite.start, rewrite) for rewrite in masked_rewrites)
+        rewrites = list(starts.values())
+    return spans, rewrites
 
 
-def _cookie_pair_replacement(match: re.Match[str]) -> str:
-    name_eq, val = match.groups()
-    if name_eq[:-1].lower() in _COOKIE_ATTRS:
-        return match.group()
-    if len(val) >= MIN_SECRET_LENGTH or _credential_like(val, "token"):
-        return name_eq + REDACTED
-    return match.group()
-
-
-def _cookie_header_replacement(match: re.Match[str]) -> str:
-    prefix, raw_cookies = match.groups()
-    return prefix + _COOKIE_PAIR.sub(_cookie_pair_replacement, raw_cookies)
+def _redact(value: str, spans: list[Span], rewrites: list[_Rewrite]) -> str:
+    return _apply(value, _merged(spans), rewrites) if spans or rewrites else value
 
 
 def redact_text(
@@ -293,23 +897,19 @@ def redact_text(
 ) -> str:
     """Remove known secret values and common URL/auth/assignment/token encodings.
 
+    Every rule and every known value is matched in the original text, and each union
+    of their matches is replaced at once: a known value cannot erase the context a
+    rule needs, such as the name before ``=`` or an ``Authorization`` header, nor can
+    a rule's rewrite hide part of a known value from the scrubber.
+
     ``identifier`` keeps names that are matched against other evidence, such as tool
     names, free of the private key rule and of the token formats that ordinary names
     take: an innocuous name like ``sk-learn-classifier`` must keep matching the name a
     live server reports. A name holding a distinctive token such as ``ghp_...`` is
     still redacted.
     """
-    value = _scrubber(secrets).scrub(value)
-    value = _URL.sub(lambda match: redact_url(match.group()), value)
-    if not identifier:
-        value = _redact_private_keys(value)
-    value = _ASSIGNMENT.sub(lambda match: match.group(1) + REDACTED, value)
-    value = _AUTH.sub(_auth_replacement, value)
-    if identifier:
-        return _NAMED_TOKEN.sub(REDACTED, value)
-    value = _RAW_AUTH_HEADER.sub(_raw_auth_replacement, value)
-    value = _COOKIE_HEADER.sub(_cookie_header_replacement, value)
-    return TOKEN_SHAPE.sub(REDACTED, value)
+    spans, rewrites = _redaction(value, _scrubber(secrets), identifier=identifier)
+    return _redact(value, spans, rewrites)
 
 
 def redact_keyed_text(
@@ -330,20 +930,49 @@ def redact_keyed_text(
     locators. ``redacted`` is the value as the caller already redacted it, when that
     is not ``redact_text(value, secrets)``.
     """
-    safe = redact_text(value, secrets) if redacted is None else redacted
     if not value:
-        return safe
+        return redact_text(value, secrets) if redacted is None else redacted
+    cookie = _COOKIE_KEY.fullmatch(key) is not None
+    scrubber = _scrubber(secrets)
+    if redacted is not None:
+        safe = redacted
+    else:
+        # The pairs are read in the original value too: a known value redacted first
+        # could hide the name that marks the pair after it.
+        spans, rewrites = _redaction(value, scrubber, identifier=False, cookie=cookie)
+        safe = _redact(value, spans, rewrites)
     if _AUTHORIZATION_KEY.fullmatch(key):
         parts = _SCHEME_AND_VALUE.fullmatch(value)
         if parts is not None and parts.group(1).lower() in _AUTH_SCHEMES:
             scheme, space, credential = parts.groups()
             return safe if _REFERENCE.fullmatch(credential) else scheme + space + REDACTED
         return safe if _REFERENCE.fullmatch(value) else REDACTED
-    if _COOKIE_KEY.fullmatch(key):
-        return _COOKIE_PAIR.sub(_cookie_pair_replacement, safe)
+    if cookie:
+        return safe if redacted is None else _COOKIE_PAIR.sub(_cookie_pair_replacement, safe)
     if _CREDENTIAL_KEY.search(key):
-        return safe if _REFERENCE.fullmatch(value) or _PLAIN_URL.fullmatch(safe) else REDACTED
+        if _REFERENCE.fullmatch(value) or _locator(value, safe, scrubber, redacted is None):
+            return safe
+        return REDACTED
     return safe
+
+
+def _locator(value: str, safe: str, scrubber: SecretScrubber, ours: bool) -> bool:
+    """Whether a credential-keyed ``value``, redacted to ``safe``, is a plain URL to show.
+
+    The whole value must be one URL: a credential glued to a URL after a quote or `<`
+    is no locator. When ``safe`` is this engine's own, main's redaction must read as a
+    plain URL too: hiding what both hid can merge away the `@`, `?` or `#` that made
+    main's text fall back to the marker.
+    """
+    if _URL.fullmatch(value) is None or _PLAIN_URL.fullmatch(safe) is None:
+        return False
+    if not ours:
+        return True
+    values = scrubber.values if scrubber.spans(value) else ()
+    return _PLAIN_URL.fullmatch(redaction(value, values)) is not None
+
+
+_JWK_PRIVATE_FIELDS = frozenset({"d", "p", "q", "dp", "dq", "qi", "oth", "k", "priv"})
 
 
 def redact_metadata(value: Any, secrets: Iterable[str] | SecretScrubber = ()) -> Any:
@@ -355,14 +984,18 @@ def _redact_metadata(value: Any, scrubber: SecretScrubber) -> Any:
     if isinstance(value, str):
         return redact_text(value, scrubber)
     if isinstance(value, dict):
-        return {
-            redact_text(str(key), scrubber): (
-                redact_keyed_text(str(key), item, scrubber)
-                if isinstance(item, str)
-                else _redact_metadata(item, scrubber)
-            )
-            for key, item in value.items()
-        }
+        is_jwk = isinstance(value.get("kty"), str)
+        out: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            redacted_key = redact_text(key_text, scrubber)
+            if is_jwk and key_text in _JWK_PRIVATE_FIELDS and item not in (None, "", [], {}):
+                out[redacted_key] = REDACTED
+            elif isinstance(item, str):
+                out[redacted_key] = redact_keyed_text(key_text, item, scrubber)
+            else:
+                out[redacted_key] = _redact_metadata(item, scrubber)
+        return out
     if isinstance(value, list):
         return [_redact_metadata(item, scrubber) for item in value]
     return value

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import selectors
+import subprocess
 import tempfile
 import time
 from collections.abc import Callable, Iterator
@@ -113,8 +115,8 @@ def _capture(binary: Path, work: Path) -> PinnedObservation:
         proc = spawn_pinned(binary, work)
     except PinnedProcessError as exc:
         raise LaunchPolicyError(exc.reason, str(exc)) from exc
-    with proc:
-        assert proc.stdin is not None and proc.stdout is not None
+    assert proc.stdin is not None and proc.stdout is not None
+    try:
         inbox = proc.stdin.fileno()
         deadline = time.monotonic() + DEADLINE_SECONDS
         frames = _frames(proc.stdout.fileno(), lambda: deadline)
@@ -197,40 +199,48 @@ def _capture(binary: Path, work: Path) -> PinnedObservation:
                 params = {"cursor": cursor}
             raise StdioProtocolError("MCP page budget exceeded")
 
-        try:
-            os.set_blocking(inbox, False)
-            os.set_blocking(proc.stdout.fileno(), False)
-            hello = call(
-                "initialize",
-                {
-                    "protocolVersion": PROTOCOL,
-                    "capabilities": {},
-                    "clientInfo": {"name": "nexus-symbiote", "version": "1"},
-                },
+        os.set_blocking(inbox, False)
+        os.set_blocking(proc.stdout.fileno(), False)
+        hello = call(
+            "initialize",
+            {
+                "protocolVersion": PROTOCOL,
+                "capabilities": {},
+                "clientInfo": {"name": "nexus-symbiote", "version": "1"},
+            },
+        )
+        if hello is None or hello.get("protocolVersion") not in SUPPORTED_PROTOCOL_VERSIONS:
+            raise StdioProtocolError(
+                "unsupported MCP protocol version", reason="unsupported-protocol-version"
             )
-            if hello is None or hello.get("protocolVersion") not in SUPPORTED_PROTOCOL_VERSIONS:
-                raise StdioProtocolError(
-                    "unsupported MCP protocol version", reason="unsupported-protocol-version"
-                )
-            capabilities = hello.get("capabilities")
-            if not isinstance(capabilities, dict) or not isinstance(
-                capabilities.get("tools"), dict
-            ):
-                raise StdioProtocolError("MCP tool listing was not negotiated")
-            send({"method": "notifications/initialized"})
-            tools = listing("tools/list", "tools", "name")
-            if tools is None:
-                raise StdioProtocolError("MCP tool listing was not negotiated")
-            observation = PinnedObservation(hello, tools)
-            if isinstance(capabilities.get("prompts"), dict):
-                observation.prompts = listing("prompts/list", "prompts", "name")
-            if isinstance(capabilities.get("resources"), dict):
-                observation.resource_templates = listing(
-                    "resources/templates/list", "resourceTemplates", "uriTemplate"
-                )
-            return observation
+        capabilities = hello.get("capabilities")
+        if not isinstance(capabilities, dict) or not isinstance(capabilities.get("tools"), dict):
+            raise StdioProtocolError("MCP tool listing was not negotiated")
+        send({"method": "notifications/initialized"})
+        tools = listing("tools/list", "tools", "name")
+        if tools is None:
+            raise StdioProtocolError("MCP tool listing was not negotiated")
+        observation = PinnedObservation(hello, tools)
+        if isinstance(capabilities.get("prompts"), dict):
+            observation.prompts = listing("prompts/list", "prompts", "name")
+        if isinstance(capabilities.get("resources"), dict):
+            observation.resource_templates = listing(
+                "resources/templates/list", "resourceTemplates", "uriTemplate"
+            )
+        return observation
+    finally:
+        try:
+            try:
+                terminate_process_group(proc)
+            except PinnedProcessError as exc:
+                raise LaunchPolicyError(exc.reason, str(exc)) from exc
         finally:
-            terminate_process_group(proc)
+            with contextlib.suppress(OSError):
+                proc.stdin.close()
+            with contextlib.suppress(OSError):
+                proc.stdout.close()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=5.0)
 
 
 def observe_pinned(command: str, digest: str) -> PinnedObservation:

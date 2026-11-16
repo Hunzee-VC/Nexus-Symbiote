@@ -218,10 +218,14 @@ def test_case_variant_below_an_in_root_directory_link_is_reported(tmp_path):
         assert list(files.iter_files(".claude/rules")) == []
         assert files.case_variants(".claude/settings.json") == [Path(".claude/Settings.json")]
     assert failures == [
-        ".claude/Settings.json: case variant of .claude/settings.json is the active file on "
-        "case-insensitive file systems and is not inventoried",
-        ".claude/Rules: case variant of .claude/rules is the active file on "
-        "case-insensitive file systems and is not inventoried",
+        (
+            ".claude/Settings.json: case variant of .claude/settings.json is the active file on "
+            "case-insensitive file systems and is not inventoried"
+        ),
+        (
+            ".claude/Rules: case variant of .claude/rules is the active file on "
+            "case-insensitive file systems and is not inventoried"
+        ),
     ]
 
 

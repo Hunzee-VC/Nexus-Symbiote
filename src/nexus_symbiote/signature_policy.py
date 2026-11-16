@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 from pathlib import Path, PureWindowsPath
 from typing import Any
 from urllib.parse import urlsplit
@@ -137,11 +138,36 @@ def _identity(path: Path) -> tuple[int, int]:
     return info.st_dev, info.st_ino
 
 
+def _repository_roots(path: Path) -> tuple[Path, ...]:
+    """Every enclosing checkout, including superprojects above a nested marker."""
+    return tuple(
+        candidate for candidate in (path, *path.parents) if os.path.lexists(candidate / ".git")
+    )
+
+
 def _read_policy(policy_path: Path, root: Path) -> tuple[bytes, str]:
-    inside = "Signature policy must be provisioned outside the scanned project"
-    if policy_path.resolve().is_relative_to(root):
+    inside = (
+        "Signature policy must be provisioned outside the scanned project and outside "
+        "every repository that holds it"
+    )
+    # A change under review can edit any file of the repository that holds the project,
+    # including a superproject's policy and gitlink, so none may gate itself.
+    untrusted = [root, *_repository_roots(root)]
+    resolved = policy_path.resolve()
+    if any(resolved.is_relative_to(directory) for directory in untrusted):
         raise SignaturePolicyError(inside)
+    from nexus_symbiote.utils.crypto import _trusted_ancestor_uids
+
+    uid = getattr(os, "geteuid", lambda: None)()
+    trusted_uids = _trusted_ancestor_uids(uid) if uid is not None else set()
     try:
+        from nexus_symbiote.core.hashing import open_directory_nofollow
+
+        parent_fd = open_directory_nofollow(policy_path.parent)
+        try:
+            parent_info = os.fstat(parent_fd)
+        finally:
+            os.close(parent_fd)
         with open_regular_file(policy_path) as stream:
             info = os.fstat(stream.fileno())
             if info.st_size > MAX_POLICY_BYTES:
@@ -149,6 +175,16 @@ def _read_policy(policy_path: Path, root: Path) -> tuple[bytes, str]:
             # Another name for the file could live inside the project it gates.
             if info.st_nlink != 1:
                 raise SignaturePolicyError("Signature policy must not have other hard links")
+            if uid is not None and info.st_uid not in trusted_uids:
+                raise SignaturePolicyError("Signature policy must be owned by the current user")
+            parent_world_writable = bool(parent_info.st_mode & 0o002) and not (
+                bool(parent_info.st_mode & stat.S_ISVTX)
+                and (uid is None or parent_info.st_uid in trusted_uids)
+            )
+            if (info.st_mode & 0o002) or parent_world_writable:
+                raise SignaturePolicyError(
+                    "Signature policy and its directory must not be world-writable"
+                )
             raw = stream.read(MAX_POLICY_BYTES + 1)
             # The open followed no symlink, so these are the file's real ancestors.
             # Their device and inode also reveal the project behind a name that the
@@ -159,10 +195,10 @@ def _read_policy(policy_path: Path, root: Path) -> tuple[bytes, str]:
             "Selected signature policy is unavailable or invalid strict JSON"
         ) from None
     try:
-        project = _identity(root)
+        project = {_identity(directory) for directory in untrusted}
     except OSError:
         raise SignaturePolicyError("Project root is unavailable") from None
-    if project in ancestors:
+    if project & ancestors:
         raise SignaturePolicyError(inside)
     if len(raw) > MAX_POLICY_BYTES:
         raise SignaturePolicyError("Signature policy exceeds the byte limit")
@@ -174,7 +210,8 @@ def load_signature_policies(policy_path: Path, project_root: Path) -> SignatureP
 
     Each artifact has one entry. Unknown fields and kinds, duplicate object keys,
     duplicate artifacts, missing files and symlinks are rejected, as is a policy
-    stored inside the project or hard-linked from elsewhere. No ambient policy,
+    stored inside the project, inside any enclosing repository (including a superproject), or
+    hard-linked from elsewhere. No ambient policy,
     repository configuration, signer hint or adjacent signature is trusted. The
     project root is resolved first, so every command accepts the same path.
     """

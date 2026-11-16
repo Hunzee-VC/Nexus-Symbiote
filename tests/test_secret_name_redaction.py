@@ -14,6 +14,7 @@ from nexus_symbiote.utils.secrets import (
     redact_text,
     secret_like,
 )
+from tests.support import scaling_ratio
 
 SECRET = "s3cr3tValue9"  # noqa: S105 - synthetic fixture
 
@@ -31,6 +32,10 @@ SECRET = "s3cr3tValue9"  # noqa: S105 - synthetic fixture
         "private_key",
         "DB_PASSWORD",
         "mytoken",
+        "ENCRYPTION_KEY",
+        "MASTER_KEY",
+        "signing-key",
+        "session_key",
     ],
 )
 @pytest.mark.parametrize("operator", ["=", ": "])
@@ -42,7 +47,16 @@ def test_credential_assignment_value_is_redacted(name, operator):
 
 
 @pytest.mark.parametrize(
-    "text", ["max_tokens=4096", "tokenizer=bert", "keyword=value", "monkey=banana", "mode=fast"]
+    "text",
+    [
+        "max_tokens=4096",
+        "tokenizer=bert",
+        "keyword=value",
+        "monkey=banana",
+        "mode=fast",
+        "turkey=dinner",
+        "key=C major",
+    ],
 )
 def test_unrelated_assignments_are_unchanged(text):
     assert redact_text(text) == text
@@ -165,6 +179,10 @@ def test_an_escaped_quote_does_not_end_a_quoted_value(text, expected):
         "AKIA" + "ABCDEFGHIJKLMNOP",
         "AIza" + "f6" * 17 + "g",
         "npm_" + "h7" * 18,
+        "SG." + "i8" * 11 + "." + "j9" * 14,
+        "dckr_pat_" + "k0" * 12,
+        "shpat_" + "abcd1234" * 4,
+        "SK" + "0123456789abcdef" * 2,
         "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJl",
     ],
 )
@@ -317,10 +335,15 @@ def test_new_patterns_stay_linear_on_adversarial_input(text):
 def test_prepared_scrubber_is_linear_in_values_and_strings():
     scrubber = SecretScrubber(f"credential-{i:05d}" for i in range(256))
     metadata = {"examples": [f"value {i} credential-00007" for i in range(20_000)]}
-    started = time.monotonic()
     redacted = redact_metadata(metadata, scrubber)
-    assert time.monotonic() - started < 10
     assert "credential-00007" not in str(redacted)
+
+    def run(scale: int) -> object:
+        examples = [f"value {i} credential-00007" for i in range(2_000 * scale)]
+        return redact_metadata({"examples": examples}, scrubber)
+
+    # CONTRIBUTING: show linear work with a ratio, not a duration the runner sets.
+    assert scaling_ratio(run) < 10
 
 
 @pytest.mark.parametrize(
@@ -342,3 +365,53 @@ def test_long_or_shaped_scheme_values_are_redacted_whatever_their_letters(text, 
 )
 def test_capitalised_prose_after_a_scheme_word_survives(text):
     assert redact_text(text) == text
+
+
+# Vendor formats with a fixed prefix, assembled at run time like the tokens above. A
+# Doppler body that opens in lowercase letters and digits, as a service token's config
+# name does, must still be read as the token.
+DOPPLER_BODY = "".join(("a1b2", "C3d4E5f6G7h8" * 3, "J9k"))
+VENDOR_TOKENS = {
+    "databricks": "".join(("da", "pi", "0123456789abcdef" * 2)),
+    "slack-app": "".join(("xa", "pp-", "1-A0B1C2D3E4-1234567890-", "c" * 24)),
+    "shopify-private-app": "".join(("sh", "ppa_", "0123456789abcdef" * 2)),
+    "postman": "".join(("PM", "AK-", "a" * 24, "-", "b" * 34)),
+    "doppler-personal": "".join(("dp", ".pt.", DOPPLER_BODY)),
+    "doppler-cli": "".join(("dp", ".ct.", DOPPLER_BODY)),
+    "doppler-service": "".join(("dp", ".st.", DOPPLER_BODY)),
+    "doppler-service-lowercase": "".join(("dp", ".st.", "0123456789abcdef" * 2, "0123456789ab")),
+    "doppler-service-config": "".join(("dp", ".st.", "dev.", DOPPLER_BODY)),
+    "doppler-service-branch-config": "".join(("dp", ".st.", "prd_api-2.", DOPPLER_BODY)),
+    "doppler-service-account": "".join(("dp", ".sa.", DOPPLER_BODY)),
+    "doppler-scim": "".join(("dp", ".scim.", DOPPLER_BODY)),
+    "doppler-audit": "".join(("dp", ".audit.", DOPPLER_BODY)),
+}
+
+
+@pytest.mark.parametrize("token", VENDOR_TOKENS.values(), ids=VENDOR_TOKENS.keys())
+@pytest.mark.parametrize("identifier", [False, True])
+def test_vendor_token_formats_are_redacted(token, identifier):
+    redacted = redact_text(f"call with {token} inside", identifier=identifier)
+    assert token not in redacted and redacted == f"call with {REDACTED} inside"
+    assert secret_like("CONFIG", token)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "SG.config",
+        "dapi-client",
+        "dapi-docs",
+        "xapp-bot",
+        "shpat_rotation",
+        "shppa_rotation",
+        "PMAK-docs",
+        "dp.pt.cfg",
+        "dp.st.dev",
+        "dp.st.dev.integrations.secrets_manager.client_factory",
+        "dp.pt.load_pretrained_weights_from_checkpoint_directory",
+    ],
+)
+@pytest.mark.parametrize("identifier", [False, True])
+def test_ordinary_names_near_vendor_token_formats_are_kept(name, identifier):
+    assert redact_text(name, identifier=identifier) == name

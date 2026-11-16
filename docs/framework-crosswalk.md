@@ -32,7 +32,7 @@ for every kind, none is made. `launch_context` has no MITRE ATLAS reference, alt
 its privileged-mode findings are preconditions for AML.T0105 Escape to Host, because a
 high `launch_context` finding can also record only a command-valued field. Medium
 `nonregistry_source` findings have no reference at all, because they also record
-workspace members and local paths, which can be the project's own packages. The
+workspace members, local paths and local patches, which can be the project's own. The
 exceptions are references that the earlier SARIF rules carried: they were kept so that
 those rules keep their tags, their rationales name the kind of finding they do not hold
 for, and [Limits](#limits) lists them.

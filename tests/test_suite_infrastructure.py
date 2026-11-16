@@ -74,8 +74,18 @@ def test_a_hung_test_fails_with_its_traceback_instead_of_stalling_the_run(suite)
     [
         ("sigstore is not installed", True, pytest.ExitCode.TESTS_FAILED),
         ("sigstore is not installed", False, pytest.ExitCode.OK),
-        ("the file system is case-sensitive", True, pytest.ExitCode.OK),
+        (
+            "the file system is case-sensitive, so the alias does not exist",
+            True,
+            pytest.ExitCode.OK,
+        ),
         ("file system rejects the name", True, pytest.ExitCode.OK),
+        ("needs a case-sensitive file system to hold both spellings", True, pytest.ExitCode.OK),
+        # Only the exact reasons pass: containing or starting with the words is not enough.
+        ("quarantined for now; file system rejects nothing", True, pytest.ExitCode.TESTS_FAILED),
+        ("flaky on case-sensitive hosts", True, pytest.ExitCode.TESTS_FAILED),
+        ("file system rejects nothing; quarantined", True, pytest.ExitCode.TESTS_FAILED),
+        ("the file system is case-sensitive -- disabled", True, pytest.ExitCode.TESTS_FAILED),
     ],
 )
 def test_only_host_file_system_skips_pass_a_strict_run(suite, reason, strict, status):
@@ -93,6 +103,30 @@ def test_only_host_file_system_skips_pass_a_strict_run(suite, reason, strict, st
     result = suite.runpytest("-p", "no:cacheprovider", *(["--strict-skips"] if strict else []))
     assert result.ret == status
     result.stdout.fnmatch_lines(["*skip accounting*", f"*test_skips: {reason}*"])
+
+
+def test_temporary_files_go_to_the_tests_private_directory(suite, monkeypatch, tmp_path):
+    shared = tmp_path / "shared-tmp"
+    shared.mkdir()
+    monkeypatch.setenv("TMPDIR", str(shared))
+    suite.makepyfile(
+        """
+        import os
+        import tempfile
+        from pathlib import Path
+
+        def test_first():
+            home = Path(os.environ["HOME"])
+            assert Path(os.environ["TMPDIR"]).parent == home
+            assert Path(tempfile.gettempdir()).parent == home
+            assert Path(tempfile.mkdtemp()).parent.parent == home
+
+        def test_second_gets_its_own():
+            assert Path(tempfile.gettempdir()).parent == Path(os.environ["HOME"])
+        """
+    )
+    suite.runpytest("-p", "no:cacheprovider").assert_outcomes(passed=2)
+    assert list(shared.iterdir()) == []
 
 
 def test_a_module_level_import_skip_is_accounted_for(suite):
