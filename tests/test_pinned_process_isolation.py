@@ -583,7 +583,9 @@ _WRAPPERS = {
 }
 
 
-def _launch_state(tmp_path: Path, name: str, *, namespaced: bool = False) -> list[str]:
+def _launch_state(
+    tmp_path: Path, name: str, *, namespaced: bool = False, wrapped: bool = True
+) -> list[str]:
     out = tmp_path / f"{name}.state"
     script = tmp_path / name
     script.write_text(STATE.replace("OUT", shlex.quote(str(out))))
@@ -594,8 +596,15 @@ def _launch_state(tmp_path: Path, name: str, *, namespaced: bool = False) -> lis
         observe_pinned(str(script), pin)
     *lines, stat = out.read_text().splitlines()
     pid = stat.split()[0]
-    # Opted out, the launcher leads its own session; in a namespace, unshare does.
-    assert (stat.rpartition(")")[2].split()[2:4] == [pid, pid]) is not namespaced
+    parent, *group = stat.rpartition(")")[2].split()[1:4]
+    if namespaced:
+        # In a namespace, unshare leads the session.
+        assert group != [pid, pid]
+    elif wrapped:
+        # Opted out, the subreaper wrapper stays the launcher's parent and leads its session.
+        assert group == [parent, parent]
+    else:
+        assert group == [pid, pid]
     work = re.compile(r"\S*/nexus-live-\w+")
     return [re.sub(r"pipe:\[\d+\]", "pipe", work.sub("WORK", line)) for line in lines]
 
@@ -614,7 +623,7 @@ def _wrapped_and_direct(
         wrapped = _launch_state(tmp_path, "wrapped", namespaced=namespaced)
         with monkeypatch.context() as direct_exec:
             direct_exec.setattr(pinned_process, _WRAPPERS[wrapper][1], lambda staged: None)
-            direct = _launch_state(tmp_path, "direct", namespaced=namespaced)
+            direct = _launch_state(tmp_path, "direct", namespaced=namespaced, wrapped=False)
     finally:
         signal.pthread_sigmask(signal.SIG_SETMASK, previous)
     return wrapped, direct, {*previous, signal.SIGUSR2}
@@ -1282,3 +1291,69 @@ def test_gate_is_disabled_and_init_fd_closes_without_pidfd_send_signal(
             os.close(read_fd)
         monkeypatch.undo()
         _end_supervised(proc, init)
+
+
+def _spawn_opted_out(tmp_path: Path, body: str) -> subprocess.Popen[bytes]:
+    """Stage a shell launcher and start it opted out, as ``observe_pinned`` would."""
+    script = tmp_path / "launcher.sh"
+    script.write_text("#!/bin/sh\n" + body)
+    script.chmod(0o700)
+    digest = "sha256:" + hashlib.sha256(script.read_bytes()).hexdigest()
+    work = tmp_path / "work"
+    work.mkdir()
+    staged = pinned_process.stage_pinned_executable(str(script), digest, work)
+    with isolation_off():
+        return pinned_process.spawn_pinned(staged, work)
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="the subreaper wrapper is Linux-only"
+)
+@pytest.mark.parametrize(("body", "expected"), [("exit 3\n", 3), ("kill -9 $$\n", -9)])
+def test_the_opt_out_wrapper_reports_the_launchers_exit_status(
+    tmp_path: Path, body: str, expected: int
+) -> None:
+    # The wrapper is the process the caller waits for; its status is the launcher's.
+    proc = _spawn_opted_out(tmp_path, body)
+    try:
+        assert proc.wait(timeout=10) == expected
+    finally:
+        pinned_process.terminate_process_group(proc)
+        for stream in (proc.stdin, proc.stdout):
+            if stream is not None:
+                stream.close()
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="the subreaper wrapper is Linux-only"
+)
+def test_opt_out_kills_what_a_launcher_that_already_exited_left_behind(tmp_path: Path) -> None:
+    # The launcher starts a daemon in its own session and exits at once. The daemon's
+    # parent becomes the wrapper, not pid 1, so cleanup still finds and kills it.
+    marker = tmp_path / "pid"
+    launcher = tmp_path / "launcher-pid"
+    quoted, recorded = shlex.quote(str(marker)), shlex.quote(str(launcher))
+    body = (
+        f"setsid sh -c 'echo $$ > {quoted}.tmp && mv {quoted}.tmp {quoted} && exec sleep 60' "
+        "</dev/null >/dev/null 2>&1 &\n"
+        f"while [ ! -e {quoted} ]; do sleep 0.01; done\n"
+        f"echo $$ > {recorded}.tmp && mv {recorded}.tmp {recorded}\n"
+        "exit 0\n"
+    )
+    proc = _spawn_opted_out(tmp_path, body)
+    try:
+        deadline = time.monotonic() + 10
+        while not launcher.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert launcher.exists(), "the launcher did not start its daemon within 10 seconds"
+        # Cleanup must run only after the launcher has exited and the daemon was orphaned.
+        _assert_dead(_host_pid(launcher))
+        pinned_process.terminate_process_group(proc)
+        proc.wait(timeout=10)
+        _assert_dead(_host_pid(marker))
+    finally:
+        with contextlib.suppress(ProcessLookupError, ValueError, OSError):
+            os.kill(_host_pid(marker), signal.SIGKILL)
+        for stream in (proc.stdin, proc.stdout):
+            if stream is not None:
+                stream.close()

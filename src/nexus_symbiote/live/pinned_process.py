@@ -8,15 +8,15 @@ cleanup kills it through that pidfd, or, where no pidfd can be held, as the chil
 stopped ``unshare``. Cleanup then waits until the kernel has ended every process in
 the namespace, or reports that it could not. If the kernel refuses the namespace,
 launch fails before executing the pinned program. On Linux,
-``--no-isolation`` starts the launcher through a short exec wrapper that makes it a
-child subreaper, and cleanup stops the launcher before it sweeps the tree, so while the
-launcher is alive its descendants are killed with the session, including a double-fork.
-A descendant that outlives the launcher can escape. An opted-out launch also joins a
-private cgroup v2 when the current cgroup allows a child, and cleanup writes
-``cgroup.kill``, so a ``clone(CLONE_PARENT)`` child that calls ``setsid`` dies with
-that cgroup; without one, cleanup signals every process still in the launcher's
-session. A process that leaves both can escape. Elsewhere that cleanup is best effort.
-Neither is a PID or filesystem namespace.
+``--no-isolation`` starts the launcher as the child of a short wrapper that stays alive
+as a child subreaper, and cleanup stops the wrapper and sweeps its tree. A double-fork,
+a ``clone(CLONE_PARENT)`` child that calls ``setsid``, and a descendant of a launcher
+that already exited are all reparented to the wrapper, so they die with the session.
+An opted-out launch also joins a private cgroup v2 when the current cgroup allows a
+child, and cleanup writes ``cgroup.kill``, and it signals every process still in the
+wrapper's session. A launcher that kills its wrapper can leave the tree; then only
+that cgroup, where one exists, still reaches what it started. Elsewhere that cleanup
+is best effort. Neither is a PID or filesystem namespace.
 """
 
 from __future__ import annotations
@@ -47,8 +47,9 @@ _NAMESPACED: set[int] = set()
 _INITS: dict[int, int] = {}
 _RELEASE = b"\n"
 _START_SECONDS = 5.0
-# Opt-out launches only: session id and a private cgroup, recorded while the pid is live.
-_OPT_OUT: dict[int, tuple[int | None, Path | None]] = {}
+# Opt-out launches only: session id, a private cgroup and whether the subreaper wrapper
+# is the process, recorded while the pid is live.
+_OPT_OUT: dict[int, tuple[int | None, Path | None, bool]] = {}
 _CGROUP_SEQ = 0
 _STOP_SECONDS = 1.0
 _SWEEP_PASSES = 8
@@ -79,6 +80,33 @@ if prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0:
     os._exit(127)
 signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 signal.signal(signal.SIGXFSZ, signal.SIG_DFL)
+# The wrapper stays alive as the launcher's parent and subreaper. A child the launcher
+# starts with clone(CLONE_PARENT) is then the wrapper's, and so is every orphan below
+# it, so cleanup finds them in the wrapper's tree on any host. The child execs below.
+launcher = os.fork()
+if launcher:
+    # Keep no copy of the launcher's streams, so their end of file is the launcher's.
+    null = os.open(os.devnull, os.O_RDWR)
+    os.dup2(null, 0)
+    os.dup2(null, 1)
+    os.close(null)
+    status = 0
+    while True:
+        try:
+            child, waited = os.wait()
+        except ChildProcessError:
+            break
+        if child == launcher:
+            status = waited
+    code = os.waitstatus_to_exitcode(status)
+    if code < 0:
+        # Die of the launcher's signal; SIGKILL and SIGSTOP keep their only disposition.
+        try:
+            signal.signal(-code, signal.SIG_DFL)
+        except (OSError, ValueError):
+            pass
+        os.kill(os.getpid(), -code)
+    os._exit(code & 0xFF)
 os.execve(sys.argv[1], [sys.argv[1]], {"PATH": os.defpath})
 """
 # The namespace init runs this before the pinned bytes and waits for one byte on stdin.
@@ -294,9 +322,9 @@ def _kill_descendants(root: int) -> None:
 
 
 def _stop_launcher(pid: int) -> int | None:
-    """Stop the launcher, or ``unshare``, so it cannot fork or reap during cleanup.
+    """Stop the opted-out wrapper, or ``unshare``, so it cannot fork or reap during cleanup.
 
-    A stopped launcher is still alive, so on Linux it stays the subreaper that adopts the
+    A stopped wrapper is still alive, so on Linux it stays the subreaper that adopts the
     children of every descendant the sweep kills. The kernel reports the stop only once
     every thread has stopped, which a thread does on its way out of the kernel, so a fork
     in progress has attached its child by then. The wait is bounded: a launcher that is
@@ -321,6 +349,31 @@ def _stop_launcher(pid: int) -> int | None:
             return changed.si_code
         if time.monotonic() >= deadline:
             return None
+        time.sleep(delay)
+        delay = min(delay * 2, 0.02)
+
+
+def _let_the_wrapper_reap(pid: int) -> None:
+    """Resume the stopped wrapper so it reaps the launcher's killed tree and exits.
+
+    The wrapper is this module's own program, and the sweep has killed everything below
+    it, so resuming it only lets it collect exit statuses: the launcher and its
+    descendants are then reaped before the caller's ``wait()`` returns, rather than by
+    pid 1 at some later time. Never used for a launcher run without the wrapper, which is
+    untrusted. Bounded: a descendant that survived the sweep keeps the wrapper waiting,
+    and the rest of cleanup still kills it and then the wrapper.
+    """
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.kill(pid, signal.SIGCONT)
+    deadline = time.monotonic() + _STOP_SECONDS
+    delay = 0.0005
+    while time.monotonic() < deadline:
+        try:
+            # WNOWAIT leaves the exit status for the caller's wait().
+            if os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None:
+                return
+        except OSError:
+            return
         time.sleep(delay)
         delay = min(delay * 2, 0.02)
 
@@ -611,53 +664,17 @@ def _kill_session(sid: int) -> None:
                 os.kill(pid, signal.SIGKILL)
 
 
-def _cgroup_members(path: Path) -> list[int]:
-    """The pids in the private cgroup ``path``, read before it is killed."""
-    try:
-        text = (path / "cgroup.procs").read_text(encoding="ascii")
-    except (OSError, ValueError):
-        return []
-    return [int(pid) for pid in text.split() if pid.isdigit()]
-
-
-def _reap_adopted(candidates: list[int], except_pid: int) -> None:
-    """Reap the killed members of the launcher's cgroup that are this process's children.
-
-    ``clone(CLONE_PARENT)`` makes this process their parent. Only those members are
-    reaped: reaping any zombie child of this process would take the exit status of a
-    subprocess other code started, which its ``wait()`` then reports as 0. A member
-    stays this process's child until it is reaped, so its pid cannot be reused first.
-    ``waitpid`` on the launcher stays with the caller.
-    """
-    me = str(os.getpid())
-    pending = [pid for pid in dict.fromkeys(candidates) if pid != except_pid]
-    deadline = time.monotonic() + _STOP_SECONDS
-    while pending:
-        running: list[int] = []
-        for pid in pending:
-            fields = _proc_fields(pid)
-            if fields is None or fields[1] != me:
-                continue  # gone, or another process's child
-            if fields[0] == "Z":
-                with contextlib.suppress(ChildProcessError, OSError):
-                    os.waitpid(pid, os.WNOHANG)
-            else:
-                running.append(pid)
-        if not running or time.monotonic() >= deadline:
-            return
-        pending = running
-        time.sleep(0.005)
-
-
 def _subreaper_argv(staged: Path) -> list[str] | None:
-    """Run ``staged`` through an exec wrapper that makes it a child subreaper, or None.
+    """Run ``staged`` as the child of a wrapper that stays a child subreaper, or None.
 
     A double-fork calls ``setsid`` and then exits the intermediate process, so the
-    grandchild's parent would otherwise become pid 1 and leave the descendant tree.
-    The flag is kept across exec, so while the launcher is alive it adopts every
-    orphaned descendant and the tree sweep still finds it. Once the launcher has
-    exited, its descendants are adopted outside that tree and the sweep misses them.
-    The wrapper runs before the pinned bytes, with this interpreter, a fixed program,
+    grandchild's parent would otherwise become pid 1 and leave the descendant tree. The
+    wrapper forks, the child execs the pinned bytes, and the wrapper stays alive,
+    reaping and keeping no copy of the launcher's streams, until no child is left; then
+    it exits with the launcher's status. Every orphan below it, a ``clone(CLONE_PARENT)``
+    child of the launcher (whose parent is the wrapper) and the descendants of a launcher
+    that already exited are therefore in the wrapper's tree for the sweep. The launcher
+    shares the session and group its wrapper leads. The wrapper runs before the pinned bytes, with this interpreter, a fixed program,
     the fixed launch environment and ``-I -S``, so environment variables, the working
     directory and site-packages do not reach it. Only Linux has
     ``PR_SET_CHILD_SUBREAPER``; elsewhere, or without a separately runnable
@@ -736,7 +753,7 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
             sid: int | None = os.getsid(proc.pid)
         except OSError:
             sid = None
-        _OPT_OUT[proc.pid] = (sid, cgroup)
+        _OPT_OUT[proc.pid] = (sid, cgroup, argv != [str(staged)])
     if gated:
         _release(proc)
     return proc
@@ -778,21 +795,23 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
     was killed before cleanup with no pidfd held, ``unshare`` is still killed and
     ``PinnedProcessError`` reports ``isolation-teardown-failed``.
 
-    Outside a namespace, on Linux, the launcher is a child subreaper, so a double-fork
-    is reparented to it instead of pid 1 and the tree sweep still finds it. There the
-    launcher is stopped first, so it cannot start a process after the sweep, such as a
-    helper that a watchdog restarts, which would be reparented to pid 1 when killpg
-    kills the launcher. A descendant left behind by a launcher that already exited was
-    adopted outside the tree and is not found.
+    Outside a namespace, on Linux, the launcher runs as the child of a wrapper that
+    stays alive as a child subreaper. A double-fork, a ``clone(CLONE_PARENT)`` child and
+    a descendant of a launcher that already exited are all reparented to the wrapper
+    instead of pid 1 or this process, so the tree sweep from the wrapper finds them,
+    whatever session or group they moved to. The wrapper is stopped first, so it stays
+    alive to adopt the children of each process the sweep kills; a helper the launcher
+    restarts during the sweep is its child and is found by the next pass. A launcher
+    that kills its wrapper, or reaches past this process tree another way, is outside
+    what this cleanup can see, apart from the cgroup where one could be made.
     """
     namespaced = proc.pid in _NAMESPACED
     init = _INITS.pop(proc.pid, None)
-    sid, cgroup = _OPT_OUT.pop(proc.pid, (None, None))
+    sid, cgroup, wrapped = _OPT_OUT.pop(proc.pid, (None, None, False))
     # The sweep reads Linux's /proc, and macOS has no os.waitid before Python 3.13. Until
     # it is reaped, the pid is still this launcher's.
     stop = sys.platform.startswith("linux") and proc.returncode is None
     ended = True
-    members: list[int] = []
     try:
         try:
             if namespaced:
@@ -807,12 +826,13 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
                 if stop:
                     _stop_launcher(proc.pid)
                 _kill_descendants(proc.pid)
-            # After the stopped launcher's tree is swept: the cgroup also holds a
-            # CLONE_PARENT child, which that walk does not see, but killing it first
-            # would kill the launcher and orphan its tree before the walk.
+            # Defense in depth after the sweep: the cgroup also holds a process that
+            # has left the wrapper's tree, as one does when the launcher kills its
+            # wrapper. Killing the cgroup first would orphan the tree before the walk.
             if cgroup is not None:
-                members = _cgroup_members(cgroup)
                 _cgroup_kill(cgroup)
+            if wrapped and stop:
+                _let_the_wrapper_reap(proc.pid)
         finally:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
@@ -823,7 +843,6 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
             _kill_session(sid)
         if not namespaced:
             _kill_descendants(proc.pid)
-            _reap_adopted(members, proc.pid)
     finally:
         # A finished pid must not stay marked. The kernel can reuse it for a later
         # launcher that is not in a PID namespace, and that launcher would then skip

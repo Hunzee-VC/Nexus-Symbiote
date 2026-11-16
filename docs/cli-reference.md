@@ -973,7 +973,7 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 | `--json-output` | Output the verification report as JSON. |
 | `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools, declarations or the server identity drifted, unless `--accept-drift`. |
 | `--accept-drift` | With `--record`, exit 0 although changed or new tools, declarations or server identity were recorded. |
-| `--no-isolation` | Explicitly allow execution without a PID namespace; printed as a warning. On Linux the launcher is made a child subreaper and is stopped before cleanup. When a cgroup v2 child can be created, cleanup writes `cgroup.kill`, which also kills a `clone(CLONE_PARENT)` child that has called `setsid`. Otherwise cleanup kills the descendant tree, the process group, and every process still in the launcher's session. A process that leaves that session and the cgroup can escape. Elsewhere cleanup is best effort. This is not a namespace or sandbox. |
+| `--no-isolation` | Explicitly allow execution without a PID namespace; printed as a warning. On Linux the launcher runs under a wrapper that stays its parent as a child subreaper, and cleanup kills the wrapper's whole tree, including a `clone(CLONE_PARENT)` child that has called `setsid` and what a launcher that already exited left behind. A launcher that kills its wrapper can escape, except from a cgroup v2 child where one can be created, which cleanup also kills. Elsewhere cleanup is best effort. This is not a namespace or sandbox. |
 
 By default the launcher must run as pid 1 of a new user and PID namespace
 (`unshare --user --map-root-user --pid --fork --kill-child`). That process first
@@ -1007,17 +1007,22 @@ supplementary groups or changes file ownership behaves differently than under di
 execution. A host that refuses the namespace fails with `isolation-unavailable`
 before executing the pinned launcher. Only the explicit operator option
 `--no-isolation` permits a launch without this boundary. On that path, on Linux,
-a short exec wrapper (the running interpreter with `-I -S`) sets
-`PR_SET_CHILD_SUBREAPER` and then executes the staged launcher with the same
-argument, environment and working directory. While the launcher is alive, its
-descendants stay in its process tree, including a `setsid` child that
-double-forks. Cleanup stops the launcher before it kills them, so the launcher
-cannot start another process, such as a helper that a watchdog restarts, and then
-kills the launcher's process group. A descendant that outlives the launcher,
-because the launcher exited or was killed before the session ended, is adopted
-outside that tree and can escape. So can a launcher or descendant that deliberately
-evades cleanup, for example by clearing the subreaper flag or forking faster than
-the tree is scanned, and a descendant running as another user cannot be signalled.
+a short wrapper (the running interpreter with `-I -S`) sets
+`PR_SET_CHILD_SUBREAPER`, forks, and executes the staged launcher in the child with
+the same argument, environment and working directory. The wrapper stays alive as the
+launcher's parent, keeps no copy of its streams, reaps every child and exits with
+the launcher's status once none is left; the launcher shares the session and process
+group the wrapper leads. Every orphan below the wrapper is reparented to it, so a
+`setsid` child that double-forks, a `clone(CLONE_PARENT)` child (whose parent is the
+wrapper) and the descendants of a launcher that already exited all stay in the
+wrapper's tree. Cleanup stops the wrapper, kills its tree in repeated passes, so a
+helper that a watchdog restarts is found as the wrapper's child, lets the wrapper
+reap them, and kills the wrapper's process group, the processes in its session and
+a private cgroup v2 where the current cgroup allows a child. A launcher that kills
+its wrapper leaves the tree, and what it starts then can escape unless that cgroup
+exists. So can a launcher or descendant that deliberately evades cleanup another
+way, for example by moving out of the cgroup or forking faster than the tree is
+scanned, and a descendant running as another user cannot be signalled.
 On other systems that cleanup is best effort. The option is not a PID namespace,
 and neither form is a filesystem or network sandbox.
 
