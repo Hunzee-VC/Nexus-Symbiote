@@ -803,7 +803,6 @@ _AMBIGUOUS_SHELL = "shell options before the script are ambiguous"
 # servers. A function or alias defined there replaces any program the script names.
 _STARTUP_FILE = "shell options name a startup file the shell runs before the script"
 # fish reads its options with getopt "+hPilNnvc:C:p:d:f:D:o:" and unique long prefixes.
-_FISH_FLAGS = frozenset("hPilNnv")
 _FISH_FLAG_RUN = re.compile("[hPilNnv]*")
 _FISH_VALUES = frozenset("cCpdfDo")
 _FISH_LONG = {

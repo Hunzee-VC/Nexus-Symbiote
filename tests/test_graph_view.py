@@ -601,7 +601,6 @@ HOSTILE = (
     "line\nbreak\r::warning::forged",
     "[md](https://evil.example) **bold** `code`",
 )
-WORD = re.compile(r"[a-z]{4,}")
 
 
 def hostile_inventory() -> AIBOM:

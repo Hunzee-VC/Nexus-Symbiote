@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-import nexus_symbiote.runtime as runtime
+from nexus_symbiote import runtime
 from nexus_symbiote.live.session import invoke_pinned_stdio
 from nexus_symbiote.runtime import (
     AuthorizationError,

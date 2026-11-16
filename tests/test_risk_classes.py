@@ -5,7 +5,6 @@ from __future__ import annotations
 import itertools
 import json
 import pickle
-from pathlib import Path
 
 import pytest
 
@@ -31,7 +30,6 @@ from nexus_symbiote.scanners.ide_agents import IDEAgentScanner
 from nexus_symbiote.scanners.mcp import MCPScanner
 from nexus_symbiote.scanners.model import ModelScanner
 
-ROOT = Path(__file__).resolve().parents[1]
 UNASSESSED = RiskClassification(classes=(), basis=(), assessed=False)
 NONE_DERIVED = RiskClassification(classes=(), basis=(), assessed=True)
 
