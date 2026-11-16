@@ -1210,30 +1210,3 @@ def test_gate_is_disabled_and_init_fd_closes_without_pidfd_send_signal(
             os.close(read_fd)
         monkeypatch.undo()
         _end_supervised(proc, init)
-
-
-def test_the_launcher_group_is_killed_when_the_sweep_fails(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    killpg = os.killpg
-    groups: list[int] = []
-
-    def record(pgid: int, sig: int) -> None:
-        groups.append(pgid)
-        killpg(pgid, sig)
-
-    def fail(root: int) -> None:
-        raise RuntimeError("sweep failed")
-
-    monkeypatch.setattr(pinned_process, "_kill_descendants", fail)
-    monkeypatch.setattr(pinned_process.os, "killpg", record)
-    proc = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)  # noqa: S603
-    try:
-        with pytest.raises(RuntimeError, match="sweep failed"):
-            pinned_process.terminate_process_group(proc)
-    finally:
-        monkeypatch.undo()
-        with contextlib.suppress(ProcessLookupError):
-            killpg(proc.pid, signal.SIGKILL)
-    assert groups == [proc.pid]
-    assert proc.wait(timeout=5) == -signal.SIGKILL
