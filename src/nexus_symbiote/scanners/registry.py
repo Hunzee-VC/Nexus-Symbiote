@@ -31,6 +31,7 @@ from nexus_symbiote.core.enums import AssuranceLevel, RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import extract_version_pin, hash_bytes, parse_json_strict
 from nexus_symbiote.core.models import ClaimEvidence, RegistryEntryComponent, RiskAssessment
 from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.scanners.credential_files import credential_gap
 from nexus_symbiote.scanners.mcp import (
     _npmrc,
     _origin_label,
@@ -1267,12 +1268,44 @@ class RegistryScanner(Scanner):
             raise RuntimeError("registry files read outside a _collection context")
         return self._files
 
+    # Read on purpose although their names say they hold credentials: only the registry
+    # settings of .npmrc and whether .env names COMPOSE_FILE are used, and no value of
+    # either is recorded.
+    _CREDENTIAL_INPUTS = frozenset({".npmrc", ".env"})
+
+    def _withheld(self, name: str, result: ScanResult) -> bool:
+        """Whether the root file ``name``, or the in-root file a symlink there leads to, is
+        named as holding credentials, such as ``requirements-dev.txt -> .env``.
+
+        Such a file is a recorded gap and is not read: a line of ``.env`` that names an
+        AI package would otherwise carry its value into a component's version.
+        """
+        if name in self._CREDENTIAL_INPUTS:
+            return False
+        target = self._confined().in_root_target(name)
+        reason = credential_gap(name, None if target is None else target.as_posix())
+        if reason is None:
+            return False
+        message = f"{name}: {reason}; not read or inventoried"
+        if message not in result.surfaces_excluded:
+            result.surfaces_excluded.append(message)
+        return True
+
     def _read(self, name: str, result: ScanResult) -> str | None:
         """A root file by its name, which is also how the inventory records it."""
+        if self._withheld(name, result):
+            return None
         content = self._confined().read_text(name, missing_ok=True)
         if content is not None:
             result.surfaces_scanned.append(name)
         return content
+
+    def _read_mapping(
+        self, path: Path, result: ScanResult, *, missing_ok: bool = True
+    ) -> dict[str, Any] | None:
+        if self._withheld(path.as_posix(), result):
+            return None
+        return super()._read_mapping(path, result, missing_ok=missing_ok)
 
     # Lockfiles of other package managers, which the collector does not read; the
     # npm, pnpm, Yarn, uv and Poetry lockfiles are read below.
@@ -1340,6 +1373,10 @@ class RegistryScanner(Scanner):
         for names in self._NODE_LOCKFILES:
             for name in names:
                 before = files.failures_recorded, files.exclusions_recorded
+                if self._withheld(name, result):
+                    # Present but not read: no other file stands in for it.
+                    found.append((name, None))
+                    break
                 # Parse and bind the same bounded bytes; a second open for hashing could
                 # associate a swapped lockfile with a previously parsed resolution.
                 raw = files.read_bytes(name, missing_ok=True)
@@ -1366,7 +1403,9 @@ class RegistryScanner(Scanner):
         if name not in self._NPM_LOCKFILES:
             return None, (name, raw), False
         try:
-            lock = parse_json_strict(raw)
+            # The operator's file-bytes limit already bounded the read; a fixed parser
+            # cap below it would fail every larger lockfile whatever the limit says.
+            lock = parse_json_strict(raw, max_bytes=files.max_file_bytes)
             if (
                 not isinstance(lock, dict)
                 or not isinstance(lock.get("packages"), dict)
@@ -2544,6 +2583,8 @@ class RegistryScanner(Scanner):
         pnpm-lock.yaml is; None when the file is not read."""
         files = self._confined()
         before = files.failures_recorded, files.exclusions_recorded
+        if self._withheld("pnpm-workspace.yaml", result):
+            return None
         text = files.read_text("pnpm-workspace.yaml", missing_ok=True)
         if text is None:
             unread = (files.failures_recorded, files.exclusions_recorded) != before
@@ -2679,13 +2720,18 @@ class RegistryScanner(Scanner):
                 message = f"{source}: invalid or unsupported PyPI requirement"
                 if message not in result.scan_failures:
                     result.scan_failures.append(message)
-            spec = _unparsed(reference[len(match.group()) :].strip())
+            # Redacted whole: the name before the value can be what marks it as a
+            # credential, as in COHERE_API_KEY=..., so it must not be cut off first.
+            whole = redact_text(_unparsed(reference))
+            spec = (
+                whole[len(match.group()) :].strip() if whole.startswith(match.group()) else REDACTED
+            )
             return _PipDeclaration(
                 name=name,
                 source=source,
                 reference=reference,
                 recorded=_unparsed(reference),
-                spec=redact_text(spec) or None,
+                spec=spec or None,
                 group=group,
                 untranslated="invalid",
                 hashes=hashes,
@@ -3296,6 +3342,8 @@ class RegistryScanner(Scanner):
         files = self._confined()
         found_locks: list[tuple[str, str, bytes]] = []
         for lock_name, method in (("uv.lock", "uv-lockfile"), ("poetry.lock", "poetry-lockfile")):
+            if self._withheld(lock_name, result):
+                continue
             raw = files.read_bytes(lock_name, missing_ok=True)
             if raw is not None:
                 result.surfaces_scanned.append(lock_name)
