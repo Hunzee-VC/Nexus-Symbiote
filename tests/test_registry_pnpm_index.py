@@ -114,41 +114,49 @@ def _scan(root: Path, dependencies: dict[str, str], lock: str) -> ScanResult:
     return RegistryScanner().scan(root)
 
 
+# pnpm lists the root's dependencies in every lockfile format, so a record found by key
+# in a lockfile that does not records no specifier for package.json and binds nothing.
+STALE = "pnpm-lock.yaml: selected package version disagrees with package.json"
+
+
 def _packages(*keys: str) -> str:
-    """A lockfile whose root importer lists nothing, so every package is found by key:
-    a 5.x lockfile, since 6.x and 9.x always write a root importer."""
+    """A lockfile whose root importer lists nothing, so every package is found by key."""
     records = "".join(f"  '{key}':\n    resolution: {{integrity: {SHA512}}}\n" for key in keys)
     return "lockfileVersion: '5.4'\npackages:\n" + records
 
 
 @pytest.mark.parametrize(
-    ("name", "key", "pointer"),
+    ("name", "key", "reference"),
     [
-        ("mcp-p1", "mcp-p1@1.0.0", "mcp-p1@1.0.0"),
-        ("mcp-p1", "/mcp-p1@1.0.0(peer@2.0.0)", "~1mcp-p1@1.0.0(peer@2.0.0)"),
-        ("mcp-p1", "/mcp-p1/1.0.0", "~1mcp-p1~11.0.0"),
-        ("@ai/mcp", "@ai/mcp@1.0.0", "@ai~1mcp@1.0.0"),
-        ("@ai/mcp", "/@ai/mcp/1.0.0", "~1@ai~1mcp~11.0.0"),
+        ("mcp-p1", "mcp-p1@1.0.0", "1.0.0"),
+        ("mcp-p1", "/mcp-p1@1.0.0(peer@2.0.0)", "1.0.0(peer@2.0.0)"),
+        ("mcp-p1", "/mcp-p1/1.0.0", "1.0.0"),
+        ("@ai/mcp", "@ai/mcp@1.0.0", "1.0.0"),
+        ("@ai/mcp", "/@ai/mcp/1.0.0", "1.0.0"),
     ],
 )
-def test_a_package_the_importer_does_not_list_is_selected_by_its_key(tmp_path, name, key, pointer):
+def test_a_package_the_importer_does_not_list_is_selected_by_its_key_and_not_bound(
+    tmp_path, name, key, reference
+):
+    packages = {key: {}, "other@1.0.0": {}}
+    assert RegistryScanner._pnpm_selections(packages, {name}) == {name: (key, reference)}
     result = _scan(tmp_path, {name: "^1.0.0"}, _packages(key, "other@1.0.0"))
-    assert not result.scan_failures and not result.surfaces_excluded
+    assert result.scan_failures == [STALE] and not result.surfaces_excluded
     (component,) = result.components
-    assert component.version == "1.0.0"
-    assert component.properties["lockfile_record"] == "pnpm-lock.yaml#/packages/" + pointer
-    assert component.claims["package_resolution"].method == "pnpm-lockfile"
+    assert component.version == "^1.0.0" and component.package_url is None
+    assert "lockfile_record" not in component.properties
+    assert "package_resolution" not in component.claims
 
 
 def test_a_longer_name_does_not_select_a_shorter_names_records(tmp_path):
-    result = _scan(
-        tmp_path,
-        {"mcp-p1": "^1.0.0", "mcp-p10": "^1.0.0", "@ai/mcp": "^1.0.0"},
-        _packages("mcp-p10@1.0.0", "mcp-p100/2.0.0", "@ai/mcp-p1@1.0.0", "@ai/mcpx/1.0.0"),
-    )
-    assert not result.scan_failures and not result.surfaces_excluded
-    versions = {c.name: c.version for c in result.components}
-    assert versions == {"mcp-p1": "^1.0.0", "mcp-p10": "1.0.0", "@ai/mcp": "^1.0.0"}
+    keys = ("mcp-p10@1.0.0", "mcp-p100/2.0.0", "@ai/mcp-p1@1.0.0", "@ai/mcpx/1.0.0")
+    names = {"mcp-p1", "mcp-p10", "@ai/mcp"}
+    assert RegistryScanner._pnpm_selections(dict.fromkeys(keys, {}), names) == {
+        "mcp-p10": ("mcp-p10@1.0.0", "1.0.0")
+    }
+    result = _scan(tmp_path, dict.fromkeys(names, "^1.0.0"), _packages(*keys))
+    assert result.scan_failures == [STALE] and not result.surfaces_excluded
+    assert all("package_resolution" not in c.claims for c in result.components)
 
 
 def test_records_of_two_versions_are_ambiguous_and_of_one_version_bind_nothing(tmp_path):
@@ -269,7 +277,7 @@ def test_one_long_separator_dense_key_is_indexed_in_linear_space():
 def test_a_long_separator_dense_explicit_key_is_the_record_of_one_name(tmp_path):
     lock = "lockfileVersion: '5.4'\npackages:\n  ? mcp-p0" + "@a" * 50_000 + "\n  : {}\n"
     result = _scan(tmp_path, {"mcp-p0": "^1.0.0", "mcp-p0@a": "^1.0.0"}, lock)
-    assert result.scan_failures == ["pnpm-lock.yaml: selected package lacks an exact version"]
+    assert result.scan_failures == [STALE]
     assert all("package_resolution" not in c.claims for c in result.components)
 
 
@@ -290,7 +298,9 @@ def test_twenty_thousand_components_and_keys_are_resolved_in_linear_time(tmp_pat
     keys = [f"q{index}@1.0.0" for index in range(20_000)]
     result = _timed_scan(tmp_path, dependencies, keys + ["mcp-p7@1.0.7"])
     assert len(result.components) == 20_000
-    assert [c.version for c in result.components if "package_resolution" in c.claims] == ["1.0.7"]
+    # Only mcp-p7's record is selected, and as a record found by key it binds nothing.
+    assert result.scan_failures == [STALE]
+    assert all("package_resolution" not in c.claims for c in result.components)
 
 
 @pytest.mark.no_cover

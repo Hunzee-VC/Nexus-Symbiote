@@ -76,7 +76,7 @@ def test_a_package_json_that_links_to_a_credential_file_is_a_gap(tmp_path: Path)
     )
 
 
-@pytest.mark.parametrize("target", ["prod.env", "app.env", "prod.env.local"])
+@pytest.mark.parametrize("target", ["prod.env", "app.env", "prod.env.local", "secrets.env.example"])
 def test_requirements_that_link_to_a_named_env_file_are_a_gap(tmp_path: Path, target: str) -> None:
     value = _value(12)
     (tmp_path / target).write_text(f"openai_org=org-{value}\n")

@@ -47,9 +47,13 @@ def credential_shaped(path: str) -> bool:
     suffix = PurePosixPath(name).suffix
     if name in _CREDENTIAL_NAMES:
         return True
-    if name.startswith(".env") or name.endswith(".env") or ".env." in name:
-        # `prod.env` and `app.env.local` hold values as `.env` does.
-        return suffix not in _ENV_TEMPLATE_SUFFIXES
+    if suffix not in _ENV_TEMPLATE_SUFFIXES and (
+        name.startswith(".env")
+        # `prod.env` and `app.env.local` hold values as `.env` does; `jest.env.js` is a
+        # program, and a template still falls through to the marker checks below.
+        or ((name.endswith(".env") or ".env." in name) and suffix not in _PROGRAM_SUFFIXES)
+    ):
+        return True
     if suffix in _CREDENTIAL_SUFFIXES:
         return True
     if suffix in _PROGRAM_SUFFIXES:

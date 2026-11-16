@@ -45,27 +45,28 @@ checked before it is taken:
 lockfile in the project root (`npm-shrinkwrap.json` and `package-lock.json` count as
 npm's one), for each package that `package.json` declares from a registry: the exact
 version, SRI integrity and tarball origin of the root importer's record, or of the
-stanza for the spec `package.json` declares. A pnpm lockfile with no root importer,
-neither `importers` nor top-level dependency maps, is searched for the package by
-name. A record that only another package's dependency left, such as a stanza for
-another range, is not taken, and neither is a record of a git, URL or path
-dependency. A pnpm record is the one the lockfile format reads: `/<name>/<version>`
-in a 5.x lockfile, `/<name>@<version>` with its peers in 6.x and `<name>@<version>`
-without them in 9.x, whose peers are in `snapshots`; another lockfile version is a
-collection failure, and a record of the same package and version under another of
-these spellings that only another lockfile format writes, which pnpm never reads,
-makes the resolution ambiguous. Records of one version in several peer contexts,
-which 5.x and 6.x lockfiles hold, are siblings, and the importer's own is taken. An
-importer `specifier` (a 5.x `specifiers` entry) other than the spec pnpm takes from
-`package.json` (from `optionalDependencies`, then `dependencies`, `devDependencies`
-and `peerDependencies`), or the spec `pnpm.overrides` or `resolutions` gives the whole
-name, which pnpm writes in its place, is a stale lockfile, which
-`pnpm install --frozen-lockfile` refuses: a collection failure, and nothing is
-bound. So is an importer that records no specifier. An override with a range or a
-parent in its selector, or one in `pnpm-workspace.yaml`, is not resolved, so a
-lockfile resolved through one is reported stale. pnpm writes a root importer in every
-6.x and 9.x lockfile, so a record found by name in one records no specifier and
-binds nothing; a 5.x lockfile is still bound by its record alone. Their records are checked as an npm record is: the
+stanza for the spec `package.json` declares. A record that only another package's
+dependency left, such as a stanza for another range, is not taken, and neither is a
+record of a git, URL or path dependency. A pnpm record is the one the lockfile format
+reads: `/<name>/<version>` in a 5.x lockfile, `/<name>@<version>` with its peers in
+6.x and `<name>@<version>` without them in 9.x, whose peers are in `snapshots`;
+another lockfile version is a collection failure, and a record of the same package and
+version under another of these spellings that only another lockfile format writes,
+which pnpm never reads, makes the resolution ambiguous. Records of one version in
+several peer contexts, which 6.x lockfiles hold, are siblings, and the importer's own
+is taken. A 5.x importer reference with peers, such as `4.52.0_zod@3.23.8`, is not
+parsed: it is a collection failure, and nothing is bound. An importer `specifier` (a
+5.x `specifiers` entry) other than the spec pnpm takes from `package.json` (from
+`optionalDependencies`, then `dependencies`, `devDependencies` and
+`peerDependencies`), or the spec `pnpm.overrides` or `resolutions` gives the whole
+name, which pnpm writes in its place, is a stale lockfile, which `pnpm install
+--frozen-lockfile` refuses: a collection failure, and nothing is bound. So is an
+importer that records no specifier. An override with a range or a parent in its
+selector, or one in `pnpm-workspace.yaml`, is not resolved, so a lockfile resolved
+through one is reported stale. pnpm lists the root's dependencies in every lockfile
+format (5.x at the top level, with `specifiers`), so a lockfile with neither
+`importers` nor top-level dependency maps records no specifier: a record found there
+by name is stale and binds nothing. Their records are checked as an npm record is: the
 `resolved` or `tarball` URL, the exact version, an exact `package.json` version it
 contradicts and the integrity value are collection failures as above (so a Yarn v1
 `sha1-` value is one), and a tarball URL that names another package or version is a

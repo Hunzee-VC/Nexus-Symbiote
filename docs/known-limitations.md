@@ -695,9 +695,11 @@ A way around a limit that its entry does not describe is worth a
   paths, an `imports` list is replaced by `imports_count` and `imports_digest`, and an
   `imported_by` list by `imported_by_count`; every file is still inventoried.
 - **Files named as holding credentials are not read.** The `prompt` collector does not
-  read a file without a Markdown suffix whose name says it holds credentials (`.env*`,
-  `*.env` and `*.env.*` other than a template ending in `.example`, `.sample` or
-  `.template`,
+  read a file without a Markdown suffix whose name says it holds credentials (`.env*`
+  other than a template ending in `.example`, `.sample` or `.template`; `*.env` and
+  `*.env.*` other than such a template or a program with a suffix listed below, such
+  as `jest.env.js`; a template that another rule here names, such as
+  `secrets.env.example`, is still not read;
   `.netrc`, `.npmrc`, `.pypirc`, `id_rsa`, `id_ecdsa`, `id_ed25519`, the suffixes
   `.pem`, `.key`, `.p12`, `.pfx`, `.der`, `.jks`, `.keystore` and `.token`, or a name
   containing `secret`, `credential`, `password` or an `api key` spelling: `apikey`,

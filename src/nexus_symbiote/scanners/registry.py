@@ -2411,9 +2411,9 @@ class RegistryScanner(Scanner):
                     "pnpm-lock.yaml: local or non-registry resolution is unverified"
                 )
                 continue
-            # Only pnpm 5 lockfiles without a root importer are searched by name and
-            # record no specifier; pnpm 6 and 9 always list the root's dependencies.
-            if not (family == "5" and matched_pkg_key is not None) and not self._pnpm_spec_agrees(
+            # A record found by name records no specifier: pnpm lists the root's
+            # dependencies in every format, so a lockfile that does not is stale.
+            if not self._pnpm_spec_agrees(
                 specifiers.get(comp.name),
                 (declared_specs or {}).get(comp.name),
                 (override_specs or {}).get(comp.name),

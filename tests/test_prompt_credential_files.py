@@ -318,6 +318,10 @@ def test_a_walk_that_skips_the_credential_check_still_records_no_credential_file
         "prod.env",
         "config/app.env",
         "prod.env.local",
+        "secrets.env.example",
+        "credentials.env.sample",
+        "api_key.env.template",
+        ".env.py",
     ],
 )
 def test_names_that_hold_credentials_are_credential_shaped(name):
@@ -337,6 +341,10 @@ def test_names_that_hold_credentials_are_credential_shaped(name):
         "secret_scanner.ts",
         "docs/secrets-handling.md",
         "notes.txt",
+        "skills/x/scripts/load.env.py",
+        "jest.env.js",
+        "vite.env.d.ts",
+        "app.env.ts",
     ],
 )
 def test_templates_and_programs_named_for_credentials_are_not(name):
