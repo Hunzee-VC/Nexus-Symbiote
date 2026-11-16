@@ -60,11 +60,13 @@ class RequireExecution:
             self.skipped.append(report.nodeid)
 
     def unexercised(self, cases: tuple[str, ...]) -> list[str]:
-        """The named cases of which no test, or parametrized instance, ran and passed."""
+        """The named cases (a module, a test or its parametrized instances) none of which passed."""
         return [
             case
             for case in cases
-            if not any(node == case or node.startswith(case + "[") for node in self.passed)
+            if not any(
+                node == case or node.startswith((case + "[", case + "::")) for node in self.passed
+            )
         ]
 
 

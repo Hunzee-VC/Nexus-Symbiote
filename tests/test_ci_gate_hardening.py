@@ -118,3 +118,14 @@ def test_a_named_case_that_never_ran_is_reported() -> None:
     missing = required.unexercised(wheel.CASES)
     assert first not in missing and second not in missing
     assert missing == list(wheel.CASES[2:])
+
+
+def test_a_whole_module_case_is_exercised_by_any_of_its_tests() -> None:
+    required = wheel.RequireExecution()
+    module = next(case for case in wheel.CASES if "::" not in case)
+    assert module in required.unexercised(wheel.CASES)
+    required.pytest_runtest_logreport(_report(f"{module}::test_anything[param]"))
+    assert module not in required.unexercised(wheel.CASES)
+    required.pytest_runtest_logreport(_report(f"{module}x::test_other"))
+    other = next(case for case in wheel.CASES if "::" not in case and case != module)
+    assert other in required.unexercised(wheel.CASES)
