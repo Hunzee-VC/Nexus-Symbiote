@@ -294,6 +294,15 @@ A way around a limit that its entry does not describe is worth a
   in a statement of its own, which discards it; and passing it to a function of
   the same file, undecorated and bound once, that uses that parameter only in
   these ways and not inside a nested function, lambda, class or comprehension.
+  The server must bind that parameter by the call alone: passed positionally
+  before any `*` spread, or by the keyword of a parameter that is not
+  positional-only; a `**` spread cannot rebind it. A server that may reach
+  another parameter, `*args` or `**kwargs`, as in `configure(*(), server)` or
+  `configure(srv=server)` with `srv` positional-only, is a gap. So is a call to
+  a helper that the file names anywhere other than as the function called, by
+  its name or as an attribute, as in `object.__setattr__(configure, "__code__",
+  code)` or `module.configure = swap`, since that can replace the body the call
+  runs.
   Any other use is a gap, such as saving, passing or dereferencing a bound method
   (`method = server.run`, `anyio.run(server.run_stdio_async)`), keeping a
   decorator, or naming the server in an annotation. An app or run coroutine still
@@ -304,25 +313,31 @@ A way around a limit that its entry does not describe is worth a
   built-in generic such as `list[FastMCP]`. Any other part of an annotation, such
   as a call or another subscript, is analyzed as code, because annotations are
   evaluated. In a file with a recognized server or PydanticAI agent, this
-  reflection is a gap even when harmless: a call by name of `locals`, `globals`,
-  `vars`, `eval` or `exec`; `__builtins__` or an import of the `builtins` module;
-  a call by name of `getattr`, `setattr` or `delattr`, unless the object is a
-  literal or a name, or attribute of a name, that the file binds only by import
-  and the attribute is a literal name other than `modules` and those listed next, so
-  `getattr(os, "environ")` is accepted and `getattr(self, "name")` is a gap; the
-  attributes `__self__`, `__closure__`, `__globals__`, `__builtins__`, `__dict__`,
-  `__annotations__`, `__traceback__`, `__getattribute__`, `tb_frame`, `tb_next`,
-  `f_back`, `f_locals`, `f_globals`, `f_builtins`, `gi_frame`, `cr_frame`,
-  `ag_frame`, `_getframe`, `currentframe`, `getouterframes`, `getinnerframes`,
-  `getargvalues` and `getclosurevars`, also imported by name; and a `modules`
-  attribute that is not called, as in `sys.modules[__name__]`, or `modules`
-  imported from `sys`. A method that only shares a name, such as `model.eval()`
-  or `model.modules()`, is not reflection. Other reflection is not recognized,
-  such as a reflective builtin under another name,
-  `importlib.import_module(__name__)`, a module that imports itself, `gc`, or
-  reflection in another file, including on the traceback of an exception that
-  propagated out of a server's run, so a completed scan cannot prove that a
-  server or agent never escaped.
+  reflection is a gap even when harmless: a reference by name to `locals`,
+  `globals`, `vars`, `eval`, `exec`, `__import__`, `setattr` or `delattr`;
+  `__builtins__` or an import of `builtins`, `__main__`, `_imp`, `imp`,
+  `_frozen_importlib`, `_frozen_importlib_external`, `_importlib` or `runpy`;
+  `getattr` by name, unless it is not rebound and is called directly with two or
+  three positional arguments whose attribute is a literal name other than `modules`
+  and those listed next, on an object that is not a recognized server or agent, so
+  `getattr(self, "name")` and `getattr(os, "environ")` are accepted while
+  `getattr(mcp, "tool")` and `fn = getattr` are gaps; the attributes `__self__`,
+  `__closure__`, `__globals__`, `__builtins__`, `__dict__`, `__annotations__`,
+  `__traceback__`, `__code__`, `__getattribute__`, `__setattr__`, `__delattr__`,
+  `__import__`, `import_module`, `resolve_name`, `attrgetter`, `methodcaller`,
+  `exec_module`, `load_module`, `spec_from_file_location`, `_gcd_import`,
+  `_bootstrap`, `_bootstrap_external`, `tb_frame`, `tb_next`, `f_back`, `f_locals`,
+  `f_globals`, `f_builtins`, `gi_frame`, `cr_frame`, `ag_frame`, `_getframe`,
+  `currentframe`, `getouterframes`, `getinnerframes`, `getargvalues`,
+  `getclosurevars`, `getmodule`, `stack`, `trace` and `getattr_static`, also
+  imported by name; and a `modules` attribute that is not called, as in
+  `sys.modules[__name__]`, or `modules` imported from `sys`. A method that only
+  shares a name, such as `model.eval()` or `model.modules()`, is not reflection.
+  Other reflection is not recognized, such as a reflective builtin under another
+  name, a module that imports itself by its own literal name, as `import server`
+  does in `server.py`, `gc`, or reflection in another file, including on the
+  traceback of an exception that propagated out of a server's run, so a completed
+  scan cannot prove that a server or agent never escaped.
   Any
   call whose first argument, or `name` keyword, is a literal that names `mcp`,
   `mcp.server` or `fastmcp`, or a submodule of the last two, is a gap whatever the
@@ -333,15 +348,16 @@ A way around a limit that its entry does not describe is worth a
   position, a keyword or an element of a list, tuple, set or dict argument, also
   behind `*` or `**`, so `functools.partial`, `map` and a thread target's `args` or
   `kwargs` are covered too. A call to another
-  function with such a literal is a gap as well, except `logging.getLogger` and a
-  server class imported from its own module, such as `FastMCP("mcp")`. A literal is a string or an
+  function with such a literal is a gap as well, except `logging.getLogger`, a
+  server class imported from its own module, such as `FastMCP("mcp")`, and the
+  attribute name of an unshadowed `getattr` call, such as `getattr(ns, "mcp")`. A literal is a string or an
   f-string without placeholders. A dynamic import (`importlib.import_module`,
   `__import__` or `pkgutil.resolve_name`, or a name bound to one of them by an
   assignment, an unpacking, a `for`, comprehension or `with ... as` target, an
   import alias or a parameter default) counts on any literal argument, and a
   relative name counts once resolved against a literal package or `__import__`
   globals. A module name computed at run time, a relative name given to a loader
-  no such binding shows, and a loader reached through `getattr`, `globals()` or
+  no such binding shows, and a loader reached through a computed `getattr`, `globals()` or
   code in a string are not followed and leave no gap.
 - **Python files without a reference are not examined.** A file that names neither
   `mcp`, a supported agent framework nor an MCP launcher or server class is not parsed.

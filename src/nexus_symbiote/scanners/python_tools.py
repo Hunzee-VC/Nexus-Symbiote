@@ -52,13 +52,18 @@ _SERVER_DECORATORS = _names("resource prompt custom_route")
 # called by name, getattr and its kin on an object that could be one, and these
 # attributes, also imported by name, which expose frames, closures, namespaces and
 # bound instances.
-_REFLECTIVE_BUILTINS = _names("locals globals vars eval exec")
-_ATTRIBUTE_BUILTINS = _names("getattr setattr delattr")
+_REFLECTIVE_BUILTINS = _names("locals globals vars eval exec __import__ setattr delattr")
+_ATTRIBUTE_BUILTINS = _names("getattr")
+_REFLECTIVE_MODULES = _names(
+    "builtins __main__ _imp imp _frozen_importlib _frozen_importlib_external _importlib runpy"
+)
 _REFLECTIVE_ATTRIBUTES = _names(
     "__self__ __closure__ __globals__ __builtins__ __dict__ __annotations__ __traceback__ "
-    "__getattribute__ tb_frame tb_next f_back f_locals f_globals f_builtins gi_frame "
-    "cr_frame ag_frame _getframe currentframe getouterframes getinnerframes getargvalues "
-    "getclosurevars"
+    "__code__ __getattribute__ __setattr__ __delattr__ __import__ import_module resolve_name "
+    "attrgetter methodcaller exec_module load_module spec_from_file_location _gcd_import "
+    "_bootstrap _bootstrap_external tb_frame tb_next f_back f_locals f_globals f_builtins "
+    "gi_frame cr_frame ag_frame _getframe currentframe getouterframes getinnerframes "
+    "getargvalues getclosurevars getmodule stack trace getattr_static"
 )
 # Generics whose subscript only records its arguments as types.
 _TYPING_MODULES = frozenset({"typing", "typing_extensions", "collections.abc"})
@@ -116,29 +121,38 @@ def _safe_receivers(
     }
 
 
-def _plain_attribute(call: ast.Call, imported: set[str]) -> bool:
-    """Whether getattr, setattr or delattr names a literal attribute, not a reflective
-    one, of an object that cannot be a server or agent of this file.
-
-    Such an object is a literal, or a name, or attribute of a name, that the file binds
-    only by import. Anything else, such as a parameter, ``self`` or a call's result,
-    could be one.
-    """
-    if call.keywords or len(call.args) < 2 or any(isinstance(a, ast.Starred) for a in call.args):
+def _plain_attribute(call: ast.Call) -> bool:
+    """Whether getattr names a literal attribute, not a reflective one, by position."""
+    if (
+        call.keywords
+        or len(call.args) not in (2, 3)
+        or any(isinstance(a, ast.Starred) for a in call.args)
+    ):
         return False
-    target, attribute = call.args[0], call.args[1]
-    if not (
+    attribute = call.args[1]
+    return (
         isinstance(attribute, ast.Constant)
         and isinstance(attribute.value, str)
         and attribute.value not in _REFLECTIVE_ATTRIBUTES
         and attribute.value != "modules"
-    ):
-        return False
-    while isinstance(target, ast.Attribute):
-        target = target.value
-    return isinstance(target, ast.Constant) or (
-        isinstance(target, ast.Name) and target.id in imported
     )
+
+
+def _getattr_attr(node: ast.AST) -> tuple[ast.expr, str] | None:
+    """The target and literal attribute name of ``getattr(target, "attr", ...)``."""
+    if not (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and not node.keywords
+        and len(node.args) in (2, 3)
+        and not any(isinstance(a, ast.Starred) for a in node.args)
+    ):
+        return None
+    attribute = node.args[1]
+    if isinstance(attribute, ast.Constant) and isinstance(attribute.value, str):
+        return node.args[0], attribute.value
+    return None
 
 
 def _reflective_access(
@@ -146,19 +160,23 @@ def _reflective_access(
 ) -> bool:
     """Whether reflection can reach a server or agent of the file without naming it.
 
-    The builtins count when called by their own names and through the builtins
+    The builtins count whenever referenced by their own names and through the builtins
     module; a method that only shares a name, such as ``model.eval()``, does not.
     ``modules`` counts unless it is called, so ``sys.modules[__name__]`` does and
     ``model.modules()`` does not.
     """
-    imports = Counter(
-        node.asname or node.name.split(".")[0] for node in nodes if isinstance(node, ast.alias)
-    )
-    imported = {name for name, count in imports.items() if bindings[name] == count}
     for node in nodes:
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            if node.func.id in _REFLECTIVE_BUILTINS or (
-                node.func.id in _ATTRIBUTE_BUILTINS and not _plain_attribute(node, imported)
+        if isinstance(node, ast.Name) and node.id == "__builtins__":
+            return True
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            use = parents.get(node)
+            if node.id in _REFLECTIVE_BUILTINS:
+                return True
+            if node.id in _ATTRIBUTE_BUILTINS and not (
+                not bindings[node.id]
+                and isinstance(use, ast.Call)
+                and use.func is node
+                and _plain_attribute(use)
             ):
                 return True
         elif isinstance(node, ast.Attribute):
@@ -167,15 +185,14 @@ def _reflective_access(
                 node.attr == "modules" and not (isinstance(use, ast.Call) and use.func is node)
             ):
                 return True
-        elif isinstance(node, ast.Name) and node.id == "__builtins__":
-            return True
         elif isinstance(node, ast.Import):
-            if any(alias.name.split(".")[0] == "builtins" for alias in node.names):
+            if any(alias.name.split(".")[0] in _REFLECTIVE_MODULES for alias in node.names):
                 return True
-        elif isinstance(node, ast.ImportFrom) and not node.level:
-            if node.module == "builtins" or any(
+        elif isinstance(node, ast.ImportFrom):
+            root = (node.module or "").split(".")[0] if not node.level else ""
+            if root in _REFLECTIVE_MODULES or any(
                 alias.name in _REFLECTIVE_ATTRIBUTES
-                or (node.module == "sys" and alias.name == "modules")
+                or (not node.level and node.module == "sys" and alias.name == "modules")
                 for alias in node.names
             ):
                 return True
@@ -555,11 +572,17 @@ def _collect_agent_decorators(
         for node in nodes
         if isinstance(node, ast.withitem) and node.optional_vars is None
     )
+    factory_calls = {call.func for call in calls}
+    annotations = _annotation_names(nodes)
     escaped = any(
         isinstance(node, ast.Name)
         and isinstance(node.ctx, ast.Load)
-        and node.id in agents
-        and node not in reached
+        and (
+            (node.id in agents and node not in reached)
+            or (
+                node.id in agent_factories and node not in factory_calls and node not in annotations
+            )
+        )
         for node in nodes
     )
     if (
@@ -705,9 +728,11 @@ def _record_decorated_tools(
 class _Helper(NamedTuple):
     """How a call binds a top-level function's parameters, and the parameters it uses
     unsafely: any use a server's name could not have at the top level, and any use in a
-    nested scope, which closes over the parameter."""
+    nested scope, which closes over the parameter. A keyword never binds a
+    positional-only parameter, so ``keywords`` leaves those out of ``named``."""
 
     positional: tuple[str, ...]
+    keywords: frozenset[str]
     named: frozenset[str]
     unsafe: frozenset[str]
 
@@ -728,7 +753,8 @@ def _helper(
     function: ast.FunctionDef | ast.AsyncFunctionDef, parents: dict[ast.AST, ast.AST]
 ) -> _Helper:
     positional = tuple(arg.arg for arg in (*function.args.posonlyargs, *function.args.args))
-    named = frozenset({*positional, *(arg.arg for arg in function.args.kwonlyargs)})
+    keywords = frozenset(arg.arg for arg in (*function.args.args, *function.args.kwonlyargs))
+    named = keywords | frozenset(arg.arg for arg in function.args.posonlyargs)
     unsafe: set[str] = set()
     pending: list[tuple[ast.AST, bool]] = [(n, False) for n in ast.iter_child_nodes(function)]
     while pending:
@@ -745,7 +771,26 @@ def _helper(
             unsafe.add(node.id)
         nested = nested or isinstance(node, _SCOPES)
         pending.extend((child, nested) for child in ast.iter_child_nodes(node))
-    return _Helper(positional, named, frozenset(unsafe))
+    return _Helper(positional, keywords, named, frozenset(unsafe))
+
+
+def _referenced_outside_calls(nodes: list[ast.AST], parents: dict[ast.AST, ast.AST]) -> set[str]:
+    """Names and attribute names the file uses other than as the function called."""
+    referenced: set[str] = set()
+    for node in nodes:
+        if isinstance(node, (ast.Name, ast.Attribute)) and isinstance(node.ctx, ast.Load):
+            use = parents.get(node)
+            if isinstance(use, ast.Call) and use.func is node:
+                continue
+        if isinstance(node, ast.Name):
+            referenced.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            referenced.add(node.attr)
+        elif (pair := _getattr_attr(node)) is not None:
+            use = parents.get(node)
+            if not (isinstance(use, ast.Call) and use.func is node):
+                referenced.add(pair[1])
+    return referenced
 
 
 def _benign_helper_arguments(
@@ -761,14 +806,22 @@ def _benign_helper_arguments(
     Only an undecorated function whose name the file binds once is read, since a
     call can otherwise reach another definition or what a decorator returned. Each
     helper is read once, however many calls pass it a server, so the work stays
-    linear in the size of the file.
+    linear in the size of the file. A positional argument at or after a ``*``
+    spread binds a parameter that cannot be read from the call, so it is not judged
+    benign. A ``**`` spread cannot rebind a parameter the call already binds, since
+    Python raises before the body runs, so it changes nothing here. A helper the file
+    names other than by calling it, by its name or as an attribute, could have its
+    code, defaults or module binding replaced, as ``object.__setattr__(configure,
+    "__code__", code)`` or ``module.configure = swap`` do, so it is not read.
     """
+    referenced = _referenced_outside_calls(nodes, parents)
     functions = {
         stmt.name: stmt
         for stmt in tree.body
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
         and not stmt.decorator_list
         and bindings[stmt.name] == 1
+        and stmt.name not in referenced
     }
     helpers: dict[str, _Helper] = {}
     benign: set[ast.AST] = set()
@@ -784,11 +837,15 @@ def _benign_helper_arguments(
         helper = helpers.get(function.name)
         if helper is None:
             helper = helpers[function.name] = _helper(function, parents)
+        known = len(helper.positional)
+        for index, value in enumerate(node.args):
+            if isinstance(value, ast.Starred):
+                known = min(known, index)
         passed = [
-            (helper.positional[index] if index < len(helper.positional) else None, value)
+            (helper.positional[index] if index < known else None, value)
             for index, value in enumerate(node.args)
         ] + [
-            (keyword.arg if keyword.arg in helper.named else None, keyword.value)
+            (keyword.arg if keyword.arg in helper.keywords else None, keyword.value)
             for keyword in node.keywords
         ]
         for parameter, value in passed:
@@ -820,6 +877,7 @@ def _typing_generics(nodes: list[ast.AST]) -> tuple[set[str], dict[str, str]]:
     bindings = _bindings(nodes)
     generics: Counter[str] = Counter()
     modules: dict[str, list[str]] = {}
+    mutated: set[str] = set()
     for node in nodes:
         if isinstance(node, ast.ImportFrom) and not node.level and node.module in _TYPING_MODULES:
             generics.update(alias.asname or alias.name for alias in node.names)
@@ -827,12 +885,23 @@ def _typing_generics(nodes: list[ast.AST]) -> tuple[set[str], dict[str, str]]:
             for alias in node.names:
                 name = alias.asname or alias.name.split(".")[0]
                 modules.setdefault(name, []).append(alias.name if alias.asname else name)
+        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            target: ast.expr = node.value
+            while True:
+                if isinstance(target, ast.Attribute):
+                    target = target.value
+                elif (pair := _getattr_attr(target)) is not None:
+                    target = pair[0]
+                else:
+                    break
+            if isinstance(target, ast.Name):
+                mutated.add(target.id)
     names = {name for name, count in generics.items() if bindings[name] == count}
     names.update(name for name in _GENERIC_BUILTINS if not bindings[name])
     roots = {
         name: paths[0]
         for name, paths in modules.items()
-        if bindings[name] == len(paths) and len(set(paths)) == 1
+        if bindings[name] == len(paths) and len(set(paths)) == 1 and name not in mutated
     }
     return names, roots
 
@@ -934,13 +1003,22 @@ def _imported_receivers(tree: ast.Module) -> bool:
             continue
         for deco in node.decorator_list:
             target = deco.func if isinstance(deco, ast.Call) else deco
-            if not isinstance(target, ast.Attribute) or target.attr != "tool":
+            t_pair = _getattr_attr(target)
+            if isinstance(target, ast.Attribute) and target.attr == "tool":
+                pending: list[ast.expr] = [target.value]
+            elif t_pair is not None and t_pair[1] == "tool":
+                pending = [t_pair[0]]
+            else:
                 continue
-            root = target.value
-            while isinstance(root, ast.Attribute):
-                root = root.value
-            if isinstance(root, ast.Name) and root.id in imported:
-                return True
+            while pending:
+                root = pending.pop()
+                while isinstance(root, ast.Attribute):
+                    root = root.value
+                pair = _getattr_attr(root)
+                if isinstance(root, ast.Name) and root.id in imported:
+                    return True
+                if pair is not None and isinstance(root, ast.Call):
+                    pending.extend((pair[0], *root.args[2:]))
     return False
 
 
@@ -1010,7 +1088,10 @@ def collect_python_tools(
     if not factories and not decorators and not agent_factories:
         _report_imported_receivers(tree, path, result)
         return
-    if any(a.name == "*" for stmt in imports for a in stmt.names):
+    if any(
+        isinstance(stmt, ast.ImportFrom) and any(a.name == "*" for a in stmt.names)
+        for stmt in nodes
+    ):
         result.surfaces_excluded.append(
             f"{path.as_posix()}: Python MCP bindings exceed supported scope"
         )

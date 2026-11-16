@@ -338,6 +338,78 @@ def test_helpers_of_the_same_file_are_judged_by_what_they_do_with_the_server(tmp
         + "except Exception as error:\n"
         + " error.__traceback__.tb_next.tb_frame.f_locals['self'].tool()(delete_all)\n",
         "def register(server):\n    server.run.__self__.tool()(delete_all)\nregister(mcp)\n",
+        "def configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "configure.__code__ = swap.__code__\nconfigure(mcp)\n",
+        "def configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "setattr(configure, '__code__', swap.__code__)\nconfigure(mcp)\n",
+        "import operator\ndef configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "object.__setattr__(configure, '__code__', operator.attrgetter('__code__')(swap))\n"
+        + "configure(mcp)\n",
+        "import operator\ndef configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "configure.__setattr__('__co' + 'de__', operator.attrgetter('__co' + 'de__')(swap))\n"
+        + "configure(mcp)\n",
+        "def configure(label, srv=None): pass\n"
+        + "code = compile('def f(srv, label=None): srv.tool()(delete_all)', 's', 'exec')\n"
+        + "object.__setattr__(configure, '__co' + 'de__', code.co_consts[0])\n"
+        + "configure(mcp)\n",
+        "def configure(srv, label=None): pass\n"
+        + "configure.__defaults__, configure.__kwdefaults__ = None, None\nconfigure(mcp)\n",
+        "import importlib\ndef configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "importlib.import_module(__name__).configure = swap\nconfigure(mcp)\n",
+        "import __main__\ndef configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "__main__.configure = swap\nconfigure(mcp)\n",
+        "import importlib\nimportlib.import_module(__name__).mcp.tool()(delete_all)\n",
+        "import importlib\nimportlib.import_module(name=__spec__.name).mcp.tool()(delete_all)\n",
+        "__import__(__name__).mcp.tool()(delete_all)\n",
+        "import importlib\nimportlib.import_module(delete_all.__module__).mcp.tool()(delete_all)\n",
+        "import importlib\nimportlib.import_module(__package__ + '.server').mcp.tool()(delete_all)\n",
+        "import importlib\nimportlib.import_module('.server', package=__package__).mcp.tool()\n",
+        "import importlib\nimportlib.import_module(*['server']).mcp.tool()(delete_all)\n",
+        "import inspect\ninspect.getmodule(delete_all).mcp.tool()(delete_all)\n",
+        "from inspect import getmodule as find\nfind(delete_all).mcp.tool()(delete_all)\n",
+        "import importlib\ndef configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "importlib.import_module(swap.__module__).__setattr__('confi' + 'gure', swap)\n"
+        + "configure(mcp)\n",
+        "import inspect\ndef configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "inspect.getmodule(swap).__setattr__('confi' + 'gure', swap)\nconfigure(mcp)\n",
+        "from __main__ import mcp as same\nsame.tool()(delete_all)\n",
+        "from importlib import import_module\nimport_module('evil_mod').register(mcp)\n",
+        "from importlib import import_module as im\nim('evil_mod')\n",
+        "from _importlib import import_module as im\nim('evil_mod')\n",
+        "import importlib as il\ngetattr(il, 'import_' + 'module')('evil_mod')\n",
+        "import importlib as il\ngetattr(il, 'import_module')('evil_mod')\n",
+        "import builtins\ngetattr(builtins, '__imp' + 'ort__')('evil_mod')\n",
+        "import sys\ngetattr(sys, 'mod' + 'ules')[__name__].__dict__['mcp'].tool()(delete_all)\n",
+        "import sys\nsys.modules['__main__'].mcp.tool()(delete_all)\n",
+        "import inspect as i\ngetattr(i, 'current' + 'frame')()\n",
+        "import inspect as i\ni.stack()[0][0]\n",
+        "import importlib\nload = importlib.import_module\nload('evil_mod')\n",
+        "imp = __import__\nimp('evil_mod')\n",
+        "import operator\nag = operator.attrgetter\n",
+        "ev = eval\nev('mcp.tool()(delete_all)')\n",
+        "fn = getattr\nfn(delete_all, '__glo' + 'bals__')['mcp'].tool()(delete_all)\n",
+        "gl = globals\ngl()['mcp'].tool()(delete_all)\n",
+        "lo = locals\nlo()['mcp'].tool()(delete_all)\n",
+        "va = vars\nva()['mcp'].tool()(delete_all)\n",
+        "ex = exec\nex('mcp.tool()(delete_all)')\n",
+        "__import__('builtins').eval('mcp.tool()(delete_all)')\n",
+        "__import__('evil_mod')\n",
+        "import importlib\nimportlib.import_module('pkg.server').mcp.tool()(delete_all)\n",
+        "import operator\n"
+        + "operator.attrgetter('__glo' + 'bals__')(delete_all)['mcp'].tool()(delete_all)\n",
+        "from operator import attrgetter\n"
+        + "attrgetter('__glo' + 'bals__')(delete_all)['mcp'].tool()(delete_all)\n",
+        "import pkg.server as s\ndef configure(label, srv=None): pass\n"
+        + "def swap(srv, label=None): srv.tool()(delete_all)\n"
+        + "setattr(s, 'configure', swap)\nconfigure(mcp)\n",
         "def hidden(value: mcp.tool()(delete_all)): pass\n",
         "def hidden() -> mcp.tool()(delete_all): pass\n",
         "registered: mcp.tool()(delete_all) = None\n",
@@ -361,7 +433,9 @@ def test_helpers_of_the_same_file_are_judged_by_what_they_do_with_the_server(tmp
         "from sys import modules\nmodules[__name__].mcp.tool()(delete_all)\n",
         "import sys\ngetattr(sys, 'modules')[__name__].mcp.tool()(delete_all)\n",
         "import importlib\ngetattr(importlib.import_module(__name__), 'mcp').tool()(delete_all)\n",
-        "def find(value):\n    return getattr(value, 'tool')\n",
+        "getattr(mcp, 'tool')(delete_all)\n",
+        "def find(value):\n    return getattr(value, 'tool')\nfind(mcp)(delete_all)\n",
+        "def run(getattr):\n    return getattr(1, 'real')\n",
         "__builtins__['globals']()['mcp'].tool()(delete_all)\n",
     ],
 )
@@ -412,6 +486,14 @@ def test_immediately_awaited_server_run_does_not_escape(tmp_path):
         "def total(df):\n    return df.eval('a + b')\n",
         "real = getattr(7, 'real')\n",
         "import os\nenviron = getattr(os, 'environ')\n",
+        "def read_title(item):\n    return getattr(item, 'title', '')\n",
+        "class Box:\n    def label(self):\n        return getattr(self, 'name', '')\n",
+        "import functools\ndef build(server):\n    return server.sse_app()\napp = build(mcp)\n"
+        + "def logged(fn):\n    @functools.wraps(fn)\n    def inner(*a):\n        return fn(*a)\n"
+        + "    print(inner.__wrapped__, fn.__defaults__, fn.__kwdefaults__)\n    return inner\n",
+        "import logging\nlogger = logging.getLogger(__name__)\n",
+        "from importlib.metadata import version\nrelease = version('pydantic')\n",
+        "def build(server):\n    return server.sse_app()\napp = build(mcp)\napp2 = build(mcp)\n",
     ],
 )
 def test_ordinary_server_use_is_not_a_gap(tmp_path, operation):
@@ -449,6 +531,58 @@ def test_a_helper_the_call_may_not_reach_is_not_judged_benign(tmp_path, helper):
     assert "pkg/server.py: unsupported Python MCP binding or dynamic registration" in (
         result.surfaces_excluded
     )
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "def configure(srv, label=None):\n    srv.tool()(delete_all)\nconfigure(*(), mcp)\n",
+        "def configure(srv, label=None):\n    srv.tool()(delete_all)\nconfigure(*[], mcp)\n",
+        "def configure(srv, label=None, extra=None):\n    srv.tool()(delete_all)\n"
+        + "configure(*(), 'x', mcp)\n",
+        "def configure(srv=None, /, **options):\n    options['srv'].tool()(delete_all)\n"
+        + "configure(srv=mcp)\n",
+        "def configure(srv=None, /):\n    pass\nconfigure(srv=mcp)\n",
+        "def configure(label, *rest):\n    rest[0].tool()(delete_all)\nconfigure('x', mcp)\n",
+        "def configure(**options):\n    options['srv'].tool()(delete_all)\n"
+        + "configure(srv=mcp)\n",
+        "def configure(srv, label=None):\n    srv.tool()(delete_all)\n"
+        + "configure(label='x', **{'srv': mcp})\n",
+    ],
+)
+def test_a_server_whose_helper_parameter_is_not_certain_is_a_gap(tmp_path, call):
+    source = FASTMCP + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\ndef delete_all(): pass\n"
+    result, tools = scan(tmp_path, source + call)
+    assert [tool.name for tool in tools] == ["add"]
+    assert "pkg/server.py: unsupported Python MCP binding or dynamic registration" in (
+        result.surfaces_excluded
+    )
+    (tmp_path / "CLAUDE.md").write_text("Be helpful.\n")
+    checked = CliRunner().invoke(main, ["scan", "--no-project-policy", "--check", str(tmp_path)])
+    assert checked.exit_code == 1, checked.output
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "def build(srv, label=None):\n    return srv.sse_app()\napp = build(mcp, *labels)\n",
+        "def build(srv, /, label=None):\n    return srv.sse_app()\napp = build(mcp, label='x')\n",
+        "def build(label=None, srv=None):\n    return srv.sse_app()\napp = build(srv=mcp)\n",
+        "def build(label, *, srv):\n    return srv.sse_app()\napp = build('x', srv=mcp)\n",
+        "def build(srv, *rest, **options):\n    return srv.sse_app()\n"
+        + "app = build(mcp, 'x', label='y')\n",
+        "def build(srv, label=None):\n    return srv.sse_app()\napp = build(mcp, **options)\n",
+        "def build(label=None, srv=None):\n    return srv.sse_app()\n"
+        + "app = build(srv=mcp, **options)\n",
+        "def build(srv, /, **options):\n    return srv.sse_app()\n"
+        + "app = build(mcp, **{'srv': 'x'})\n",
+    ],
+)
+def test_a_server_bound_to_a_certain_helper_parameter_stays_benign(tmp_path, call):
+    source = FASTMCP + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n"
+    result, tools = scan(tmp_path, source + call)
+    assert [tool.name for tool in tools] == ["add"]
+    assert not result.scan_failures and not result.surfaces_excluded
 
 
 AGENT = "from pydantic_ai import Agent\n"
@@ -512,3 +646,71 @@ def test_agent_tools_are_named_per_agent(tmp_path):
         "tool:python:pkg%2Fserver.py/a/search",
         "tool:python:pkg%2Fserver.py/b/search",
     ]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def wire(ns, f):\n    getattr(ns, 'mcp').tool()(f)\n",
+        FASTMCP
+        + "mcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n"
+        + "def wire(ns, f):\n    getattr(ns, 'mcp').tool()(f)\n",
+    ],
+)
+def test_unshadowed_getattr_attribute_name_is_not_treated_as_dynamic_module_load(tmp_path, source):
+    result, _ = scan(tmp_path, source)
+    assert not result.scan_failures and not result.surfaces_excluded
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_gap"),
+    [
+        (
+            "import shared\n@getattr(shared, 'mcp').tool()\ndef add(): pass\n",
+            "pkg/server.py: Python MCP tools registered on an imported server",
+        ),
+        (
+            "def f(ns):\n    return getattr(ns, 'FastMCP')('x')\n",
+            "pkg/server.py: MCP server class reached as an attribute; servers built from it not inventoried",
+        ),
+        (
+            "def f(ns):\n    return getattr(ns, 'StdioServerParameters')(command='x')\n",
+            "pkg/server.py: MCP server launched from application code; launcher not inventoried",
+        ),
+        (
+            "import importlib\nload = getattr(importlib, 'import_module')\nload('..server', 'mcp.sub')\n",
+            "pkg/server.py: MCP server module loaded dynamically; tools not inventoried",
+        ),
+        (
+            "def f(getattr):\n    return getattr('mcp', 'x')\n",
+            "pkg/server.py: MCP server module loaded dynamically; tools not inventoried",
+        ),
+        (
+            FASTMCP + "from .evil import *\nmcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n",
+            "pkg/server.py: Python MCP bindings exceed supported scope",
+        ),
+        (
+            FASTMCP + "from .. import *\nmcp = FastMCP('x')\n@mcp.tool()\ndef add(): pass\n",
+            "pkg/server.py: Python MCP bindings exceed supported scope",
+        ),
+        (
+            FASTMCP
+            + "import mod\ndef configure(server):\n    return server.sse_app()\n"
+            + "ref = getattr(mod, 'configure')\nmcp = FastMCP('x')\nconfigure(mcp)\n",
+            "pkg/server.py: unsupported Python MCP binding or dynamic registration",
+        ),
+        (
+            FASTMCP
+            + "import typing as t\nt.Optional = lookup\nmcp = FastMCP('x')\n"
+            + "def f(x: t.Optional[mcp]): pass\n",
+            "pkg/server.py: unsupported Python MCP binding or dynamic registration",
+        ),
+        (
+            AGENT + "cls = Agent\nagent = Agent('m')\n@agent.tool_plain\ndef search(): pass\n",
+            "pkg/server.py: unsupported Python SDK tool binding or dynamic registration",
+        ),
+    ],
+)
+def test_getattr_parity_and_relative_star_import_gaps(tmp_path, source, expected_gap):
+    result, _ = scan(tmp_path, source)
+    assert expected_gap in result.surfaces_excluded
