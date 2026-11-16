@@ -159,7 +159,8 @@ A way around a limit that its entry does not describe is worth a
   `eval`, `pwsh -Command`, the command word of `npx -p` or `npm exec --package`
   (which npm runs with `sh`, so one that is itself an expansion is a gap too),
   and the words of `bun exec`, `yarn exec` and `pnpm exec -c` (or `--shell-mode`,
-  or any `-c` among its words) are classified only when no word holds a character the
+  or an option cluster with `c`, among the options before its command word; a word
+  after an option written without `=` counts as that option's value) are classified only when no word holds a character the
   reader rewrites: braces, patterns, `~`, `#`, `!`, `^`, `$`, backquotes,
   non-ASCII text or, except for a POSIX shell, quoting. `cmd /c` needs a plain
   program word and no `%`, `!`, `"`, `^` or unusual whitespace; cmd keeps
@@ -193,7 +194,11 @@ A way around a limit that its entry does not describe is worth a
   word that starts with `-`, is a gap: npm's parser may give the option an empty
   value and read that word as an option, so `npx --tag --package=evil@6.6.6
   decoy@1.0.0` installs `evil`. Attach such values with `=`, as in
-  `--node-options=--max-old-space-size=4096`.
+  `--node-options=--max-old-space-size=4096`. A flag of `npm` or `pnpm dlx` written
+  without `=` and followed by the word `true` or `false` is a gap as well, since nopt
+  reads that word as a Boolean option's value; this also covers flags npm expands to
+  another option, such as `-q`, which do not take it. Write `--yes` alone, or put
+  `--` before a command named `true`.
 - **Container launch context is read from the declared options only.** Mounts are
   rated by their written source: a mount through a link, a client variable other than `${userHome}`,
   `${env:HOME}`, `${env:USERPROFILE}`, `${workspaceFolder}` and `$PWD`, and a
@@ -201,7 +206,17 @@ A way around a limit that its entry does not describe is worth a
   `.config`, `.azure` and `.gcloud` are only `host_mounts`. Variables in an
   `--env-file`, a `--health-cmd` and a seccomp profile file are a medium finding
   without being read, and `podman --env-host` is not rated. An `--entrypoint` is a
-  medium finding only beside a host mount.
+  medium finding only beside a host mount. An image command is a medium
+  code-loading finding when it runs a file under an absolute `-v` or `--mount`
+  target: an interpreter (`node`, `python`, `sh` and similar) followed by such a
+  path, or a path with a file suffix, absolute or relative to an absolute `-w`. A
+  file without a suffix (`/w/server`), a relative path without `-w` (resolved against
+  the image's own working directory) and a link from the image into the mount are not
+  rated, so that a directory argument such as `mcp/filesystem /data` is not a finding.
+  `HOME`, `ZDOTDIR`, `XDG_CONFIG_HOME` and `PYTHONUSERBASE` passed with `-e` count as
+  code-loading only beside a host mount. Any path component named like a credential
+  directory counts, also outside a home directory, so `/srv/app/.config` is a broad
+  mount.
 - **Environment that moves a runner's configuration is a gap.** A server's `env`
   that may point `HOME`, `XDG_CONFIG_HOME`, `PREFIX`, `DESTDIR`, `GOENV`,
   `ZDOTDIR` or a relative `PATH` entry into the project, or that replaces the
