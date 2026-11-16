@@ -202,8 +202,14 @@ taking both snapshots the same way still apply
 ([take both snapshots the same way](drift-gate.md#take-both-snapshots-the-same-way)),
 and so does protecting the workflow file itself.
 
-For a stricter gate that fails on any change at all, verify the new collection against
-the reviewed attestation by content instead of running `diff`:
+For a stricter gate that fails on any change the inventory records, verify the new
+collection against the reviewed attestation by content instead of running `diff`. It
+fails on any change at all only when both collections were taken with the same
+`NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`: without the key, a change only to a value the
+inventory withholds and only the keyed binding covers, such as an `env` value, a
+credential helper command, a command argument, an HTTP header value, or the content of
+a prompt file whose content hash is withheld, leaves the content digest unchanged
+([source binding](verification-source-binding.md)).
 
 ```bash
 nexus-symbiote verify-attestation "$RUNNER_TEMP/agentbom.json" "$RUNNER_TEMP/reviewed.json.att" \
