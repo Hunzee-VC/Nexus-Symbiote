@@ -12,6 +12,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -64,19 +65,22 @@ def _launcher(tmp_path: Path, marker: Path, *, detached: bool = False) -> tuple[
     return _pinned(
         tmp_path / "launcher",
         f"""marker = {str(marker)!r}
+def record():
+    # Written whole before it appears, so a reader never sees an empty marker.
+    open(marker + ".tmp", "w").write(os.readlink("/proc/self"))
+    os.rename(marker + ".tmp", marker)
 if os.fork() == 0:
     os.setsid()
     if {detached!r}:
         if os.fork() == 0:
-            open(marker, "w").write(os.readlink("/proc/self"))
+            record()
             time.sleep(60)
         os._exit(0)
-    open(marker, "w").write(os.readlink("/proc/self"))
+    record()
     time.sleep(60)
     raise SystemExit
-for _ in range(100):
-    if os.path.exists(marker) and os.path.getsize(marker):
-        break
+deadline = time.monotonic() + 10
+while not os.path.exists(marker) and time.monotonic() < deadline:
     time.sleep(0.01)
 """,
     )
@@ -453,8 +457,11 @@ def test_cli_requires_an_explicit_opt_out_when_the_namespace_is_unavailable(
         assert "clone(CLONE_PARENT)" in text
         assert "kills its wrapper with SIGKILL can escape" in text
         assert "isolation-teardown-failed" in text
+        assert "unless the launcher runs as root" in text
+        assert "Never opt out as root" in text
         assert "cgroup v2" in text
         assert "not a namespace or sandbox" in text
+    assert "--no-isolation as root" not in allowed.stderr or os.geteuid() == 0
 
 
 def test_a_descendant_that_cannot_be_signalled_does_not_abort_cleanup(
@@ -484,7 +491,7 @@ def test_a_descendant_that_cannot_be_signalled_does_not_abort_cleanup(
             observe_pinned(str(command), digest)
     finally:
         monkeypatch.undo()
-        with contextlib.suppress(ProcessLookupError):
+        with contextlib.suppress(ProcessLookupError, FileNotFoundError, ValueError):
             kill(_host_pid(marker), signal.SIGKILL)
     # Cleanup still ran to the end, and the child it could not signal may still be
     # running, so the session fails closed instead of reporting success.
@@ -1946,3 +1953,163 @@ def test_a_byte_from_a_copy_of_the_wrappers_end_does_not_count(
             if stream is not None:
                 stream.close()
         proc.wait(timeout=10)
+
+
+def _python_launcher(tmp_path: Path, marker: Path) -> subprocess.Popen[bytes]:
+    """An opted-out launcher that ignores SIGHUP and starts three sleeps in its group."""
+    source = f"""import os, signal, subprocess, time
+signal.signal(signal.SIGHUP, signal.SIG_IGN)
+pids = [subprocess.Popen(["/bin/sleep", "300"]).pid for _ in range(3)]
+open({str(marker)!r} + ".tmp", "w").write(" ".join(map(str, [os.getpid(), *pids])))
+os.rename({str(marker)!r} + ".tmp", {str(marker)!r})
+time.sleep(300)
+"""
+    return _spawn_opted_out(tmp_path, source, interpreter=sys.executable)
+
+
+@_LINUX_ONLY
+@pytest.mark.parametrize(
+    ("step", "after"),
+    [("_stop_tree", False), ("_stop_tree", True), ("_drain_children", True)],
+    ids=["before-tree-stop", "after-tree-stop", "in-drain"],
+)
+def test_an_interrupted_cleanup_still_kills_the_launchers_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, step: str, after: bool
+) -> None:
+    # The launcher leads its own group, which killpg of the wrapper's group misses, so
+    # a KeyboardInterrupt during cleanup must not leave its tree running.
+    marker = tmp_path / "pids"
+    proc = _python_launcher(tmp_path, marker)
+    try:
+        deadline = time.monotonic() + 10
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        pids = [int(pid) for pid in marker.read_text().split()]
+        real = getattr(pinned_process, step)
+
+        def interrupted(*args: object) -> object:
+            if after:
+                real(*args)
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(pinned_process, step, interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            pinned_process.terminate_process_group(proc)
+        for pid in pids:
+            _assert_dead(pid)
+    finally:
+        with contextlib.suppress(FileNotFoundError, ValueError):
+            for pid in marker.read_text().split():
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(int(pid), signal.SIGKILL)
+        for stream in (proc.stdin, proc.stdout):
+            if stream is not None:
+                stream.close()
+        proc.wait(timeout=10)
+
+
+@_LINUX_ONLY
+def test_a_session_spawned_on_a_thread_that_exits_is_still_cleaned_up(tmp_path: Path) -> None:
+    # A thread pool's worker can start a session and exit before the session ends; only
+    # the death of the process that started it may end the wrapper.
+    spawned: list[subprocess.Popen[bytes]] = []
+
+    def spawn() -> None:
+        spawned.append(_spawn_opted_out(tmp_path, "exec sleep 60\n"))
+        # Long enough for the wrapper to have started: a parent-death signal tied to this
+        # thread would then fire when it exits.
+        time.sleep(0.5)
+
+    worker = threading.Thread(target=spawn)
+    worker.start()
+    worker.join()
+    proc = spawned[0]
+    try:
+        time.sleep(1)
+        assert proc.poll() is None
+        pinned_process.terminate_process_group(proc)
+    finally:
+        for stream in (proc.stdin, proc.stdout):
+            if stream is not None:
+                stream.close()
+        proc.wait(timeout=10)
+
+
+@_LINUX_ONLY
+def test_the_session_sweep_does_not_count_an_ended_leader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The unreaped wrapper leads the session; signalling its zombie in each pass made
+    # every teardown scan /proc eight times.
+    leader = subprocess.Popen(["/bin/true"], start_new_session=True)  # noqa: S603
+    try:
+        os.waitid(os.P_PID, leader.pid, os.WEXITED | os.WNOWAIT)
+        signalled: list[int] = []
+        monkeypatch.setattr(pinned_process.os, "kill", lambda pid, sig: signalled.append(pid))
+        pinned_process._kill_session(leader.pid)
+        assert signalled == []
+    finally:
+        monkeypatch.undo()
+        leader.wait(timeout=5)
+
+
+@_LINUX_ONLY
+def test_the_drain_reads_the_proc_scan_fallback_only_a_few_times(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Without the kernel's children list every read is a scan of all of /proc.
+    stopped = subprocess.Popen(["/bin/sleep", "30"])  # noqa: S603
+    try:
+        os.kill(stopped.pid, signal.SIGSTOP)
+        reads: list[int] = []
+        real = pinned_process._children_of
+        exists = os.path.exists
+
+        def counted(pid: int) -> list[int]:
+            reads.append(pid)
+            return real(pid)
+
+        monkeypatch.setattr(pinned_process, "_children_of", counted)
+        monkeypatch.setattr(
+            pinned_process.os.path,
+            "exists",
+            lambda path: "/children" not in str(path) and exists(path),
+        )
+        assert pinned_process._drain_children(stopped.pid)
+        assert len(reads) <= 3
+    finally:
+        monkeypatch.undo()
+        stopped.kill()
+        stopped.wait(timeout=5)
+
+
+@_LINUX_ONLY
+def test_an_interrupted_spawn_leaks_no_descriptor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def interrupted(*args: object, **kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    script = tmp_path / "launcher.sh"
+    script.write_text("#!/bin/sh\nexit 0\n")
+    script.chmod(0o700)
+    digest = "sha256:" + hashlib.sha256(script.read_bytes()).hexdigest()
+    work = tmp_path / "work"
+    work.mkdir()
+    staged = pinned_process.stage_pinned_executable(str(script), digest, work)
+    before = set(os.listdir("/proc/self/fd"))
+    monkeypatch.setattr(pinned_process.subprocess, "Popen", interrupted)
+    with isolation_off(), pytest.raises(KeyboardInterrupt):
+        pinned_process.spawn_pinned(staged, work)
+    assert set(os.listdir("/proc/self/fd")) <= before
+
+
+def test_opting_out_as_root_prints_a_second_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pinned_process, "namespace_available", lambda: False)
+    monkeypatch.setattr("nexus_symbiote.supply_chain_cli.os.geteuid", lambda: 0)
+    arguments, _ = command(tmp_path, inventory(), launcher(tmp_path))
+    allowed = CliRunner().invoke(main, [*arguments, "--json-output", "--no-isolation"])
+    assert allowed.exit_code == 0, allowed.output
+    assert "warning: --no-isolation as root" in allowed.stderr

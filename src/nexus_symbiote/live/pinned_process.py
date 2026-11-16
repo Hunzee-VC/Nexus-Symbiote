@@ -76,7 +76,6 @@ import ctypes, os, signal, sys
 # The wrapper writes one byte to this socket once no child of it is left; exec closes it.
 done = int(sys.argv[2])
 os.set_inheritable(done, False)
-PR_SET_PDEATHSIG = 1
 PR_SET_DUMPABLE = 4
 PR_SET_CHILD_SUBREAPER = 36
 prctl = ctypes.CDLL(None).prctl
@@ -101,16 +100,33 @@ def finish(status):
     os._exit(code & 0xFF)
 
 
+def children():
+    me = os.getpid()
+    try:
+        with open(f"/proc/{me}/task/{me}/children", "rb") as listing:
+            return [int(child) for child in listing.read().split()]
+    except (OSError, ValueError):
+        pass
+    found = []
+    for entry in os.listdir("/proc"):
+        if entry.isdigit():
+            try:
+                with open(f"/proc/{entry}/stat", "rb") as stat:
+                    if int(stat.read().rpartition(b")")[2].split()[1]) == me:
+                        found.append(int(entry))
+            except (OSError, ValueError, IndexError):
+                pass
+    return found
+
+
 # A process that is not dumpable cannot be traced, or have its /proc descriptors
 # opened, by another process of the same user, and it dumps no core of its own when it
-# repeats the launcher's signal. Exec makes the launcher dumpable again. The wrapper
-# dies with the thread that started it, as a launcher started directly would see its
-# parent go; the fork clears that for the launcher.
+# repeats the launcher's signal. Exec makes the launcher dumpable again.
+parent = int(sys.argv[3])
 if (
     prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0
     or prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) != 0
-    or prctl(PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0) != 0
-    or os.getppid() != int(sys.argv[3])
+    or os.getppid() != parent
 ):
     finish(127 << 8)
 try:
@@ -152,14 +168,29 @@ if launcher:
     os.dup2(null, 0)
     os.dup2(null, 1)
     os.close(null)
+    # Blocked only here, after the fork, so SIGCHLD can be awaited with a timeout; a
+    # child that exited before the block is reaped by the next pass all the same.
+    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGCHLD})
     status = 0
     while True:
         try:
-            child, waited = os.wait()
+            while True:
+                child, waited = os.waitpid(-1, os.WNOHANG)
+                if child == 0:
+                    break
+                if child == launcher:
+                    status = waited
         except ChildProcessError:
             break
-        if child == launcher:
-            status = waited
+        if os.getppid() != parent:
+            # The process that started the session is gone, a thread exiting is not
+            # enough, and nothing else will end what the launcher started.
+            for child in children():
+                try:
+                    os.kill(child, signal.SIGKILL)
+                except OSError:
+                    pass
+        signal.sigtimedwait({signal.SIGCHLD}, 0.5)
     finish(status)
 for number, previous in inherited.items():
     signal.signal(number, signal.SIG_IGN if previous == signal.SIG_IGN else signal.SIG_DFL)
@@ -476,7 +507,10 @@ def _drain_children(pid: int) -> bool:
     ended: set[int] = set()
     quiet = 0
     delay = 0.0005
-    while quiet < _QUIET_READS:
+    # Without the kernel's list each read scans all of /proc; two quiet reads in a row
+    # still cover a child that exited between the listing and its state.
+    needed = _QUIET_READS if os.path.exists(f"/proc/{pid}/task/{pid}/children") else 3
+    while quiet < needed:
         running: set[int] = set()
         for child in _children_of(pid):
             if child in ended:
@@ -902,7 +936,9 @@ def _kill_session(sid: int) -> None:
             if pid in {own, 1}:
                 continue
             fields = _proc_fields(pid)
-            if fields is not None and fields[3] == str(sid):
+            # An ended process, such as the unreaped wrapper that leads the session, would
+            # otherwise keep every pass from finding the session empty.
+            if fields is not None and fields[3] == str(sid) and not _ended(pid):
                 victims.append(pid)
         if not victims:
             return
@@ -963,11 +999,10 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
 
     No Python runs in the child between fork and exec: that is unsafe in a threaded
     caller, and ``Popen`` would wait for it before any protocol deadline exists. The
-    subreaper wrapper does its work after exec, within the caller's deadline. It dies
-    with the thread that calls this, as a launcher started directly sees its parent go,
-    so call it on a thread that outlives the session: cleanup reports a wrapper that
-    died first as ``isolation-teardown-failed``. A namespace init waits in the gate
-    until this process holds a pidfd for it, at most ``_START_SECONDS``.
+    subreaper wrapper does its work after exec, within the caller's deadline. When this
+    process dies without cleaning up, the wrapper notices within half a second and
+    kills the launcher's tree. A namespace init waits in the gate until this process
+    holds a pidfd for it, at most ``_START_SECONDS``.
     """
     if not _executable_image(staged):
         raise PinnedProcessError("launcher-start-failed", "launcher could not be run")
@@ -995,12 +1030,12 @@ def spawn_pinned(staged: Path, work: Path) -> subprocess.Popen[bytes]:
             bufsize=0,
             pass_fds=() if finished is None else (finished,),
         )
-    except (PinnedProcessError, OSError) as exc:
+    except BaseException as exc:
         if done is not None:
             os.close(done)
         if cgroup is not None:
             _remove_cgroup(cgroup)
-        if isinstance(exc, PinnedProcessError):
+        if isinstance(exc, PinnedProcessError) or not isinstance(exc, OSError):
             raise
         raise PinnedProcessError("launcher-start-failed", "launcher could not be run") from exc
     finally:
@@ -1080,6 +1115,7 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
     stop = sys.platform.startswith("linux") and proc.returncode is None
     ended = True
     contained = True
+    swept = False
     seen: int | None = None
     try:
         try:
@@ -1104,19 +1140,28 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
                 _cgroup_kill(cgroup)
             if done is not None:
                 contained = _wrapper_contained(proc.pid, done, seen, stop)
+            swept = True
         finally:
+            if not swept and not namespaced:
+                # Interrupted, by KeyboardInterrupt or an error: the launcher leads its own
+                # group, which killpg does not reach, so its tree is swept while the
+                # wrapper still adopts its orphans.
+                with contextlib.suppress(Exception):
+                    _kill_descendants(proc.pid)
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
             except ProcessLookupError:
                 # The group already exited; the caller's wait() still reaps the launcher.
                 pass
-        # Only while the launch is unreaped: its pid, which is the session id, cannot
-        # then name a session that a later, unrelated process started.
-        if sid is not None and stop:
-            _kill_session(sid)
         if not namespaced:
             _kill_descendants(proc.pid)
     finally:
+        # Only while the launch is unreaped: its pid, which is the session id, cannot
+        # then name a session that a later, unrelated process started. Here so that an
+        # interrupted cleanup still ends what is left in the session.
+        if sid is not None and stop:
+            with contextlib.suppress(Exception):
+                _kill_session(sid)
         # A finished pid must not stay marked. The kernel can reuse it for a later
         # launcher that is not in a PID namespace, and that launcher would then skip
         # the descendant-tree kill.

@@ -192,8 +192,9 @@ def register_supply_chain_commands(main: click.Group) -> None:
             "called setsid and what a launcher that already exited left behind. A launcher "
             "that kills its wrapper with SIGKILL can escape, except from a cgroup v2 child "
             "where one can be created, which cleanup also kills; the server then fails "
-            "with isolation-teardown-failed. Elsewhere cleanup is best effort. This is not "
-            "a namespace or sandbox."
+            "with isolation-teardown-failed, unless the launcher runs as root or holds "
+            "CAP_SYS_PTRACE or CAP_SYS_ADMIN, which can hide the escape. Never opt out as "
+            "root. Elsewhere cleanup is best effort. This is not a namespace or sandbox."
         ),
     )
     def verify_live(
@@ -254,10 +255,17 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 "setsid and what a launcher that already exited left behind. A launcher that "
                 "kills its wrapper with SIGKILL can escape, except from a cgroup v2 child where "
                 "one can be created, which cleanup also kills; the server then fails with "
-                "isolation-teardown-failed. Elsewhere cleanup is best effort. This is not a "
-                "namespace or sandbox.",
+                "isolation-teardown-failed, unless the launcher runs as root or holds "
+                "CAP_SYS_PTRACE or CAP_SYS_ADMIN, which can hide the escape. Never opt out as "
+                "root. Elsewhere cleanup is best effort. This is not a namespace or sandbox.",
                 err=True,
             )
+            if hasattr(os, "geteuid") and os.geteuid() == 0:
+                click.echo(
+                    "warning: --no-isolation as root: the pinned launcher runs as root with no "
+                    "kernel containment, and can escape cleanup without it being reported.",
+                    err=True,
+                )
         with isolation_off() if no_isolation else contextlib.nullcontext():
             report = verify_mcp_servers(bom, trusted_launchers=policy)
         report.inputs = {
