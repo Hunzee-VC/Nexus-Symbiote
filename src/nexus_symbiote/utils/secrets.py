@@ -46,7 +46,6 @@ _ASSIGNMENT = re.compile(
     rf"(?i)({_CREDENTIAL_KEYWORD}[\"']?\s*+{_MARK}\s*+)"
     r"(\"(?:[^\"\\\n]|\\.){0,8192}\"|'(?:[^'\\\n]|\\.){0,8192}'|[^\s,;]++)"
 )
-_TRAILING_ASSIGNMENT_KEY = re.compile(rf"(?i)(?:{_CREDENTIAL_KEYWORD})[\"']?{_MARK}\Z")
 # A long command-line option named for a credential, with its value as the next word:
 # `--password value`, `--db-password "value"`. A word that starts with `-` is the next
 # option, not a value.
