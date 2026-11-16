@@ -973,7 +973,7 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 | `--json-output` | Output the verification report as JSON. |
 | `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools, declarations or the server identity drifted, unless `--accept-drift`. |
 | `--accept-drift` | With `--record`, exit 0 although changed or new tools, declarations or server identity were recorded. |
-| `--no-isolation` | Explicitly allow execution without a PID namespace; printed as a warning. On Linux the launcher is made a child subreaper and is stopped before cleanup. When a cgroup v2 child can be created, cleanup writes `cgroup.kill`, which also kills a `clone(CLONE_PARENT)` child that has called `setsid`. Otherwise cleanup kills the descendant tree, the process group, and every process still in the launcher's session. A process that leaves that session and the cgroup can escape. Elsewhere cleanup is best effort. This is not a namespace or sandbox. |
+| `--no-isolation` | Explicitly allow execution without a PID namespace; printed as a warning. On Linux the launcher runs under a wrapper that stays its parent and adopts its orphans, so every descendant, including a `clone(CLONE_PARENT)` child, stays in one tree, which is stopped before cleanup kills it; the server fails with `isolation-teardown-failed` if the wrapper ended first. A launcher that deliberately evades cleanup can escape. Elsewhere cleanup is best effort. This is not a namespace or sandbox. |
 
 By default the launcher must run as pid 1 of a new user and PID namespace
 (`unshare --user --map-root-user --pid --fork --kill-child`). That process first
@@ -1007,19 +1007,28 @@ supplementary groups or changes file ownership behaves differently than under di
 execution. A host that refuses the namespace fails with `isolation-unavailable`
 before executing the pinned launcher. Only the explicit operator option
 `--no-isolation` permits a launch without this boundary. On that path, on Linux,
-a short exec wrapper (the running interpreter with `-I -S`) sets
-`PR_SET_CHILD_SUBREAPER` and then executes the staged launcher with the same
-argument, environment and working directory. While the launcher is alive, its
-descendants stay in its process tree, including a `setsid` child that
-double-forks. Cleanup stops the launcher before it kills them, so the launcher
-cannot start another process, such as a helper that a watchdog restarts, and then
-kills the launcher's process group. A descendant that outlives the launcher,
-because the launcher exited or was killed before the session ended, is adopted
-outside that tree and can escape. So can a launcher or descendant that deliberately
-evades cleanup, for example by clearing the subreaper flag or forking faster than
-the tree is scanned, and a descendant running as another user cannot be signalled.
-On other systems that cleanup is best effort. The option is not a PID namespace,
-and neither form is a filesystem or network sandbox.
+a short wrapper (the running interpreter with `-I -S`) sets
+`PR_SET_CHILD_SUBREAPER`, forks, and executes the staged launcher in the child with
+the same argument, environment and working directory. The wrapper stays the
+launcher's parent until the launcher's whole process tree has exited, then exits
+with the launcher's status, re-raising the signal that killed it as `unshare --fork`
+does. Every descendant therefore stays under the wrapper: a `setsid` child that
+double-forks, a `clone(CLONE_PARENT)` child, whose parent is the launcher's parent,
+and a descendant that outlives the launcher. The wrapper leads the session and
+process group the launcher runs in, and ignores the signals a launcher can send its
+group, other than `SIGKILL` and `SIGSTOP`. Cleanup stops the wrapper and then every
+process in its tree, so none can start another process, such as a helper that a
+watchdog restarts, kills the tree, scanning it again until a scan finds no new
+process, then kills the wrapper's process group and every process left in the
+launch's session. The server fails with `isolation-teardown-failed` when the wrapper
+was ended by a signal before or during cleanup, including when it re-raised the
+signal that killed the launcher, or when the tree could not be emptied, because a
+process from it may then still be running. A launcher running as the same user can
+still escape on purpose, for example by killing the wrapper, which is reported, or
+by forking faster than the tree is scanned, and a descendant running as another user
+cannot be signalled. On other systems, or without a separately runnable interpreter,
+the launcher is executed directly and cleanup is best effort. The option is not a
+PID namespace, and neither form is a filesystem or network sandbox.
 
 Servers whose transport is `sse`, `streamable-http` or `http` and that record no
 launch command are reported as not verifiable by `verify-live` (reason

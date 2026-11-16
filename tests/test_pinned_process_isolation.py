@@ -13,7 +13,7 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -131,6 +131,86 @@ def _assert_dead(pid: int) -> None:
     raise AssertionError(f"process {pid} was still running")
 
 
+def _kill_recorded(marker: Path) -> None:
+    """Kill the process ``marker`` names, so a failed run leaves nothing for later tests."""
+    with contextlib.suppress(ProcessLookupError, ValueError, OSError):
+        os.kill(_host_pid(marker), signal.SIGKILL)
+
+
+# Records the caller's pid whole, then renames it, so a reader never sees a partial pid.
+_RECORD = """
+def record(path):
+    with open(path + ".tmp", "w") as out:
+        out.write(str(os.getpid()))
+    os.replace(path + ".tmp", path)
+def detach():
+    null = os.open(os.devnull, os.O_RDWR)
+    os.dup2(null, 0)
+    os.dup2(null, 1)
+def await_record(path):
+    deadline = time.monotonic() + 10
+    while not os.path.exists(path) and time.monotonic() < deadline:
+        time.sleep(0.01)
+"""
+
+
+def _clone_parent_launcher(tmp_path: Path, marker: Path) -> tuple[Path, str]:
+    """A server whose ``clone(CLONE_PARENT)`` child calls ``setsid`` and records its pid.
+
+    The child's parent is the launcher's parent, so it is not the launcher's descendant,
+    and ``setsid`` takes it out of the group that ``killpg`` reaches.
+    """
+    return _pinned(
+        tmp_path / "launcher",
+        f"""import ctypes
+{_RECORD}
+marker = {str(marker)!r}
+CLONE_PARENT = 0x00008000
+stack = ctypes.create_string_buffer(1024 * 1024)
+libc = ctypes.CDLL(None, use_errno=True)
+def child(_):
+    os.setsid()
+    record(marker)
+    time.sleep(60)
+    return 0
+callback = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)(child)
+sys._keep = (callback, stack)
+cloned = libc.clone(
+    callback, ctypes.c_void_p(ctypes.addressof(stack) + len(stack)), CLONE_PARENT, None
+)
+if cloned < 0:
+    raise SystemExit(1)
+# The child must have recorded its pid before the session can end, or a loaded runner
+# kills it first and the test learns nothing.
+await_record(marker)
+""",
+    )
+
+
+def _spawn_opted_out(tmp_path: Path, source: str) -> subprocess.Popen[bytes]:
+    """Stage ``source`` as the launcher and start it as an opted-out session does."""
+    work = tmp_path / "work"
+    work.mkdir(parents=True)
+    script = tmp_path / "script"
+    script.write_text(source)
+    script.chmod(0o700)
+    pin = "sha256:" + hashlib.sha256(script.read_bytes()).hexdigest()
+    staged = pinned_process.stage_pinned_executable(str(script), pin, work)
+    with isolation_off():
+        return pinned_process.spawn_pinned(staged, work)
+
+
+def _release_spawned(proc: subprocess.Popen[bytes]) -> None:
+    # A stale entry would steer the cleanup of a later process that reuses the pid.
+    pinned_process._OPT_OUT.pop(proc.pid, None)
+    for pipe in (proc.stdin, proc.stdout):
+        if pipe is not None:
+            pipe.close()
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(proc.pid, signal.SIGKILL)
+    proc.wait(timeout=5)
+
+
 def test_observe_pinned_requires_containment_or_kills_its_descendants(tmp_path: Path) -> None:
     marker = tmp_path / "pid"
     command, digest = _launcher(tmp_path, marker)
@@ -189,20 +269,20 @@ def test_a_finished_pid_is_not_remembered_as_namespaced() -> None:
     assert proc.pid not in pinned_process._NAMESPACED
 
 
-def test_teardown_leaves_the_exit_status_of_another_child() -> None:
+def test_opt_out_teardown_leaves_the_exit_status_of_another_child(tmp_path: Path) -> None:
     # Code elsewhere in the process, such as the validation worker, trusts its child's
-    # exit status; reaping every zombie child would turn this 3 into 0.
+    # exit status. Teardown reaping zombie children of this process, as a sweep for a
+    # clone(CLONE_PARENT) child once did, would turn this 3 into 0.
     other = subprocess.Popen([sys.executable, "-c", "raise SystemExit(3)"])  # noqa: S603
-    if hasattr(os, "waitid"):
-        os.waitid(os.P_PID, other.pid, os.WEXITED | os.WNOWAIT)
-    else:  # pragma: no cover - macOS before Python 3.13
-        time.sleep(1)
-    proc = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)  # noqa: S603
+    os.waitid(os.P_PID, other.pid, os.WEXITED | os.WNOWAIT)
+    marker = tmp_path / "pid"
+    command, digest = _clone_parent_launcher(tmp_path, marker)
     try:
-        pinned_process.terminate_process_group(proc)
+        with isolation_off():
+            observe_pinned(str(command), digest)
+        assert other.wait(timeout=5) == 3
     finally:
-        proc.wait(timeout=5)
-    assert other.wait(timeout=5) == 3
+        _kill_recorded(marker)
 
 
 def test_a_forgotten_pid_is_swept_again_when_reused(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -237,58 +317,23 @@ def test_opt_out_kills_a_double_fork_and_a_refused_namespace_never_starts_it(
     assert not blocked.exists()
 
 
-@pytest.mark.skipif(
-    not sys.platform.startswith("linux"), reason="clone(CLONE_PARENT) is Linux-only"
-)
 def test_opt_out_kills_a_clone_parent_child_that_leaves_the_session(tmp_path: Path) -> None:
-    """``clone(CLONE_PARENT)`` plus ``setsid`` reparents to the supervisor and leaves the group.
+    """A ``clone(CLONE_PARENT)`` child that calls ``setsid`` dies with the session.
 
-    The descendant sweep does not see it, and ``killpg`` does not signal the new session.
+    It is the child of the launcher's parent. Executed directly, that parent was this
+    process, outside the launcher's tree, group and session, so neither the sweep nor
+    ``killpg`` reached it. Under the wrapper, the wrapper is that parent.
     """
     marker = tmp_path / "pid"
-    command, digest = _pinned(
-        tmp_path / "launcher",
-        f"""
-import ctypes
-marker = {str(marker)!r}
-CLONE_PARENT = 0x00008000
-stack = ctypes.create_string_buffer(1024 * 1024)
-libc = ctypes.CDLL(None, use_errno=True)
-def child(_):
+    command, digest = _clone_parent_launcher(tmp_path, marker)
     try:
-        os.setsid()
-    except OSError:
-        pass
-    # Written whole, then renamed, so the supervisor never reads a partial pid.
-    with open(marker + ".tmp", "w") as out:
-        out.write(str(os.getpid()))
-    os.replace(marker + ".tmp", marker)
-    time.sleep(60)
-    return 0
-callback = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)(child)
-sys._keep = (callback, stack)
-cloned = libc.clone(
-    callback, ctypes.c_void_p(ctypes.addressof(stack) + len(stack)), CLONE_PARENT, None
-)
-if cloned < 0:
-    raise SystemExit(1)
-# The child must have recorded its pid before the session can end, or a loaded runner
-# kills it first and the test learns nothing.
-for _ in range(1000):
-    if os.path.exists(marker):
-        break
-    time.sleep(0.01)
-""",
-    )
-    with isolation_off():
-        observe_pinned(str(command), digest)
-    assert marker.exists(), "the clone(CLONE_PARENT) child did not start within 10 seconds"
-    try:
+        with isolation_off():
+            observe_pinned(str(command), digest)
+        assert marker.exists(), "the clone(CLONE_PARENT) child did not start within 10 seconds"
         _assert_dead(_host_pid(marker))
     finally:
         # A failed run must not leave the escaped child alive for the rest of the suite.
-        with contextlib.suppress(ProcessLookupError, ValueError, OSError):
-            os.kill(_host_pid(marker), signal.SIGKILL)
+        _kill_recorded(marker)
 
 
 def test_opt_out_stops_the_launcher_before_its_tree_is_swept(
@@ -296,19 +341,31 @@ def test_opt_out_stops_the_launcher_before_its_tree_is_swept(
 ) -> None:
     # The watchdog restarts its helper whenever the sweep kills it. A launcher that still
     # runs after the sweep starts another one in a new session, which pid 1 adopts once
-    # killpg kills the launcher, out of reach of the second sweep. Cleanup must stop the
-    # launcher first. Real timing opens that window only in some runs, so killpg here
-    # waits until a running launcher has started such a helper, and returns once the
-    # helper has been reparented, as a preempted cleanup thread would.
+    # killpg kills the launcher's group, out of reach of the second sweep. Cleanup must
+    # stop the launcher, or kill it, before its group is killed. Real timing opens that
+    # window only in some runs, so killpg here waits until a member of the group that
+    # still runs has started such a helper, and returns once the helper has been
+    # reparented out of the group, as a preempted cleanup thread would.
     helpers = tmp_path / "helpers"
     helpers.mkdir()
     command, digest = _watchdog_launcher(tmp_path, helpers)
     killpg = os.killpg
     late: set[int] = set()
 
+    def in_group(pid: int, pgid: int) -> bool:
+        return _stat(pid)[2:3] == [str(pgid)]
+
+    def group_runs(pgid: int) -> bool:
+        members = {pgid} | pinned_process._descendant_pids(pgid)
+        return any(_stat(pid)[0] not in {"T", "Z", "X"} and in_group(pid, pgid) for pid in members)
+
+    def held(pid: int, pgid: int) -> bool:
+        parent = _stat(pid)[1:2]
+        return bool(parent) and in_group(int(parent[0]), pgid)
+
     def preempted_killpg(pgid: int, sig: int) -> None:
         deadline = time.monotonic() + 5
-        while not late and _stat(pgid)[0] not in {"T", "Z", "X"}:
+        while not late and group_runs(pgid):
             for pid in pinned_process._descendant_pids(pgid):
                 fields = _stat(pid)
                 # Alive, and leading its own session, so killpg does not reach it.
@@ -318,7 +375,7 @@ def test_opt_out_stops_the_launcher_before_its_tree_is_swept(
                 break
             time.sleep(0.005)
         killpg(pgid, sig)
-        while any(_stat(pid)[1:2] == [str(pgid)] for pid in late):
+        while any(held(pid, pgid) for pid in late):
             if time.monotonic() > deadline:
                 break
             time.sleep(0.005)
@@ -335,6 +392,318 @@ def test_opt_out_stops_the_launcher_before_its_tree_is_swept(
         for pid in {int(entry.name) for entry in helpers.iterdir()} | late:
             with contextlib.suppress(ProcessLookupError):
                 os.kill(pid, signal.SIGKILL)
+
+
+def test_opt_out_stops_the_whole_tree_before_it_is_swept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Stopping only the wrapper leaves a watchdog in the launcher free to restart a helper
+    # while the tree is swept, and a running parent free to reap a child the sweep found,
+    # whose pid could then name another process when it is signalled.
+    helpers = tmp_path / "helpers"
+    helpers.mkdir()
+    command, digest = _watchdog_launcher(tmp_path, helpers)
+    seen: list[dict[int, str]] = []
+    sweep = pinned_process._kill_descendants
+
+    def observed(root: int) -> bool:
+        if not seen:
+            tree = {root} | pinned_process._descendant_pids(root)
+            seen.append({pid: _stat(pid)[0] for pid in tree})
+        return sweep(root)
+
+    monkeypatch.setattr(pinned_process, "_kill_descendants", observed)
+    try:
+        with isolation_off():
+            observe_pinned(str(command), digest)
+        # The wrapper, the launcher and at least one helper, none of them running.
+        assert len(seen[0]) >= 3, seen
+        assert set(seen[0].values()) <= {"T", "Z"}, seen
+    finally:
+        for entry in helpers.iterdir():
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int(entry.name), signal.SIGKILL)
+
+
+def _python(source: str) -> str:
+    return f"#!{sys.executable}\nimport os, signal, sys, time\n{_RECORD}\n{source}"
+
+
+# A setsid grandchild that holds neither pipe records its pid and sleeps; the launcher
+# waits for the record and then runs END.
+_ORPHANING = """marker = {marker!r}
+if os.fork() == 0:
+    os.setsid()
+    if os.fork() == 0:
+        detach()
+        record(marker)
+        time.sleep(60)
+    os._exit(0)
+await_record(marker)
+{end}
+"""
+
+
+def test_opt_out_kills_the_tree_before_its_wrapper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Killing the wrapper first, as cgroup.kill ahead of the sweep once did to the
+    # launcher, hands its tree to pid 1 before the sweep can walk it.
+    marker = tmp_path / "pid"
+    proc = _spawn_opted_out(
+        tmp_path, _python(_ORPHANING.format(marker=str(marker), end="time.sleep(60)"))
+    )
+    kill, killpg = os.kill, os.killpg
+    killed: list[int] = []
+
+    def record_kill(pid: int, sig: int) -> None:
+        if sig == signal.SIGKILL:
+            killed.append(pid)
+        kill(pid, sig)
+
+    def record_killpg(pgid: int, sig: int) -> None:
+        if sig == signal.SIGKILL:
+            killed.append(pgid)
+        killpg(pgid, sig)
+
+    try:
+        assert _eventually(marker.exists)
+        orphan = _host_pid(marker)
+        monkeypatch.setattr(pinned_process.os, "kill", record_kill)
+        monkeypatch.setattr(pinned_process.os, "killpg", record_killpg)
+        pinned_process.terminate_process_group(proc)
+        monkeypatch.undo()
+        assert orphan in killed[: killed.index(proc.pid)]
+        _assert_dead(orphan)
+    finally:
+        monkeypatch.undo()
+        _kill_recorded(marker)
+        _release_spawned(proc)
+
+
+def _eventually(check: Callable[[], bool]) -> bool:
+    deadline = time.monotonic() + 10
+    while not check():
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.01)
+    return True
+
+
+def test_opt_out_kills_a_descendant_that_outlives_the_launcher(tmp_path: Path) -> None:
+    # Executed directly, the launcher was the subreaper, so once it had exited its
+    # orphans were adopted outside its tree and escaped. The wrapper stays their parent.
+    marker = tmp_path / "pid"
+    proc = _spawn_opted_out(tmp_path, _python(_ORPHANING.format(marker=str(marker), end="")))
+    try:
+        assert proc.stdout is not None
+        # End of output: the launcher has exited, and its orphan holds neither pipe.
+        assert proc.stdout.read() == b""
+        orphan = _host_pid(marker)
+        assert _eventually(lambda: _stat(orphan)[1] == str(proc.pid))
+        pinned_process.terminate_process_group(proc)
+        _assert_dead(orphan)
+    finally:
+        _kill_recorded(marker)
+        _release_spawned(proc)
+
+
+@pytest.mark.parametrize("wrapped", [True, False], ids=["wrapped", "direct"])
+def test_opt_out_kills_an_orphan_that_left_the_process_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, wrapped: bool
+) -> None:
+    # killpg misses a process that called setpgid. Under the wrapper it stays in the
+    # wrapper's tree. Executed directly, once the launcher has exited, it was adopted
+    # outside the tree, and only the sweep of the launch's own session still finds it.
+    if not wrapped:
+        monkeypatch.setattr(pinned_process, "_subreaper_argv", lambda staged: None)
+    marker = tmp_path / "pid"
+    proc = _spawn_opted_out(
+        tmp_path,
+        _python(
+            f"""marker = {str(marker)!r}
+if os.fork() == 0:
+    os.setpgid(0, 0)
+    detach()
+    record(marker)
+    time.sleep(60)
+    os._exit(0)
+await_record(marker)
+"""
+        ),
+    )
+    try:
+        assert proc.stdout is not None
+        assert proc.stdout.read() == b""
+        orphan = _host_pid(marker)
+        assert _stat(orphan)[2:4] == [str(orphan), str(proc.pid)]
+        pinned_process.terminate_process_group(proc)
+        _assert_dead(orphan)
+    finally:
+        _kill_recorded(marker)
+        _release_spawned(proc)
+
+
+def test_a_group_signal_from_the_launcher_does_not_end_its_wrapper(tmp_path: Path) -> None:
+    # A launcher that ends with kill(0, SIGTERM), as a script with trap 'kill 0' EXIT
+    # does, signals its whole group, the wrapper included. The wrapper ignores it and
+    # keeps the launcher's orphan in its tree.
+    marker = tmp_path / "pid"
+    end = "os.kill(0, signal.SIGTERM)"
+    proc = _spawn_opted_out(tmp_path, _python(_ORPHANING.format(marker=str(marker), end=end)))
+    try:
+        assert proc.stdout is not None
+        assert proc.stdout.read() == b""
+        pinned_process.terminate_process_group(proc)
+        _assert_dead(_host_pid(marker))
+    finally:
+        _kill_recorded(marker)
+        _release_spawned(proc)
+
+
+@pytest.mark.parametrize("ending", ["wrapper-killed", "launcher-killed"])
+def test_opt_out_reports_a_wrapper_that_a_signal_ended(tmp_path: Path, ending: str) -> None:
+    # Once the wrapper is gone, its tree is adopted out of the sweep's reach, so cleanup
+    # cannot confirm that the launch ended. The wrapper also ends with the signal that
+    # killed the launcher, as unshare does, so that reads the same and fails closed.
+    marker = tmp_path / "pid"
+    if ending == "wrapper-killed":
+        # Executed directly, the launcher's parent would be this test process.
+        end = f"if os.getppid() != {os.getpid()}:\n    os.kill(os.getppid(), signal.SIGKILL)"
+        source = _python(_ORPHANING.format(marker=str(marker), end=end))
+    else:
+        source = _python("os.kill(os.getpid(), signal.SIGKILL)\n")
+    proc = _spawn_opted_out(tmp_path, source)
+    try:
+        os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOWAIT)
+        with pytest.raises(pinned_process.PinnedProcessError) as failed:
+            pinned_process.terminate_process_group(proc)
+        assert failed.value.reason == "isolation-teardown-failed"
+        assert "process tree could not be confirmed ended" in str(failed.value)
+        assert proc.pid not in pinned_process._OPT_OUT
+    finally:
+        _kill_recorded(marker)
+        _release_spawned(proc)
+
+
+_READY = "#!/bin/sh\necho ready\nexec sleep 60\n"
+
+
+@pytest.mark.parametrize("fault", ["passes-exhausted", "proc-unreadable", "wrapper-died"])
+def test_opt_out_reports_a_tree_it_could_not_confirm_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    # A tree that forks faster than it is scanned can outlast the bounded passes, a /proc
+    # that cannot be read shows no tree at all, and a wrapper that died while its tree
+    # was swept adopted none of the orphans the sweep made.
+    proc = _spawn_opted_out(tmp_path, _READY)
+    sweep = pinned_process._kill_descendants
+
+    def unreadable() -> dict[int, list[int]]:
+        raise PermissionError(13, "Permission denied")
+
+    def wrapper_dies_first(root: int) -> bool:
+        os.kill(root, signal.SIGKILL)
+        os.waitid(os.P_PID, root, os.WEXITED | os.WNOWAIT)
+        return sweep(root)
+
+    try:
+        assert proc.stdout is not None and proc.stdout.readline() == b"ready\n"
+        if fault == "passes-exhausted":
+            monkeypatch.setattr(pinned_process, "_SWEEP_PASSES", 0)
+        elif fault == "proc-unreadable":
+            monkeypatch.setattr(pinned_process, "_children_by_parent", unreadable)
+        else:
+            monkeypatch.setattr(pinned_process, "_kill_descendants", wrapper_dies_first)
+        with pytest.raises(pinned_process.PinnedProcessError) as failed:
+            pinned_process.terminate_process_group(proc)
+        assert failed.value.reason == "isolation-teardown-failed"
+    finally:
+        monkeypatch.undo()
+        _release_spawned(proc)
+
+
+@pytest.mark.parametrize(
+    ("ending", "status"),
+    [("exit 3", 3), ("kill -TERM $$", -signal.SIGTERM), ("kill -KILL $$", -signal.SIGKILL)],
+)
+def test_the_wrapper_reports_the_launcher_exit_status_as_a_direct_exec_does(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ending: str, status: int
+) -> None:
+    results = []
+    for wrapped in (True, False):
+        with monkeypatch.context() as direct:
+            if not wrapped:
+                direct.setattr(pinned_process, "_subreaper_argv", lambda staged: None)
+            proc = _spawn_opted_out(
+                tmp_path / str(wrapped), f"#!/bin/sh\nread -r line\necho got:$line\n{ending}\n"
+            )
+        try:
+            output, _ = proc.communicate(b"x\n", timeout=10)
+            results.append((output, proc.returncode))
+        finally:
+            _release_spawned(proc)
+    assert results == [(b"got:x\n", status)] * 2
+
+
+@pytest.mark.parametrize(("ending", "ended"), [("exit 0", True), ("kill -KILL $$", False)])
+def test_cleanup_after_the_wrapper_was_reaped_reports_how_it_ended(
+    tmp_path: Path, ending: str, ended: bool
+) -> None:
+    # A reaped wrapper's pid may already name another process, so nothing is stopped or
+    # swept, and only a wrapper that exited normally had emptied its tree.
+    proc = _spawn_opted_out(tmp_path, f"#!/bin/sh\n{ending}\n")
+    proc.wait(timeout=10)
+    try:
+        if ended:
+            pinned_process.terminate_process_group(proc)
+        else:
+            with pytest.raises(pinned_process.PinnedProcessError):
+                pinned_process.terminate_process_group(proc)
+    finally:
+        _release_spawned(proc)
+
+
+def test_cleanup_before_the_wrapper_forks_never_starts_the_launcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A session can end before the wrapper has started the launcher, as when the first
+    # write fails. Continued after the sweep to reap its tree, such a wrapper would start
+    # the launcher while cleanup waits, here preempted for a second.
+    marker = tmp_path / "pid"
+    held = "import time\ntime.sleep(0.3)\n" + pinned_process._SUBREAPER_EXEC
+    monkeypatch.setattr(pinned_process, "_SUBREAPER_EXEC", held)
+    reaped = pinned_process._await_reaped
+
+    def preempted(wrapper: int) -> bool:
+        time.sleep(1)
+        return reaped(wrapper)
+
+    monkeypatch.setattr(pinned_process, "_await_reaped", preempted)
+    proc = _spawn_opted_out(tmp_path, _python(f"record({str(marker)!r})\ntime.sleep(60)\n"))
+    try:
+        pinned_process.terminate_process_group(proc)
+        assert proc.wait(timeout=5) == -signal.SIGKILL
+        time.sleep(0.5)
+        assert not marker.exists()
+    finally:
+        _kill_recorded(marker)
+        _release_spawned(proc)
+
+
+def test_the_session_sweep_targets_only_a_session_the_launch_leads() -> None:
+    # The session sweep kills every member of the session, so it may only ever target one
+    # that start_new_session created for the launch, never the caller's own.
+    inherited = subprocess.Popen(["/bin/sleep", "30"])  # noqa: S603
+    leader = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)  # noqa: S603
+    try:
+        assert pinned_process._own_session(inherited.pid) is None
+        assert pinned_process._own_session(leader.pid) == leader.pid
+    finally:
+        for proc in (inherited, leader):
+            proc.kill()
+            proc.wait(timeout=5)
+    assert pinned_process._own_session(leader.pid) is None
 
 
 def test_a_launcher_that_does_not_stop_is_still_killed(
@@ -447,10 +816,11 @@ def test_cli_requires_an_explicit_opt_out_when_the_namespace_is_unavailable(
     assert "kernel PID containment is disabled" in allowed.stderr
     usage = " ".join(CliRunner().invoke(main, ["verify-live", "--help"]).output.split())
     for text in (" ".join(allowed.stderr.split()), usage):
-        assert "stopped before cleanup" in text
-        assert "cgroup.kill" in text
-        assert "clone(CLONE_PARENT)" in text
-        assert "leaves that session and the cgroup can escape" in text
+        assert "stays its parent and adopts its orphans" in text
+        assert "clone(CLONE_PARENT) child, stays in one tree" in text
+        assert "stopped before cleanup kills it" in text
+        assert "the server fails if the wrapper ended first" in text
+        assert "deliberately evades cleanup can escape" in text
         assert "not a namespace or sandbox" in text
 
 
@@ -473,12 +843,14 @@ def test_a_descendant_that_cannot_be_signalled_does_not_abort_cleanup(
 
     monkeypatch.setattr(pinned_process.os, "kill", refuse)
     monkeypatch.setattr(pinned_process.os, "killpg", record)
+    monkeypatch.setattr(pinned_process, "_TEARDOWN_SECONDS", 0.5)
     try:
-        with isolation_off():
+        # The rest of the session is still killed, and the survivor is reported.
+        with isolation_off(), pytest.raises(LaunchPolicyError) as failed:
             observe_pinned(str(command), digest)
+        assert failed.value.reason == "isolation-teardown-failed"
     finally:
         monkeypatch.undo()
-        # cgroup.kill may already have reaped the child that os.kill was not allowed to signal.
         with contextlib.suppress(ProcessLookupError):
             kill(_host_pid(marker), signal.SIGKILL)
     assert len(groups) == 1
@@ -583,7 +955,9 @@ _WRAPPERS = {
 }
 
 
-def _launch_state(tmp_path: Path, name: str, *, namespaced: bool = False) -> list[str]:
+def _launch_state(
+    tmp_path: Path, name: str, *, namespaced: bool = False, wrapped: bool = True
+) -> list[str]:
     out = tmp_path / f"{name}.state"
     script = tmp_path / name
     script.write_text(STATE.replace("OUT", shlex.quote(str(out))))
@@ -594,8 +968,11 @@ def _launch_state(tmp_path: Path, name: str, *, namespaced: bool = False) -> lis
         observe_pinned(str(script), pin)
     *lines, stat = out.read_text().splitlines()
     pid = stat.split()[0]
-    # Opted out, the launcher leads its own session; in a namespace, unshare does.
-    assert (stat.rpartition(")")[2].split()[2:4] == [pid, pid]) is not namespaced
+    parent, group, session = stat.rpartition(")")[2].split()[1:4]
+    # Executed directly, the launcher leads its own session. Under the subreaper wrapper,
+    # or in a namespace, its parent leads it, and the launcher is in that group too.
+    leader = parent if namespaced or wrapped else pid
+    assert [group, session] == [leader, leader]
     work = re.compile(r"\S*/nexus-live-\w+")
     return [re.sub(r"pipe:\[\d+\]", "pipe", work.sub("WORK", line)) for line in lines]
 
@@ -614,7 +991,7 @@ def _wrapped_and_direct(
         wrapped = _launch_state(tmp_path, "wrapped", namespaced=namespaced)
         with monkeypatch.context() as direct_exec:
             direct_exec.setattr(pinned_process, _WRAPPERS[wrapper][1], lambda staged: None)
-            direct = _launch_state(tmp_path, "direct", namespaced=namespaced)
+            direct = _launch_state(tmp_path, "direct", namespaced=namespaced, wrapped=False)
     finally:
         signal.pthread_sigmask(signal.SIG_SETMASK, previous)
     return wrapped, direct, {*previous, signal.SIGUSR2}
