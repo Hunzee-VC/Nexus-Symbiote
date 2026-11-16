@@ -412,3 +412,11 @@ def test_check_json_budget_accepts_i_json_and_integral_floats_only_when_asked():
     assert str(denied.value) == "integral float outside the I-JSON range"
     assert denied.value.reason == "json-number-out-of-range"
     assert validation.check_json_budget(2.5, maximum=100, strict_integral_floats=True) is None
+
+
+def test_cyclic_ref_schema_is_refused_as_schema_invalid():
+    from nexus_symbiote.runtime_validation import ValidationBudgetError, validate_arguments
+
+    with pytest.raises(ValidationBudgetError) as failure:
+        validate_arguments({"$ref": "#"}, {})
+    assert failure.value.reason == "schema-invalid"

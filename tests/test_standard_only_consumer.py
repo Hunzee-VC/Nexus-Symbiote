@@ -583,3 +583,12 @@ def test_scan_exports_name_their_subject_types_and_digests(scans):
     (agent,) = nodes[root]["rootElement"]
     assert nodes[agent]["type"] == "ai_AIPackage"
     assert nodes[root]["software_sbomType"] == ["source"]
+
+
+def test_spdx_conditional_comment_is_neutralized():
+    bom = _one_edge("invokes")
+    bom.dependencies[0].conditions = "served\x1b[2Jcleared \u202etext"
+    view = standard_only(SPDXGenerator().generate(bom), "spdx")
+    (edge,) = _between(view, "agent:main", "tool:send")
+    assert "\x1b" not in edge["comment"] and "\u202e" not in edge["comment"]
+    assert "served" in edge["comment"] and "cleared" in edge["comment"]

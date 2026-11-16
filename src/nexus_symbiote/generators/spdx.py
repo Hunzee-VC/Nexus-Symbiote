@@ -51,7 +51,8 @@ from nexus_symbiote.generators.validation import (
     spdx_errors,
 )
 
-PROJECTION = "spdx-3.0.1/2"
+PROJECTION = "spdx-3.0.1/3"
+PREVIOUS_PROJECTION = "spdx-3.0.1/2"
 SPDX_TYPE_MAP = {
     ComponentType.AGENT: "ai_AIPackage",
     ComponentType.MODEL: "ai_AIPackage",
@@ -65,6 +66,23 @@ SPDX_TYPE_MAP = {
 # SPDX 3.0.1 defines this named individual for "no assertion" about a license.
 NO_ASSERTION_LICENSE = "expandedlicensing_NoAssertionLicense"
 MAX_CONDITION_COMMENT = 1024
+# Projection 3 shows native text in relationship comments with this mapping: a tab
+# becomes a space; C0 and C1 controls, line and paragraph separators, format and
+# bidirectional characters, the other default-ignorable code points and the
+# noncharacters U+FFFE and U+FFFF become U+FFFD; and a "##name[" CI log command
+# introducer is broken. Recovery renders every comment again and compares it with the
+# stored one, so the mapping is frozen with the projection instead of following
+# utils.terminal.neutralize(), whose set grows as disguising characters are found:
+# any change would make earlier projection 3 exports unrecoverable. A different
+# rendering needs a new projection.
+_COMMENT_UNSAFE = re.compile(
+    r"[\x00-\x08\x0a-\x1f\x7f-\x9f\xad\u034f\u0600-\u0605\u061c\u06dd\u070f\u0890\u0891"
+    r"\u08e2\u115f\u1160\u17b4\u17b5\u180b-\u180f\u200b-\u200f\u2028\u2029\u202a-\u202e"
+    r"\u2060-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0\ufff0-\ufff8\ufff9-\ufffb\ufffe\uffff"
+    r"\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a"
+    r"\U000e0000-\U000e0fff]"
+)
+_COMMENT_LOG_COMMAND = re.compile(r"##(?=[A-Za-z]*\[)")
 COVERAGE_COMMENTS = {
     "incomplete": (
         "Collection coverage is incomplete: collectors were scoped or failed, surfaces "
@@ -96,6 +114,12 @@ def _extension(properties: list[dict[str, str]]) -> list[dict[str, Any]]:
             ],
         }
     ]
+
+
+def _comment_text(value: str) -> str:
+    """Native text as projection 3 shows it in a relationship comment."""
+    shown = _COMMENT_UNSAFE.sub("\ufffd", value.replace("\t", " "))
+    return _COMMENT_LOG_COMMAND.sub("##\ufffd", shown)
 
 
 def _validated_namespace(namespace: str) -> str:
@@ -183,7 +207,9 @@ class SPDXGenerator(Generator):
             )
         return _DocumentIds(f"{self._namespace}/document/{revision}")
 
-    def _projection(self, aibom: AIBOM, native: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _projection(
+        self, aibom: AIBOM, native: dict[str, Any] | None = None, *, legacy_v2: bool = False
+    ) -> dict[str, Any]:
         prepare(aibom)
         native = native_document(aibom) if native is None else native
         # Native refs are BOM-local, and producers can reuse serial numbers across revisions.
@@ -240,7 +266,10 @@ class SPDXGenerator(Generator):
         coverage = coverage_aggregate(aibom.metadata.completeness)
         relationships = [
             self._relationship(
-                edge_values[key], ids, "incomplete" if coverage == "incomplete" else "noAssertion"
+                edge_values[key],
+                ids,
+                "incomplete" if coverage == "incomplete" else "noAssertion",
+                neutralize_comments=not legacy_v2,
             )
             for key in sorted(edge_values)
         ]
@@ -295,7 +324,10 @@ class SPDXGenerator(Generator):
             "extension": _extension(
                 [
                     *document_properties(aibom, self.format_name, native),
-                    {"name": PROJECTION_PROPERTY, "value": PROJECTION},
+                    {
+                        "name": PROJECTION_PROPERTY,
+                        "value": PREVIOUS_PROJECTION if legacy_v2 else PROJECTION,
+                    },
                 ]
             ),
         }
@@ -370,7 +402,13 @@ class SPDXGenerator(Generator):
         return element
 
     @staticmethod
-    def _relationship(edge: DependencyEdge, ids: _DocumentIds, completeness: str) -> dict[str, Any]:
+    def _relationship(
+        edge: DependencyEdge,
+        ids: _DocumentIds,
+        completeness: str,
+        *,
+        neutralize_comments: bool = True,
+    ) -> dict[str, Any]:
         mapping = {
             "invokes": "usesTool",
             "trained-on": "trainedOn",
@@ -395,16 +433,23 @@ class SPDXGenerator(Generator):
                 [{"name": "nexus-symbiote:relationship", "value": json_text(body)}]
             ),
         }
+        # Projection 2 rendered the original text. Retain that exact rendering
+        # only for recovery; new exports declare projection 3 and neutralize it.
+        shown_relationship = (
+            _comment_text(edge.relationship) if neutralize_comments else edge.relationship
+        )
         if edge.conditions:
-            conditions = edge.conditions
+            # SARIF and VEX neutralize inventory text in rendered messages; SPDX
+            # comments are rendered by viewers the same way.
+            conditions = _comment_text(edge.conditions) if neutralize_comments else edge.conditions
             if len(conditions) > MAX_CONDITION_COMMENT:
                 conditions = conditions[:MAX_CONDITION_COMMENT] + " [truncated]"
             relationship["comment"] = (
-                f"Conditional native relationship '{edge.relationship}' (conditions: "
+                f"Conditional native relationship '{shown_relationship}' (conditions: "
                 f"{conditions}). Not an unconditional {typed or 'relationship'} assertion."
             )
         elif typed is None:
-            relationship["comment"] = f"Native relationship '{edge.relationship}'."
+            relationship["comment"] = f"Native relationship '{shown_relationship}'."
         return relationship
 
     @staticmethod
@@ -439,16 +484,12 @@ class SPDXGenerator(Generator):
             if isinstance(prop, dict) and "extension_cdxPropName" in prop
         ]
         projection = declared_projection(properties)
-        errors = spdx_errors(
-            document,
-            legacy_license=_legacy.NO_ASSERTION_LICENSE if projection is None else None,
-        )
-        if errors:
-            raise ValueError("invalid spdx export: " + "; ".join(errors[:10]))
         namespace = _document_namespace(doc["spdxId"])
         recovered, native = recover_native(properties)
-        if projection == PROJECTION:
-            expected = SPDXGenerator(namespace)._projection(recovered, native)
+        if projection in {PROJECTION, PREVIOUS_PROJECTION}:
+            expected = SPDXGenerator(namespace)._projection(
+                recovered, native, legacy_v2=projection == PREVIOUS_PROJECTION
+            )
         elif projection is None and namespace is not None:
             expected = _legacy.spdx_projection(recovered, namespace, native)
         else:
@@ -461,6 +502,15 @@ class SPDXGenerator(Generator):
             actual, wanted = _without_created(actual), _without_created(wanted)
         if unordered_projection(actual) != unordered_projection(wanted):
             raise ValueError("SPDX projection conflicts with the embedded native document")
+        # Only the flat reference topology emitted by a supported projection may
+        # reach schema validation. Inline reference objects can make the general
+        # SPDX schema revisit a tiny nested input an enormous number of times.
+        errors = spdx_errors(
+            document,
+            legacy_license=_legacy.NO_ASSERTION_LICENSE if projection is None else None,
+        )
+        if errors:
+            raise ValueError("invalid spdx export: " + "; ".join(errors[:10]))
         return recovered
 
 

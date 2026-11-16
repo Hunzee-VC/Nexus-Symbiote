@@ -187,9 +187,15 @@ the same run counts as verification; the outcome recorded in the BOM is not trus
 
 `--signature-policy` (`scan`, `validate`, `risk`, `baseline`) and the Action's
 `signature-policy` input take a strict JSON file, at most 4 MiB and 1,000 artifacts,
-written by the operator, never by the checkout. A policy inside the scanned project,
-also under another name for the project directory, or one with other hard links is
-refused:
+written by the operator, never by the checkout. The CLI refuses a policy inside the
+scanned project or inside any Git working tree that encloses it, including a
+submodule's superproject, also under another name for any of these directories, or
+one with other hard links. The Action checks its input only against
+`GITHUB_WORKSPACE`: it refuses a path inside the workspace, one that passes through a
+symlink, or a hard link. It then copies the policy into a private directory under
+`RUNNER_TEMP`, or under the system temporary directory when `RUNNER_TEMP` is unset,
+and passes that copy to the CLI, which applies the rules above to the copy; a
+temporary directory inside a Git working tree therefore fails the run.
 
 ```json
 {
@@ -212,6 +218,11 @@ takes these four fields and an optional `expected_sha256`, and `digest-pin` take
 Unknown fields, duplicate keys or artifacts, symbolic links and missing files are
 refused.
 
+Every directory at or above the project with a `.git` entry counts as an enclosing
+repository. So neither a trusted base checkout that encloses the pull request's
+checkout nor a home directory that is itself a repository (`~/.git`) can hold the
+policy for a project below it; keep the policy where no repository encloses it.
+
 ### Launch policy
 
 `verify-live --launch-policy` takes a JSON object, outside the project, that maps each
@@ -230,12 +241,21 @@ stdio MCP server's `bom_ref` to exactly a `command` and a `sha256`:
 of its bytes as `sha256:<64 lowercase hexadecimal characters>`. A server without an
 entry is not started.
 
-The file must lie outside the project and outside the repository (the nearest
-directory with a `.git` entry) that holds the project or the inventory. On POSIX
+The file must lie outside the project and outside every repository (a directory with
+a `.git` entry) that encloses the project or the inventory, including the repository
+around a nested checkout such as a submodule. On POSIX
 systems it must also be a single-link regular file owned by you or root that only its
-owner can write, in a directory owned by you or root that others cannot write unless
-it is sticky. A policy that breaks these rules is a usage error (exit 2). The checks
+owner can write, and every directory above it, up to the file system root, must be
+owned by you or root and not writable by others unless it is sticky: whoever can write
+an ancestor can rename the directory below it and put another policy in its place. A
+policy that breaks these rules is a usage error (exit 2). The checks
 catch a misplaced policy; they do not authenticate it.
+
+The ownership rule includes `/`. Inside a user namespace that does not map host root
+and keeps the host's file system, such as one made with `unshare -r`, `/` and `/tmp`
+appear owned by the overflow user (usually uid 65534), so every launch policy is
+refused, and no option overrides the check. Run `verify-live` where `/` and every
+directory above the policy are owned by root or by you.
 
 ### JSON documents
 
@@ -334,10 +354,10 @@ nexus-symbiote attest [OPTIONS] SUBJECT
 
 | Option | Description |
 |---|---|
-| `--key` `FILE` | Ed25519 private key PEM that only its owner can read; repeat for each signer. (required, repeatable) |
+| `--key` `FILE` | Ed25519 private key PEM that you own and that gives group and others no permission; repeat for each signer. (required, repeatable) |
 | `--purpose` `generated\|reviewed` | generated: you produced SUBJECT; reviewed: you reviewed SUBJECT as a baseline. (required) |
 | `--out` `PATH` | Envelope file to create with mode 0600; must not exist. (required) |
-| `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file, which only its owner may read. |
+| `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file, which you own and which gives group and others no permission. |
 | `--source-revision` `TEXT` | Git commit ID SUBJECT was produced from, 40 or 64 lowercase hexadecimal characters; recorded as your claim and never checked. |
 
 SUBJECT is read once, as a regular file reached without symbolic links, at most
@@ -479,7 +499,7 @@ nexus-symbiote discover-mcp [OPTIONS] ENDPOINT
 | `--client-name` `TEXT` | `clientInfo` name sent in `initialize` (default: `nexus-symbiote-discovery`); use your production host's so the server cannot single out the observer. |
 | `--client-version` `TEXT` | `clientInfo` version sent in `initialize` (default: the tool version). |
 | `--user-agent` `TEXT` | `User-Agent` header to send; none is sent by default. |
-| `--raw-descriptors` `PATH` | Also write the unredacted server info, capabilities, instructions, tool descriptors, prompts and resource templates to this new file (mode 0600) for review; only the bearer token and session ID are masked. |
+| `--raw-descriptors` `PATH` | Also write the unredacted server info, capabilities, instructions, tool descriptors, prompts and resource templates to this new file (mode 0600) for review; only the bearer token is masked, and a server whose declarations repeat its own session ID (of eight or more characters) ends the observation. |
 
 ### `export-inventory`
 
@@ -628,11 +648,12 @@ nexus-symbiote runtime keygen [OPTIONS]
 |---|---|
 | `--private-key` `PATH` | New PEM private key file, created with mode 0600; must not exist. (required) |
 | `--public-key` `PATH` | New PEM public key file, created with mode 0600; must not exist. (required) |
-| `--passphrase-file` `PATH` | Encrypt the private key with the passphrase on the first line of this file, which only its owner may read. |
+| `--passphrase-file` `PATH` | Encrypt the private key with the passphrase on the first line of this file, which you own and which gives group and others no permission. |
 
 Use one key pair per purpose: snapshot, approval and trust rings must not share keys.
-A passphrase is at most 1,023 bytes, and a passphrase file that its group or others
-can read is refused. If either file cannot be written, neither key is kept.
+A passphrase is at most 1,023 bytes, and a passphrase file that you do not own, or
+that gives its group or others any permission, is refused. If either file cannot be written,
+neither key is kept.
 
 ### `runtime sign`
 
@@ -645,13 +666,15 @@ nexus-symbiote runtime sign [OPTIONS] CONTRACT_PATH
 | Option | Description |
 |---|---|
 | `--kind` `snapshot\|approval\|trust\|model` | Contract purpose; a signature is valid only for this purpose. (required) |
-| `--key` `PATH` | Ed25519 private key PEM that only its owner can access; repeat for multiple signers. (required, repeatable) |
+| `--key` `PATH` | Ed25519 private key PEM that you own and only you can access; repeat for multiple signers. (required, repeatable) |
 | `--out` `PATH` | Signed envelope file to create; must not exist. (required) |
-| `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file, which only its owner may read. |
+| `--passphrase-file` `PATH` | Passphrase for encrypted private keys, on the first line of this file, which you own and which gives group and others no permission. |
 
 A contract that could never verify, because its validity window is longer than its
 purpose allows or has already ended, is refused. The output includes the contract
-`digest` that approvals and revocation lists use.
+`digest` that approvals and revocation lists use. A key or passphrase file owned by
+another user is refused even when the command runs as root, such as a key mounted
+into a container from the host.
 
 ### `runtime verify`
 
@@ -935,7 +958,7 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 
 | Option | Description |
 |---|---|
-| `--project` `DIRECTORY` | Untrusted project root (required); the launch policy must be outside it and outside the repository that holds the project or the inventory. |
+| `--project` `DIRECTORY` | Untrusted project root (required); the launch policy must be outside it and outside every repository that encloses the project or the inventory. |
 | `--launch-policy` `FILE` | Operator-owned JSON outside the project: exact server references to absolute commands and SHA-256 pins; see [launch policy](#launch-policy). (required) |
 | `--json-output` | Output the verification report as JSON. |
 | `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools, declarations or the server identity drifted, unless `--accept-drift`. |

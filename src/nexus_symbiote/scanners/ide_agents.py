@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import os
 import re
-import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +35,7 @@ from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
 from nexus_symbiote.utils.jsonc import strip_jsonc
 from nexus_symbiote.utils.secrets import REDACTED, redact_keyed_text, redact_text
+from nexus_symbiote.utils.toml import loads as load_toml
 
 IDE_AGENT_CONFIGS: dict[str, dict[str, Any]] = {
     "claude-code": {
@@ -886,6 +886,26 @@ def _count(value: Any) -> int:
     return len(value) if isinstance(value, (list, dict)) else 0
 
 
+# Declared starting modes beyond the two named in _starting_mode_risk that run
+# without approval prompts, and what each runs that way. Unsandboxed full access is
+# high and the rest medium, as the Codex TOML path rates `danger-full-access`,
+# `never` and `on-failure`. Claude Code's dontAsk is not one: it denies a tool that
+# is not pre-approved instead of prompting for it.
+_PROMPT_SKIPPING_MODES: dict[str, tuple[RiskSeverity, str]] = {
+    "danger-full-access": (RiskSeverity.HIGH, "runs without approval prompts"),
+    "full-access": (RiskSeverity.HIGH, "runs without approval prompts"),
+    "never": (RiskSeverity.MEDIUM, "runs without approval prompts"),
+    "auto": (RiskSeverity.MEDIUM, "runs without approval prompts"),
+    "on-failure": (RiskSeverity.MEDIUM, "runs commands without approval prompts unless they fail"),
+}
+# Codex approval policies that run commands without asking first. `on-failure` asks
+# only to rerun a command that failed in the sandbox, outside it.
+_UNPROMPTED_APPROVALS = {
+    "never": "that commands never ask for approval",
+    "on-failure": "that commands run without asking for approval unless they fail",
+}
+
+
 def _series(names: list[str]) -> str:
     """Names as prose: ``a``, ``a and b`` or ``a, b and c``."""
     return " and ".join([", ".join(names[:-1]), names[-1]] if len(names) > 1 else names)
@@ -917,6 +937,21 @@ def _starting_mode_risk(ide_type: str, mode: str | None) -> RiskAssessment | Non
             recommendation=(
                 "Use the default or plan mode in project settings; grant narrow allow "
                 "rules instead."
+            ),
+        )
+    skipping = _PROMPT_SKIPPING_MODES.get(mode or "")
+    if skipping is not None:
+        severity, runs = skipping
+        return RiskAssessment(
+            severity=severity,
+            category="permission_scope",
+            detail=(
+                f"IDE agent '{ide_type}' declares starting mode '{mode}', which {runs}; "
+                "effective approval remains unverified."
+            ),
+            recommendation=(
+                "Use a default or sandboxed mode in project settings and approve "
+                "actions explicitly."
             ),
         )
     return None
@@ -997,8 +1032,11 @@ class IDEAgentScanner(Scanner):
                 documents[relative] = data
         self._bind_settings(ide_type, documents, result, risks, properties)
         mode = self._extract_permission_mode(settings or {}, ide_type, result)
+        toml_mode = False
         if ide_type == "codex" and mode is None:
+            # _codex_settings already rated the TOML approval and sandbox modes.
             mode = properties.get("approval_policy")
+            toml_mode = True
         broad = self._broad_permissions(settings or {}, ide_type, result)
         if broad:
             risks.insert(
@@ -1016,7 +1054,7 @@ class IDEAgentScanner(Scanner):
                     ),
                 ),
             )
-        starting_mode = _starting_mode_risk(ide_type, mode)
+        starting_mode = None if toml_mode else _starting_mode_risk(ide_type, mode)
         if starting_mode is not None:
             risks.insert(0, starting_mode)
         layered = (
@@ -1345,8 +1383,8 @@ class IDEAgentScanner(Scanner):
         if text is None:
             return
         try:
-            config = tomllib.loads(text)
-        except (tomllib.TOMLDecodeError, ValueError, RecursionError):
+            config = load_toml(text)
+        except (ValueError, RecursionError, MemoryError):
             result.scan_failures.append(f"{CODEX_CONFIG}: invalid TOML")
             return
         documents[CODEX_CONFIG] = config
@@ -1363,7 +1401,12 @@ class IDEAgentScanner(Scanner):
             sandbox = None
         properties["approval_policy"] = approval
         properties["sandbox_mode"] = sandbox
-        if sandbox == "danger-full-access" or approval == "never":
+        declared = (
+            "an unsandboxed full-access mode"
+            if sandbox == "danger-full-access"
+            else _UNPROMPTED_APPROVALS.get(approval or "")
+        )
+        if declared is not None:
             risks.append(
                 RiskAssessment(
                     severity=RiskSeverity.HIGH
@@ -1371,13 +1414,8 @@ class IDEAgentScanner(Scanner):
                     else RiskSeverity.MEDIUM,
                     category="permission_scope",
                     detail=(
-                        "IDE agent 'codex' declares "
-                        + (
-                            "an unsandboxed full-access mode"
-                            if sandbox == "danger-full-access"
-                            else "that commands never ask for approval"
-                        )
-                        + "; effective approval remains unverified."
+                        f"IDE agent 'codex' declares {declared}; "
+                        "effective approval remains unverified."
                     ),
                     recommendation="Keep the workspace-write sandbox and on-request approval.",
                 )

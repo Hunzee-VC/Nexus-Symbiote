@@ -20,12 +20,11 @@ import math
 import os
 import posixpath
 import re
-import tomllib
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 from packaging.utils import canonicalize_name
 
@@ -70,13 +69,17 @@ from nexus_symbiote.scanners.mcp_launch import (
 from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.jsonc import strip_jsonc
 from nexus_symbiote.utils.secrets import (
+    MIN_SECRET_LENGTH,
     REDACTED,
     TOKEN_SHAPE,
     SecretScrubber,
     redact_descriptor,
     redact_text,
+    secret_like,
     secret_values,
 )
+from nexus_symbiote.utils.terminal import neutralize
+from nexus_symbiote.utils.toml import loads as load_toml
 
 
 @dataclass(frozen=True)
@@ -307,6 +310,28 @@ def source_binding_key() -> bytes | None:
             f"{_MIN_SOURCE_BINDING_KEY_LENGTH} characters"
         )
     return key.encode()
+
+
+def _launch_secrets(launch: Launch) -> list[str]:
+    # Earlier assignments remain private even when a later value shadows them.
+    return [value for name, value in launch.environment if secret_like(name, value)]
+
+
+def _server_launch(config: dict[str, Any]) -> Launch:
+    """The server's launcher as analyze reads it; raises as analyze does."""
+    command = config.get("command", "")
+    return analyze(command, config.get("args", [])) if command else Launch()
+
+
+def _server_secrets(config: dict[str, Any], launch: Launch) -> list[str]:
+    """Credential values one server declares: environment, headers and inline launcher."""
+    values: list[str] = []
+    for field in ("env", "headers", "http_headers"):
+        mapping = config.get(field)
+        if isinstance(mapping, dict):
+            values.extend(secret_values(mapping))
+    values.extend(_launch_secrets(launch))
+    return values
 
 
 def _value_binding(
@@ -1174,8 +1199,8 @@ class _Resolvers:
         if text is None:
             return {}
         try:
-            return tomllib.loads(text)
-        except (tomllib.TOMLDecodeError, RecursionError):
+            return load_toml(text)
+        except (ValueError, RecursionError, MemoryError):
             self._result.scan_failures.append(f"{path}: invalid TOML")
             return {}
 
@@ -1388,6 +1413,69 @@ class _Identity:
     withheld: list[str]
 
 
+_DIAGNOSTIC_NODES = 4096
+# `NAME=value`, as `cross-env` or `env` take it, or docker's `--env=NAME=value`.
+_INLINE_ASSIGNMENT = re.compile(r"(?:--env=)?([A-Za-z_][A-Za-z0-9_]*)=(.+)", re.DOTALL)
+
+
+def _user_info(locator: str) -> list[str]:
+    """The user name and password of a URL, as written and percent-decoded.
+
+    A WHATWG client, as most MCP clients use, ends the authority of a special scheme
+    at a backslash as at a slash; urlsplit does not, so both readings count.
+    """
+    found: list[str] = []
+    for reading in {locator, locator.replace("\\", "/")}:
+        try:
+            parts = urlsplit(reading)
+            username, password = parts.username, parts.password
+        except ValueError:
+            continue
+        # A short user name such as `git` is a locator that ordinary names repeat; a
+        # long one is often a token. A password is one at any length.
+        for value, counted in (
+            (username, username is not None and len(username) >= MIN_SECRET_LENGTH),
+            (password, True),
+        ):
+            if value and counted:
+                found.extend({value, unquote(value)})
+    return found
+
+
+def _diagnostic_values(config: dict[str, Any]) -> list[str] | None:
+    """User information in this server's URLs, and credentials its fields and `NAME=value`
+    arguments hold.
+
+    Every field but `tools` is read: a large tool list, which is often what failed,
+    cannot use up the walk, while any field a client may read can hold a credential.
+    ``None`` when the fields exceed the bounded walk: a server that failed validation
+    can be any shape, and its name is then not shown, as it never was before.
+    """
+    values: list[str] = []
+    pending: list[Any] = [item for field, item in config.items() if field != "tools"]
+    visited = 0
+    while pending:
+        visited += 1
+        if visited > _DIAGNOSTIC_NODES:
+            return None
+        node = pending.pop()
+        if isinstance(node, dict):
+            # As for `env`: only a credential name's value, or a credential-shaped one.
+            values.extend(secret_values(node))
+            pending.extend(node.values())
+        elif isinstance(node, list):
+            pending.extend(node)
+        elif isinstance(node, str):
+            if "@" in node and "://" in node:
+                for locator in _locators(node):
+                    if "@" in locator:
+                        values.extend(_user_info(locator))
+            inline = _INLINE_ASSIGNMENT.fullmatch(node)
+            if inline is not None:
+                values.extend(secret_values({inline.group(1): inline.group(2)}))
+    return values
+
+
 class MCPScanner(Scanner):
     name = "mcp"
     _resolvers: _Resolvers | None = None
@@ -1458,6 +1546,7 @@ class MCPScanner(Scanner):
             if key_error is not None and entries:
                 result.scan_failures.append(f"{dialect.path}: {key_error}")
                 continue
+            # Prepared once per file and reused for every server and diagnostic.
             file_secrets = SecretScrubber(self._file_secrets(entries))
             if len(file_secrets) > MAX_SECRETS_PER_FILE:
                 result.scan_failures.append(
@@ -1483,7 +1572,13 @@ class MCPScanner(Scanner):
                     result.scan_failures.append(f"{dialect.path}: {exc}")
                     continue
                 except (TypeError, ValueError, RecursionError):
-                    result.scan_failures.append(f"{dialect.path}: invalid tool definition")
+                    # The whole server record is dropped with its risk findings, so the
+                    # failure must say which server a reviewer no longer sees.
+                    shown = self._diagnostic_server_name(server_name, server_config, file_secrets)
+                    result.scan_failures.append(
+                        f"{dialect.path}: invalid tool definition for server '{shown}'; "
+                        "the server and its risks are not inventoried"
+                    )
                     continue
                 result.components.append(mcp_comp)
                 result.components.extend(tool_comps)
@@ -1508,22 +1603,63 @@ class MCPScanner(Scanner):
             clients[host].server_refs = sorted(refs)
         return found_any
 
-    @staticmethod
-    def _file_secrets(entries: list[tuple[str, Any]]) -> list[str]:
-        """Credential values of every server in a file.
+    @classmethod
+    def _file_secrets(cls, entries: list[tuple[str, Any]]) -> list[str]:
+        """Credential values of every server in a file, inline launcher values included.
 
         One server's tool text or name may repeat a value that another server's
-        environment or headers hold, so the file's values are scrubbed from each.
+        environment, headers or launcher holds, so the file's values are scrubbed
+        from each. A server that _server_problem refuses is never parsed, but its
+        `env`, `headers` and `http_headers` still count, as they did before launcher
+        values were added: refusing it must not publish what its siblings repeat. Only
+        its launcher is not analysed.
         """
         values: list[str] = []
         for _, config in entries:
             if not isinstance(config, dict):
                 continue
-            for field in ("env", "headers", "http_headers"):
-                mapping = config.get(field)
-                if isinstance(mapping, dict):
-                    values.extend(secret_values(mapping))
+            if cls._server_problem(config) is not None:
+                for field in ("env", "headers", "http_headers"):
+                    mapping = config.get(field)
+                    if isinstance(mapping, dict):
+                        values.extend(secret_values(mapping))
+                continue
+            try:
+                launch = _server_launch(config)
+            except (TypeError, ValueError, RecursionError):
+                # The server's normal parsing path reports this failure.
+                launch = Launch()
+            values.extend(_server_secrets(config, launch))
         return values
+
+    @staticmethod
+    def _diagnostic_server_name(
+        name: str, config: dict[str, Any], file_secrets: SecretScrubber | None = None
+    ) -> str:
+        """The server's name for a failure, redacted as a parsed server's name is.
+
+        The file's prepared values hold this server's own values too; without a file
+        context the server's environment, header and inline launcher values are
+        collected as _parse_server collects them.
+        """
+        try:
+            launch = _server_launch(config)
+        except (TypeError, ValueError, RecursionError):
+            return "[withheld]"
+        scrubber = (
+            file_secrets
+            if file_secrets is not None
+            else SecretScrubber(_server_secrets(config, launch))
+        )
+        # A name may repeat what only this server's text holds and no rule reads as a
+        # credential: URL user information, or `NAME=value` passed to a launcher such
+        # as `cross-env`, which the launch analysis does not unwrap.
+        own = _diagnostic_values(config)
+        if own is None:
+            return "[withheld]"
+        scrubber = scrubber.extended(own)
+        # Clipping first can truncate a token so its recognizable shape is lost.
+        return neutralize(redact_text(name, scrubber)[:256])
 
     @staticmethod
     def _read_dialect(files: ConfinedCollection, dialect: McpDialect, result: ScanResult) -> Any:
@@ -1534,9 +1670,9 @@ class MCPScanner(Scanner):
             return None
         try:
             if dialect.syntax == "toml":
-                return tomllib.loads(text, parse_float=_finite_float)
+                return load_toml(text, parse_float=_finite_float)
             return _load_jsonc(text)
-        except (ValueError, RecursionError):
+        except (ValueError, RecursionError, MemoryError):
             syntax = "TOML" if dialect.syntax == "toml" else "JSON or duplicate keys"
             result.scan_failures.append(f"{dialect.path}: invalid {syntax}")
             return None
@@ -1649,24 +1785,20 @@ class MCPScanner(Scanner):
         header_names = sorted({*headers, *config.get("env_http_headers", {})})
         endpoints = [config[field] for field in _ENDPOINT_FIELDS if config.get(field)]
         endpoint_url = endpoints[0] if endpoints else None
-        launch = analyze(command, args) if command else Launch()
+        launch = _server_launch(config)
         transport, transport_gap = self._transport(config, dialect, bool(command))
         server_ref = (
             "mcp-server:" + hash_canonical({"config": config_scope, "name": name}).split(":", 1)[1]
         )
         # Launch arguments are opaque executable inputs. Only the launcher's own
         # grammar is read; argument and environment values never leave.
-        # Each header map on its own: a name in both keeps both of its values secret.
-        # The file's other servers contribute too: this server's free text may repeat
-        # a value that one of them holds.
-        scrubber = (file_secrets or SecretScrubber()).extended(
-            [
-                *secret_values(env),
-                *secret_values(config.get("headers", {})),
-                *secret_values(config.get("http_headers", {})),
-                *secret_values(dict(launch.environment)),
-            ]
-        )
+        # The file's prepared values cover this server and its siblings, inline launcher
+        # values included: this server's free text may repeat a value one of them holds.
+        # Without a file context, _server_secrets collects them as _file_secrets does,
+        # shadowed inline assignments included.
+        scrubber = file_secrets
+        if scrubber is None:
+            scrubber = SecretScrubber(_server_secrets(config, launch))
         cwd = config.get("cwd")
         relocated = (
             launch.relocated
@@ -1892,9 +2024,9 @@ class MCPScanner(Scanner):
     ) -> _Identity:
         """Compute identity fields from raw values; withhold one that holds a secret value."""
         withheld: list[str] = []
-        shown_name = redact_text(name, identifier=True)
+        # Known values and the identifier rules are matched in the same raw name.
+        shown_name = redact_text(name, scrubber, identifier=True)
         if scrubber.contains(name):
-            shown_name = scrubber.scrub(shown_name)
             withheld.append("name")
         command = self._safe_name(launch.command)
         if launch.command and scrubber.contains(launch.command):
@@ -2113,8 +2245,7 @@ class MCPScanner(Scanner):
 
     @staticmethod
     def _tool_name(name: str, scrubber: SecretScrubber) -> str:
-        shown = redact_text(name, identifier=True)
-        return scrubber.scrub(shown) if scrubber.contains(name) else shown
+        return redact_text(name, scrubber, identifier=True)
 
     def _transport(
         self, config: dict[str, Any], dialect: McpDialect, has_command: bool
@@ -2449,7 +2580,7 @@ class MCPScanner(Scanner):
     ) -> list[ToolComponent]:
         tools_config = config.get("tools", [])
         tool_comps = []
-        scrubber = secrets or SecretScrubber()
+        scrubber = secrets if secrets is not None else SecretScrubber()
 
         if isinstance(tools_config, list):
             for tool_def in tools_config:

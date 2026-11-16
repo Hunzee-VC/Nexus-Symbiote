@@ -343,6 +343,44 @@ def test_private_key_readable_by_others_is_refused(tmp_path):
     assert result.exit_code == 1 and "group or others" in result.output
 
 
+def test_a_root_run_sign_refuses_a_key_another_user_owns(tmp_path, monkeypatch):
+    private, _ = keypair(tmp_path, "key")
+    now = datetime.now(UTC)
+    status = TrustStatus(
+        tenant="acme", serial=1, not_before=now, not_after=now + timedelta(minutes=5)
+    )
+    contract = write(tmp_path, "status.json", status)
+    # Run as root with a 0600 key that another uid owns, such as a host-mounted key.
+    if os.geteuid() == 0:
+        os.chown(private, 4242, 4242)
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    out = tmp_path / "o"
+    result = run("sign", contract, "--kind", "trust", "--key", private, "--out", out)
+    assert result.exit_code == 1
+    assert (
+        "private key file must be owned by the user running the command (runtime-key-error)"
+        in result.output
+    )
+    assert not out.exists()
+
+
+def test_a_root_run_keygen_refuses_a_passphrase_file_another_user_owns(tmp_path, monkeypatch):
+    passphrase = secret(tmp_path, "passphrase.txt", "correct horse battery staple\n")
+    if os.geteuid() == 0:
+        os.chown(passphrase, 4242, 4242)
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    private, public = tmp_path / "key.pem", tmp_path / "key.pub"
+    result = run(
+        "keygen", "--private-key", private, "--public-key", public, "--passphrase-file", passphrase
+    )
+    assert result.exit_code == 1
+    assert (
+        "passphrase file must be owned by the user running the command (runtime-key-error)"
+        in result.output
+    )
+    assert not private.exists() and not public.exists()
+
+
 def test_keygen_failure_is_reported_and_leaves_no_partial_pair(tmp_path):
     public = tmp_path / "key.pub"
     result = run(

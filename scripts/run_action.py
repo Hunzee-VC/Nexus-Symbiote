@@ -46,6 +46,17 @@ TRUST_ROOT_ENVS = (
     "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT",
     "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256",
 )
+WITHHELD_ENV = (
+    "NEXUS_SYMBIOTE_MODE",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_URL",
+    "ACTIONS_RUNTIME_TOKEN",
+    "ACTIONS_RUNTIME_URL",
+    "ACTIONS_RESULTS_URL",
+    "ACTIONS_CACHE_URL",
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+)
 RELAY_PREFIX = "| "
 
 
@@ -183,6 +194,7 @@ class Config:
     allow_unsigned_discovery: bool = False
     fail_on_severity: str = "high"
     binding_key: str = field(default="", repr=False)
+    scratch_parent: Path | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
@@ -263,6 +275,10 @@ class Config:
                 "scanners subset requires validate and risk-check to be false, because "
                 "both gates require all built-in collectors"
             )
+        # A TMPDIR inside the checkout would put the policy snapshot inside the
+        # repository it guards, which the CLI refuses; the runner's own temp is outside.
+        runner_temp = Path(env.get("RUNNER_TEMP", ""))
+        scratch_parent = runner_temp if runner_temp.is_absolute() and runner_temp.is_dir() else None
         return cls(
             workspace,
             project,
@@ -282,6 +298,7 @@ class Config:
             ),
             severity,
             supplied_key,
+            scratch_parent,
         )
 
 
@@ -301,7 +318,12 @@ def _run(
     # and the Sigstore trust root only from the hash-locked sigstore package: an explicit
     # trust root in the job environment would let an earlier step choose the authorities.
     env.pop(LIMITS_ENV, None)
-    for name in TRUST_ROOT_ENVS:
+    # These commands run offline whatever NEXUS_SYMBIOTE_MODE says; a job-level value
+    # could only fail them. Remove these named runner and OIDC credential variables from
+    # children; other variables, including custom secrets and the source-binding key,
+    # can remain, and a child running as the same user can still read this process's
+    # environment. This filtering is not a process sandbox.
+    for name in (*TRUST_ROOT_ENVS, *WITHHELD_ENV):
         env.pop(name, None)
     if limits:
         env[LIMITS_ENV] = limits
@@ -547,7 +569,9 @@ def run(
             export(native, output, fmt)
 
     _announce(config)
-    with tempfile.TemporaryDirectory(prefix="nexus-symbiote-action-") as created:
+    with tempfile.TemporaryDirectory(
+        prefix="nexus-symbiote-action-", dir=config.scratch_parent
+    ) as created:
         # The CLI refuses symlinked directories, and macOS temp paths contain one.
         scratch = Path(created).resolve(strict=True)
         if command is None:

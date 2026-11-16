@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
+from nexus_symbiote import limits
 from nexus_symbiote.core.models import MAX_REFERENCE_CHARS
 
 ScannerName = Literal[
@@ -156,15 +157,22 @@ def find_policy_path(project_root: Path) -> Path | None:
 
     The policy is part of the checkout it governs. A file above the project root
     belongs to whoever controls that directory, not to the project. Both file names
-    at once are refused: either could silently shadow the other.
+    at once are refused: either could silently shadow the other. The directory must
+    fit the operator's entry bound before a policy is selected or defaults apply.
     """
     from nexus_symbiote.utils.confined import fold_name
 
     current = project_root.resolve()
     if current.is_file():
         current = current.parent
+    entry_bound = limits.bound("entries")
+    entries: list[str] = []
     try:
-        entries = sorted(os.listdir(current))
+        with os.scandir(current) as stream:
+            for item in stream:
+                if len(entries) >= entry_bound.value:
+                    raise PolicyError(f"project root {current}: {entry_bound.exceeded()}")
+                entries.append(item.name)
     except (FileNotFoundError, NotADirectoryError):
         return None
     except OSError as exc:
@@ -173,7 +181,7 @@ def find_policy_path(project_root: Path) -> Path | None:
     folded_targets = {fold_name(name): name for name in POLICY_FILE_NAMES}
     found: list[Path] = []
     variants: list[tuple[str, str]] = []
-    for entry in entries:
+    for entry in sorted(entries):
         canonical = folded_targets.get(fold_name(entry))
         if canonical is None:
             continue

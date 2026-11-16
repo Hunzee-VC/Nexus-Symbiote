@@ -66,6 +66,10 @@ A way around a limit that its entry does not describe is worth a
   names it, so the default gates fail. A skill checked out with its own `.git`,
   including a Git submodule, whose `.git` is a file, or one whose script left a
   `__pycache__` beside it, fails them until that entry is removed.
+  Outside those directories the skip is silent, so a file the collectors would
+  otherwise record, such as model weights under `venv/weights/` or an instruction
+  file under `node_modules/`, produces no component, finding or drift alert. Review
+  a pull request that adds tracked files under one of these names.
 - **Case variants.** When a fixed path such as `CLAUDE.md`, `.mcp.json`,
   `.claude/settings.json` or a model directory's configuration, tokenizer or chat
   template file or `additional_chat_templates` directory is absent, a file or
@@ -418,20 +422,59 @@ A way around a limit that its entry does not describe is worth a
   TFLite, Core ML and ExecuTorch files are rated `unknown`: Keras Lambda layers,
   SavedModel operations and custom operators are not inspected. Each is a high
   finding, which the default gate does not fail on by severity alone.
-- **Some files are not inventoried.** Pickles under names other than the
-  [listed suffixes](model-integrity.md#model-files-and-references), NumPy `.npy` and
-  `.npz` arrays, and `.pb` files other than `saved_model.pb` produce no component.
-- **Pickle recognition under another suffix is bounded.** A binary pickle is
-  recognized by its PROTO opcode and 16 well-formed opcodes in the first 64 KiB, a
-  text-protocol pickle by a consistent stream of at most 4,096 opcodes, and a ZIP
-  archive by a `.pkl` member in its first local header or in a central directory of
-  at most 1 MiB, read from the end of the archive. A pickle hidden otherwise under
-  `.onnx`, `.gguf` or another suffix is rated `unknown`, a high finding, and
+- **Some files are not inventoried.** A file outside the
+  [listed names](model-integrity.md#model-files-and-references) is inventoried by
+  its content only when it is named `.npy`, `.npz` or `.dat` or has any name below a
+  directory named `model`, `models`, `weights`, `checkpoint` or `checkpoints`, and it
+  does not have the name of a model directory's configuration, tokenizer or chat
+  template file, such as `config.json`, and is not a Python or Jinja source. There, a
+  recognized pickle, a NumPy array with an object dtype (which
+  `np.load(allow_pickle=True)` unpickles) and a ZIP archive with a pickle-family
+  member or such an array as a member are rated
+  `unsafe-code-execution`, and a NumPy header or ZIP archive left unread at the
+  bounds below is rated `unknown`. A pickle renamed anywhere else, an unrecognized
+  pickle, a numeric NumPy array, a ZIP archive with neither kind of member, and `.pb`
+  files other than `saved_model.pb` produce no component. A candidate ZIP archive is
+  read to its end and digested, as a model archive is, and a candidate larger than
+  the `model-bytes` limit is a collection failure.
+- **Content recognition is bounded.** A binary pickle is recognized by its PROTO
+  opcode and 16 well-formed opcodes in the first 64 KiB, and a text-protocol pickle
+  by a consistent stream of at most 4,096 opcodes. In a file inventoried only by its
+  content, a text-protocol stream must also name an importable callable (a `GLOBAL`
+  or `INST` whose module and name are dotted identifiers), so text that only parses as
+  one, such as a `.gitignore` under `checkpoints/`, is not inventoried; text whose
+  first lines happen to read as such a reference, such as `cache`, `logs`, `.`, still
+  is. A ZIP member is a pickle when its name ends in a pickle-family suffix, so `.pkl`
+  and `archive/.pkl` count, and a central directory entry whose 32-bit size or offset
+  is `0xFFFFFFFF` without a ZIP64 field is read as written, as `zipfile` reads it. A
+  directory that turns malformed after it lists a pickle-family member, such as with an
+  entry whose name runs past the end of the file, still rates the archive
+  `unsafe-code-execution`. An entry whose ZIP64 field is too short to locate its data,
+  which `zipfile` refuses, is passed over by its own lengths, as a loader that reads
+  past the field does, so it hides no pickle-family member, its own name included;
+  when no such member is listed, an entry that cannot be located leaves the archive
+  `unknown`. A NumPy array's version 1, 2 or 3 header is parsed when it
+  is at most 64 KiB long, as every version 1 header is, and
+  while the 16,000,000 structure units one scan shares with the ONNX and GGUF readers
+  last, at one unit a header byte; only its `descr` value is read for types, so a
+  field named `O` is not one. A ZIP
+  archive is recognized by a pickle-family member in its first local header or in a
+  central directory of at most 1 MiB, read from the end of the archive, including
+  ZIP64, and by an object-dtype array as any member, read from the member's local
+  header and the start of its stored or DEFLATE-compressed data. A longer array
+  header, a longer or malformed directory, a member compressed by another method,
+  such as BZIP2 or LZMA, and a member whose data runs past the next member's local
+  header are rated `unknown`, a high finding; a pickle hidden otherwise under
+  `.onnx`, `.gguf` or another suffix is rated `unknown` too, and
   `validate --project` still refuses it as unverified.
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat
   templates are checked for potential Python-internals access patterns, not evaluated;
-  computed names can evade the heuristic, and a match does not establish a sandbox
-  escape or execution. A template file larger
+  a match does not establish a sandbox escape or execution. Computed names can evade
+  the heuristic: some constructions of dunder names, such as `dict(__class__=1)|first`
+  or `("_"*2) ~ "class" ~ ("_"*2)`, are not found, although direct attribute access such
+  as `obj.__class__` is. Without other unsafe evidence, a SafeTensors model beside an
+  unrecognized template keeps its `safe` serialization rating; that rating does not
+  establish that the template is safe to render. A template file larger
   than the `file-bytes` limit is digested but not checked, and is a coverage gap.
   SafeTensors tensor bytes are hashed but not inspected. See
   [what this does not establish](model-integrity.md#what-this-does-not-establish).
@@ -461,6 +504,12 @@ A way around a limit that its entry does not describe is worth a
   text is searched as written, so more is looked up; a host that reads Markdown
   otherwise, such as with GitHub's table or autolink extensions, can still import a
   file from text read here as code.
+  A reference is read only where `@` starts the text or follows white space, and
+  without the sentence punctuation after it. A host that also starts a reference
+  after inline markup (`**@docs/x.md**`, the text of a link, `<b>@x.md</b>`), keeps that
+  punctuation, decodes an escaped space, or interprets a `#fragment` instead of
+  treating it as part of the literal filename can import a different file that is
+  not inventoried here; which hosts do has not been established by test.
   An import that leaves the project root, names an excluded path or lies deeper than
   the `depth` limit is a gap, so write a path alias such as `@/components` as code. An
   import of a file named as holding credentials, as the next entry lists them, is a
@@ -683,6 +732,11 @@ A way around a limit that its entry does not describe is worth a
 
 ## A2A and RAG
 
+- **Ambiguous redacted A2A scheme identifiers are refused.** Distinct scheme names
+  that redact to the same label anywhere in a card, including skill requirements,
+  cause collection failure even with the binding key. Rename them to distinct
+  non-secret identifiers and recollect/review the inventory. Card structure v4
+  supersedes v3; see [snapshot migration](verification-source-binding.md#upgrade-existing-snapshots).
 - **Same-host URL changes need the binding key.** A2A and RAG records export URLs as
   origins. Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a path or query change on the
   same host that keeps the path depth changes no digest, and neither does a changed
@@ -830,7 +884,8 @@ A way around a limit that its entry does not describe is worth a
 - **The Action's trust root ages.** The Action gives its scans an empty private
   cache, so it uses the root embedded in its hash-locked `sigstore` package. A
   bundle that relies on a key Sigstore introduced later fails until you update the
-  Action pin.
+  Action pin. The reverse holds too: a key that Sigstore has retired or revoked
+  since that package was released stays trusted until you update the pin.
 
 ## Attestations
 
@@ -1101,6 +1156,14 @@ A way around a limit that its entry does not describe is worth a
 - **Launcher pins cover the launcher only.** They do not authenticate the operating
   system, interpreter or libraries. Run launchers in an isolated worker, as
   [security boundaries](../SECURITY.md#security-boundaries) describe.
+- **Inside some user namespaces, every launch policy is refused.** `verify-live`
+  accepts a launch policy only when `/` and every directory above it are owned by root
+  or by you. Inside a user namespace that does not map host root and keeps the host's
+  file system, such as one made with `unshare -r`, `/` and `/tmp` appear owned by the
+  overflow user (usually uid 65534), so every policy is refused, and no option
+  overrides the check. In a sandbox that binds host directories into such a
+  namespace, such as bubblewrap, a policy below any of them is refused. Isolate the
+  worker in a way that keeps those owners; see [launch policy](cli-reference.md#launch-policy).
 - **The offline guard is a tripwire, not a sandbox.** Native code can bypass it, a
   process `verify-live` starts is not covered, and live mode removes it for the
   three live commands. Add an operating-system network boundary where you need one;

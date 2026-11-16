@@ -182,6 +182,11 @@ def test_nothing_in_the_checkout_can_set_a_limit(tmp_path):
     (project / ".nexus-symbiote.yaml").write_text("limits:\n  entries: 5000000\n")
     result = runner.invoke(main, ["--limit", "entries=5", "scan", str(project), "-o", str(output)])
     assert result.exit_code == 1
+    assert "entries limit of 5 exceeded" in result.output
+    result = runner.invoke(
+        main, ["--limit", "entries=500", "scan", str(project), "-o", str(output)]
+    )
+    assert result.exit_code == 1
     assert "invalid policy" in result.output
 
 

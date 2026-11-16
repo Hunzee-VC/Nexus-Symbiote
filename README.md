@@ -84,11 +84,11 @@ Requires Python 3.11 to 3.14, git, curl and the [GitHub CLI](https://cli.github.
 )
 ```
 
-Paste the block as one unit, unchanged. Nothing is installed unless the attestation passes. [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) describes what the attestation does and does not establish.
+Paste the block as one unit, unchanged. The wheel is downloaded, but the package is not installed unless the attestation passes. [Releasing](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/releasing.md) describes what the attestation does and does not establish.
 
 ### Try it in 60 seconds
 
-From the checkout, inventory the bundled [demo agent](https://github.com/Hunzee-VC/Nexus-Symbiote/tree/main/examples/demo-agent). Nothing is executed and no network is used:
+This walkthrough needs the [source install](#install-from-reviewed-source): the `v0.1.0` wheel has no checkout and does not read the signer policy format used below. From the checkout, inventory the bundled [demo agent](https://github.com/Hunzee-VC/Nexus-Symbiote/tree/main/examples/demo-agent). Nothing is executed and no network is used:
 
 ```bash
 nexus-symbiote scan examples/demo-agent -o demo.aibom.json
@@ -102,11 +102,12 @@ The scan records 11 components across 9 types and eleven findings (risk score 41
 To approve the model, pin its digest in a [signer policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md#operator-signature-policy) you own, kept outside the scanned project. Here the digest comes from the checkout only to show the mechanism; in real use, take it from a source you trust:
 
 ```bash
+policy_dir="$(mktemp -d)"   # outside the checkout: a policy inside the repository is refused
 digest="$(sha256sum examples/demo-agent/models/intent-classifier.safetensors | cut -d' ' -f1)"
 printf '{"version": 2, "artifacts": [{"kind": "digest-pin", "expected_sha256": "sha256:%s",
-  "artifact_path": "models/intent-classifier.safetensors"}]}\n' "$digest" > signers.json
+  "artifact_path": "models/intent-classifier.safetensors"}]}\n' "$digest" > "$policy_dir/signers.json"
 nexus-symbiote validate demo.aibom.json --project examples/demo-agent --no-project-policy \
-  --signature-policy signers.json
+  --signature-policy "$policy_dir/signers.json"
 ```
 
 `validate` now exits 0. The [examples walkthrough](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/examples/README.md) adds drift detection, exports, a ShadowScan import and a comparison with a synthetic runtime trace, all offline.

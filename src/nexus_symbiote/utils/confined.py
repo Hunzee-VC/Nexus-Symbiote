@@ -440,6 +440,23 @@ class _BoundedReader(io.RawIOBase):
             raise
         return raw
 
+    def reread(self, offset: int, size: int) -> bytes:
+        """Read again ``size`` bytes at ``offset`` from the bytes this stream has read.
+
+        They were charged to the budget when they were first read, so reading them again
+        is not charged; a range past them is refused. The caller bounds how often it
+        reads a range again.
+        """
+        if self.closed:
+            raise ValueError("read of closed collection stream")
+        if offset < 0 or not 0 <= size <= _MAX_CHUNK_BYTES or offset + size > self._read:
+            raise CollectionError("re-read outside the bytes already read")
+        try:
+            return os.pread(self._fd, size, offset)
+        except OSError:
+            self._owner._fail(self._path, "stream read failed (I/O error)")
+            raise
+
     def close(self) -> None:
         if not self.closed:
             os.close(self._fd)
@@ -459,7 +476,7 @@ class ConfinedCollection:
     """Read regular files beneath a pinned root without following symlinks.
 
     Limits cover individual file bytes, the bytes read in total, directory entries
-    over the complete walk, and directory depth. A limit left unset is the
+    across walks and exact-name checks, and directory depth. A limit left unset is the
     operator's current one (``nexus_symbiote.limits``); an integer is a fixed bound
     for this input. Reaching any limit records a failure that names it. A
     directory exceeding the entry budget is not partially returned. Within those
@@ -512,7 +529,9 @@ class ConfinedCollection:
         self._root_fd: int | None = None
         self._links: dict[str, str] = {}
         self._listings: dict[Path, dict[str, list[tuple[str, str]]] | None] = {}
-        self._exact_names: dict[tuple[int, int], tuple[tuple[int, int], frozenset[str]]] = {}
+        self._exact_names: dict[
+            tuple[int, int], tuple[tuple[int, int, int, int, int, int], frozenset[str]]
+        ] = {}
         self._case_sensitive_dirs: set[tuple[int, int]] = set()
         self._root_folds = False
         self._folded_excluded: set[tuple[str, ...]] | None = None
@@ -704,13 +723,24 @@ class ConfinedCollection:
                 except OSError:
                     # Any other failure decides nothing; the listing below does.
                     pass
-        stamp = (info.st_mtime_ns, info.st_ctime_ns)
+        stamp = descriptor_binding(info)
         cached = self._exact_names.get(dir_key)
         if cached is None or cached[0] != stamp:
+            if self._entries_exhausted:
+                raise LimitExceededError(self._entry_bound)
             dup_fd = os.dup(directory_fd)
             try:
+                found: set[str] = set()
                 with os.scandir(dup_fd) as stream:
-                    names = frozenset(entry.name for entry in stream)
+                    for entry in stream:
+                        if self._entry_budget[0] <= 0:
+                            # Metadata-only callers also need a blocking failure; they
+                            # otherwise return no observation when opening is refused.
+                            self._entries_exceeded(Path("."))
+                            raise LimitExceededError(self._entry_bound)
+                        self._entry_budget[0] -= 1
+                        found.add(entry.name)
+                names = frozenset(found)
             finally:
                 os.close(dup_fd)
             cached = (stamp, names)
@@ -1016,14 +1046,14 @@ class ConfinedCollection:
         try:
             with os.scandir(self._root_fd) as stream:
                 for entry in stream:
-                    if len(names) >= self._entry_budget[0]:
+                    if self._entry_budget[0] <= 0:
                         self._entries_exceeded(Path("."))
                         return []
+                    self._entry_budget[0] -= 1
                     names.append(entry.name)
         except OSError:
             self._fail(".", "root directory cannot be listed")
             return []
-        self._entry_budget[0] -= len(names)
         return sorted(names)
 
     def _entries_exceeded(self, relative: Path) -> None:
@@ -1099,11 +1129,11 @@ class ConfinedCollection:
         try:
             with os.scandir(directory_fd) as stream:
                 for entry in stream:
-                    if len(entries) >= budget[0]:
+                    if budget[0] <= 0:
                         self._entries_exceeded(relative)
                         return
+                    budget[0] -= 1
                     entries.append(entry.name)
-            budget[0] -= len(entries)
             for name in sorted(entries):
                 if _undecodable(name):
                     # A surrogate-escaped name cannot be written to, or read back from,
@@ -1127,6 +1157,9 @@ class ConfinedCollection:
                     except _LinkRefusedError as exc:
                         self._record(child, exc.reason, scope.unlisted)
                         continue
+                    except LimitExceededError:
+                        # The listing that spent the entry budget recorded it once.
+                        return
                     if target is None:
                         yield child
                     elif follow:
@@ -1169,6 +1202,8 @@ class ConfinedCollection:
     ) -> Iterator[Path]:
         try:
             fd = self._open_directory_no_follow(target)
+        except LimitExceededError:
+            return
         except OSError:
             self._record(target, "directory changed or could not be read", scope.unlisted)
             return
@@ -1189,7 +1224,8 @@ class ConfinedCollection:
 
         Returns the root-relative path that holds the bytes, which is ``path`` itself
         when no symlink is involved, or ``None`` when no such regular file exists.
-        No failure is recorded; a path excluded by policy is recorded as a coverage gap.
+        Ordinary path refusals are silent; a spent listing budget is a failure and a
+        path excluded by policy is recorded as a coverage gap.
         """
         found = self.regular_file(path)
         return None if found is None else found[0]
@@ -1212,9 +1248,9 @@ class ConfinedCollection:
     def is_directory(self, path: str | Path) -> bool:
         """Whether ``path`` is a directory, reached through at most one in-root symlink.
 
-        No failure is recorded, though a path excluded by policy is recorded as a
-        coverage gap: a caller that goes on to read or walk the path records any
-        refusal then.
+        Ordinary path refusals are silent; a spent listing budget is a failure and a
+        path excluded by policy is recorded as a coverage gap. A caller that goes on
+        to read or walk the path records any other refusal then.
         """
         try:
             relative = self._relative(path)
@@ -1403,6 +1439,9 @@ class ConfinedCollection:
         index: dict[str, list[tuple[str, str]]] | None = None
         try:
             fd = self._open_directory_no_follow(directory)
+        except LimitExceededError:
+            # The spent entry budget is recorded once, where it was spent.
+            raise _VariantSearchStoppedError from None
         except OSError:
             self._listings[directory] = None
             return None

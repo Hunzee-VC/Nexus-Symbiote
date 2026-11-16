@@ -45,7 +45,7 @@ This Code of Conduct applies within all community spaces, and also applies when 
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement through the [lead maintainer's GitHub profile](https://github.com/aisecnomad).
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement by opening a report through the repository's [private vulnerability reporting form](https://github.com/Hunzee-VC/Nexus-Symbiote/security/advisories/new), marked as a conduct report. The project has no separate confidential conduct channel yet; [GOVERNANCE.md](GOVERNANCE.md) records this gap. Do not put conduct reports in a public issue.
 
 All complaints will be reviewed and investigated promptly and fairly.
 

@@ -113,5 +113,8 @@ def test_static_configuration_rejects_wrongly_typed_optional_fields(tmp_path, fi
         json.dumps({"mcpServers": {"weather": {"command": "npx", "tools": [descriptor]}}})
     )
     result = MCPScanner().scan(tmp_path)
-    assert result.scan_failures == [".mcp.json: invalid tool definition"]
+    assert result.scan_failures == [
+        ".mcp.json: invalid tool definition for server 'weather'; "
+        + "the server and its risks are not inventoried"
+    ]
     assert not [c for c in result.components if isinstance(c, ToolComponent)]

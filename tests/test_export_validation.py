@@ -1,4 +1,4 @@
-"""Export validation is linear, deterministic across installs, and complete for its schemas."""
+"""Export validation is deterministic and preserves schema checks and fast graph walks."""
 
 from __future__ import annotations
 
