@@ -836,6 +836,13 @@ A way around a limit that its entry does not describe is worth a
   of a package whose name Yarn 4 hashes as it hashes the declared one, such as
   `@op/enai` for `openai`, binds neither, even for another range that Yarn would keep
   apart.
+  A pnpm record whose key's peer suffix holds anything but package names, exact
+  versions and patch hashes in balanced parentheses is recorded as
+  `<name>@<version>(***)`, which no JSON pointer resolves; the root importer's
+  `version`, or the lockfile's only record of the package, names the key. A Yarn
+  Berry record is named by the one descriptor the declared spec matched, not by the
+  stanza's whole key. Exact versions are recorded as the lockfile writes them, so a
+  prerelease such as `4.0.0-<text>` keeps its text, credential-shaped or not.
 - **A Yarn Berry checksum counts as Yarn 4 checks it.** The collector models the cache
   key `10c0` that Yarn 4 computes at its default compression level, and reads Yarn's
   settings from the root `.yarnrc.yml` and the release `package.json` names for

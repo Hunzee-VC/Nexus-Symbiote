@@ -58,6 +58,23 @@ record names (`openai@npm:4.52.0` for a record of `openai` 4.52.0): Berry fetche
 what the resolution names, a tarball URL or a git repository among them, and records
 no URL to check.
 
+The record's position, `lockfile_record` and the `package_resolution` claim's
+`locator`, holds no text of a lockfile key but the package name, spec and version
+that the inventory records, and the names and exact versions of a pnpm record's
+peers. An npm key is written as the package name is recorded, redacted
+(`package-lock.json#/packages/node_modules~1openai`). A Yarn record is named by the
+selector that the declared spec matched, `yarn.lock#/openai@4.0.0`, or
+`yarn.lock#/openai@npm:4.0.0` in a Berry lockfile, whose one key lists every
+descriptor of the stanza; another selector of the stanza, which may be a tarball
+URL with a token in it, is never recorded. A pnpm package key is recorded whole when
+its peer suffix names only packages with exact versions, and patch hashes, in
+balanced parentheses as pnpm writes them
+(`pnpm-lock.yaml#/packages/~1openai@4.0.0(react@18.2.0)`). A suffix that holds
+anything else, such as a URL, a path, a credential-shaped name or unbalanced
+parentheses, is recorded as `(***)`: `pnpm-lock.yaml#/packages/~1openai@4.0.0(***)`
+no longer points at the key, which the root importer's `version`, or the lockfile's
+only record of the package, names.
+
 `yarn.lock` is tokenized as Yarn 1 reads it: a quoted key, selector or value is a
 JSON string and is decoded, so `"resolved" "https://..."` and `"\u006fpenai@4.0.0":`
 bind the record Yarn installs from. A selector in more than one stanza, which Yarn 1
@@ -156,8 +173,9 @@ them.
 These are declared resolution claims with unknown trust. The collector does not
 fetch packages, establish their presence, verify registry ownership or publisher
 identity, or prove that package bytes match the lockfile. Raw download paths,
-userinfo, tokens and signed URL parameters are omitted. A manifest without a
-supported lock record does not establish a registry origin. An exact version in
+userinfo, tokens and signed URL parameters are omitted, from the recorded origins and
+record positions alike. A manifest without a supported lock record does not
+establish a registry origin. An exact version in
 `package.json` names a package URL without a record only when the project root has
 no npm lockfile, or the one read has no record of the package: a lockfile that is
 ambiguous, refused or not parsed may install it from elsewhere. `bun.lock`,

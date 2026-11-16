@@ -43,7 +43,7 @@ from nexus_symbiote.scanners.mcp import (
 )
 from nexus_symbiote.scanners.mcp_launch import expands
 from nexus_symbiote.utils.confined import ConfinedCollection, recorded_count
-from nexus_symbiote.utils.secrets import redact_text, redact_url
+from nexus_symbiote.utils.secrets import REDACTED, redact_text, redact_url
 from nexus_symbiote.utils.terminal import UNSAFE_TEXT
 from nexus_symbiote.utils.toml import TOMLBoundsError
 from nexus_symbiote.utils.toml import loads as load_toml
@@ -404,6 +404,36 @@ _PYPROJECT_BUDGET = 256 * 1024
 # read limit is about 650,000. The bound refuses denser input before it is parsed.
 _MAX_PNPM_LOCK_TOKENS = 1_000_000
 _PNPM_NAME_END = re.compile("[@/]")
+# The opening of one peer in a pnpm package key's suffix as pnpm writes it: an npm
+# package name and the exact version it resolved to; or the hash of a patch applied
+# to the package, which holds no peers of its own.
+_PNPM_PEER = re.compile(
+    r"\((?:(?:@[A-Za-z0-9][A-Za-z0-9._~-]*/)?[A-Za-z0-9][A-Za-z0-9._~-]*@"
+    r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?"
+    r"|patch_hash=[0-9a-z]{1,128}(?=\)))"
+)
+
+
+def _pointer_token(text: str) -> str:
+    """``text`` as one reference token of a JSON pointer (RFC 6901)."""
+    return text.replace("~", "~0").replace("/", "~1")
+
+
+def _plain_pnpm_peers(suffix: str) -> bool:
+    """Whether a pnpm package key's peer suffix names only packages, exact versions and
+    patch hashes in balanced groups, which a locator can carry: a URL, a path or a
+    credential cannot be told apart from the parentheses around it, and is not
+    recorded."""
+    depth = index = 0
+    while index < len(suffix):
+        if suffix[index] == ")" and depth:
+            depth, index = depth - 1, index + 1
+            continue
+        match = _PNPM_PEER.match(suffix, index)
+        if match is None:
+            return False
+        depth, index = depth + 1, match.end()
+    return depth == 0 and redact_text(suffix) == suffix
 
 
 def _parsed(text: str) -> Version | None:
@@ -1618,9 +1648,8 @@ class RegistryScanner(Scanner):
         resolution = None
         if lock is not None and record is not None:
             lock_name, _, lock_digest = lock
-            locator = f"{lock_name}#/packages/" + ("node_modules/" + key).replace(
-                "~", "~0"
-            ).replace("/", "~1")
+            # The key as the inventory records the name or alias it installs: redacted.
+            locator = f"{lock_name}#/packages/" + _pointer_token("node_modules/" + redact_text(key))
             if registry:
                 resolution = self._npm_resolution(
                     lock_name, key, package, version_range, record, locator, result
@@ -2175,13 +2204,14 @@ class RegistryScanner(Scanner):
                         )
                         continue
                     integrity = resolution.get("integrity")
-                locator = "pnpm-lock.yaml#/packages/" + pkg_key.replace("~", "~0").replace(
-                    "/", "~1"
-                )
+                # The key is the component's name and exact version, then any peers.
+                peers = ver_ref[len(ver_ref.split("(", 1)[0]) :]
+                recorded = pkg_key
+                if peers and pkg_key.endswith(peers) and not _plain_pnpm_peers(peers):
+                    recorded = pkg_key[: -len(peers)] + f"({REDACTED})"
+                locator = "pnpm-lock.yaml#/packages/" + _pointer_token(recorded)
             else:
-                locator = "pnpm-lock.yaml#/importers/./" + comp.name.replace("~", "~0").replace(
-                    "/", "~1"
-                )
+                locator = "pnpm-lock.yaml#/importers/./" + _pointer_token(comp.name)
             self._bind_npm_resolution(
                 comp,
                 "pnpm-lock.yaml",
@@ -2212,15 +2242,14 @@ class RegistryScanner(Scanner):
             return False
         berry = metadata is not None
         lock_digest = hash_bytes(lock_bytes)
-        by_pkg: dict[str, list[tuple[str, dict[str, str], str, int]]] = {}
+        by_pkg: dict[str, list[tuple[str, dict[str, str], int]]] = {}
         for index, (selectors, fields) in enumerate(stanzas):
-            first_sel = selectors[0]
             for sel in selectors:
                 at_idx = sel.find("@", 1) if sel.startswith("@") else sel.find("@")
                 if at_idx <= 0:
                     continue
                 sel_name, sel_spec = sel[:at_idx], sel[at_idx + 1 :]
-                by_pkg.setdefault(sel_name, []).append((sel_spec, fields, first_sel, index))
+                by_pkg.setdefault(sel_name, []).append((sel_spec, fields, index))
         # Yarn 4 keeps what it reads by hash, so the last record of a locator replaces
         # its package, checksum and conditions, and a name it hashes alike, as it does
         # `@op/enai` and `openai`, resolves the other's descriptors and locators.
@@ -2260,17 +2289,17 @@ class RegistryScanner(Scanner):
                 continue
             # Yarn keeps the last stanza of a repeated selector, and which of `X` and
             # `npm:X` it looks up depends on its version; more than one stanza binds none.
-            if len({e[3] for e in chosen}) > 1:
+            if len({e[2] for e in chosen}) > 1:
                 result.surfaces_excluded.append(
                     f"yarn.lock: multiple package resolutions for {comp.name} are ambiguous"
                 )
                 continue
-            sel_spec, fields, locator_key, chosen_index = chosen[0]
+            sel_spec, fields, chosen_index = chosen[0]
             # Yarn 1 installs the first stanza of the package it resolves with the same
             # version, which may be another range's, by package.json key order.
             source = _yarn_source(fields)
             if not berry and any(
-                e[3] != chosen_index
+                e[2] != chosen_index
                 and e[1].get("version") == fields.get("version")
                 and _yarn_source(e[1]) != source
                 for e in entries
@@ -2331,7 +2360,9 @@ class RegistryScanner(Scanner):
                     f"yarn.lock: multiple package resolutions for {comp.name} are ambiguous"
                 )
                 continue
-            locator = "yarn.lock#/" + locator_key.replace("~", "~0").replace("/", "~1")
+            # The selector that matched holds only the name and spec the inventory
+            # records; another selector of the stanza may be a URL with a credential.
+            locator = "yarn.lock#/" + _pointer_token(f"{comp.name}@{sel_spec}")
             # Yarn 1 reads `integrity` and not `checksum`, and Berry the reverse.
             self._bind_npm_resolution(
                 comp,
