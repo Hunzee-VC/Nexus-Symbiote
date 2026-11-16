@@ -12,6 +12,11 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# A newer push to a pull request supersedes its macOS run; a push to main or a scheduled
+# run is never cancelled.
+concurrency:
+  group: platforms-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   macos:
     name: macOS case-insensitive and confinement branches

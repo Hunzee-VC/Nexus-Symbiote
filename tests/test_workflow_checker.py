@@ -734,3 +734,56 @@ def test_a_gate_step_cannot_move_to_another_directory(tmp_path):
 def test_the_gate_reader_follows_quoting_expansions_and_redirections(script, runs):
     gates = checker._gates(script, True, False)
     assert any(gate.runs("scripts/check_locks.py") for gate in gates) is runs
+
+
+@pytest.mark.parametrize("variable", ["SHELLOPTS", "BASHOPTS", "PS4", "ENV", "PATH"])
+@pytest.mark.parametrize("scope", ["workflow", "job", "step"])
+def test_a_shell_variable_that_hollows_a_gate_is_unsafe_gate_environment(tmp_path, variable, scope):
+    # bash imports SHELLOPTS at startup: noexec parses every later script and exits 0.
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    value = {"SHELLOPTS": "noexec", "BASHOPTS": "extdebug", "PS4": "$(id)", "ENV": "x"}.get(
+        variable, "stubs:/usr/bin"
+    )
+    target = {
+        "workflow": workflow,
+        "job": workflow["jobs"]["quality"],
+        "step": step_running(workflow["jobs"]["quality"], "scripts/check_workflows.py"),
+    }[scope]
+    target.setdefault("env", {})[variable] = value
+    path = tmp_path / "ci.yml"
+    path.write_text(yaml.safe_dump(workflow))
+    errors = checker.check(path)
+    assert any(f"sets unsafe gate environment in {scope} env" in e for e in errors), errors
+
+
+@pytest.mark.parametrize(
+    "write",
+    ['echo SHELLOPTS=noexec >> "$GITHUB_ENV"', 'echo stubs >> "${GITHUB_PATH}"'],
+)
+def test_a_job_environment_write_ahead_of_a_gate_is_rejected(tmp_path, write):
+    def change(jobs):
+        jobs["quality"]["steps"].insert(1, {"run": write})
+
+    errors = workflow_errors(tmp_path, "ci.yml", change)
+    assert any("writes the job environment through $GITHUB_ENV" in e for e in errors), errors
+
+
+def test_the_pull_request_size_step_is_a_protected_gate(tmp_path):
+    errors = workflow_errors(
+        tmp_path,
+        "ci.yml",
+        edit_run(
+            "quality",
+            "scripts/check_pull_request_size.py",
+            '"origin/$PR_BASE"',
+            '"origin/$PR_BASE" || true',
+        ),
+    )
+    assert any(
+        "discards the exit status of scripts/check_pull_request_size.py" in e for e in errors
+    )
+    assert workflow_errors(
+        tmp_path,
+        "ci.yml",
+        condition("quality", "scripts/check_pull_request_size.py", "github.event_name == 'never'"),
+    )

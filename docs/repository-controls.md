@@ -120,11 +120,14 @@ actually applies to `main` with `gh api repos/Hunzee-VC/Nexus-Symbiote/rules/bra
 ## Security acceptance evidence
 
 The `CodeQL policy` job analyzes the workflow checkout with the pinned CodeQL
-Action and `security-and-quality` queries. The next step requires a nonempty
+Action and `security-and-quality` queries, for Python and for the `actions`
+language (the workflows and `action.yml`), as the weekly run does, so a workflow
+finding fails the pull request rather than `main` on the next scheduled run. For
+each language, the next step requires a nonempty
 CodeQL rule catalog and rejects every security result with `security-severity`
 7.0 or greater, including existing and suppressed results. Missing or invalid
 severity on a security-tagged result fails closed. A successful analysis step
-alone is not a zero-alert policy decision. Raw SARIF and the policy report are
+alone is not a zero-alert policy decision. Raw SARIF and the policy reports are
 retained together.
 
 The policy script requires the actual Git `HEAD` to equal `GITHUB_SHA` and no

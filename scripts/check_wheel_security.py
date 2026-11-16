@@ -46,10 +46,26 @@ class RequireExecution:
 
     def __init__(self) -> None:
         self.skipped: list[str] = []
+        self.passed: set[str] = set()
 
     def pytest_runtest_logreport(self, report: pytest.TestReport) -> None:
         if report.skipped:
             self.skipped.append(report.nodeid)
+        elif report.when == "call" and report.passed:
+            self.passed.add(report.nodeid)
+
+    def pytest_collectreport(self, report: pytest.CollectReport) -> None:
+        # A module-level skip removes every case in the module before any run report.
+        if report.skipped:
+            self.skipped.append(report.nodeid)
+
+    def unexercised(self, cases: tuple[str, ...]) -> list[str]:
+        """The named cases of which no test, or parametrized instance, ran and passed."""
+        return [
+            case
+            for case in cases
+            if not any(node == case or node.startswith(case + "[") for node in self.passed)
+        ]
 
 
 def main() -> int:
@@ -87,6 +103,9 @@ def main() -> int:
             status = pytest.main(["-v", "--import-mode=importlib", *CASES], plugins=[required])
             if required.skipped:
                 print(f"Required wheel checks skipped: {required.skipped}", file=sys.stderr)
+                return 1
+            if status == 0 and (missing := required.unexercised(CASES)):
+                print(f"Required wheel checks ran no test: {missing}", file=sys.stderr)
                 return 1
             return int(status)
         finally:
