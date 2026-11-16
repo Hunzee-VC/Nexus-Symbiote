@@ -35,6 +35,7 @@ import select
 import shutil
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -63,6 +64,10 @@ _TEARDOWN_SECONDS = 5.0
 # Reads of the stopped wrapper's children that must find none running before the drain
 # ends; a child that exits between two reads has its own children listed by the next.
 _QUIET_READS = 50
+# The credentials of a Unix-socket message, and how many messages cleanup reads looking
+# for the wrapper's byte among any that a process holding a copy of its end wrote.
+_UCRED = struct.Struct("3i")
+_CHANNEL_MESSAGES = 64
 # Runs in a fresh interpreter, so the caller executes no Python between fork and exec.
 # The interpreter ignores SIGPIPE and SIGXFSZ at startup and adds LC_CTYPE under the C
 # locale, so the wrapper restores both signals and passes the launch environment itself.
@@ -550,26 +555,55 @@ def _wrapper_contained(pid: int, done: int, seen: int | None, stop: bool) -> boo
         return True
     if stop:
         _let_the_wrapper_reap(pid)
-    return held or _wrapper_finished(done)
+    return held or _wrapper_finished(done, pid)
 
 
-def _wrapper_finished(done: int) -> bool:
+def _wrapper_finished(done: int, wrapper: int) -> bool:
     """Whether the wrapper wrote its last byte, which it does only once it has no child.
 
     A wrapper that a launcher killed, or that cleanup had to kill, never writes it, and
     what it had adopted is then reparented past it, out of this cleanup's reach. The
     channel is a socket because a process of the same user can reopen this process's
     end of a pipe for writing through ``/proc/<pid>/fd`` and forge the byte, while
-    opening a socket that way fails.
+    opening a socket that way fails. A process that copied the wrapper's end, as one of
+    the same user can with ``pidfd_getfd`` before the wrapper makes itself undumpable,
+    could still write it, so only a byte the kernel credits to the wrapper's pid counts;
+    claiming another pid needs ``CAP_SYS_ADMIN``. The wrapper is unreaped until the
+    caller waits, so its pid names no other process.
     """
-    poller = select.poll()
-    poller.register(done, select.POLLIN)
-    if not poller.poll(int(_STOP_SECONDS * 1000)):
-        return False
+    channel = socket.socket(fileno=os.dup(done))
     try:
-        return os.read(done, 1) == b"\n"
-    except OSError:
+        poller = select.poll()
+        poller.register(channel.fileno(), select.POLLIN)
+        deadline = time.monotonic() + _STOP_SECONDS
+        for _ in range(_CHANNEL_MESSAGES):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not poller.poll(max(1, int(remaining * 1000))):
+                return False
+            try:
+                data, ancillary, _, _ = channel.recvmsg(
+                    16, socket.CMSG_SPACE(_UCRED.size), socket.MSG_DONTWAIT
+                )
+            except BlockingIOError:
+                continue
+            except OSError:
+                return False
+            if not data:
+                # End of file: every writer has closed its end without the byte.
+                return False
+            senders = [
+                _UCRED.unpack(payload[: _UCRED.size])[0]
+                for level, kind, payload in ancillary
+                if level == socket.SOL_SOCKET
+                and kind == socket.SCM_CREDENTIALS
+                and len(payload) >= _UCRED.size
+            ]
+            # The kernel never joins the bytes of two writers into one read.
+            if data == b"\n" and senders == [wrapper]:
+                return True
         return False
+    finally:
+        channel.close()
 
 
 def _wrapper_channel() -> tuple[int, int]:
@@ -579,6 +613,8 @@ def _wrapper_channel() -> tuple[int, int]:
     ``pass_fds``, so the wrapper's end there would be replaced.
     """
     left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    # Every write then carries its sender's credentials, stamped by the kernel.
+    left.setsockopt(socket.SOL_SOCKET, socket.SO_PASSCRED, 1)
     done, finished = left.detach(), right.detach()
     low: list[int] = []
     while finished < 3:

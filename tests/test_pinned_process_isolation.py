@@ -1900,3 +1900,49 @@ def test_opt_out_stops_the_whole_tree_before_it_is_swept(
         for entry in helpers.iterdir():
             with contextlib.suppress(ProcessLookupError):
                 os.kill(int(entry.name), signal.SIGKILL)
+
+
+@_LINUX_ONLY
+def test_a_byte_from_a_copy_of_the_wrappers_end_does_not_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A process of the same user can copy the wrapper's end with pidfd_getfd while the
+    # wrapper's interpreter starts, before it makes itself undumpable. Here the test
+    # holds that copy, writes the byte, and the launcher then kills its wrapper: the
+    # kernel credits the byte to this process, not the wrapper, so cleanup fails closed.
+    marker = tmp_path / "pid"
+    copies: list[int] = []
+    channel = pinned_process._wrapper_channel
+
+    def copied() -> tuple[int, int]:
+        done, finished = channel()
+        copies.append(os.dup(finished))
+        return done, finished
+
+    monkeypatch.setattr(pinned_process, "_wrapper_channel", copied)
+    proc = _spawn_opted_out(
+        tmp_path,
+        "import os, time\n"
+        + _worker_prelude(marker)
+        + "time.sleep(0.3)\nos.kill(os.getppid(), signal.SIGKILL)\ntime.sleep(60)\n",
+        interpreter=sys.executable,
+    )
+    try:
+        os.write(copies[0], b"\n")
+        deadline = time.monotonic() + 10
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert marker.exists(), "the launcher did not start its worker within 10 seconds"
+        _assert_dead(proc.pid)
+        with pytest.raises(pinned_process.PinnedProcessError) as failed:
+            pinned_process.terminate_process_group(proc)
+        assert failed.value.reason == "isolation-teardown-failed"
+    finally:
+        os.close(copies[0])
+        _kill_marked(marker)
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(proc.pid, signal.SIGKILL)
+        for stream in (proc.stdin, proc.stdout):
+            if stream is not None:
+                stream.close()
+        proc.wait(timeout=10)

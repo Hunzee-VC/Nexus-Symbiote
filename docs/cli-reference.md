@@ -1029,6 +1029,9 @@ exited with no child left; when it does not, because the launcher killed it or a
 descendant could not be killed (one running as another user, or one that stays in
 uninterruptible sleep), the server fails with `isolation-teardown-failed`, since what
 the wrapper had adopted may still be running, outside that cgroup where none exists.
+The report counts only when the kernel credits it to the wrapper's pid. A launcher
+running as root, or with `CAP_SYS_PTRACE` or `CAP_SYS_ADMIN`, can forge it or trace
+the wrapper, so its escape can go unreported; never opt out as root.
 A launcher or descendant can still evade cleanup another way, for example by moving
 out of the cgroup. On other systems that cleanup is best effort. The option is not a PID namespace,
 and neither form is a filesystem or network sandbox.
