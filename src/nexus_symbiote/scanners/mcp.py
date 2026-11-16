@@ -20,11 +20,12 @@ import math
 import os
 import posixpath
 import re
-from collections.abc import Callable, Iterable, Mapping
+import shlex
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import parse_qsl, quote, unquote, urlsplit
 
 from packaging.utils import canonicalize_name
 
@@ -73,8 +74,11 @@ from nexus_symbiote.utils.secrets import (
     REDACTED,
     TOKEN_SHAPE,
     SecretScrubber,
+    credential_shaped,
+    is_reference,
     redact_descriptor,
     redact_text,
+    scheme_credentials,
     secret_like,
     secret_values,
 )
@@ -285,7 +289,7 @@ _TRANSITIVE_RUNNERS = frozenset(
 # structure digest covers only fields the inventory already exports in clear.
 # Values are bound by an HMAC under an operator key that never enters the BOM.
 # A change to either preimage requires a new profile and new test vectors.
-STATIC_CONFIG_HASH_PROFILE = "nexus-symbiote/mcp-static-config/v3"
+STATIC_CONFIG_HASH_PROFILE = "nexus-symbiote/mcp-static-config/v4"
 STATIC_VALUE_BINDING_PROFILE = "nexus-symbiote/mcp-static-values/v3"
 SOURCE_BINDING_KEY_ENV = "NEXUS_SYMBIOTE_SOURCE_BINDING_KEY"
 _MIN_SOURCE_BINDING_KEY_LENGTH = 32
@@ -312,9 +316,200 @@ def source_binding_key() -> bytes | None:
     return key.encode()
 
 
-def _launch_secrets(launch: Launch) -> list[str]:
+_HEADER_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{1,63}")
+_CLI_FLAG = re.compile(r"-{1,2}[A-Za-z][A-Za-z0-9_-]{0,63}")
+_HEADER_FLAGS = frozenset({"-h", "--header"})
+_HEADER_PREFIXES = ("--header=", "-h=")
+# The character before a requirement's version (pkg==1.2, pkg>=1.2, pkg~=1.2, pkg!=1.2).
+_REQUIREMENT_OPERATORS = frozenset("<>!~=")
+# OAuth parameters that travel in clear (RFC 6749 and its extensions), compared without
+# case, "-" or "_": identifiers that names may repeat, not credentials.
+_PUBLIC_AUTH_FIELDS = _names(
+    "type clientid scope scopes audience audiences resource granttype responsetype "
+    "redirecturi issuer"
+)
+_TOOL_APPROVAL_FIELDS = ("alwaysAllow", "autoApprove")
+_TOOL_FILTER_FIELDS = (
+    "includeTools",
+    "excludeTools",
+    "enabled_tools",
+    "disabled_tools",
+    "disabledTools",
+)
+_TOOL_LIST_FIELDS = (*_TOOL_APPROVAL_FIELDS, *_TOOL_FILTER_FIELDS)
+
+
+def _scheme_secrets(value: str) -> list[str]:
+    """``value`` and its bare credential when it is an auth scheme word and a credential."""
+    credentials = scheme_credentials(value)
+    if credentials and len(value) >= MIN_SECRET_LENGTH:
+        return [value, *credentials]
+    return credentials
+
+
+def _shape_secrets(value: str) -> list[str]:
+    """Credentials a value holds by its shape, whatever names it."""
+    return [
+        *_scheme_secrets(value),
+        *(match.group() for match in TOKEN_SHAPE.finditer(value)),
+        *_header_line_secrets(value),
+        *_url_secrets(value),
+    ]
+
+
+def _url_secrets(value: str) -> list[str]:
+    """Credentials in URL user information or in credential-named query parameters.
+
+    A password counts on its own only when it reads as a credential, so the default
+    ``postgres:postgres`` is not taken out of a server named ``postgres``; a user name
+    without a password counts only in a known token format (``https://ghp_...@host``).
+    The whole value is still scrubbed wherever its name or user information marks it.
+    """
+    found: list[str] = []
+    for locator in _locators(value):
+        try:
+            parsed = urlsplit(locator)
+            password, username = parsed.password, parsed.username
+        except ValueError:
+            # Malformed URLs contribute no parsed userinfo or query fields.
+            continue
+        if password is not None:
+            found.extend(
+                candidate
+                for candidate in dict.fromkeys((password, unquote(password)))
+                if len(candidate) >= MIN_SECRET_LENGTH
+                and credential_shaped(candidate)
+                and not is_reference(candidate)
+            )
+        if username is not None:
+            for candidate in dict.fromkeys((username, unquote(username))):
+                found.extend(match.group() for match in TOKEN_SHAPE.finditer(candidate))
+        for query_name, query_value in parse_qsl(parsed.query):
+            if not is_reference(query_value):
+                if secret_like(query_name, query_value):
+                    found.append(query_value)
+                found.extend(scheme_credentials(query_value))
+    return found
+
+
+def _header_line_secrets(text: str) -> list[str]:
+    """Credentials in an inline ``Header-Name: value`` string such as ``Authorization: Bearer ...``."""
+    candidate = text.strip()
+    lowered = candidate.lower()
+    for prefix in _HEADER_PREFIXES:
+        if lowered.startswith(prefix):
+            candidate = candidate[len(prefix) :].strip()
+            break
+    else:
+        if candidate.startswith("-H") and len(candidate) > 2 and not candidate.startswith("-H="):
+            candidate = candidate[2:].strip()
+    if ":" not in candidate:
+        return []
+    hdr_name, _, hdr_val = candidate.partition(":")
+    hdr_name = hdr_name.strip(" \"'")
+    if hdr_val.startswith("//") or not _HEADER_NAME.fullmatch(hdr_name):
+        return []
+    hdr_val = hdr_val.strip(" \"'")
+    if not hdr_val or is_reference(hdr_val):
+        return []
+    found: list[str] = []
+    if secret_like(hdr_name, hdr_val):
+        found.append(hdr_val)
+    found.extend(_scheme_secrets(hdr_val))
+    found.extend(_url_secrets(hdr_val))
+    return found
+
+
+def _auth_object_secrets(settings: dict[str, Any]) -> list[str]:
+    """Credentials an ``oauth`` or ``auth`` object declares, at any depth.
+
+    The field names a credential, so each string in it counts as the value of a
+    variable named ``AUTH`` would, under any key (``value``, ``credentials.value``),
+    except the OAuth parameters that travel in clear. _server_problem bounds the
+    object, so every node is read.
+    """
+    found: list[str] = []
+    pending: list[tuple[str, Any]] = [("", settings)]
+    while pending:
+        key, current = pending.pop()
+        if isinstance(current, str):
+            public = key.replace("-", "").replace("_", "").lower() in _PUBLIC_AUTH_FIELDS
+            if not is_reference(current) and secret_like(key if public else "auth", current):
+                found.append(current)
+            found.extend(_shape_secrets(current))
+        elif isinstance(current, dict):
+            pending.extend((str(name), item) for name, item in current.items())
+        elif isinstance(current, list):
+            pending.extend((key, item) for item in current)
+    return found
+
+
+def _launch_words(texts: Iterable[str]) -> list[str]:
+    """Each text and, when it holds white space (a command line, an inline script), its words.
+
+    Words also end at the shell and cmd operators ``&&``, ``;`` and ``|``, so cmd's
+    ``set API_TOKEN=Bearer <token>&& npx ...`` leaves the token as a word of its own.
+    """
+    words: list[str] = []
+    for text in texts:
+        words.append(text)
+        if any(char.isspace() for char in text):
+            lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+            lexer.whitespace_split = True
+            lexer.commenters = ""
+            try:
+                parts = list(lexer)
+            except ValueError:
+                # An unclosed quote still leaves the whitespace-delimited words.
+                parts = text.split()
+            words.extend(parts)
+    return words
+
+
+def _requirement(name: str, value: str) -> bool:
+    """Whether ``name=value`` is a requirement such as ``pkg==1.2`` or ``pkg>=1.2``."""
+    return not name.startswith("-") and (
+        value.startswith("=") or name[-1:] in _REQUIREMENT_OPERATORS
+    )
+
+
+def _launch_secrets(launch: Launch, args: Sequence[str] = (), command: str = "") -> list[str]:
     # Earlier assignments remain private even when a later value shadows them.
-    return [value for name, value in launch.environment if secret_like(name, value)]
+    values: list[str] = []
+    for name, value in launch.environment:
+        if secret_like(name, value):
+            values.append(value)
+        values.extend(_shape_secrets(value))
+    for _, source_value in launch.sources:
+        values.extend(_url_secrets(source_value))
+    words = _launch_words(
+        [*([command] if command else []), *(a for a in args if isinstance(a, str))]
+    )
+    for index, word in enumerate(words):
+        values.extend(_shape_secrets(word))
+        name, equals, value = word.partition("=")
+        if equals and not _requirement(name, value):
+            name = name.lstrip("-").strip(" \"'")
+            value = value.strip(" \"'")
+            if name and value and not is_reference(value):
+                if name.lower() not in {"h", "header"} and secret_like(name, value):
+                    values.append(value)
+                values.extend(_shape_secrets(value))
+                # cmd's `set API_TOKEN=Bearer <token>` leaves the credential in the next word.
+                if index + 1 < len(words) and secret_like(name, f"{value} {words[index + 1]}"):
+                    values.extend(scheme_credentials(f"{value} {words[index + 1]}"))
+        if index > 0:
+            flag = words[index - 1]
+            if (
+                _CLI_FLAG.fullmatch(flag)
+                and flag.lower() not in _HEADER_FLAGS
+                and not word.startswith("-")
+                and not is_reference(word)
+                and secret_like(flag, word)
+            ):
+                values.append(word)
+                values.extend(scheme_credentials(word))
+    return list(dict.fromkeys(values))
 
 
 def _server_launch(config: dict[str, Any]) -> Launch:
@@ -324,14 +519,33 @@ def _server_launch(config: dict[str, Any]) -> Launch:
 
 
 def _server_secrets(config: dict[str, Any], launch: Launch) -> list[str]:
-    """Credential values one server declares: environment, headers and inline launcher."""
+    """Credential values one server declares: env, headers, auth, endpoints and launcher."""
     values: list[str] = []
     for field in ("env", "headers", "http_headers"):
         mapping = config.get(field)
         if isinstance(mapping, dict):
             values.extend(secret_values(mapping))
-    values.extend(_launch_secrets(launch))
-    return values
+            for item in mapping.values():
+                if isinstance(item, str):
+                    values.extend(_shape_secrets(item))
+    for field in ("oauth", "auth"):
+        settings = config.get(field)
+        if isinstance(settings, dict):
+            values.extend(_auth_object_secrets(settings))
+    for field in (*_ENDPOINT_FIELDS, "gallery"):
+        endpoint = config.get(field)
+        if isinstance(endpoint, str):
+            values.extend(_shape_secrets(endpoint))
+    args = config.get("args", [])
+    command = config.get("command", "")
+    values.extend(
+        _launch_secrets(
+            launch,
+            args if isinstance(args, list) else [],
+            command if isinstance(command, str) else "",
+        )
+    )
+    return list(dict.fromkeys(values))
 
 
 def _value_binding(
@@ -1766,6 +1980,16 @@ class MCPScanner(Scanner):
                     f"MCP tool definition limit ({MAX_TOOL_NODES} nodes, "
                     f"{MAX_TOOL_DEPTH} levels) exceeded"
                 )
+        # Every credential an authentication object holds is scrubbed, so all of it is
+        # read; one past the bound is refused, never read in part.
+        for field in ("oauth", "auth"):
+            if field in config:
+                nodes, depth = _json_shape(config[field], MAX_TOOL_NODES)
+                if nodes > MAX_TOOL_NODES or depth > MAX_TOOL_DEPTH:
+                    return (
+                        f"MCP server authentication settings limit ({MAX_TOOL_NODES} nodes, "
+                        f"{MAX_TOOL_DEPTH} levels) exceeded"
+                    )
         return None
 
     def _parse_server(
@@ -1800,10 +2024,10 @@ class MCPScanner(Scanner):
         if scrubber is None:
             scrubber = SecretScrubber(_server_secrets(config, launch))
         cwd = config.get("cwd")
+        nested = _launch_directory(dialect.path) != ""
+        # Clients do not trim a cwd: " ." is a directory the checkout can create.
         relocated = (
-            launch.relocated
-            or (isinstance(cwd, str) and cwd.strip() not in _ROOT_DIRECTORIES)
-            or _launch_directory(dialect.path) != ""
+            launch.relocated or (isinstance(cwd, str) and cwd not in _ROOT_DIRECTORIES) or nested
         )
         environment = [*env.items(), *launch.environment]
         runner_sources, runner_reasons = _runner_environment(
@@ -1837,12 +2061,16 @@ class MCPScanner(Scanner):
             gaps.append(f"launcher identity unknown ({identity_unknown})")
         if identity.withheld:
             gaps.append("identity withheld by environment-value redaction")
+        raw_tool_names = [
+            str(tool.get("name", "")) for tool in config.get("tools", []) if isinstance(tool, dict)
+        ]
+        if any(scrubber.contains(tool_name) for tool_name in raw_tool_names):
+            gaps.append("tool name withheld by environment-value redaction")
+        tool_lists, tool_lists_redacted = self._tool_lists(config, scrubber)
+        if key is None and tool_lists_redacted:
+            gaps.append("tool list entries withheld by redaction")
         name = identity.name
-        tool_names = sorted(
-            self._tool_name(str(tool.get("name", "")), scrubber)
-            for tool in config.get("tools", [])
-            if isinstance(tool, dict)
-        )
+        tool_names = sorted(self._tool_name(tool_name, scrubber) for tool_name in raw_tool_names)
         packages = launch.packages
         # uv tool run and pipx name one tool package; --with adds dependencies to it.
         primary = (
@@ -1873,7 +2101,7 @@ class MCPScanner(Scanner):
             if primary is not None and launcher_package is not None and not identity_unknown
             else None
         )
-        settings = self._client_settings(config)
+        settings = self._client_settings(config, tool_lists)
         context = dict(launch.context)
         loading = [
             variable
@@ -1912,6 +2140,9 @@ class MCPScanner(Scanner):
             {"-y", "--yes", *(package.spec for package in packages)} if launcher_package else set()
         )
         unbound = self._unbound_values(args, env, headers, endpoint_url, command, launch, recorded)
+        unbound.extend(
+            self._unbound_client_values(config, nested=nested, redacted=tool_lists_redacted)
+        )
         if resolver:
             unbound.append("project resolver settings")
         if unbound and key is None:
@@ -2297,15 +2528,47 @@ class MCPScanner(Scanner):
             return "[redacted]", "endpoint authority is ambiguous"
         return sanitized_origin(url), None
 
+    @classmethod
+    def _tool_lists(
+        cls, config: dict[str, Any], scrubber: SecretScrubber
+    ) -> tuple[dict[str, list[str]], bool]:
+        """Each approval and filter field's sorted names as exported, and whether one changed.
+
+        Every entry is redacted once here: against a file's values that is the costly
+        step. A known value in an entry is always replaced, so a change covers it.
+        """
+        lists: dict[str, list[str]] = {}
+        changed = False
+        for field in _TOOL_LIST_FIELDS:
+            entries = config.get(field)
+            if not entries:
+                continue
+            shown = [cls._tool_name(entry, scrubber) for entry in entries]
+            changed = changed or shown != entries
+            lists[field] = sorted(shown)
+        return lists, changed
+
     @staticmethod
-    def _client_settings(config: dict[str, Any]) -> dict[str, Any]:
-        """Client behaviour switches as booleans and counts, never values."""
+    def _client_settings(
+        config: dict[str, Any], tool_lists: dict[str, list[str]]
+    ) -> dict[str, Any]:
+        """Client behaviour switches as booleans and counts, and the tool names they name.
+
+        Tool names are identifiers, not values: swapping which tool is auto-approved or
+        filtered keeps every count, so the names must be exported for diff to see it.
+        """
         settings: dict[str, Any] = {}
-        approved = len(config.get("alwaysAllow", [])) + len(config.get("autoApprove", []))
+        # Clients read only one of these fields, so a tool moved between them changes
+        # what is approved without changing the merged list.
+        approved = {
+            field: tool_lists[field] for field in _TOOL_APPROVAL_FIELDS if field in tool_lists
+        }
         if config.get("trust") is True:
             settings["auto_approve"] = "all"
         elif approved:
-            settings["auto_approve"] = approved
+            settings["auto_approve"] = sum(len(names) for names in approved.values())
+        if approved:
+            settings["auto_approved_tools"] = approved
         if config.get("disabled") is True or config.get("enabled") is False:
             settings["disabled"] = True
         for field, label in (
@@ -2319,18 +2582,10 @@ class MCPScanner(Scanner):
         ):
             if field in config:
                 settings[label] = True
-        filters = sum(
-            len(config.get(field, []))
-            for field in (
-                "includeTools",
-                "excludeTools",
-                "enabled_tools",
-                "disabled_tools",
-                "disabledTools",
-            )
-        )
+        filters = {field: tool_lists[field] for field in _TOOL_FILTER_FIELDS if field in tool_lists}
         if filters:
-            settings["tool_filters"] = filters
+            settings["tool_filters"] = sum(len(names) for names in filters.values())
+            settings["tool_filter_names"] = filters
         return settings
 
     @staticmethod
@@ -2357,6 +2612,36 @@ class MCPScanner(Scanner):
             _has_path_or_query(endpoint_url) or "#" in endpoint_url or _has_userinfo(endpoint_url)
         ):
             unbound.append("endpoint path and query")
+        return unbound
+
+    @staticmethod
+    def _unbound_client_values(
+        config: dict[str, Any], *, nested: bool, redacted: bool
+    ) -> list[str]:
+        """Client settings exported only as present or redacted, whose values only the key covers.
+
+        A nested file's servers start in its own directory, which "." and
+        "${workspaceFolder}" name differently, so there any cwd is unbound.
+        """
+        unbound = []
+        if "cwd" in config:
+            cwd = config.get("cwd")
+            if nested or not (isinstance(cwd, str) and cwd in _ROOT_DIRECTORIES):
+                unbound.append("working directory")
+        for label, fields in (
+            ("environment file", ("envFile",)),
+            ("watch paths", ("watchPaths",)),
+            ("authentication settings", ("oauth", "auth")),
+            ("development settings", ("dev",)),
+            (
+                "forwarded environment variable names",
+                ("env_vars", "bearer_token_env_var", "env_http_headers"),
+            ),
+        ):
+            if any(config.get(field) for field in fields):
+                unbound.append(label)
+        if redacted:
+            unbound.append("redacted tool list entries")
         return unbound
 
     def _server_risks(
