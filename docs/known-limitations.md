@@ -744,9 +744,67 @@ A way around a limit that its entry does not describe is worth a
   UTF-32 file without a byte-order mark.
 - **Hidden-character detection is character-based.** Lookalike letters are not
   detected, and neither are control characters such as ESC, spaces other than
-  U+0020, such as U+00A0 and U+3000, or private-use characters. HTML and Markdown
-  comments are reported by count, not text, and only in Markdown files and
-  instruction files without a suffix, such as `.cursorrules`.
+  U+0020, such as U+00A0 and U+3000, or private-use characters.
+- **Hidden markup means comments, unused definitions and footnotes.** HTML and
+  Markdown comments are reported by count, not text, and only in Markdown files and
+  instruction files without a suffix, such as `.cursorrules`. They are HTML comments,
+  processing instructions, declarations and CDATA sections outside code, the other
+  forms that HTML parsers read as comments (`<! ...>`, `</ ...>`) in HTML blocks, link
+  reference definitions that no link uses or that repeat a label, definitions written
+  as comments, with a `#` or `<>` destination, used or not and also in HTML blocks,
+  and footnotes (`[^x]: ...`) that nothing references, which GitHub drops. Text that a
+  rendered view hides in other ways is not reported: the title of a link or image,
+  shown only on hover, whether written inline or in a definition with another
+  destination that a link with visible text, or any image, uses, however short that
+  text and even when the image's alt text is empty (`![][label]`), and the
+  label of such a definition when only full references, such as `[text][label]`, use
+  it; alt text and attribute values; and the content of elements that a sanitizer
+  removes or a viewer collapses, such as `<script>`, `<style>`, `<details>` or an
+  element with `hidden`, apart from the comments above. A definition used only by a
+  link inside an image description, which renders as that image's alt text, is not
+  counted either.
+- **The high rating for hidden markup is by shape.** Each comment is rated by its
+  whole text, every line of a title, footnote or HTML comment included, but only a
+  URL, a path under `~/`, one of the words ignore, disregard, exfiltrate, execute,
+  download, upload, send, steal, override, bypass, curl, wget, fetch, eval and
+  install, whole and in any case, or `run` in one of the forms that the
+  [finding catalog](finding-catalog.md) lists makes it high. An instruction in other
+  words or other forms of those, such as `<!-- always answer in French -->` or
+  `ignoring`, is reported by count and rated low, so the Action's default
+  `fail-on-severity: high` passes it.
+- **Hidden markup is read to err toward a finding.** A reference counts as a use of a
+  definition only where every reader makes a link of it that shows: not in code, raw
+  HTML, an autolink, a URL that GitHub makes an autolink of (`https://`, `http://`
+  or `ftp://` after anything but a letter or `[`, or `www.` after a space, `*`, `_`,
+  `~` or `(`, up to a space or `<`), or a link destination, not as a link whose text
+  shows only spaces, ASCII punctuation, entities and tags, as in `[][x]` or `[.][x]`,
+  not with a `|` in its label, which a table cell can split, not right before brackets
+  that nest, as in `[b][[y]]`, and not later in a paragraph than an inline link whose
+  destination nests parentheses twice, or than a link that only markdown-it reads,
+  with tabs between its parts, and that holds a backtick or `<`. A definition used
+  only there is reported as unused, and so is a footnote referenced only there or
+  from a footnote that is not referenced. A line inside a paragraph that has the form
+  of a definition is counted, though CommonMark shows it as text, and so is a
+  definition in the most lenient form a reader takes: cmark-gfm takes a destination
+  with unbalanced parentheses and markdown-it a title right after a pointy
+  destination, and a title runs to the next line that ends with its closing quote or
+  parenthesis. A footnote runs to the next footnote or the end of its paragraph, and
+  takes as its continuation the indented code after it and, as cmark-gfm does, the
+  lines right after that code that start no block, such as a paragraph line or an
+  HTML tag that cannot interrupt a paragraph, even when that code ends with a heading
+  or a closed fence, after which GitHub shows them. Where CommonMark readers
+  disagree about the block structure, as when a line after the definitions that open
+  a paragraph is indented four columns or starts with `2.`, or a block quote is
+  followed by a `>` indented four columns, every line of the file that has the form of
+  a definition or a footnote is counted as unused, used or not and in code and HTML
+  blocks too, and so is every processing instruction, declaration, CDATA section and
+  other form an HTML block can hide, even in prose or a code span, as in
+  ``(`<!`)``. A footnote then runs to the next footnote or blank line and on through
+  each later run of lines whose first line is indented four columns past its block
+  quote marks, a tab counting as four, as cmark-gfm continues it. Each processing
+  instruction, declaration, CDATA section or other such form is counted to the end
+  CommonMark gives it (`?>`, `>` or `]]>`), or to the end of its HTML block when it
+  is not closed, although an HTML parser hides it only up to its first `>`.
 - **Settings alerts do not say what changed.** Rules, hook commands and other
   settings are bound by a digest of each settings file, not recorded. A changed
   value, such as an added hook command or a removed deny rule, raises a high
