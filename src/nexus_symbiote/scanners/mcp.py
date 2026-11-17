@@ -896,6 +896,9 @@ _CONTEXT_MEDIUM = {
     "code_loading_option": "an option that loads local code",
     "code_loading_environment": "environment that changes code loading",
     "code_loading_setting": "a package manager setting that loads local code",
+    "container_environment_file": "container environment from a file the inventory does not read",
+    "container_command": "a health-check command the engine runs in the container",
+    "custom_security_profile": "a seccomp profile from a file",
 }
 
 

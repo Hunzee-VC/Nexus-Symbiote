@@ -156,7 +156,12 @@ A way around a limit that its entry does not describe is worth a
   argument that only reads like a launch is a gap too.
 - **Text a shell reads again must read as written.** An `sh -c`, `bash -c`,
   `zsh -c` or `fish -c` script, a command line, `env -S`, `wsl` without `-e`,
-  `eval` and `pwsh -Command` are classified only when no word holds a character the
+  `eval`, `pwsh -Command`, the command word of `npx -p` or `npm exec --package`
+  (which npm runs with `sh`, so one that is itself an expansion is a gap too),
+  and the words of `bun exec`, `yarn exec` and `pnpm exec -c` (or `--shell-mode`,
+  or an option cluster with `c`, among the options before its command word; a word
+  after an option written without `=` counts as that option's value; pnpm 10 itself
+  reads shell mode only before `exec`, and `pnpm -c exec` is a gap) are classified only when no word holds a character the
   reader rewrites: braces, patterns, `~`, `#`, `!`, `^`, `$`, backquotes,
   non-ASCII text or, except for a POSIX shell, quoting. `cmd /c` needs a plain
   program word and no `%`, `!`, `"`, `^` or unusual whitespace; cmd keeps
@@ -186,7 +191,51 @@ A way around a limit that its entry does not describe is worth a
   system paths.
 - **Some ordinary forms are gaps.** `uvx -w` and `uv run -w` (aliases of `--with`)
   and a bare `pwsh server.ps1` are not read and fail the gates; spell `--with` and
-  `-File`.
+  `-File`. An `npx`, `npm` or `pnpm dlx` option that takes a value, followed by a
+  word that starts with `-`, is a gap: npm's parser may give the option an empty
+  value and read that word as an option, so `npx --tag --package=evil@6.6.6
+  decoy@1.0.0` installs `evil`. Attach such values with `=`, as in
+  `--node-options=--max-old-space-size=4096`. A flag of `npm` or `pnpm dlx` written
+  without `=` and followed by the word `true`, `false` or `null` is a gap as well, since
+  nopt reads that word as a Boolean (or `[null, Boolean]`) option's value; this also
+  covers flags that do not take it, such as `-q`, which npm expands to another option. Write `--yes` alone, or put
+  `--` before a command named `true`. `npx` steps over the word after `--no`,
+  `--no-yes`, `--no-update-notifier`, `--no-audit` and `--no-fund`, so such a flag
+  followed by `true`, `false` or `null`, or by any word and then an option (as in
+  `npx --no-audit srv@1.2.3 --stdio`, where npm takes `--stdio` for itself), is a gap.
+  A scoped registry (`--@scope:registry`) of `npx` or `npm` written without `=` is a
+  gap too: npm has no type for it, so the next word stays a command or package word.
+  The `yarn dlx` options were not checked against a running Yarn 2 or later.
+- **Container launch context is read from the declared options only.** Mounts are
+  rated by their written source: a mount through a link, a client variable other than `${userHome}`,
+  `${env:HOME}`, `${env:USERPROFILE}`, `${workspaceFolder}` and `$PWD`, and a
+  credential directory other than `.ssh`, `.aws`, `.gnupg`, `.kube`, `.docker`,
+  `.config`, `.azure` and `.gcloud` are only `host_mounts`. Variables in an
+  `--env-file`, a `--health-cmd` and a seccomp profile file are a medium finding
+  without being read, and `podman --env-host` is not rated. An `--entrypoint` is a
+  medium finding only beside a host mount. An image command is a medium
+  code-loading finding when it runs a file under an absolute `-v` or `--mount`
+  target: an interpreter or runner (`node`, `python`, `sh`, `env`, `java`, `npm`,
+  `pnpm`, `yarn`, `bun`, `uv`, `tsx`, `ts-node` and similar, also after `tini`,
+  `dumb-init`, `timeout` or `nice`) with any later word or `--opt=value` that is such
+  a path, a package manager's `run`, `start` or `test`, `make`, or `python -m` with
+  `-w` under the mount, or a path with a script suffix (`.sh`, `.js`, `.py`, `.jar`
+  and similar), absolute or relative to an absolute `-w`. A relative word counts as a
+  path only when it holds a `/` or has a script suffix, so a port, host, version or
+  dotted module name (`--port=8080`, `--host 0.0.0.0`, `v1.2`) or a file such as
+  `notes.txt` is not. A word after an interpreter counts even
+  when it is a data argument of the script, so `node /app/s.js /w/data` is rated. A
+  file without a script suffix (`/w/server`, `/db/app.sqlite`, `/cfg/config.json`), a
+  relative path without `-w` (resolved against the image's own working directory) and
+  a link from the image into the mount are not rated, so that an argument such as
+  `mcp/filesystem /data` is not a finding. A mount over a directory on the default
+  `PATH` (`/usr/local/bin`, `/usr/bin`, `/bin` and their `sbin` and parents) is
+  rated; a mount over another directory of the image's own code (`-v .:/app`) is not.
+  `HOME`, `ZDOTDIR`, `XDG_CONFIG_HOME` and `PYTHONUSERBASE` passed with `-e` count as
+  code-loading only beside a host mount, whatever their value, and `PATH` only when an
+  entry is empty, relative or under a mount target. Any path component named like a credential
+  directory counts, also outside a home directory, so `/srv/app/.config` is a broad
+  mount.
 - **Environment that moves a runner's configuration is a gap.** A server's `env`
   that may point `HOME`, `XDG_CONFIG_HOME`, `PREFIX`, `DESTDIR`, `GOENV`,
   `ZDOTDIR` or a relative `PATH` entry into the project, or that replaces the
