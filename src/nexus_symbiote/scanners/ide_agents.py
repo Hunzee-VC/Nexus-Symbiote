@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -162,6 +162,13 @@ _CREDENTIAL_HELPER_KEYS = (
     "gcpAuthRefresh",
     "otelHeadersHelper",
 )
+# Claude Code settings whose `{"type": "command", "command": ...}` value runs without an
+# agent event, as a hook command does, and how the finding names each. Any settings file
+# may declare them, and the same gates turn both off.
+_AUTO_RUN_SETTINGS = {
+    "statusLine": "a status line command that runs automatically",
+    "fileSuggestion": "a file suggestion command that runs automatically when the user types @",
+}
 # Settings `env` applies to the session and every process it starts. These names send
 # the API key, prompts or telemetry to another endpoint, proxy or trust store, add
 # headers to API requests, replace the credential, or switch the session to a cloud
@@ -1396,11 +1403,28 @@ def _reads_stdin(interpreter: str, args: list[str]) -> bool:
                 continue
             known = bool(equals) or option in plain_long
         elif word.startswith("-"):
-            if word[1:2] in letters:
+            # Walk a bundle letter by letter, as _interpreter_program does: `-ne`,
+            # `-pe` and `-uc` take the program from the command line.
+            known, code, valued = True, False, False
+            for position in range(1, len(word)):
+                letter, rest = word[position], word[position + 1 :]
+                if letter in letters:
+                    code = True
+                    break
+                if f"-{letter}" in with_value:
+                    valued = not rest
+                    break
+                if letter in plain:
+                    continue
+                if letter in attached_value and rest:
+                    break
+                known = False
+                break
+            if code:
                 continue
-            known = all(letter in plain for letter in word[1:]) or (
-                len(word) > 2 and (word[1] in attached_value or f"-{word[1]}" in with_value)
-            )
+            if valued:
+                reached[min(index + 2, len(args))] = True
+                continue
         else:
             continue
         steps = (2,) if word in with_value else (1,) if known else (1, 2)
@@ -2287,11 +2311,10 @@ def _severity_clause(severity: RiskSeverity) -> str:
     return "."
 
 
-def _hook_detail(count: int, severity: RiskSeverity, ide: str, *, status_line: bool = False) -> str:
+def _hook_detail(count: int, severity: RiskSeverity, ide: str, settings: Iterable[str] = ()) -> str:
     parts = [f"{count} hook command(s) that run automatically on agent events"] if count else []
-    if status_line:
-        parts.append("a status line command that runs automatically")
-    return f"IDE agent '{ide}' declares {' and '.join(parts)}" + _severity_clause(severity)
+    parts += [_AUTO_RUN_SETTINGS[key] for key in settings]
+    return f"IDE agent '{ide}' declares {_series(parts)}" + _severity_clause(severity)
 
 
 def _environment_risk(documents: dict[str, dict[str, Any]]) -> RiskAssessment | None:
@@ -2709,8 +2732,8 @@ class IDEAgentScanner(Scanner):
             properties["declared_permission_rule_counts"] = counts
         hook_commands = 0
         hook_severity: RiskSeverity | None = None
-        # The status line and credential helpers run without an agent event, as hooks do.
-        status_line = False
+        # Auto-run settings and credential helpers run without an agent event, as hooks do.
+        auto_run: set[str] = set()
         helper_severity = RiskSeverity.MEDIUM
         for relative, data in documents.items():
             body = data if relative == CLAUDE_PLUGIN_HOOKS else data.get("hooks")
@@ -2721,10 +2744,11 @@ class IDEAgentScanner(Scanner):
                 result.scan_failures.append(f"{relative}: settings cannot be canonicalized")
             if relative == CLAUDE_PLUGIN_HOOKS:
                 continue
-            line = data.get("statusLine")
-            if isinstance(line, dict) and isinstance(line.get("command"), str):
-                status_line = True
-                hook_severity = _worse(hook_severity, _command_severity(line["command"]))
+            for key in _AUTO_RUN_SETTINGS:
+                setting = data.get(key)
+                if isinstance(setting, dict) and isinstance(setting.get("command"), str):
+                    auto_run.add(key)
+                    hook_severity = _worse(hook_severity, _command_severity(setting["command"]))
             for key in _CREDENTIAL_HELPER_KEYS:
                 helper = data.get(key)
                 if isinstance(helper, str):
@@ -2742,7 +2766,7 @@ class IDEAgentScanner(Scanner):
             "enable_all_project_mcp_servers": merged.get("enableAllProjectMcpServers") is True,
         }
         properties["settings_declarations"] = declared
-        if hook_commands or status_line:
+        if hook_commands or auto_run:
             risks.append(
                 RiskAssessment(
                     severity=hook_severity or RiskSeverity.MEDIUM,
@@ -2751,7 +2775,7 @@ class IDEAgentScanner(Scanner):
                         hook_commands,
                         hook_severity or RiskSeverity.MEDIUM,
                         "claude-code",
-                        status_line=status_line,
+                        [key for key in _AUTO_RUN_SETTINGS if key in auto_run],
                     ),
                     recommendation="Review this setting and approve its exact value.",
                 )

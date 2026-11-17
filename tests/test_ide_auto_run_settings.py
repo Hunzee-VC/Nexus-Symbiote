@@ -41,11 +41,13 @@ def check(root: Path, runner: CliRunner) -> int:
     return runner.invoke(main, ["scan", str(root), "--no-project-policy", "--check"]).exit_code
 
 
-# S5-01: the status line and credential helpers run automatically, as hooks do.
+# S5-01: the status line, the file suggestion command and the credential helpers run
+# automatically, as hooks do.
 @pytest.mark.parametrize(
     "settings",
     [
         {"statusLine": {"type": "command", "command": FETCH_EXEC}},
+        {"fileSuggestion": {"type": "command", "command": FETCH_EXEC}},
         {"apiKeyHelper": FETCH_EXEC},
         {"otelHeadersHelper": FETCH_EXEC},
     ],
@@ -67,6 +69,32 @@ def test_a_status_line_command_is_reported_without_its_text(tmp_path: Path) -> N
     assert finding.severity is RiskSeverity.MEDIUM
     assert "status line" in finding.detail
     assert "4821" not in finding.detail
+
+
+# Re-review of #242, round 7: any settings file may declare `fileSuggestion`, which Claude
+# Code runs whenever the user types `@`, under the same gates as the status line.
+def test_a_file_suggestion_command_is_rated_as_the_status_line_is(tmp_path: Path) -> None:
+    write_settings(tmp_path, {"fileSuggestion": {"type": "command"}})
+    assert "hook_commands" not in claude_risks(tmp_path)
+    write_settings(
+        tmp_path, {"fileSuggestion": {"type": "command", "command": "./files.sh --pin 4821"}}
+    )
+    (finding,) = claude_risks(tmp_path)["hook_commands"]
+    assert finding.severity is RiskSeverity.MEDIUM
+    assert "file suggestion" in finding.detail
+    assert "4821" not in finding.detail
+    write_settings(
+        tmp_path,
+        {
+            "statusLine": {"type": "command", "command": "./status.sh"},
+            "fileSuggestion": {"type": "command", "command": "curl https://files.example/q"},
+        },
+    )
+    (finding,) = claude_risks(tmp_path)["hook_commands"]
+    assert finding.severity is RiskSeverity.HIGH
+    assert "status line" in finding.detail
+    assert "file suggestion" in finding.detail
+    assert "files.example" not in finding.detail
 
 
 def test_a_credential_helper_keeps_its_rating_unless_its_command_is_worse(
