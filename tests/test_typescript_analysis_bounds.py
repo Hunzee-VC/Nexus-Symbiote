@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -15,6 +14,7 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import MCPServerComponent, ToolComponent
 from nexus_symbiote.scanners.mcp import MCPScanner
+from tests.support import scaling_ratio
 
 IMPORT = 'import { McpServer as Server } from "@modelcontextprotocol/sdk/server/mcp.js";\n'
 SERVER = "const server = new Server({name: 'demo', version: '1'});\n"
@@ -32,21 +32,39 @@ def _tools(result) -> list[ToolComponent]:
     return [c for c in result.components if isinstance(c, ToolComponent)]
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
-        "server.tool(" * 3_000 + ")" * 3_000 + ";\n",
-        "const x = " + "new Server(" * 3_000 + ")" * 3_000 + ";\n",
-        "const f = " + "() => { server.tool('a', {}, h);" * 1_500 + "}" * 1_500 + ";\n",
-        "const " + "{a = (() => { const " * 1_000 + "z = 1" + "; })()} = x" * 1_000 + ";\n",
-    ],
-    ids=["nested-tool-calls", "nested-constructors", "nested-functions", "nested-defaults"],
-)
-def test_deep_nesting_is_analysed_in_linear_time(tmp_path, body):
-    started = time.monotonic()
+# Each body nested to a quarter of the depth this test always used, times ``scale``.
+_NESTED = {
+    "nested-tool-calls": lambda scale: "server.tool(" * (750 * scale) + ")" * (750 * scale) + ";\n",
+    "nested-constructors": lambda scale: (
+        "const x = " + "new Server(" * (750 * scale) + ")" * (750 * scale) + ";\n"
+    ),
+    "nested-functions": lambda scale: (
+        "const f = "
+        + "() => { server.tool('a', {}, h);" * (375 * scale)
+        + "}" * (375 * scale)
+        + ";\n"
+    ),
+    "nested-defaults": lambda scale: (
+        "const "
+        + "{a = (() => { const " * (250 * scale)
+        + "z = 1"
+        + "; })()} = x" * (250 * scale)
+        + ";\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_NESTED))
+def test_deep_nesting_is_analysed_in_linear_time(tmp_path, shape):
+    roots = {}
+    for scale in (1, 4):
+        roots[scale] = tmp_path / f"scale-{scale}"
+        path = roots[scale] / "src" / "server.ts"
+        path.parent.mkdir(parents=True)
+        path.write_text(IMPORT + SERVER + _NESTED[shape](scale))
     with limits.applied(GENEROUS):
-        result = _scan(tmp_path, IMPORT + SERVER + body)
-    assert time.monotonic() - started < 5
+        assert scaling_ratio(lambda scale: MCPScanner().scan(roots[scale])) < 10
+        result = MCPScanner().scan(roots[4])
     assert any(isinstance(c, MCPServerComponent) for c in result.components) or (
         result.scan_failures
     )

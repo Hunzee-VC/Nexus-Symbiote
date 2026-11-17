@@ -9,7 +9,6 @@ import pickletools
 import random
 import subprocess
 import sys
-import time
 import zipfile
 from collections.abc import Callable
 from dataclasses import replace
@@ -38,6 +37,7 @@ from nexus_symbiote.scanners.model import (
 )
 from nexus_symbiote.utils import pickle_load
 from nexus_symbiote.validators.integrity import IntegrityValidator
+from tests.support import scaling_ratio
 
 UNSAFE = SerializationSafety.UNSAFE_CODE_EXECUTION
 BINARY_PICKLE = "Recognized binary pickle opcode stream; object loading can execute code"
@@ -444,11 +444,16 @@ _SHARED_TUPLES = b"(N" + b"2\x86" * 40 + b"\x91."
 
 
 def test_a_frozenset_of_shared_tuples_is_rated_in_linear_time(tmp_path: Path) -> None:
-    (tmp_path / "models").mkdir()
-    (tmp_path / "models" / "shared").write_bytes(_SHARED_TUPLES)
-    started = time.monotonic()
-    assert _component(tmp_path, "models/shared") is None
-    assert time.monotonic() - started < 10
+    # Each level holds the one below twice, so a walk that does not share them is
+    # exponential in the depth; at the largest depth that is 2**40 visits.
+    roots = {}
+    for scale in (1, 4):
+        roots[scale] = tmp_path / f"scale-{scale}"
+        (roots[scale] / "models").mkdir(parents=True)
+        (roots[scale] / "models" / "shared").write_bytes(b"(N" + b"2\x86" * (10 * scale) + b"\x91.")
+    assert scaling_ratio(lambda scale: _components(roots[scale])) < 10
+    assert (roots[4] / "models" / "shared").read_bytes() == _SHARED_TUPLES
+    assert _component(roots[4], "models/shared") is None
 
 
 def test_a_resolved_object_below_shared_tuples_is_still_hashed(tmp_path: Path) -> None:

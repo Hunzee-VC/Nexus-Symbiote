@@ -406,12 +406,17 @@ def test_extras_come_off_as_pip_strips_them():
 
 
 def test_requirement_path_parsing_is_linear(tmp_path):
-    (tmp_path / "requirements.txt").write_text(
-        "".join(f"{prefix}{'[' * 1_000_000}\n" for prefix in ("x", "openai @ ", "./", "x]"))
-    )
-    started = time.monotonic()
-    result = RegistryScanner().scan(tmp_path)
-    assert time.monotonic() - started < 5
+    roots = {}
+    for scale in (1, 4):
+        roots[scale] = tmp_path / f"scale-{scale}"
+        roots[scale].mkdir()
+        (roots[scale] / "requirements.txt").write_text(
+            "".join(
+                f"{prefix}{'[' * (62_500 * scale)}\n" for prefix in ("x", "openai @ ", "./", "x]")
+            )
+        )
+    assert scaling_ratio(lambda scale: RegistryScanner().scan(roots[scale])) < 10
+    result = RegistryScanner().scan(roots[4])
     assert result.surfaces_excluded == [
         "requirements.txt: URL, VCS or path requirement not followed"
     ]
@@ -696,11 +701,16 @@ def test_tag_change_behind_a_from_flag_is_drift(tmp_path):
 
 
 def test_dockerfile_parsing_is_linear(tmp_path):
-    (tmp_path / "Dockerfile").write_text("FROM" + " " * 4_000_000)
-    (tmp_path / "Dockerfile.agent").write_text("FROM a AS b \\\n" * 300_000 + "RUN x\n")
-    started = time.monotonic()
-    result = RegistryScanner().scan(tmp_path)
-    assert time.monotonic() - started < 5
+    roots = {}
+    for scale in (1, 4):
+        roots[scale] = tmp_path / f"scale-{scale}"
+        roots[scale].mkdir()
+        (roots[scale] / "Dockerfile").write_text("FROM" + " " * (1_000_000 * scale))
+        (roots[scale] / "Dockerfile.agent").write_text(
+            "FROM a AS b \\\n" * (75_000 * scale) + "RUN x\n"
+        )
+    assert scaling_ratio(lambda scale: RegistryScanner().scan(roots[scale])) < 10
+    result = RegistryScanner().scan(roots[4])
     assert result.surfaces_excluded == ["Dockerfile: FROM instruction not parsed"]
 
 
@@ -937,14 +947,16 @@ def test_heredoc_word_reader_matches_the_heredoc_pattern():
 
 def test_directive_and_heredoc_reading_is_linear_at_the_read_limit(tmp_path):
     # Both shapes made the old patterns backtrack quadratically: about half a day
-    # each at this size.
-    (tmp_path / "Dockerfile").write_text("# a=x" + " " * 4_000_000 + "y\nFROM ollama/ollama:1\n")
-    (tmp_path / "Dockerfile.agent").write_text(
-        "RUN <<" + " " * 4_000_000 + "a<b\nFROM ollama/ollama:2\n"
-    )
-    started = time.monotonic()
-    result = RegistryScanner().scan(tmp_path)
-    assert time.monotonic() - started < 5
+    # each at the read limit, which the larger size reaches.
+    roots = {}
+    for scale in (1, 4):
+        blank = " " * (1_000_000 * scale)
+        roots[scale] = tmp_path / f"scale-{scale}"
+        roots[scale].mkdir()
+        (roots[scale] / "Dockerfile").write_text(f"# a=x{blank}y\nFROM ollama/ollama:1\n")
+        (roots[scale] / "Dockerfile.agent").write_text(f"RUN <<{blank}a<b\nFROM ollama/ollama:2\n")
+    assert scaling_ratio(lambda scale: RegistryScanner().scan(roots[scale])) < 10
+    result = RegistryScanner().scan(roots[4])
     assert [c.name for c in result.components] == ["ollama/ollama:1", "ollama/ollama:2"]
 
 

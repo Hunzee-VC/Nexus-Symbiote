@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -18,6 +17,7 @@ from nexus_symbiote.policy import PolicyError
 from nexus_symbiote.scanners.model import ModelScanner, safetensors_fingerprint
 from nexus_symbiote.utils.confined import hash_confined_file
 from nexus_symbiote.validators.integrity import VALIDATION_PASSES, IntegrityValidator
+from tests.support import scaling_ratio
 
 
 def _safetensors(path: Path, data: bytes = b"abcd") -> None:
@@ -102,18 +102,20 @@ def test_agent_manifest_models_follow_the_model_limit(tmp_path):
 def test_many_model_directories_are_scanned_in_linear_time(tmp_path):
     # Each model directory scanned every entry of the walk, several times: with the
     # entries default of 100,000 a crafted tree held the collector for 15 minutes.
-    for index in range(1_000):
-        directory = tmp_path / "models" / f"m{index:04d}"
-        directory.mkdir(parents=True)
-        (directory / "model.onnx").write_bytes(b"")
-    filler = tmp_path / "filler"
-    filler.mkdir()
-    for index in range(10_000):
-        (filler / f"f{index:05d}.txt").write_bytes(b"")
-    started = time.monotonic()
-    result = ModelScanner().scan(tmp_path)
-    assert time.monotonic() - started < 15
-    assert len(result.components) == 1_000
+    roots = {}
+    for scale in (1, 4):
+        roots[scale] = tmp_path / f"scale-{scale}"
+        for index in range(125 * scale):
+            directory = roots[scale] / "models" / f"m{index:04d}"
+            directory.mkdir(parents=True)
+            (directory / "model.onnx").write_bytes(b"")
+        filler = roots[scale] / "filler"
+        filler.mkdir()
+        for index in range(1_250 * scale):
+            (filler / f"f{index:05d}.txt").write_bytes(b"")
+    assert scaling_ratio(lambda scale: ModelScanner().scan(roots[scale])) < 10
+    result = ModelScanner().scan(roots[4])
+    assert len(result.components) == 500
     assert result.components[0].name == "models/m0000/model.onnx"
 
 
