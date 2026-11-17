@@ -94,7 +94,12 @@ A way around a limit that its entry does not describe is worth a
   not excluded, within the `depth` limit and reached without another symlink, is
   read through its target. A read through any other symlink, such as an absolute
   one or `.claude -> .`, is a failure. A walk of the project skips directory
-  symlinks and walks their targets under the targets' own names.
+  symlinks and walks their targets under the targets' own names. The `mcp` collector
+  also looks up its client paths through each such link, as `a2a` does for agent
+  cards and `ide_agents` for nested `.claude` settings, so a linked client
+  directory, such as `pkg/.gemini -> ../shared/gemini`, is read as
+  `pkg/.gemini/settings.json`, the file a host started in `pkg` opens, as well as
+  under its target's name.
 - **Every walk fails on a link out of the project.** An absolute or escaping
   symlink anywhere in the tree, such as `assets/logo.png -> /usr/share/logo.png`,
   is a failure for each collector that walks the project (`mcp`, `model`,
@@ -331,7 +336,19 @@ A way around a limit that its entry does not describe is worth a
   User-level client settings in your home directory are not read either.
 - **Some client files are only detected.** Zed `context_servers`, opencode `mcp`,
   `.continue/mcpServers/` and `.junie/mcp/mcp.json` are gaps; their servers are not
-  parsed.
+  parsed. A copy at any depth, such as `pkg/opencode.json` or
+  `pkg/.continue/mcpServers/`, is a gap too, and another spelling of one, such as
+  `pkg/.Zed/settings.json`, is a [case-variant failure](#every-collector).
+- **Gemini CLI's server command is read only as plain words.** Gemini CLI starts
+  `mcpServerCommand`, or `mcp.serverCommand` in its current settings layout, as a
+  server named `mcp`, in place of an `mcpServers` entry of that name, and so does the
+  collector. Gemini CLI splits that command as a shell would, with environment
+  variables substituted, so a value with anything but words of letters, digits and
+  `_@%+=:,./-` separated by spaces, such as `$`, quotes, a backslash, a glob or a shell
+  operator, is a failure and the server is not inventoried, and so is a value set in
+  both settings. Gemini CLI's tool discovery and call commands (`toolDiscoveryCommand`,
+  `toolCallCommand` and their `tools.` forms) are not MCP servers and are not
+  inventoried; their settings file is digested by `ide_agents`.
 - **Every file with an MCP client name is parsed.** One that does not parse, or
   whose server map is not a map of server objects, is a failure even when it is not
   an MCP configuration. Rename such a file; excluding it records a gap instead.
