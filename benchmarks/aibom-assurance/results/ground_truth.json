@@ -1,0 +1,1354 @@
+{
+  "benchmark": "AI-BOM Assurance Benchmark",
+  "version": "1.0.0",
+  "fixture": "acme-support-agent",
+  "sentinels": {
+    "token": "BENCH-SENTINEL-NOTES-TOKEN-7f3a9c",
+    "outside": "BENCH-SENTINEL-OUTSIDE-FILE-5d21"
+  },
+  "canaries": [
+    "setup-py-executed",
+    "npm-postinstall-executed",
+    "python-import-executed"
+  ],
+  "families": {
+    "agent": [
+      "instruction",
+      "agent",
+      "skill",
+      "permission"
+    ],
+    "mcp": [
+      "mcp_server",
+      "mcp_client",
+      "tool"
+    ],
+    "model": [
+      "model",
+      "endpoint"
+    ],
+    "data": [
+      "dataset",
+      "rag"
+    ],
+    "tools": [
+      "library",
+      "guardrail",
+      "infra"
+    ]
+  },
+  "items": [
+    {
+      "id": "A1",
+      "family": "agent",
+      "category": "instruction",
+      "name": "CLAUDE.md",
+      "path": "CLAUDE.md",
+      "tokens": [
+        "CLAUDE.md"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "A2",
+      "family": "agent",
+      "category": "instruction",
+      "name": "AGENTS.md",
+      "path": "AGENTS.md",
+      "tokens": [
+        "AGENTS.md"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "A3",
+      "family": "agent",
+      "category": "instruction",
+      "name": "copilot-instructions.md",
+      "path": ".github/copilot-instructions.md",
+      "tokens": [
+        "copilot-instructions"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "A4",
+      "family": "agent",
+      "category": "instruction",
+      "name": "agent-rules.md (imported by CLAUDE.md)",
+      "path": "docs/agent-rules.md",
+      "tokens": [
+        "agent-rules.md"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "A5",
+      "family": "agent",
+      "category": "agent",
+      "name": "support-triage-agent (LangGraph)",
+      "path": "agent/main.py",
+      "tokens": [
+        "support-triage-agent",
+        "support_triage_agent",
+        "create_react_agent",
+        "agent/main.py"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "A6",
+      "family": "agent",
+      "category": "agent",
+      "name": "A2A agent card",
+      "path": ".well-known/agent.json",
+      "tokens": [
+        "Acme Support Agent",
+        "support-agent.acme.example",
+        ".well-known/agent.json"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "A7",
+      "family": "agent",
+      "category": "agent",
+      "name": "Claude Code subagent reviewer",
+      "path": ".claude/agents/reviewer.md",
+      "tokens": [
+        ".claude/agents/reviewer",
+        "agents/reviewer.md"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "A8",
+      "family": "agent",
+      "category": "agent",
+      "name": "n8n support-triage workflow agent",
+      "path": "workflows/n8n/support-triage.json",
+      "tokens": [
+        "support-triage.json",
+        "n8n-nodes-langchain.agent",
+        "Triage Agent"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "S1",
+      "family": "agent",
+      "category": "skill",
+      "name": "deploy-prod skill",
+      "path": ".claude/skills/deploy-prod/SKILL.md",
+      "tokens": [
+        "deploy-prod"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "S2",
+      "family": "agent",
+      "category": "skill",
+      "name": "triage-ticket skill",
+      "path": ".claude/skills/triage-ticket/SKILL.md",
+      "tokens": [
+        "triage-ticket"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "S3",
+      "family": "agent",
+      "category": "skill",
+      "name": "summarize-thread skill",
+      "path": "skills/summarize-thread/SKILL.md",
+      "tokens": [
+        "summarize-thread"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "P1",
+      "family": "agent",
+      "category": "permission",
+      "name": "Claude Code settings (permissions, hooks)",
+      "path": ".claude/settings.json",
+      "tokens": [
+        ".claude/settings.json",
+        "acceptEdits",
+        "check-command.sh"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "M1",
+      "family": "mcp",
+      "category": "mcp_server",
+      "name": "filesystem (scoped root)",
+      "path": ".mcp.json",
+      "tokens": [
+        "server-filesystem@2025",
+        "/workspace/acme"
+      ],
+      "names": [],
+      "shared_tokens": [
+        "server-filesystem",
+        "filesystem"
+      ],
+      "local_file": false
+    },
+    {
+      "id": "M2",
+      "family": "mcp",
+      "category": "mcp_server",
+      "name": "github (unpinned)",
+      "path": ".mcp.json",
+      "tokens": [
+        "server-github"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "M3",
+      "family": "mcp",
+      "category": "mcp_server",
+      "name": "tickets (local Python server)",
+      "path": ".mcp.json",
+      "tokens": [
+        "acme-tickets",
+        "ticket_server",
+        "tickets"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "M4",
+      "family": "mcp",
+      "category": "mcp_server",
+      "name": "remote-kb (SSE over HTTP)",
+      "path": ".mcp.json",
+      "tokens": [
+        "remote-kb",
+        "kb-mcp.internal.example"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "M5",
+      "family": "mcp",
+      "category": "mcp_server",
+      "name": "notes (local TypeScript server)",
+      "path": ".cursor/mcp.json",
+      "tokens": [
+        "acme-notes",
+        "notes_server",
+        "notes"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "M6",
+      "family": "mcp",
+      "category": "mcp_server",
+      "name": "fs-root (filesystem rooted at /)",
+      "path": ".cursor/mcp.json",
+      "tokens": [
+        "fs-root"
+      ],
+      "names": [],
+      "shared_tokens": [
+        "server-filesystem",
+        "filesystem"
+      ],
+      "local_file": false
+    },
+    {
+      "id": "M7",
+      "family": "mcp",
+      "category": "mcp_server",
+      "name": "fetch (VS Code)",
+      "path": ".vscode/mcp.json",
+      "tokens": [
+        "mcp-server-fetch"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "M8",
+      "family": "mcp",
+      "category": "mcp_server",
+      "name": "search (Codex)",
+      "path": ".codex/config.toml",
+      "tokens": [
+        "server-brave-search",
+        "brave"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "M9",
+      "family": "mcp",
+      "category": "mcp_server",
+      "name": "memory (Gemini CLI)",
+      "path": ".gemini/settings.json",
+      "tokens": [
+        "server-memory"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "M10",
+      "family": "mcp",
+      "category": "mcp_server",
+      "name": "MCP Registry manifest",
+      "path": "mcp_servers/ticket_server/server.json",
+      "tokens": [
+        "io.acme/tickets",
+        "acme-tickets-mcp"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "M11",
+      "family": "mcp",
+      "category": "mcp_client",
+      "name": "MultiServerMCPClient in agent code",
+      "path": "agent/main.py",
+      "tokens": [
+        "MultiServerMCPClient",
+        "mcp_client",
+        "mcp client"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "T1",
+      "family": "mcp",
+      "category": "tool",
+      "name": "list_tickets",
+      "path": "mcp_servers/ticket_server/server.py",
+      "tokens": [
+        "list_tickets"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "T2",
+      "family": "mcp",
+      "category": "tool",
+      "name": "get_ticket",
+      "path": "mcp_servers/ticket_server/server.py",
+      "tokens": [
+        "get_ticket"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "T3",
+      "family": "mcp",
+      "category": "tool",
+      "name": "update_ticket_status",
+      "path": "mcp_servers/ticket_server/server.py",
+      "tokens": [
+        "update_ticket_status"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "T4",
+      "family": "mcp",
+      "category": "tool",
+      "name": "delete_ticket",
+      "path": "mcp_servers/ticket_server/server.py",
+      "tokens": [
+        "delete_ticket"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "T5",
+      "family": "mcp",
+      "category": "tool",
+      "name": "run_report_sql",
+      "path": "mcp_servers/ticket_server/server.py",
+      "tokens": [
+        "run_report_sql"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "T6",
+      "family": "mcp",
+      "category": "tool",
+      "name": "create_note",
+      "path": "mcp_servers/notes_server/src/index.ts",
+      "tokens": [
+        "create_note"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "T7",
+      "family": "mcp",
+      "category": "tool",
+      "name": "search_notes",
+      "path": "mcp_servers/notes_server/src/index.ts",
+      "tokens": [
+        "search_notes"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "T8",
+      "family": "mcp",
+      "category": "tool",
+      "name": "search_knowledge_base",
+      "path": "agent/tools.py",
+      "tokens": [
+        "search_knowledge_base"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "T9",
+      "family": "mcp",
+      "category": "tool",
+      "name": "send_customer_email",
+      "path": "agent/tools.py",
+      "tokens": [
+        "send_customer_email"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "T10",
+      "family": "mcp",
+      "category": "tool",
+      "name": "escalate_to_human",
+      "path": "agent/tools.py",
+      "tokens": [
+        "escalate_to_human"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "MD1",
+      "family": "model",
+      "category": "model",
+      "name": "gpt-4o-2024-08-06 (primary)",
+      "path": "agent/main.py",
+      "tokens": [
+        "gpt-4o-2024-08-06"
+      ],
+      "names": [],
+      "shared_tokens": [
+        "gpt-4o"
+      ],
+      "local_file": false
+    },
+    {
+      "id": "MD2",
+      "family": "model",
+      "category": "model",
+      "name": "claude-sonnet-4-5 (fallback)",
+      "path": "agent/main.py",
+      "tokens": [
+        "claude-sonnet-4-5"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "MD3",
+      "family": "model",
+      "category": "model",
+      "name": "text-embedding-3-small",
+      "path": "agent/rag.py",
+      "tokens": [
+        "text-embedding-3-small"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "MD4",
+      "family": "model",
+      "category": "model",
+      "name": "DistilBERT SST-2 (pinned revision)",
+      "path": "agent/train.py",
+      "tokens": [
+        "distilbert-base-uncased-finetuned-sst-2-english"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "MD5",
+      "family": "model",
+      "category": "model",
+      "name": "all-MiniLM-L6-v2 (unpinned)",
+      "path": "agent/train.py",
+      "tokens": [
+        "all-MiniLM-L6-v2"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "MD6",
+      "family": "model",
+      "category": "model",
+      "name": "intent-classifier safetensors",
+      "path": "models/intent-classifier/model.safetensors",
+      "tokens": [
+        "intent-classifier",
+        "model.safetensors"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": true
+    },
+    {
+      "id": "MD7",
+      "family": "model",
+      "category": "model",
+      "name": "legacy pickle model",
+      "path": "models/legacy/intent_model.pkl",
+      "tokens": [
+        "intent_model.pkl"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": true
+    },
+    {
+      "id": "MD8",
+      "family": "model",
+      "category": "model",
+      "name": "tiny GGUF model",
+      "path": "models/tiny-llm/tiny.gguf",
+      "tokens": [
+        "tiny.gguf",
+        "acme-tiny-llm"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": true
+    },
+    {
+      "id": "MD9",
+      "family": "model",
+      "category": "model",
+      "name": "identity ONNX graph",
+      "path": "models/embed/identity.onnx",
+      "tokens": [
+        "identity.onnx",
+        "acme-identity"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": true
+    },
+    {
+      "id": "MD10",
+      "family": "model",
+      "category": "model",
+      "name": "Ollama Modelfile llama3.2",
+      "path": "infra/ollama/Modelfile",
+      "tokens": [
+        "llama3.2",
+        "Modelfile"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "MD11",
+      "family": "model",
+      "category": "model",
+      "name": "vLLM served Llama 3.1 8B",
+      "path": "infra/docker-compose.yml",
+      "tokens": [
+        "Llama-3.1-8B-Instruct"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "MD12",
+      "family": "model",
+      "category": "model",
+      "name": "gpt-4o-mini (n8n)",
+      "path": "workflows/n8n/support-triage.json",
+      "tokens": [
+        "gpt-4o-mini"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "MD13",
+      "family": "model",
+      "category": "model",
+      "name": "o4-mini (Codex default)",
+      "path": ".codex/config.toml",
+      "tokens": [
+        "o4-mini"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "E1",
+      "family": "model",
+      "category": "endpoint",
+      "name": "OpenAI-compatible endpoint (vLLM)",
+      "path": ".env.example",
+      "tokens": [
+        "vllm.internal.example"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "D1",
+      "family": "data",
+      "category": "dataset",
+      "name": "imdb",
+      "path": "agent/train.py",
+      "tokens": [
+        "imdb"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "D2",
+      "family": "data",
+      "category": "dataset",
+      "name": "glue/sst2",
+      "path": "agent/eval.py",
+      "tokens": [
+        "sst2",
+        "glue"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "D3",
+      "family": "data",
+      "category": "dataset",
+      "name": "intents.csv",
+      "path": "data/train/intents.csv",
+      "tokens": [
+        "intents.csv"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": true
+    },
+    {
+      "id": "D4",
+      "family": "data",
+      "category": "dataset",
+      "name": "golden_set.jsonl",
+      "path": "data/eval/golden_set.jsonl",
+      "tokens": [
+        "golden_set.jsonl"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": true
+    },
+    {
+      "id": "D5",
+      "family": "data",
+      "category": "dataset",
+      "name": "datasheet",
+      "path": "data/DATASHEET.md",
+      "tokens": [
+        "DATASHEET.md"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": true
+    },
+    {
+      "id": "R1",
+      "family": "data",
+      "category": "rag",
+      "name": "knowledge-base directory",
+      "path": "data/kb",
+      "tokens": [
+        "data/kb"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "R2",
+      "family": "data",
+      "category": "rag",
+      "name": "S3 knowledge-base source",
+      "path": "agent/rag.py",
+      "tokens": [
+        "acme-support-kb"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "R3",
+      "family": "data",
+      "category": "rag",
+      "name": "Chroma vector store collection",
+      "path": "rag_config.yaml",
+      "tokens": [
+        "support-kb",
+        "persist_directory"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "L1",
+      "family": "tools",
+      "category": "library",
+      "name": "langchain",
+      "path": "requirements.txt",
+      "tokens": [],
+      "names": [
+        "langchain"
+      ],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "L2",
+      "family": "tools",
+      "category": "library",
+      "name": "langgraph",
+      "path": "requirements.txt",
+      "tokens": [],
+      "names": [
+        "langgraph"
+      ],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "L3",
+      "family": "tools",
+      "category": "library",
+      "name": "langchain-openai",
+      "path": "requirements.txt",
+      "tokens": [],
+      "names": [
+        "langchain-openai",
+        "langchain_openai"
+      ],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "L4",
+      "family": "tools",
+      "category": "library",
+      "name": "langchain-anthropic",
+      "path": "requirements.txt",
+      "tokens": [],
+      "names": [
+        "langchain-anthropic",
+        "langchain_anthropic"
+      ],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "L5",
+      "family": "tools",
+      "category": "library",
+      "name": "langchain-mcp-adapters",
+      "path": "requirements.txt",
+      "tokens": [],
+      "names": [
+        "langchain-mcp-adapters",
+        "langchain_mcp_adapters"
+      ],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "L6",
+      "family": "tools",
+      "category": "library",
+      "name": "openai",
+      "path": "requirements.txt",
+      "tokens": [],
+      "names": [
+        "openai"
+      ],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "L7",
+      "family": "tools",
+      "category": "library",
+      "name": "anthropic",
+      "path": "requirements.txt",
+      "tokens": [],
+      "names": [
+        "anthropic"
+      ],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "L8",
+      "family": "tools",
+      "category": "library",
+      "name": "transformers",
+      "path": "requirements.txt",
+      "tokens": [],
+      "names": [
+        "transformers"
+      ],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "L9",
+      "family": "tools",
+      "category": "library",
+      "name": "chromadb",
+      "path": "requirements.txt",
+      "tokens": [],
+      "names": [
+        "chromadb"
+      ],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "L10",
+      "family": "tools",
+      "category": "library",
+      "name": "mcp",
+      "path": "requirements.txt",
+      "tokens": [],
+      "names": [
+        "mcp"
+      ],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "L11",
+      "family": "tools",
+      "category": "library",
+      "name": "llm-guard",
+      "path": "requirements.txt",
+      "tokens": [],
+      "names": [
+        "llm-guard",
+        "llm_guard"
+      ],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "L12",
+      "family": "tools",
+      "category": "library",
+      "name": "@modelcontextprotocol/sdk",
+      "path": "mcp_servers/notes_server/package.json",
+      "tokens": [],
+      "names": [
+        "@modelcontextprotocol/sdk"
+      ],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "L13",
+      "family": "tools",
+      "category": "library",
+      "name": "@anthropic-ai/sdk",
+      "path": "package.json",
+      "tokens": [],
+      "names": [
+        "@anthropic-ai/sdk"
+      ],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "L14",
+      "family": "tools",
+      "category": "library",
+      "name": "ai (Vercel AI SDK)",
+      "path": "package.json",
+      "tokens": [],
+      "names": [
+        "ai"
+      ],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "G1",
+      "family": "tools",
+      "category": "guardrail",
+      "name": "llm-guard input screening",
+      "path": "agent/guard.py",
+      "tokens": [
+        "guard.py",
+        "PromptInjection",
+        "llm_guard.input_scanners"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "I1",
+      "family": "tools",
+      "category": "infra",
+      "name": "agent Dockerfile",
+      "path": "infra/Dockerfile",
+      "tokens": [
+        "infra/Dockerfile",
+        "python:3.12-slim"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "I2",
+      "family": "tools",
+      "category": "infra",
+      "name": "vLLM container",
+      "path": "infra/docker-compose.yml",
+      "tokens": [
+        "vllm/vllm-openai"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "I3",
+      "family": "tools",
+      "category": "infra",
+      "name": "Ollama container (latest)",
+      "path": "infra/docker-compose.yml",
+      "tokens": [
+        "ollama/ollama"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "I4",
+      "family": "tools",
+      "category": "infra",
+      "name": "Chroma container",
+      "path": "infra/docker-compose.yml",
+      "tokens": [
+        "chromadb/chroma"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "I5",
+      "family": "tools",
+      "category": "infra",
+      "name": "Kubernetes vLLM deployment",
+      "path": "infra/k8s/vllm-deployment.yaml",
+      "tokens": [
+        "vllm-inference",
+        "vllm-deployment"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    },
+    {
+      "id": "I6",
+      "family": "tools",
+      "category": "infra",
+      "name": "CI AI action",
+      "path": ".github/workflows/agent-eval.yml",
+      "tokens": [
+        "claude-code-action"
+      ],
+      "names": [],
+      "shared_tokens": [],
+      "local_file": false
+    }
+  ],
+  "risks": [
+    {
+      "id": "K1",
+      "title": "Unpinned MCP server packages (github, fetch, memory, brave, fs-root)",
+      "subject_tokens": [
+        "server-github",
+        "mcp-server-fetch",
+        "server-memory",
+        "server-brave-search",
+        "fs-root",
+        "@modelcontextprotocol/server-filesystem\""
+      ],
+      "reason_tokens": [
+        "unpinned",
+        "pin",
+        "pinned",
+        "pinning",
+        "no version",
+        "no exact version",
+        "without a version",
+        "floating",
+        "latest",
+        "mutable",
+        "unversioned"
+      ]
+    },
+    {
+      "id": "K2",
+      "title": "Plaintext token in an MCP config env block",
+      "subject_tokens": [
+        "notes",
+        "NOTES_TOKEN",
+        ".cursor/mcp.json"
+      ],
+      "reason_tokens": [
+        "credential",
+        "credentials",
+        "secret",
+        "secrets",
+        "token",
+        "plaintext",
+        "hardcoded",
+        "hard-coded",
+        "exposed",
+        "inline",
+        "literal"
+      ]
+    },
+    {
+      "id": "K3",
+      "title": "MCP filesystem server rooted at /",
+      "subject_tokens": [
+        "fs-root",
+        "server-filesystem"
+      ],
+      "reason_tokens": [
+        "root",
+        "broad",
+        "over-broad",
+        "entire",
+        "whole",
+        "unrestricted",
+        "scope",
+        "wide",
+        "widened",
+        "filesystem access"
+      ]
+    },
+    {
+      "id": "K4",
+      "title": "Remote MCP transport over cleartext HTTP without authentication",
+      "subject_tokens": [
+        "remote-kb",
+        "kb-mcp.internal.example"
+      ],
+      "reason_tokens": [
+        "http://",
+        "not https",
+        "plaintext",
+        "cleartext",
+        "unencrypted",
+        "insecure",
+        "unauthenticated",
+        "no auth",
+        "without auth",
+        "no authentication",
+        "without authentication",
+        "tls",
+        "non-tls",
+        "unverified endpoint"
+      ]
+    },
+    {
+      "id": "K5",
+      "title": "Pickle-format model file",
+      "subject_tokens": [
+        "intent_model.pkl",
+        "intent_model",
+        ".pkl"
+      ],
+      "reason_tokens": [
+        "pickle",
+        "deserialization",
+        "deserialize",
+        "unsafe",
+        "arbitrary",
+        "code execution",
+        "code-executing",
+        "executes",
+        "execution",
+        "critical"
+      ]
+    },
+    {
+      "id": "K6",
+      "title": "Hugging Face model without a pinned revision",
+      "subject_tokens": [
+        "all-MiniLM-L6-v2"
+      ],
+      "reason_tokens": [
+        "revision",
+        "pin",
+        "pinned",
+        "unpinned",
+        "floating",
+        "mutable",
+        "commit"
+      ]
+    },
+    {
+      "id": "K7",
+      "title": "Container image and Modelfile on mutable latest tags",
+      "subject_tokens": [
+        "ollama/ollama",
+        "llama3.2"
+      ],
+      "reason_tokens": [
+        "latest",
+        "pin",
+        "pinned",
+        "unpinned",
+        "tag",
+        "mutable",
+        "digest",
+        "review"
+      ]
+    },
+    {
+      "id": "K8",
+      "title": "Unpinned Python dependencies (torch, llm-guard)",
+      "subject_tokens": [
+        "torch",
+        "llm-guard"
+      ],
+      "reason_tokens": [
+        "pin",
+        "pinned",
+        "unpinned",
+        "nonexact",
+        "no exact version",
+        "constraint",
+        "range",
+        "wildcard",
+        "unversioned",
+        "floating"
+      ]
+    },
+    {
+      "id": "K9",
+      "title": "Destructive and SQL-executing tools exposed by an MCP server",
+      "subject_tokens": [
+        "delete_ticket",
+        "run_report_sql"
+      ],
+      "reason_tokens": [
+        "destructive",
+        "delete",
+        "deletes",
+        "deletion",
+        "sql",
+        "injection",
+        "dangerous",
+        "high-impact",
+        "write",
+        "irreversible",
+        "privilege",
+        "sensitive",
+        "risk"
+      ]
+    },
+    {
+      "id": "K10",
+      "title": "Permissive coding-agent default mode and shell hook",
+      "subject_tokens": [
+        "acceptEdits",
+        ".claude/settings.json",
+        "defaultMode",
+        "claude-code",
+        "check-command.sh"
+      ],
+      "reason_tokens": [
+        "permission",
+        "permissions",
+        "mode",
+        "allow",
+        "hook",
+        "hooks",
+        "accepts",
+        "approval",
+        "without a prompt",
+        "edits"
+      ]
+    },
+    {
+      "id": "K11",
+      "title": "CI workflow runs a third-party AI action from a mutable tag with a secret",
+      "subject_tokens": [
+        "claude-code-action"
+      ],
+      "reason_tokens": [
+        "pin",
+        "pinned",
+        "unpinned",
+        "sha",
+        "mutable",
+        "tag",
+        "secret"
+      ]
+    }
+  ],
+  "decoys": [
+    {
+      "id": "X1",
+      "tokens": [
+        "legacy-sql",
+        "mcp-server-sqlite"
+      ],
+      "why": "Commented-out server inside JSONC; no client loads it."
+    },
+    {
+      "id": "X2",
+      "tokens": [
+        "Mixtral-8x7B",
+        "mixtral"
+      ],
+      "why": "Model named only in blog prose."
+    },
+    {
+      "id": "X3",
+      "tokens": [
+        "purge_all_tickets"
+      ],
+      "why": "Tool name that appears only inside a test string."
+    }
+  ],
+  "runtime": {
+    "trace_file": "telemetry/traces.json",
+    "declared": [
+      {
+        "kind": "model",
+        "name": "gpt-4o-2024-08-06"
+      },
+      {
+        "kind": "tool",
+        "name": "get_ticket"
+      },
+      {
+        "kind": "tool",
+        "name": "search_notes"
+      }
+    ],
+    "undeclared": [
+      {
+        "kind": "model",
+        "name": "gpt-4.1-mini"
+      },
+      {
+        "kind": "tool",
+        "name": "export_customers"
+      }
+    ]
+  }
+}

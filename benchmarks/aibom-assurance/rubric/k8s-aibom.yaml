@@ -1,0 +1,44 @@
+tool: k8s-aibom
+display: "k8s-aibom (Google Cloud, Kubernetes controller)"
+runnable: false
+not_run_reason: >
+  A Kubernetes controller that inventories running AI workloads. This sandbox has no
+  container runtime or cluster, so nothing could be measured. Criteria are from the project
+  README (D) or unverifiable (U). It is a runtime tool; a static fixture is not its input.
+claimed_dimensions: [D2, D4, D6, D7, D8]
+claimed_families: [model, tools]
+manual:
+  D1.agent: {points: 0, label: U, note: "static fixture is not its input"}
+  D1.mcp: {points: 0, label: U, note: "static fixture is not its input"}
+  D1.model: {points: 0, label: U, note: "would inventory served models from running pods; not measurable here"}
+  D1.data: {points: 0, label: U, note: "static fixture is not its input"}
+  D1.tools: {points: 0, label: U, note: "would inventory runtime containers; not measurable here"}
+  D2.locator: {points: 4, label: D, note: "README: an evidence locator for every attribute"}
+  D2.hash: {points: 2, label: D, note: "image digests once pulled; model identity verified against Sigstore or OpenSSF Model Signing since v1.5.0"}
+  D2.version: {points: 2, label: D, note: "runtime and model versions where declared or inferred"}
+  D2.license: {points: 0, label: U, note: "not documented"}
+  D2.supplier: {points: 0, label: U, note: "not documented"}
+  D2.confidence: {points: 2, label: D, note: "declared, verified, inferred and unresolved tiers per attribute"}
+  D3.recall: {points: 0, label: U, note: "not measurable here"}
+  D3.quality: {points: 0, label: U, note: "not measurable here"}
+  D4.cyclonedx: {points: 3, label: D, note: "CycloneDX 1.6 ML-BOM documents"}
+  D4.spdx: {points: 0, label: D, note: "no SPDX output documented"}
+  D4.sarif: {points: 0, label: D, note: "no SARIF output documented"}
+  D4.ml_structures: {points: 2, label: D, note: "ML-BOM with machine-learning-model components; modelCard use not confirmed"}
+  D4.g7: {points: 0, label: U, note: "not measurable here"}
+  D5.determinism: {points: 0, label: U, note: "runtime state changes; not measurable here"}
+  D5.serial: {points: 0, label: U, note: "not measurable here"}
+  D5.signing: {points: 0, label: U, note: "verifies model signatures; signing of the emitted BOM not documented"}
+  D5.diff: {points: 0, label: D, note: "write-once storage sink; no BOM diff documented"}
+  D6.no_exec: {points: 3, label: D, note: "observes through the Kubernetes API only; no privileged container, DaemonSet or node agent"}
+  D6.confinement: {points: 0, label: U, note: "not applicable to a cluster controller; not measured"}
+  D6.redaction: {points: 0, label: U, note: "not measured"}
+  D6.offline: {points: 1, label: D, note: "in-cluster operation with air-gapped trust-root files supported"}
+  D6.pinning: {points: 2, label: M, note: "go.sum and an OpenSSF Scorecard workflow in the repository; Helm chart on ghcr.io"}
+  D6.security_policy: {points: 1, label: M, note: "SECURITY.md present"}
+  D7.ingest: {points: 2, label: D, note: "builds the BOM from runtime state and separates declared from inferred and unresolved attributes; does not compare against a pre-declared BOM"}
+  D7.capability: {points: 2, label: D, note: "unprivileged controller inventories inference services, agent stacks, RAG pipelines and training jobs at runtime"}
+  D8.gate: {points: 0, label: U, note: "not documented"}
+  D8.ci: {points: 1, label: D, note: "Helm chart and Artifact Hub listing; GKE blueprint integration"}
+  D8.speed: {points: 0, label: U, note: "not measurable here"}
+  D8.docs: {points: 0, label: U, note: "not reproducible here"}

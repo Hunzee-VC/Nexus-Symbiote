@@ -1,0 +1,45 @@
+tool: wasmagent-agentbom
+display: "WasmAgent agentbom-core 0.4.0 (spec and library)"
+runnable: false
+not_run_reason: >
+  A TypeScript library that validates, compliance-checks and diffs documents in its own
+  AgentBOM format. It does not discover components, so there is no scan to run against the
+  fixture. The library's validate, compliance and diff functions were exercised on a
+  hand-written document (see RESULTS.md); everything else is from its README.
+claimed_dimensions: [D3, D5, D8]
+claimed_families: [agent, mcp]
+manual:
+  D1.agent: {points: 0, label: U, note: "no discovery"}
+  D1.mcp: {points: 0, label: U, note: "no discovery"}
+  D1.model: {points: 0, label: U, note: "no discovery"}
+  D1.data: {points: 0, label: U, note: "no discovery"}
+  D1.tools: {points: 0, label: U, note: "no discovery"}
+  D2.locator: {points: 0, label: U, note: "no discovery"}
+  D2.hash: {points: 0, label: U, note: "no discovery"}
+  D2.version: {points: 0, label: U, note: "no discovery"}
+  D2.license: {points: 0, label: U, note: "no discovery"}
+  D2.supplier: {points: 0, label: U, note: "no discovery"}
+  D2.confidence: {points: 0, label: U, note: "no discovery"}
+  D3.recall: {points: 0, label: U, note: "no scanner; compliance rules apply to a document the user supplies"}
+  D3.quality: {points: 0, label: M, note: "checkCompliance threw TypeError with the README's options object and with two guessed profile shapes on 0.4.0; no findings could be produced"}
+  D4.cyclonedx: {points: 0, label: D, note: "own JSON format; alignment with the CycloneDX Agent BOM proposal is stated, no CycloneDX output"}
+  D4.spdx: {points: 0, label: D, note: "none"}
+  D4.sarif: {points: 0, label: D, note: "none"}
+  D4.ml_structures: {points: 0, label: D, note: "own format"}
+  D4.g7: {points: 0, label: U, note: "not applicable"}
+  D5.determinism: {points: 0, label: U, note: "no generation step"}
+  D5.serial: {points: 0, label: U, note: "no generation step"}
+  D5.signing: {points: 1, label: D, note: "compliance rule `require_signed` checks a signature field; no signing implementation"}
+  D5.diff: {points: 1, label: M, note: "diffAgentBOM ran and returned tools, permissions and risks sections; the README's buildDriftAlert does not exist in 0.4.0 and createDriftAlert plus formatDriftAlert threw on a guessed input"}
+  D6.no_exec: {points: 0, label: U, note: "no scanner"}
+  D6.confinement: {points: 0, label: U, note: "no scanner"}
+  D6.redaction: {points: 0, label: U, note: "no scanner"}
+  D6.offline: {points: 2, label: M, note: "pure functions; no network use"}
+  D6.pinning: {points: 1, label: M, note: "npm release carries provenance attestations; no lockfile found at the repository root"}
+  D6.security_policy: {points: 0, label: M, note: "no SECURITY.md found"}
+  D7.ingest: {points: 0, label: D, note: "none"}
+  D7.capability: {points: 0, label: D, note: "none"}
+  D8.gate: {points: 0, label: M, note: "checkCompliance, the documented gate, could not be run (TypeError)"}
+  D8.ci: {points: 0, label: D, note: "library only"}
+  D8.speed: {points: 0, label: U, note: "no scan"}
+  D8.docs: {points: 0, label: M, note: "README examples do not run on 0.4.0: validateAgentBOM works, but the documented tools shape fails validation, checkCompliance throws and buildDriftAlert is not exported"}

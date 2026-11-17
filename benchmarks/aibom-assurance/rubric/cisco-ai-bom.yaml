@@ -1,0 +1,52 @@
+tool: cisco-ai-bom
+display: "Cisco AI BOM 1.10.1 (deterministic tiers only)"
+runnable: true
+claimed_dimensions: [D1, D2, D3, D4, D5, D6, D7, D8]
+claimed_families: [agent, mcp, model, data, tools]
+notes: >
+  `cisco-aibom analyze` refuses to run without an LLM provider, so the benchmark drove the same
+  `ScanPipeline` class that `cisco-aibom watch` uses (tiers 1 and 2, no agentic stage) and
+  rendered the package's own JSON, CycloneDX, SARIF and SPDX reporters. The vendor's full
+  pipeline sends every candidate to an LLM for confirmation and enrichment; results here are
+  a floor for discovery and may include candidates the LLM stage would have removed.
+manual:
+  D3.quality:
+    points: 2
+    label: M
+    note: "risk flags carry severity, weight, description and file location; SARIF rules carry ids"
+  D5.signing:
+    points: 0
+    label: D
+    note: "no BOM signing or attestation feature documented"
+  D5.diff:
+    points: 2
+    label: M
+    note: "`cisco-aibom diff run` compared the two deterministic reports: 58 unchanged components, 0 added, 0 removed, 0 changed"
+  D6.offline:
+    points: 0
+    label: M
+    note: "no offline flag; the deterministic run queried OSV (403 through the sandbox proxy) and `analyze` needs an LLM endpoint"
+  D6.pinning:
+    points: 2
+    label: M
+    note: "aibom/uv.lock in the repository; PyPI release carries PEP 740 provenance attestations"
+  D6.security_policy:
+    points: 1
+    label: M
+    note: "SECURITY.md present"
+  D7.ingest:
+    points: 0
+    label: D
+    note: "no runtime telemetry ingestion against a BOM"
+  D7.capability:
+    points: 1
+    label: D
+    note: "cloud scanning of Bedrock, Vertex AI and Azure AI resources inventories deployed AI assets; `watch` re-scans on change; neither exercised"
+  D8.gate:
+    points: 1
+    label: D
+    note: "--fail-on severity and --policy YAML gates on `analyze`"
+  D8.docs:
+    points: 1
+    label: D
+    note: "documented quickstart needs an LLM key, so it could not be reproduced here; command syntax matched the CLI help"

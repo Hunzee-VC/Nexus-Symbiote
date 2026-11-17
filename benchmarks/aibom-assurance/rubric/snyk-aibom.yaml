@@ -1,0 +1,44 @@
+tool: snyk-aibom
+display: "Snyk `snyk aibom` (CLI 1.1308.4)"
+runnable: false
+not_run_reason: >
+  The Snyk CLI wrapper could not download its binary through the sandbox proxy, and the
+  `aibom` command requires a Snyk account and sends the project to Snyk's hosted analysis.
+  Every criterion below is from Snyk's documentation (D) or unverifiable (U).
+claimed_dimensions: [D1, D2, D3, D4, D6, D8]
+claimed_families: [agent, mcp, model, data, tools]
+manual:
+  D1.agent: {points: 0, label: U, note: "documentation lists agents and tools; recall not measurable here"}
+  D1.mcp: {points: 0, label: U, note: "documentation lists MCP servers; recall not measurable here"}
+  D1.model: {points: 0, label: U, note: "documentation lists models; recall not measurable here"}
+  D1.data: {points: 0, label: U, note: "documentation lists datasets; recall not measurable here"}
+  D1.tools: {points: 0, label: U, note: "documentation lists AI libraries; recall not measurable here"}
+  D2.locator: {points: 0, label: U, note: "not observable"}
+  D2.hash: {points: 0, label: U, note: "not observable"}
+  D2.version: {points: 0, label: U, note: "not observable"}
+  D2.license: {points: 0, label: U, note: "not observable"}
+  D2.supplier: {points: 0, label: U, note: "not observable"}
+  D2.confidence: {points: 0, label: U, note: "not observable"}
+  D3.recall: {points: 0, label: U, note: "not observable"}
+  D3.quality: {points: 0, label: U, note: "not observable"}
+  D4.cyclonedx: {points: 3, label: D, note: "documented output is CycloneDX 1.6 JSON"}
+  D4.spdx: {points: 0, label: D, note: "no SPDX output documented"}
+  D4.sarif: {points: 0, label: D, note: "no SARIF output documented; HTML report via --html"}
+  D4.ml_structures: {points: 0, label: U, note: "not observable"}
+  D4.g7: {points: 0, label: U, note: "not observable"}
+  D5.determinism: {points: 0, label: U, note: "not observable"}
+  D5.serial: {points: 0, label: U, note: "not observable"}
+  D5.signing: {points: 0, label: D, note: "no BOM signing documented"}
+  D5.diff: {points: 0, label: D, note: "no BOM diff documented"}
+  D6.no_exec: {points: 0, label: U, note: "not observable"}
+  D6.confinement: {points: 0, label: U, note: "not observable"}
+  D6.redaction: {points: 0, label: U, note: "not observable"}
+  D6.offline: {points: 0, label: D, note: "requires an internet connection and a Snyk account; the project is analysed by Snyk's service"}
+  D6.pinning: {points: 1, label: M, note: "package-lock.json in snyk/cli; npm release signed but without provenance attestations (registry probe)"}
+  D6.security_policy: {points: 1, label: M, note: "SECURITY.md present in snyk/cli"}
+  D7.ingest: {points: 0, label: D, note: "not documented"}
+  D7.capability: {points: 0, label: D, note: "not documented"}
+  D8.gate: {points: 0, label: U, note: "no fail-on option documented for `snyk aibom`"}
+  D8.ci: {points: 1, label: D, note: "Snyk CLI runs in every major CI; JSON output pipes into the open-source aibom viewer"}
+  D8.speed: {points: 0, label: U, note: "not observable"}
+  D8.docs: {points: 0, label: U, note: "not reproducible here"}

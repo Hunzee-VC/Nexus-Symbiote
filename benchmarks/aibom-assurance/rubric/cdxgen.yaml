@@ -1,0 +1,53 @@
+tool: cdxgen
+display: "cdxgen 13.8.0 (OWASP), `aibom` command"
+runnable: true
+claimed_dimensions: [D1, D2, D3, D4, D5, D6, D7, D8]
+claimed_families: [agent, mcp, model, data, tools]
+notes: >
+  Run as `aibom <fixture> -o bom.cdx.json` (the AI-BOM entry point) and as plain
+  `cdxgen <fixture> -o bom.cdx.json` (auto-detected project types, which adds the MCP and
+  JavaScript overlays); discovery credit is the union of both documented zero-configuration
+  invocations. Also `--format spdx` and a `--no-install-deps` safe run. The plain `cdxgen`
+  run executed the fixture's `setup.py` while resolving Python metadata with install-deps on,
+  which cdxgen itself warns about on the console; the `aibom` run did not.
+manual:
+  D3.quality:
+    points: 2
+    label: M
+    note: "bom-audit rules carry stable ids (MCP-009, CISA-MIN-001 style), severity and mitigation text; findings land in annotations and the console report"
+  D5.signing:
+    points: 3
+    label: M
+    note: "`aibom --generate-key-and-sign` produced a key pair and a BOM with a JSON Signature Format `signature` block (algorithm, publicKey, value); cdx-sign and cdx-verify also exist"
+  D5.diff:
+    points: 0
+    label: D
+    note: "no built-in BOM-to-BOM diff; consumers such as Dependency-Track provide it"
+  D6.pinning:
+    points: 2
+    label: M
+    note: "pnpm-lock.yaml and uv.lock in the repository; npm release carries provenance attestations (registry probe)"
+  D6.security_policy:
+    points: 1
+    label: M
+    note: "SECURITY.md present"
+  D7.ingest:
+    points: 0
+    label: D
+    note: "no ingestion of agent runtime telemetry against a BOM"
+  D7.capability:
+    points: 1
+    label: D
+    note: "tracebom profiles running applications and services into CycloneDX 1.7; not agent-specific, not exercised"
+  D8.gate:
+    points: 1
+    label: D
+    note: "--introspect-fail-below and cdx-audit exit codes gate CI; --fail-on-error"
+  D8.ci:
+    points: 1
+    label: D
+    note: "official GitHub Action and Dependency-Track upload; no SARIF output observed"
+  D8.docs:
+    points: 1
+    label: M
+    note: "`aibom .` ran exactly as the AI-BOM guide documents"

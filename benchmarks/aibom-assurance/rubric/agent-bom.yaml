@@ -1,0 +1,46 @@
+tool: agent-bom
+display: "agent-bom 0.115.3"
+runnable: true
+claimed_dimensions: [D1, D2, D3, D4, D5, D6, D7, D8]
+claimed_families: [agent, mcp, model, data, tools]
+notes: >
+  Run as `agent-bom scan <fixture> -f cyclonedx|json|sarif|spdx` with defaults (vulnerability
+  lookups on) and once with `--offline`. The offline run warns that it needs a pre-populated
+  local vulnerability database and exits 1 while still writing the BOM.
+manual:
+  D3.quality:
+    points: 2
+    label: M
+    note: "findings carry severity, rule ids and fix guidance in SARIF and the console report"
+  D5.signing:
+    points: 0
+    label: D
+    note: "no BOM signing or attestation feature documented"
+  D5.diff:
+    points: 1
+    label: M
+    note: "`scan --baseline <report.json> -f json` ran without error but the JSON output and console carried no visible delta section in this run; the HTML report documents deltas"
+  D6.pinning:
+    points: 2
+    label: M
+    note: "uv.lock, Dependabot and an OpenSSF Scorecard workflow in the repository; PyPI release carries PEP 740 provenance attestations"
+  D6.security_policy:
+    points: 1
+    label: M
+    note: "SECURITY.md present"
+  D7.ingest:
+    points: 0
+    label: D
+    note: "no ingestion of exported traces against the BOM"
+  D7.capability:
+    points: 2
+    label: D
+    note: "runtime MCP proxy and gateway that alert on or block injected tool results (`--injection-mode enforce`), and `--introspect` connects to live MCP servers; documented, not exercised"
+  D8.gate:
+    points: 1
+    label: D
+    note: "--fail-on-severity, --fail-on-kev, --fail-if-ai-risk and --policy"
+  D8.docs:
+    points: 1
+    label: M
+    note: "`agent-bom scan . -f cyclonedx -o sbom.cdx.json` ran as documented"

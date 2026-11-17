@@ -1,0 +1,46 @@
+tool: trusera-ai-bom
+display: "Trusera ai-bom 3.6.0"
+runnable: true
+claimed_dimensions: [D1, D2, D3, D4, D5, D6, D7, D8]
+claimed_families: [agent, mcp, model, data, tools]
+notes: >
+  Run as `ai-bom scan <fixture> -f cyclonedx|json|sarif` with defaults, plus one `--deep`
+  run (AST-based Python analysis) that is excluded from discovery credit. Telemetry is
+  opt-in. Last release March 2026.
+manual:
+  D3.quality:
+    points: 1
+    label: M
+    note: "components carry a risk score and risk factors; SARIF results exist but findings are per-component flags rather than discrete rules with remediation"
+  D5.signing:
+    points: 0
+    label: D
+    note: "no BOM signing or attestation feature documented"
+  D5.diff:
+    points: 0
+    label: D
+    note: "no BOM diff; `--save-dashboard` stores history for the Trusera dashboard"
+  D6.pinning:
+    points: 1
+    label: M
+    note: "no lockfile in the repository (Dependabot only); PyPI release carries PEP 740 provenance attestations"
+  D6.security_policy:
+    points: 1
+    label: M
+    note: "SECURITY.md present"
+  D7.ingest:
+    points: 0
+    label: D
+    note: "no runtime telemetry ingestion against a BOM"
+  D7.capability:
+    points: 1
+    label: D
+    note: "separate Trusera runtime SDKs evaluate Cedar policies on agent HTTP calls; not part of the scanner, not exercised"
+  D8.gate:
+    points: 1
+    label: D
+    note: "--fail-on severity and --policy YAML"
+  D8.docs:
+    points: 1
+    label: M
+    note: "`ai-bom scan . -f cyclonedx -o ai-bom.cdx.json` ran as documented"

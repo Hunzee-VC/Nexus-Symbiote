@@ -1,0 +1,51 @@
+tool: owasp-aibom-generator
+display: "OWASP AIBOM Generator (git main, Hugging Face models)"
+runnable: true
+claimed_dimensions: [D1, D2, D4, D5, D6, D8]
+claimed_families: [model]
+notes: >
+  Generates one AIBOM per Hugging Face model id; it does not scan repositories. The benchmark
+  ran it on the fixture's pinned DistilBERT model (`python -m src.cli <model> -o aibom.json`),
+  so discovery credit can only reach that one model item. It needs the Hugging Face API by
+  design.
+manual:
+  D3.quality:
+    points: 0
+    label: M
+    note: "produces a completeness score with recommendations, not security findings"
+  D5.signing:
+    points: 0
+    label: D
+    note: "no BOM signing or attestation feature documented"
+  D5.diff:
+    points: 0
+    label: D
+    note: "no diff feature"
+  D6.pinning:
+    points: 1
+    label: M
+    note: "uv.lock in the repository; distributed from git, no package release to attest"
+  D6.security_policy:
+    points: 0
+    label: M
+    note: "no SECURITY.md found at the repository root"
+  D7.ingest:
+    points: 0
+    label: D
+    note: "not in scope"
+  D7.capability:
+    points: 0
+    label: D
+    note: "not in scope"
+  D8.gate:
+    points: 0
+    label: D
+    note: "no pass or fail gate; completeness score only"
+  D8.ci:
+    points: 0
+    label: D
+    note: "web UI and HTTP API; no SARIF or CI action"
+  D8.docs:
+    points: 1
+    label: M
+    note: "ran as the README documents"

@@ -1,0 +1,44 @@
+tool: nexus-symbiote
+display: "Nexus SymBiote 0.2.0 (this repository)"
+runnable: true
+claimed_dimensions: [D1, D2, D3, D4, D5, D6, D7, D8]
+claimed_families: [agent, mcp, model, data, tools]
+notes: >
+  Run as `nexus-symbiote scan <fixture> -f cyclonedx|json|spdx|sarif -o ...` with defaults
+  (offline), plus `trace-diff` against the fixture's OTLP export and `minimum-elements` on the
+  CycloneDX export. The scan gate fails on the fixture (exit 1) by design because the pickle
+  model is a critical finding; the inventory is still written. Conflict of interest: the
+  benchmark lives in this tool's repository; see BENCHMARK.md section 8.
+manual:
+  D3.quality:
+    points: 2
+    label: M
+    note: "findings carry a code, severity, the offending component and remediation guidance; SARIF rules map to the crosswalk"
+  D5.signing:
+    points: 3
+    label: M
+    note: "`attest` signed the native inventory with an Ed25519 key into a DSSE envelope and `verify-attestation` verified it (attestation_verified true, subject and attested SHA-256 equal)"
+  D5.diff:
+    points: 2
+    label: M
+    note: "`diff` compared two collections of the fixture and reported 13 changes, all medium alerts for values left unbound without the source-binding key; exit 1 by design"
+  D6.pinning:
+    points: 2
+    label: M
+    note: "hash-locked CI environment, Dependabot, OpenSSF Scorecard and release workflows; PyPI release carries PEP 740 provenance attestations"
+  D6.security_policy:
+    points: 1
+    label: M
+    note: "SECURITY.md present"
+  D7.capability:
+    points: 1
+    label: D
+    note: "`verify-live` compares the inventory with the tools operator-pinned stdio servers serve, and a signed runtime authorization gateway exists; no proxy or cluster inventory; not exercised"
+  D8.gate:
+    points: 1
+    label: M
+    note: "scan gate exited 1 on the critical pickle finding; `risk` and `--fail-on-alert` gates documented"
+  D8.docs:
+    points: 1
+    label: M
+    note: "`nexus-symbiote scan <dir> -f cyclonedx -o file` ran as the CLI reference documents"

@@ -1,0 +1,51 @@
+tool: aisbom
+display: "AIsbom 1.7.0 (model-file scanner)"
+runnable: true
+claimed_dimensions: [D1, D2, D3, D4, D5, D6, D8]
+claimed_families: [model, tools]
+notes: >
+  A static scanner for model files (pickle, Keras, GGUF, ONNX, safetensors) that also lists
+  Python requirements. Run as `aisbom scan <fixture> --format json|spdx --output ...` and once
+  with `--offline`. Agents, MCP servers, skills and datasets are outside its claimed scope,
+  so its in-scope score covers only the model and tools families.
+manual:
+  D3.quality:
+    points: 1
+    label: M
+    note: "per-file risk and legal columns with a severity label; no remediation text or stable rule ids in the BOM"
+  D5.signing:
+    points: 0
+    label: D
+    note: "no BOM signing or attestation feature documented"
+  D5.diff:
+    points: 1
+    label: D
+    note: "`--vex-baseline` compares against a previous SBOM to emit VEX; a partial diff, not exercised"
+  D6.pinning:
+    points: 1
+    label: M
+    note: "poetry.lock in the repository; PyPI release has no provenance attestation (HTTP 404 on the integrity endpoint)"
+  D6.security_policy:
+    points: 0
+    label: M
+    note: "no SECURITY.md found at the repository root"
+  D7.ingest:
+    points: 0
+    label: D
+    note: "not in scope"
+  D7.capability:
+    points: 0
+    label: D
+    note: "not in scope"
+  D8.gate:
+    points: 1
+    label: D
+    note: "--fail-on-risk returns exit code 2"
+  D8.ci:
+    points: 1
+    label: D
+    note: "GitHub Action on the Marketplace posts a PR comment; no SARIF output"
+  D8.docs:
+    points: 1
+    label: M
+    note: "`aisbom scan <dir>` ran as documented"
