@@ -14,7 +14,7 @@ import json
 import os
 import re
 import stat
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TypeVar, cast
@@ -22,6 +22,7 @@ from typing import TypeVar, cast
 import click
 
 from nexus_symbiote.runtime_cli import (
+    _check_key_placement,
     _InputTooLargeError,
     _KeyFileError,
     _load_private,
@@ -35,15 +36,6 @@ MAX_SUBJECT_BYTES = 64 * 1024 * 1024
 MAX_AGE_DAYS = 36500
 _PURPOSES = ["generated", "reviewed"]
 _REVISION = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
-_MISPLACED = (
-    "a --trusted-key file must lie outside every git working tree that holds SUBJECT, "
-    "ENVELOPE or the current directory; this catches misplacement, it does not "
-    "authenticate the key"
-)
-_LINKED = (
-    "a --trusted-key file must not have other hard links: another name for it could lie "
-    "inside such a working tree"
-)
 T = TypeVar("T")
 
 
@@ -73,38 +65,8 @@ def _revision(_ctx: click.Context, _param: click.Parameter, value: str | None) -
     return value
 
 
-def _working_trees(directories: Iterable[Path]) -> list[Path]:
-    """Every directory at or above these that holds a ``.git`` entry, nested ones included."""
-    found: list[Path] = []
-    for directory in directories:
-        for candidate in (directory, *directory.parents):
-            if candidate not in found and os.path.lexists(candidate / ".git"):
-                found.append(candidate)
-    return found
-
-
-def _identity(path: Path) -> tuple[int, int]:
-    info = os.stat(path)
-    return info.st_dev, info.st_ino
-
-
 def _check_trust_anchors(keys: tuple[Path, ...], inputs: tuple[Path, ...]) -> None:
-    """Refuse a trusted key that a change to a working tree around the inputs could supply."""
-    try:
-        trees = _working_trees([*(path.resolve().parent for path in inputs), Path.cwd().resolve()])
-        untrusted = {_identity(tree) for tree in trees}
-        for key in keys:
-            resolved = key.resolve()
-            # Device and inode also find the tree directory itself under a name the path
-            # text misses, such as a case variant or a bind mount of the tree. A mount of
-            # a directory or file inside a tree gives the key another location: not found.
-            ancestors = {_identity(parent) for parent in resolved.parents}
-            if any(resolved.is_relative_to(tree) for tree in trees) or ancestors & untrusted:
-                raise click.UsageError(_MISPLACED)
-            if os.stat(resolved).st_nlink != 1:
-                raise click.UsageError(_LINKED)
-    except (OSError, RuntimeError):
-        raise click.UsageError("the location of a --trusted-key file cannot be inspected") from None
+    _check_key_placement(keys, inputs, option="--trusted-key", holders="SUBJECT, ENVELOPE")
 
 
 @click.command("attest")
