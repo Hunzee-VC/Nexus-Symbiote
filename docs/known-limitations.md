@@ -630,7 +630,10 @@ A way around a limit that its entry does not describe is worth a
   pickle, a numeric NumPy array, a ZIP archive with neither kind of member, and `.pb`
   files other than `saved_model.pb` produce no component. A candidate ZIP archive is
   read to its end and digested, as a model archive is, and a candidate larger than
-  the `model-bytes` limit is a collection failure.
+  the `model-bytes` limit is a collection failure. A candidate that a model binds,
+  such as ONNX external data or a SavedModel variables file, is rated the same way
+  and is a component of its own when its content is a payload; a bound file outside
+  those names is only digested.
 - **Content recognition is bounded.** A binary pickle is recognized by its PROTO
   opcode and 16 well-formed opcodes in the first 64 KiB, and a text-protocol pickle
   by a consistent stream of at most 4,096 opcodes. In a file inventoried only by its
@@ -660,11 +663,19 @@ A way around a limit that its entry does not describe is worth a
   field named `O` is not one. A ZIP
   archive is recognized by a pickle-family member in its first local header or in a
   central directory of at most 1 MiB, read from the end of the archive, including
-  ZIP64, and by an object-dtype array as any member, read from the member's local
+  ZIP64, wherever the specification, `zipfile` (which `np.load` uses) or a ZIP64
+  locator puts it, so a member that any of them lists counts, and in a file that
+  starts with an end record, which `np.load` also reads as an archive; and by an
+  object-dtype array as any member, read from the member's local
   header and the start of its stored or DEFLATE-compressed data. A longer array
   header, a longer or malformed directory, a member compressed by another method,
   such as BZIP2 or LZMA, and a member whose data runs past the next member's local
-  header are rated `unknown`, a high finding; a pickle hidden otherwise under
+  header are rated `unknown`, a high finding. The directory is read with the
+  tolerances of `zipfile` and the specification; another reader's, such as the C++
+  reader `torch.load` uses, are not modelled. A member name with a NUL byte is
+  matched both whole and as `zipfile` cuts it at the NUL, and a member is also
+  matched by the name a version-1 Info-ZIP Unicode Path field (0x7075) with a
+  matching CRC gives it, as `zipfile` from Python 3.12 lists it. A pickle hidden otherwise under
   `.onnx`, `.gguf` or another suffix is rated `unknown` too, and
   `validate --project` still refuses it as unverified.
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat
