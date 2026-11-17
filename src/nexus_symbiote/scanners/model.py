@@ -258,6 +258,10 @@ MAX_WEIGHT_FILE_BINDINGS = 2 * MAX_ENTRIES
 # digests of its directory, so those records are bounded across one scan as well.
 MAX_SHARED_DIGESTS = 2 * MAX_ENTRIES
 TOO_MANY_INDEXES = "model directory holds more shard indexes than one directory may bind"
+INDEX_UNBOUND = (
+    "a shard index beside this file could not be read, parsed or bound; "
+    "what it makes a loader open is unknown"
+)
 BINDINGS_EXHAUSTED = (
     "weight files bound to models exceed what one collection records; "
     "the bound files of this and later models are unknown"
@@ -466,15 +470,16 @@ def _pickle_member(name: bytes) -> bool:
     member, so a member is rated by its name, as a file on disk is. The name is matched
     as text, not split into suffixes, so ``.pkl`` and ``archive/.pkl``, which
     ``PurePath`` reads as names without a suffix, count as ``zipfile`` opens them.
+    ``zipfile`` cuts a name at its first NUL, so that name is matched as well.
     """
-    text = name.decode("latin-1").lower()
-    if text.endswith(tuple(_UNSAFE_SUFFIXES)):
-        return True
-    return any(
-        text.endswith(unsafe + wrapper)
-        for unsafe in _UNSAFE_SUFFIXES
-        for wrapper in _PICKLE_WRAPPERS
-    )
+    for text in {name.decode("latin-1").lower(), name.split(b"\0")[0].decode("latin-1").lower()}:
+        if text.endswith(tuple(_UNSAFE_SUFFIXES)) or any(
+            text.endswith(unsafe + wrapper)
+            for unsafe in _UNSAFE_SUFFIXES
+            for wrapper in _PICKLE_WRAPPERS
+        ):
+            return True
+    return False
 
 
 def _little(data: bytes, offset: int, width: int) -> int:
@@ -491,17 +496,29 @@ class _ZipMember(NamedTuple):
 
 
 def _zip_directory(
-    stream: BinaryIO, consumed: int, size: int
-) -> tuple[list[_ZipMember], int] | None:
-    """The members the central directory at the end of a ZIP archive lists, and its offset.
+    stream: BinaryIO, consumed: int, size: int, read: bytes = b""
+) -> list[tuple[list[_ZipMember], int]] | None:
+    """The members each central directory a ZIP reader can locate lists, and its offset.
+
+    Readers locate it differently, so a decoy directory that one reads must not hide the
+    one another reads. A reader that follows the specification reads the directory at
+    the offset its end record stores. ``zipfile``, which ``np.load`` uses, reads the
+    directory that ends where its end record starts and moves every member's offset by
+    the difference. When a ZIP64 locator precedes the end record, ``zipfile`` reads the
+    ZIP64 record right before the locator whatever the classic record holds, and other
+    readers the one at the locator's offset. Every reading that lists members is
+    returned, with the offset its directory starts at, its members' offsets as that
+    reader moves them.
 
     The rest of the stream is read in bounded chunks, keeping only the tail that can
     hold the directory within ``MAX_ZIP_DIRECTORY_BYTES``, the end-of-central-directory
-    record with its comment and the ZIP64 records. ``None`` when the directory is
-    malformed, truncated or beyond that bound, or the stream ends before ``size``.
+    record with its comment and the ZIP64 records. ``read`` holds the bytes that end at
+    ``consumed``, already read from the stream. ``None`` when no directory can be
+    read, when any directory that lies within the archive is beyond that bound, as it
+    may list what the others do not, or when the stream ends before ``size``.
     """
-    tail: deque[bytes] = deque()
-    held = 0
+    tail: deque[bytes] = deque([read])
+    held = len(read)
     remaining = size - consumed
     while remaining > 0:
         chunk = stream.read(min(65536, remaining))
@@ -514,27 +531,56 @@ def _zip_directory(
             held -= len(tail.popleft())
     data = b"".join(tail)
     start = size - len(data)
-    end_record = data.rfind(b"PK\x05\x06", max(0, len(data) - 22 - 65_535))
+    # zipfile takes the last 22 bytes as the end record when they hold one without a
+    # comment, before it searches back, so a signature in its count fields is not one.
+    end_record = len(data) - 22
+    if end_record < 0 or data[end_record : end_record + 4] != b"PK\x05\x06" or data[-2:] != b"\0\0":
+        end_record = data.rfind(b"PK\x05\x06", max(0, len(data) - 22 - 65_535))
     if end_record < 0 or end_record + 22 > len(data):
         return None
-    directory_end = end_record
-    directory_size = _little(data, end_record + 12, 4)
-    directory_offset = _little(data, end_record + 16, 4)
-    if _little(data, end_record + 10, 2) == 0xFFFF or 0xFFFFFFFF in (
-        directory_size,
-        directory_offset,
+    # (where the directory ends, its size, its stored offset) for each record a reader takes
+    records = [(end_record, _little(data, end_record + 12, 4), _little(data, end_record + 16, 4))]
+    locator = end_record - 20
+    if locator >= 0 and data[locator : locator + 4] == b"PK\x06\x07":
+        for record in sorted({locator - 56, _little(data, locator + 8, 8) - start}):
+            if (
+                record >= 0
+                and record + 56 <= locator
+                and data[record : record + 4] == b"PK\x06\x06"
+            ):
+                records.append(
+                    (record, _little(data, record + 40, 8), _little(data, record + 48, 8))
+                )
+    if len(records) > 1 and (
+        _little(data, end_record + 10, 2) == 0xFFFF or 0xFFFFFFFF in records[0][1:]
     ):
-        locator = end_record - 20
-        if locator < 0 or data[locator : locator + 4] != b"PK\x06\x07":
-            return None
-        record = _little(data, locator + 8, 8) - start
-        if record < 0 or record + 56 > locator or data[record : record + 4] != b"PK\x06\x06":
-            return None
-        directory_end = record
-        directory_size = _little(data, record + 40, 8)
-        directory_offset = _little(data, record + 48, 8)
-    members = _directory_members(data, directory_offset - start, directory_size, directory_end)
-    return None if members is None else (members, directory_offset)
+        # Every reader takes a ZIP64 record over a saturated classic one.
+        del records[0]
+    readings: dict[tuple[int, int, int], tuple[list[_ZipMember], int]] = {}
+    for directory_end, directory_size, directory_offset in records:
+        for begin in (directory_offset, start + directory_end - directory_size):
+            key = (begin, directory_size, begin - directory_offset)
+            if key in readings:
+                continue
+            members = _directory_members(data, begin - start, directory_size, directory_end)
+            if members is None and (
+                0 <= begin <= start + directory_end - directory_size
+                and (
+                    begin < start
+                    or directory_size > MAX_ZIP_DIRECTORY_BYTES
+                    or data[begin - start : begin - start + 4] == b"PK\x01\x02"
+                )
+            ):
+                # A directory past the bound, or one that starts but cannot be read,
+                # may list what a decoy the other reading takes does not.
+                return None
+            if members is not None:
+                shift = begin - directory_offset
+                readings[key] = (
+                    [m._replace(offset=m.offset + shift) if m.offset >= 0 else m for m in members],
+                    begin,
+                )
+    return list(readings.values()) or None
 
 
 def _directory_members(data: bytes, begin: int, size: int, end: int) -> list[_ZipMember] | None:
@@ -551,15 +597,18 @@ def _directory_members(data: bytes, begin: int, size: int, end: int) -> list[_Zi
     members: list[_ZipMember] = []
     unlocated = False
     position = begin
+    # zipfile reads the directory into a buffer of its stated size, so a name, extra
+    # field or comment that runs past it is cut where the directory ends.
+    data = data[: begin + size]
     while position < begin + size:
         if position + 46 > begin + size or data[position : position + 4] != b"PK\x01\x02":
             return _listed(members, complete=False)
         name_length = _little(data, position + 28, 2)
         extra_length = _little(data, position + 30, 2)
-        name = data[position + 46 : position + 46 + name_length]
-        if len(name) < name_length:
-            return _listed(members, complete=False)
         extra_at = position + 46 + name_length
+        name = _listed_name(
+            data[position + 46 : extra_at], data[extra_at : extra_at + extra_length]
+        )
         method = _little(data, position + 10, 2)
         located = _zip64_location(
             data[extra_at : extra_at + extra_length],
@@ -575,6 +624,30 @@ def _directory_members(data: bytes, begin: int, size: int, end: int) -> list[_Zi
             unlocated = True
         position = extra_at + extra_length + _little(data, position + 32, 2)
     return _listed(members, complete=not unlocated)
+
+
+def _listed_name(name: bytes, extra: bytes) -> bytes:
+    """The name a loader may open a member by: ``name``, or a pickle-family name that an
+    Info-ZIP Unicode Path field (0x7075) gives it.
+
+    ``zipfile`` from Python 3.12 lists a member under a version-1 Unicode Path field's
+    name when the field's CRC32 matches the stored name, and 3.11 under the stored name,
+    so a pickle name either way rates the member.
+    """
+    position = 0
+    while position + 4 <= len(extra):
+        length = _little(extra, position + 2, 2)
+        field = extra[position + 4 : position + 4 + length]
+        if (
+            _little(extra, position, 2) == 0x7075
+            and len(field) >= 5
+            and field[0] == 1
+            and _little(field, 1, 4) == zlib.crc32(name)
+            and _pickle_member(field[5:])
+        ):
+            return field[5:]
+        position += 4 + length
+    return name
 
 
 def _listed(members: list[_ZipMember], *, complete: bool) -> list[_ZipMember] | None:
@@ -844,27 +917,36 @@ def _recognized_code_container(
         if array is None:
             return SerializationSafety.UNKNOWN, NUMPY_HEADER_UNREAD
         return (SerializationSafety.UNSAFE_CODE_EXECUTION, NUMPY_OBJECT_ARRAY) if array else None
-    if prefix[:4] != b"PK\x03\x04":
+    # np.load hands zipfile a file that starts with an end record too, as an empty
+    # archive does; zipfile reads the archive whose end record ends the file.
+    if prefix[:4] not in (b"PK\x03\x04", b"PK\x05\x06"):
         return _recognized_pickle(stream, prefix, size, by_content=by_content)
-    header = prefix + stream.read(22)
-    consumed = len(header)
-    first = b""
-    if len(header) == 30:
-        name_length = int.from_bytes(header[26:28], "little")
-        if 0 < name_length <= 4096:
-            first = stream.read(name_length)
-            consumed += len(first)
-    if _pickle_member(first):
-        return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_PICKLE_MEMBER
-    directory = _zip_directory(stream, consumed, size)
-    if directory is None:
+    consumed = len(prefix)
+    # An end record at offset 0 is all an empty archive holds, so the prefix is kept.
+    kept = prefix if prefix[:4] == b"PK\x05\x06" else b""
+    if prefix[:4] == b"PK\x03\x04":
+        header = prefix + stream.read(22)
+        consumed = len(header)
+        first = b""
+        if len(header) == 30:
+            name_length = int.from_bytes(header[26:28], "little")
+            if 0 < name_length <= 4096:
+                first = stream.read(name_length)
+                consumed += len(first)
+        if _pickle_member(first):
+            return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_PICKLE_MEMBER
+    readings = _zip_directory(stream, consumed, size, kept)
+    if readings is None:
         return SerializationSafety.UNKNOWN, ZIP_DIRECTORY_UNREAD
-    members, offset = directory
-    if any(_pickle_member(member.name) for member in members):
+    if any(_pickle_member(member.name) for members, _ in readings for member in members):
         return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_PICKLE_MEMBER
-    arrays = _members_hold_object_array(stream, members, offset, budget)
-    if arrays:
-        return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_OBJECT_ARRAY
+    arrays: bool | None = False
+    for members, offset in readings:
+        found = _members_hold_object_array(stream, members, offset, budget)
+        if found:
+            return SerializationSafety.UNSAFE_CODE_EXECUTION, ZIP_OBJECT_ARRAY
+        if found is None:
+            arrays = None
     return SerializationSafety.UNKNOWN, ZIP_WITHOUT_PICKLE if arrays is False else ZIP_MEMBER_UNREAD
 
 
@@ -1198,6 +1280,8 @@ class BindingBudget:
         self.remaining = 2 * limits.current().entries if units is None else units
         self.reason = reason
         self.refused: set[Path] = set()
+        # Shard indexes, and directories with too many, that bound none of their shards.
+        self.unbound: set[Path] = set()
 
     def charge(self, path: Path, units: int, fail: Callable[[str], None]) -> bool:
         """Spend ``units`` for ``path``, or refuse it and spend nothing."""
@@ -1232,26 +1316,31 @@ def index_references(
     indexes = [path for path in tree.children.get(directory, ()) if _index_base(path) is not None]
     if len(indexes) > MAX_SHARD_INDEXES:
         files._fail(directory, TOO_MANY_INDEXES)
+        budget.unbound.add(directory)
         return references, []
     for index in indexes:
         raw = (read or files.read_bytes)(index)
         if raw is None:
+            budget.unbound.add(index)
             continue
         digests[index] = hash_bytes(raw)
         try:
             document = _json_document(raw)
         except (ValueError, RecursionError):
             files._fail(index, "invalid JSON or duplicate keys")
+            budget.unbound.add(index)
             continue
         weight_map = document.get("weight_map") if isinstance(document, dict) else None
         if not isinstance(weight_map, dict) or not all(
             isinstance(value, str) for value in weight_map.values()
         ):
             files._fail(index, "model index must map tensor names to weight files")
+            budget.unbound.add(index)
             continue
         names = set(weight_map.values())
         if not budget.charge(index, len(names), partial(files._fail, index)):
             continue
+        bound = False
         for name in sorted(names):
             shard = _local_reference(directory, name)
             if (
@@ -1267,6 +1356,11 @@ def index_references(
                 )
                 continue
             references.setdefault(shard, []).append(index)
+            bound = True
+        if not bound:
+            # An index that names no collected weight file binds no shard, so what it
+            # makes a loader open is unknown, as for one that could not be parsed.
+            budget.unbound.add(index)
     return references, indexes
 
 
@@ -1603,6 +1697,7 @@ def verify_weight_files(
     policies: Mapping[Path, ArtifactPolicy],
     *,
     verify: Callable[[Path, Path, str | None, str | None], VerificationResult],
+    unbound: str | None = None,
 ) -> WeightVerification:
     """Verify every weight file against its operator policy entry, main file first.
 
@@ -1610,7 +1705,8 @@ def verify_weight_files(
     the confined reader. A file verifies when its digest pin matches, or when its
     Sigstore bundle verifies over exactly that digest under the entry's identity
     and issuer (and its ``expected_sha256``, if set). The model counts as signed
-    only when every weight file verifies. ``policies`` is keyed by resolved path
+    only when every weight file verifies, and never when ``unbound`` gives the reason
+    its other weight files are unknown. ``policies`` is keyed by resolved path
     and ``root`` must be resolved: the paths come from a confined walk, which
     follows no symlink, so none is resolved again.
     """
@@ -1718,6 +1814,10 @@ def verify_weight_files(
         status = SigningStatus.SIGSTORE_SIGNED
     else:
         status = SigningStatus.DIGEST_PINNED
+    if unbound is not None and status.value in VERIFIED_SIGNING_STATUSES:
+        status = SigningStatus.PARTIALLY_VERIFIED
+        failures.append(f"{main.as_posix()}: {unbound}")
+        issues.append(("unverified_signature", unbound, "unknown"))
     verified = status.value in VERIFIED_SIGNING_STATUSES
     reasons = failures + [f"{label}: no signer policy entry" for label in uncovered]
     evidence = ClaimEvidence(
@@ -1812,6 +1912,7 @@ class ModelScanner(Scanner):
         self._tree = ModelTree(())
         self._digests: dict[Path, str | None] = {}
         self._read: set[Path] = set()
+        self._bound_content: dict[Path, ModelArtifactObservation] = {}
         self._gaps: list[str] = []
         self._budget = InspectionBudget()
         self._bindings = BindingBudget()
@@ -1827,7 +1928,7 @@ class ModelScanner(Scanner):
         ) as files:
             self._tree = tree = ModelTree(files.iter_files())
             self._digests, self._read, self._budget = {}, set(), InspectionBudget()
-            self._gaps = []
+            self._gaps, self._bound_content = [], {}
             self._bindings, self._verified = BindingBudget(), {}
             self._shared = BindingBudget(reason=SHARED_DIGESTS_EXHAUSTED)
             named = sorted(
@@ -1852,7 +1953,8 @@ class ModelScanner(Scanner):
             # A file no name rates is a model artifact by its content. It is checked after
             # the files that the models above bind and their directories configure, and
             # only if none of them is it, so no byte is read twice.
-            found: dict[Path, ModelArtifactObservation] = {}
+            # A file a model binds is rated by its content too, from the read that hashed it.
+            found = dict(self._bound_content)
             for path in tree.files:
                 if path not in self._read and _content_candidate(path):
                     observation = self._content_artifact(files, path)
@@ -1866,7 +1968,9 @@ class ModelScanner(Scanner):
                     if model_dir in contexts
                     else self._directory_context(files, model_dir)
                 )
-                for path in tree.children.get(model_dir, ()):
+                # A SavedModel binds a linked directory's files under the link's name.
+                linked = sorted(p for p in found if p.parent == model_dir and p not in tree.paths)
+                for path in [*tree.children.get(model_dir, ()), *linked]:
                     observation = found.get(path)
                     if observation is not None:
                         component, weight_files = self._scan_model_file(
@@ -1903,6 +2007,46 @@ class ModelScanner(Scanner):
             self._read.add(path)
             self._digests[path] = files.hash_file(path, max_bytes=limits.bound("model-bytes"))
         return self._digests[path]
+
+    def _unbound_reason(self, path: Path) -> str | None:
+        """Why the files a loader opens with ``path`` are unknown, or ``None`` when known.
+
+        A shard index the budget refused, or one that could not be read, parsed or
+        bound, binds none of its shards, which then charge nothing, so the gap is the
+        shard's too: what its index makes a loader open is unknown.
+        """
+        bindings = self._bindings
+        indexes = [
+            index
+            for index in self._tree.children.get(path.parent, ())
+            if _index_base(index) is not None
+        ]
+        if path in bindings.refused or any(index in bindings.refused for index in indexes):
+            return bindings.reason
+        if path.parent in bindings.unbound or any(index in bindings.unbound for index in indexes):
+            return INDEX_UNBOUND
+        return None
+
+    def _companion_digest(self, files: ConfinedCollection, path: Path) -> str | None:
+        """The digest of a file a model binds, observed for its content when a file of
+        that name is a content candidate; a payload is kept for its own component."""
+        if path in self._digests or not _content_candidate(path):
+            return self._digest(files, path)
+        self._read.add(path)
+        self._digests[path] = None
+        try:
+            with files.open_regular(path, max_bytes=limits.bound("model-bytes")) as stream:
+                observed = observe_model_artifact(path, stream=stream, budget=self._budget)
+        except (OSError, ValueError):
+            files._fail(path, "model inspection or hashing failed")
+            return None
+        self._digests[path] = observed.digest
+        if (
+            observed.safety == SerializationSafety.UNSAFE_CODE_EXECUTION
+            or observed.explanation in _CONTENT_UNREAD
+        ):
+            self._bound_content[path] = observed
+        return observed.digest
 
     def _credential_file(self, files: ConfinedCollection, path: Path) -> bool:
         """Whether ``path``, or the in-root file a symlink there leads to, is named as
@@ -2005,17 +2149,21 @@ class ModelScanner(Scanner):
                     referenced_modules.add("/".join(mod_parts).lower() + ".py")
                     for idx in range(1, len(mod_parts)):
                         referenced_modules.add("/".join(mod_parts[:idx]).lower() + "/__init__.py")
-            python_files = [
-                {"path": path.as_posix(), "sha256": digest}
-                for path in tree.below(model_dir)
-                if path.suffix.lower() == ".py"
-                and (
+            python_files = []
+            for path in tree.below(model_dir):
+                if path.suffix.lower() != ".py" or not (
                     path.parent == model_dir
                     or path.relative_to(model_dir).as_posix().lower() in referenced_modules
-                )
-                and not _CREDENTIAL_PYTHON_STEM.search(path.stem)
-                and (digest := self._digest(files, path)) is not None
-            ]
+                ):
+                    continue
+                if _CREDENTIAL_PYTHON_STEM.search(path.stem):
+                    # Not digested, so a change to it raises no drift alert: a gap.
+                    self._gaps.append(
+                        f"{path.as_posix()}: custom code module named as holding "
+                        "credentials; not read or inventoried"
+                    )
+                elif (digest := self._digest(files, path)) is not None:
+                    python_files.append({"path": path.as_posix(), "sha256": digest})
             custom_code = {
                 "declared_in": declared_in,
                 "references": sorted(set(references)),
@@ -2172,12 +2320,16 @@ class ModelScanner(Scanner):
             lambda reason: files._fail(path, reason),
             self._bindings,
         )
-        weight_files = [(path, weight_hash), *((c, self._digest(files, c)) for c in companions)]
+        weight_files = [
+            (path, weight_hash),
+            *((c, self._companion_digest(files, c)) for c in companions),
+        ]
         verification = verify_weight_files(
             weight_files,
             files.root,
             self._policies,
             verify=memoized(verify_sigstore_bundle, self._verified),
+            unbound=self._unbound_reason(path),
         )
         status = verification.status or self._unverified_status(path)
         if status == SigningStatus.VERIFICATION_UNAVAILABLE:

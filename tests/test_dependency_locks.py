@@ -278,3 +278,65 @@ def test_a_ci_lock_without_its_cutoff_is_not_silently_moved_to_now(checkout, mon
     assert calls == []
     locks.regenerate(checkout, "2026-11-03T00:00:00Z", False)
     assert locks.read_lock(checkout, locks.FLOOR_LOCK).inputs["cutoff"] == "2026-11-03T00:00:00Z"
+
+
+def _orphan(name="evil-helper", via="nexus-symbiote (pyproject.toml)"):
+    block = f"{name}==1.0.0 \\\n    --hash=sha256:" + "a" * 64 + "\n"
+    return block + (f"    # via {via}\n" if via is not None else "")
+
+
+@pytest.mark.parametrize("lock", [locks.CI_LOCK, locks.ACTION_LOCK, locks.FLOOR_LOCK])
+@pytest.mark.parametrize(
+    "via",
+    [
+        None,
+        "\n    #   -c requirements-ci.lock",
+        "\n    #   -c requirements-ci.lock (test tools)",
+        "nexus-symbiote (pyproject.toml)",
+        "nexus-symbiote (pyproject.toml:dev)",
+        "\n    #   -r pyproject.toml (build-system)",
+        "not-a-locked-package",
+        "evil-helper",
+    ],
+)
+def test_a_pin_that_no_declaration_or_locked_parent_requires_fails(checkout, lock, via):
+    # Audit 2026-11-16 S16-02: a pin inserted into a lock, with no declaration behind it,
+    # was installed with --require-hashes by CI, the release build and the Action while
+    # the check reported that the locks agree with pyproject.toml.
+    names = [lock, locks.CI_LOCK] if lock == locks.ACTION_LOCK else [lock]
+    for name in names:
+        edit(checkout / name, "email-validator==", _orphan(via=via) + "email-validator==")
+    errors = locks.check(checkout)
+    for name in names:
+        message = f"{name}: evil-helper is not required by pyproject.toml or by another pin"
+        assert any(error.startswith(message) for error in errors), errors
+
+
+def test_a_pin_reached_only_through_an_orphan_parent_fails(checkout):
+    edit(
+        checkout / locks.FLOOR_LOCK,
+        "email-validator==",
+        _orphan(via="not-a-locked-package")
+        + _orphan("evil-child", via="evil-helper")
+        + "email-validator==",
+    )
+    errors = "\n".join(locks.check(checkout))
+    assert f"{locks.FLOOR_LOCK}: evil-helper is not required" in errors
+    assert f"{locks.FLOOR_LOCK}: evil-child is not required" in errors
+
+
+def test_a_pin_required_by_a_locked_parent_passes(checkout):
+    edit(
+        checkout / locks.FLOOR_LOCK,
+        "email-validator==",
+        _orphan("new-helper", via="pydantic") + "email-validator==",
+    )
+    assert locks.check(checkout) == []
+
+
+def test_via_annotations_are_read_in_both_layouts():
+    lock = locks.parse_lock(
+        _orphan("a", via="b") + _orphan("b", via="\n    #   -c requirements-ci.lock\n    #   Click")
+    )
+    assert lock.pins["a"][0].via == frozenset({"b"})
+    assert lock.pins["b"][0].via == frozenset({"-c requirements-ci.lock", "Click"})

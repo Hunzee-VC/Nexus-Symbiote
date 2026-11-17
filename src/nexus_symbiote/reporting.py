@@ -511,12 +511,19 @@ def scan_gate_lines(
     not_collected: Sequence[str],
     *,
     recorded: bool,
+    discovery: Sequence[str] = (),
 ) -> list[ReportLine]:
-    """The scan gate's reasons; `recorded` says whether this run keeps an inventory."""
-    return gate_reason_lines(
+    """The scan gate's reasons; `recorded` says whether this run keeps an inventory.
+
+    `discovery` holds the discovery-verification failures, which report-only never
+    relaxes, so they are labelled apart from collection failures.
+    """
+    lines = gate_reason_lines(
         document,
         _attributed(failures),
         recorded=recorded,
         not_collected=not_collected,
         excluded=_attributed(excluded),
     )
+    lines.extend((safe_line("  - discovery verification: ", reason), None) for reason in discovery)
+    return lines
