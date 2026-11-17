@@ -105,8 +105,10 @@ its gap.
   `WebSocketClientTransport`), used other than in type syntax. The server it starts
   or reaches is not inventoried; a launch configuration in a client file is.
 - A direct `eval` in a file with SDK imports, because the code it runs can use them,
-  also parenthesized or wrapped in TypeScript syntax, as in `(eval)(code)` or
-  `eval!(code)`.
+  also parenthesized or wrapped in TypeScript syntax, as in `(eval)(code)`,
+  `eval!(code)` or `(eval<any>)(code)`. Comments inside the parentheses or among the arguments of a call
+  are skipped, so `(eval /* c */)(code)` is direct and
+  `require(/* c */ "@modelcontextprotocol/sdk/server/mcp.js")` loads that module.
 - Dynamic method names, receiver aliases, unsupported constructor bindings and
   registration ordering.
 

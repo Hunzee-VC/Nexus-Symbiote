@@ -1,3 +1,4 @@
+import ast
 import json
 import warnings
 from pathlib import Path
@@ -7,7 +8,10 @@ from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.models import ToolComponent
+from nexus_symbiote.scanners.base import ScanResult
 from nexus_symbiote.scanners.mcp import MCPScanner
+from nexus_symbiote.scanners.python_tools import collect_python_tools
+from tests.support import scaling_ratio
 
 IMPORT = "from mcp.server.mcpserver import MCPServer as Factory\n"
 SERVER = "server = Factory('Demo')\n"
@@ -1315,3 +1319,97 @@ def test_unshadowed_getattr_attribute_name_is_not_treated_as_dynamic_module_load
 def test_mutated_typing_sdk_root_aliasing_and_getattr_parity_gaps(tmp_path, source, expected_gap):
     result, _ = scan(tmp_path, source)
     assert expected_gap in result.surfaces_excluded
+
+
+@pytest.mark.parametrize(
+    "header, unit, count, body",
+    [
+        ("from mcp.server.fastmcp import FastMCP\nz = y", "._a", 1000, "\n"),
+        ("from mcp.server.fastmcp import FastMCP\nz = y", "[0]._a", 500, "\n"),
+        ("from mcp.server.fastmcp import Context\nz = y", ".Context", 1000, "\n"),
+        ("from mcp.server.fastmcp import Context\ndef h(ctx: y", ".Context", 1000, "): pass\n"),
+        (
+            "from mcp.server.fastmcp import Context\ndef h(ctx: Context):\n return ctx.request_id",
+            " + ctx.request_id",
+            1000,
+            "\n",
+        ),
+    ],
+)
+def test_context_handle_analysis_is_linear_in_expression_depth(header, unit, count, body):
+    # Audit 2026-11-16 S6-01: each link of a chain walked the rest of it again, and
+    # each name climbed every enclosing expression to find its function.
+    def run(scale: int) -> ScanResult:
+        source = header + unit * (count * scale) + body
+        tree = ast.parse(source)
+        result = ScanResult(scanner_name="mcp")
+        collect_python_tools(tree, list(ast.walk(tree)), source, Path("server.py"), result)
+        return result
+
+    # Linear work grows about 8 times over the sizes measured, quadratic about 64 times.
+    assert not run(1).scan_failures
+    assert scaling_ratio(run, factor=8) < 16
+
+
+def test_context_uses_climb_nested_scopes_once_in_all(monkeypatch):
+    # Review of #243: each use of a context climbed every enclosing lambda to find
+    # the one binding it, so D nested lambdas took D * D scope lookups. The parser
+    # caps the depth, which keeps a timing ratio too close to call; count lookups.
+    from nexus_symbiote.scanners import python_tools
+
+    lookups = 0
+
+    class Counting(dict[ast.AST, ast.AST | None]):
+        def get(self, key, default=None):
+            nonlocal lookups
+            lookups += 1
+            return super().get(key, default)
+
+    real = python_tools._scopes
+    monkeypatch.setattr(python_tools, "_scopes", lambda parents: Counting(real(parents)))
+    source = (
+        "from mcp.server.fastmcp import Context\ndef h(ctx: Context):\n return "
+        + "lambda a=ctx.request_id: " * 2000
+        + "0\n"
+    )
+    tree = ast.parse(source)
+    nodes = list(ast.walk(tree))
+    result = ScanResult(scanner_name="mcp")
+    collect_python_tools(tree, nodes, source, Path("server.py"), result)
+    assert not result.scan_failures
+    assert not result.surfaces_excluded
+    assert lookups < 2 * len(nodes)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        "name_or_fn='exec_shell'",
+        "name='read_file', name_or_fn='exec_shell'",
+        "nickname='exec_shell'",
+    ],
+)
+def test_an_unknown_tool_decorator_keyword_leaves_the_name_unresolved(tmp_path, options):
+    # Audit 2026-11-16 S6-04: fastmcp also takes the name as ``name_or_fn``, which the
+    # collector ignored and recorded the function name in its place.
+    result, tools = scan(
+        tmp_path,
+        "from fastmcp import FastMCP\nmcp = FastMCP('x')\n"
+        f"@mcp.tool({options})\ndef read_file(): pass\n",
+    )
+    assert not tools
+    assert "pkg/server.py:3: unresolved Python MCP tool name" in result.surfaces_excluded
+
+
+def test_tool_decorator_options_that_name_nothing_keep_the_tool(tmp_path):
+    result, tools = scan(
+        tmp_path,
+        "from fastmcp import FastMCP\nmcp = FastMCP('x')\n"
+        "@mcp.tool(name='lookup', title='Lookup', description='d', tags={'a'},\n"
+        "          annotations=None, output_schema=None, exclude_args=['c'], meta={},\n"
+        "          structured_output=True, icons=[], enabled=True, version='1', app=None,\n"
+        "          task=True, timeout=5.0, auth=None, run_in_thread=False)\n"
+        "def lookup_impl(c): pass\n",
+    )
+    assert [tool.name for tool in tools] == ["lookup"]
+    assert not result.surfaces_excluded

@@ -1270,9 +1270,6 @@ class A2AScanner(Scanner):
     ) -> None:
         references = self._code_references(files.root, sources, result)
         result.surfaces_scanned.append("a2a: Python SDK references (heuristic)")
-        static_cards = any(
-            component.bom_ref.startswith("a2a-server:") for component in result.components
-        )
         result.surfaces_excluded.extend(
             f"{path}: A2A agent card built in Python code is not inventoried"
             for path in references.built_cards
@@ -1287,12 +1284,11 @@ class A2AScanner(Scanner):
             "an agent card it builds is not inventoried"
             for path in references.unfollowed
         )
-        if not static_cards:
-            # With a static card present, a card built from loaded data is taken to be it.
-            result.surfaces_excluded.extend(
-                f"{path}: A2A agent card loaded in Python code is not inventoried"
-                for path in references.loaded_cards
-            )
+        # Nothing ties a loaded card to a static one, so a static card does not cover it.
+        result.surfaces_excluded.extend(
+            f"{path}: A2A agent card loaded in Python code is not inventoried"
+            for path in references.loaded_cards
+        )
         if any(component.bom_ref.startswith("a2a-") for component in result.components):
             return
         for kind, paths in (("server", references.server), ("client", references.client)):
