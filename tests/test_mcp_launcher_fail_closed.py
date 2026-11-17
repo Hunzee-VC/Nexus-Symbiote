@@ -881,10 +881,11 @@ def test_npm_boolean_options_before_other_words_stay_classified(tmp_path, args):
     assert assert_no_gap(tmp_path, {"command": "npm", "args": args}).version_pinned is True
 
 
-# npm reads its options anywhere before "--", also after the script name, and nopt resolves
-# an abbreviation such as --scr, any number of leading dashes and a "no-" before a value
-# option: npm 10.9.9 ran ./evil.sh as its script shell, or loaded ./hook.js into node, for
-# each form below.
+# npm reads its options anywhere before the end of its options, also after the script name,
+# and nopt resolves an abbreviation such as --scr, any number of leading dashes and a "no-"
+# before a value option. nopt also takes a "--" after --browser, or after a "no-" option whose
+# type allows a string, as that option's value and reads on. npm 10.9.9 ran ./evil.sh as its
+# script shell, or loaded ./hook.js into node, for each form below.
 @pytest.mark.parametrize(
     "args",
     [
@@ -897,6 +898,12 @@ def test_npm_boolean_options_before_other_words_stay_classified(tmp_path, args):
         ["run", "--scr=./evil.sh", "start"],
         ["run", "start", "---no-script-shell=./evil.sh"],
         ["run", "start", "arg", "-nod=--require=./hook.js"],
+        ["start", "--browser", "--", "--script-shell=./evil.sh"],
+        ["start", "--br", "--", "--script-shell=./evil.sh"],
+        ["start", "--no-os", "--", "--script-shell=./evil.sh"],
+        ["run", "start", "--no-otp", "--", "--script-shell=./evil.sh"],
+        ["run", "start", "--NO-cpu", "--", "--script-shell=./evil.sh"],
+        ["run", "start", "-no-key", "---", "--script-shell=./evil.sh"],
     ],
 )
 def test_npm_code_loading_options_after_the_subcommand_are_rated(tmp_path, args):
@@ -918,6 +925,8 @@ def test_npm_code_loading_options_after_the_subcommand_are_rated(tmp_path, args)
         ["run", "start", "-SC", "/srv/other"],
         ["test", "--globalconfig=./npmrc"],
         ["start", "--cache", "./cache"],
+        ["start", "--browser", "--", "--prefix=../other"],
+        ["start", "--no-node-options", "--", "--prefix=../other"],
     ],
 )
 def test_npm_source_options_after_the_subcommand_are_recorded(args):
@@ -935,13 +944,61 @@ def test_npm_source_options_after_the_subcommand_are_recorded(args):
         ["run", "start", "--sh=x"],
         ["run", "start", "--no-audit"],
         ["run", "start", "--no-prefix=/srv/other"],
+        ["run", "start", "---", "--script-shell=./evil.sh"],
+        ["start", "--if-present", "--", "--script-shell=./evil.sh"],
+        ["start", "--browser=x", "--", "--script-shell=./evil.sh"],
+        ["start", "--os", "--", "--script-shell=./evil.sh"],
+        ["run", "start", "--no-audit", "--", "--prefix=../other"],
+        ["run", "start", "--no-color", "--", "--prefix=../other"],
+        ["run", "start", "--no-registry", "--", "--prefix=../other"],
+        ["run", "start", "--if-present", "--", "-w", "4"],
+        ["run", "start", "--", "--script-${E}shell=./evil.sh"],
+        ["run", "start", "--port=${PORT}"],
     ],
 )
 def test_npm_script_arguments_are_not_npm_options(args):
-    # After "--" npm passes every word to the script; to nopt, --sh is -s -h and not --shell,
-    # and --no-prefix=/srv/other sets no prefix.
+    # After the end of npm's options, "--" or any longer run of dashes that no option before it
+    # takes as its value, npm passes every word to the script; to nopt, --sh is -s -h and not
+    # --shell, and --no-prefix=/srv/other sets no prefix. npm 10.9.9 ran neither ./evil.sh nor
+    # the script of ../other for any form.
     launch = analyze("npm", args)
     assert launch.unknown is None and not launch.sources and not launch.context, launch
+
+
+# @npmcli/config replaces ${VAR} in an option's name after nopt has read it: with E="" and
+# K=script-shell, npm 10.9.9 ran ./evil.sh as its script shell, loaded ./hook.js into node, or
+# ran the start script of ../other, for each form below.
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["run", "start", "--script-${E}shell=./evil.sh"],
+        ["run", "start", "--${K}=./evil.sh"],
+        ["run", "start", "--${E}script-shell=./evil.sh"],
+        ["run", "start", "--script-shell${E}=./evil.sh"],
+        ["start", "--pre${E}fix=../other"],
+        ["test", "--node-${E}options=--require=./hook.js"],
+    ],
+)
+def test_npm_option_names_from_the_environment_are_unknown(tmp_path, args):
+    server = {"command": "npm", "args": args, "env": {"E": "", "K": "script-shell"}}
+    assert "npm option name depends on the environment" in unknown_reason(tmp_path, server)
+
+
+# Only npm exec reads --call: npm 10.9.9 ran the start or test script, and never the call, for
+# each form below, so a server's own -c after the script name is not a shell command.
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["start", "-c", "config.json"],
+        ["run", "-c", "x", "start"],
+        ["run", "--call", "x", "start"],
+        ["test", "--call=x"],
+        ["--call", "x", "run", "start"],
+    ],
+)
+def test_npm_run_start_and_test_ignore_call(tmp_path, args):
+    record = assert_no_gap(tmp_path, {"command": "npm", "args": args})
+    assert "launch_context" not in record.properties
 
 
 NODE = "node@sha256:" + "cd" * 32

@@ -138,10 +138,18 @@ A way around a limit that its entry does not describe is worth a
   `make serve`, `npm run mcp`, `uv run server.py` or a program that installs
   packages can start an unpinned package the inventory does not show. Review what
   such commands run. npm's own options on `npm run`, `start` or `test` count wherever
-  npm reads them, also after the script name and abbreviated, up to `--`
-  (`npm run start --scr=./x.sh`): `--script-shell`, `--node-options` and `--shell`
-  are a medium code-loading finding, and `--prefix`, `-C`, `-w`, `--userconfig`,
-  `--globalconfig`, `--registry` and `--cache` are package sources.
+  npm reads them, also after the script name and abbreviated, up to the end of its
+  options (`npm run start --scr=./x.sh`): `--script-shell`, `--node-options` and
+  `--shell` are a medium code-loading finding, and `--prefix`, `-C`, `-w`,
+  `--userconfig`, `--globalconfig`, `--registry` and `--cache` are package sources.
+  npm's options end at `--` or a longer run of dashes, unless the word before it is
+  `--browser` or a `--no-` option whose type allows a string, such as `--no-os`, which
+  takes it as a value (`npm start --no-os -- --scr=./x.sh` still sets the script
+  shell). An option name built from an environment variable, such as
+  `--script-${E}shell`, which npm expands after reading it, is a gap. These
+  subcommands ignore `-c` and `--call`. A `script-shell` or `node-options` setting in
+  the project `.npmrc`, which npm uses for them, gets no `launch_context` finding;
+  review that file.
 - **Unclassified runners are gaps.** `dnx`, `jbang`, `pip-run`, `nix run`,
   `dotnet tool`, `gem exec`, `pixi exec`, `corepack`, `mise`, `pkgx`, `finch`,
   Apple `container` and `apptainer` are a high `launcher_identity` finding and a
@@ -322,7 +330,11 @@ A way around a limit that its entry does not describe is worth a
   `npm exec` run a matching package already installed in the project's
   `node_modules`, which the collector does not read. A committed
   `node_modules/<name>` that claims the pinned version runs under the pinned
-  identity.
+  identity. Without `--package`, a file named exactly like the package word in
+  `node_modules/.bin` of the project or any parent directory, such as
+  `node_modules/.bin/srv@1.2.3` for `npx -y srv@1.2.3`, runs in its place and npm
+  fetches nothing. For a scoped spec, npm then runs the word as a path from the
+  working directory, such as a committed `@s/srv@1.2.3`.
 - **A project `package.json` bin can stand in for a pinned package.** Without
   `--package`, `npx` and `npm exec` run a `bin` entry of the project's `package.json`,
   or of a workspace selected with `-w`, that is named exactly like the package word,

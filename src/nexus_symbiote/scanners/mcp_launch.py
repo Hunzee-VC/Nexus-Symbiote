@@ -2586,17 +2586,63 @@ _NPM_SPELLINGS = {
 # npm's one-letter shorthands. nopt reads a word made of them as a cluster (-SC is --save
 # --prefix) unless it is one of the shorthands dd, ddd and ws.
 _NPM_SINGLES = frozenset("?BCDEHLOPSacdfghlmnpqsvwy")
+# npm 10.9.9's options whose type allows a string, each with the length of the shortest
+# abbreviation nopt resolves to it. Written --no-<name>, or as --browser, which is Boolean too,
+# such an option takes a following run of dashes as its value, and nopt reads on.
+_NPM_DASH_ABBREVIATED = {
+    "_auth": 1,
+    "browser": 2,
+    "ca": 2,
+    "cert": 2,
+    "cidr": 2,
+    "cpu": 2,
+    "diff": 4,
+    "key": 1,
+    "libc": 3,
+    "node-options": 3,
+    "noproxy": 3,
+    "os": 2,
+    "otp": 2,
+    "package": 7,
+    "replace-registry-host": 3,
+    "script-shell": 3,
+    "workspace": 9,
+}
+_NPM_DASH_VALUES = {
+    name[:size]: name
+    for name, least in _NPM_DASH_ABBREVIATED.items()
+    for size in range(least, len(name) + 1)
+}
 
 
-def _npm_unread_options(words: list[str]) -> list[tuple[str, str | None]]:
-    """Those options among words the port did not read, up to "--", spelled in full."""
+def _npm_takes_dashes(word: str) -> bool:
+    """Whether nopt takes a run of dashes after this word as the value of its option."""
+    key = word.lstrip("-")
+    bare = re.sub("^(?:no-)+", "", key, flags=re.IGNORECASE)
+    name = _NPM_DASH_VALUES.get(bare)
+    return (
+        word.startswith("-")
+        and "=" not in word
+        and name is not None
+        and (bare != key or name == "browser")
+    )
+
+
+def _npm_unread_options(words: list[str]) -> list[tuple[str, str | None]] | None:
+    """Those options among words the port did not read, up to the end of npm's options,
+    spelled in full; None when an option's name depends on the environment."""
     found: list[tuple[str, str | None]] = []
     for index, word in enumerate(words):
-        if word == "--":
+        if re.fullmatch(r"-{2,}", word):
+            if index and _npm_takes_dashes(words[index - 1]):
+                continue
             break
         if not word.startswith("-"):
             continue
         key, equals, value = word.lstrip("-").partition("=")
+        if "${" in key:
+            # @npmcli/config replaces ${VAR} in an option's name after nopt has read it.
+            return None
         bare = _NPM_SPELLINGS.get(re.sub("^(?:no-)+", "", key, flags=re.IGNORECASE))
         if key in _NPM_SPELLINGS:
             names = [_NPM_SPELLINGS[key]]
@@ -2633,9 +2679,13 @@ def _npm(name: str, rest: list[str], launch: Launch) -> None:
             _npm_exec(options, remain, launch)
     elif subcommand in _NPM_LOCAL:
         launch.launcher = f"npm {subcommand}"
-        # npm reads its options anywhere before "--", also after the script name.
-        found = [(option, value) for option, value, _ in options]
-        if _npm_options([*found, *_npm_unread_options(parsed.unread)], launch):
+        # npm reads its options anywhere before their end, also after the script name. Only
+        # npm exec reads --call (the port spells -c so), so here it runs nothing.
+        found = [(option, value) for option, value, _ in options if option != "--call"]
+        unread = _npm_unread_options(parsed.unread)
+        if unread is None:
+            launch.fail("npm option name depends on the environment")
+        elif _npm_options([*found, *unread], launch):
             # The words after the subcommand, as written: a script's own arguments may
             # hold options the port does not model.
             _local_subcommand(parsed.after, launch)
