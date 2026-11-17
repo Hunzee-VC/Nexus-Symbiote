@@ -1,6 +1,6 @@
 # Comparative AI-BOM benchmark: method
 
-Version 1.0.0. This page is the specification: what the benchmark measures, how each number is computed, and what the numbers do not show. To run it, see the [README](README.md). Results of recorded rounds are under [`results/`](results/).
+Version 1.0.0. This page is the specification: what the benchmark measures, how each number is computed, and what the numbers do not show. To run it, see the [README](README.md). Recorded rounds are listed in [results](results/README.md).
 
 - [What this is](#what-this-is)
 - [Principles](#principles)
@@ -83,7 +83,7 @@ Each pair is two cases with the same paths, where one file differs in one condit
 
 ### Hostile cases
 
-Each case holds a hostile input and an ordinary component, the *survivor*. Canaries make misuse observable:
+Each case holds a hostile input and ordinary components, the *survivors*: an MCP server in every case, and a valid weight file wherever the hostile input is a model file. Canaries make misuse observable:
 
 - **Execution**: commands in fixtures create a file in a directory that starts empty, or a file with a canary name in the project.
 - **Escape**: files outside the scanned directory carry a marker and known digests.
@@ -108,9 +108,9 @@ Each run materializes one case into a new directory and starts the tool inside n
 | `/mnt/bench/canary` | An empty directory that fixtures try to write to |
 | `/mnt/bench/outside` | Files that are not part of the project |
 
-The environment is cleared and then set to `HOME`, the XDG directories, `PATH`, `LANG`, `LC_ALL`, `TZ=UTC`, `TERM=dumb`, `NO_COLOR=1`, `CI=true` and the variables an adapter lists. A run is stopped after 120 seconds, or when the tool's resident memory passes 3 GiB.
+The environment is cleared and then set to `HOME`, the XDG directories, `PATH`, `LANG`, `LC_ALL`, `TZ=UTC`, `TERM=dumb`, `NO_COLOR=1`, `CI=true` and the variables an adapter lists. A run is stopped after 300 seconds, or when the tool's resident memory passes 3 GiB.
 
-**Invocation policy.** Each tool gets its documented AI-BOM command with only the flags needed to choose the output file and format, to be quiet, to stay offline and to switch telemetry off. No flag that turns a gate on or off is passed; exit codes are recorded as they come. The exact commands are in `bench/tools.py` and are printed in every report.
+**Invocation policy.** Each tool gets its documented AI-BOM command with only the flags needed to choose the output file and format, to be quiet, to stay offline and to switch telemetry off. Where a tool documents more than one command for the task, each is run and reported as its own configuration. No flag that turns a gate on or off is passed; exit codes are recorded as they come. The exact commands are in `bench/tools.py` and are printed in every report.
 
 **Formats.** CycloneDX JSON is requested for every case. SARIF and the tool's own JSON format, where it has them, are requested for the risk pairs and hostile cases; the tool's own JSON is also requested for discovery cases, for the diagnostic in the report.
 
@@ -122,11 +122,13 @@ Tool versions are pinned: Python tools by hash-locked requirements, cdxgen by a 
 
 An **element** is any object in a `components`, `services`, `workflows` or `tasks` list, or under a `component` key, anywhere in the document. Its text is every string and number it holds, lower-cased, without the elements nested inside it.
 
-An element **names** a label when every token of one of the label's groups occurs in its text.
+An element **names** a label when every token of one of the label's groups occurs in its text, or when it carries the SHA-256 digest of the label's file. The digest identifies a file whatever name a tool gives it.
 
 An element's **signature** is its kind, its `type`, its property names, and its property values that read as labels (short, no path separators, not digests or numbers). The signatures of elements that mention a control file are the tool's *generic* signatures: how it renders a file it knows nothing about.
 
 A label is **found** when an element names it and that element's signature is not generic. Listing a model file the same way as a PNG is not discovery.
+
+A label's **own record** is the found element that names the fewest labels of the case. An element that refers to many components, such as an agent that lists its tools, names all of them; attributes and relationships are read from each component's own record, not from such a list.
 
 This matching is deliberately lenient about *where* a tool records a fact, because the standards do not yet fix a representation for MCP servers, skills or instruction files. It is strict about *whether* the fact is there.
 
@@ -138,8 +140,8 @@ Each pillar is a number from 0 to 1.
 | --- | ---: | --- |
 | Discovery | 30 | For each domain, labels found divided by labels present; the pillar is the mean of the five domains, so a large domain does not dominate. The report gives counts and a 95% Wilson interval per domain |
 | Precision | 8 | Decoys rejected divided by decoys. A decoy is rejected when no element names it **and** its paired real component was found |
-| Attributes | 12 | Attribute checks that hold, divided by all attribute checks of all labels. For a found label the best matching element is used; for a label not found every check fails. The report also gives the share for found labels only |
-| Relationships | 5 | Labelled relationships that the document expresses, divided by all. Two found components are related when one element names both, when one is nested in the other, when `dependencies` links them in either direction, or when one refers to the other's `bom-ref` |
+| Attributes | 12 | Attribute checks that hold, divided by all attribute checks of all labels. For a found label its own record is used, the best one if there are several; for a label not found every check fails. The report also gives the share for found labels only |
+| Relationships | 5 | Labelled relationships that the document expresses, divided by all. Two found components are related when the own record of one names the other, when one is nested in the other, when `dependencies` links them in either direction, or when one refers to the other's `bom-ref` |
 | Conformance | 8 | Mean over discovery cases of a case value; a case with no found label has value 0. The case value is the mean of the checks that apply: strict validation against the official CycloneDX schema of the declared version (with `cyclonedx-python-lib`), the share of package URLs that are syntactically valid, unique `bom-ref` values, and the share of found models and datasets that carry the standard type |
 | Risk signal | 12 | Mean credit over risk pairs. 1 when a machine-readable output of the risky twin holds a risk statement that the clean twin's does not: a SARIF result, a CycloneDX vulnerability or annotation, a property whose name matches the risk pattern in `bench/score.py`, or such a field in the tool's own JSON. 0.5 when only the console text contains more risk words or the exit code differs. 0 otherwise |
 | Hostile input | 12 | Mean credit over hostile cases. A case earns the share of its checks that pass if the tool found a survivor, and 0 if it did not |
@@ -178,11 +180,13 @@ Read these before quoting a number.
 
 - **The corpus is synthetic and small.** 128 labels in 41 cases, written to be unambiguous. Real repositories are larger, messier and distributed differently across surfaces. The intervals in the report are wide; small differences between tools are not evidence.
 - **One author, no blinding.** The labels were written by the author of the cases, with knowledge of what several tools read. No second labeller reviewed them.
-- **First-party.** The benchmark is developed with one of the graded tools. The surface list was drawn from every tool's documentation and from published formats to counter that, and the host tool is shown losing wherever it loses, but selection effects cannot be excluded from the inside.
+- **First-party.** The benchmark is developed with one of the graded tools. The surface list was drawn from every tool's documentation and from published formats to counter that, and the host tool is shown losing wherever it loses, but selection effects cannot be excluded from the inside. The hostile cases are the clearest instance: they cover the classes the host project's own security audits target, so its passing them is expected and is weaker evidence than a hostile suite written by someone else.
+- **Residual over-credit.** A label that a tool records only inside a broad element, with no record of its own, is read from that element, which can lend it facts about other components.
+- **Tools ran as root.** The sandbox needs root, and the tools inherit it. A tool that behaves differently for an unprivileged user was not measured that way.
 - **Token matching can over-credit.** A label is found when its tokens occur in a recognized element. A tool that records a name without understanding the component earns the discovery credit; attribute checks then separate shallow from deep records only where a label has attributes.
 - **CycloneDX first.** A tool whose own format carries more than its CycloneDX export is scored on the export. The report shows the difference; the score does not include it.
 - **Defaults, offline.** Every tool ran with its documented command and no tuning, without a network. A maintainer could likely configure a better result, and online features are absent by design.
-- **The risk comparison is coarse.** It credits any new risk statement in the risky twin, whatever it says, and it reads only the channels listed above. It does not measure false alarms on clean projects.
+- **The risk comparison is coarse.** It credits any new risk statement in the risky twin, whatever it says, and it reads only the channels listed above. A tool that makes the same statement about both twins, such as flagging every pickle file, earns nothing: a pair measures whether the tool tells the two apart, not whether it is cautious. False alarms on clean projects are not measured.
 - **Engagement gating has two edges.** It denies credit for safety by omission, and it also means a tool that is safe on a surface it does not inventory shows as "not engaged", not as safe.
 - **One environment, one date.** Versions are those pinned on the day of the round, on one Linux machine. Tools change monthly.
 - **Weights and bands are judgments.** They were fixed before the first run and are not derived from data.
@@ -204,7 +208,7 @@ These belong to an AI-BOM tool's value and are outside version 1.0. Each needs a
 
 ## Changing the benchmark
 
-The corpus, the scoring rules, the weights and the grade bands were committed before any tool was run on the corpus. Tool adapters were developed against a separate smoke project that is not part of it. Every change after that commit is listed in [DEVIATIONS.md](DEVIATIONS.md) with its reason and its effect on every tool, and a change to a case or label changes the pinned corpus digest.
+The corpus, the scoring rules, the weights and the grade bands were committed before any tool was run on the corpus (commit `65859db`). Tool adapters were developed against a separate smoke project that is not part of it. Every change after that commit is listed in [DEVIATIONS.md](DEVIATIONS.md) with its reason and its effect on every tool, and a change to a case or label changes the pinned corpus digest. This page describes the rules as they stand after those changes.
 
 To add a tool, add an adapter to `bench/tools.py` with its pinned version and exact command, and nothing else. To dispute a label or a rule, open an issue with the case identifier; a correction is applied to every tool and recorded as a deviation.
 

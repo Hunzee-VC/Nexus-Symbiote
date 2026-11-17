@@ -10,7 +10,7 @@ from __future__ import annotations
 import struct
 
 from .artifacts import digest_bytes, gguf, safetensors
-from .build import as_json, case, ex, text
+from .build import as_json, case, ex, sha, text
 from .cases_risk import literal_secret_values, pairs, secret
 from .model import CANARY_DIR, OUTSIDE_DIR, Expect, Files, Hostile, HostileCheck
 
@@ -63,6 +63,20 @@ def survivor(case_id: str, package: str = "@modelcontextprotocol/server-memory@2
 
 def survivor_expect(case_id: str) -> Expect:
     return ex(f"{case_id}.survivor", "agent", "mcp-server", f"{case_id}-survivor")
+
+
+def model_survivor(case_id: str) -> tuple[Files, Expect]:
+    """A valid weight file beside hostile model files.
+
+    Cases whose hostile input is a model file need a survivor on that surface, so
+    that a tool which reads model files and not MCP configuration is still engaged.
+    """
+    path = f"models/{case_id}-weights-ok.safetensors"
+    weights = safetensors([("w", "F32", (2,), digest_bytes(f"{case_id}:ok", 8))], {"format": "pt"})
+    label = ex(
+        f"{case_id}.weights", "model", "model-file", f"{case_id}-weights-ok", attrs=[sha(path)]
+    )
+    return {path: weights}, label
 
 
 def install_scripts() -> Hostile:
@@ -180,12 +194,15 @@ def launch_commands() -> Hostile:
 
 
 def symlink_escape() -> Hostile:
+    files = survivor("h04")
+    weights, weights_label = model_survivor("h04")
+    files.update(weights)
     return Hostile(
         case(
             "h04-symlink-escape",
             "Symbolic links that point outside the scanned project, and a directory loop",
-            survivor("h04"),
-            [survivor_expect("h04")],
+            files,
+            [survivor_expect("h04"), weights_label],
             symlinks={
                 "models/linked-weights.safetensors": f"{OUTSIDE_DIR}/outside-model.safetensors",
                 "CLAUDE.md": f"{OUTSIDE_DIR}/outside-notes.md",
@@ -259,11 +276,13 @@ def malformed_inputs() -> Hostile:
             }
         }
     }
+    weights, weights_label = model_survivor("h06")
     return Hostile(
         case(
             "h06-malformed-inputs",
             "Truncated, deeply nested, empty and wrongly encoded files beside valid ones",
             {
+                **weights,
                 ".mcp.json": b'{"mcpServers": {"h06-truncated": {"command": "npx", "args": ["-y", "@acme/tr',
                 ".cursor/mcp.json": as_json(cursor),
                 ".vscode/mcp.json": jsonc,
@@ -277,6 +296,7 @@ def malformed_inputs() -> Hostile:
             [
                 ex("h06.survivor", "agent", "mcp-server", "h06-survivor"),
                 ex("h06.jsonc", "agent", "mcp-server", "h06-jsonc-server"),
+                weights_label,
             ],
         ),
         ("completes",),
@@ -291,6 +311,8 @@ def parser_bombs() -> Hostile:
     cursor = {"mcpServers": {"h07-big": {"command": "npx", "args": [big_argument]}}}
     nested = b'{"tools": ' + b"[" * 50_000 + b"]" * 50_000 + b"}"
     files = survivor("h07")
+    weights, weights_label = model_survivor("h07")
+    files.update(weights)
     files.update(
         {
             "models/bomb-count-h07.gguf": b"GGUF" + struct.pack("<IQQ", 3, 0, 1 << 62),
@@ -306,7 +328,7 @@ def parser_bombs() -> Hostile:
             "h07-parser-bombs",
             "Model headers that declare enormous sizes, deep nesting and a very long value",
             files,
-            [survivor_expect("h07")],
+            [survivor_expect("h07"), weights_label],
         ),
         ("completes", "bounded_memory"),
         "resource exhaustion from declared sizes",
@@ -406,6 +428,8 @@ def filename_injection() -> Hostile:
     weights = gguf([("general.name", "h10")], "h10")
     tensor = safetensors([("w", "F32", (2,), digest_bytes("h10", 8))])
     files = survivor("h10")
+    ok_weights, weights_label = model_survivor("h10")
+    files.update(ok_weights)
     files.update(
         {
             "models/$(touch h10-subst-canary).gguf": weights,
@@ -421,7 +445,7 @@ def filename_injection() -> Hostile:
             "h10-filename-injection",
             "File names that are shell commands or options",
             files,
-            [survivor_expect("h10")],
+            [survivor_expect("h10"), weights_label],
         ),
         ("completes", "no_execution"),
         "command injection through file names",
@@ -474,12 +498,15 @@ def steering_text() -> Hostile:
 
 
 def special_files() -> Hostile:
+    files = survivor("h13")
+    weights, weights_label = model_survivor("h13")
+    files.update(weights)
     return Hostile(
         case(
             "h13-special-files",
             "A named pipe and links to endless device files with model and data names",
-            survivor("h13"),
-            [survivor_expect("h13")],
+            files,
+            [survivor_expect("h13"), weights_label],
             symlinks={
                 "models/endless.safetensors": "/dev/zero",
                 "data/random.jsonl": "/dev/urandom",

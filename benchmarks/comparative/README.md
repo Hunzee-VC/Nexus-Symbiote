@@ -4,7 +4,7 @@ Runs AI-BOM generators on the same generated projects and compares what each wri
 
 - [Method](METHOD.md): what is measured, every scoring rule, and what the numbers do not show. Read it before quoting a score.
 - [Deviations](DEVIATIONS.md): every change made after the method was registered.
-- [Results](results/): one directory per recorded round, with a report and the full scorecard.
+- [Results](results/README.md): one directory per recorded round, with a report, notes and the full scorecard. The latest is the [round of 2026-11-17](results/2026-11-17/REPORT.md).
 
 This is a first-party benchmark with a synthetic corpus. It supports comparisons on this corpus only, and no percentile or market ranking.
 
@@ -30,10 +30,10 @@ cd benchmarks/comparative && python -m bench check
 
 ```text
 41 discovery cases, 128 expected components, 14 risk pairs, 15 hostile cases, 14 mutations
-corpus digest 935f70a418d8cfa114e6b805a1915e678b89b8386f1386a3bd083c5a16408f8c
+corpus digest 93cf36ee3a2fbc24f4502c124f0686a086a214e0cec6601ea62d6f42174694fb
 ```
 
-Run every tool on every case. About 1,400 runs; allow fifteen minutes on four cores.
+Run every tool on every case. About 1,550 runs; allow twenty minutes on four cores. Runs with a package manager retry against the missing network and take longest.
 
 ```bash
 python -m bench run --tools-root "$HOME/aibom-bench-tools" --work "$HOME/aibom-bench-work"
@@ -57,7 +57,7 @@ python -m bench report --results results/local/scorecard.json --out results/loca
 - **Run tools only through `python -m bench run`.** The sandbox gives a tool no network, an empty home directory and a cleared environment, so it cannot read your agent configuration or send anything out. Outside it, several of these tools send telemetry by default, and at least one does so on `--help`.
 - **Tools run with your privileges inside the namespaces.** The sandbox isolates the network and the paths under `/mnt`; it is not a security boundary against a malicious tool. Install only the pinned versions, in a disposable environment.
 - **Credential canaries are derived, not stored.** No token-shaped string is committed. A materialized corpus contains them; they are not valid credentials.
-- **Results name real projects.** A finding against another tool is a statement about a pinned version on one corpus. Report a suspected vulnerability to that project before publishing it.
+- **Results name real projects.** A result against another tool is a statement about a pinned version, run with its defaults, on one corpus. The hostile cases show how a tool behaves on a hostile repository; tell the project what you observed. Anything that looks exploitable beyond that is a vulnerability: report it to the project privately before you publish it.
 
 ## Layout
 

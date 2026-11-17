@@ -34,7 +34,7 @@ from .model import (
 )
 from .tools import OUT_NAMES, Tool
 
-TIMEOUT_SECONDS = 120.0
+TIMEOUT_SECONDS = 300.0
 MEMORY_GUARD_KB = 3 * 1024 * 1024
 CANARY_NAME = re.compile(r"^h\d\d-[a-z-]+-canary$")
 STATE_READ_LIMIT = 5 * 1024 * 1024
@@ -288,8 +288,19 @@ def plan(tool: Tool, corpus: Corpus) -> list[Job]:
 
 
 def run_all(
-    tools: Iterable[Tool], corpus: Corpus, tools_root: Path, work: Path, workers: int = 4
+    tools: Iterable[Tool],
+    corpus: Corpus,
+    tools_root: Path,
+    work: Path,
+    workers: int = 4,
+    only_cases: frozenset[str] | None = None,
 ) -> list[Record]:
-    jobs = [job for tool in tools if tool.measured for job in plan(tool, corpus)]
+    jobs = [
+        job
+        for tool in tools
+        if tool.measured
+        for job in plan(tool, corpus)
+        if only_cases is None or job.case.id in only_cases
+    ]
     with ThreadPoolExecutor(max_workers=workers) as pool:
         return list(pool.map(lambda job: run_job(job, corpus, tools_root, work), jobs))

@@ -61,18 +61,37 @@ def command_run(args: argparse.Namespace) -> int:
     selected = [tool for tool in _tools(args.tool) if tool.measured]
     work = Path(args.work)
     started = time.time()
-    records = runner.run_all(selected, built, Path(args.tools_root).resolve(), work, args.workers)
+    only = frozenset(args.case) if args.case else None
+    records = runner.run_all(
+        selected, built, Path(args.tools_root).resolve(), work, args.workers, only
+    )
+    session = {
+        "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started)),
+        "seconds": round(time.time() - started, 1),
+        "runs": len(records),
+        "tools": [tool.id for tool in selected],
+        "cases": sorted(only) if only else "all",
+    }
+    environment_path = work / "environment.json"
+    previous = json.loads(environment_path.read_text()) if environment_path.is_file() else {}
+    sessions = [*previous.get("sessions", []), session]
     environment = {
         "bench_version": BENCH_VERSION,
         "corpus_digest": corpus.digest(built),
-        "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started)),
-        "seconds": round(time.time() - started, 1),
+        "started_utc": sessions[0]["started_utc"],
+        "seconds": round(sum(entry["seconds"] for entry in sessions), 1),
         "platform": platform.platform(),
         "python": platform.python_version(),
         "cpus": os.cpu_count(),
         "timeout_seconds": runner.TIMEOUT_SECONDS,
         "isolation": "unshare --net --mount, cleared environment, empty home directory",
-        "runs": len(records),
+        "runs": sum(
+            1
+            for record in (work / "runs").glob("*/*/*/*/record.json")
+            if record.parts[-5] not in {baselines.ORACLE.id, baselines.NULL.id}
+        ),
+        "executed": sum(entry["runs"] for entry in sessions),
+        "sessions": sessions,
     }
     (work / "environment.json").write_text(json.dumps(environment, indent=2) + "\n")
     print(json.dumps(environment, indent=2))
@@ -151,6 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("--work", required=True)
     run.add_argument("--tool", action="append")
     run.add_argument("--workers", type=int, default=4)
+    run.add_argument("--case", action="append", help="run only this case; repeatable")
     run.set_defaults(run=command_run)
     scoring = commands.add_parser("score", help="score recorded runs")
     scoring.add_argument("--work", required=True)

@@ -111,16 +111,29 @@ def load_view(work: Path, tool_id: str, case_id: str, variant: str = "base") -> 
     return view
 
 
-def _matches(expect: Expect, element: cdx.Element) -> bool:
-    return any(all(token.lower() in element.text for token in group) for group in expect.any_of)
+def _digests(expect: Expect, files: dict[str, bytes]) -> list[str]:
+    return [
+        hashlib.sha256(files[attr.values[0]]).hexdigest()
+        for attr in expect.attrs
+        if attr.kind == "sha256"
+    ]
 
 
-def recognized(expect: Expect, view: View, generic: set[cdx.Signature]) -> list[cdx.Element]:
+def _matches(expect: Expect, element: cdx.Element, files: dict[str, bytes]) -> bool:
+    """True when the element holds the component's tokens or the digest of its file."""
+    if any(all(token.lower() in element.text for token in group) for group in expect.any_of):
+        return True
+    return any(digest in element.text for digest in _digests(expect, files))
+
+
+def recognized(
+    expect: Expect, view: View, generic: set[cdx.Signature], files: dict[str, bytes]
+) -> list[cdx.Element]:
     """Elements that name the component and are not rendered like an arbitrary file."""
     return [
         element
         for element in view.elements
-        if _matches(expect, element) and element.signature not in generic
+        if _matches(expect, element, files) and element.signature not in generic
     ]
 
 
@@ -187,12 +200,26 @@ def attribute_holds(
     return all(_word(value, element.text) for value in attr.values)
 
 
-def connected(sources: list[cdx.Element], targets: list[cdx.Element], view: View) -> bool:
-    """True when the document relates the two components in any standard way."""
+def connected(
+    source_label: Expect,
+    target_label: Expect,
+    sources: list[cdx.Element],
+    targets: list[cdx.Element],
+    view: View,
+    files: dict[str, bytes],
+) -> bool:
+    """True when the document relates the two components.
+
+    ``sources`` and ``targets`` are each component's own elements. The relation holds
+    when one component's own element names the other, when one is nested in the other,
+    when ``dependencies`` links them, or when one refers to the other's ``bom-ref``.
+    """
+    if any(_matches(target_label, element, files) for element in sources):
+        return True
+    if any(_matches(source_label, element, files) for element in targets):
+        return True
     for source in sources:
         for target in targets:
-            if source.index == target.index:
-                return True
             if source.parent == target.index or target.parent == source.index:
                 return True
             if source.ref and target.ref:
@@ -335,13 +362,37 @@ class Scorer:
 
     def found(self, case: Case, variant: str = "base") -> dict[str, list[cdx.Element]]:
         view = self.view(case.id, variant)
-        return {expect.id: recognized(expect, view, self.generic) for expect in case.expects}
+        return {
+            expect.id: recognized(expect, view, self.generic, case.files) for expect in case.expects
+        }
+
+    def own(self, case: Case) -> dict[str, list[cdx.Element]]:
+        """For each label, the found elements that name the fewest labels of the case.
+
+        An element that refers to many components, such as an agent that lists its
+        tools, names all of them. A component's own record is the narrowest element
+        that names it; attributes and relationships are read from that record only.
+        """
+        view = self.view(case.id)
+        breadth = {
+            element.index: sum(
+                1 for expect in case.expects if _matches(expect, element, case.files)
+            )
+            for element in view.elements
+        }
+        own: dict[str, list[cdx.Element]] = {}
+        for expect_id, elements in self.found(case).items():
+            narrowest = min((breadth[element.index] for element in elements), default=0)
+            own[expect_id] = [
+                element for element in elements if breadth[element.index] == narrowest
+            ]
+        return own
 
     def discovery(self) -> Json:
         by_domain = {domain: [0, 0] for domain in DOMAINS}
         items: Json = {}
         for case in self.corpus.discovery:
-            hits = self.found(case)
+            hits = self.own(case)
             for expect in case.expects:
                 by_domain[expect.domain][1] += 1
                 elements = hits[expect.id]
@@ -382,10 +433,11 @@ class Scorer:
             nodes = cdx.bounded_nodes(document) if document else []
             for expect in case.expects:
                 by_domain[expect.domain][1] += 1
+                digests = _digests(expect, case.files)
                 if any(
-                    all(token.lower() in node for token in group)
+                    any(all(token.lower() in node for token in group) for group in expect.any_of)
+                    or any(digest in node for digest in digests)
                     for node in nodes
-                    for group in expect.any_of
                 ):
                     by_domain[expect.domain][0] += 1
         recalls = {domain: round(found / total, 4) for domain, (found, total) in by_domain.items()}
@@ -406,11 +458,18 @@ class Scorer:
         rejected = sum(
             1 for item in items.values() if item["paired_found"] and not item["reported"]
         )
+        controls = sum(
+            1
+            for case in self.corpus.discovery
+            for element in self.view(case.id).elements
+            if any(token in element.text for token in control_tokens(case.id))
+        )
         reported_count = sum(1 for item in items.values() if item["reported"])
         return {
             "score": round(rejected / len(items), 4),
             "rejected": rejected,
             "reported": reported_count,
+            "control_files_reported": controls,
             "total": len(items),
             "items": items,
         }
@@ -419,7 +478,7 @@ class Scorer:
         passed = total = passed_found = total_found = 0
         items: Json = {}
         for case in self.corpus.discovery:
-            hits = self.found(case)
+            hits = self.own(case)
             for expect in case.expects:
                 if not expect.attrs:
                     continue
@@ -449,12 +508,17 @@ class Scorer:
     def relationships(self) -> Json:
         items: Json = {}
         for case in self.corpus.discovery:
-            hits = self.found(case)
+            hits = self.own(case)
+            labels = {expect.id: expect for expect in case.expects}
             view = self.view(case.id)
             for edge in case.edges:
                 sources, targets = hits[edge.source], hits[edge.target]
                 items[f"{edge.source} {edge.relation} {edge.target}"] = bool(
-                    sources and targets and connected(sources, targets, view)
+                    sources
+                    and targets
+                    and connected(
+                        labels[edge.source], labels[edge.target], sources, targets, view, case.files
+                    )
                 )
         return {
             "score": round(sum(items.values()) / len(items), 4),
@@ -484,17 +548,18 @@ class Scorer:
             refs = [element.ref for element in view.elements if element.ref]
             if refs:
                 parts["refs"] = float(len(refs) == len(set(refs)))
+            own = self.own(case)
             typed = [
                 (expect, attr)
                 for expect in case.expects
                 for attr in expect.attrs
-                if attr.kind == "type" and hits[expect.id]
+                if attr.kind == "type" and own[expect.id]
             ]
             if typed:
                 parts["typing"] = sum(
                     any(
                         attribute_holds(attr, expect, element, case.files)
-                        for element in hits[expect.id]
+                        for element in own[expect.id]
                     )
                     for expect, attr in typed
                 ) / len(typed)

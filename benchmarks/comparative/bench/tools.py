@@ -122,12 +122,37 @@ TOOLS: tuple[Tool, ...] = (
     ),
     Tool(
         id="cdxgen",
-        name="cdxgen",
+        name="cdxgen (aibom command)",
         version="13.8.0",
         license="Apache-2.0",
         origin="npm @cdxgen/cdxgen@13.8.0, installed with --ignore-scripts",
         commands={"cdx": ("{root}/cdxgen/node_modules/.bin/aibom", "-o", "{out}", ".")},
-        note="The dedicated `aibom` command with its defaults.",
+        note="The dedicated `aibom` command with its defaults, which select the `ai` project type.",
+    ),
+    Tool(
+        id="cdxgen-repository",
+        name="cdxgen (repository command)",
+        version="13.8.0",
+        license="Apache-2.0",
+        origin="npm @cdxgen/cdxgen@13.8.0, installed with --ignore-scripts",
+        commands={
+            "cdx": (
+                "{root}/cdxgen/node_modules/.bin/cdxgen",
+                "-r",
+                "--include-formulation",
+                "-o",
+                "{out}",
+                "--bom-audit",
+                "--bom-audit-categories",
+                "ai-bom",
+                ".",
+            )
+        },
+        note=(
+            "The command its README gives to generate and audit an AI-BOM from a repository. "
+            "It detects every project type, so it also reads package manifests and MCP "
+            "configuration, and by default it runs the project's package manager."
+        ),
     ),
     _agent_bom(),
     _trusera(),

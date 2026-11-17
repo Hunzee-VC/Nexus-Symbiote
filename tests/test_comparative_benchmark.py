@@ -332,7 +332,7 @@ def test_grades_and_weights_are_the_published_ones(bench: ModuleType) -> None:
 
 def test_every_tool_adapter_writes_to_the_sandbox_output_directory(bench: ModuleType) -> None:
     measured = [tool for tool in bench.tools.TOOLS if tool.measured]
-    assert len(bench.tools.TOOLS) == 11 and len(measured) == 8
+    assert len(bench.tools.TOOLS) == 12 and len(measured) == 9
     for tool in measured:
         argv = tool.argv("cdx", "/tools")
         assert argv[0].startswith("/tools/")
@@ -356,3 +356,81 @@ def test_method_page_names_every_case_and_the_published_weights(
         assert f"| {weight} |" in method, name
     readme = (BENCH_ROOT / "README.md").read_text(encoding="utf-8")
     assert bench.CORPUS_DIGEST in readme
+
+
+def test_an_element_that_names_everything_states_no_relationship(
+    bench: ModuleType, built: Any, tmp_path: Path
+) -> None:
+    def aggregating(case: Any, files: dict[str, bytes]) -> dict[str, Any]:
+        document = bench.baselines.oracle_document(case, files)
+        document["dependencies"] = []
+        references = [
+            {"name": "ref", "value": " ".join(expect.any_of[0])} for expect in case.expects
+        ]
+        document["components"].insert(
+            0, {"type": "application", "name": "agent", "properties": references}
+        )
+        return document
+
+    tool = bench.tools.Tool("aggregating", "Aggregating", "-", "-", "test", {"cdx": ("x",)})
+    _write_runs(bench, built, tmp_path, tool, aggregating)
+    scorer = bench.score.Scorer(built, tool, tmp_path)
+    assert scorer.discovery()["score"] == 1.0
+    assert scorer.fidelity()["score"] == 1.0
+    assert scorer.relationships()["score"] == 0.0
+    described = scorer.discovery()["items"]["a01.fs"]["as"]
+    assert described == "component/application: fs-workspace"
+
+
+def test_the_digest_of_its_file_identifies_a_component(
+    bench: ModuleType, built: Any, tmp_path: Path
+) -> None:
+    import hashlib
+
+    def anonymous(case: Any, files: dict[str, bytes]) -> dict[str, Any]:
+        components = [
+            {
+                "type": "machine-learning-model",
+                "name": f"artifact-{index}",
+                "hashes": [
+                    {"alg": "SHA-256", "content": hashlib.sha256(files[attr.values[0]]).hexdigest()}
+                ],
+            }
+            for index, (expect, attr) in enumerate(
+                (expect, attr)
+                for expect in case.expects
+                for attr in expect.attrs
+                if attr.kind == "sha256"
+            )
+        ]
+        return {
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.6",
+            "version": 1,
+            "components": components,
+        }
+
+    tool = bench.tools.Tool("anonymous", "Anonymous", "-", "-", "test", {"cdx": ("x",)})
+    _write_runs(bench, built, tmp_path, tool, anonymous)
+    items = bench.score.Scorer(built, tool, tmp_path).discovery()["items"]
+    hashed = {
+        expect.id
+        for case in built.discovery
+        for expect in case.expects
+        if any(attr.kind == "sha256" for attr in expect.attrs)
+    }
+    assert {key for key, value in items.items() if value["found"]} == hashed
+    assert "m02.weights" in hashed and "a01.fs" not in hashed
+
+
+def test_hostile_cases_that_target_model_files_have_a_model_survivor(built: Any) -> None:
+    by_id = {hostile.case.id: hostile.case for hostile in built.hostile}
+    for case_id in (
+        "h04-symlink-escape",
+        "h06-malformed-inputs",
+        "h07-parser-bombs",
+        "h10-filename-injection",
+        "h13-special-files",
+    ):
+        domains = {expect.domain for expect in by_id[case_id].expects}
+        assert {"agent", "model"} <= domains, case_id
