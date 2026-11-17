@@ -22,6 +22,7 @@ from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import MCPClientComponent, ToolComponent
 from nexus_symbiote.scanners.mcp import MCPScanner, without_js_comments
 from nexus_symbiote.utils.confined import MAX_LISTED_FAILURES
+from tests.support import scaling_ratio
 
 REPOSITORY = Path(__file__).resolve().parents[1]
 CLIENT_PY = "from mcp import ClientSession\n"
@@ -531,21 +532,23 @@ def test_the_repository_itself_passes_the_mcp_collector():
     ]
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
-        "/* " * 87_381,
-        "\n" * 262_144,
-        " \n" * 131_072,
-        "a\n" * 131_072,
-        "/*/" * 87_381,
-        "//\n" * 43_690 + "/*" + "x" * 131_068 + "*/",
-    ],
-)
-def test_comment_stripping_is_linear_at_the_syntax_limit(text):
-    started = time.monotonic()
-    without_js_comments(text)
-    assert time.monotonic() - started < 5
+# Each shape at a quarter of the syntax limit times ``scale``; at 4 it is the limit.
+_COMMENT_SHAPES = {
+    "open-comments": lambda scale: "/* " * (21_845 * scale),
+    "newlines": lambda scale: "\n" * (65_536 * scale),
+    "blank-lines": lambda scale: " \n" * (32_768 * scale),
+    "short-lines": lambda scale: "a\n" * (32_768 * scale),
+    "slash-star-slash": lambda scale: "/*/" * (21_845 * scale),
+    "line-comments-then-block": lambda scale: (
+        "//\n" * (10_922 * scale) + "/*" + "x" * (32_767 * scale) + "*/"
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_COMMENT_SHAPES))
+def test_comment_stripping_is_linear_at_the_syntax_limit(shape):
+    make = _COMMENT_SHAPES[shape]
+    assert scaling_ratio(lambda scale: without_js_comments(make(scale))) < 10
 
 
 class _SearchCountingText(str):

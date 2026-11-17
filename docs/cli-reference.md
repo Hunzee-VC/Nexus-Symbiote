@@ -137,13 +137,13 @@ Colors are used only on a terminal, and `NO_COLOR` turns them off.
 |---|---|
 | `0` | The command completed and every requested gate passed. |
 | `1` | A gate or check failed (risk gate, integrity, digest or signature mismatch, a `diff` security alert, since `--fail-on-alert` is the default and only `--no-fail-on-alert` turns that gate off, incomplete collection or observation), the input could not be read or parsed, `import-shadowscan` ran without `--report-only`, unverified ShadowScan discovery evidence was imported, validated or scored in CI without `--allow-unsigned-discovery`, a project policy that weakens a gate was applied in CI without `--accept-project-policy`, or an unexpected internal error occurred. |
-| `2` | Usage error: an unknown command or option, a missing argument or file, a `PROJECT_PATH` of `scan` or `baseline` or a `--project` of `validate`, `risk`, `verify-artifact` or `verify-live` that is a file, a `verify-live` launch policy kept where the [launch policy](#launch-policy) rules forbid, a `verify-attestation` `--trusted-key` kept where the [trusted-key rule](#verify-attestation) forbids, an invalid value (including a malformed `verify-artifact --sha256` and an incomplete `--bundle`, `--signer-identity` and `--issuer` set), a relative project path that a symbolic link leads outside the working directory, an invalid `NEXUS_SYMBIOTE_MODE` or collection limit, a `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` shorter than 32 characters, a malformed `SOURCE_DATE_EPOCH` for `scan`, `baseline` or `import-shadowscan`, or a live command run without live mode (`advisories --dry-run` contacts nothing and runs in either mode). |
+| `2` | Usage error: an unknown command or option, a missing argument or file, a `PROJECT_PATH` of `scan` or `baseline` or a `--project` of `validate`, `risk`, `verify-artifact` or `verify-live` that is a file, a `verify-live` launch policy kept where the [launch policy](#launch-policy) rules forbid, a `verify-attestation` `--trusted-key` kept where the [trusted-key rule](#verify-attestation) forbids or a `runtime verify` or `runtime register` public key kept where the same rule forbids, an invalid value (including a malformed `verify-artifact --sha256` and an incomplete `--bundle`, `--signer-identity` and `--issuer` set), a relative project path that a symbolic link leads outside the working directory, an invalid `NEXUS_SYMBIOTE_MODE` or collection limit, a `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` shorter than 32 characters, a malformed `SOURCE_DATE_EPOCH` for `scan`, `baseline` or `import-shadowscan`, or a live command run without live mode (`advisories --dry-run` contacts nothing and runs in either mode). |
 
 What exit status 1 means for each gate:
 
 | Command | Exits 1 when |
 |---|---|
-| `scan` | A collector failed or the scan gate failed, unless `--report-only` or a report-only project policy applies. |
+| `scan` | A collector failed or the scan gate failed, unless `--report-only` or a report-only project policy applies. With `--check`, unverified ShadowScan discovery evidence and a failed producer check exit 1 even then. |
 | `validate` | Completeness, integrity (including integrity that is only unknown), the discovery producer check, the minimum assurance level or the dependency graph failed, or unverified discovery evidence was gated (see below). |
 | `risk` | The risk gate failed, `--project` reconciliation failed, or unverified discovery evidence was gated (see below). |
 | `diff` | The diff reports a security alert; `--no-fail-on-alert` turns this gate off. |
@@ -165,7 +165,8 @@ findings without turning them into exit status 1, as a project policy with
 `baseline` applies the built-in gate whatever the project policy says.
 
 Unverified ShadowScan discovery evidence is gated separately. `import-shadowscan`
-(including `--report-only`), `scan --check`, `baseline`, `validate` and `risk` exit 1 on
+and `scan --check` (including `--report-only` and a report-only project policy, which
+never relax this gate), `baseline`, `validate` and `risk` exit 1 on
 it when a CI variable is set (see [environment variables](#environment-variables)) or
 `--fail-on-unsigned-discovery` is given, unless `--allow-unsigned-discovery` is given.
 Only a producer check made in the same run counts as verification; the outcome recorded
@@ -276,7 +277,7 @@ directory above the policy are owned by root or by you.
 | `digest --json-output` | `file_sha256`, `canonical_digest`, `content_digest`, `content_profile`, `spec_version` and `components`, in that order; a digest that is undefined for the inventory is `null`. |
 | `graph --format json` | `format` (`nexus-symbiote/graph-view/v1`), `inventory`, `focus`, `coverage`, `limitations`, `nodes` (each with its risk classes, `basis`, `assessed`, findings summary and facts), `edges` and `exposure` (sources, sinks and ranked `paths`, with omitted counts); see [graph view](graph-view.md#the-json-document). |
 | `crosswalk` | Sorted keys: `format` (`nexus-symbiote/crosswalk/v1`); `meaning`; `policy_source` (`built-in`), `suppressed_findings` and `ignored_findings`; `coverage_status`; `findings`, each with `category`, `severity`, `component_ref` and a neutralized `detail`; `frameworks`, each with `framework`, `name`, `edition`, `source`, `verification`, `note`, `findings_with_reference`, `findings_without_reference` and `entries` (each with `entry`, `title`, `severity_counts`, the referencing `categories` with their `rationale`, and `findings`, positions in the `findings` list); `unmapped_categories`, each with `category`, `findings` and `in_catalog`. |
-| `discover-mcp` | The observation: `endpoint`, `protocol_version` and `requested_protocol_version`, `collector_id`, `collection_id`, `observed_at`, `completed_at`, `client_info`, `user_agent`, `session_established`, `session_digest`, `server_info`, `server_capabilities`, `instructions` and `instructions_hash`, `declaration_hash` and `identity_hash` with their profiles, `tools` (each with its redacted `descriptor`, `definition_hash`, `fingerprint` and `lints`), `prompts`, `resource_templates`, `failures`, `complete`, `pages_observed`, `bytes_observed` and `coverage`, which names what was not observed. With `--record`, a native AgentBOM instead. |
+| `discover-mcp` | The observation: `endpoint` (the origin only, since a path can hold a credential) and `observed_endpoint_hash` (a digest of the full URL, as `--record` stores it), `protocol_version` and `requested_protocol_version`, `collector_id`, `collection_id`, `observed_at`, `completed_at`, `client_info`, `user_agent`, `session_established`, `session_digest`, `server_info`, `server_capabilities`, `instructions` and `instructions_hash`, `declaration_hash` and `identity_hash` with their profiles, `tools` (each with its redacted `descriptor`, `definition_hash`, `fingerprint` and `lints`), `prompts`, `resource_templates`, `failures`, `complete`, `pages_observed`, `bytes_observed` and `coverage`, which names what was not observed. With `--record`, a native AgentBOM instead. |
 | `advisories` | `components_checked`, `components_skipped` and `components_excluded`, with the `skipped` and `excluded` entries and their reasons; `queries` (the ecosystem, name and version of each package in scope); `advisories`; `errors`; `coverage` (`complete`, `partial` or `none`) and `complete`; `dry_run`; `checked_at`, `tool_version` and `inventory_sha256`; `scope` and `sent_to_osv`. |
 | `verify-live --json-output` | `complete`, `servers_checked`, `servers_reachable`, `servers_skipped`, `has_drift`, `inputs` (the SHA-256 of the inventory and of the launch policy) and `results`: per MCP server, `server`, `server_ref`, `status` (`verified`, `failed` or `not-verifiable`), `reachable`, `reason`, `error`, `transport`, `protocol_version`, `launcher_sha256`, `rug_pull_detected`, `live_schema_hash`, `declaration_hash` and `declaration_status`, `identity_hash` and `identity_status`, and `tools` (each tool's `name`, `definition_hash` and `status`: `match`, `changed`, `new` or `unverifiable`). |
 | `runtime keygen` | `key_id` and `encrypted`. |
@@ -695,13 +696,16 @@ nexus-symbiote runtime verify [OPTIONS] ENVELOPE_PATH
 | Option | Description |
 |---|---|
 | `--kind` `snapshot\|approval\|trust\|model` | Expected contract purpose; a contract signed for another purpose is rejected. (required) |
-| `--public-key` `PATH` | Trusted Ed25519 public key PEM; repeat to build the trusted key ring. (required, repeatable) |
+| `--public-key` `PATH` | Trusted Ed25519 public key PEM; repeat to build the trusted key ring. It must lie outside every git working tree that holds ENVELOPE_PATH, the --bom file or the current directory, which catches misplacement but does not authenticate the key. (required, repeatable) |
 | `--threshold` `INTEGER RANGE` | Minimum number of distinct trusted signatures (default: 1). |
 | `--bom` `PATH` | The exact companion BOM; required for snapshot contracts. |
 
 Revocation, signer scopes, approver identities and an approval's bindings are
 checked only by the gateway. A failure names its reason code, listed in the
-[runtime contract reference](runtime-contract-reference.md#reason-codes).
+[runtime contract reference](runtime-contract-reference.md#reason-codes). A
+`--public-key` file kept where the change under review could write it, or with other
+hard links, is a usage error (exit 2), as for
+[`verify-attestation`](#verify-attestation).
 
 ### `runtime digest`
 
@@ -751,7 +755,11 @@ and shared-key setting the gateways use. Pass the approval keys too when the sco
 map covers them. A scope entry for a key in no ring, or a key in two rings without
 `--allow-shared-keys`, fails with `configuration-invalid` and names the key ID. The
 output names the tenant, deployment, agent, serial and contract `digest` that
-became current.
+became current. A `--snapshot-key`, `--trust-key` or `--approval-key` file inside a
+git working tree that holds SNAPSHOT_PATH, the `--trust`, `--state` or
+`--signer-scopes` file or the current directory, or with other hard links, is a usage
+error (exit 2): a key planted there could register a snapshot or trust status at the
+highest serial and lock the tenant out of every gateway sharing the store.
 
 ### `scan`
 
@@ -766,7 +774,7 @@ nexus-symbiote scan [OPTIONS] [PROJECT_PATH]
 | `-o`, `--output` `PATH` | Output file path (default: standard output) |
 | `-f`, `--format` `json\|cyclonedx\|spdx\|sarif` | Output format (default: json, or from .nexus-symbiote.yaml) |
 | `--scanner` `TEXT` | Collector to run, once each: mcp, model, prompt, rag, registry, a2a, ide_agents, shadowscan (default: all, or from .nexus-symbiote.yaml). A collector left out makes coverage partial. (repeatable) |
-| `--report-only` | Emit findings and collection failures without a CI failure |
+| `--report-only` | Emit findings and collection failures without a CI failure. With `--check`, unverified discovery evidence and a failed producer check still exit 1. |
 | `--check` | Collect and apply the scan gate without writing an inventory. Cannot be combined with `-o`. |
 | `--signature-policy` `PATH` | Explicit operator signer policy JSON |
 | `--no-project-policy` | Use built-in policy without reading configuration from the target. |
@@ -973,7 +981,7 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 | `--json-output` | Output the verification report as JSON. |
 | `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools, declarations or the server identity drifted, unless `--accept-drift`. |
 | `--accept-drift` | With `--record`, exit 0 although changed or new tools, declarations or server identity were recorded. |
-| `--no-isolation` | Explicitly allow execution without a PID namespace; printed as a warning. On Linux the launcher runs under a wrapper that stays its parent and adopts its orphans, so every descendant, including a `clone(CLONE_PARENT)` child, stays in one tree, which is stopped before cleanup kills it; the server fails with `isolation-teardown-failed` if the wrapper ended first. A launcher that deliberately evades cleanup can escape. Elsewhere cleanup is best effort. This is not a namespace or sandbox. |
+| `--no-isolation` | Explicitly allow execution without a PID namespace; printed as a warning. On Linux the launcher runs in its own process group under a wrapper that stays its parent as a child subreaper and ignores the signals it can, and cleanup kills the wrapper's whole tree, including a `clone(CLONE_PARENT)` child that has called `setsid` and what a launcher that already exited left behind. A launcher that kills its wrapper with SIGKILL can escape, except from a cgroup v2 child where one can be created, which cleanup also kills; the server then fails with `isolation-teardown-failed`, unless the launcher runs as root or holds `CAP_SYS_PTRACE` or `CAP_SYS_ADMIN`, which can hide the escape. Never opt out as root; doing so prints a second warning. Elsewhere cleanup is best effort. This is not a namespace or sandbox. |
 
 By default the launcher must run as pid 1 of a new user and PID namespace
 (`unshare --user --map-root-user --pid --fork --kill-child`). That process first
@@ -1009,26 +1017,33 @@ before executing the pinned launcher. Only the explicit operator option
 `--no-isolation` permits a launch without this boundary. On that path, on Linux,
 a short wrapper (the running interpreter with `-I -S`) sets
 `PR_SET_CHILD_SUBREAPER`, forks, and executes the staged launcher in the child with
-the same argument, environment and working directory. The wrapper stays the
-launcher's parent until the launcher's whole process tree has exited, then exits
-with the launcher's status, re-raising the signal that killed it as `unshare --fork`
-does. Every descendant therefore stays under the wrapper: a `setsid` child that
-double-forks, a `clone(CLONE_PARENT)` child, whose parent is the launcher's parent,
-and a descendant that outlives the launcher. The wrapper leads the session and
-process group the launcher runs in, and ignores the signals a launcher can send its
-group, other than `SIGKILL` and `SIGSTOP`. Cleanup stops the wrapper and then every
-process in its tree, so none can start another process, such as a helper that a
-watchdog restarts, kills the tree, scanning it again until a scan finds no new
-process, then kills the wrapper's process group and every process left in the
-launch's session. The server fails with `isolation-teardown-failed` when the wrapper
-was ended by a signal before or during cleanup, including when it re-raised the
-signal that killed the launcher, or when the tree could not be emptied, because a
-process from it may then still be running. A launcher running as the same user can
-still escape on purpose, for example by killing the wrapper, which is reported, or
-by forking faster than the tree is scanned, and a descendant running as another user
-cannot be signalled. On other systems, or without a separately runnable interpreter,
-the launcher is executed directly and cleanup is best effort. The option is not a
-PID namespace, and neither form is a filesystem or network sandbox.
+the same argument, environment, signal dispositions and working directory. The
+wrapper stays alive as the launcher's parent, keeps no copy of its streams, reaps
+every child and exits with the launcher's status once none is left, repeating the
+signal that killed the launcher as `unshare --fork` does. The launcher
+leads its own process group in the session the wrapper leads, and the wrapper ignores
+every signal it can and is not dumpable, so the launcher cannot end it with a signal
+to its group or its parent, or trace it, unless it holds `CAP_SYS_PTRACE`; only
+SIGKILL aimed at the wrapper ends it. Every orphan below the wrapper is reparented to
+it, so a `setsid` child that double-forks, a `clone(CLONE_PARENT)` child (whose
+parent is the wrapper) and the descendants of a launcher that already exited all stay
+in the wrapper's tree. Cleanup stops the wrapper and then every process in its tree, so
+none can fork or reap a pid the sweep found, kills the tree in repeated passes,
+so a helper that a watchdog restarts is found as the wrapper's child, then kills each
+child that is still running, including a chain that forks faster than the tree is
+scanned, as it is reparented to the stopped wrapper. It lets the wrapper reap them
+and kills the wrapper's process group, the processes in its session and a private
+cgroup v2 where the current cgroup allows a child. The wrapper reports that it
+exited with no child left; when it does not, because the launcher killed it or a
+descendant could not be killed (one running as another user, or one that stays in
+uninterruptible sleep), or when the wrapper's children cannot be listed, the server fails with `isolation-teardown-failed`, since what
+the wrapper had adopted may still be running, outside that cgroup where none exists.
+The report counts only when the kernel credits it to the wrapper's pid. A launcher
+running as root, or with `CAP_SYS_PTRACE` or `CAP_SYS_ADMIN`, can forge it or trace
+the wrapper, so its escape can go unreported; never opt out as root.
+A launcher or descendant can still evade cleanup another way, for example by moving
+out of the cgroup. On other systems that cleanup is best effort. The option is not a PID namespace,
+and neither form is a filesystem or network sandbox.
 
 Servers whose transport is `sse`, `streamable-http` or `http` and that record no
 launch command are reported as not verifiable by `verify-live` (reason

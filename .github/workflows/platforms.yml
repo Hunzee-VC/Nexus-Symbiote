@@ -12,6 +12,12 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+# A newer push to a pull request supersedes its macOS run. Any other run gets a group of
+# its own: a group holds one pending run and a newer one cancels it whatever
+# cancel-in-progress says, so a shared group could drop a main push or scheduled run.
+concurrency:
+  group: platforms-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   macos:
     name: macOS case-insensitive and confinement branches

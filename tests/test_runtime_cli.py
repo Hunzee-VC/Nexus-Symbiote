@@ -785,3 +785,106 @@ def test_register_prints_contract_text_without_a_ci_log_command(tmp_path):
     assert "##[" not in result.stdout and "##vso[" not in result.stdout
     document = json.loads(result.stdout)
     assert {key: document[key] for key in hostile} == hostile
+
+
+MISPLACED = "must lie outside every git working tree"
+
+
+def test_verify_refuses_a_public_key_in_the_working_tree_of_its_inputs(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    (repo / "keys").mkdir(parents=True)
+    (repo / ".git").mkdir()
+    operator = tmp_path / "operator"
+    operator.mkdir()
+    private, public = keypair(operator, "trust")
+    now = datetime.now(UTC)
+    status = TrustStatus(
+        tenant="acme",
+        serial=2**53 - 1,
+        not_before=now - timedelta(seconds=1),
+        not_after=now + timedelta(minutes=30),
+    )
+    contract = write(operator, "trust.json", status)
+    signed = repo / "trust.dsse.json"
+    assert (
+        run("sign", contract, "--kind", "trust", "--key", private, "--out", signed).exit_code == 0
+    )
+    inside = repo / "keys" / "trust.pub"
+    inside.write_bytes(public.read_bytes())
+    refused = run("verify", signed, "--kind", "trust", "--public-key", inside)
+    assert refused.exit_code == 2 and MISPLACED in refused.output
+    assert "contract_verified" not in refused.output
+    mixed = run("verify", signed, "--kind", "trust", "--public-key", public, "--public-key", inside)
+    assert mixed.exit_code == 2 and "--public-key" in mixed.output
+    # The current directory's tree, although the envelope is outside it.
+    outside = operator / "trust.dsse.json"
+    outside.write_bytes(signed.read_bytes())
+    monkeypatch.chdir(repo)
+    assert run("verify", outside, "--kind", "trust", "--public-key", inside).exit_code == 2
+    monkeypatch.chdir(tmp_path)
+    linked = operator / "linked.pub"
+    os.link(public, linked)
+    hard = run("verify", signed, "--kind", "trust", "--public-key", linked)
+    assert hard.exit_code == 2 and "must not have other hard links" in hard.output
+    os.unlink(linked)
+    passed = run("verify", signed, "--kind", "trust", "--public-key", public)
+    assert passed.exit_code == 0, passed.output
+    assert json.loads(passed.stdout)["contract_verified"] is True
+
+
+def test_verify_refuses_a_key_in_the_tree_that_holds_the_companion_bom(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").write_text("gitdir: elsewhere\n")
+    private, public = keypair(tmp_path, "snapshot")
+    bom: dict[str, list[str]] = {"components": []}
+    signed = tmp_path / "snapshot.dsse.json"
+    contract = write(tmp_path, "snapshot.json", current_snapshot(bom))
+    signing = run("sign", contract, "--kind", "snapshot", "--key", private, "--out", signed)
+    assert signing.exit_code == 0, signing.output
+    companion = write(repo, "bom.json", json.dumps(bom))
+    inside = repo / "snapshot.pub"
+    inside.write_bytes(public.read_bytes())
+    args = ["verify", signed, "--kind", "snapshot", "--bom", companion]
+    refused = run(*args, "--public-key", inside)
+    assert refused.exit_code == 2 and MISPLACED in refused.output
+    assert run(*args, "--public-key", public).exit_code == 0
+
+
+@pytest.mark.parametrize("ring", ["--snapshot-key", "--trust-key", "--approval-key"])
+def test_register_refuses_a_ring_key_in_the_working_tree_of_its_inputs(tmp_path, ring):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    private = dict(
+        zip(
+            ["--snapshot-key", "--trust-key", "--approval-key"],
+            (Ed25519PrivateKey.generate() for _ in range(3)),
+            strict=True,
+        )
+    )
+
+    def ring_args(planted_in):
+        return [
+            arg
+            for option, key in private.items()
+            for arg in (
+                option,
+                public_file(planted_in if option == ring else tmp_path, f"{option[2:]}.pub", key),
+            )
+        ]
+
+    snapshot, *rest = registration(repo, private["--snapshot-key"], private["--trust-key"])
+    refused = run("register", snapshot, *rest, *ring_args(repo))
+    assert refused.exit_code == 2 and MISPLACED in refused.output and ring in refused.output
+    assert '"registered"' not in refused.output
+    # The state database alone in the tree is enough.
+    moved = [outside / "snapshot.dsse.json", outside / "trust.dsse.json"]
+    for source, target in zip((snapshot, rest[1]), moved, strict=True):
+        target.write_bytes(source.read_bytes())
+    alone = run("register", moved[0], "--trust", moved[1], "--state", rest[3], *ring_args(repo))
+    assert alone.exit_code == 2 and MISPLACED in alone.output
+    registered = run("register", snapshot, *rest, *ring_args(outside))
+    assert registered.exit_code == 0, registered.output

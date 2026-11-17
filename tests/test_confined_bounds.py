@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import errno
 import os
-import time
 import tracemalloc
 from dataclasses import replace
 from pathlib import Path
@@ -27,6 +26,7 @@ from nexus_symbiote.utils.confined import (
     MAX_LISTED_FAILURES,
     ConfinedCollection,
 )
+from tests.support import scaling_ratio
 
 
 def _refused_link(link: Path, target: Path) -> None:
@@ -217,41 +217,60 @@ def test_undecodable_and_unparsable_files_are_listed_once_under_the_root_relativ
 
 
 def test_policy_exclusion_checks_do_not_grow_with_the_number_of_entries(tmp_path):
-    for index in range(300):
-        (tmp_path / f"f{index}.py").write_text("")
-    (tmp_path / "x000123").mkdir()
-    (tmp_path / "x000123" / "hidden.py").write_text("")
-    exclusions = [f"x{index:06d}" for index in range(20_000)]
-    started = time.monotonic()
-    surfaces: list[str] = []
-    with ConfinedCollection(tmp_path, [], surfaces, exclude_paths=exclusions) as files:
-        found = list(files.iter_files())
-    assert time.monotonic() - started < 5
+    # Files and exclusions grow together, so checking each file against every
+    # exclusion grows with the square of the size.
+    roots = {}
+    for scale in (1, 4):
+        roots[scale] = tmp_path / f"scale-{scale}"
+        (roots[scale] / "x000123").mkdir(parents=True)
+        (roots[scale] / "x000123" / "hidden.py").write_text("")
+        for index in range(75 * scale):
+            (roots[scale] / f"f{index}.py").write_text("")
+
+    def walk(scale: int) -> tuple[list[Path], list[str]]:
+        surfaces: list[str] = []
+        exclusions = [f"x{index:06d}" for index in range(5_000 * scale)]
+        with ConfinedCollection(roots[scale], [], surfaces, exclude_paths=exclusions) as files:
+            return list(files.iter_files()), surfaces
+
+    assert scaling_ratio(walk) < 10
+    found, surfaces = walk(4)
     assert len(found) == 300
     assert surfaces == ["x000123: excluded by collection policy"]
 
 
 def test_a_walk_records_tens_of_thousands_of_messages_in_linear_time(tmp_path):
     # Checking each new message against the list made 95,000 symlinks a 70 s walk.
-    count = 50_000
-    (tmp_path / "target").write_text("x")
-    names = [f"l{index:05d}" for index in range(count)]
-    for name in names:
-        _refused_link(tmp_path / name, tmp_path / "target")
-    failures: list[str] = []
-    started = time.monotonic()
-    with ConfinedCollection(tmp_path, failures) as files:
-        assert list(files.iter_files()) == [Path("target")]
-    assert time.monotonic() - started < 8
+    count = 12_000
+    names: dict[int, list[str]] = {}
+    roots = {}
+    for scale in (1, 4):
+        roots[scale] = tmp_path / f"scale-{scale}"
+        roots[scale].mkdir()
+        (roots[scale] / "target").write_text("x")
+        names[scale] = [f"l{index:05d}" for index in range(count // 4 * scale)]
+        for name in names[scale]:
+            _refused_link(roots[scale] / name, roots[scale] / "target")
+
+    def refused(scale: int) -> list[str]:
+        failures: list[str] = []
+        with ConfinedCollection(roots[scale], failures) as files:
+            assert list(files.iter_files()) == [Path("target")]
+        return failures
+
+    def excluded(scale: int) -> list[str]:
+        exclusions: list[str] = []
+        with ConfinedCollection(roots[scale], [], exclusions, exclude_paths=names[scale]) as files:
+            assert list(files.iter_files()) == [Path("target")]
+        return exclusions
+
+    assert scaling_ratio(refused) < 10
+    failures = refused(4)
     assert len(failures) == MAX_LISTED_FAILURES + 1
     assert failures[-1] == f"l01000: {REFUSED} (and {count - 1_001} more not listed)"
-    exclusions: list[str] = []
-    started = time.monotonic()
-    with ConfinedCollection(tmp_path, [], exclusions, exclude_paths=names) as files:
-        assert list(files.iter_files()) == [Path("target")]
-    assert time.monotonic() - started < 8
+    assert scaling_ratio(excluded) < 10
     # Each exclusion names a path of the operator's policy, so their text is bounded already.
-    assert len(exclusions) == count
+    assert len(excluded(4)) == count
 
 
 def test_failures_past_the_listing_bounds_are_summarized_by_reason(tmp_path):

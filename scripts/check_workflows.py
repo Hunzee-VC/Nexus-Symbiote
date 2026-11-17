@@ -91,6 +91,7 @@ REQUIRED_COMMANDS: dict[str, dict[str, tuple[str, ...]]] = {
             "mypy src/nexus_symbiote scripts",
             "scripts/check_workflows.py",
             "scripts/check_repository_hygiene.py",
+            "scripts/check_pull_request_size.py",
             "scripts/check_locks.py",
         ),
         "distribution": (
@@ -151,6 +152,10 @@ REVIEWED_JOB_CONDITIONS: dict[str, dict[str, str]] = {
     "release.yml": {"build": "github.ref == 'refs/heads/main'"},
 }
 REVIEWED_STEP_CONDITIONS: dict[str, dict[str, frozenset[str]]] = {
+    # A push has no pull request base to measure against.
+    "ci.yml": {
+        "github.event_name == 'pull_request'": frozenset({"scripts/check_pull_request_size.py"})
+    },
     "release.yml": {
         "inputs.publish != 'none'": frozenset({"scripts/check_repository_controls.py", "--publish"})
     },
@@ -222,8 +227,77 @@ UNSAFE_GATE_ENV = frozenset(
         "PYTHONINSPECT",
         "PYTEST_ADDOPTS",
         "PYTEST_PLUGINS",
+        # bash imports these at startup: SHELLOPTS=noexec parses a gate without running
+        # it and exits 0, and ENV, PS4 and BASHOPTS run or change code before it. PATH
+        # can put a stub first in place of python, mypy or git.
+        "SHELLOPTS",
+        "BASHOPTS",
+        "PS4",
+        "ENV",
+        "PATH",
+        # The default Python user base is $HOME/.local, so HOME does what PYTHONUSERBASE
+        # does, and HOME and XDG_CONFIG_HOME select git's global config and attributes.
+        "HOME",
     }
 )
+# Families of variables that do the same: bash imports BASH_FUNC_<name>%% as a function
+# that shadows the gate's program, PYTHON* (PYTHONUSERBASE with a committed
+# usercustomize) can run code before the gate, and GIT_* (GIT_DIR) can point git at
+# another history. A name outside [A-Za-z0-9_] is no ordinary variable either.
+UNSAFE_GATE_ENV_PREFIXES = ("BASH_FUNC_", "PYTHON", "GIT_", "XDG_")
+ENV_NAME = re.compile(r"[A-Za-z0-9_]+")
+# An earlier step that appends to $GITHUB_ENV or $GITHUB_PATH sets the environment of
+# every later step of the job, gates included, out of reach of the env checks; only this
+# reviewed write may name either file in a job that runs a gate. Matching the bare name
+# also catches printenv, ${!name} and os.environ; it is a tripwire, not a boundary: a
+# step can still reach the file without naming it, or rewrite a gate script.
+ENVIRONMENT_FILE_WRITES = re.compile(r"GITHUB_(?:ENV|PATH)\b")
+REVIEWED_ENVIRONMENT_FILE_WRITES = frozenset(
+    {'printf \'SOURCE_DATE_EPOCH=%s\\n\' "$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"'}
+)
+# Gate steps whose arguments decide what the gate checks, pinned to their reviewed run
+# script and environment: --limit, --base HEAD or --numstat-file /dev/null would let the
+# size cap pass anything, and the CodeQL policy must read each analyzed language's SARIF.
+REVIEWED_GATE_STEPS: dict[str, dict[str, dict[str, tuple[str, dict[str, str]]]]] = {
+    "ci.yml": {
+        "quality": {
+            "scripts/check_pull_request_size.py": (
+                'git fetch --no-tags origin "$PR_BASE"\n'
+                'python scripts/check_pull_request_size.py --base "origin/$PR_BASE"\n',
+                {"PR_BASE": "${{ github.base_ref }}"},
+            )
+        },
+        "codeql": {
+            "scripts/check_codeql_sarif.py": (
+                'python scripts/check_codeql_sarif.py "$SARIF_PATH" --out "$CODEQL_REPORT"',
+                {
+                    "SARIF_PATH": "${{ runner.temp }}/codeql-sarif/python.sarif",
+                    "CODEQL_REPORT": "${{ runner.temp }}/codeql-policy.json",
+                },
+            )
+        },
+    },
+    "codeql.yml": {
+        "analyze": {
+            "scripts/check_codeql_sarif.py": (
+                'python scripts/check_codeql_sarif.py "$SARIF_PATH" --out "$CODEQL_REPORT"',
+                {
+                    "SARIF_PATH": "${{ runner.temp }}/codeql-sarif/${{ matrix.language }}.sarif",
+                    "CODEQL_REPORT": "${{ runner.temp }}/codeql-policy.json",
+                },
+            )
+        },
+    },
+}
+# The languages each CodeQL job's matrix must analyze, and the events its workflow must run
+# on: code scanning blocks a merge until a pull request has a result for every configuration
+# main holds, so a workflow that uploads on main must run on pull requests too.
+CODEQL_LANGUAGES: dict[str, dict[str, frozenset[str]]] = {
+    "codeql.yml": {"analyze": frozenset({"python", "actions"})}
+}
+CODEQL_TRIGGERS: dict[str, frozenset[str]] = {
+    "codeql.yml": frozenset({"push", "pull_request", "schedule"})
+}
 # The timeout options that leave the command's status intact, alone or with a value.
 TIMEOUT_FLAGS = frozenset({"--foreground", "--preserve-status", "-v", "--verbose"})
 TIMEOUT_VALUED = frozenset({"-k", "--kill-after", "-s", "--signal"})
@@ -1021,7 +1095,7 @@ def _gates(script: str, errexit: bool, pipefail: bool) -> list[_Gate]:
             for assignment in words[:start]:
                 form = ASSIGNMENT.match(assignment)
                 assert form is not None
-                if form[1] in UNSAFE_GATE_ENV and start == len(words):
+                if _unsafe_gate_env(form[1]) and start == len(words):
                     trusted = False
                 if alone and start == len(words) and not form[2] and not form[3]:
                     variables[form[1]] = assignment[form.end() :]
@@ -1050,7 +1124,7 @@ def _gates(script: str, errexit: bool, pipefail: bool) -> list[_Gate]:
             elif program in BINDING_BUILTINS or (program == "printf" and "-v" in args):
                 variables.clear()
                 if any(
-                    arg.split("=", 1)[0].split("[", 1)[0].rstrip("+") in UNSAFE_GATE_ENV
+                    _unsafe_gate_env(arg.split("=", 1)[0].split("[", 1)[0].rstrip("+"))
                     for arg in args
                     if not arg.startswith("-")
                 ):
@@ -1120,7 +1194,7 @@ def _item_gates(item: _Item, pipefail: bool, variables: dict[str, str]) -> list[
         words = command.words
         unsafe_env = False
         while words and (assigned := ASSIGNMENT.match(words[0])):
-            if assigned[1] in UNSAFE_GATE_ENV:
+            if _unsafe_gate_env(assigned[1]):
                 unsafe_env = True
             words = words[1:]
         if unsafe_env:
@@ -1156,6 +1230,14 @@ def _run_setting(
     return None, ""
 
 
+def _unsafe_gate_env(name: str) -> bool:
+    return (
+        name in UNSAFE_GATE_ENV
+        or name.startswith(UNSAFE_GATE_ENV_PREFIXES)
+        or ENV_NAME.fullmatch(name) is None
+    )
+
+
 def _unsafe_env_scope(workflow_env: Any, job_env: Any, step_env: Any) -> str | None:
     for scope, env_map in (
         ("workflow", workflow_env),
@@ -1164,7 +1246,7 @@ def _unsafe_env_scope(workflow_env: Any, job_env: Any, step_env: Any) -> str | N
     ):
         if env_map is None:
             continue
-        if not isinstance(env_map, dict) or (set(map(str, env_map)) & UNSAFE_GATE_ENV):
+        if not isinstance(env_map, dict) or any(map(_unsafe_gate_env, map(str, env_map))):
             return scope
     return None
 
@@ -1176,10 +1258,42 @@ def _gate_issues(
     commands = REQUIRED_COMMANDS.get(path.name, {}).get(name, ())
     text_only = REQUIRED_TEXT.get(path.name, {}).get(name, frozenset())
     errors = []
+    if commands and ("container" in job or "services" in job):
+        # A job container supplies its own python, git and HOME, so the gate environment
+        # rules above would not describe what the gate runs with.
+        errors.append(
+            f"{path}: {name} must not run its gates in a job container or beside services"
+        )
     condition = _condition(job)
     reviewed_job = REVIEWED_JOB_CONDITIONS.get(path.name, {}).get(name)
     if commands and condition not in (None, *ALWAYS_RUNS, reviewed_job):
         errors.append(f"{path}: required job {name} may be skipped (if: {condition})")
+    if commands:
+        for step in _steps(job):
+            run = step.get("run")
+            for line in run.splitlines() if isinstance(run, str) else ():
+                if (
+                    ENVIRONMENT_FILE_WRITES.search(line)
+                    and line.strip() not in REVIEWED_ENVIRONMENT_FILE_WRITES
+                ):
+                    errors.append(
+                        f"{path}: {name} writes the job environment through $GITHUB_ENV or "
+                        "$GITHUB_PATH ahead of its gates"
+                    )
+    pinned = REVIEWED_GATE_STEPS.get(path.name, {}).get(name, {})
+    for step in _steps(job):
+        for command, (script, env) in pinned.items():
+            run = step.get("run")
+            if command in str(run) and (run != script or step.get("env") != env):
+                errors.append(f"{path}: {name} runs {command} other than in its reviewed step")
+    languages = CODEQL_LANGUAGES.get(path.name, {}).get(name, frozenset())
+    if languages:
+        strategy = job.get("strategy")
+        matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
+        listed = matrix.get("language") if isinstance(matrix, dict) else None
+        analyzed = {str(item) for item in listed} if isinstance(listed, list) else set()
+        for language in sorted(languages - analyzed):
+            errors.append(f"{path}: {name} must analyze {language} with CodeQL")
     reviewed = REVIEWED_STEP_CONDITIONS.get(path.name, {})
     found: set[str] = set()
     unstructured: set[str] = set()
@@ -1260,6 +1374,8 @@ def _workflow_issues(path: Path, document: dict[Any, Any]) -> list[str]:
     triggers = _triggers(document)
     if not triggers or triggers - ALLOWED_TRIGGERS:
         errors.append(f"{path}: triggers must be among {', '.join(sorted(ALLOWED_TRIGGERS))}")
+    for event in sorted(CODEQL_TRIGGERS.get(path.name, frozenset()) - triggers):
+        errors.append(f"{path}: must run on {event}, or code scanning blocks every merge")
     if "permissions" not in document or not _read_only(document["permissions"]):
         errors.append(f"{path}: top-level permissions must be present and read-only")
     if _schedules_cancel_each_other(document):

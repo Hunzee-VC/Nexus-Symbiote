@@ -38,6 +38,7 @@ from nexus_symbiote.validators.completeness import (
 )
 from nexus_symbiote.validators.integrity import IntegrityValidator
 from nexus_symbiote.validators.risk import RiskScorer
+from tests.support import scaling_ratio
 
 
 def write_safetensors(path: Path, data: bytes = b"abcd") -> None:
@@ -1130,16 +1131,15 @@ def test_digest_pins_need_no_sigstore_install(tmp_path, project, monkeypatch):
 
 
 def test_many_model_directories_scan_in_linear_time(project):
-    import time
-
-    for index in range(1500):
-        directory = project / f"d{index:04d}"
-        directory.mkdir()
-        (directory / "m.ggml").write_bytes(b"x")
-    started = time.monotonic()
-    result = ModelScanner().scan(project)
-    assert len(result.components) == 1500
-    assert time.monotonic() - started < 15
+    roots = {}
+    for scale in (1, 4):
+        roots[scale] = project / f"scale-{scale}"
+        for index in range(125 * scale):
+            directory = roots[scale] / f"d{index:04d}"
+            directory.mkdir(parents=True)
+            (directory / "m.ggml").write_bytes(b"x")
+    assert scaling_ratio(lambda scale: ModelScanner().scan(roots[scale])) < 10
+    assert len(ModelScanner().scan(roots[4]).components) == 500
 
 
 @pytest.mark.parametrize(
@@ -1717,3 +1717,174 @@ def test_the_native_schema_names_every_signing_status_the_collector_emits():
 
     description = ModelComponent.model_fields["signing_status"].description or ""
     assert [status.value for status in SigningStatus if status.value not in description] == []
+
+
+def _length_delimited(field: int, payload: bytes) -> bytes:
+    return bytes([(field << 3) | 2, len(payload)]) + payload
+
+
+def _onnx_with_external_data(location: bytes) -> bytes:
+    entry = _length_delimited(1, b"location") + _length_delimited(2, location)
+    tensor = _length_delimited(13, entry) + bytes([14 << 3, 1])
+    return _length_delimited(7, _length_delimited(5, tensor))
+
+
+_BOUND_LAYOUTS = {
+    "onnx-external-data": (
+        "models/checkpoint",
+        {"models/model.onnx": _onnx_with_external_data(b"checkpoint")},
+    ),
+    "savedmodel-variables": ("models/variables/blob", {"models/saved_model.pb": b"\x08\x01"}),
+}
+
+
+@pytest.mark.parametrize("layout", _BOUND_LAYOUTS.values(), ids=_BOUND_LAYOUTS)
+def test_a_pickle_bound_to_a_model_keeps_its_own_critical_component(
+    project: Path, layout: tuple[str, dict[str, bytes]]
+) -> None:
+    # Audit 2026-11-16 S4-05: a file a model binds was only hashed, so a pickle bound as
+    # ONNX external data or SavedModel variables lost the rating it has on its own.
+    bound, parents = layout
+    payload = b"\x80\x02cbuiltins\nexec\n(X\x01\x00\x00\x001tR."
+    (project / bound).parent.mkdir(parents=True, exist_ok=True)
+    (project / bound).write_bytes(payload)
+    for relative, content in parents.items():
+        (project / relative).write_bytes(content)
+    result = ModelScanner().scan(project)
+    assert not result.scan_failures, result.scan_failures
+    found = {c.source_path: c for c in result.components}
+    (parent,) = parents
+    digest = "sha256:" + hashlib.sha256(payload).hexdigest()
+    assert found[parent].properties["weight_files"] == [{"path": bound, "sha256": digest}]
+    assert found[bound].serialization_safety is SerializationSafety.UNSAFE_CODE_EXECUTION
+    assert found[bound].hashes == {"sha256": digest}
+    assert any(r.severity is RiskSeverity.CRITICAL for r in found[bound].risks)
+    assert sorted(result.surfaces_scanned).count(bound) == 1
+
+
+def test_a_bound_file_that_holds_no_payload_is_only_a_weight_file(project: Path) -> None:
+    (project / "models").mkdir()
+    (project / "models/checkpoint").write_bytes(b"\x00\x01" * 64)
+    (project / "models/model.onnx").write_bytes(_onnx_with_external_data(b"checkpoint"))
+    result = ModelScanner().scan(project)
+    assert not result.scan_failures, result.scan_failures
+    assert [c.source_path for c in result.components] == ["models/model.onnx"]
+
+
+def test_a_pinned_model_is_not_verified_once_the_binding_budget_refuses_it(project: Path) -> None:
+    # Audit 2026-11-16 S4-06: after the budget refused its bindings, a model was verified
+    # on its main file alone, as digest-pinned, though its external data differs from its pin.
+    (project / "a").mkdir()
+    (project / "b").mkdir()
+    (project / "b/model.onnx").write_bytes(_onnx_with_external_data(b"weights.data"))
+    (project / "b/weights.data").write_bytes(b"pinned bytes")
+    pins = [
+        DigestPinPolicy(project / p, sha256(project / p))
+        for p in ("b/model.onnx", "b/weights.data")
+    ]
+    (project / "b/weights.data").write_bytes(b"swapped bytes")
+    index = {"weight_map": {f"t{i}": f"missing-{i}.safetensors" for i in range(25)}}
+    (project / "a/model.safetensors.index.json").write_text(json.dumps(index))
+    with limits.applied(replace(limits.DEFAULTS, entries=10)):
+        result = ModelScanner(digest_pins=pins).scan(project)
+    assert any(f.endswith(model_collector.BINDINGS_EXHAUSTED) for f in result.scan_failures)
+    (component,) = [c for c in result.components if c.source_path == "b/model.onnx"]
+    assert "weight_files" not in component.properties
+    assert component.signing_status == "partially-verified"
+    assert component.trust_tier is TrustTier.UNKNOWN
+    (evidence,) = component.claims.values()
+    assert evidence.assurance.value != "verified"
+    assert model_collector.BINDINGS_EXHAUSTED in (evidence.unknown_reason or "")
+
+
+def test_a_pinned_shard_is_not_verified_once_the_budget_refuses_its_index(project: Path) -> None:
+    # A refused index binds none of its shards, and a shard then charges nothing, so it
+    # was verified alone although its pinned index, which decides what loads, differs.
+    (project / "c").mkdir()
+    shard = project / "c/model-00001-of-00001.safetensors"
+    header = json.dumps({"t0": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]}}).encode()
+    shard.write_bytes(len(header).to_bytes(8, "little") + header + b"\0\0\0\0")
+    index = project / "c/model.safetensors.index.json"
+    index.write_text(json.dumps({"weight_map": {"t0": shard.name}}))
+    pins = [DigestPinPolicy(path, sha256(path)) for path in (shard, index)]
+    weight_map = {"t0": shard.name, **{f"t{i}": f"missing-{i}.safetensors" for i in range(1, 25)}}
+    index.write_text(json.dumps({"weight_map": weight_map}))
+    with limits.applied(replace(limits.DEFAULTS, entries=10)):
+        result = ModelScanner(digest_pins=pins).scan(project)
+    assert any(f.endswith(model_collector.BINDINGS_EXHAUSTED) for f in result.scan_failures)
+    (component,) = [c for c in result.components if c.source_path == "c/" + shard.name]
+    assert component.signing_status == "partially-verified"
+    assert component.trust_tier is TrustTier.UNKNOWN
+    (evidence,) = component.claims.values()
+    assert evidence.assurance.value != "verified"
+    assert model_collector.BINDINGS_EXHAUSTED in (evidence.unknown_reason or "")
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "duplicate-keys",
+        "list-weight-map",
+        "too-many-indexes",
+        "oversized",
+        "missing-shard",
+        "outside-shard",
+        "empty-weight-map",
+    ],
+)
+def test_a_pinned_shard_is_not_verified_when_its_index_cannot_be_bound(
+    project: Path, variant: str
+) -> None:
+    # An index that cannot be read or parsed, one of too many, or one that names none of
+    # the collected weight files binds none of its shards; the shard was then verified
+    # alone although its pinned index, which decides what loads, differs from its pin.
+    (project / "c").mkdir()
+    shard = project / "c/model-00001-of-00001.safetensors"
+    header = json.dumps({"t0": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]}}).encode()
+    shard.write_bytes(len(header).to_bytes(8, "little") + header + b"\0\0\0\0")
+    index = project / "c/model.safetensors.index.json"
+    index.write_text(json.dumps({"weight_map": {"t0": shard.name}}))
+    pins = [DigestPinPolicy(path, sha256(path)) for path in (shard, index)]
+    if variant == "duplicate-keys":
+        entry = json.dumps({"t0": shard.name})[1:-1]
+        index.write_text(f'{{"weight_map": {{{entry}, {entry}}}}}')
+    elif variant == "list-weight-map":
+        index.write_text(json.dumps({"weight_map": [shard.name]}))
+    elif variant == "too-many-indexes":
+        index.write_text(json.dumps({"weight_map": {"t0": shard.name, "t1": shard.name}}))
+        for number in range(model_collector.MAX_SHARD_INDEXES):
+            (project / f"c/m{number}.safetensors.index.json").write_text('{"weight_map": {}}')
+    elif variant == "oversized":
+        index.write_text(json.dumps({"weight_map": {"t0": shard.name}, "pad": "x" * 512}))
+    elif variant == "outside-shard":
+        (project / shard.name).write_bytes(shard.read_bytes())
+        index.write_text(json.dumps({"weight_map": {"t0": "../" + shard.name}}))
+    elif variant == "missing-shard":
+        index.write_text(json.dumps({"weight_map": {"t0": "nothere.safetensors"}}))
+    else:
+        index.write_text(json.dumps({"weight_map": {}}))
+    bound = replace(limits.DEFAULTS, file_bytes=256) if variant == "oversized" else limits.DEFAULTS
+    with limits.applied(bound):
+        result = ModelScanner(digest_pins=pins).scan(project)
+    assert result.scan_failures
+    (component,) = [c for c in result.components if c.source_path == "c/" + shard.name]
+    assert component.signing_status == "partially-verified"
+    assert component.trust_tier is TrustTier.UNKNOWN
+    (evidence,) = component.claims.values()
+    assert evidence.assurance.value != "verified"
+    assert model_collector.INDEX_UNBOUND in (evidence.unknown_reason or "")
+
+
+def test_a_pinned_shard_with_a_bound_index_stays_verified(project: Path) -> None:
+    (project / "c").mkdir()
+    shard = project / "c/model-00001-of-00001.safetensors"
+    header = json.dumps({"t0": {"dtype": "F32", "shape": [1], "data_offsets": [0, 4]}}).encode()
+    shard.write_bytes(len(header).to_bytes(8, "little") + header + b"\0\0\0\0")
+    index = project / "c/model.safetensors.index.json"
+    index.write_text(json.dumps({"weight_map": {"t0": shard.name}}))
+    pins = [DigestPinPolicy(path, sha256(path)) for path in (shard, index)]
+    result = ModelScanner(digest_pins=pins).scan(project)
+    assert not result.scan_failures, result.scan_failures
+    (component,) = [c for c in result.components if c.source_path == "c/" + shard.name]
+    assert component.signing_status == "digest-pinned"
+    assert component.trust_tier is TrustTier.INTERNAL_VERIFIED

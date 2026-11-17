@@ -26,9 +26,13 @@ def record():
     }
 
 
-def lock_bytes(entry):
+def lock_bytes(entry, spec="^1.0.0"):
+    # npm writes the root entry, with package.json's specs, in every v2 and v3 lockfile.
+    root = {"dependencies": {"openai": spec}}
     return (
-        json.dumps({"lockfileVersion": 3, "packages": {"node_modules/openai": entry}}, indent=2)
+        json.dumps(
+            {"lockfileVersion": 3, "packages": {"": root, "node_modules/openai": entry}}, indent=2
+        )
         .replace("\n", "\r\n")
         .encode()
     )

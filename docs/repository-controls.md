@@ -119,12 +119,18 @@ actually applies to `main` with `gh api repos/Hunzee-VC/Nexus-Symbiote/rules/bra
 
 ## Security acceptance evidence
 
-The `CodeQL policy` job analyzes the workflow checkout with the pinned CodeQL
-Action and `security-and-quality` queries. The next step requires a nonempty
+The `CodeQL policy` job in `ci.yml` analyzes the workflow checkout's Python with the
+pinned CodeQL Action and `security-and-quality` queries. The `CodeQL` workflow
+(`codeql.yml`) analyzes Python and the `actions` language (the workflows and
+`action.yml`) on every pull request, every push to `main` and weekly. It must run on
+pull requests: code scanning compares a pull request with every CodeQL configuration
+`main` holds, keyed by workflow and category, and the repository ruleset holds the
+merge until each has a result, so a configuration only `main` produces blocks every
+merge. For each analysis, the next step requires a nonempty
 CodeQL rule catalog and rejects every security result with `security-severity`
 7.0 or greater, including existing and suppressed results. Missing or invalid
 severity on a security-tagged result fails closed. A successful analysis step
-alone is not a zero-alert policy decision. Raw SARIF and the policy report are
+alone is not a zero-alert policy decision. Raw SARIF and the policy reports are
 retained together.
 
 The policy script requires the actual Git `HEAD` to equal `GITHUB_SHA` and no
@@ -196,8 +202,23 @@ written in any form other than a `uses:` line of its own is rejected, because it
 comment cannot be read.
 A `$VAR` command name counts only while a plain `VAR=value` line still binds it, and a
 script the checker reads differently from `bash` (a here-document delimiter that is
-partly quoted, or a `case` inside `$(...)`) has no gates. The scheduled CodeQL workflow also
-analyzes the workflows with CodeQL's `actions` queries. All of these checks live in
+partly quoted, or a `case` inside `$(...)`) has no gates. A gate step whose workflow, job
+or step `env` sets a variable that loads code into it or changes how it runs is refused:
+the loader and Python variables, `PYTEST_ADDOPTS`, the bash start-up variables
+(`SHELLOPTS`, `BASHOPTS`, `PS4`, `ENV`, `BASH_ENV`, `PATH`), `HOME` (Python's default
+user site and git's global configuration are under it), and any name that starts
+`BASH_FUNC_`, `PYTHON`, `GIT_` or `XDG_` or has a character outside `[A-Za-z0-9_]`. The steps of
+the pull-request size cap and of the CodeQL policies must match their reviewed run script
+and environment exactly, so `--limit`, `--base HEAD` or `--numstat-file` cannot
+neutralize the cap and each policy reads the SARIF its analysis wrote; `codeql.yml`
+must analyze `python` and `actions` and run on `push`, `pull_request` and `schedule`.
+A job that runs a gate may not run in a job `container` or beside `services`, whose
+image would supply its own `python`, `git` and `HOME`. A job that runs a gate may not name
+`GITHUB_ENV` or `GITHUB_PATH` anywhere in its run scripts, other than the release's
+reviewed `SOURCE_DATE_EPOCH` write. That is a tripwire for the forms a reviewer would
+miss (`printenv`, `${!name}`, `os.environ`), not a boundary: an earlier step can still
+reach those files without naming them, or overwrite a gate script, so earlier steps of a
+gate job need the same line-by-line reading. All of these checks live in
 files a pull request can change; read changes to them line by line.
 
 The OpenSSF Scorecard workflow publishes the repository's

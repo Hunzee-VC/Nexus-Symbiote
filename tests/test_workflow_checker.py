@@ -734,3 +734,178 @@ def test_a_gate_step_cannot_move_to_another_directory(tmp_path):
 def test_the_gate_reader_follows_quoting_expansions_and_redirections(script, runs):
     gates = checker._gates(script, True, False)
     assert any(gate.runs("scripts/check_locks.py") for gate in gates) is runs
+
+
+@pytest.mark.parametrize("variable", ["SHELLOPTS", "BASHOPTS", "PS4", "ENV", "PATH"])
+@pytest.mark.parametrize("scope", ["workflow", "job", "step"])
+def test_a_shell_variable_that_hollows_a_gate_is_unsafe_gate_environment(tmp_path, variable, scope):
+    # bash imports SHELLOPTS at startup: noexec parses every later script and exits 0.
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text())
+    value = {"SHELLOPTS": "noexec", "BASHOPTS": "extdebug", "PS4": "$(id)", "ENV": "x"}.get(
+        variable, "stubs:/usr/bin"
+    )
+    target = {
+        "workflow": workflow,
+        "job": workflow["jobs"]["quality"],
+        "step": step_running(workflow["jobs"]["quality"], "scripts/check_workflows.py"),
+    }[scope]
+    target.setdefault("env", {})[variable] = value
+    path = tmp_path / "ci.yml"
+    path.write_text(yaml.safe_dump(workflow))
+    errors = checker.check(path)
+    assert any(f"sets unsafe gate environment in {scope} env" in e for e in errors), errors
+
+
+@pytest.mark.parametrize(
+    "write",
+    ['echo SHELLOPTS=noexec >> "$GITHUB_ENV"', 'echo stubs >> "${GITHUB_PATH}"'],
+)
+def test_a_job_environment_write_ahead_of_a_gate_is_rejected(tmp_path, write):
+    def change(jobs):
+        jobs["quality"]["steps"].insert(1, {"run": write})
+
+    errors = workflow_errors(tmp_path, "ci.yml", change)
+    assert any("writes the job environment through $GITHUB_ENV" in e for e in errors), errors
+
+
+def test_the_pull_request_size_step_is_a_protected_gate(tmp_path):
+    errors = workflow_errors(
+        tmp_path,
+        "ci.yml",
+        edit_run(
+            "quality",
+            "scripts/check_pull_request_size.py",
+            '"origin/$PR_BASE"',
+            '"origin/$PR_BASE" || true',
+        ),
+    )
+    assert any(
+        "discards the exit status of scripts/check_pull_request_size.py" in e for e in errors
+    )
+    assert workflow_errors(
+        tmp_path,
+        "ci.yml",
+        condition("quality", "scripts/check_pull_request_size.py", "github.event_name == 'never'"),
+    )
+
+
+@pytest.mark.parametrize(
+    "write",
+    [
+        'echo SHELLOPTS=noexec >> "$(printenv GITHUB_ENV)"',
+        'v=GITHUB_ENV; echo SHELLOPTS=noexec >> "${!v}"',
+        "python -c \"import os; open(os.environ['GITHUB_PATH'], 'a').write('stubs')\"",
+    ],
+)
+def test_naming_the_job_environment_files_ahead_of_a_gate_is_rejected(tmp_path, write):
+    # A tripwire: the bare name catches indirect writes, not every way to reach the file.
+    def change(jobs):
+        jobs["quality"]["steps"].insert(1, {"run": write})
+
+    errors = workflow_errors(tmp_path, "ci.yml", change)
+    assert any("writes the job environment through $GITHUB_ENV" in e for e in errors), errors
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ('"origin/$PR_BASE"', '"origin/$PR_BASE" --limit 99999999'),
+        ('--base "origin/$PR_BASE"', "--base HEAD"),
+        ('--base "origin/$PR_BASE"', "--numstat-file /dev/null"),
+    ],
+)
+def test_the_pull_request_size_arguments_are_pinned(tmp_path, old, new):
+    errors = workflow_errors(
+        tmp_path, "ci.yml", edit_run("quality", "scripts/check_pull_request_size.py", old, new)
+    )
+    assert any("scripts/check_pull_request_size.py other than" in e for e in errors), errors
+
+
+def test_the_pull_request_size_base_comes_from_the_pull_request(tmp_path):
+    def change(jobs):
+        step_running(jobs["quality"], "scripts/check_pull_request_size.py")["env"] = {
+            "PR_BASE": "${{ github.head_ref }}"
+        }
+
+    errors = workflow_errors(tmp_path, "ci.yml", change)
+    assert any("scripts/check_pull_request_size.py other than" in e for e in errors), errors
+
+
+@pytest.mark.parametrize(
+    "variable,command",
+    [
+        ("BASH_FUNC_python%%", "scripts/check_locks.py"),
+        ("PYTHONUSERBASE", "scripts/check_locks.py"),
+        ("PYTHONSAFEPATH", "scripts/check_workflows.py"),
+        ("GIT_DIR", "scripts/check_pull_request_size.py"),
+        ("HOME", "scripts/check_locks.py"),
+        ("XDG_CONFIG_HOME", "scripts/check_pull_request_size.py"),
+        ("XDG_DATA_HOME", "scripts/check_workflows.py"),
+        ("A-B", "scripts/check_locks.py"),
+    ],
+)
+def test_a_variable_family_that_hollows_a_gate_is_unsafe_gate_environment(
+    tmp_path, variable, command
+):
+    def change(jobs):
+        step_running(jobs["quality"], command).setdefault("env", {})[variable] = "() { true; }"
+
+    errors = workflow_errors(tmp_path, "ci.yml", change)
+    assert any("sets unsafe gate environment in step env" in e for e in errors), errors
+
+
+@pytest.mark.parametrize("language", ["python", "actions"])
+def test_the_codeql_workflow_analyzes_python_and_actions(tmp_path, language):
+    def change(jobs):
+        matrix = jobs["analyze"]["strategy"]["matrix"]
+        matrix["language"] = [item for item in matrix["language"] if item != language]
+
+    errors = workflow_errors(tmp_path, "codeql.yml", change)
+    assert any(f"analyze must analyze {language} with CodeQL" in e for e in errors), errors
+
+
+@pytest.mark.parametrize("event", ["pull_request", "push", "schedule"])
+def test_the_codeql_workflow_runs_on_pull_requests_and_main(tmp_path, event):
+    # Code scanning holds a merge until the pull request has a result for every CodeQL
+    # configuration main holds; a workflow that uploads on main only would block them all.
+    workflow = yaml.safe_load((ROOT / ".github/workflows/codeql.yml").read_text())
+    triggers = workflow.get("on", workflow.get(True))
+    del triggers[event]
+    path = tmp_path / "codeql.yml"
+    path.write_text(yaml.safe_dump(workflow))
+    errors = checker.check(path)
+    assert any(f"must run on {event}" in e for e in errors), errors
+
+
+@pytest.mark.parametrize(
+    ("name", "job", "variable", "value"),
+    [
+        ("ci.yml", "codeql", "SARIF_PATH", "/dev/null"),
+        ("codeql.yml", "analyze", "SARIF_PATH", "/dev/null"),
+    ],
+)
+def test_the_codeql_policy_reads_the_analysis_it_gates(tmp_path, name, job, variable, value):
+    def change(jobs):
+        step_running(jobs[job], "scripts/check_codeql_sarif.py")["env"][variable] = value
+
+    errors = workflow_errors(tmp_path, name, change)
+    assert any("scripts/check_codeql_sarif.py other than" in e for e in errors), errors
+
+
+@pytest.mark.parametrize("field", ["container", "services"])
+def test_a_gate_job_cannot_run_in_a_job_container(tmp_path, field):
+    def change(jobs):
+        jobs["quality"][field] = (
+            "ghcr.io/example/python:latest" if field == "container" else {"db": {"image": "x"}}
+        )
+
+    errors = workflow_errors(tmp_path, "ci.yml", change)
+    assert any("must not run its gates in a job container" in e for e in errors), errors
+
+
+def test_non_pull_request_platform_runs_never_share_a_concurrency_group():
+    # A group keeps one pending run, and a newer queued run cancels it whatever
+    # cancel-in-progress says, so a main push or schedule needs a group of its own.
+    workflow = yaml.safe_load((ROOT / ".github/workflows/platforms.yml").read_text())
+    group = workflow["concurrency"]["group"]
+    assert "github.run_id" in group and "github.event_name == 'pull_request'" in group

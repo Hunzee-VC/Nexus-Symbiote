@@ -6,7 +6,6 @@ import hashlib
 import http.client
 import itertools
 import json
-import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -20,6 +19,7 @@ from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.models import MCPServerComponent, RegistryEntryComponent
 from nexus_symbiote.scanners.live_mcp import HTTPReply
 from nexus_symbiote.scanners.registry import RegistryScanner
+from tests.support import scaling_ratio
 
 
 def package(name: str = "requests", version: str = "2.19.0", **extra: Any):
@@ -204,8 +204,11 @@ def test_private_origin_exclusion_sends_only_lockfile_backed_public_packages(tmp
     lock = {
         "lockfileVersion": 3,
         "packages": {
-            f"node_modules/{name}": {"version": dependencies[name], "resolved": url}
-            for name, url in resolved.items()
+            "": {"dependencies": dependencies},
+            **{
+                f"node_modules/{name}": {"version": dependencies[name], "resolved": url}
+                for name, url in resolved.items()
+            },
         },
     }
     (tmp_path / "package-lock.json").write_text(json.dumps(lock))
@@ -235,7 +238,8 @@ def test_a_package_resolved_from_another_registry_is_sent_unless_excluded(tmp_pa
     (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"mcp-billing": "1.0.0"}}))
     resolved = "https://npm.acme.internal/mcp-billing/-/mcp-billing-1.0.0.tgz"
     record = {"version": "1.0.0", "resolved": resolved}
-    lock = {"lockfileVersion": 3, "packages": {"node_modules/mcp-billing": record}}
+    root = {"dependencies": {"mcp-billing": "1.0.0"}}
+    lock = {"lockfileVersion": 3, "packages": {"": root, "node_modules/mcp-billing": record}}
     (tmp_path / "package-lock.json").write_text(json.dumps(lock))
     bom = AIBOM(components=RegistryScanner().scan(tmp_path).components)
     (component,) = bom.components
@@ -358,14 +362,19 @@ def test_exhausted_lookup_budget_is_an_error_not_a_clean_result(monkeypatch):
 
 
 def test_a_reply_near_the_size_limit_is_read_in_linear_time_and_bounded():
-    ids = [{"id": f"G{index}"} for index in range(advisories.MAX_ADVISORIES_PER_PACKAGE)]
-    transport = Scripted(lambda queries, _: {"results": [{"vulns": ids} for _ in queries]})
-    bom = AIBOM(components=[package(f"pkg{index}") for index in range(24)])
-    started = time.monotonic()
-    report = fetch_advisories(bom, transport=transport)
-    # 240,000 records in one reply of about 4 MB; checked one by one against the
-    # growing list, the same reply took hours.
-    assert time.monotonic() - started < 15
+    def fetch(packages: int, per_package: int):
+        ids = [{"id": f"G{index}"} for index in range(per_package)]
+        transport = Scripted(lambda queries, _: {"results": [{"vulns": ids} for _ in queries]})
+        bom = AIBOM(components=[package(f"pkg{index}") for index in range(packages)])
+        return fetch_advisories(bom, transport=transport)
+
+    # Checked one by one against the growing list, a reply of 240,000 records took
+    # hours. Two packages keep every record within the report limit at both sizes, so
+    # the work measured is all of it: at the larger size, exactly that limit.
+    per_package = advisories.MAX_ADVISORIES_PER_PACKAGE // 4
+    assert scaling_ratio(lambda scale: fetch(2, per_package * scale)) < 10
+    # 240,000 records in one reply of about 4 MB, which the report limit bounds.
+    report = fetch(24, advisories.MAX_ADVISORIES_PER_PACKAGE)
     assert len(report.advisories) == advisories.MAX_ADVISORIES
     assert report.components_checked == 2 and report.coverage == "partial"
     assert len(report.errors) == 22

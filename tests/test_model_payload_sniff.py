@@ -9,7 +9,6 @@ import pickletools
 import random
 import subprocess
 import sys
-import time
 import zipfile
 from collections.abc import Callable
 from dataclasses import replace
@@ -38,6 +37,7 @@ from nexus_symbiote.scanners.model import (
 )
 from nexus_symbiote.utils import pickle_load
 from nexus_symbiote.validators.integrity import IntegrityValidator
+from tests.support import scaling_ratio
 
 UNSAFE = SerializationSafety.UNSAFE_CODE_EXECUTION
 BINARY_PICKLE = "Recognized binary pickle opcode stream; object loading can execute code"
@@ -444,11 +444,16 @@ _SHARED_TUPLES = b"(N" + b"2\x86" * 40 + b"\x91."
 
 
 def test_a_frozenset_of_shared_tuples_is_rated_in_linear_time(tmp_path: Path) -> None:
-    (tmp_path / "models").mkdir()
-    (tmp_path / "models" / "shared").write_bytes(_SHARED_TUPLES)
-    started = time.monotonic()
-    assert _component(tmp_path, "models/shared") is None
-    assert time.monotonic() - started < 10
+    # Each level holds the one below twice, so a walk that does not share them is
+    # exponential in the depth; at the largest depth that is 2**40 visits.
+    roots = {}
+    for scale in (1, 4):
+        roots[scale] = tmp_path / f"scale-{scale}"
+        (roots[scale] / "models").mkdir(parents=True)
+        (roots[scale] / "models" / "shared").write_bytes(b"(N" + b"2\x86" * (10 * scale) + b"\x91.")
+    assert scaling_ratio(lambda scale: _components(roots[scale])) < 10
+    assert (roots[4] / "models" / "shared").read_bytes() == _SHARED_TUPLES
+    assert _component(roots[4], "models/shared") is None
 
 
 def test_a_resolved_object_below_shared_tuples_is_still_hashed(tmp_path: Path) -> None:
@@ -1249,8 +1254,9 @@ def test_a_memo_slot_that_was_stored_is_read_back(tmp_path: Path) -> None:
 # pure-Python unpicklers, with find_class returning a class that records each way it is
 # used instead of importing anything (called, __new__, __setstate__, item assignment,
 # append, extend, add, hashing, iteration, truth, __index__ and keys()), and
-# persistent_load an inert object. find_class fails only for a module that no finder can
-# name, as the import of it does; any other module may be a file of that name.
+# persistent_load torch's legacy one: the object a ("module", obj, ...) id carries, else
+# an inert object. find_class fails only for a module that no finder can name, as the
+# import of it does; any other module may be a file of that name.
 
 
 class _Log:
@@ -1298,8 +1304,11 @@ def _unpickler(base: type) -> type:
                 raise ImportError(module)
             return _recording(self.log)
 
-        def persistent_load(self, _: object) -> object:
-            # torch.load's returns a storage: an object that runs nothing it is given.
+        def persistent_load(self, saved: object) -> object:
+            # torch.load's legacy persistent_load returns the object a "module" id
+            # carries, and otherwise a storage: an object that runs nothing it is given.
+            if isinstance(saved, tuple) and len(saved) > 1 and saved[0] in ("module", b"module"):
+                return saved[1]
             return object()
 
     return Recording
@@ -1308,14 +1317,16 @@ def _unpickler(base: type) -> type:
 _UNPICKLERS = {"c": _unpickler(pickle.Unpickler), "py": _unpickler(pickle._Unpickler)}  # type: ignore[attr-defined]
 
 
-def _oracle_walk(flavor: str, stream: io.BufferedIOBase | io.BytesIO, size: int) -> list:
+def _oracle_walk(
+    flavor: str, stream: io.BufferedIOBase | io.BytesIO, size: int, encoding: str = "ASCII"
+) -> list:
     walk: list[tuple[str, bool, int | None]] = []
     for _ in range(32):
         log = _Log()
         if stream.tell() >= size:
             walk.append(("error", False, None))
             break
-        unpickler = _UNPICKLERS[flavor](stream)
+        unpickler = _UNPICKLERS[flavor](stream, encoding=encoding)
         unpickler.log = log
         try:
             unpickler.load()
@@ -1399,6 +1410,7 @@ _SNIPPETS = [
     *(b"ca b\nc\n", b"c\n\n", b"\x8c\x08builtins\x8c\x04exec", b"ios\nsystem\n", b"\x80\x02"),
     *(b"\x80\x04", b"\x82\x01", b"\xff", b"\x8c\x02os\x8c\x06system", b"NNb", b"N}b", b"N)b"),
     *(b"cbuiltins\n__dict__\n", b"\x8c\x08builtins\x8c\x08__dict__\x93", b"(S'k'\nS'v'\n"),
+    *(b"U\x01\xe9", b"S'\xc3\xa9'\n", b"(S'module'\ncos\nsystem\nNNtQ", b"U\x01m"),
 ]
 
 
@@ -1513,7 +1525,12 @@ def _oracle(data: bytes, path: Path) -> tuple[bool, bool]:
     in: after a STOP inside a frame it resumes right after the STOP.
     """
     path.write_bytes(data)
-    walks = [_oracle_walk(flavor, io.BytesIO(data), len(data)) for flavor in _UNPICKLERS]
+    walks = [
+        _oracle_walk(flavor, io.BytesIO(data), len(data), encoding)
+        for flavor in _UNPICKLERS
+        # torch.load passes "utf-8", np.load and pandas "latin1" (audit 2026-11-16 S4-02).
+        for encoding in ("ASCII", "utf-8", "latin1", "bytes")
+    ]
     with path.open("rb") as stream:
         walks.append(_oracle_walk("c", stream, len(data)))
     steps = [step for walk in walks for step in walk]
@@ -1736,3 +1753,124 @@ def test_a_global_cut_by_the_sample_that_may_import_is_unknown(
     found = _components(root)
     assert sorted(found) == ["models/weights"]
     assert found["models/weights"].serialization_safety is SerializationSafety.UNKNOWN
+
+
+# Audit 2026-11-16 S4-02: STRING, BINSTRING and SHORT_BINSTRING decode by the loader's
+# encoding. pickle.load's default "ASCII" stops at a byte over 0x7f, but torch.load
+# passes "utf-8" and np.load(encoding="latin1") and pandas.read_pickle "latin1", and
+# those go on to the call.
+_CALL = b"cbuiltins\nexec\n(S'import builtins; builtins.HIT=1'\ntR."
+_ENCODED_STRINGS = {
+    "short-binstring-utf8": b"U\x02\xc3\xa90" + _CALL,
+    "binstring-utf8": b"T\x02\x00\x00\x00\xc3\xa90" + _CALL,
+    "string-utf8": b"S'\xc3\xa9'\n0" + _CALL,
+    "short-binstring-latin1": b"U\x01\xff0" + _CALL,
+    "proto2-short-binstring": b"\x80\x02U\x02\xc3\xa90" + _CALL,
+    # Under encoding="bytes" the string is bytes, which READONLY_BUFFER takes.
+    "readonly-buffer": b"\x80\x05U\x01m\x980" + _CALL,
+}
+
+
+def _runs_with(data: bytes, encoding: str) -> bool:
+    called: list[object] = []
+
+    class _Unpickler(pickle.Unpickler):
+        def find_class(self, module: str, name: str) -> object:
+            return lambda *args: called.append(args)
+
+    try:
+        _Unpickler(io.BytesIO(data), encoding=encoding).load()
+    except Exception:  # noqa: BLE001, S110 - pickle.load stops at any exception
+        pass
+    return bool(called)
+
+
+@pytest.mark.parametrize("data", _ENCODED_STRINGS.values(), ids=_ENCODED_STRINGS)
+def test_a_call_after_a_string_another_encoding_reads_is_critical(
+    tmp_path: Path, data: bytes
+) -> None:
+    assert not _runs_with(data, "ASCII")
+    assert any(_runs_with(data, encoding) for encoding in ("utf-8", "latin1", "bytes"))
+    differs = {
+        key
+        for flavor in pickle_load.FLAVORS
+        for segment in pickle_load.load_segments(
+            data, len(data), 0, flavor, pickle_load.Budget(10**6, 10**6)
+        )
+        for key in segment.differs
+    }
+    assert "string-encoding" in differs
+    assert "string-encoding" in pickle_load.VERSION_DIFFERENCES
+    (tmp_path / "models").mkdir()
+    for relative in ("models/x", "x.dat"):
+        (tmp_path / relative).write_bytes(data)
+    found = _components(tmp_path)
+    assert {relative: found[relative].serialization_safety for relative in found} == {
+        "models/x": UNSAFE,
+        "x.dat": UNSAFE,
+    }
+
+
+# Audit 2026-11-16 S4-03: torch's legacy persistent_load returns the object that a
+# ("module", obj, source_file, source) id carries when the source fields are empty, so
+# a BINPERSID of such a tuple puts what GLOBAL resolved back on the stack.
+_PERSISTENT_MAIN = b"(S'module'\ncbuiltins\nexec\nNNtQ(S'import builtins; builtins.HIT=1'\ntR."
+
+
+def _legacy_persistent_load(saved: object) -> object:
+    assert isinstance(saved, tuple)
+    if saved[0] == "module":
+        return saved[1]
+    raise RuntimeError(saved[0])
+
+
+def _torch_legacy_runs(data: bytes) -> bool:
+    called: list[object] = []
+
+    class _Unpickler(pickle.Unpickler):
+        def find_class(self, module: str, name: str) -> object:
+            return lambda *args: called.append(args)
+
+    stream = io.BytesIO(data)
+    try:
+        for _ in range(3):
+            _Unpickler(stream, encoding="utf-8").load()
+        unpickler = _Unpickler(stream, encoding="utf-8")
+        unpickler.persistent_load = _legacy_persistent_load  # type: ignore[assignment]
+        unpickler.load()
+    except Exception:  # noqa: BLE001, S110 - torch.load stops at any exception
+        pass
+    return bool(called)
+
+
+_PERSISTENT_CALLS = {
+    "text-main": _legacy_torch(None)[: -len(pickle.dumps(None, protocol=2))] + _PERSISTENT_MAIN,
+    "binary-main": _legacy_torch(None)[: -len(pickle.dumps(None, protocol=2))]
+    + b"\x80\x02"
+    + _PERSISTENT_MAIN,
+}
+
+
+@pytest.mark.parametrize("data", _PERSISTENT_CALLS.values(), ids=_PERSISTENT_CALLS)
+def test_an_object_torch_persistent_load_returns_is_used_as_resolved(
+    tmp_path: Path, data: bytes
+) -> None:
+    assert _torch_legacy_runs(data)
+    (tmp_path / "checkpoints").mkdir()
+    for relative in ("checkpoints/x", "x.dat"):
+        (tmp_path / relative).write_bytes(data)
+    found = _components(tmp_path)
+    assert {relative: found[relative].serialization_safety for relative in found} == {
+        "checkpoints/x": UNSAFE,
+        "x.dat": UNSAFE,
+    }
+
+
+def test_a_storage_id_stays_inert() -> None:
+    # Any other id is a storage, which runs nothing: a REDUCE of it fails.
+    data = b"(S'storage'\ncbuiltins\nexec\nNNtQ)R."
+    for flavor in pickle_load.FLAVORS:
+        (segment,) = pickle_load.load_segments(
+            data, len(data), 0, flavor, pickle_load.Budget(10**6, 10**6)
+        )
+        assert segment.outcome == "error", flavor
