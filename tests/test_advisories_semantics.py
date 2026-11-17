@@ -204,8 +204,11 @@ def test_private_origin_exclusion_sends_only_lockfile_backed_public_packages(tmp
     lock = {
         "lockfileVersion": 3,
         "packages": {
-            f"node_modules/{name}": {"version": dependencies[name], "resolved": url}
-            for name, url in resolved.items()
+            "": {"dependencies": dependencies},
+            **{
+                f"node_modules/{name}": {"version": dependencies[name], "resolved": url}
+                for name, url in resolved.items()
+            },
         },
     }
     (tmp_path / "package-lock.json").write_text(json.dumps(lock))
@@ -235,7 +238,8 @@ def test_a_package_resolved_from_another_registry_is_sent_unless_excluded(tmp_pa
     (tmp_path / "package.json").write_text(json.dumps({"dependencies": {"mcp-billing": "1.0.0"}}))
     resolved = "https://npm.acme.internal/mcp-billing/-/mcp-billing-1.0.0.tgz"
     record = {"version": "1.0.0", "resolved": resolved}
-    lock = {"lockfileVersion": 3, "packages": {"node_modules/mcp-billing": record}}
+    root = {"dependencies": {"mcp-billing": "1.0.0"}}
+    lock = {"lockfileVersion": 3, "packages": {"": root, "node_modules/mcp-billing": record}}
     (tmp_path / "package-lock.json").write_text(json.dumps(lock))
     bom = AIBOM(components=RegistryScanner().scan(tmp_path).components)
     (component,) = bom.components

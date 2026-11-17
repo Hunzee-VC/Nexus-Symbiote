@@ -60,9 +60,9 @@ REASONS: dict[str, str] = {
         "Use an independently isolated worker or explicitly accept --no-isolation."
     ),
     "isolation-teardown-failed": (
-        "The pinned launcher's PID namespace, or with --no-isolation its process tree, "
-        "could not be confirmed ended after the session; a process from it may still be "
-        "running on this worker."
+        "The pinned launcher's processes could not be confirmed ended after the session "
+        "(its PID namespace, or under --no-isolation its wrapper's tree); a process it "
+        "started may still be running on this worker."
     ),
     "deadline": (
         "The pinned server's bounded MCP exchange and the checks of its descriptors did "
