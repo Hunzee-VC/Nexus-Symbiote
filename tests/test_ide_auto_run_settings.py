@@ -213,6 +213,80 @@ def test_settings_environment_that_only_tunes_telemetry_is_not_reported(
     assert "settings_environment" not in claude_risks(tmp_path)
 
 
+# Re-review of #242: names from Claude Code's environment variable reference and its
+# Amazon Bedrock and Google Cloud setup pages. The first group switches the session to a
+# cloud provider, or to the key, credentials, account or project prompts go to; the
+# second sets the shell Bash commands run in, a prefix that wraps every command, a script
+# run before each one, or plugin directories to load.
+@pytest.mark.parametrize(
+    ("name", "severity"),
+    [
+        *(
+            (name, RiskSeverity.HIGH)
+            for name in (
+                "CLAUDE_CODE_USE_BEDROCK",
+                "CLAUDE_CODE_USE_MANTLE",
+                "CLAUDE_CODE_USE_VERTEX",
+                "CLAUDE_CODE_USE_FOUNDRY",
+                "CLAUDE_CODE_USE_ANTHROPIC_AWS",
+                "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+                "AWS_BEARER_TOKEN_BEDROCK",
+                "AWS_ACCESS_KEY_ID",
+                "AWS_SECRET_ACCESS_KEY",
+                "AWS_SESSION_TOKEN",
+                "AWS_PROFILE",
+                "AWS_SHARED_CREDENTIALS_FILE",
+                "AWS_CONFIG_FILE",
+                "ANTHROPIC_VERTEX_PROJECT_ID",
+                "GOOGLE_APPLICATION_CREDENTIALS",
+                "ANTHROPIC_GOOGLE_CLOUD_PROJECT",
+                "ANTHROPIC_FOUNDRY_RESOURCE",
+                "ANTHROPIC_FOUNDRY_API_KEY",
+                "ANTHROPIC_FOUNDRY_AUTH_TOKEN",
+                "ANTHROPIC_AWS_API_KEY",
+                "ANTHROPIC_FEDERATION_RULE_ID",
+                "ANTHROPIC_ORGANIZATION_ID",
+            )
+        ),
+        *(
+            (name, RiskSeverity.MEDIUM)
+            for name in (
+                "CLAUDE_CODE_SHELL_PREFIX",
+                "CLAUDE_CODE_SHELL",
+                "CLAUDE_CODE_GIT_BASH_PATH",
+                "CLAUDE_ENV_FILE",
+                "CLAUDE_CODE_PLUGIN_DIRS",
+            )
+        ),
+    ],
+)
+def test_settings_environment_that_switches_provider_or_wraps_commands_is_reported(
+    tmp_path: Path, name: str, severity: RiskSeverity
+) -> None:
+    write_settings(tmp_path, {"env": {name: "https://evil.example/v1-secret-9137"}})
+    (finding,) = claude_risks(tmp_path)["settings_environment"]
+    assert finding.severity is severity
+    assert name in finding.detail
+    assert "9137" not in finding.detail
+    assert "evil.example" not in finding.detail
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "CLAUDE_CODE_USE_POWERSHELL_TOOL",
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_GOOGLE_CLOUD_LOCATION",
+        "CLOUD_ML_REGION",
+    ],
+)
+def test_settings_environment_that_picks_a_tool_model_or_region_is_not_reported(
+    tmp_path: Path, name: str
+) -> None:
+    write_settings(tmp_path, {"env": {name: "1"}})
+    assert "settings_environment" not in claude_risks(tmp_path)
+
+
 # Review of #242: no agent reads a hook directory's files as instructions.
 @pytest.mark.parametrize("directory", [".claude/hooks", ".cursor/hooks"])
 def test_hook_directory_files_are_resources_without_markup_findings(

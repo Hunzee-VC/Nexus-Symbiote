@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -163,19 +164,29 @@ _CREDENTIAL_HELPER_KEYS = (
 )
 # Settings `env` applies to the session and every process it starts. These names send
 # the API key, prompts or telemetry to another endpoint, proxy or trust store, add
-# headers to API requests, or replace the credential. Only names are rated; values are
-# never reported.
+# headers to API requests, replace the credential, or switch the session to a cloud
+# provider (Amazon Bedrock and its Mantle endpoint, Google Cloud, Microsoft Foundry,
+# Claude Platform on AWS) and to the account, project or key it sends prompts to. Only
+# names are rated; values are never reported.
 _REDIRECTING_ENVIRONMENT = re.compile(
     r"[A-Z0-9_]*_(?:BASE_URL|API_URL)|ANTHROPIC_(?:AUTH_TOKEN|API_KEY|CUSTOM_HEADERS)"
     r"|OTEL_EXPORTER_OTLP(?:_[A-Z]+)?_(?:ENDPOINT|HEADERS)|AWS_ENDPOINT_URL(?:_[A-Z0-9_]+)?"
     r"|(?:HTTPS?|ALL)_PROXY"
     r"|NODE_EXTRA_CA_CERTS|NODE_TLS_REJECT_UNAUTHORIZED|SSL_CERT_(?:FILE|DIR)"
     r"|REQUESTS_CA_BUNDLE|CURL_CA_BUNDLE"
+    r"|CLAUDE_CODE_USE_(?:BEDROCK|MANTLE|VERTEX|FOUNDRY|ANTHROPIC_AWS|ANTHROPIC_GOOGLE_CLOUD)"
+    r"|AWS_(?:BEARER_TOKEN_BEDROCK|ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN|PROFILE"
+    r"|SHARED_CREDENTIALS_FILE|CONFIG_FILE)|GOOGLE_APPLICATION_CREDENTIALS"
+    r"|ANTHROPIC_(?:VERTEX_PROJECT_ID|GOOGLE_CLOUD_PROJECT|FOUNDRY_(?:RESOURCE|API_KEY|AUTH_TOKEN)"
+    r"|AWS_API_KEY|FEDERATION_RULE_ID|ORGANIZATION_ID)"
 )
 # Beyond the names the MCP collector treats as code loading: where programs are found,
-# and the git settings that run a program.
+# the git settings that run a program, and Claude Code's own shell, the prefix that wraps
+# every command it runs, the script it runs before each Bash command, and plugin
+# directories it loads.
 _SETTINGS_CODE_ENVIRONMENT = re.compile(
     r"PATH|GIT_(?:SSH|SSH_COMMAND|EXEC_PATH|ASKPASS|TEMPLATE_DIR|CONFIG_[A-Z0-9_]+)|SSH_ASKPASS"
+    r"|CLAUDE_CODE_(?:SHELL|SHELL_PREFIX|GIT_BASH_PATH|PLUGIN_DIRS)|CLAUDE_ENV_FILE"
 )
 CODEX_CONFIG = ".codex/config.toml"
 CURSOR_HOOKS = ".cursor/hooks.json"
@@ -692,6 +703,9 @@ _VERSIONED_NAME = re.compile(r"(python|ruby|php|perl|lua|nodejs|node)[0-9][0-9.]
 # misses costs linear time whatever its length.
 _SEGMENT_BOUNDARY = re.compile(r"[\n|;&]")
 _PREFIX_REDIR = re.compile(r"\d*(?:<<-|<<<|<<|<>|>>|>&|&>|[<>])")
+# `base64` decodes with `-d` or `-D`, alone or in a bundle such as `-di`, or `--decode`,
+# which GNU getopt also takes abbreviated, anywhere among its arguments.
+_BASE64_DECODE = re.compile(r"-[A-Za-z0-9]*[dD][A-Za-z0-9]*|(?i:--d(?:e(?:c(?:o(?:de?)?)?)?)?)")
 _SCRIPT_FLAG = re.compile(r"(?i)-c(?:ommand(?:withargs)?)?\Z|-[A-Za-z]*c\Z")
 # An interpreter's flag that takes its program as the next argument: `-e`, `-E`, `-p`,
 # `-r` (PHP only: node and ruby load a module with it) and the long `--eval` and
@@ -885,6 +899,46 @@ def _shell_word_spans(segment: str) -> list[tuple[int, int]]:
 
 def _shell_words(segment: str) -> list[str]:
     return [segment[start:end] for start, end in _shell_word_spans(segment)]
+
+
+def _redirections(segment: str, spans: list[tuple[int, int]]) -> list[str]:
+    """For each word, the redirection it belongs to: `<` for the target of an input
+    (`<`, `<>`, `<<<`), `>` for an output's, `&` for the descriptor number or `&` written
+    against one (`2>`, `&>`), and an empty string for a word no redirection takes.
+    """
+    marks: list[str] = []
+    previous = 0
+    continued = ""
+    for start, end in spans:
+        word = segment[start:end]
+        gap = segment[previous:start].rstrip(" \t")
+        if gap.endswith(("<", "<>")):
+            mark = "<"
+        elif gap.endswith(">"):
+            mark = ">"
+        else:
+            # `>|` leaves `|` as a word, and its target may follow after a space.
+            mark = "" if gap else continued
+        continued = mark if word == "|" else ""
+        if not mark and segment.startswith(("<", ">"), end) and (word.isdigit() or word == "&"):
+            mark = "&"
+        marks.append(mark)
+        previous = end
+    return marks
+
+
+def _unredirected(
+    segment: str, spans: list[tuple[int, int]], start: int, *, inputs: bool = False
+) -> list[str]:
+    """The words of `segment` from the `start`th on that no redirection takes. With
+    `inputs`, the file an input redirection reads stays, as a word the command reads."""
+    marks = _redirections(segment, spans)
+    kept = ("", "<") if inputs else ("",)
+    return [
+        segment[s:e]
+        for (s, e), mark in zip(spans[start:], marks[start:], strict=True)
+        if mark in kept
+    ]
 
 
 def _ifs_at(word: str, index: int) -> int:
@@ -1308,31 +1362,57 @@ _DATA_MODULES = frozenset(
 )
 # Arguments that name standard input as the program.
 _STDIN_PROGRAMS = frozenset({"-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"})
+# Suffixes an interpreter tries for a program or module named without one: node runs
+# `node a` and `node -r ./a` from a.js, and ruby loads `ruby -r ./a` from a.rb.
+_RESOLVED_SUFFIXES = {
+    **dict.fromkeys(("node", "nodejs"), (".js", ".cjs", ".mjs")),
+    "ruby": (".rb",),
+}
 
 
 def _reads_stdin(interpreter: str, args: list[str]) -> bool:
-    """True when the interpreter reads its program from stdin, as `python3 -` does."""
+    """True when the interpreter may read its program from stdin, as `python3 -` does.
+
+    An option not known to take no value may take the next word as its value, so both
+    readings are followed: stdin is the program when either ends without one.
+    """
     letters, long_code, with_value = _STDIN_INTERPRETERS[interpreter]
-    index = 0
-    while index < len(args):
-        word = _decode_word(args[index], drop_ifs=True)
+    plain, attached_value, plain_long = _NO_VALUE[interpreter]
+    reached = [True] + [False] * len(args)
+    for index, raw in enumerate(args):
+        if not reached[index]:
+            continue
+        word = _decode_word(raw, drop_ifs=True)
         if word in _STDIN_PROGRAMS:
             return True
+        if word == "--":
+            following = args[index + 1 : index + 2]
+            if not following or _decode_word(following[0], drop_ifs=True) in _STDIN_PROGRAMS:
+                return True
+            continue
         if word.startswith("--"):
-            if word.split("=", 1)[0] in long_code:
-                return False
+            option, equals, _ = word.partition("=")
+            if option in long_code:
+                continue
+            known = bool(equals) or option in plain_long
         elif word.startswith("-"):
             if word[1:2] in letters:
-                return False
+                continue
+            known = all(letter in plain for letter in word[1:]) or (
+                len(word) > 2 and (word[1] in attached_value or f"-{word[1]}" in with_value)
+            )
         else:
-            return False
-        index += 2 if word in with_value else 1
-    return True
+            continue
+        steps = (2,) if word in with_value else (1,) if known else (1, 2)
+        for step in steps:
+            reached[min(index + step, len(args))] = True
+    return reached[-1]
 
 
 def _segment_executes(segment: str) -> bool:
     """Whether this pipeline segment runs a shell, `iex`, or an interpreter on stdin."""
-    words = _shell_words(segment)
+    spans = _shell_word_spans(segment)
+    words = [segment[start:end] for start, end in spans]
     index = _executable_index(words)
     if index is None:
         return _sudo_shell(words)
@@ -1341,7 +1421,10 @@ def _segment_executes(segment: str) -> bool:
     if names & (_SHELL_NAMES | _IEX_NAMES | {"su", "runuser"}):
         return True
     interpreter = next(iter(sorted(names & _STDIN_INTERPRETERS.keys())), None)
-    return interpreter is not None and _reads_stdin(interpreter, words[index + 1 :])
+    # An output redirection's words, as in `python3 2>/dev/null`, are not the program.
+    return interpreter is not None and _reads_stdin(
+        interpreter, _unredirected(segment, spans, index + 1, inputs=True)
+    )
 
 
 def _sudo_shell(words: list[str]) -> bool:
@@ -1362,16 +1445,15 @@ def _segment_downloads(segment: str) -> bool:
 
 
 def _segment_fetches(segment: str) -> bool:
-    """Whether a word downloads or is `base64 -d` / `base64 --decode`."""
-    words = _shell_words(segment)
-    for index, word in enumerate(words):
+    """Whether a word downloads, or `base64` is given a decode flag among its arguments."""
+    decoder = False
+    for word in _shell_words(segment):
         names = _name_variants(word)
         if names & _DOWNLOAD_NAMES:
             return True
-        if "base64" in names and index + 1 < len(words):
-            flag = _decode_word(words[index + 1], drop_ifs=True).lower()
-            if flag in {"-d", "--decode"}:
-                return True
+        if decoder and _BASE64_DECODE.fullmatch(_decode_word(word, drop_ifs=True)):
+            return True
+        decoder = decoder or "base64" in names
     return False
 
 
@@ -1487,44 +1569,101 @@ def _saved_names(segment: str) -> tuple[set[str], set[str]]:
 # lower than it was. Shells count any download that way; a decoded file, and for Python
 # and Perl a download saved another way, counts only as the program.
 _ANY_ARGUMENT_RUNNERS = _SHELL_NAMES | _PYTHON_NAMES | _IEX_NAMES | _EVAL_NAMES | {"perl"}
+# How deep a `-c` script, `eval` or `su -c` command line inside another is read.
+_MAX_SCRIPT_DEPTH = 4
 
 
-def _executes_saved(
-    segment: str, outputs: set[str], downloaded: set[str], decoded: set[str]
-) -> bool:
-    """Whether this segment runs a saved file with a shell, an interpreter, or directly.
+class _Saved:
+    """Files earlier segments saved, by how, and the unions of them that segments read.
 
     `outputs` holds files a downloader's output option wrote, `downloaded` files a
-    download wrote otherwise, and `decoded` those only `base64 -d` wrote.
+    download wrote otherwise, and `decoded` those only `base64 -d` wrote. The unions grow
+    with them: rebuilding one for each segment cost time in proportion to every file
+    saved before it, which made a long chain of saves quadratic.
     """
-    saved = outputs | downloaded | decoded
-    if not saved:
+
+    def __init__(self) -> None:
+        self.outputs: set[str] = set()
+        self.downloaded: set[str] = set()
+        self.decoded: set[str] = set()
+        self.fetched: set[str] = set()
+        self.every: set[str] = set()
+
+    def add_outputs(self, names: set[str]) -> None:
+        self.outputs |= names
+        self.fetched |= names
+        self.every |= names
+        self.decoded -= names
+
+    def add_downloaded(self, names: set[str]) -> None:
+        self.downloaded |= names
+        self.fetched |= names
+        self.every |= names
+        self.decoded -= names
+
+    def add_decoded(self, names: set[str]) -> None:
+        names = names - self.downloaded
+        self.decoded |= names
+        self.every |= names
+
+
+def _inline_scripts(command: str, names: set[str], args: list[str]) -> list[str]:
+    """Command lines a segment runs from its own words: a whole command given as one word,
+    as to `su -c`, `eval`'s arguments, or a shell's `-c` script."""
+    whole = _decode_word(command, drop_ifs=False)
+    if whole.strip() and any(blank in whole for blank in " \t"):
+        return [whole]
+    if "eval" in names:
+        return [" ".join(_decode_word(word, drop_ifs=False) for word in args)]
+    if names & _SHELL_NAMES:
+        for position, word in enumerate(args[:-1]):
+            if _SCRIPT_FLAG.fullmatch(_decode_word(word, drop_ifs=True)):
+                return [_decode_word(args[position + 1], drop_ifs=False)]
+    return []
+
+
+def _executes_saved(segment: str, saved: _Saved, depth: int = 0) -> bool:
+    """Whether this segment runs a saved file with a shell, an interpreter, or directly."""
+    if not saved.every:
         return False
-    words = _shell_words(segment)
+    spans = _shell_word_spans(segment)
+    words = [segment[start:end] for start, end in spans]
     index = _executable_index(words)
     if index is None:
         return False
     names = _name_variants(words[index])
     interpreters = _SHELL_NAMES | _STDIN_INTERPRETERS.keys()
-    if _file_keys(words[index]) & saved and not (names & interpreters):
+    if _file_keys(words[index]) & saved.every and not (names & interpreters):
+        return True
+    args = words[index + 1 :]
+    # `sh -c 'sh a'` and `su -c 'sh a'` name the file in a script of their own.
+    if depth < _MAX_SCRIPT_DEPTH and any(
+        _executes_saved(script, saved, depth + 1) or _runs_saved_input(script, saved)
+        for script in _inline_scripts(words[index], names, args)
+    ):
         return True
     if not (names & (interpreters | _IEX_NAMES | _EVAL_NAMES | {"busybox"})):
         return False
-    args = words[index + 1 :]
+    # An output redirection's words, as in `python3 2>/dev/null a`, are never the program.
+    program = _unredirected(segment, spans, index + 1, inputs=True)
     interpreter = next(iter(sorted(names & _STDIN_INTERPRETERS.keys())), None)
     if not names & _ANY_ARGUMENT_RUNNERS:
         if interpreter is None:
-            return _any_argument(args, saved)
-        return _interpreter_program(interpreter, args, saved)
-    if _any_argument(args, outputs):
+            return _any_argument(args, saved.every)
+        return _interpreter_program(interpreter, program, saved.every)
+    if _any_argument(args, saved.outputs):
         return True
     if interpreter is not None:
-        return _interpreter_program(interpreter, args, downloaded | decoded)
-    if _any_argument(args, downloaded):
+        return _interpreter_program(interpreter, program, saved.every)
+    if _any_argument(args, saved.downloaded):
         return True
     if names & _SHELL_NAMES:
-        return _shell_program(args, decoded)
-    return _any_argument(args, decoded)
+        return _shell_program(
+            program,
+            lambda word: bool(_file_keys(word) & saved.decoded),
+            lambda rest: _any_argument(rest, saved.decoded),
+        )
+    return _any_argument(args, saved.decoded)
 
 
 def _any_argument(args: list[str], saved: set[str]) -> bool:
@@ -1545,29 +1684,35 @@ def _any_argument(args: list[str], saved: set[str]) -> bool:
 _SHELL_WITH_VALUE = frozenset({"-o", "+o", "-O", "+O", "--rcfile", "--init-file"})
 
 
-def _shell_program(args: list[str], saved: set[str]) -> bool:
-    """Whether a shell runs one of `saved` as its script, not as a later argument.
+def _shell_program(
+    args: list[str], hit: Callable[[str], bool], scripted: Callable[[list[str]], bool]
+) -> bool:
+    """Whether a shell runs a word `hit` accepts as its script, not as a later argument.
 
-    The script is the first operand; with `-c` any argument counts, since the script
-    may source `$1`. Fails closed on an unknown option by also testing the next word.
+    The script is the first operand after the options and `--` or `-`. With `-c`, also
+    with its script attached, `scripted` reads the words from the flag on, since the
+    script may source `$1`. Each `o` or `O` in a bundle takes one following word as its
+    value (`-eou pipefail a`, `-oo pipefail errexit a`); those values and the word after
+    them are tested too, which fails closed on an option this does not know.
     """
     index = 0
     while index < len(args):
         word = _decode_word(args[index], drop_ifs=True)
-        if word == "--":
+        if word in {"--", "-"}:
             index += 1
             break
         if not word.startswith(("-", "+")) or word in _STDOUT_NAMES:
             break
-        if _SCRIPT_FLAG.fullmatch(word) or re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word):
-            return _any_argument(args[index:], saved)
-        # `-euo pipefail`: a bundle ending in `o` or `O` takes the next word as its value,
-        # so the word after that may be the script. `-opipefail` carries its value.
-        valued = word in _SHELL_WITH_VALUE or re.fullmatch(r"[-+][A-Za-z]*[oO]", word)
-        if any(_file_keys(item) & saved for item in args[index + 1 : index + (3 if valued else 2)]):
+        if _SCRIPT_FLAG.fullmatch(word) or re.match(r"-[A-Za-z]*c", word):
+            return scripted(args[index:])
+        if re.fullmatch(r"[-+][A-Za-z]+", word):
+            values = sum(letter in "oO" for letter in word[1:])
+        else:
+            values = 1 if word in _SHELL_WITH_VALUE else 0
+        if any(hit(item) for item in args[index + 1 : index + values + 2]):
             return True
-        index += 2 if valued else 1
-    return index < len(args) and bool(_file_keys(args[index]) & saved)
+        index += 1 + values
+    return index < len(args) and hit(args[index])
 
 
 def _interpreter_program(interpreter: str, args: list[str], saved: set[str]) -> bool:
@@ -1578,15 +1723,20 @@ def _interpreter_program(interpreter: str, args: list[str], saved: set[str]) -> 
     the program's own, as in `node build.js data.json`. An option's value counts too,
     since `node -r`, `ruby -r` and `php -z` load and run the file they name. Where the
     program's position is uncertain this fails closed: after `-` or `/dev/stdin` any
-    later word may be the target of a `<` redirection, and the word after an option not
-    known to take no value may be that option's value or the program, so it is tested
-    and the reading goes on after it.
+    later word counts, and the word after an option not known to take no value may be
+    that option's value or the program, so it is tested and the reading goes on after it.
     """
     letters, long_code, with_value = _STDIN_INTERPRETERS[interpreter]
     plain, attached_value, plain_long = _NO_VALUE[interpreter]
+    suffixes = _RESOLVED_SUFFIXES.get(interpreter, ())
 
     def named(values: list[str]) -> bool:
-        return any(_file_keys(value) & saved for value in values)
+        for value in values:
+            bare = bool(value) and "." not in value.rsplit("/", 1)[-1]
+            tried = ("", *suffixes) if bare else ("",)
+            if any(_file_keys(value + suffix) & saved for suffix in tried):
+                return True
+        return False
 
     index = 0
     while index < len(args):
@@ -1621,7 +1771,8 @@ def _interpreter_program(interpreter: str, args: list[str], saved: set[str]) -> 
             if letter == "m" and interpreter in _PYTHON_NAMES:
                 module = rest or (_decode_word(following[0], drop_ifs=True) if following else "")
                 if module not in _DATA_MODULES:
-                    return named([rest] + args[index + 1 :])
+                    # `python3 -m a` runs a.py from the working directory.
+                    return named([rest, *args[index + 1 :], module.replace(".", "/") + ".py"])
             if letter in letters:
                 return named([rest] if rest else following)
             if f"-{letter}" in with_value:
@@ -1668,11 +1819,12 @@ def _relayed_names(segment: str) -> set[str]:
     return relayed
 
 
-# Commands that copy a file they name to their operands or output: a copy of a saved
-# file holds what it holds.
+# Commands that copy a file they name to their destination or output: a copy of a saved
+# file holds what it holds. The last operand of these is the file or directory written.
 _COPIERS = frozenset({"cat", "cp", "ln", "dd", "tee", "install", "mv", "rsync", "sponge"})
-# Standard input read from a file: `<` and `0<`, not `<<`, `<<<`, `<(`, `<&` or `<>`.
-_INPUT_REDIRECTION = re.compile(r"(?<![0-9<>&])0?<(?![<>&(])[ \t]*(?P<target>[^\s<>|;&()]+)")
+_DESTINATION_COPIERS = frozenset({"cp", "ln", "install", "mv", "rsync"})
+# Standard input read from a file: `<`, `0<` and `<>`, not `<<`, `<<<`, `<(` or `<&`.
+_INPUT_REDIRECTION = re.compile(r"(?<![0-9<>&])0?<>?(?![<>&(])[ \t]*(?P<target>[^\s<>|;&()]+)")
 
 
 def _operand_keys(words: list[str]) -> set[str]:
@@ -1684,52 +1836,94 @@ def _operand_keys(words: list[str]) -> set[str]:
     return keys
 
 
-def _copies_saved(segment: str, saved: set[str]) -> set[str]:
-    """Files a copier that names one of `saved` writes: its operands and redirections."""
-    words = _shell_words(segment)
+def _copies_saved(segment: str, saved: set[str]) -> set[str] | None:
+    """What a copier that names one of `saved` writes; None when this is no such copier.
+
+    A copy is written to the destination of `cp`, `mv`, `ln`, `install` or `rsync`, to
+    `dd of=`, to a `tee` or `sponge` operand and to a redirection. Other operands are
+    read, as `header.txt` is in `cat header.txt a > out`, and keep what they held.
+    """
+    spans = _shell_word_spans(segment)
+    words = [segment[start:end] for start, end in spans]
     index = _executable_index(words)
-    if index is None or not _name_variants(words[index]) & _COPIERS:
-        return set()
-    operands = _operand_keys(words[index + 1 : index + 65])
-    if not operands & saved:
-        return set()
-    return operands | _relayed_names(segment)
+    if index is None:
+        return None
+    names = _name_variants(words[index])
+    if not names & _COPIERS or not _operand_keys(words[index + 1 : index + 65]) & saved:
+        return None
+    written = _relayed_names(segment)
+    if names & _DESTINATION_COPIERS:
+        for word in reversed(_unredirected(segment, spans, index + 1)):
+            if not _decode_word(word, drop_ifs=True).startswith("-"):
+                written |= _file_keys(word)
+                break
+    return written
 
 
 def _substitution_reads(word: str, saved: set[str]) -> bool:
-    """Whether `word` holds a `$(...)`, backtick or `<(...)` that reads one of `saved`."""
+    """Whether `word` holds a `$(...)`, backtick or `<(...)` that reads one of `saved`,
+    with a copier or as `$(< a)`, which is bash's `$(cat a)`."""
     for match in re.finditer(r"[$<]\(([^()]*)\)|`([^`]*)`", word):
-        inner = _shell_words(match.group(1) if match.group(1) is not None else match.group(2))
+        body = match.group(1) if match.group(1) is not None else match.group(2)
+        inner = _shell_words(body)
+        if body.lstrip().startswith("<") and _operand_keys(inner) & saved:
+            return True
         if inner and _name_variants(inner[0]) & _COPIERS and _operand_keys(inner[1:]) & saved:
             return True
     return False
 
 
-def _runs_saved_input(
-    segment: str, outputs: set[str], downloaded: set[str], decoded: set[str]
+def _shell_substitution(
+    segment: str, spans: list[tuple[int, int]], index: int, saved: _Saved
 ) -> bool:
+    """Whether a shell runs a saved file that a substitution in its arguments reads.
+
+    A download counts wherever the substitution is, as a shell's download argument does.
+    A decoded file counts as `_shell_program` reads its name: as the script, in or after a
+    `-c` script, and on stdin as `bash <<< "$(cat a)"` gives it, not as a later argument.
+    """
+    words = [segment[start:end] for start, end in spans[index + 1 : index + 65]]
+    if any(_substitution_reads(word, saved.fetched) for word in words):
+        return True
+
+    def reads(word: str) -> bool:
+        return _substitution_reads(word, saved.decoded)
+
+    marks = _redirections(segment, spans)[index + 1 : index + 65]
+    if any(mark == "<" and reads(word) for word, mark in zip(words, marks, strict=True)):
+        return True
+    program = [word for word, mark in zip(words, marks, strict=True) if not mark]
+    return _shell_program(program, reads, lambda rest: any(map(reads, rest)))
+
+
+def _runs_saved_input(segment: str, saved: _Saved) -> bool:
     """Whether this segment runs a saved file given on stdin or by substitution.
 
     `sh < a`, `sh 0< a`, `bash run.sh < a`, `sh -c "$(cat a)"`, `bash <<< "$(cat a)"`
     and `eval "$(cat a)"` run `a` as `cat a | sh` does. Python and Perl keep the released
-    rule for a download, which counted any file they were given, stdin included.
+    rule for a file a downloader's output option wrote, which counted any file they were
+    given, stdin included; any other saved file counts for them only as the program.
     """
-    saved = outputs | downloaded | decoded
-    words = _shell_words(segment)
+    if not saved.every:
+        return False
+    spans = _shell_word_spans(segment)
+    words = [segment[start:end] for start, end in spans]
     index = _executable_index(words)
     if index is None:
         return False
     names = _name_variants(words[index])
-    if names & (_SHELL_NAMES | _EVAL_NAMES | _IEX_NAMES) and any(
-        _substitution_reads(word, saved) for word in words[index + 1 : index + 65]
+    if names & _SHELL_NAMES and _shell_substitution(segment, spans, index, saved):
+        return True
+    if names & (_EVAL_NAMES | _IEX_NAMES) and any(
+        _substitution_reads(word, saved.every) for word in words[index + 1 : index + 65]
     ):
         return True
     stdin = set()
     for match in _INPUT_REDIRECTION.finditer(segment):
         stdin |= _file_keys(match.group("target"))
-    if not stdin & saved:
+    if not stdin & saved.every:
         return False
-    if names & (_PYTHON_NAMES | {"perl"}) and stdin & (outputs | downloaded):
+    if names & (_PYTHON_NAMES | {"perl"}) and stdin & saved.outputs:
         return True
     return _segment_executes(_INPUT_REDIRECTION.sub(" ", segment))
 
@@ -1741,42 +1935,36 @@ def _download_then_run(pipelines: list[list[str]]) -> bool:
     or `curl x | cat > a`, holds the download too, as does a copy of a saved file and
     a file decoded from a download.
     """
-    outputs: set[str] = set()
-    downloaded: set[str] = set()
-    decoded: set[str] = set()
+    saved = _Saved()
     for segments in pipelines:
         fetched: str | None = None
         reads_saved = False
         for segment in segments:
-            if _executes_saved(segment, outputs, downloaded, decoded):
-                return True
-            if _runs_saved_input(segment, outputs, downloaded, decoded):
+            if _executes_saved(segment, saved) or _runs_saved_input(segment, saved):
                 return True
             # A saved file read into a pipeline (`cat a | sh`) is a fetch for its later segments.
             if reads_saved and (
                 _segment_executes(segment) or _output_substitution_executes(segment)
             ):
                 return True
-            fetched_files = outputs | downloaded
-            saved = fetched_files | decoded
             names = _operand_keys(_shell_words(segment))
-            if not reads_saved and saved:
-                reads_saved = bool(names & saved)
+            if not reads_saved and saved.every:
+                reads_saved = bool(names & saved.every)
+            copied = _copies_saved(segment, saved.every)
+            # A copy or decoding of a download, or a relay after one, holds the download.
+            source = (
+                "download" if names & saved.fetched else "decode" if copied is not None else None
+            )
             options, written = _saved_names(segment)
-            outputs |= options
-            decoded -= options
-            copied = _copies_saved(segment, saved)
+            saved.add_outputs(options)
             if fetched:
                 written |= _relayed_names(segment)
-            # A copy or decoding of a download, or a relay after one, holds the download.
-            source = "download" if names & fetched_files else "decode" if copied else None
-            written |= copied
+            written |= copied or set()
             if fetched == "download" or source == "download" or _segment_downloads(segment):
-                downloaded |= written
-                decoded -= written
+                saved.add_downloaded(written)
             else:
-                decoded |= written - downloaded
-            if fetched != "download" and (_segment_fetches(segment) or copied):
+                saved.add_decoded(written)
+            if fetched != "download" and (_segment_fetches(segment) or copied is not None):
                 download = _segment_downloads(segment) or source == "download"
                 fetched = "download" if download else "decode"
     return False
@@ -1808,8 +1996,19 @@ def _substitution_downloads(command: str, index: int) -> bool:
         return True
     if "base64" not in names:
         return False
-    rest = command[end:]
-    return rest.lstrip(" \t").lower().startswith(("-d", "--decode"))
+    # Its arguments up to the end of the substitution's command; past 64 of them a decode
+    # flag may still follow, so this fails closed.
+    for _ in range(64):
+        while end < len(command) and command[end] in " \t":
+            end += 1
+        if end >= len(command) or command[end] in "\n)|&;`":
+            return False
+        start = end
+        while end < len(command) and command[end] not in " \t\n)|&;`":
+            end += 1
+        if _BASE64_DECODE.fullmatch(_decode_word(command[start:end], drop_ifs=True)):
+            return True
+    return True
 
 
 def _substitution_at(command: str, index: int, interpreter: str | None = None) -> bool:

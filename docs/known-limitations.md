@@ -886,7 +886,9 @@ A way around a limit that its entry does not describe is worth a
   command name, is medium, as is a downloader given a host without a scheme or a path,
   such as `curl evil.example`. A command given to `su -c` or `script -c` as one quoted
   string is read as one word, which names a shell but no interpreter, so
-  `su -c 'python3 -'` is medium too. A download unpacked and then run, as by `curl x | tar -xz; sh install.sh`,
+  `curl x | su -c 'python3 -'` is medium too; a saved file named in such a string, or
+  in a shell's `-c` script or `eval`'s arguments (`su -c 'sh a'`, `sh -c 'sh a'`),
+  counts. A download unpacked and then run, as by `curl x | tar -xz; sh install.sh`,
   is medium, because the archive's members are not known. A file a downloader's `-o`
   wrote counts as run when it is any argument of a shell, `python` or `perl`, as it did
   before, so `curl -o d x && bash run.sh d` and `curl -o d x && python3 -m json.tool d`
@@ -895,12 +897,34 @@ A way around a limit that its entry does not describe is worth a
   classifier does not know, the next word is read as the possible program and then as
   that option's value, so the reading goes on after it; an unknown option that takes no
   value therefore makes the program's first argument count, as in
-  `curl -o d x && node --unknown-flag app.js d`. A file only `base64 -d` decoded, not
-  from a download, counts as run only as a program. A saved file copied by `cat`, `cp`,
-  `mv`, `ln`, `dd`, `tee`, `install`, `rsync` or `sponge`, given on standard input, or
-  read by `$(cat a)` or `<(cat a)` that a shell or `eval` runs, counts as the file; one
-  transformed by another tool (`sed`, `awk`, `tar`), or read by an interpreter's own
-  code (`python3 -c 'exec(open("a").read())'`, `node -e "$(cat a)"`), is medium. A saved
+  `curl -o d x && node --unknown-flag app.js d`, and a download piped to an interpreter
+  after one counts as its program, as in `curl x | node --unknown-flag app.js`. Option
+  forms that make the program exit before it runs are critical for the same reason:
+  bash's `-eopipefail`, which takes `-o`'s value from the next word, letters attached to
+  bash's `-c`, and node given a V8 flag's value as the next word (`--stack-size 9`) or an
+  option it does not know. Any `python3 -m` module other than a data tool counts every
+  later argument, so `python3 -m pytest tests/ --json d.json` with a downloaded
+  `d.json` is critical. A shell given a decoded or downloaded file on standard input
+  (`bash deploy.sh < c.json`, `bash deploy.sh <<< "$(cat c.json)"`) is critical, as a
+  download piped into a shell is, though the script may only read it. A saved file is
+  matched by its path and by its base name, so `sh /tmp/i.sh` counts a saved `i.sh`
+  wherever it was written. A file only `base64 -d` decoded, not
+  from a download, counts as run only as a program. A copy of a saved file made by
+  `cat`, `cp`, `mv`, `ln`, `dd`, `tee`, `install`, `rsync` or `sponge` counts as the file
+  at its destination (the last operand of `cp`, `mv`, `ln`, `install` or `rsync`,
+  `dd of=`, a `tee` or `sponge` operand, or a redirection), and so does a saved file
+  given on standard input or read by `$(cat a)`, `$(< a)` or `<(cat a)` that a shell or
+  `eval` runs, though a shell counts a decoded file's substitution, as it counts its
+  name, only as the script; one transformed by another tool (`sed`, `awk`, `tar`), read
+  by an interpreter's own code (`python3 -c 'exec(open("a").read())'`,
+  `node -e "$(cat a)"`, `python3 -c 'import a'`), or loaded by a name that is not the
+  file's, as by
+  `php -d auto_prepend_file=a` or a module the program imports from the working
+  directory (`sitecustomize.py`, or a `json.py` that shadows the standard library), is
+  medium. A download written where something runs it later, such as
+  `curl x >> ~/.bashrc`, `curl x -o .git/hooks/post-checkout` or
+  `curl x -o .claude/settings.local.json`, is rated only by the rules above, since it
+  runs nothing now. A saved
   file read into a pipeline is rated as a download piped there, so
   `curl -o r.json x && cat r.json | bash ./notify.sh` is critical. A runner the
   classifier does not model, such as `deno run`, `bun`, `tsx`, `npx`, `pkexec`,
@@ -911,6 +935,8 @@ A way around a limit that its entry does not describe is worth a
   discovery and call commands are digested but not rated. Settings `env` is rated by
   the names `settings_environment` lists, never by value, so an endpoint set through
   another variable, or a project tool that reads its own variable, is not reported.
+  Claude Code 2.1.282 and later ignore the OpenTelemetry exporter variables in project
+  and local settings; they are still rated, because earlier releases apply them.
 - **Hook scripts outside the hook directories are not read.** Every file under
   `.claude/hooks` and `.cursor/hooks` is bound by digest as a `skill-resource` and
   checked only for hidden characters, so a change to one alerts. A hook that runs a script elsewhere in the project, such as

