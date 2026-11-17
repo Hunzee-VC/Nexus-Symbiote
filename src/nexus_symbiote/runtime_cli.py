@@ -7,6 +7,7 @@ import json
 import os
 import re
 import stat
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -139,6 +140,53 @@ def _ring(paths: tuple[Path, ...]) -> dict[str, Ed25519PublicKey]:
         public = _load_public(path)
         ring[key_id(public)] = public
     return ring
+
+
+def _working_trees(directories: Iterable[Path]) -> list[Path]:
+    """Every directory at or above these that holds a ``.git`` entry, nested ones included."""
+    found: list[Path] = []
+    for directory in directories:
+        for candidate in (directory, *directory.parents):
+            if candidate not in found and os.path.lexists(candidate / ".git"):
+                found.append(candidate)
+    return found
+
+
+def _identity(path: Path) -> tuple[int, int]:
+    info = os.stat(path)
+    return info.st_dev, info.st_ino
+
+
+def _check_key_placement(
+    keys: tuple[Path, ...], inputs: tuple[Path, ...], *, option: str, holders: str
+) -> None:
+    """Refuse a trusted key that a change to a working tree around the inputs could supply.
+
+    This catches misplacement, such as a key committed beside the contracts it is to
+    judge; it does not authenticate the key.
+    """
+    try:
+        trees = _working_trees([*(path.resolve().parent for path in inputs), Path.cwd().resolve()])
+        untrusted = {_identity(tree) for tree in trees}
+        for key in keys:
+            resolved = key.resolve()
+            # Device and inode also find the tree directory itself under a name the path
+            # text misses, such as a case variant or a bind mount of the tree. A mount of
+            # a directory or file inside a tree gives the key another location: not found.
+            ancestors = {_identity(parent) for parent in resolved.parents}
+            if any(resolved.is_relative_to(tree) for tree in trees) or ancestors & untrusted:
+                raise click.UsageError(
+                    f"a {option} file must lie outside every git working tree that holds "
+                    f"{holders} or the current directory; this catches misplacement, it "
+                    "does not authenticate the key"
+                )
+            if os.stat(resolved).st_nlink != 1:
+                raise click.UsageError(
+                    f"a {option} file must not have other hard links: another name for it "
+                    "could lie inside such a working tree"
+                )
+    except (OSError, RuntimeError):
+        raise click.UsageError(f"the location of a {option} file cannot be inspected") from None
 
 
 def _check_rings(
@@ -394,7 +442,9 @@ def sign(
     multiple=True,
     required=True,
     type=click.Path(exists=True, path_type=Path),
-    help="Trusted Ed25519 public key PEM; repeat to build the trusted key ring.",
+    help="Trusted Ed25519 public key PEM; repeat to build the trusted key ring. It must lie "
+    "outside every git working tree that holds ENVELOPE_PATH, the --bom file or the current "
+    "directory, which catches misplacement but does not authenticate the key.",
 )
 @click.option(
     "--threshold",
@@ -416,6 +466,10 @@ def verify(
     checked only by the gateway.
     """
     purpose = cast(Kind, kind)
+    inputs = (envelope_path,) if bom is None else (envelope_path, bom)
+    _check_key_placement(
+        keys, inputs, option="--public-key", holders="ENVELOPE_PATH, the --bom file"
+    )
     try:
         ring = _ring(keys)
         envelope = Envelope.model_validate(_json_object(envelope_path))
@@ -562,8 +616,26 @@ def register(
     The snapshot and trust status are checked as the gateway checks them, except the
     workload context and the companion BOM. Pass the rings, quorums, signer scopes
     and shared-key setting the gateways use; approval keys are only checked against
-    the scope map.
+    the scope map. Every key file must lie outside every git working tree that holds
+    SNAPSHOT_PATH, a --trust, --state or --signer-scopes file, or the current directory.
     """
+    inputs = (
+        snapshot_path,
+        trust_path,
+        state,
+        *(() if signer_scopes is None else (signer_scopes,)),
+    )
+    for option, ring_keys in (
+        ("--snapshot-key", snapshot_keys),
+        ("--trust-key", trust_keys),
+        ("--approval-key", approval_keys),
+    ):
+        _check_key_placement(
+            ring_keys,
+            inputs,
+            option=option,
+            holders="SNAPSHOT_PATH, a --trust, --state or --signer-scopes file,",
+        )
     try:
         scopes = (
             {}

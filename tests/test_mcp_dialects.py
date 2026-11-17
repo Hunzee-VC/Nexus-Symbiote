@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import time
 from pathlib import Path
 
 import pytest
@@ -12,6 +11,7 @@ from packageurl import PackageURL
 
 from nexus_symbiote.core.models import MCPClientComponent, MCPServerComponent
 from nexus_symbiote.scanners.mcp import MCPScanner, _load_jsonc
+from tests.support import scaling_ratio
 
 
 def scan(root: Path, files: dict[str, str]):
@@ -124,12 +124,13 @@ def test_unparsed_client_with_ambiguous_line_ends_is_still_a_gap(tmp_path):
     ]
 
 
-@pytest.mark.parametrize("payload", ["/*" * 200_000, "//\n" * 200_000, '"a",' * 200_000])
-def test_jsonc_preprocessing_is_linear(payload):
-    started = time.monotonic()
-    with pytest.raises(ValueError):
-        _load_jsonc(payload)
-    assert time.monotonic() - started < 5
+@pytest.mark.parametrize("unit", ["/*", "//\n", '"a",'])
+def test_jsonc_preprocessing_is_linear(unit):
+    def run(scale: int) -> None:
+        with pytest.raises(ValueError):
+            _load_jsonc(unit * (50_000 * scale))
+
+    assert scaling_ratio(run) < 10
 
 
 def test_gemini_settings_use_gemini_url_semantics_and_trust(tmp_path):

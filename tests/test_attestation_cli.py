@@ -19,7 +19,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ec import SECP256R1, generate_private_key
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from nexus_symbiote import attestation_cli
+from nexus_symbiote import attestation_cli, runtime_cli
 from nexus_symbiote.attestation import MAX_NATIVE_DEPTH, build_statement, sign_statement
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
@@ -668,14 +668,14 @@ def test_trusted_key_check_compares_directories_by_identity(setup, tmp_path, mon
     check = attestation_cli._check_trust_anchors
     # A tree found under a name the path text misses, as a case variant or a bind mount of
     # the tree is.
-    monkeypatch.setattr(attestation_cli, "_working_trees", lambda directories: [alias])
+    monkeypatch.setattr(runtime_cli, "_working_trees", lambda directories: [alias])
     assert not key.resolve().is_relative_to(alias)
     with pytest.raises(click.UsageError, match="must lie outside every git working tree"):
         check((key,), (setup["subject"],))
-    monkeypatch.setattr(attestation_cli, "_working_trees", lambda directories: [setup["work"]])
+    monkeypatch.setattr(runtime_cli, "_working_trees", lambda directories: [setup["work"]])
     check((key,), (setup["subject"],))
     gone = tmp_path / "gone"
-    monkeypatch.setattr(attestation_cli, "_working_trees", lambda directories: [gone])
+    monkeypatch.setattr(runtime_cli, "_working_trees", lambda directories: [gone])
     with pytest.raises(click.UsageError, match="cannot be inspected"):
         check((key,), (setup["subject"],))
 
@@ -692,12 +692,12 @@ def test_trusted_key_check_finds_a_mount_of_the_tree_but_not_of_a_directory_insi
     key = mounted / "trusted.pub"
     shutil.copyfile(setup["a"][1], key)
     monkeypatch.chdir(tmp_path)
-    identity = attestation_cli._identity
+    identity = runtime_cli._identity
 
     def mount(source: Path) -> None:
         """Make ``mounted`` report the identity of ``source``, as a bind mount does."""
         monkeypatch.setattr(
-            attestation_cli,
+            runtime_cli,
             "_identity",
             lambda path: identity(source if path == mounted.resolve() else path),
         )

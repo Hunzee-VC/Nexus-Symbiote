@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 
 from click.testing import CliRunner
@@ -13,16 +12,21 @@ from nexus_symbiote.core.aibom import DependencyEdge
 from nexus_symbiote.core.models import PromptComponent
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.scanners.registry import RegistryScanner
+from tests.support import scaling_ratio
 
 
 def test_container_image_pattern_is_linear_in_trailing_whitespace(tmp_path):
     # Two adjacent whitespace quantifiers made this quadratic: about 10 minutes
     # for this file, and over a day at the 4 MiB read limit.
-    (tmp_path / "docker-compose.yml").write_text("services:\n  app:\n    image:" + " " * 300_000)
-    started = time.monotonic()
-    result = RegistryScanner().scan(tmp_path)
-    assert time.monotonic() - started < 5
-    assert not result.scan_failures
+    roots = {}
+    for scale in (1, 4):
+        roots[scale] = tmp_path / f"scale-{scale}"
+        roots[scale].mkdir()
+        (roots[scale] / "docker-compose.yml").write_text(
+            "services:\n  app:\n    image:" + " " * (75_000 * scale)
+        )
+    assert scaling_ratio(lambda scale: RegistryScanner().scan(roots[scale])) < 10
+    assert not RegistryScanner().scan(roots[4]).scan_failures
 
 
 def test_container_image_pattern_still_finds_model_servers(tmp_path):

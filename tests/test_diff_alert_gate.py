@@ -42,11 +42,12 @@ def _project(root: Path) -> None:
             {
                 "lockfileVersion": 3,
                 "packages": {
+                    "": {"dependencies": {"@modelcontextprotocol/sdk": "1.0.0"}},
                     "node_modules/@modelcontextprotocol/sdk": {
                         "version": "1.0.0",
                         "resolved": "https://registry.npmjs.org/@modelcontextprotocol/sdk/-/sdk-1.0.0.tgz",
                         "integrity": LOCK_INTEGRITY,
-                    }
+                    },
                 },
             }
         )

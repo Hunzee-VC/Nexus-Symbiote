@@ -1,6 +1,13 @@
 name: "CodeQL"
 
+# Runs on every pull request and push to main as well as weekly: code scanning compares a
+# pull request with every CodeQL configuration main holds, keyed by workflow and category,
+# so one main has that pull requests never produce blocks every merge.
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
@@ -54,7 +61,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: scheduled-codeql-policy-evidence-${{ matrix.language }}
+          name: codeql-policy-evidence-${{ matrix.language }}
           path: |
             ${{ runner.temp }}/codeql-sarif/*.sarif
             ${{ runner.temp }}/codeql-policy.json

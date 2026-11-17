@@ -151,7 +151,13 @@ def discover_mcp(
     if record:
         _record(result, output, server_ref)
         return
-    text = json.dumps(result.to_dict(), indent=2) + "\n"
+    from nexus_symbiote.live.inventory import endpoint_evidence
+
+    report = result.to_dict()
+    # The path can hold a credential; only the --raw-descriptors review copy keeps it.
+    if result.endpoint != DiscoveryResult.endpoint:
+        report.update(endpoint_evidence(result.endpoint))
+    text = json.dumps(report, indent=2) + "\n"
     if output:
         write_cli_output(output, text)
     else:

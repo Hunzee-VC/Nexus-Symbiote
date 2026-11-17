@@ -644,7 +644,10 @@ A way around a limit that its entry does not describe is worth a
   pickle, a numeric NumPy array, a ZIP archive with neither kind of member, and `.pb`
   files other than `saved_model.pb` produce no component. A candidate ZIP archive is
   read to its end and digested, as a model archive is, and a candidate larger than
-  the `model-bytes` limit is a collection failure.
+  the `model-bytes` limit is a collection failure. A candidate that a model binds,
+  such as ONNX external data or a SavedModel variables file, is rated the same way
+  and is a component of its own when its content is a payload; a bound file outside
+  those names is only digested.
 - **Content recognition is bounded.** A binary pickle is recognized by its PROTO
   opcode and 16 well-formed opcodes in the first 64 KiB, and a text-protocol pickle
   by a consistent stream of at most 4,096 opcodes. In a file inventoried only by its
@@ -674,11 +677,19 @@ A way around a limit that its entry does not describe is worth a
   field named `O` is not one. A ZIP
   archive is recognized by a pickle-family member in its first local header or in a
   central directory of at most 1 MiB, read from the end of the archive, including
-  ZIP64, and by an object-dtype array as any member, read from the member's local
+  ZIP64, wherever the specification, `zipfile` (which `np.load` uses) or a ZIP64
+  locator puts it, so a member that any of them lists counts, and in a file that
+  starts with an end record, which `np.load` also reads as an archive; and by an
+  object-dtype array as any member, read from the member's local
   header and the start of its stored or DEFLATE-compressed data. A longer array
   header, a longer or malformed directory, a member compressed by another method,
   such as BZIP2 or LZMA, and a member whose data runs past the next member's local
-  header are rated `unknown`, a high finding; a pickle hidden otherwise under
+  header are rated `unknown`, a high finding. The directory is read with the
+  tolerances of `zipfile` and the specification; another reader's, such as the C++
+  reader `torch.load` uses, are not modelled. A member name with a NUL byte is
+  matched both whole and as `zipfile` cuts it at the NUL, and a member is also
+  matched by the name a version-1 Info-ZIP Unicode Path field (0x7075) with a
+  matching CRC gives it, as `zipfile` from Python 3.12 lists it. A pickle hidden otherwise under
   `.onnx`, `.gguf` or another suffix is rated `unknown` too, and
   `validate --project` still refuses it as unverified.
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat
@@ -759,7 +770,10 @@ A way around a limit that its entry does not describe is worth a
   `imported_by` list by `imported_by_count`; every file is still inventoried.
 - **Files named as holding credentials are not read.** The `prompt` collector does not
   read a file without a Markdown suffix whose name says it holds credentials (`.env*`
-  other than a template ending in `.example`, `.sample` or `.template`,
+  other than a template ending in `.example`, `.sample` or `.template`; `*.env` and
+  `*.env.*` other than such a template or a program with a suffix listed below, such
+  as `jest.env.js`; a template that another rule here names, such as
+  `secrets.env.example`, is still not read;
   `.netrc`, `.npmrc`, `.pypirc`, `id_rsa`, `id_ecdsa`, `id_ed25519`, the suffixes
   `.pem`, `.key`, `.p12`, `.pfx`, `.der`, `.jks`, `.keystore` and `.token`, or a name
   containing `secret`, `credential`, `password` or an `api key` spelling: `apikey`,
@@ -1475,6 +1489,11 @@ A way around a limit that its entry does not describe is worth a
   `verify-live` observes stdio servers only: observe remote servers with
   `discover-mcp --record` and compare with `diff`. A WebSocket server is reported as
   `unsupported-transport`.
+- **The endpoint digest is unkeyed.** The `discover-mcp` report and `--record`
+  inventories show the origin and `observed_endpoint_hash`, an unsalted SHA-256 of the
+  full URL. A reader can recover a short or guessable path token by hashing candidate
+  URLs; a high-entropy API key is not practical to recover this way. Keep reports from
+  servers with low-entropy path secrets as private as the URL.
 - **Launcher pins cover the launcher only.** They do not authenticate the operating
   system, interpreter or libraries. Run launchers in an isolated worker, as
   [security boundaries](../SECURITY.md#security-boundaries) describe.
@@ -1498,16 +1517,21 @@ A way around a limit that its entry does not describe is worth a
   signalled. The server fails with `isolation-teardown-failed`, but the launcher and
   everything it started keep running. The same reason is reported when the launcher
   only crashed, because `unshare` ends with the signal that ended the launcher.
-- **`--no-isolation` contains a launcher's processes only against accidents.** On
-  Linux, cleanup relies on a wrapper process that runs as your user and keeps the
-  launcher's whole tree under it. A launcher running as the same user can kill that
-  wrapper, after which its processes are adopted by pid 1 and keep running; the
-  server fails with `isolation-teardown-failed`, but nothing ends them. The same
-  reason is reported when the launcher was only killed by a signal, including a
-  crash, because the wrapper re-raises it as `unshare` does, and when a tree that
-  keeps forking outlasts the scans. A delegated cgroup v2 would not close this,
-  because a process running as the same user can move itself out of it. Use
-  `--no-isolation` only inside a worker that is already isolated; see
+- **Under `--no-isolation`, a launcher that kills its wrapper with SIGKILL escapes.**
+  On Linux the opted-out launcher runs under a wrapper that ignores every signal it
+  can and adopts every orphan below it. A launcher that sends that wrapper SIGKILL
+  takes what it started out of the wrapper's tree, and outside a private cgroup v2,
+  which cleanup kills where the current cgroup allows one, nothing ends it. The server
+  fails with `isolation-teardown-failed`, but those processes keep running. The cgroup
+  does not close this on its own, because a process running as the same user can move
+  itself out of it. The same reason is reported when a descendant cannot be killed,
+  such as one running as another user, when a tree that keeps forking outlasts
+  cleanup, and when the wrapper's children cannot be listed from `/proc`. A launcher
+  that only crashed is not reported: the wrapper reaps its tree and reports it empty
+  before it ends with the launcher's signal. A launcher running as root, or with `CAP_SYS_PTRACE` or
+  `CAP_SYS_ADMIN`, can also trace the wrapper or forge the report it gives cleanup,
+  so its escape can end with the server reported as verified. Run opted-out launchers
+  only in an independently isolated worker, never as root; see
   [`verify-live`](cli-reference.md#verify-live).
 - **Inside some user namespaces, every launch policy is refused.** `verify-live`
   accepts a launch policy only when `/` and every directory above it are owned by root
@@ -1549,6 +1573,16 @@ A way around a limit that its entry does not describe is worth a
   state file, so every gateway that serves the same tenants must share one store.
 - **`runtime verify` does not check revocation.** Revocation and approval bindings
   are checked only by the gateway.
+- **The runtime key placement check is a heuristic.** `runtime verify` and
+  `runtime register` refuse a public key inside a git working tree that holds an input
+  file or the current directory, and a key file with other hard links, as
+  `verify-attestation` does. The check does not authenticate a key or check its owner,
+  and a key copied or mounted out of the checkout is accepted; a registrar given such a
+  key can still record an attacker's serial, which only deleting rows undoes. Python
+  callers of `ReferenceGateway` pass key objects and get no placement check. The
+  hard-link rule does not look at where the other names are, so a key in a store that
+  deduplicates by hard links, such as the Nix store after `nix-store --optimise`, is
+  refused too; copy such a key to a file of its own.
 - **Schemas are read in their declared dialect.** A schema without `$schema` is read
   as JSON Schema 2020-12. A constraint that evaluation would skip, or a pattern that
   ECMA-262 and Python read differently, such as a backreference to an optional

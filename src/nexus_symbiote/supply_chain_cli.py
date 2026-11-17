@@ -31,6 +31,10 @@ if TYPE_CHECKING:
 STAGED_INVENTORY = "nexus_symbiote.staged-inventory"
 
 
+def _running_as_root() -> bool:
+    return hasattr(os, "geteuid") and os.geteuid() == 0
+
+
 def _load_inventory(path: Path) -> AIBOM:
     # Parser and validation messages can quote attacker-controlled input; keep them out.
     try:
@@ -186,11 +190,15 @@ def register_supply_chain_commands(main: click.Group) -> None:
         is_flag=True,
         help=(
             "Explicitly allow execution without a PID namespace; printed as a warning. On "
-            "Linux the launcher runs under a wrapper that stays its parent and adopts its "
-            "orphans, so every descendant, including a clone(CLONE_PARENT) child, stays in "
-            "one tree, which is stopped before cleanup kills it; the server fails if the "
-            "wrapper ended first. A launcher that deliberately evades cleanup can escape. "
-            "Elsewhere cleanup is best effort. This is not a namespace or sandbox."
+            "Linux the launcher runs in its own process group under a wrapper that stays "
+            "its parent as a child subreaper and ignores the signals it can, and cleanup "
+            "kills the wrapper's whole tree, including a clone(CLONE_PARENT) child that has "
+            "called setsid and what a launcher that already exited left behind. A launcher "
+            "that kills its wrapper with SIGKILL can escape, except from a cgroup v2 child "
+            "where one can be created, which cleanup also kills; the server then fails "
+            "with isolation-teardown-failed, unless the launcher runs as root or holds "
+            "CAP_SYS_PTRACE or CAP_SYS_ADMIN, which can hide the escape. Never opt out as "
+            "root. Elsewhere cleanup is best effort. This is not a namespace or sandbox."
         ),
     )
     def verify_live(
@@ -245,13 +253,23 @@ def register_supply_chain_commands(main: click.Group) -> None:
         if no_isolation:
             click.echo(
                 "warning: --no-isolation: kernel PID containment is disabled. On Linux the "
-                "launcher runs under a wrapper that stays its parent and adopts its orphans, "
-                "so every descendant, including a clone(CLONE_PARENT) child, stays in one "
-                "tree, which is stopped before cleanup kills it; the server fails if the "
-                "wrapper ended first. A launcher that deliberately evades cleanup can escape. "
-                "Elsewhere cleanup is best effort. This is not a namespace or sandbox.",
+                "launcher runs in its own process group under a wrapper that stays its parent "
+                "as a child subreaper and ignores the signals it can, and cleanup kills the "
+                "wrapper's whole tree, including a clone(CLONE_PARENT) child that has called "
+                "setsid and what a launcher that already exited left behind. A launcher that "
+                "kills its wrapper with SIGKILL can escape, except from a cgroup v2 child where "
+                "one can be created, which cleanup also kills; the server then fails with "
+                "isolation-teardown-failed, unless the launcher runs as root or holds "
+                "CAP_SYS_PTRACE or CAP_SYS_ADMIN, which can hide the escape. Never opt out as "
+                "root. Elsewhere cleanup is best effort. This is not a namespace or sandbox.",
                 err=True,
             )
+            if _running_as_root():
+                click.echo(
+                    "warning: --no-isolation as root: the pinned launcher runs as root with no "
+                    "kernel containment, and can escape cleanup without it being reported.",
+                    err=True,
+                )
         with isolation_off() if no_isolation else contextlib.nullcontext():
             report = verify_mcp_servers(bom, trusted_launchers=policy)
         report.inputs = {

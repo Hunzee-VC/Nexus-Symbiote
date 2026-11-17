@@ -34,8 +34,12 @@ opcodes and 64 MARKs over all the pickles read. Where the unpicklers of CPython 
 to 3.14 differ, it takes every reading one of them takes: `INT` and `LONG` text in
 base 0, as up to 3.13 (`I0x1f`), and in base 10, as from 3.14 (`I08`), and, for the C
 unpickler of 3.11 and 3.12, a read past the end of a frame, which goes on from where
-the pickle stands or from the frame's end. A call that one supported version reaches
-is rated whatever version runs the scan. It never imports, calls or builds an
+the pickle stands or from the frame's end. It also takes every reading that a loader's
+`encoding` gives a `STRING`, `BINSTRING` or `SHORT_BINSTRING` with a byte over 0x7f,
+which the default `"ASCII"` fails: `torch.load` passes `"utf-8"`, `np.load` and
+`pandas.read_pickle` `"latin1"`, and `"bytes"` keeps the bytes, which `READONLY_BUFFER`
+takes. A call that one supported version or encoding reaches is rated whatever version
+runs the scan. It never imports, calls or builds an
 object: what `find_class` returns is a placeholder that stands for any attribute of a
 module, a class or a function as well as `os.environ`, `sys.path` or
 `builtins.__dict__`. `find_class` imports the module before it looks the name up, and
@@ -55,8 +59,10 @@ of the file, after which nothing is read. The ratings are:
   or `os.environ['LD_PRELOAD'] = ...` needs no call opcode), and a key, set item,
   argument list, state, buffer or `STACK_GLOBAL` string that is the resolved object
   runs its methods or passes a type check an object of the right type would pass. A
-  call reached only through a module that no finder can name, or through what a
-  loader's `persistent_load` returned, counts for nothing.
+  call reached only through a module that no finder can name, or through a storage
+  that a loader's `persistent_load` returned, counts for nothing. A `BINPERSID` of a
+  `("module", obj, ...)` id gives back `obj`, as the `persistent_load` of `torch.load`'s
+  legacy format returns it, so a call of what `obj` resolved counts.
 - A pickle that the 64 KiB, opcode or MARK bound cuts short before the loader's
   behaviour is decided is `unknown` wherever it starts, in a file inventoried by its
   content too, and the explanation says whether it had already resolved an importable
@@ -112,7 +118,7 @@ The serialization rating is:
 
 | Rating | When |
 | --- | --- |
-| `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or, under any other model suffix and for a file inventoried by its content, content recognized as a binary or text-protocol pickle, a NumPy array with an object dtype, which `np.load(allow_pickle=True)` unpickles, or a ZIP archive with a pickle-family member (`.pkl`, as `torch.save` writes `data.pkl`, `.pickle`, the other listed suffixes, or such a name inside a compression suffix such as `.pkl.gz`) or with such an array as a member. A pickle is recognized when `pickle.load`, read as [above](#model-files-and-references), calls or changes what it resolved within the first 64 KiB and 4,096 opcodes, before any flaw that ends it, as `pickle.load` runs that call first. Under a model suffix, a binary pickle is also recognized by its PROTO opcode and at least 16 well-formed opcodes in its first 64 KiB, whatever follows them, and a text-protocol one by a consistent opcode stream of at most 4,096 opcodes to its first STOP. An object dtype is found in a NumPy version 1, 2 or 3 header of at most 64 KiB, which holds every version 1 header however it is padded, parsed as `np.load` parses it; only its `descr` value names types, in structured, nested and subarray dtypes too, so a field name is never taken for a type. A ZIP member's name is read from the archive's first local header or from its central directory, read from the end of the archive up to 1 MiB, including ZIP64; every listed member, whatever its name, is checked for an array from its local header and the start of its data, stored or DEFLATE-compressed |
+| `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or, under any other model suffix and for a file inventoried by its content, content recognized as a binary or text-protocol pickle, a NumPy array with an object dtype, which `np.load(allow_pickle=True)` unpickles, or a ZIP archive with a pickle-family member (`.pkl`, as `torch.save` writes `data.pkl`, `.pickle`, the other listed suffixes, or such a name inside a compression suffix such as `.pkl.gz`) or with such an array as a member. A pickle is recognized when `pickle.load`, read as [above](#model-files-and-references), calls or changes what it resolved within the first 64 KiB and 4,096 opcodes, before any flaw that ends it, as `pickle.load` runs that call first. Under a model suffix, a binary pickle is also recognized by its PROTO opcode and at least 16 well-formed opcodes in its first 64 KiB, whatever follows them, and a text-protocol one by a consistent opcode stream of at most 4,096 opcodes to its first STOP. An object dtype is found in a NumPy version 1, 2 or 3 header of at most 64 KiB, which holds every version 1 header however it is padded, parsed as `np.load` parses it; only its `descr` value names types, in structured, nested and subarray dtypes too, so a field name is never taken for a type. A ZIP member's name is read from the archive's first local header or from its central directory, read from the end of the archive up to 1 MiB, including ZIP64, wherever a reader locates it: at the offset the end record stores, ending where the end record (or a ZIP64 record before a ZIP64 locator, whatever the classic record holds) starts, as `zipfile` and so `np.load` locate it, and at the ZIP64 locator's offset; a member that any of these directories lists is rated, so a decoy directory hides none, and an archive where any of them lies beyond that bound, or starts but cannot be read, is unread. As in `zipfile`, the end record is the last 22 bytes when they hold one without a comment, and a name, extra field or comment that runs past its directory is cut where the directory ends. A file that starts with an end record (`PK\x05\x06`), which `np.load` hands to `zipfile`, is read as an archive too. Every listed member, whatever its name, is checked for an array from its local header and the start of its data, stored or DEFLATE-compressed |
 | `safe` | A SafeTensors file whose header is UTF-8 JSON with string metadata, known dtypes and tensor spans that index the whole data region, with no configured chat template matching the access-pattern heuristic. The rating is not a guarantee that the template is safe; `validate` compares templates only through its completeness check |
 | `unsafe-template-injection` | A GGUF file whose embedded chat template matches the access-pattern heuristic, or a SafeTensors file that would be `safe` in a directory whose Hugging Face chat template matches it. A match does not establish that the renderer executes the pattern or that its sandbox is bypassed |
 | `unknown` | Everything else, including ONNX, GGUF, Keras, HDF5, SavedModel, TFLite, Core ML and ExecuTorch files, a pickle that the 64 KiB, 4,096-opcode or 64-MARK bound cuts short before `pickle.load` calls anything, where [the check above](#model-files-and-references) rates it, a SafeTensors header over the 1 MiB inspection limit, a NumPy array header over 64 KiB or past the 16,000,000 structure units one scan shares with the ONNX and GGUF readers, at one unit a header byte, and a ZIP archive whose central directory is malformed or over 1 MiB or that has a member that was not checked: one compressed by another method, such as BZIP2 or LZMA, one whose data runs past the next member's local header, or one with an array header past those limits |
@@ -157,7 +163,25 @@ fails. One scan records at most twice the `entries`
 [collection limit](collection-limits.md) in bindings (200,000 by default),
 counting each distinct entry of a shard index once when the index is read and
 each file once for every model it is bound to; beyond that, the scan fails and
-binds nothing more to the remaining models.
+binds nothing more to the remaining models. A model whose bindings were refused, or
+whose directory holds a shard index that was refused, is never reported verified on
+its own file alone: where its signer policy entries would
+verify it, its `signing_status` is `partially-verified`, its trust tier `unknown`, and
+its signing claim names the exhausted budget as the reason. The same holds for a
+shard whose directory holds a shard index that could not be read or parsed, or whose
+`weight_map` is not a map of names to files or names no collected weight file, and for
+every model in a directory with more than 16 shard indexes: the claim names the shard
+index that could not be bound. The check is conservative: any such index in the
+directory downgrades every pinned model file there, including one that a loader would
+reach through a different, well-formed index, such as a SafeTensors shard beside a
+broken `pytorch_model.bin.index.json`.
+
+A bound file that is a content candidate, such as ONNX external data named
+`checkpoint` under `models/` or a file below a SavedModel's `variables/`, is rated by
+its content from the read that digests it, as a file no model binds is: when that
+content is a payload, or was left unread at a bound, the file is also a component of
+its own, with its own rating and finding, beside its digest in the model's
+`weight_files`.
 
 `validate --project` observes the files again and fails with
 `weight_files_mismatch` when they differ from the BOM's record, so replacing one
@@ -208,7 +232,9 @@ these lists, `tokenizer_hash` or `chat_template_hash`.
 only with `trust_remote_code`: the model gets a high `custom_code` finding, and
 `properties.custom_code` records which files declare it, the well-formed module
 references, whether any reference names another repository, and the digests of
-the directory's `.py` files. Without such a declaration, Python files are not
+the directory's `.py` files and the referenced modules below it. A module named as
+holding credentials, such as `secrets.py` or `token_utils.py`, is not read and is a
+coverage gap instead, as a change to it would raise no drift alert. Without such a declaration, Python files are not
 recorded, so adding an unrelated script does not change the inventory. The
 `base_model_name_or_path` of an `adapter_config.json` is recorded as
 `properties.base_model` when it is a Hugging Face model identifier.
