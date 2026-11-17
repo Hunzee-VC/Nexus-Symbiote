@@ -125,7 +125,7 @@ def test_unused_or_unrelated_card_alias_is_not_a_construction_gap(tmp_path, sour
 
 
 @pytest.mark.parametrize("loaded", [False, True])
-def test_static_card_covers_only_a_loaded_alias_card(tmp_path, loaded):
+def test_static_card_covers_no_alias_card(tmp_path, loaded):
     (tmp_path / "agent-card.json").write_text(
         json.dumps({"name": "agent", "url": "https://example.test", "skills": []})
     )
@@ -135,9 +135,11 @@ def test_static_card_covers_only_a_loaded_alias_card(tmp_path, loaded):
     )
     result = A2AScanner().scan(tmp_path)
     assert not result.scan_failures
-    assert result.surfaces_excluded == (
-        [] if loaded else ["server.py: A2A agent card built in Python code is not inventoried"]
-    )
+    # Audit 2026-11-16 S6-03: a loaded card need not be the static one.
+    kind = "loaded" if loaded else "built"
+    assert result.surfaces_excluded == [
+        f"server.py: A2A agent card {kind} in Python code is not inventoried"
+    ]
 
 
 @pytest.mark.parametrize("name", ["AgentCard", "Card"])

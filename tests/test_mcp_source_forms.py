@@ -426,13 +426,57 @@ def test_a_direct_eval_beside_sdk_imports_is_a_gap(tmp_path):
         ("server.mjs", "(eval)(code);\n", True),
         ("server.ts", "(eval as any)(code);\n", True),
         ("server.ts", "eval!(code);\n", True),
+        ("server.ts", "(eval<any>)(code);\n", True),
+        ("server.ts", "(eval /* c */ <any>)(code);\n", True),
+        ("server.ts", "(eval<any> as any)(code);\n", True),
         ("server.mjs", "(0, eval)(code);\n", False),
+        ("server.ts", "(0, eval<any>)(code);\n", False),
     ],
 )
 def test_a_parenthesized_or_asserted_eval_is_still_direct(tmp_path, name, call, direct):
     result = _scan(tmp_path, {name: IMPORT + SERVER + call + TOOL})
     reason = "direct eval can use the MCP SDK imports of the file; what it builds not inventoried"
     assert result.surfaces_excluded == ([_gap(name, 3, reason)] if direct else [])
+    assert _inventory(result) == INVENTORIED
+
+
+# Audit 2026-11-16 S6-02: the grammar gives comments as children, so a comment in
+# the parentheses or the arguments was read as the callee or the module name.
+@pytest.mark.parametrize(
+    ("call", "direct"),
+    [
+        ("(eval /* c */)(code);\n", True),
+        ("(/* c */ eval)(code);\n", True),
+        ("(eval /* c */ as any)(code);\n", True),
+        ("(0, eval /* c */)(code);\n", False),
+    ],
+)
+def test_a_comment_beside_eval_does_not_hide_a_direct_eval(tmp_path, call, direct):
+    result = _scan(tmp_path, {"server.ts": IMPORT + SERVER + call + TOOL})
+    reason = "direct eval can use the MCP SDK imports of the file; what it builds not inventoried"
+    assert result.surfaces_excluded == ([_gap("server.ts", 3, reason)] if direct else [])
+    assert _inventory(result) == INVENTORIED
+
+
+@pytest.mark.parametrize(
+    "load",
+    [
+        f'(require /* c */)(/* c */ "{MODULE}");\n',
+        f'require(/* c */ "{MODULE}");\n',
+        f'await import(/* webpackChunkName: "mcp" */ "{MODULE}");\n',
+        f'require.call(null, /* c */ "{MODULE}");\n',
+        f'require.apply(null, [/* c */ "{MODULE}"]);\n',
+    ],
+)
+def test_a_comment_beside_a_module_load_does_not_hide_the_module(tmp_path, load):
+    result = _scan(tmp_path, {"server.mjs": load})
+    assert result.surfaces_excluded == [_gap("server.mjs", 1, LOADED)]
+
+
+def test_a_comment_before_a_tool_name_does_not_hide_the_name(tmp_path):
+    tool = 'server.registerTool(/* c */ "read_note", {}, readNote);\n'
+    result = _scan(tmp_path, {"server.ts": IMPORT + SERVER + tool})
+    assert result.surfaces_excluded == []
     assert _inventory(result) == INVENTORIED
 
 
