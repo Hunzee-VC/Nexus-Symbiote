@@ -1341,8 +1341,8 @@ def test_context_handle_analysis_is_linear_in_expression_depth(header, unit, cou
     # each name climbed every enclosing expression to find its function. The largest
     # chain is 2,000 links: Python 3.11 builds the AST of no more than about 3,000
     # nested nodes (three times the recursion limit) and raises RecursionError above
-    # it, as parse_python records. At these sizes the code before that fix still
-    # measures 18 to 30.
+    # it, as parse_python records. At these sizes the code before that fix measures 10
+    # to 30 per shape, and at least four of the five shapes fail on every run.
     def run(scale: int) -> ScanResult:
         source = header + unit * (count * scale) + body
         tree = ast.parse(source)
