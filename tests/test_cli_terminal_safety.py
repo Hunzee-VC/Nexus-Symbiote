@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import json
 import re
-import time
 import unicodedata
 from pathlib import Path
 
 import click
 import pytest
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -26,6 +25,7 @@ from nexus_symbiote.core.models import (
 )
 from nexus_symbiote.scanners import live_mcp
 from nexus_symbiote.utils.terminal import json_text, neutralize, safe_line
+from tests.support import scaling_ratio
 from tests.test_live_mcp import (
     ENDPOINT,
     ORIGIN,
@@ -292,14 +292,13 @@ def test_json_on_standard_output_parses_to_the_same_value_without_a_command():
     assert json.loads(text) == value
 
 
-def _bom_with_names(path: Path, *names: str) -> Path:
+def _bom_with_names(path: Path, *names: str, reference_chars: int = MAX_REFERENCE_CHARS) -> Path:
     # A reference is capped at MAX_REFERENCE_CHARS; a name is not, so a long name keeps
-    # its length and its reference is the longest one allowed.
+    # its length and, by default, its reference is the longest one allowed.
     path.write_text(
         AIBOM(
             components=[
-                ToolComponent(bom_ref=f"tool:{name}"[:MAX_REFERENCE_CHARS], name=name)
-                for name in names
+                ToolComponent(bom_ref=f"tool:{name}"[:reference_chars], name=name) for name in names
             ]
         ).to_json()
     )
@@ -510,21 +509,43 @@ def test_markup_and_emoji_codes_are_printed_literally(tmp_path, ref):
     assert f"WARNING [{ref}] Component 'mcp-source:a.ts:x:100:7 :warning:'" in result.output
 
 
-@pytest.mark.parametrize(
-    "name",
-    ["'" + "1" * 200_000, "a" * 200_000, "\\" * 200_000, "x" + " " * 200_000 + "y", "<" * 200_000],
-)
-def test_long_inventory_names_print_in_linear_time(tmp_path, name):
+# Each name a quarter of the length this test always used, times ``scale``.
+_LONG_NAMES = {
+    "quote-and-digits": lambda scale: "'" + "1" * (50_000 * scale),
+    "letters": lambda scale: "a" * (50_000 * scale),
+    "backslashes": lambda scale: "\\" * (50_000 * scale),
+    "inner-spaces": lambda scale: "x" + " " * (50_000 * scale) + "y",
+    "angle-brackets": lambda scale: "<" * (50_000 * scale),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_LONG_NAMES))
+def test_long_inventory_names_print_in_linear_time(tmp_path, shape):
     # Rich's markup, highlighter and wrapping regexes took hours on such names.
-    bom = _bom_with_names(tmp_path / "bom.json", name)
+    names = {scale: _LONG_NAMES[shape](scale) for scale in (1, 4)}
+    # validate prints each name beside its reference, so the reference grows with the
+    # scale too, to the longest one allowed: otherwise the text printed grows less.
+    boms = {
+        scale: _bom_with_names(
+            tmp_path / f"bom-{scale}.json",
+            names[scale],
+            reference_chars=MAX_REFERENCE_CHARS // 4 * scale,
+        )
+        for scale in names
+    }
     old = tmp_path / "old.json"
     old.write_text(AIBOM().to_json())
     runner = CliRunner()
-    for args in (["validate", str(bom), "--no-project-policy"], ["diff", str(old), str(bom)]):
-        started = time.perf_counter()
-        result = runner.invoke(main, args)
-        assert time.perf_counter() - started < 10, args
-        assert name in result.output
+
+    def validate(scale: int) -> Result:
+        return runner.invoke(main, ["validate", str(boms[scale]), "--no-project-policy"])
+
+    def diff(scale: int) -> Result:
+        return runner.invoke(main, ["diff", str(old), str(boms[scale])])
+
+    for command in (validate, diff):
+        assert scaling_ratio(command) < 10, command.__name__
+        assert names[4] in command(4).output
 
 
 def test_a_tab_is_replaced_with_a_space_in_neutralized_text():

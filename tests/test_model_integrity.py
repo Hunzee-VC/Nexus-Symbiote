@@ -1134,12 +1134,12 @@ def test_many_model_directories_scan_in_linear_time(project):
     roots = {}
     for scale in (1, 4):
         roots[scale] = project / f"scale-{scale}"
-        for index in range(125 * scale):
+        for index in range(375 * scale):
             directory = roots[scale] / f"d{index:04d}"
             directory.mkdir(parents=True)
             (directory / "m.ggml").write_bytes(b"x")
     assert scaling_ratio(lambda scale: ModelScanner().scan(roots[scale])) < 10
-    assert len(ModelScanner().scan(roots[4]).components) == 500
+    assert len(ModelScanner().scan(roots[4]).components) == 1500
 
 
 @pytest.mark.parametrize(
