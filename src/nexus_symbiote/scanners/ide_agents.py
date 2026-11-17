@@ -1367,6 +1367,10 @@ _DATA_MODULES = frozenset(
     {"json.tool", "http.server", "venv", "zipfile", "tarfile", "gzip", "base64"}
     | {"py_compile", "compileall", "tabnanny"}
 )
+# Interpreters whose `-i` reads standard input as code after the program has run, as
+# `python3 -ic0` and `node -i -e 0` do, and the Python modules that do: its consoles.
+_INSPECT_INTERPRETERS = _PYTHON_NAMES | {"node", "nodejs", "lua"}
+_CONSOLE_MODULES = frozenset({"code", "asyncio"})
 # Arguments that name standard input as the program.
 _STDIN_PROGRAMS = frozenset({"-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"})
 # Suffixes an interpreter tries for a program or module named without one: node runs
@@ -1381,8 +1385,12 @@ def _reads_stdin(interpreter: str, args: list[str]) -> bool:
     """True when the interpreter may read its program from stdin, as `python3 -` does.
 
     An option not known to take no value may take the next word as its value, so both
-    readings are followed: stdin is the program when either ends without one.
+    readings are followed: stdin is the program when either ends without one. Perl and
+    ruby letters that take only an attached value (`perl -l`, `ruby -W`) take none when
+    alone. `-i`, a console module and perl's debugger read stdin after the program.
     """
+    if interpreter == "perl" and _perl_debugger(args):
+        return True
     letters, long_code, with_value = _STDIN_INTERPRETERS[interpreter]
     plain, attached_value, plain_long = _NO_VALUE[interpreter]
     reached = [True] + [False] * len(args)
@@ -1399,6 +1407,8 @@ def _reads_stdin(interpreter: str, args: list[str]) -> bool:
             continue
         if word.startswith("--"):
             option, equals, _ = word.partition("=")
+            if option == "--interactive" and interpreter in _INSPECT_INTERPRETERS:
+                return True
             if option in long_code:
                 continue
             known = bool(equals) or option in plain_long
@@ -1407,16 +1417,24 @@ def _reads_stdin(interpreter: str, args: list[str]) -> bool:
             # `-pe` and `-uc` take the program from the command line.
             known, code, valued = True, False, False
             for position in range(1, len(word)):
-                letter, rest = word[position], word[position + 1 :]
+                # Only the walk's last letter slices the word, so a bundle costs its length.
+                letter, rest = word[position], position + 1 < len(word)
                 if letter in letters:
+                    if letter == "m" and interpreter in _PYTHON_NAMES:
+                        following = args[index + 1 : index + 2]
+                        module = word[position + 1 :] or (following[0] if following else "")
+                        if _decode_word(module, drop_ifs=True) in _CONSOLE_MODULES:
+                            return True
                     code = True
                     break
                 if f"-{letter}" in with_value:
                     valued = not rest
                     break
                 if letter in plain:
+                    if letter == "i" and interpreter in _INSPECT_INTERPRETERS:
+                        return True
                     continue
-                if letter in attached_value and rest:
+                if letter in attached_value:
                     break
                 known = False
                 break
@@ -1431,6 +1449,30 @@ def _reads_stdin(interpreter: str, args: list[str]) -> bool:
         for step in steps:
             reached[min(index + step, len(args))] = True
     return reached[-1]
+
+
+def _perl_debugger(args: list[str]) -> bool:
+    """Whether perl's switches, which it reads on past `-e`, hold `-d`: with no terminal
+    the debugger reads its commands, which are Perl, from stdin."""
+    plain = _NO_VALUE["perl"][0]
+    skip = False
+    for raw in args:
+        if skip:
+            skip = False
+            continue
+        word = _decode_word(raw, drop_ifs=True)
+        if word in {"-", "--"} or not word.startswith("-"):
+            return False
+        for position in range(1, len(word)):
+            letter = word[position]
+            if letter == "d":
+                return True
+            if letter in "eEI":
+                skip = position + 1 == len(word)
+                break
+            if letter not in plain:
+                break
+    return False
 
 
 def _segment_executes(segment: str) -> bool:
@@ -1791,7 +1833,11 @@ def _interpreter_program(interpreter: str, args: list[str], saved: set[str]) -> 
             continue
         step = 1
         for position in range(1, len(word)):
-            letter, rest = word[position], word[position + 1 :]
+            letter = word[position]
+            # A plain letter goes on without slicing, so a bundle costs its length.
+            if letter in plain and letter not in letters and f"-{letter}" not in with_value:
+                continue
+            rest = word[position + 1 :]
             if letter == "m" and interpreter in _PYTHON_NAMES:
                 module = rest or (_decode_word(following[0], drop_ifs=True) if following else "")
                 if module not in _DATA_MODULES:
@@ -1806,7 +1852,7 @@ def _interpreter_program(interpreter: str, args: list[str], saved: set[str]) -> 
                 break
             if letter in plain:
                 continue
-            if letter in attached_value and rest:
+            if letter in attached_value:
                 break
             if named([rest, *following]):
                 return True

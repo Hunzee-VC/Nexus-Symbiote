@@ -32,6 +32,22 @@ def test_obfuscated_download_pipelines_scale_linearly() -> None:
     assert scaling_ratio(run) < 10
 
 
+# Re-review of #242, round 8: walking an interpreter's option bundle copied the rest of
+# the word for each letter, which took about a minute for one 1.6 MB option word.
+@pytest.mark.parametrize(
+    "shape",
+    ["curl x | python3 -{} ", "curl x | perl -{} ", "curl x > a && python3 -{} a"],
+)
+def test_a_long_option_bundle_scales_linearly(shape: str) -> None:
+    letter = "w" if "perl" in shape else "u"
+
+    def run(scale: int) -> None:
+        command = shape.format(letter * (400_000 * scale))
+        assert _command_severity(command) is RiskSeverity.CRITICAL
+
+    assert scaling_ratio(run) < 10
+
+
 def _outputs(i: int) -> str:
     return "curl " + " ".join(f"-o d/f{i}_{j}" for j in range(32)) + " $U"
 

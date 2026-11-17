@@ -903,8 +903,7 @@ A way around a limit that its entry does not describe is worth a
   that option's value, so the reading goes on after it; an unknown option that takes no
   value therefore makes the program's first argument count, as in
   `curl -o d x && node --unknown-flag app.js d`, and a download piped to an interpreter
-  after one counts as its program, as in `curl x | node --unknown-flag app.js` or
-  `curl x | perl -x lib`, whose `-x` without a directory is read that way. Option
+  after one counts as its program, as in `curl x | node --unknown-flag app.js`. Option
   forms that make the program exit before it runs are critical for the same reason:
   bash's `-eopipefail`, which takes `-o`'s value from the next word, letters attached to
   bash's `-c`, and node given a V8 flag's value as the next word (`--stack-size 9`) or an

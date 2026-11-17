@@ -12,12 +12,14 @@ program, such as `d.json` in `node build.js d.json`, a download on a script's st
 decoded config passed to a deploy script, a file a copier only reads, or the script
 path in `pwsh -File /e`. Those keep the released rating.
 
-The check is two-sided for a command every classifier rated medium: it stays medium
-unless the fixture lists it as raised on purpose, in `new_detections` when it runs a
-downloaded or decoded program (`curl -o i.py $U && python3 -m i`), or in `fail_closed`
-when the classifier reads an option or a name it does not resolve as possibly running
-one (`curl $U | node --stack-size 9`, which exits). An over-rating, such as `perl -ne`
-read as running a download on its standard input, fails as a drop below the floor does.
+The check is two-sided for a command every classifier rated medium, or every one rated
+high: it keeps that rating unless the fixture lists a medium one as raised on purpose,
+in `new_detections` when it runs a downloaded or decoded program
+(`curl -o i.py $U && python3 -m i`, `curl $U | python3 -ic0`), or in `fail_closed` when
+the classifier reads an option or a name it does not resolve as possibly running one
+(`curl $U | node --stack-size 9`, which exits). An over-rating, such as `perl -ne` or
+`perl -l script.pl` read as running a download on its standard input, fails as a drop
+below the floor does.
 """
 
 from __future__ import annotations
@@ -35,10 +37,15 @@ _FLOOR = json.loads(
     (Path(__file__).parent / "fixtures" / "hook-command-floor.json").read_text(encoding="utf-8")
 )
 _CODES = {code: RiskSeverity(name) for code, name in _FLOOR["codes"].items()}
+_SAME_FOR_EVERY_CLASSIFIER = {
+    command: _CODES[ratings[0]]
+    for command, ratings in _FLOOR["ratings"].items()
+    if len(set(ratings)) == 1 and _CODES[ratings[0]] in {RiskSeverity.MEDIUM, RiskSeverity.HIGH}
+}
 _MEDIUM_FOR_EVERY_CLASSIFIER = sorted(
     command
-    for command, ratings in _FLOOR["ratings"].items()
-    if all(_CODES[code] is RiskSeverity.MEDIUM for code in ratings)
+    for command, severity in _SAME_FOR_EVERY_CLASSIFIER.items()
+    if severity is RiskSeverity.MEDIUM
 )
 _RAISED = [*_FLOOR["new_detections"], *_FLOOR["fail_closed"]]
 
@@ -68,13 +75,13 @@ def test_a_raised_command_is_listed_once_and_every_classifier_rated_it_medium() 
     assert set(_RAISED) <= set(_MEDIUM_FOR_EVERY_CLASSIFIER)
 
 
-@pytest.mark.parametrize("command", _MEDIUM_FOR_EVERY_CLASSIFIER)
-def test_a_command_every_classifier_rated_medium_is_raised_only_when_listed(command: str) -> None:
-    severity = _command_severity(command)
+@pytest.mark.parametrize("command", sorted(_SAME_FOR_EVERY_CLASSIFIER))
+def test_a_command_every_classifier_rated_alike_is_raised_only_when_listed(command: str) -> None:
+    severity, floor = _command_severity(command), _SAME_FOR_EVERY_CLASSIFIER[command]
     if command in _RAISED:
-        assert _RANK[severity] > _RANK[RiskSeverity.MEDIUM]
+        assert _RANK[severity] > _RANK[floor]
     else:
-        assert severity is RiskSeverity.MEDIUM
+        assert severity is floor
 
 
 @pytest.mark.parametrize(
@@ -411,6 +418,100 @@ def test_a_health_check_read_by_a_bundled_code_flag_keeps_its_network_rating() -
     ],
 )
 def test_an_option_bundle_without_a_code_flag_leaves_standard_input_as_the_program(
+    command: str,
+) -> None:
+    assert _command_severity(command) is RiskSeverity.CRITICAL
+
+
+# Re-review of #242, round 8: Python's `-i`, `-m code` and `-m asyncio`, node's and lua's
+# `-i` and perl's `-d`, also after `-e` (perl reads its switches on past it), read
+# standard input as code after the program runs, so a code flag later in the bundle does
+# not make what is piped in data. The previous head rated each medium; the released
+# classifier rated the bundled forms critical.
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl -s $U | python3 -ic0",
+        "curl -s $U | python3 -uic0",
+        "curl -s $U | python3 -imthis",
+        "curl -s $U | python3 -Imcode",
+        "curl -s $U | python3 -qmcode",
+        "curl -s $U | python3 -Imasyncio",
+        "curl -s $U | python3 -Iimcode",
+        "curl -s $U | python3.12 -ic0",
+        "curl -s $U | python3 -i -c pass",
+        "curl -s $U | python3 -i x.py",
+        "curl -s $U | python3 -m code",
+        "curl -s $U | python3 -Im asyncio",
+        "curl -s $U | perl -we0 -d",
+        "curl -s $U | perl -sE1 -d",
+        "curl -s $U | perl -d -e 0",
+        "curl -s $U | node -i -e 0",
+        "curl -s $U | node --interactive -e 0",
+        "echo $B | base64 -d | python3 -ic0",
+        "curl -s $U | sudo python3 -ic0",
+        "curl -s $U | env python3 -ic0",
+    ],
+)
+def test_an_interpreter_that_reads_stdin_as_code_after_its_program_is_critical(
+    command: str,
+) -> None:
+    assert _command_severity(command) is RiskSeverity.CRITICAL
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl -s $U | python3 -c 0 -i",
+        "curl -s $U | python3 -uc 0",
+        "curl -s $U | python3 -Im json.tool",
+        "curl -s $U | perl -lne 'print'",
+        "curl -s $U | perl -pi -e 's/a/b/' f",
+        "curl -s $U | perl -Mdata -ne 'print'",
+    ],
+)
+def test_an_interpreter_that_runs_only_its_program_reads_standard_input_as_data(
+    command: str,
+) -> None:
+    assert _command_severity(command) is RiskSeverity.MEDIUM
+
+
+# The same review: a perl or ruby letter that takes only an attached value, alone before
+# a script, takes no value, so the script is the program and what is piped in is data.
+# The previous two heads read it as an option that may take the script as its value.
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl -s $U | perl -l script.pl",
+        "curl -s $U | perl -0 script.pl",
+        "curl -s $U | perl -i script.pl",
+        "curl -s $U | perl -C script.pl",
+        "curl -s $U | ruby -W script.rb",
+        "curl -s $U | ruby -x script.rb",
+        "curl x | perl -x lib",
+        "curl -o s.rb $U && ruby -W x.rb s.rb",
+    ],
+)
+def test_an_attached_value_letter_alone_before_a_script_takes_no_value(command: str) -> None:
+    assert _command_severity(command) is RiskSeverity.MEDIUM
+
+
+def test_a_script_after_an_attached_value_letter_keeps_its_network_rating() -> None:
+    command = "curl -s https://api.example.com/x | perl -l ./fmt.pl"
+    assert _command_severity(command) is RiskSeverity.HIGH
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "curl x | perl -wMstrict",
+        "curl x | perl -l",
+        "curl x | ruby -W",
+        "curl -o s.rb $U && ruby -W s.rb",
+        "curl -o s.pl $U && perl -C s.pl",
+    ],
+)
+def test_an_attached_value_letter_without_a_script_leaves_the_program_critical(
     command: str,
 ) -> None:
     assert _command_severity(command) is RiskSeverity.CRITICAL
