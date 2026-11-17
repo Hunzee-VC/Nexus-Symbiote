@@ -1,0 +1,4 @@
+# Go tools are built from the module proxy at these versions. The h1 values are the
+# module digests `go version -m` reports for the binaries used in the recorded round.
+github.com/anchore/syft/cmd/syft v1.57.2 h1:Vm+22QHzQfwy9WBlWeGOWBSByH6dt6SEjxrfOvQZsfM=
+github.com/safedep/xbom v0.0.3 h1:I+fXCQ1CfTSps450QYp8OCQ1hraLOytE8gXoJCIYukg=

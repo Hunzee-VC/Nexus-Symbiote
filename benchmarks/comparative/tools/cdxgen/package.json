@@ -1,0 +1,9 @@
+{
+  "name": "comparative-bench-cdxgen",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pins cdxgen for the comparative benchmark.",
+  "dependencies": {
+    "@cdxgen/cdxgen": "13.8.0"
+  }
+}
