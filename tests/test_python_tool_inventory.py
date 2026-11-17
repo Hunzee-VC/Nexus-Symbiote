@@ -1324,21 +1324,25 @@ def test_mutated_typing_sdk_root_aliasing_and_getattr_parity_gaps(tmp_path, sour
 @pytest.mark.parametrize(
     "header, unit, count, body",
     [
-        ("from mcp.server.fastmcp import FastMCP\nz = y", "._a", 1000, "\n"),
-        ("from mcp.server.fastmcp import FastMCP\nz = y", "[0]._a", 500, "\n"),
-        ("from mcp.server.fastmcp import Context\nz = y", ".Context", 1000, "\n"),
-        ("from mcp.server.fastmcp import Context\ndef h(ctx: y", ".Context", 1000, "): pass\n"),
+        ("from mcp.server.fastmcp import FastMCP\nz = y", "._a", 250, "\n"),
+        ("from mcp.server.fastmcp import FastMCP\nz = y", "[0]._a", 125, "\n"),
+        ("from mcp.server.fastmcp import Context\nz = y", ".Context", 250, "\n"),
+        ("from mcp.server.fastmcp import Context\ndef h(ctx: y", ".Context", 250, "): pass\n"),
         (
             "from mcp.server.fastmcp import Context\ndef h(ctx: Context):\n return ctx.request_id",
             " + ctx.request_id",
-            1000,
+            250,
             "\n",
         ),
     ],
 )
 def test_context_handle_analysis_is_linear_in_expression_depth(header, unit, count, body):
     # Audit 2026-11-16 S6-01: each link of a chain walked the rest of it again, and
-    # each name climbed every enclosing expression to find its function.
+    # each name climbed every enclosing expression to find its function. The largest
+    # chain is 2,000 links: Python 3.11 builds the AST of no more than about 3,000
+    # nested nodes (three times the recursion limit) and raises RecursionError above
+    # it, as parse_python records. At these sizes the code before that fix still
+    # measures 18 to 30.
     def run(scale: int) -> ScanResult:
         source = header + unit * (count * scale) + body
         tree = ast.parse(source)
