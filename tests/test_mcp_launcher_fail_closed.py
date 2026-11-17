@@ -1224,7 +1224,7 @@ def _identity(specs: list[str]) -> list[tuple[str, str, bool]]:
 
 
 def test_npx_and_npm_exec_record_what_npm_installs_and_runs(monkeypatch):
-    import nexus_symbiote.scanners.mcp_launch as launch_module
+    from nexus_symbiote.scanners import mcp_launch as launch_module
 
     seen: dict[str, list[str]] = {}
     start, program = launch_module._start, launch_module._package_program
