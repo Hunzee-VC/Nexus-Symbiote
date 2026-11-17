@@ -191,20 +191,29 @@ A way around a limit that its entry does not describe is worth a
   system paths.
 - **Some ordinary forms are gaps.** `uvx -w` and `uv run -w` (aliases of `--with`)
   and a bare `pwsh server.ps1` are not read and fail the gates; spell `--with` and
-  `-File`. An `npx`, `npm` or `pnpm dlx` option that takes a value, followed by a
-  word that starts with `-`, is a gap: npm's parser may give the option an empty
-  value and read that word as an option, so `npx --tag --package=evil@6.6.6
-  decoy@1.0.0` installs `evil`. Attach such values with `=`, as in
-  `--node-options=--max-old-space-size=4096`. A flag of `npm` or `pnpm dlx` written
-  without `=` and followed by the word `true`, `false` or `null` is a gap as well, since
-  nopt reads that word as a Boolean (or `[null, Boolean]`) option's value; this also
-  covers flags that do not take it, such as `-q`, which npm expands to another option. Write `--yes` alone, or put
-  `--` before a command named `true`. `npx` steps over the word after `--no`,
-  `--no-yes`, `--no-update-notifier`, `--no-audit` and `--no-fund`, so such a flag
-  followed by `true`, `false` or `null`, or by any word and then an option (as in
-  `npx --no-audit srv@1.2.3 --stdio`, where npm takes `--stdio` for itself), is a gap.
-  A scoped registry (`--@scope:registry`) of `npx` or `npm` written without `=` is a
-  gap too: npm has no type for it, so the next word stays a command or package word.
+  `-File`. `npx` and `npm` arguments are read by a port of npm 10.9.9's own
+  handling (the rewrite in `bin/npx-cli.js`, then nopt with npm's option types), and
+  anything the port does not model exactly is a gap: an unknown, abbreviated or
+  single-dash long option (`--pack`, `-package`), `--help` or `--version`, a lone `-`
+  or `---` before the package or command word, an `npm` shorthand written with `=`, a
+  `--no-` spelling of an option that is not a Boolean, and a Boolean option given a
+  value other than `true` or `false` (or `null` for `--yes` and `--workspaces`) with
+  `=`. A value option followed by a word that starts with `-`, or by nothing, is a gap
+  because npm's parser may give it an empty value and read that word as an option
+  (`npx --tag --package=evil@6.6.6 decoy@1.0.0` installs `evil`); attach such values
+  with `=`, as in `--node-options=--max-old-space-size=4096`. An `npm` flag written
+  without `=` and followed by `true`, `false` or `null` is a gap, also where npm would
+  not take the word (`-q true`); write `--yes` alone, or put `--` before a command named
+  `true`. `npx` steps over the word after a flag outside its switch set, such as
+  `--no-audit`, so that flag followed by such a word, or by any word and then an option
+  (`npx --no-audit srv@1.2.3 --stdio`, where npm takes `--stdio` for itself), is a gap, and `npm exec` options after the package or command word without `--` are a
+  gap. A scoped registry (`--@scope:registry`) is read only with `=`. `npm exec -p`
+  is npm's `--parseable`, not `--package`; only `npx` rewrites `-p`. A differential
+  fuzz of 120,000 random argument lists for each of `npx` and `npm exec`, compared with
+  the real `npx-cli.js` and nopt, found no list the reader records as a package other
+  than the one npm installs, or as a command other than the one npm runs, without a
+  gap; a sample of it is a regression test. The `bunx` and `pnpm dlx` readers are not
+  ports and were not fuzzed this way.
   The `yarn dlx` options were not checked against a running Yarn 2 or later.
 - **Container launch context is read from the declared options only.** Mounts are
   rated by their written source: a mount through a link, a client variable other than `${userHome}`,
@@ -229,8 +238,13 @@ A way around a limit that its entry does not describe is worth a
   relative path without `-w` (resolved against the image's own working directory) and
   a link from the image into the mount are not rated, so that an argument such as
   `mcp/filesystem /data` is not a finding. A mount over a directory on the default
-  `PATH` (`/usr/local/bin`, `/usr/bin`, `/bin` and their `sbin` and parents) is
-  rated; a mount over another directory of the image's own code (`-v .:/app`) is not.
+  `PATH` (`/usr/local/bin`, `/usr/bin`, `/bin` and their `sbin` and parents), or over
+  one program in it (`-v ./node:/usr/local/bin/node`), is rated; a mount over another
+  directory of the image's own code (`-v .:/app` or `/usr/local/lib/node_modules`) is
+  not. `python -m` after `-I` or `-P`, which keep the working directory off
+  `sys.path`, is not rated. A command that loads the mounted working directory by a
+  word without a `/` or a script suffix (`node .`, `node server`, `python app`,
+  `ruby -I. /app/x.rb`) is not rated either.
   `HOME`, `ZDOTDIR`, `XDG_CONFIG_HOME` and `PYTHONUSERBASE` passed with `-e` count as
   code-loading only beside a host mount, whatever their value, and `PATH` only when an
   entry is empty, relative or under a mount target. Any path component named like a credential

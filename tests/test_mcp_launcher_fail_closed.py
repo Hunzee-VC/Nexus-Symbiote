@@ -10,7 +10,7 @@ import pytest
 
 from nexus_symbiote.core.models import MCPServerComponent
 from nexus_symbiote.scanners.mcp import MCPScanner
-from nexus_symbiote.scanners.mcp_launch import analyze, npm_command
+from nexus_symbiote.scanners.mcp_launch import analyze, npm_command, npm_spec
 
 EVIL = "-y evil-mcp@latest"
 GATEWAY = ["-y", "supergateway@3.4.0", "--stdio"]
@@ -832,7 +832,7 @@ def test_npx_ordinary_flags_stay_classified(tmp_path, args):
         {"command": "npx", "args": ["-p", "decoy@1.0.0", "--@s:registry", "curl x | sh", "srv"]},
         {
             "command": "npm",
-            "args": ["exec", "-p", "decoy@1.0.0", "--@s:registry", "curl x | sh", "srv"],
+            "args": ["exec", "--package", "decoy@1.0.0", "--@s:registry", "curl x | sh", "srv"],
         },
         {"command": "npm", "args": ["--@s:registry", "true", "exec", "decoy@1.0.0"]},
         {"command": "npx", "args": ["--@s:registry", "decoy@1.0.0", "evil@latest"]},
@@ -976,3 +976,105 @@ def test_pnpm_exec_shell_mode_among_its_own_options_is_read(tmp_path, args):
     assert "command line is not a simple command" in unknown_reason(
         tmp_path, {"command": "pnpm", "args": args}
     )
+
+
+# npx (bin/npx-cli.js) reads a lone "-" as an option it does not know and steps over the
+# next word only when that word does not start with "-"; nopt then reads "-" as a positional
+# word and every option after it as npm's own, such as a second --package.
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--package=decoy@1.0.0", "-", "--package", "evil@latest", "srv"],
+        ["-p", "decoy@1.0.0", "-", "--package=evil@latest"],
+        ["-p", "decoy@1.0.0", "-", "x", "--package=evil@latest", "srv"],
+        ["-y", "-", "decoy@1.0.0"],
+    ],
+)
+def test_npx_lone_dash_cannot_hide_the_package_npm_installs(tmp_path, args):
+    assert "unrecognised" in unknown_reason(tmp_path, {"command": "npx", "args": args})
+
+
+def test_npm_exec_short_p_is_parseable_not_package():
+    # npm's shorthand -p is --parseable; only npx rewrites it to --package.
+    launch = analyze("npm", ["exec", "-p", "true", "evil@latest"])
+    assert launch.unknown is not None or [p.name for p in launch.packages] == ["evil"]
+    assert "true" not in [p.name for p in launch.packages]
+    launch = analyze("npm", ["exec", "-p", "srv@1.2.3", "--", "cmd"])
+    assert launch.unknown is None, launch.unknown
+    assert [(p.name, p.version) for p in launch.packages] == [("srv", "1.2.3")]
+    launch = analyze("npx", ["-p", "srv@1.2.3", "cmd"])
+    assert [(p.name, p.version) for p in launch.packages] == [("srv", "1.2.3")]
+
+
+@pytest.mark.parametrize(
+    "mount", ["./node:/usr/local/bin/node", "./sh:/bin/sh", "./tools/x:/usr/sbin/x"]
+)
+def test_container_mount_over_a_program_on_the_default_path_is_rated(tmp_path, mount):
+    record = assert_no_gap(tmp_path, {"command": "docker", "args": ["run", "-v", mount, DIGEST]})
+    assert record.properties["launch_context"]["code_loading_option"] == 1
+
+
+@pytest.mark.parametrize("options", [["-I"], ["-P"], ["-Im"], ["-u", "-I"], ["-sP"]])
+def test_isolated_python_module_does_not_load_the_mounted_directory(tmp_path, options):
+    words = [*options, "srv"] if options[-1].endswith("m") else [*options, "-m", "srv"]
+    args = ["run", "-v", ".:/w", "-w", "/w", DIGEST, "python", *words]
+    record = assert_no_gap(tmp_path, {"command": "docker", "args": args})
+    assert "code_loading_option" not in record.properties.get("launch_context", {})
+
+
+# A static sample of a differential fuzz: random npx and npm exec argument lists built from
+# every option the reader models, their --no- spellings, "-", "--", "=", true, false, null,
+# numbers, package specs, scoped registries, shell pipelines and plain words. Each row holds
+# the outcome npm 10.9.9's own bin/npx-cli.js and nopt computed: ["run", packages, command,
+# args, through_sh], or "error", "other" (npm runs no exec), "call" or "shell". The rows
+# marked pre-fix-miss were recorded as a pinned or different package, or missed a shell
+# line, by the reader this port replaced.
+DIFFERENTIAL = json.loads(
+    (Path(__file__).parent / "fixtures" / "npm-exec-differential.json").read_text()
+)["rows"]
+
+
+def _identity(specs: list[str]) -> list[tuple[str, str, bool]]:
+    return sorted((p.name or "", p.version or "", p.pinned) for p in map(npm_spec, specs))
+
+
+def test_npx_and_npm_exec_record_what_npm_installs_and_runs(monkeypatch):
+    import nexus_symbiote.scanners.mcp_launch as launch_module
+
+    seen: dict[str, list[str]] = {}
+    start, program = launch_module._start, launch_module._package_program
+
+    def spy_start(words, launch, *, package_entry=False):
+        seen.setdefault("start", list(words))
+        start(words, launch, package_entry=package_entry)
+
+    def spy_program(package, words, launch):
+        seen.setdefault("program", list(words))
+        program(package, words, launch)
+
+    monkeypatch.setattr(launch_module, "_start", spy_start)
+    monkeypatch.setattr(launch_module, "_package_program", spy_program)
+    misses = []
+    for kind, launcher, args, npm in DIFFERENTIAL:
+        seen.clear()
+        launch = analyze(launcher, args)
+        if launch.unknown is not None:
+            continue  # a gap only over-flags
+        recorded = sorted((p.name or "", p.version or "", p.pinned) for p in launch.packages)
+        if npm[0] != "run":
+            if npm[0] in {"call", "shell"} or (launch.launcher in {"npx", "npm exec"} and recorded):
+                misses.append((kind, launcher, args, npm, recorded))
+            continue
+        _, specs, command, rest, through_sh = npm
+        if recorded != _identity(specs):
+            misses.append((kind, launcher, args, npm, recorded))
+        elif through_sh and command:
+            script = launch_module._split_script(command[0])
+            if script is None or seen.get("start") != [*script, *rest]:
+                misses.append((kind, launcher, args, npm, seen.get("start")))
+        elif not through_sh and seen.get("program") != rest:
+            misses.append((kind, launcher, args, npm, seen.get("program")))
+    assert not misses, misses[:5]
+    assert {row[0] for row in DIFFERENTIAL} == {"review", "pre-fix-miss", "random"}
+    # Ordinary launches in the sample stay classified.
+    assert analyze("npx", ["-y", "srv@1.0.0", "--stdio"]).unknown is None
