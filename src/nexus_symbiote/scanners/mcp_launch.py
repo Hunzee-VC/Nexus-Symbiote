@@ -199,6 +199,8 @@ class Launch:
     interactive: bool = False
     # A shell in the launch traces its commands (-x), expanding $PS4 before each one.
     xtrace: bool = False
+    # npm exec names packages and no command, so npm runs a configured call or its script shell.
+    script_shell: bool = False
 
     def mark(self, flag: str, count: int = 1) -> None:
         self.context[flag] = self.context.get(flag, 0) + count
@@ -634,7 +636,7 @@ _SCOPED_REGISTRY = r"--@[a-z0-9][a-z0-9._-]*:registry"
 # differently from the record (the differential test replays the real npx-cli.js and nopt).
 _NOPT_BOOLEAN = _set(
     "offline prefer-online prefer-offline legacy-peer-deps foreground-scripts"
-    " include-workspace-root update-notifier audit fund parseable"
+    " include-workspace-root update-notifier audit fund parseable ignore-scripts"
 )
 _NOPT_NULL_BOOLEAN = _set("yes workspaces")
 # Options whose type is exactly String: nopt reads a value that starts with "-" as an option.
@@ -738,6 +740,8 @@ class _NpmArgs:
     # "late" for an option after the second positional word (npm's command and its package
     # or command word); "unrecognised" for anything the port does not model.
     failure: str | None = None
+    # On a failure, the words from the one the port stopped at, as written.
+    unread: list[str] = field(default_factory=list)
 
 
 def _nopt(tokens: list[str]) -> _NpmArgs:
@@ -752,7 +756,7 @@ def _nopt(tokens: list[str]) -> _NpmArgs:
             if not remain:
                 parsed.after = words[index + 2 :]
             remain.extend(words[index + 1 :])
-            break
+            return parsed
         if not arg.startswith("-") or (arg == "-" and len(remain) >= 2):
             if not remain:
                 parsed.after = words[index + 1 :]
@@ -761,7 +765,7 @@ def _nopt(tokens: list[str]) -> _NpmArgs:
             continue
         if len(remain) >= 2:
             parsed.failure = "late"
-            return parsed
+            break
         following = words[index + 1] if index + 1 < len(words) else None
         name, equals, value = arg.partition("=")
         short = not name.startswith("--")
@@ -769,7 +773,7 @@ def _nopt(tokens: list[str]) -> _NpmArgs:
         if key in _NOPT_SHORTHANDS and (short or key in _NOPT_LONG_SHORTHANDS):
             if equals or following in _NOPT_BOOLEAN_WORDS:
                 parsed.failure = "unrecognised"
-                return parsed
+                break
             words[index : index + 1] = _NOPT_SHORTHANDS[key]
             continue
         base = key.removeprefix("no-")
@@ -779,22 +783,22 @@ def _nopt(tokens: list[str]) -> _NpmArgs:
             allowed = {"true", "false"} | ({"null"} if base in _NOPT_NULL_BOOLEAN else set())
             if (value not in allowed) if equals else (following in _NOPT_BOOLEAN_WORDS):
                 parsed.failure = "unrecognised"
-                return parsed
+                break
             options.append((f"--{key}", value if equals else None, len(remain)))
             index += 1
             continue
         typed = key in _NOPT_STRING or key in _NOPT_VALUE
         if short or not (typed or (equals and _SCOPED_REGISTRY_KEY.fullmatch(key))):
             parsed.failure = "unrecognised"
-            return parsed
+            break
         if not equals:
             value = following or ""
-            index += 1
         if not _nopt_value(key, value, bool(equals)):
             parsed.failure = "unrecognised"
-            return parsed
+            break
         options.append((f"--{key}", value, len(remain)))
-        index += 1
+        index += 1 if equals else 2
+    parsed.unread = words[index:]
     return parsed
 
 
@@ -2420,7 +2424,12 @@ def _npm_options(options: list[tuple[str, str | None]], launch: Launch) -> bool:
 
 
 def _package_runner(
-    rest: list[str], launch: Launch, table: _Options, package_options: set[str]
+    rest: list[str],
+    launch: Launch,
+    table: _Options,
+    package_options: set[str],
+    *,
+    last_package: bool = False,
 ) -> None:
     """npx-style grammar: packages from -p/--package, else the first word."""
     scanned = _scan(rest, table)
@@ -2428,6 +2437,10 @@ def _package_runner(
         launch.fail(f"unrecognised {launch.launcher} option")
         return
     options, position = scanned
+    if last_package:
+        # bun installs only the package its last -p or --package names.
+        named = [pair for pair in options if pair[0] in package_options]
+        options = [pair for pair in options if pair[0] not in package_options] + named[-1:]
     _run_packages(options, rest[position:], launch, package_options, through_sh=False)
 
 
@@ -2466,6 +2479,10 @@ def _run_packages(
             _start(command, launch, package_entry=True)
             if through_sh and expands(command[0]):
                 launch.fail(f"{launch.launcher} command depends on the environment")
+    elif through_sh:
+        # Without a configured call, npm runs its script shell (sh) on the MCP client's stdin.
+        launch.script_shell = True
+        launch.fail(f"{launch.launcher} --package without a command runs the script shell")
     launch.packages.extend(npm_spec(spec) for spec in specs)
 
 
@@ -2548,6 +2565,54 @@ def _pnpm_shell_mode(words: list[str]) -> bool:
     return False
 
 
+# Options _npm_options reads, with the length of the shortest abbreviation npm 10.9.9's nopt
+# resolves to each once it drops the leading dashes (cache and workspace have none).
+_NPM_ABBREVIATED = {
+    "script-shell": 3,
+    "node-options": 3,
+    "shell": 3,
+    "registry": 3,
+    "userconfig": 5,
+    "globalconfig": 7,
+    "prefix": 5,
+    "cache": 5,
+    "workspace": 9,
+}
+_NPM_SPELLINGS = {
+    name[:size]: name
+    for name, least in _NPM_ABBREVIATED.items()
+    for size in range(least, len(name) + 1)
+}
+# npm's one-letter shorthands. nopt reads a word made of them as a cluster (-SC is --save
+# --prefix) unless it is one of the shorthands dd, ddd and ws.
+_NPM_SINGLES = frozenset("?BCDEHLOPSacdfghlmnpqsvwy")
+
+
+def _npm_unread_options(words: list[str]) -> list[tuple[str, str | None]]:
+    """Those options among words the port did not read, up to "--", spelled in full."""
+    found: list[tuple[str, str | None]] = []
+    for index, word in enumerate(words):
+        if word == "--":
+            break
+        if not word.startswith("-"):
+            continue
+        key, equals, value = word.lstrip("-").partition("=")
+        bare = _NPM_SPELLINGS.get(re.sub("^(?:no-)+", "", key, flags=re.IGNORECASE))
+        if key in _NPM_SPELLINGS:
+            names = [_NPM_SPELLINGS[key]]
+        elif bare in {"script-shell", "node-options", "workspace"}:
+            # nopt drops any "no-" and still sets these options to the value.
+            names = [bare]
+        elif key not in {"dd", "ddd", "ws"} and set(key) <= _NPM_SINGLES:
+            names = [{"C": "prefix", "w": "workspace"}[c] for c in key if c in "Cw"]
+        else:
+            names = [key] if _SCOPED_REGISTRY_KEY.fullmatch(key) else []
+        # A separate value is read but not skipped, so the next word is checked too.
+        following = words[index + 1] if index + 1 < len(words) else ""
+        found.extend((f"--{name}", value if equals else following) for name in names)
+    return found
+
+
 def _npm(name: str, rest: list[str], launch: Launch) -> None:
     launch.launcher, launch.family = "npm", "npm"
     parsed = _nopt(rest)
@@ -2568,7 +2633,9 @@ def _npm(name: str, rest: list[str], launch: Launch) -> None:
             _npm_exec(options, remain, launch)
     elif subcommand in _NPM_LOCAL:
         launch.launcher = f"npm {subcommand}"
-        if _npm_options([(option, value) for option, value, at in options if not at], launch):
+        # npm reads its options anywhere before "--", also after the script name.
+        found = [(option, value) for option, value, _ in options]
+        if _npm_options([*found, *_npm_unread_options(parsed.unread)], launch):
             # The words after the subcommand, as written: a script's own arguments may
             # hold options the port does not model.
             _local_subcommand(parsed.after, launch)
@@ -2637,7 +2704,7 @@ def _bun(name: str, rest: list[str], launch: Launch) -> None:
     launch.launcher, launch.family = "bun", "bun"
     if name == "bunx":
         launch.launcher = "bunx"
-        _package_runner(rest, launch, _BUNX, {"-p", "--package"})
+        _package_runner(rest, launch, _BUNX, {"-p", "--package"}, last_package=True)
         return
     found = _subcommand(rest, _table("--bun --silent"), launch)
     if found is None:
@@ -2645,7 +2712,7 @@ def _bun(name: str, rest: list[str], launch: Launch) -> None:
     subcommand, remainder, _ = found
     if subcommand == "x":
         launch.launcher = "bun x"
-        _package_runner(remainder, launch, _BUNX, {"-p", "--package"})
+        _package_runner(remainder, launch, _BUNX, {"-p", "--package"}, last_package=True)
     elif subcommand in _BUN_FETCHES:
         launch.fail("bun subcommand fetches or installs packages")
     elif subcommand == "exec":
@@ -3031,8 +3098,12 @@ _CONTAINER_SCRIPT_RUNNERS = re.compile(
 )
 # Programs that run the command in their arguments; the words after them are still read.
 _CONTAINER_WRAPPERS = _set("env tini dumb-init timeout nice")
-# A Python option cluster that ends in -m, which imports the module from the working directory.
-_PYTHON_MODULE = re.compile(r"-[bBdEiIOPqsSuvx]*m.*", re.S)
+# Python's flag letters (CPython 3.13 also takes -R and -t), and a cluster of them that ends in
+# -m, which imports the module from the working directory, or in -X or -W, whose value is the
+# rest of the word or the next word.
+_PYTHON_FLAGS = "bBdEiIOPqRsStuvx"
+_PYTHON_MODULE = re.compile(rf"-[{_PYTHON_FLAGS}]*m.*", re.S)
+_PYTHON_SETTING = re.compile(rf"-([{_PYTHON_FLAGS}]*)[XW](.*)", re.S)
 # Package managers that run a project's scripts from the working directory.
 _CONTAINER_PACKAGE_RUNNERS = _set("npm pnpm yarn bun uv")
 _CONTAINER_PACKAGE_SCRIPTS = _set("run run-script start test")
@@ -3128,14 +3199,17 @@ def _mounted_command(options: list[tuple[str, str | None]], words: list[str]) ->
         isolated = False
         options_before = iter(words[at + 1 :])
         for word in options_before:
-            if word in _CONTAINER_SETTING_OPTIONS:
-                next(options_before, None)
+            # -I and -P keep the working directory off sys.path.
+            setting = _PYTHON_SETTING.fullmatch(word)
+            if setting or word == "--check-hash-based-pycs":
+                isolated = isolated or bool(setting and {"I", "P"} & set(setting[1]))
+                if not (setting and setting[2]):
+                    next(options_before, None)
             elif not word.startswith("-") or word in {"-", "--"}:
                 break
             elif _PYTHON_MODULE.fullmatch(word):
-                # -I and -P keep the working directory off sys.path.
                 return not isolated and not {"I", "P"} & set(word[1 : word.index("m")])
-            elif re.fullmatch(r"-[bBdEiIOPqsSuvx]+", word) and {"I", "P"} & set(word):
+            elif re.fullmatch(rf"-[{_PYTHON_FLAGS}]+", word) and {"I", "P"} & set(word):
                 isolated = True
     rest = iter(words[1:])
     for word in rest:

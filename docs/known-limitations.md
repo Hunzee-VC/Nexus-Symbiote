@@ -137,7 +137,11 @@ A way around a limit that its entry does not describe is worth a
 - **What a local program or project script runs is not read.** `./start.sh`,
   `make serve`, `npm run mcp`, `uv run server.py` or a program that installs
   packages can start an unpinned package the inventory does not show. Review what
-  such commands run.
+  such commands run. npm's own options on `npm run`, `start` or `test` count wherever
+  npm reads them, also after the script name and abbreviated, up to `--`
+  (`npm run start --scr=./x.sh`): `--script-shell`, `--node-options` and `--shell`
+  are a medium code-loading finding, and `--prefix`, `-C`, `-w`, `--userconfig`,
+  `--globalconfig`, `--registry` and `--cache` are package sources.
 - **Unclassified runners are gaps.** `dnx`, `jbang`, `pip-run`, `nix run`,
   `dotnet tool`, `gem exec`, `pixi exec`, `corepack`, `mise`, `pkgx`, `finch`,
   Apple `container` and `apptainer` are a high `launcher_identity` finding and a
@@ -207,13 +211,16 @@ A way around a limit that its entry does not describe is worth a
   `true`. `npx` steps over the word after a flag outside its switch set, such as
   `--no-audit`, so that flag followed by such a word, or by any word and then an option
   (`npx --no-audit srv@1.2.3 --stdio`, where npm takes `--stdio` for itself), is a gap, and `npm exec` options after the package or command word without `--` are a
-  gap. A scoped registry (`--@scope:registry`) is read only with `=`. `npm exec -p`
+  gap. So is `--package` with no command word, for which npm runs its script shell on
+  the MCP client's standard input. A scoped registry (`--@scope:registry`) is read only
+  with `=`. `npm exec -p`
   is npm's `--parseable`, not `--package`; only `npx` rewrites `-p`. A differential
   fuzz of 120,000 random argument lists for each of `npx` and `npm exec`, compared with
   the real `npx-cli.js` and nopt, found no list the reader records as a package other
   than the one npm installs, or as a command other than the one npm runs, without a
   gap; a sample of it is a regression test. The `bunx` and `pnpm dlx` readers are not
-  ports and were not fuzzed this way.
+  ports and were not fuzzed this way; `bunx` and `bun x` keep only the last `-p` or
+  `--package`, the one bun installs.
   The `yarn dlx` options were not checked against a running Yarn 2 or later.
 - **Container launch context is read from the declared options only.** Mounts are
   rated by their written source: a mount through a link, a client variable other than `${userHome}`,
@@ -241,8 +248,9 @@ A way around a limit that its entry does not describe is worth a
   `PATH` (`/usr/local/bin`, `/usr/bin`, `/bin` and their `sbin` and parents), or over
   one program in it (`-v ./node:/usr/local/bin/node`), is rated; a mount over another
   directory of the image's own code (`-v .:/app` or `/usr/local/lib/node_modules`) is
-  not. `python -m` after `-I` or `-P`, which keep the working directory off
-  `sys.path`, is not rated. A command that loads the mounted working directory by a
+  not. `python -m` is rated after other options, also after a value option such as
+  `-uX dev` or `-EW ignore`, but not after `-I` or `-P`, which keep the working
+  directory off `sys.path`. A command that loads the mounted working directory by a
   word without a `/` or a script suffix (`node .`, `node server`, `python app`,
   `ruby -I. /app/x.rb`) is not rated either.
   `HOME`, `ZDOTDIR`, `XDG_CONFIG_HOME` and `PYTHONUSERBASE` passed with `-e` count as
@@ -315,6 +323,13 @@ A way around a limit that its entry does not describe is worth a
   `node_modules`, which the collector does not read. A committed
   `node_modules/<name>` that claims the pinned version runs under the pinned
   identity.
+- **A project `package.json` bin can stand in for a pinned package.** Without
+  `--package`, `npx` and `npm exec` run a `bin` entry of the project's `package.json`,
+  or of a workspace selected with `-w`, that is named exactly like the package word,
+  and fetch nothing. A bin named like an unscoped spec, such as `"srv@1.2.3"` for
+  `npx -y srv@1.2.3`, runs checkout code under the pinned identity; the collector does
+  not read `package.json` bins. A scoped spec is not affected, and
+  `--package=srv@1.2.3 -- srv` skips this lookup, though not the `node_modules` one.
 - **Servers started from code are gaps, not records.** Application code that starts
   or reaches a server leaves no component for it, only a gap that fails the default
   gates: in Python, `StdioServerParameters`, `sse_client`, `streamablehttp_client` and
