@@ -331,9 +331,12 @@ def test_hidden_markup_reports_counts_without_text(tmp_path):
 
 
 def test_hidden_markup_scan_is_linear():
-    texts = {scale: "<!--" * (250_000 * scale) for scale in (1, 4)}
-    assert scaling_ratio(lambda scale: detect_hidden_markup(texts[scale], "x.md")) < 10
-    assert detect_hidden_markup(texts[4], "x.md")
+    # Factor 8 keeps the old 1,000,000-character input as the larger size while the
+    # smaller one stays large enough for a quadratic to show.
+    texts = {scale: "<!--" * (125_000 * scale) for scale in (1, 8)}
+    ratio = scaling_ratio(lambda scale: detect_hidden_markup(texts[scale], "x.md"), factor=8)
+    assert ratio < 16
+    assert detect_hidden_markup(texts[8], "x.md")
 
 
 def test_inventory_is_identical_when_scanned_at_two_locations(tmp_path):
@@ -519,16 +522,16 @@ def test_padded_imports_that_leave_the_root_are_gaps(tmp_path, token):
 def test_import_bookkeeping_counts_every_importer_once_with_large_fan_in(tmp_path):
     names = [f"{index:03d}" for index in range(1000)]
     roots = {}
-    for scale in (1, 4):
+    for scale in (1, 8):
         roots[scale] = tmp_path / f"scale-{scale}"
         _write(roots[scale], "CLAUDE.md", " ".join(f"@d/{name}" for name in names))
-        # The first 250 * scale files import every file, so each file's importers and
+        # The first 125 * scale files import every file, so each file's importers and
         # all references grow with the scale; at the larger size every file imports all.
         for position, name in enumerate(names):
-            imports = names if position < 250 * scale else []
+            imports = names if position < 125 * scale else []
             _write(roots[scale], f"d/{name}", " ".join(f"@{other}" for other in imports))
-    assert scaling_ratio(lambda scale: PromptScanner().scan(roots[scale])) < 10
-    result = PromptScanner().scan(roots[4])
+    assert scaling_ratio(lambda scale: PromptScanner().scan(roots[scale]), factor=8) < 16
+    result = PromptScanner().scan(roots[8])
     components = _components(result)
     # Past the inventory's recording limit references are counted, not listed;
     # tests/test_prompt_imports.py covers the lists below it.
