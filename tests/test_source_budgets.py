@@ -5,7 +5,6 @@ from __future__ import annotations
 import itertools
 import json
 import re
-import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -19,6 +18,7 @@ from nexus_symbiote.scanners.a2a import A2AScanner
 from nexus_symbiote.scanners.base import ScanResult, SourceBudget
 from nexus_symbiote.scanners.mcp import MCPScanner, without_js_comments
 from nexus_symbiote.scanners.rag import RAGScanner
+from tests.support import scaling_ratio
 
 _OLD_COMMENTS = re.compile(r"/\*.*?\*/|(?m:^\s*//[^\n]*$)", re.S)
 _SPENT = "source-scan-bytes limit of 1 KiB exceeded; raise it with --limit source-scan-bytes=N"
@@ -174,11 +174,13 @@ def test_comment_stripper_matches_the_pattern_it_replaced():
 def test_comment_stripping_is_linear_in_blank_lines(tmp_path):
     # The pattern rescanned the blank run from every line: about 80 seconds for
     # this file, which is within the syntax size limit.
-    (tmp_path / "client.js").write_text("\n" * 262_000)
-    started = time.monotonic()
-    result = MCPScanner().scan(tmp_path)
-    assert time.monotonic() - started < 5
-    assert not result.scan_failures
+    roots = {}
+    for scale in (1, 4):
+        roots[scale] = tmp_path / f"scale-{scale}"
+        roots[scale].mkdir()
+        (roots[scale] / "client.js").write_text("\n" * (65_500 * scale))
+    assert scaling_ratio(lambda scale: MCPScanner().scan(roots[scale])) < 10
+    assert not MCPScanner().scan(roots[4]).scan_failures
 
 
 def test_commented_sdk_import_is_still_not_a_client(tmp_path):

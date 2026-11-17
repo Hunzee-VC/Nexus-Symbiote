@@ -280,11 +280,12 @@ def test_ordinary_names_near_token_formats_are_kept(name, identifier):
     "unit", ["_eyJ", "_eyJaaaaaaaaa.", "_glpat-a.", "_AKIA", "_ghp_a", "_github_pat_", "-xoxb-a."]
 )
 def test_tokens_inside_names_are_found_in_linear_time(unit):
-    text = unit * (1_000_000 // len(unit))
-    started = time.monotonic()
-    redact_text(text)
-    redact_text(text, identifier=True)
-    assert time.monotonic() - started < 5
+    def run(scale: int) -> None:
+        text = unit * (62_500 // len(unit) * scale)
+        redact_text(text)
+        redact_text(text, identifier=True)
+
+    assert scaling_ratio(run) < 10
 
 
 @pytest.mark.parametrize(

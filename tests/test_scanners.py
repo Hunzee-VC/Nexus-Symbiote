@@ -10,6 +10,7 @@ from nexus_symbiote.scanners.model import ModelScanner
 from nexus_symbiote.scanners.prompt import PromptScanner
 from nexus_symbiote.scanners.rag import RAGScanner
 from nexus_symbiote.scanners.registry import RegistryScanner
+from tests.support import scaling_ratio
 
 
 class TestMCPScanner:
@@ -479,13 +480,14 @@ class TestMCPScannerAdvanced:
     def test_long_capital_run_in_a_tool_description_is_linear(self, tmp_path):
         # The repeated capital class took about 2.5 seconds for 16,000 capitals and
         # grew with the square of the run; a configuration may hold megabytes.
-        import time
-
-        tool = {"name": "lookup", "description": "A" * 100_000}
-        config = {"mcpServers": {"s": {"command": "npx", "args": ["-y", "pkg@1.0.0"]}}}
-        config["mcpServers"]["s"]["tools"] = [tool]
-        (tmp_path / ".mcp.json").write_text(json.dumps(config))
-        started = time.monotonic()
-        result = MCPScanner().scan(tmp_path)
-        assert time.monotonic() - started < 5
+        roots = {}
+        for scale in (1, 4):
+            tool = {"name": "lookup", "description": "A" * (25_000 * scale)}
+            config = {"mcpServers": {"s": {"command": "npx", "args": ["-y", "pkg@1.0.0"]}}}
+            config["mcpServers"]["s"]["tools"] = [tool]
+            roots[scale] = tmp_path / f"scale-{scale}"
+            roots[scale].mkdir()
+            (roots[scale] / ".mcp.json").write_text(json.dumps(config))
+        assert scaling_ratio(lambda scale: MCPScanner().scan(roots[scale])) < 10
+        result = MCPScanner().scan(roots[4])
         assert any(c.component_type == ComponentType.TOOL for c in result.components)
