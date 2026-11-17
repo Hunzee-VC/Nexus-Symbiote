@@ -142,7 +142,19 @@ A way around a limit that its entry does not describe is worth a
 - **What a local program or project script runs is not read.** `./start.sh`,
   `make serve`, `npm run mcp`, `uv run server.py` or a program that installs
   packages can start an unpinned package the inventory does not show. Review what
-  such commands run.
+  such commands run. npm's own options on `npm run`, `start` or `test` count wherever
+  npm reads them, also after the script name and abbreviated, up to the end of its
+  options (`npm run start --scr=./x.sh`): `--script-shell`, `--node-options` and
+  `--shell` are a medium code-loading finding, and `--prefix`, `-C`, `-w`,
+  `--userconfig`, `--globalconfig`, `--registry` and `--cache` are package sources.
+  npm's options end at `--` or a longer run of dashes, unless the word before it is
+  `--browser` or a `--no-` option whose type allows a string, such as `--no-os`, which
+  takes it as a value (`npm start --no-os -- --scr=./x.sh` still sets the script
+  shell). An option name built from an environment variable, such as
+  `--script-${E}shell`, which npm expands after reading it, is a gap. These
+  subcommands ignore `-c` and `--call`. A `script-shell` or `node-options` setting in
+  the project `.npmrc`, which npm uses for them, gets no `launch_context` finding;
+  review that file.
 - **Unclassified runners are gaps.** `dnx`, `jbang`, `pip-run`, `nix run`,
   `dotnet tool`, `gem exec`, `pixi exec`, `corepack`, `mise`, `pkgx`, `finch`,
   Apple `container` and `apptainer` are a high `launcher_identity` finding and a
@@ -196,20 +208,32 @@ A way around a limit that its entry does not describe is worth a
   system paths.
 - **Some ordinary forms are gaps.** `uvx -w` and `uv run -w` (aliases of `--with`)
   and a bare `pwsh server.ps1` are not read and fail the gates; spell `--with` and
-  `-File`. An `npx`, `npm` or `pnpm dlx` option that takes a value, followed by a
-  word that starts with `-`, is a gap: npm's parser may give the option an empty
-  value and read that word as an option, so `npx --tag --package=evil@6.6.6
-  decoy@1.0.0` installs `evil`. Attach such values with `=`, as in
-  `--node-options=--max-old-space-size=4096`. A flag of `npm` or `pnpm dlx` written
-  without `=` and followed by the word `true`, `false` or `null` is a gap as well, since
-  nopt reads that word as a Boolean (or `[null, Boolean]`) option's value; this also
-  covers flags that do not take it, such as `-q`, which npm expands to another option. Write `--yes` alone, or put
-  `--` before a command named `true`. `npx` steps over the word after `--no`,
-  `--no-yes`, `--no-update-notifier`, `--no-audit` and `--no-fund`, so such a flag
-  followed by `true`, `false` or `null`, or by any word and then an option (as in
-  `npx --no-audit srv@1.2.3 --stdio`, where npm takes `--stdio` for itself), is a gap.
-  A scoped registry (`--@scope:registry`) of `npx` or `npm` written without `=` is a
-  gap too: npm has no type for it, so the next word stays a command or package word.
+  `-File`. `npx` and `npm` arguments are read by a port of npm 10.9.9's own
+  handling (the rewrite in `bin/npx-cli.js`, then nopt with npm's option types), and
+  anything the port does not model exactly is a gap: an unknown, abbreviated or
+  single-dash long option (`--pack`, `-package`), `--help` or `--version`, a lone `-`
+  or `---` before the package or command word, an `npm` shorthand written with `=`, a
+  `--no-` spelling of an option that is not a Boolean, and a Boolean option given a
+  value other than `true` or `false` (or `null` for `--yes` and `--workspaces`) with
+  `=`. A value option followed by a word that starts with `-`, or by nothing, is a gap
+  because npm's parser may give it an empty value and read that word as an option
+  (`npx --tag --package=evil@6.6.6 decoy@1.0.0` installs `evil`); attach such values
+  with `=`, as in `--node-options=--max-old-space-size=4096`. An `npm` flag written
+  without `=` and followed by `true`, `false` or `null` is a gap, also where npm would
+  not take the word (`-q true`); write `--yes` alone, or put `--` before a command named
+  `true`. `npx` steps over the word after a flag outside its switch set, such as
+  `--no-audit`, so that flag followed by such a word, or by any word and then an option
+  (`npx --no-audit srv@1.2.3 --stdio`, where npm takes `--stdio` for itself), is a gap, and `npm exec` options after the package or command word without `--` are a
+  gap. So is `--package` with no command word, for which npm runs its script shell on
+  the MCP client's standard input. A scoped registry (`--@scope:registry`) is read only
+  with `=`. `npm exec -p`
+  is npm's `--parseable`, not `--package`; only `npx` rewrites `-p`. A differential
+  fuzz of 120,000 random argument lists for each of `npx` and `npm exec`, compared with
+  the real `npx-cli.js` and nopt, found no list the reader records as a package other
+  than the one npm installs, or as a command other than the one npm runs, without a
+  gap; a sample of it is a regression test. The `bunx` and `pnpm dlx` readers are not
+  ports and were not fuzzed this way; `bunx` and `bun x` keep only the last `-p` or
+  `--package`, the one bun installs.
   The `yarn dlx` options were not checked against a running Yarn 2 or later.
 - **Container launch context is read from the declared options only.** Mounts are
   rated by their written source: a mount through a link, a client variable other than `${userHome}`,
@@ -234,8 +258,14 @@ A way around a limit that its entry does not describe is worth a
   relative path without `-w` (resolved against the image's own working directory) and
   a link from the image into the mount are not rated, so that an argument such as
   `mcp/filesystem /data` is not a finding. A mount over a directory on the default
-  `PATH` (`/usr/local/bin`, `/usr/bin`, `/bin` and their `sbin` and parents) is
-  rated; a mount over another directory of the image's own code (`-v .:/app`) is not.
+  `PATH` (`/usr/local/bin`, `/usr/bin`, `/bin` and their `sbin` and parents), or over
+  one program in it (`-v ./node:/usr/local/bin/node`), is rated; a mount over another
+  directory of the image's own code (`-v .:/app` or `/usr/local/lib/node_modules`) is
+  not. `python -m` is rated after other options, also after a value option such as
+  `-uX dev` or `-EW ignore`, but not after `-I` or `-P`, which keep the working
+  directory off `sys.path`. A command that loads the mounted working directory by a
+  word without a `/` or a script suffix (`node .`, `node server`, `python app`,
+  `ruby -I. /app/x.rb`) is not rated either.
   `HOME`, `ZDOTDIR`, `XDG_CONFIG_HOME` and `PYTHONUSERBASE` passed with `-e` count as
   code-loading only beside a host mount, whatever their value, and `PATH` only when an
   entry is empty, relative or under a mount target. Any path component named like a credential
@@ -305,7 +335,18 @@ A way around a limit that its entry does not describe is worth a
   `npm exec` run a matching package already installed in the project's
   `node_modules`, which the collector does not read. A committed
   `node_modules/<name>` that claims the pinned version runs under the pinned
-  identity.
+  identity. Without `--package`, a file named exactly like the package word in
+  `node_modules/.bin` of the project or any parent directory, such as
+  `node_modules/.bin/srv@1.2.3` for `npx -y srv@1.2.3`, runs in its place and npm
+  fetches nothing. For a scoped spec, npm then runs the word as a path from the
+  working directory, such as a committed `@s/srv@1.2.3`.
+- **A project `package.json` bin can stand in for a pinned package.** Without
+  `--package`, `npx` and `npm exec` run a `bin` entry of the project's `package.json`,
+  or of a workspace selected with `-w`, that is named exactly like the package word,
+  and fetch nothing. A bin named like an unscoped spec, such as `"srv@1.2.3"` for
+  `npx -y srv@1.2.3`, runs checkout code under the pinned identity; the collector does
+  not read `package.json` bins. A scoped spec is not affected, and
+  `--package=srv@1.2.3 -- srv` skips this lookup, though not the `node_modules` one.
 - **Servers started from code are gaps, not records.** Application code that starts
   or reaches a server leaves no component for it, only a gap that fails the default
   gates: in Python, `StdioServerParameters`, `sse_client`, `streamablehttp_client` and
