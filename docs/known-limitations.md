@@ -828,9 +828,20 @@ A way around a limit that its entry does not describe is worth a
   wrote counts as run when it is any argument of a shell, `python` or `perl`, as it did
   before, so `curl -o d x && bash run.sh d` and `curl -o d x && python3 -m json.tool d`
   are critical though they may only read it; `node`, `ruby`, `php` and `lua` count it
-  only as their program or an option's value (`node -r ./d`), and after an option the
-  classifier does not know, the next word is also read as its possible program. A file
-  only `base64 -d` decoded counts as run only as a program. A `>(` inside quotes, as in
+  only as their program or an option's value (`node -r ./d`). After an option the
+  classifier does not know, the next word is read as the possible program and then as
+  that option's value, so the reading goes on after it; an unknown option that takes no
+  value therefore makes the program's first argument count, as in
+  `curl -o d x && node --unknown-flag app.js d`. A file only `base64 -d` decoded, not
+  from a download, counts as run only as a program. A saved file copied by `cat`, `cp`,
+  `mv`, `ln`, `dd`, `tee`, `install`, `rsync` or `sponge`, given on standard input, or
+  read by `$(cat a)` or `<(cat a)` that a shell or `eval` runs, counts as the file; one
+  transformed by another tool (`sed`, `awk`, `tar`), or read by an interpreter's own
+  code (`python3 -c 'exec(open("a").read())'`, `node -e "$(cat a)"`), is medium. A saved
+  file read into a pipeline is rated as a download piped there, so
+  `curl -o r.json x && cat r.json | bash ./notify.sh` is critical. A runner the
+  classifier does not model, such as `deno run`, `bun`, `tsx`, `npx`, `pkexec`,
+  `setpriv` or `machinectl shell`, is medium. A `>(` inside quotes, as in
   `curl x | tee '>(sh)'`, is read as a process substitution, which fails closed.
   `perl -c` is read as running its program, because it runs BEGIN
   blocks. The Codex `notify` command and the Gemini CLI tool

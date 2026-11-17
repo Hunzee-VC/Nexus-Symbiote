@@ -1083,7 +1083,9 @@ def _skip_sudo(words: list[str], index: int) -> int:
             index += 2
             continue
         if word.startswith("-"):
-            index += 1
+            # `-iu root`: a bundle whose value letter ends it takes the next word.
+            bundle = re.match(r"-([A-Za-z]*?)([ughpUCDRTrta])", word)
+            index += 2 if bundle is not None and bundle.end() == len(word) else 1
             continue
         if _assignment(word):
             index += 1
@@ -1273,8 +1275,39 @@ _STDIN_INTERPRETERS: dict[str, tuple[str, frozenset[str], frozenset[str]]] = {
     "php": ("rfBRFElvihm", frozenset({"--version", "--help"}), frozenset({"-c", "-d", "-z"})),
     "lua": ("ev", frozenset(), frozenset({"-l"})),
 }
+# Options known to take no value, and short flags whose value is the rest of their word
+# (`perl -Mstrict`, `ruby -W2`). Any other option may take the next word as its value,
+# so the word after that may be the program.
+_NO_VALUE: dict[str, tuple[str, str, frozenset[str]]] = {
+    **{
+        name: ("bBdEhiIOPqRsSuvVx", "", frozenset({"--version", "--help", "--help-all"}))
+        for name in _PYTHON_NAMES
+    },
+    "perl": ("acnpsStTuUvwWXh", "0CdDiIlmMFx", frozenset()),
+    "ruby": ("adlnpsSUvwy", "0FiWxK", frozenset({"--verbose", "--yjit", "--jit", "--copyright"})),
+    "php": ("aCnqswHe", "", frozenset()),
+    "lua": ("iEW", "", frozenset()),
+    **{
+        name: (
+            "i",
+            "",
+            frozenset({"--trace-warnings", "--trace-deprecation", "--trace-uncaught"})
+            | {"--no-warnings", "--no-deprecation", "--throw-deprecation", "--expose-gc"}
+            | {"--enable-source-maps", "--preserve-symlinks", "--inspect", "--inspect-brk"}
+            | {"--experimental-vm-modules", "--abort-on-uncaught-exception", "--watch"}
+            | {"--test", "--interactive", "--experimental-strip-types", "--no-addons"},
+        )
+        for name in ("node", "nodejs")
+    },
+}
+# Python modules that only read their arguments as data. Any other `-m` module, such as
+# `runpy`, `pdb`, `cProfile` or `trace`, may run a later argument as a program.
+_DATA_MODULES = frozenset(
+    {"json.tool", "http.server", "venv", "zipfile", "tarfile", "gzip", "base64"}
+    | {"py_compile", "compileall", "tabnanny"}
+)
 # Arguments that name standard input as the program.
-_STDIN_PROGRAMS = frozenset({"-", "/dev/stdin", "/dev/fd/0"})
+_STDIN_PROGRAMS = frozenset({"-", "/dev/stdin", "/dev/fd/0", "/proc/self/fd/0"})
 
 
 def _reads_stdin(interpreter: str, args: list[str]) -> bool:
@@ -1343,7 +1376,8 @@ def _segment_fetches(segment: str) -> bool:
 
 
 def _file_keys(word: str) -> set[str]:
-    decoded = _decode_word(word, drop_ifs=True)
+    # Parentheses are grouping or substitution, as in `(cat a) | sh` or `sh <(cat a)`.
+    decoded = _decode_word(word, drop_ifs=True).strip("()")
     if decoded.startswith("./"):
         decoded = decoded[2:]
     base = decoded.rsplit("/", 1)[-1]
@@ -1525,11 +1559,14 @@ def _shell_program(args: list[str], saved: set[str]) -> bool:
             break
         if not word.startswith(("-", "+")) or word in _STDOUT_NAMES:
             break
-        if _SCRIPT_FLAG.fullmatch(word):
+        if _SCRIPT_FLAG.fullmatch(word) or re.fullmatch(r"-[A-Za-z]*c[A-Za-z]*", word):
             return _any_argument(args[index:], saved)
-        if any(_file_keys(item) & saved for item in args[index + 1 : index + 2]):
+        # `-euo pipefail`: a bundle ending in `o` or `O` takes the next word as its value,
+        # so the word after that may be the script. `-opipefail` carries its value.
+        valued = word in _SHELL_WITH_VALUE or re.fullmatch(r"[-+][A-Za-z]*[oO]", word)
+        if any(_file_keys(item) & saved for item in args[index + 1 : index + (3 if valued else 2)]):
             return True
-        index += 2 if word in _SHELL_WITH_VALUE else 1
+        index += 2 if valued else 1
     return index < len(args) and bool(_file_keys(args[index]) & saved)
 
 
@@ -1541,10 +1578,12 @@ def _interpreter_program(interpreter: str, args: list[str], saved: set[str]) -> 
     the program's own, as in `node build.js data.json`. An option's value counts too,
     since `node -r`, `ruby -r` and `php -z` load and run the file they name. Where the
     program's position is uncertain this fails closed: after `-` or `/dev/stdin` any
-    later word may be the target of a `<` redirection, and the word after an unknown
-    option may be that option's value or the program.
+    later word may be the target of a `<` redirection, and the word after an option not
+    known to take no value may be that option's value or the program, so it is tested
+    and the reading goes on after it.
     """
     letters, long_code, with_value = _STDIN_INTERPRETERS[interpreter]
+    plain, attached_value, plain_long = _NO_VALUE[interpreter]
 
     def named(values: list[str]) -> bool:
         return any(_file_keys(value) & saved for value in values)
@@ -1553,6 +1592,9 @@ def _interpreter_program(interpreter: str, args: list[str], saved: set[str]) -> 
     while index < len(args):
         word = _decode_word(args[index], drop_ifs=True)
         following = args[index + 1 : index + 2]
+        # After an unknown option the next word is tested, then skipped as its value.
+        option_next = not following or _decode_word(following[0], drop_ifs=True).startswith("-")
+        skip = 1 if option_next else 2
         if word == "--":
             index += 1
             break
@@ -1564,23 +1606,37 @@ def _interpreter_program(interpreter: str, args: list[str], saved: set[str]) -> 
             option, equals, attached = word.partition("=")
             if option in long_code:
                 return named([attached] if equals else following)
-            if named([attached] if equals else following):
+            if equals or option in plain_long:
+                if named([attached]):
+                    return True
+                index += 1
+                continue
+            if named(following):
                 return True
-            index += 2 if option in with_value and not equals else 1
+            index += 2 if option in with_value else skip
             continue
         step = 1
         for position in range(1, len(word)):
-            rest = word[position + 1 :]
-            if word[position] in letters:
+            letter, rest = word[position], word[position + 1 :]
+            if letter == "m" and interpreter in _PYTHON_NAMES:
+                module = rest or (_decode_word(following[0], drop_ifs=True) if following else "")
+                if module not in _DATA_MODULES:
+                    return named([rest] + args[index + 1 :])
+            if letter in letters:
                 return named([rest] if rest else following)
-            if f"-{word[position]}" in with_value:
+            if f"-{letter}" in with_value:
                 if named([rest] if rest else following):
                     return True
                 step = 1 if rest else 2
                 break
-        else:
-            if named(following):
+            if letter in plain:
+                continue
+            if letter in attached_value and rest:
+                break
+            if named([rest, *following]):
                 return True
+            step = 1 if rest else skip
+            break
         index += step
     return index < len(args) and named(args[index : index + 1])
 
@@ -1612,11 +1668,78 @@ def _relayed_names(segment: str) -> set[str]:
     return relayed
 
 
+# Commands that copy a file they name to their operands or output: a copy of a saved
+# file holds what it holds.
+_COPIERS = frozenset({"cat", "cp", "ln", "dd", "tee", "install", "mv", "rsync", "sponge"})
+# Standard input read from a file: `<` and `0<`, not `<<`, `<<<`, `<(`, `<&` or `<>`.
+_INPUT_REDIRECTION = re.compile(r"(?<![0-9<>&])0?<(?![<>&(])[ \t]*(?P<target>[^\s<>|;&()]+)")
+
+
+def _operand_keys(words: list[str]) -> set[str]:
+    """File keys of `words`, reading `dd`'s `if=` and `of=` operands as their files."""
+    keys: set[str] = set()
+    for word in words:
+        decoded = _decode_word(word, drop_ifs=True)
+        keys |= _file_keys(decoded[3:] if decoded.startswith(("if=", "of=")) else word)
+    return keys
+
+
+def _copies_saved(segment: str, saved: set[str]) -> set[str]:
+    """Files a copier that names one of `saved` writes: its operands and redirections."""
+    words = _shell_words(segment)
+    index = _executable_index(words)
+    if index is None or not _name_variants(words[index]) & _COPIERS:
+        return set()
+    operands = _operand_keys(words[index + 1 : index + 65])
+    if not operands & saved:
+        return set()
+    return operands | _relayed_names(segment)
+
+
+def _substitution_reads(word: str, saved: set[str]) -> bool:
+    """Whether `word` holds a `$(...)`, backtick or `<(...)` that reads one of `saved`."""
+    for match in re.finditer(r"[$<]\(([^()]*)\)|`([^`]*)`", word):
+        inner = _shell_words(match.group(1) if match.group(1) is not None else match.group(2))
+        if inner and _name_variants(inner[0]) & _COPIERS and _operand_keys(inner[1:]) & saved:
+            return True
+    return False
+
+
+def _runs_saved_input(
+    segment: str, outputs: set[str], downloaded: set[str], decoded: set[str]
+) -> bool:
+    """Whether this segment runs a saved file given on stdin or by substitution.
+
+    `sh < a`, `sh 0< a`, `bash run.sh < a`, `sh -c "$(cat a)"`, `bash <<< "$(cat a)"`
+    and `eval "$(cat a)"` run `a` as `cat a | sh` does. Python and Perl keep the released
+    rule for a download, which counted any file they were given, stdin included.
+    """
+    saved = outputs | downloaded | decoded
+    words = _shell_words(segment)
+    index = _executable_index(words)
+    if index is None:
+        return False
+    names = _name_variants(words[index])
+    if names & (_SHELL_NAMES | _EVAL_NAMES | _IEX_NAMES) and any(
+        _substitution_reads(word, saved) for word in words[index + 1 : index + 65]
+    ):
+        return True
+    stdin = set()
+    for match in _INPUT_REDIRECTION.finditer(segment):
+        stdin |= _file_keys(match.group("target"))
+    if not stdin & saved:
+        return False
+    if names & (_PYTHON_NAMES | {"perl"}) and stdin & (outputs | downloaded):
+        return True
+    return _segment_executes(_INPUT_REDIRECTION.sub(" ", segment))
+
+
 def _download_then_run(pipelines: list[list[str]]) -> bool:
     """Whether a later command runs a file an earlier download saved (`curl -o a && bash a`).
 
     A file written by a later segment of the downloader's pipeline, as by `curl x | tee a`
-    or `curl x | cat > a`, holds the download too.
+    or `curl x | cat > a`, holds the download too, as does a copy of a saved file and
+    a file decoded from a download.
     """
     outputs: set[str] = set()
     downloaded: set[str] = set()
@@ -1627,26 +1750,35 @@ def _download_then_run(pipelines: list[list[str]]) -> bool:
         for segment in segments:
             if _executes_saved(segment, outputs, downloaded, decoded):
                 return True
+            if _runs_saved_input(segment, outputs, downloaded, decoded):
+                return True
             # A saved file read into a pipeline (`cat a | sh`) is a fetch for its later segments.
             if reads_saved and (
                 _segment_executes(segment) or _output_substitution_executes(segment)
             ):
                 return True
-            saved = outputs | downloaded | decoded
+            fetched_files = outputs | downloaded
+            saved = fetched_files | decoded
+            names = _operand_keys(_shell_words(segment))
             if not reads_saved and saved:
-                reads_saved = any(_file_keys(word) & saved for word in _shell_words(segment))
+                reads_saved = bool(names & saved)
             options, written = _saved_names(segment)
             outputs |= options
             decoded -= options
+            copied = _copies_saved(segment, saved)
             if fetched:
                 written |= _relayed_names(segment)
-            if fetched == "download" or _segment_downloads(segment):
+            # A copy or decoding of a download, or a relay after one, holds the download.
+            source = "download" if names & fetched_files else "decode" if copied else None
+            written |= copied
+            if fetched == "download" or source == "download" or _segment_downloads(segment):
                 downloaded |= written
                 decoded -= written
             else:
                 decoded |= written - downloaded
-            if fetched != "download" and _segment_fetches(segment):
-                fetched = "download" if _segment_downloads(segment) else "decode"
+            if fetched != "download" and (_segment_fetches(segment) or copied):
+                download = _segment_downloads(segment) or source == "download"
+                fetched = "download" if download else "decode"
     return False
 
 
