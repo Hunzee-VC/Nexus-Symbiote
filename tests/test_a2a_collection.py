@@ -292,12 +292,22 @@ def test_agent_card_built_in_code_is_a_gap(tmp_path):
     assert server.source_path == "services/agent/server.py"
 
 
-def test_card_loaded_from_data_is_covered_by_a_static_card(tmp_path):
-    _write(tmp_path, "server.py", "from a2a.types import AgentCard\ncard = AgentCard(**data)\n")
-    assert A2AScanner().scan(tmp_path).surfaces_excluded
+def test_card_loaded_from_data_stays_a_gap_beside_a_static_card(tmp_path):
+    # Audit 2026-11-16 S6-03: any static card hid every card loaded in code, so a
+    # second agent served from other data was not inventoried and left no gap.
+    _write(
+        tmp_path,
+        "server.py",
+        "import json\nfrom a2a.types import AgentCard\n"
+        "card = AgentCard.model_validate(json.load(open('cards/beta.json')))\n",
+    )
+    _write(tmp_path, "cards/beta.json", {**CARD, "name": "beta", "url": "http://beta.example"})
+    gap = ["server.py: A2A agent card loaded in Python code is not inventoried"]
+    assert A2AScanner().scan(tmp_path).surfaces_excluded == gap
     _write(tmp_path, ".well-known/agent-card.json", CARD)
     result = A2AScanner().scan(tmp_path)
-    assert not result.surfaces_excluded and not result.scan_failures
+    assert [server.name for server in _servers(result)] == ["billing-agent"]
+    assert result.surfaces_excluded == gap and not result.scan_failures
 
 
 @pytest.mark.parametrize(

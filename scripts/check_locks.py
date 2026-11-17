@@ -25,7 +25,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -80,6 +80,15 @@ INPUTS = re.compile(
     re.M,
 )
 HASH_LINE = re.compile(r"--hash=sha256:([0-9a-f]{64})(?: \\)?")
+PACKAGE_SOURCE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?")
+# The `# via` sources uv writes for a requirement that pyproject.toml declares itself.
+DECLARED_SOURCES = frozenset(
+    {
+        f"{PROJECT} (pyproject.toml)",
+        f"{PROJECT} (pyproject.toml:dev)",
+        "-r pyproject.toml (build-system)",
+    }
+)
 SCOPES = {
     CI_LOCK: "every extra and the dev group, universal for CPython 3.11 and later.",
     ACTION_LOCK: (
@@ -103,6 +112,7 @@ class Pin:
     version: Version
     marker: str | None
     hashes: frozenset[str]
+    via: frozenset[str] = frozenset()
 
 
 @dataclass
@@ -139,7 +149,22 @@ def parse_lock(text: str, path: str = "lock") -> Lock:
     if match is not None:
         lock.inputs = match.groupdict()
     blocks: list[list[str]] = []
+    vias: list[set[str]] = []
+    in_via = False
     for line in text.splitlines():
+        comment = line.strip()
+        if comment.startswith("#") and blocks:
+            body = comment.removeprefix("#")
+            if body.startswith(" via"):
+                in_via = True
+                if body[4:].strip():
+                    vias[-1].add(body[4:].strip())
+            elif in_via and body.startswith("   ") and body.strip():
+                vias[-1].add(body.strip())
+            else:
+                in_via = False
+            continue
+        in_via = False
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         if line[0].isspace():
@@ -148,7 +173,8 @@ def parse_lock(text: str, path: str = "lock") -> Lock:
             blocks[-1].append(line.strip())
         else:
             blocks.append([line.strip()])
-    for block in blocks:
+            vias.append(set())
+    for block, via in zip(blocks, vias, strict=True):
         head = block[0].removesuffix("\\").strip()
         try:
             requirement = Requirement(head)
@@ -178,7 +204,7 @@ def parse_lock(text: str, path: str = "lock") -> Lock:
         entries = lock.pins.setdefault(name, [])
         if any(entry.marker == marker for entry in entries):
             raise LockError(f"{path}: {name} is pinned twice under the same marker")
-        entries.append(Pin(name, version, marker, hashes))
+        entries.append(Pin(name, version, marker, hashes, frozenset(via)))
     if not lock.pins:
         raise LockError(f"{path}: no pinned requirement")
     return lock
@@ -278,6 +304,41 @@ def _inputs_issues(lock: Lock, digest: str, python: str) -> list[str]:
     return issues
 
 
+def _unreachable(lock: Lock, declared: Collection[str]) -> list[str]:
+    """Pins that neither a declaration nor another pin of the same lock requires.
+
+    uv records why each pin is in a lock in its `# via` lines. A pin is reachable when it is
+    declared in pyproject.toml and uv says so, or when a reachable pin of this lock is named
+    as its parent; a `-c` constraint is no reason to install anything. This rejects an entry
+    inserted into a lock offline; a forged `# via` naming a real parent is caught only by
+    regenerating the lock and comparing it.
+    """
+    reached = {
+        name
+        for name, pins in lock.pins.items()
+        if name in declared and any(pin.via & DECLARED_SOURCES for pin in pins)
+    }
+    parents = {
+        name: {
+            canonicalize_name(source)
+            for pin in pins
+            for source in pin.via
+            if PACKAGE_SOURCE.fullmatch(source)
+        }
+        for name, pins in lock.pins.items()
+    }
+    changed = True
+    while changed:
+        found = {name for name, wanted in parents.items() if wanted & reached} - reached
+        reached |= found
+        changed = bool(found)
+    return [
+        f"{lock.path}: {name} is not required by pyproject.toml or by another pin of the lock;"
+        " remove it or run `make lock`"
+        for name in sorted(lock.pins.keys() - reached)
+    ]
+
+
 def check(root: Path = ROOT) -> list[str]:
     """Every problem that makes a lock disagree with pyproject.toml or with another lock."""
     try:
@@ -302,12 +363,17 @@ def check(root: Path = ROOT) -> list[str]:
         errors.append(issue)
     for requirement in [*runtime, *build, *dev]:
         _satisfied(ci, requirement, errors)
+    every = {canonicalize_name(r.name) for r in [*runtime, *build, *dev]}
+    errors.extend(_unreachable(ci, every))
 
     project = pyproject["project"]
     core = _requirements(project["dependencies"])
     signing = _requirements(project.get("optional-dependencies", {}).get("sigstore", []))
     for requirement in [*core, *signing, *build]:
         _satisfied(action, requirement, errors)
+    errors.extend(
+        _unreachable(action, {canonicalize_name(r.name) for r in [*core, *signing, *build]})
+    )
     build_names = {canonicalize_name(r.name) for r in build}
     test_tools = {canonicalize_name(r.name) for r in dev} - build_names
     for name, pins in action.pins.items():
@@ -323,6 +389,7 @@ def check(root: Path = ROOT) -> list[str]:
 
     for requirement in [*runtime, *build, *dev]:
         _satisfied(floor, requirement, errors)
+    errors.extend(_unreachable(floor, every))
     for requirement in [*runtime, *build]:
         name = canonicalize_name(requirement.name)
         bound = _lower_bound(requirement)

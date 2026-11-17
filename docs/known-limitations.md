@@ -94,7 +94,12 @@ A way around a limit that its entry does not describe is worth a
   not excluded, within the `depth` limit and reached without another symlink, is
   read through its target. A read through any other symlink, such as an absolute
   one or `.claude -> .`, is a failure. A walk of the project skips directory
-  symlinks and walks their targets under the targets' own names.
+  symlinks and walks their targets under the targets' own names. The `mcp` collector
+  also looks up its client paths through each such link, as `a2a` does for agent
+  cards and `ide_agents` for nested `.claude` settings, so a linked client
+  directory, such as `pkg/.gemini -> ../shared/gemini`, is read as
+  `pkg/.gemini/settings.json`, the file a host started in `pkg` opens, as well as
+  under its target's name.
 - **Every walk fails on a link out of the project.** An absolute or escaping
   symlink anywhere in the tree, such as `assets/logo.png -> /usr/share/logo.png`,
   is a failure for each collector that walks the project (`mcp`, `model`,
@@ -156,7 +161,12 @@ A way around a limit that its entry does not describe is worth a
   argument that only reads like a launch is a gap too.
 - **Text a shell reads again must read as written.** An `sh -c`, `bash -c`,
   `zsh -c` or `fish -c` script, a command line, `env -S`, `wsl` without `-e`,
-  `eval` and `pwsh -Command` are classified only when no word holds a character the
+  `eval`, `pwsh -Command`, the command word of `npx -p` or `npm exec --package`
+  (which npm runs with `sh`, so one that is itself an expansion is a gap too),
+  and the words of `bun exec`, `yarn exec` and `pnpm exec -c` (or `--shell-mode`,
+  or an option cluster with `c`, among the options before its command word; a word
+  after an option written without `=` counts as that option's value; pnpm 10 itself
+  reads shell mode only before `exec`, and `pnpm -c exec` is a gap) are classified only when no word holds a character the
   reader rewrites: braces, patterns, `~`, `#`, `!`, `^`, `$`, backquotes,
   non-ASCII text or, except for a POSIX shell, quoting. `cmd /c` needs a plain
   program word and no `%`, `!`, `"`, `^` or unusual whitespace; cmd keeps
@@ -186,7 +196,51 @@ A way around a limit that its entry does not describe is worth a
   system paths.
 - **Some ordinary forms are gaps.** `uvx -w` and `uv run -w` (aliases of `--with`)
   and a bare `pwsh server.ps1` are not read and fail the gates; spell `--with` and
-  `-File`.
+  `-File`. An `npx`, `npm` or `pnpm dlx` option that takes a value, followed by a
+  word that starts with `-`, is a gap: npm's parser may give the option an empty
+  value and read that word as an option, so `npx --tag --package=evil@6.6.6
+  decoy@1.0.0` installs `evil`. Attach such values with `=`, as in
+  `--node-options=--max-old-space-size=4096`. A flag of `npm` or `pnpm dlx` written
+  without `=` and followed by the word `true`, `false` or `null` is a gap as well, since
+  nopt reads that word as a Boolean (or `[null, Boolean]`) option's value; this also
+  covers flags that do not take it, such as `-q`, which npm expands to another option. Write `--yes` alone, or put
+  `--` before a command named `true`. `npx` steps over the word after `--no`,
+  `--no-yes`, `--no-update-notifier`, `--no-audit` and `--no-fund`, so such a flag
+  followed by `true`, `false` or `null`, or by any word and then an option (as in
+  `npx --no-audit srv@1.2.3 --stdio`, where npm takes `--stdio` for itself), is a gap.
+  A scoped registry (`--@scope:registry`) of `npx` or `npm` written without `=` is a
+  gap too: npm has no type for it, so the next word stays a command or package word.
+  The `yarn dlx` options were not checked against a running Yarn 2 or later.
+- **Container launch context is read from the declared options only.** Mounts are
+  rated by their written source: a mount through a link, a client variable other than `${userHome}`,
+  `${env:HOME}`, `${env:USERPROFILE}`, `${workspaceFolder}` and `$PWD`, and a
+  credential directory other than `.ssh`, `.aws`, `.gnupg`, `.kube`, `.docker`,
+  `.config`, `.azure` and `.gcloud` are only `host_mounts`. Variables in an
+  `--env-file`, a `--health-cmd` and a seccomp profile file are a medium finding
+  without being read, and `podman --env-host` is not rated. An `--entrypoint` is a
+  medium finding only beside a host mount. An image command is a medium
+  code-loading finding when it runs a file under an absolute `-v` or `--mount`
+  target: an interpreter or runner (`node`, `python`, `sh`, `env`, `java`, `npm`,
+  `pnpm`, `yarn`, `bun`, `uv`, `tsx`, `ts-node` and similar, also after `tini`,
+  `dumb-init`, `timeout` or `nice`) with any later word or `--opt=value` that is such
+  a path, a package manager's `run`, `start` or `test`, `make`, or `python -m` with
+  `-w` under the mount, or a path with a script suffix (`.sh`, `.js`, `.py`, `.jar`
+  and similar), absolute or relative to an absolute `-w`. A relative word counts as a
+  path only when it holds a `/` or has a script suffix, so a port, host, version or
+  dotted module name (`--port=8080`, `--host 0.0.0.0`, `v1.2`) or a file such as
+  `notes.txt` is not. A word after an interpreter counts even
+  when it is a data argument of the script, so `node /app/s.js /w/data` is rated. A
+  file without a script suffix (`/w/server`, `/db/app.sqlite`, `/cfg/config.json`), a
+  relative path without `-w` (resolved against the image's own working directory) and
+  a link from the image into the mount are not rated, so that an argument such as
+  `mcp/filesystem /data` is not a finding. A mount over a directory on the default
+  `PATH` (`/usr/local/bin`, `/usr/bin`, `/bin` and their `sbin` and parents) is
+  rated; a mount over another directory of the image's own code (`-v .:/app`) is not.
+  `HOME`, `ZDOTDIR`, `XDG_CONFIG_HOME` and `PYTHONUSERBASE` passed with `-e` count as
+  code-loading only beside a host mount, whatever their value, and `PATH` only when an
+  entry is empty, relative or under a mount target. Any path component named like a credential
+  directory counts, also outside a home directory, so `/srv/app/.config` is a broad
+  mount.
 - **Environment that moves a runner's configuration is a gap.** A server's `env`
   that may point `HOME`, `XDG_CONFIG_HOME`, `PREFIX`, `DESTDIR`, `GOENV`,
   `ZDOTDIR` or a relative `PATH` entry into the project, or that replaces the
@@ -282,7 +336,19 @@ A way around a limit that its entry does not describe is worth a
   User-level client settings in your home directory are not read either.
 - **Some client files are only detected.** Zed `context_servers`, opencode `mcp`,
   `.continue/mcpServers/` and `.junie/mcp/mcp.json` are gaps; their servers are not
-  parsed.
+  parsed. A copy at any depth, such as `pkg/opencode.json` or
+  `pkg/.continue/mcpServers/`, is a gap too, and another spelling of one, such as
+  `pkg/.Zed/settings.json`, is a [case-variant failure](#every-collector).
+- **Gemini CLI's server command is read only as plain words.** Gemini CLI starts
+  `mcpServerCommand`, or `mcp.serverCommand` in its current settings layout, as a
+  server named `mcp`, in place of an `mcpServers` entry of that name, and so does the
+  collector. Gemini CLI splits that command as a shell would, with environment
+  variables substituted, so a value with anything but words of letters, digits and
+  `_@%+=:,./-` separated by spaces, such as `$`, quotes, a backslash, a glob or a shell
+  operator, is a failure and the server is not inventoried, and so is a value set in
+  both settings. Gemini CLI's tool discovery and call commands (`toolDiscoveryCommand`,
+  `toolCallCommand` and their `tools.` forms) are not MCP servers and are not
+  inventoried; their settings file is digested by `ide_agents`.
 - **Every file with an MCP client name is parsed.** One that does not parse, or
   whose server map is not a map of server objects, is a failure even when it is not
   an MCP configuration. Rename such a file; excluding it records a gap instead.
@@ -324,6 +390,12 @@ A way around a limit that its entry does not describe is worth a
   `pydantic_ai.mcp`, a client base class there, is not a gap. So a
   server built from a class a project module re-exports is a gap on the file that
   builds it, even when the re-exporting module's own server is inventoried.
+  A `tool` decorator with a positional argument, or a keyword other than `name`,
+  `title`, `description`, `tags`, `annotations`, `output_schema`, `exclude_args`,
+  `meta`, `structured_output`, `icons`, `enabled`, `version`, `app`, `task`,
+  `timeout`, `auth` and `run_in_thread`, is an unresolved tool name gap,
+  because `fastmcp` also takes the name as `name_or_fn`. A tool given `enabled=False`
+  is still inventoried.
   Besides its `tool` decorator on a module-level function, which is inventoried, a
   server may be used without a gap only in these ways: reading its `name`,
   `instructions` or `settings`, as in `server.settings.port = 8000`; calling a run
@@ -581,7 +653,10 @@ A way around a limit that its entry does not describe is worth a
   pickle, a numeric NumPy array, a ZIP archive with neither kind of member, and `.pb`
   files other than `saved_model.pb` produce no component. A candidate ZIP archive is
   read to its end and digested, as a model archive is, and a candidate larger than
-  the `model-bytes` limit is a collection failure.
+  the `model-bytes` limit is a collection failure. A candidate that a model binds,
+  such as ONNX external data or a SavedModel variables file, is rated the same way
+  and is a component of its own when its content is a payload; a bound file outside
+  those names is only digested.
 - **Content recognition is bounded.** A binary pickle is recognized by its PROTO
   opcode and 16 well-formed opcodes in the first 64 KiB, and a text-protocol pickle
   by a consistent stream of at most 4,096 opcodes. In a file inventoried only by its
@@ -611,11 +686,19 @@ A way around a limit that its entry does not describe is worth a
   field named `O` is not one. A ZIP
   archive is recognized by a pickle-family member in its first local header or in a
   central directory of at most 1 MiB, read from the end of the archive, including
-  ZIP64, and by an object-dtype array as any member, read from the member's local
+  ZIP64, wherever the specification, `zipfile` (which `np.load` uses) or a ZIP64
+  locator puts it, so a member that any of them lists counts, and in a file that
+  starts with an end record, which `np.load` also reads as an archive; and by an
+  object-dtype array as any member, read from the member's local
   header and the start of its stored or DEFLATE-compressed data. A longer array
   header, a longer or malformed directory, a member compressed by another method,
   such as BZIP2 or LZMA, and a member whose data runs past the next member's local
-  header are rated `unknown`, a high finding; a pickle hidden otherwise under
+  header are rated `unknown`, a high finding. The directory is read with the
+  tolerances of `zipfile` and the specification; another reader's, such as the C++
+  reader `torch.load` uses, are not modelled. A member name with a NUL byte is
+  matched both whole and as `zipfile` cuts it at the NUL, and a member is also
+  matched by the name a version-1 Info-ZIP Unicode Path field (0x7075) with a
+  matching CRC gives it, as `zipfile` from Python 3.12 lists it. A pickle hidden otherwise under
   `.onnx`, `.gguf` or another suffix is rated `unknown` too, and
   `validate --project` still refuses it as unverified.
 - **Templates and tensors are checked shallowly.** GGUF and Hugging Face chat
@@ -1060,7 +1143,9 @@ A way around a limit that its entry does not describe is worth a
   of field and scheme names, path depth, whether a query or user information is
   present, and the requirement values of schemes other than OAuth 2.0 and OpenID
   Connect, including a credential pasted there by mistake.
-- **Cards built in code are gaps.** A card built in Python is a gap. Cards are read
+- **Cards built in code are gaps.** A card built in Python is a gap, and so is one
+  loaded from data, as with `AgentCard.model_validate`, also beside a static card:
+  nothing shows that the loaded card is the static one. Cards are read
   only from `.well-known` directories and from `agent.json`, `agent-card.json` and
   `a2a/agent.json` in the root. Direct calls to `AgentCard`, its recognized class
   methods, and aliases imported by name from `a2a` modules are recognized. The
@@ -1415,6 +1500,11 @@ A way around a limit that its entry does not describe is worth a
   `verify-live` observes stdio servers only: observe remote servers with
   `discover-mcp --record` and compare with `diff`. A WebSocket server is reported as
   `unsupported-transport`.
+- **The endpoint digest is unkeyed.** The `discover-mcp` report and `--record`
+  inventories show the origin and `observed_endpoint_hash`, an unsalted SHA-256 of the
+  full URL. A reader can recover a short or guessable path token by hashing candidate
+  URLs; a high-entropy API key is not practical to recover this way. Keep reports from
+  servers with low-entropy path secrets as private as the URL.
 - **Launcher pins cover the launcher only.** They do not authenticate the operating
   system, interpreter or libraries. Run launchers in an isolated worker, as
   [security boundaries](../SECURITY.md#security-boundaries) describe.
@@ -1494,6 +1584,16 @@ A way around a limit that its entry does not describe is worth a
   state file, so every gateway that serves the same tenants must share one store.
 - **`runtime verify` does not check revocation.** Revocation and approval bindings
   are checked only by the gateway.
+- **The runtime key placement check is a heuristic.** `runtime verify` and
+  `runtime register` refuse a public key inside a git working tree that holds an input
+  file or the current directory, and a key file with other hard links, as
+  `verify-attestation` does. The check does not authenticate a key or check its owner,
+  and a key copied or mounted out of the checkout is accepted; a registrar given such a
+  key can still record an attacker's serial, which only deleting rows undoes. Python
+  callers of `ReferenceGateway` pass key objects and get no placement check. The
+  hard-link rule does not look at where the other names are, so a key in a store that
+  deduplicates by hard links, such as the Nix store after `nix-store --optimise`, is
+  refused too; copy such a key to a file of its own.
 - **Schemas are read in their declared dialect.** A schema without `$schema` is read
   as JSON Schema 2020-12. A constraint that evaluation would skip, or a pattern that
   ECMA-262 and Python read differently, such as a backreference to an optional

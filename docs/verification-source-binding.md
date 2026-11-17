@@ -27,8 +27,9 @@ variables that redirect resolution (`npm_config_registry`, `UV_INDEX_URL`,
 `PIP_INDEX_URL`, `UV_PYTHON_INSTALL_MIRROR`, `JSR_URL`, `DOCKER_HOST`, `GOPROXY` and
 similar, and cache or tool directories a prepared copy could serve from:
 `UV_CACHE_DIR`, `UV_TOOL_DIR`, `PIPX_HOME`, `DENO_DIR`, `GOMODCACHE`), container engine options (`docker -H`, `--context`, `--config`; `podman
---url`, `--root`), `pipx --pip-args` index and trust options (matched by unique
-prefix, as pip's parser does; an unknown option is a gap) and project-root resolver
+--url`, `--root`), `pipx --pip-args` index, trust and constraint options (matched by
+unique prefix, as pip's parser does; an unknown option, a requirements file and an
+editable install are gaps) and project-root resolver
 settings that apply to the launched package: `.npmrc` for npm, pnpm, bun and Deno
 `npm:` specifiers, `bunfig.toml` for bun, `.yarnrc.yml` for `yarn dlx`, and `uv.toml`
 and `pyproject.toml` `[tool.uv]` (indexes, mirrors, insecure hosts and `sources`
@@ -64,7 +65,8 @@ that runs in another working directory (a `cwd` other than the root, `env -C`,
 `working-directory=[unresolved]`, and so does a server declared in a configuration
 file below the root (such as `packages/api/.mcp.json`), which its client starts in
 that file's directory; one whose variables come from an `envFile` or from
-`dotenvx`, `doppler`, `infisical` or `op run --env-file` carries
+`dotenvx`, `doppler`, `infisical`, `op run --env-file`, `uv --env-file` or
+`deno run --env-file` carries
 `environment-file=[unresolved]`. A variable that adds a trusted CA or disables TLS
 verification (`NODE_EXTRA_CA_CERTS`, `NODE_TLS_REJECT_UNAUTHORIZED=0`,
 `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and similar) is a source, and so are the

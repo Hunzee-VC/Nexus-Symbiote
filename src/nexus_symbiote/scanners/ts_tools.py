@@ -118,7 +118,8 @@ _COMPUTED_LOAD = (
     "inventoried"
 )
 _NAMED = "MCP SDK module named as a call argument; what the call loads not inventoried"
-# Expressions that evaluate to one operand: `(0, require)`, `require as Loader`, `require!`.
+# Expressions that evaluate to one operand: `(0, require)`, `require as Loader`, `require!`,
+# `eval<any>` (type arguments are erased).
 _WRAPPERS = frozenset(
     {
         "parenthesized_expression",
@@ -127,9 +128,12 @@ _WRAPPERS = frozenset(
         "as_expression",
         "satisfies_expression",
         "non_null_expression",
+        "instantiation_expression",
     }
 )
-_OPERAND_FIRST = frozenset({"as_expression", "satisfies_expression", "non_null_expression"})
+_OPERAND_FIRST = frozenset(
+    {"as_expression", "satisfies_expression", "non_null_expression", "instantiation_expression"}
+)
 # `(eval)(code)` and `eval!(code)` still call eval directly; `(0, eval)(code)` does not.
 _REFERENCE_WRAPPERS = _WRAPPERS - {"sequence_expression"}
 _UNPARSED_JAVASCRIPT = (
@@ -672,10 +676,18 @@ def _called_method(member: Node) -> str | None:
     return _value(index)[1:-1]
 
 
+def _parts(node: Node) -> list[Node]:
+    """The named children of ``node`` other than comments.
+
+    The grammar gives a comment as a child of the node it sits in, so ``(require /* */)``
+    would otherwise read as a comment in place of the callee.
+    """
+    return [child for child in node.named_children if not child.is_extra]
+
+
 def _operand(node: Node | None, wrappers: Collection[str] = _WRAPPERS) -> Node | None:
     """The expression a wrapper such as ``(0, require)`` or ``require as Loader`` evaluates to."""
-    while node is not None and node.type in wrappers and node.named_children:
-        children = node.named_children
+    while node is not None and node.type in wrappers and (children := _parts(node)):
         node = children[0] if node.type in _OPERAND_FIRST else children[-1]
     return node
 
@@ -720,7 +732,7 @@ def _load(call: Node, loaders: Collection[str]) -> tuple[bool, Node | None]:
     arguments = call.child_by_field_name("arguments")
     # A tagged template passes no specifier a loader accepts.
     listed = arguments is not None and arguments.type == "arguments"
-    values = arguments.named_children if arguments is not None and listed else []
+    values = _parts(arguments) if arguments is not None and listed else []
     if _loader(function, loaders):
         return True, values[0] if values else None
     method = None if function is None else _property(function)
@@ -729,7 +741,7 @@ def _load(call: Node, loaders: Collection[str]) -> tuple[bool, Node | None]:
             passed = values[1] if len(values) > 1 else None
             if method == "apply":
                 array = passed is not None and passed.type == "array"
-                elements = passed.named_children if passed is not None and array else []
+                elements = _parts(passed) if passed is not None and array else []
                 passed = elements[0] if elements else None
             return True, passed
     return False, values[0] if values else None
@@ -1000,7 +1012,8 @@ def _collect_source(content: bytes, path: Path, result: ScanResult) -> None:
             )
             continue
         arguments = node.child_by_field_name("arguments")
-        arg = arguments.named_children[0] if arguments and arguments.named_children else None
+        values = _parts(arguments) if arguments is not None else []
+        arg = values[0] if values else None
         name = _value(arg)[1:-1] if arg is not None and arg.type == "string" else ""
         if not re.fullmatch(r"[a-zA-Z0-9_.-]{1,128}", name):
             result.surfaces_excluded.append(
