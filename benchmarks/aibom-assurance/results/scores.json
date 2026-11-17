@@ -98,7 +98,7 @@
         "points": 2,
         "max": 2,
         "label": "M",
-        "note": "SPDX 3.0.1 JSON-LD: 1491 elements, 0 AI-profile, 0 dataset-profile"
+        "note": "SPDX 3.0.1 JSON-LD: 1484 elements, 0 AI-profile, 0 dataset-profile"
       },
       "D4.sarif": {
         "points": 2,
@@ -191,10 +191,10 @@
         "note": "runtime MCP proxy and gateway that alert on or block injected tool results (`--injection-mode enforce`), and `--introspect` connects to live MCP servers; documented, not exercised"
       },
       "D8.gate": {
-        "points": 0.6,
+        "points": 1,
         "max": 1,
-        "label": "D",
-        "note": "--fail-on-severity, --fail-on-kev, --fail-if-ai-risk and --policy"
+        "label": "M",
+        "note": "default run exited 1 with findings while still writing the BOM"
       },
       "D8.ci": {
         "points": 1,
@@ -206,7 +206,7 @@
         "points": 1,
         "max": 1,
         "label": "M",
-        "note": "default run 37.41s"
+        "note": "default run 42.86s"
       },
       "D8.docs": {
         "points": 1.0,
@@ -253,7 +253,7 @@
       },
       "D8": {
         "title": "Operability",
-        "points": 3.6,
+        "points": 4.0,
         "max": 4
       }
     },
@@ -655,7 +655,7 @@
       {
         "well_formed": true,
         "context": "\"https://spdx.org/rdf/3.0.1/spdx-context.jsonld\"",
-        "elements": 1491,
+        "elements": 1484,
         "ai_profile_elements": 0,
         "dataset_profile_elements": 0
       }
@@ -736,7 +736,7 @@
           "8.8.4.4:53",
           "8.8.8.8:53"
         ],
-        "dns": 421
+        "dns": 432
       },
       "default-2": {
         "connect": [
@@ -781,7 +781,7 @@
           "8.8.4.4:53",
           "8.8.8.8:53"
         ],
-        "dns": 419
+        "dns": 423
       },
       "json": {
         "connect": [
@@ -826,7 +826,7 @@
           "8.8.4.4:53",
           "8.8.8.8:53"
         ],
-        "dns": 426
+        "dns": 423
       },
       "offline": {
         "connect": [],
@@ -876,7 +876,7 @@
           "8.8.4.4:53",
           "8.8.8.8:53"
         ],
-        "dns": 543
+        "dns": 559
       },
       "spdx": {
         "connect": [
@@ -921,18 +921,18 @@
           "8.8.4.4:53",
           "8.8.8.8:53"
         ],
-        "dns": 428
+        "dns": 419
       }
     },
     "default_mode_quiet": false,
     "default_telemetry_hosts": [],
-    "default_duration_seconds": 37.41,
-    "total": 61.8,
+    "default_duration_seconds": 42.86,
+    "total": 62.2,
     "grade": "C",
-    "in_scope_score": 61.8,
+    "in_scope_score": 62.2,
     "evidence_mix": {
-      "M": 31,
-      "D": 4,
+      "M": 32,
+      "D": 3,
       "U": 0
     }
   },
@@ -1143,7 +1143,7 @@
         "points": 1,
         "max": 1,
         "label": "M",
-        "note": "default run 1.68s"
+        "note": "default run 1.47s"
       },
       "D8.docs": {
         "points": 1.0,
@@ -1444,7 +1444,7 @@
     "default_telemetry_hosts": [
       "api.aisbom.io"
     ],
-    "default_duration_seconds": 1.68,
+    "default_duration_seconds": 1.47,
     "total": 36.2,
     "grade": "F",
     "in_scope_score": 38.1,
@@ -1661,7 +1661,7 @@
         "points": 1,
         "max": 1,
         "label": "M",
-        "note": "default run 7.29s"
+        "note": "default run 7.5s"
       },
       "D8.docs": {
         "points": 1.0,
@@ -7825,8 +7825,8 @@
           "104.16.0.34:0",
           "104.16.1.34:0",
           "104.16.10.34:0",
-          "104.16.10.34:443",
           "104.16.11.34:0",
+          "104.16.11.34:443",
           "104.16.2.34:0",
           "104.16.3.34:0",
           "104.16.4.34:0",
@@ -7876,7 +7876,7 @@
     },
     "default_mode_quiet": true,
     "default_telemetry_hosts": [],
-    "default_duration_seconds": 7.29,
+    "default_duration_seconds": 7.5,
     "total": 54.0,
     "grade": "D",
     "in_scope_score": 54.0,
@@ -8093,7 +8093,7 @@
         "points": 1,
         "max": 1,
         "label": "M",
-        "note": "default run 96.14s"
+        "note": "default run 119.53s"
       },
       "D8.docs": {
         "points": 0.6,
@@ -8522,7 +8522,7 @@
     },
     "default_mode_quiet": false,
     "default_telemetry_hosts": [],
-    "default_duration_seconds": 96.14,
+    "default_duration_seconds": 119.53,
     "total": 52.0,
     "grade": "D",
     "in_scope_score": 52.0,
@@ -8933,10 +8933,10 @@
         "note": "4/14 items"
       },
       "D1.data": {
-        "points": 1.0,
+        "points": 0.0,
         "max": 4,
         "label": "M",
-        "note": "2/8 items"
+        "note": "0/8 items"
       },
       "D1.tools": {
         "points": 1.24,
@@ -8951,10 +8951,10 @@
         "note": "none reported"
       },
       "D2.locator": {
-        "points": 4.0,
+        "points": 3.91,
         "max": 4,
         "label": "M",
-        "note": "49/49 matched components carry a locator"
+        "note": "45/46 matched components carry a locator"
       },
       "D2.hash": {
         "points": 3.0,
@@ -8963,28 +8963,28 @@
         "note": "4/4 local artifacts hashed; 4 match the file's SHA-256"
       },
       "D2.version": {
-        "points": 0.73,
+        "points": 0.78,
         "max": 3,
         "label": "M",
-        "note": "12/49 carry a version or revision"
+        "note": "12/46 carry a version or revision"
       },
       "D2.license": {
         "points": 0.0,
         "max": 2,
         "label": "M",
-        "note": "0/49 carry a license"
+        "note": "0/46 carry a license"
       },
       "D2.supplier": {
         "points": 0.0,
         "max": 1,
         "label": "M",
-        "note": "0/49 carry a supplier, author, publisher or group"
+        "note": "0/46 carry a supplier, author, publisher or group"
       },
       "D2.confidence": {
         "points": 2,
         "max": 2,
         "label": "M",
-        "note": "confidence or tier labels on 100% of matched components"
+        "note": "confidence or tier labels on 98% of matched components"
       },
       "D3.recall": {
         "points": 4.55,
@@ -9008,7 +9008,7 @@
         "points": 2,
         "max": 2,
         "label": "M",
-        "note": "SPDX 3.0.1 JSON-LD: 157 elements, 5 AI-profile, 3 dataset-profile"
+        "note": "SPDX 3.0.1 JSON-LD: 149 elements, 5 AI-profile, 1 dataset-profile"
       },
       "D4.sarif": {
         "points": 2,
@@ -9029,16 +9029,16 @@
         "note": "5/7 clusters: metadata, system, models, datasets, security"
       },
       "D5.determinism": {
-        "points": 4,
+        "points": 0,
         "max": 4,
         "label": "M",
-        "note": "two default runs identical-raw"
+        "note": "outputs differ after normalization: {\"bom.cdx.json\": [\"components\", \"dependencies\", \"metadata\"]}"
       },
       "D5.serial": {
-        "points": 1,
+        "points": 0,
         "max": 1,
         "label": "M",
-        "note": "serial number identical across runs"
+        "note": "serial number or digest changes per run"
       },
       "D5.signing": {
         "points": 3.0,
@@ -9089,10 +9089,10 @@
         "note": "SECURITY.md present"
       },
       "D7.ingest": {
-        "points": 3,
+        "points": 2,
         "max": 3,
         "label": "M",
-        "note": "undeclared items surfaced: gpt-4.1-mini, export_customers"
+        "note": "undeclared items surfaced: gpt-4.1-mini, export_customers; declared items reported as undeclared: gpt-4o-2024-08-06"
       },
       "D7.capability": {
         "points": 1.0,
@@ -9101,10 +9101,10 @@
         "note": "`verify-live` compares the inventory with the tools operator-pinned stdio servers serve, and a signed runtime authorization gateway exists; no proxy or cluster inventory; not exercised"
       },
       "D8.gate": {
-        "points": 1.0,
+        "points": 1,
         "max": 1,
         "label": "M",
-        "note": "scan gate exited 1 on the critical pickle finding; `risk` and `--fail-on-alert` gates documented"
+        "note": "default run exited 1 with findings while still writing the BOM"
       },
       "D8.ci": {
         "points": 1,
@@ -9116,7 +9116,7 @@
         "points": 1,
         "max": 1,
         "label": "M",
-        "note": "default run 2.46s"
+        "note": "default run 2.93s"
       },
       "D8.docs": {
         "points": 1.0,
@@ -9128,12 +9128,12 @@
     "dimensions": {
       "D1": {
         "title": "Discovery coverage",
-        "points": 20.14,
+        "points": 19.14,
         "max": 30
       },
       "D2": {
         "title": "Evidence and attribute quality",
-        "points": 9.73,
+        "points": 9.69,
         "max": 15
       },
       "D3": {
@@ -9148,7 +9148,7 @@
       },
       "D5": {
         "title": "Trustworthiness of the BOM artifact",
-        "points": 10.0,
+        "points": 5.0,
         "max": 10
       },
       "D6": {
@@ -9158,7 +9158,7 @@
       },
       "D7": {
         "title": "Runtime reconciliation",
-        "points": 4.0,
+        "points": 3.0,
         "max": 5
       },
       "D8": {
@@ -9199,8 +9199,8 @@
         "mcp sdk client (code-detected)",
         "notes",
         "mcp-source:mcp_servers%2fnotes_server%2fsrc%2findex.ts:server:5:192",
-        "tool:mcp-source:mcp_servers%2fnotes_server%2fsrc%2findex.ts:server:5:192/create_note",
-        "mcp sdk client (code-detected)"
+        "mcp sdk client (code-detected)",
+        "mcp_servers/notes_server/src/index.ts"
       ],
       "L10": [
         "mcp",
@@ -9251,13 +9251,6 @@
         "remote-kb",
         "remote-kb"
       ],
-      "T7": [
-        "server",
-        "search_notes",
-        "tool:mcp-source:mcp_servers%2fnotes_server%2fsrc%2findex.ts:server:5:192/search_notes",
-        "tool:mcp-source:mcp_servers%2fnotes_server%2fsrc%2findex.ts:server:5:192/search_notes",
-        "search_notes"
-      ],
       "MD9": [
         "models/embed/identity.onnx",
         "model:models/embed/identity.onnx",
@@ -9306,11 +9299,6 @@
       "A1": [
         "docs/agent-rules.md",
         "prompt:claude.md"
-      ],
-      "R2": [
-        "rag-source-1",
-        "s3://acme-support-kb",
-        "rag-source-1"
       ],
       "L13": [
         "@anthropic-ai/sdk",
@@ -9417,9 +9405,6 @@
         "update_ticket_status",
         "update_ticket_status"
       ],
-      "T6": [
-        "create_note"
-      ],
       "T10": [
         "escalate_to_human",
         "tool:python:agent%2ftools.py/escalate_to_human",
@@ -9438,8 +9423,15 @@
         "send_customer_email",
         "send_customer_email"
       ],
-      "R3": [
-        "rag-source-1"
+      "T6": [
+        "tool:mcp-source:mcp_servers%2fnotes_server%2fsrc%2findex.ts:server:5:192/create_note"
+      ],
+      "T7": [
+        "tool:mcp-source:mcp_servers%2fnotes_server%2fsrc%2findex.ts:server:5:192/search_notes",
+        "tool:mcp-source:mcp_servers%2fnotes_server%2fsrc%2findex.ts:server:5:192/search_notes",
+        "search_notes",
+        "server",
+        "search_notes"
       ]
     },
     "missed_items": [
@@ -9462,6 +9454,8 @@
       "D4",
       "D5",
       "R1",
+      "R2",
+      "R3",
       "L12",
       "G1",
       "I1",
@@ -9489,9 +9483,9 @@
         "recall": 0.286
       },
       "data": {
-        "found": 2,
+        "found": 0,
         "total": 8,
-        "recall": 0.25
+        "recall": 0.0
       },
       "tools": {
         "found": 13,
@@ -9499,7 +9493,7 @@
         "recall": 0.619
       }
     },
-    "attribute_rows": 49,
+    "attribute_rows": 46,
     "risks_found": {
       "K1": [
         "default-1/bom.cdx.json:property",
@@ -9542,9 +9536,9 @@
       {
         "well_formed": true,
         "context": "\"https://spdx.org/rdf/3.0.1/spdx-context.jsonld\"",
-        "elements": 157,
+        "elements": 149,
         "ai_profile_elements": 5,
-        "dataset_profile_elements": 3
+        "dataset_profile_elements": 1
       }
     ],
     "sarif_validation": [
@@ -9561,12 +9555,18 @@
       "security"
     ],
     "determinism": {
-      "status": "identical-raw",
+      "status": "differs",
       "per_file": {
-        "bom.cdx.json": "identical-raw"
+        "bom.cdx.json": "differs"
       },
-      "diff_keys": {},
-      "serial_stable": true
+      "diff_keys": {
+        "bom.cdx.json": [
+          "components",
+          "dependencies",
+          "metadata"
+        ]
+      },
+      "serial_stable": false
     },
     "canaries": {
       "default": [],
@@ -9654,10 +9654,13 @@
       "gpt-4.1-mini",
       "export_customers"
     ],
-    "default_duration_seconds": 2.46,
-    "total": 77.8,
+    "runtime_false_alarms": [
+      "gpt-4o-2024-08-06"
+    ],
+    "default_duration_seconds": 2.93,
+    "total": 70.8,
     "grade": "B",
-    "in_scope_score": 77.8,
+    "in_scope_score": 70.8,
     "evidence_mix": {
       "M": 34,
       "D": 1,
@@ -9871,7 +9874,7 @@
         "points": 1,
         "max": 1,
         "label": "M",
-        "note": "default run 22.73s"
+        "note": "default run 26.99s"
       },
       "D8.docs": {
         "points": 1.0,
@@ -9927,9 +9930,9 @@
     "matched_items": {
       "MD4": [
         "distilbert-base-uncased-finetuned-sst-2-english",
-        "job-2026-11-17-16:39:33",
+        "job-2026-11-17-21:11:42",
         "distilbert-base-uncased-finetuned-sst-2-english",
-        "job-2026-11-17-16:39:33"
+        "job-2026-11-17-21:11:42"
       ]
     },
     "missed_items": [
@@ -10109,7 +10112,7 @@
     },
     "default_mode_quiet": false,
     "default_telemetry_hosts": [],
-    "default_duration_seconds": 22.73,
+    "default_duration_seconds": 26.99,
     "total": 24.3,
     "grade": "F",
     "in_scope_score": 30.0,
@@ -10703,7 +10706,7 @@
         "points": 1,
         "max": 1,
         "label": "M",
-        "note": "default run 1.72s"
+        "note": "default run 1.42s"
       },
       "D8.docs": {
         "points": 1.0,
@@ -10757,6 +10760,38 @@
     "notes": "Run as `ai-bom scan <fixture> -f cyclonedx|json|sarif` with defaults, plus one `--deep` run (AST-based Python analysis) that is excluded from discovery credit. Telemetry is opt-in. Last release March 2026.\n",
     "not_run_reason": "",
     "matched_items": {
+      "L13": [
+        "@anthropic-ai/sdk",
+        "@anthropic-ai/sdk"
+      ],
+      "L1": [
+        "langchain",
+        "langchain",
+        "langchain",
+        "langchain",
+        "langchain"
+      ],
+      "L3": [
+        "langchain-openai",
+        "langchain-openai"
+      ],
+      "L7": [
+        "anthropic",
+        "anthropic"
+      ],
+      "L10": [
+        "mcp",
+        "mcp",
+        "mcp",
+        "mcp",
+        "mcp"
+      ],
+      "L2": [
+        "langgraph",
+        "langgraph",
+        "langgraph",
+        "langgraph"
+      ],
       "L6": [
         "openai",
         "openai"
@@ -10769,41 +10804,9 @@
         "langchain-anthropic",
         "langchain-anthropic"
       ],
-      "L13": [
-        "@anthropic-ai/sdk",
-        "@anthropic-ai/sdk"
-      ],
-      "L2": [
-        "langgraph",
-        "langgraph",
-        "langgraph",
-        "langgraph"
-      ],
-      "L3": [
-        "langchain-openai",
-        "langchain-openai"
-      ],
-      "L10": [
-        "mcp",
-        "mcp",
-        "mcp",
-        "mcp",
-        "mcp"
-      ],
-      "L1": [
-        "langchain",
-        "langchain",
-        "langchain",
-        "langchain",
-        "langchain"
-      ],
       "L9": [
         "chromadb",
         "chromadb"
-      ],
-      "L7": [
-        "anthropic",
-        "anthropic"
       ],
       "A5": [
         "langchain"
@@ -11042,7 +11045,7 @@
     },
     "default_mode_quiet": true,
     "default_telemetry_hosts": [],
-    "default_duration_seconds": 1.72,
+    "default_duration_seconds": 1.42,
     "total": 36.5,
     "grade": "F",
     "in_scope_score": 36.5,

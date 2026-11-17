@@ -210,10 +210,6 @@
     "sha256": "d677b46a3ac07ed8aa3d662cf8da098f9c6ce05c16251206e698ef98ae0e6973",
     "bytes": 321
   },
-  "rag_config.yaml": {
-    "sha256": "b804bc566a20d142676c5e4da9fb075c86fb08c345e2dfec58260cd5571ea6d9",
-    "bytes": 248
-  },
   "requirements.txt": {
     "sha256": "20a5c7e445c5a88bbb1a5bdbc88c23471fc1741a6d5afa9f459fa79042e011aa",
     "bytes": 313

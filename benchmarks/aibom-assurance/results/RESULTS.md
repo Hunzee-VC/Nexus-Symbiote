@@ -4,8 +4,8 @@ Fixture `acme-support-agent`: 76 labelled items, 11 planted risks, 3 decoys. Evi
 
 | Rank | Tool | Full-stack | Grade | In-scope | D1 /30 | D2 /15 | D3 /12 | D4 /12 | D5 /10 | D6 /12 | D7 /5 | D8 /4 | Evidence M/D/U |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Nexus SymBiote 0.2.0 (this repository) | **77.8** | B | 77.8 | 20.14 | 9.73 | 6.55 | 11.43 | 10 | 12 | 4 | 4 | 34/1/0 |
-| 2 | agent-bom 0.115.3 | **61.8** | C | 61.8 | 17.38 | 5.16 | 8.36 | 9.14 | 5 | 12 | 1.2 | 3.6 | 31/4/0 |
+| 1 | Nexus SymBiote 0.2.0 (this repository) | **70.8** | B | 70.8 | 19.14 | 9.69 | 6.55 | 11.43 | 5 | 12 | 3 | 4 | 34/1/0 |
+| 2 | agent-bom 0.115.3 | **62.2** | C | 62.2 | 17.38 | 5.16 | 8.36 | 9.14 | 5 | 12 | 1.2 | 4 | 32/3/0 |
 | 3 | cdxgen 13.8.0 (OWASP), `aibom` command | **54.0** | D | 54.0 | 11.17 | 8.14 | 3.82 | 9.71 | 7 | 10 | 1 | 3.2 | 30/5/0 |
 | 4 | Cisco AI BOM 1.10.1 (deterministic tiers only) | **52.0** | D | 52.0 | 17.72 | 3.92 | 2 | 10.14 | 4 | 10 | 1 | 3.2 | 30/5/0 |
 | 5 | Trusera ai-bom 3.6.0 | **36.5** | F | 36.5 | 7.66 | 3.4 | 1 | 4.86 | 4 | 11 | 1 | 3.6 | 30/5/0 |
@@ -19,7 +19,7 @@ Fixture `acme-support-agent`: 76 labelled items, 11 planted risks, 3 decoys. Evi
 
 | Tool | agent | mcp | model | data | tools | Decoys reported |
 | --- | --- | --- | --- | --- | --- | --- |
-| Nexus SymBiote 0.2.0 (this repository) | 10/12 | 20/21 | 4/14 | 2/8 | 13/21 | - |
+| Nexus SymBiote 0.2.0 (this repository) | 10/12 | 20/21 | 4/14 | 0/8 | 13/21 | - |
 | agent-bom 0.115.3 | 6/12 | 18/21 | 7/14 | 0/8 | 19/21 | - |
 | cdxgen 13.8.0 (OWASP), `aibom` command | 8/12 | 1/21 | 8/14 | 1/8 | 15/21 | - |
 | Cisco AI BOM 1.10.1 (deterministic tiers only) | 7/12 | 14/21 | 9/14 | 2/8 | 16/21 | - |
@@ -49,7 +49,7 @@ Fixture `acme-support-agent`: 76 labelled items, 11 planted risks, 3 decoys. Evi
 
 | Tool | Canary (code executed) | Outside sentinel | Credential sentinel | Default-mode egress | Offline-mode egress | Determinism |
 | --- | --- | --- | --- | --- | --- | --- |
-| Nexus SymBiote 0.2.0 (this repository) | none | confined | absent | none observed | none observed | identical-raw |
+| Nexus SymBiote 0.2.0 (this repository) | none | confined | absent | none observed | none observed | differs |
 | agent-bom 0.115.3 | none | confined | absent | 104.16.0.34:0, 104.16.0.34:443, 104.16.1.34:0, 104.16.1.34:443, 104.16.10.34:0, 104.16.10.34:443, 104.16.11.34:0, 104.16.11.34:443, 104.16.2.34:0, 104.16.2.34:443, 104.16.3.34:0, 104.16.3.34:443, 104.16.4.34:0, 104.16.4.34:443, 104.16.5.34:0, 104.16.5.34:443, 104.16.6.34:0, 104.16.6.34:443, 104.16.7.34:0, 104.16.7.34:443, 104.16.8.34:0, 104.16.8.34:443, 104.16.9.34:0, 104.16.9.34:443, 151.101.0.223:0, 151.101.0.223:443, 151.101.128.223:0, 151.101.128.223:443, 151.101.192.223:0, 151.101.192.223:443, 151.101.64.223:0, 151.101.64.223:443, 8.8.4.4:53, 8.8.8.8:53, api.github.com:443, api.osv.dev:443, www.cisa.gov:443 | none observed | identical-normalized |
 | cdxgen 13.8.0 (OWASP), `aibom` command | setup-py-executed | confined | absent | none observed | none observed | identical-normalized |
 | Cisco AI BOM 1.10.1 (deterministic tiers only) | none | confined | absent | api.osv.dev:443, huggingface.co:443, raw.githubusercontent.com:443 | no offline mode run | identifier-only |
@@ -60,9 +60,28 @@ Fixture `acme-support-agent`: 76 labelled items, 11 planted risks, 3 decoys. Evi
 | WasmAgent agentbom-core 0.4.0 (spec and library) | not run | not run | not run | not run | not run | not run |
 | Snyk `snyk aibom` (CLI 1.1308.4) | not run | not run | not run | not run | not run | not run |
 
+## Sensitivity of the ranking to the weights
+
+The chosen weights encode a view of what a BOM is for. These alternatives check whether the order depends on that view.
+
+| Tool | As weighted | Equal dimensions | Discovery 50% | Equal family weights in D1 | Measured criteria only |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Nexus SymBiote 0.2.0 (this repository) | 70.8 | 73.5 | 68.8 | 67.8 | 71.2 |
+| agent-bom 0.115.3 | 62.2 | 64.0 | 61.0 | 61.4 | 66.3 |
+| cdxgen 13.8.0 (OWASP), `aibom` command | 54.0 | 57.2 | 49.2 | 55.6 | 57.0 |
+| Cisco AI BOM 1.10.1 (deterministic tiers only) | 52.0 | 51.2 | 54.0 | 51.7 | 55.3 |
+| Trusera ai-bom 3.6.0 | 36.5 | 42.3 | 33.4 | 37.7 | 39.2 |
+| AIsbom 1.7.0 (model-file scanner) | 36.2 | 42.4 | 28.5 | 38.3 | 38.6 |
+| OWASP AIBOM Generator (git main, Hugging Face models) | 24.3 | 27.5 | 17.8 | 24.3 | 28.2 |
+| k8s-aibom (Google Cloud, Kubernetes controller) | 20.2 | 25.2 | 14.4 | 20.2 | n/a |
+| WasmAgent agentbom-core 0.4.0 (spec and library) | 5.0 | 5.6 | 3.6 | 5.0 | n/a |
+| Snyk `snyk aibom` (CLI 1.1308.4) | 4.4 | 5.8 | 3.1 | 4.4 | n/a |
+
+Measured-only divides points earned on M-labelled criteria by their maximum, so a tool graded mostly from documentation is shown only for tools with at least ten measured criteria.
+
 ## Per-tool criteria
 
-### Nexus SymBiote 0.2.0 (this repository): 77.8 (B)
+### Nexus SymBiote 0.2.0 (this repository): 70.8 (B)
 
 Run as `nexus-symbiote scan <fixture> -f cyclonedx|json|spdx|sarif -o ...` with defaults (offline), plus `trace-diff` against the fixture's OTLP export and `minimum-elements` on the CycloneDX export. The scan gate fails on the fixture (exit 1) by design because the pickle model is a critical finding; the inventory is still written. Conflict of interest: the benchmark lives in this tool's repository; see BENCHMARK.md section 8.
 
@@ -72,24 +91,24 @@ Run as `nexus-symbiote scan <fixture> -f cyclonedx|json|spdx|sarif -o ...` with 
 | D1.agent | 6.67 | 8 | M | 10/12 items |
 | D1.mcp | 9.52 | 10 | M | 20/21 items |
 | D1.model | 1.71 | 6 | M | 4/14 items |
-| D1.data | 1 | 4 | M | 2/8 items |
+| D1.data | 0 | 4 | M | 0/8 items |
 | D1.tools | 1.24 | 2 | M | 13/21 items |
 | D1.decoy_penalty | 0 | 0 | M | none reported |
-| D2.locator | 4 | 4 | M | 49/49 matched components carry a locator |
+| D2.locator | 3.91 | 4 | M | 45/46 matched components carry a locator |
 | D2.hash | 3 | 3 | M | 4/4 local artifacts hashed; 4 match the file's SHA-256 |
-| D2.version | 0.73 | 3 | M | 12/49 carry a version or revision |
-| D2.license | 0 | 2 | M | 0/49 carry a license |
-| D2.supplier | 0 | 1 | M | 0/49 carry a supplier, author, publisher or group |
-| D2.confidence | 2 | 2 | M | confidence or tier labels on 100% of matched components |
+| D2.version | 0.78 | 3 | M | 12/46 carry a version or revision |
+| D2.license | 0 | 2 | M | 0/46 carry a license |
+| D2.supplier | 0 | 1 | M | 0/46 carry a supplier, author, publisher or group |
+| D2.confidence | 2 | 2 | M | confidence or tier labels on 98% of matched components |
 | D3.recall | 4.55 | 10 | M | 5/11 planted risks surfaced |
 | D3.quality | 2 | 2 | M | findings carry a code, severity, the offending component and remediation guidance; SARIF rules map to the crosswalk |
 | D4.cyclonedx | 3 | 3 | M | 1 document(s) valid against spec 1.7 |
-| D4.spdx | 2 | 2 | M | SPDX 3.0.1 JSON-LD: 157 elements, 5 AI-profile, 3 dataset-profile |
+| D4.spdx | 2 | 2 | M | SPDX 3.0.1 JSON-LD: 149 elements, 5 AI-profile, 1 dataset-profile |
 | D4.sarif | 2 | 2 | M | valid |
 | D4.ml_structures | 3 | 3 | M | typed ML components, modelCard/data, services/formulation/evidence |
 | D4.g7 | 1.43 | 2 | M | 5/7 clusters: metadata, system, models, datasets, security |
-| D5.determinism | 4 | 4 | M | two default runs identical-raw |
-| D5.serial | 1 | 1 | M | serial number identical across runs |
+| D5.determinism | 0 | 4 | M | outputs differ after normalization: {"bom.cdx.json": ["components", "dependencies", "metadata"]} |
+| D5.serial | 0 | 1 | M | serial number or digest changes per run |
 | D5.signing | 3 | 3 | M | `attest` signed the native inventory with an Ed25519 key into a DSSE envelope and `verify-attestation` verified it (attestation_verified true, subject and attested SHA-256 equal) |
 | D5.diff | 2 | 2 | M | `diff` compared two collections of the fixture and reported 13 changes, all medium alerts for values left unbound without the source-binding key; exit 1 by design |
 | D6.no_exec | 3 | 3 | M | no canary fired in any run |
@@ -98,16 +117,16 @@ Run as `nexus-symbiote scan <fixture> -f cyclonedx|json|spdx|sarif -o ...` with 
 | D6.offline | 2 | 2 | M | no network attempt in offline |
 | D6.pinning | 2 | 2 | M | hash-locked CI environment, Dependabot, OpenSSF Scorecard and release workflows; PyPI release carries PEP 740 provenance attestations |
 | D6.security_policy | 1 | 1 | M | SECURITY.md present |
-| D7.ingest | 3 | 3 | M | undeclared items surfaced: gpt-4.1-mini, export_customers |
+| D7.ingest | 2 | 3 | M | undeclared items surfaced: gpt-4.1-mini, export_customers; declared items reported as undeclared: gpt-4o-2024-08-06 |
 | D7.capability | 1 | 2 | D | `verify-live` compares the inventory with the tools operator-pinned stdio servers serve, and a signed runtime authorization gateway exists; no proxy or cluster inventory; not exercised |
-| D8.gate | 1 | 1 | M | scan gate exited 1 on the critical pickle finding; `risk` and `--fail-on-alert` gates documented |
+| D8.gate | 1 | 1 | M | default run exited 1 with findings while still writing the BOM |
 | D8.ci | 1 | 1 | M | SARIF produced for code-scanning upload |
-| D8.speed | 1 | 1 | M | default run 2.46s |
+| D8.speed | 1 | 1 | M | default run 2.93s |
 | D8.docs | 1 | 1 | M | `nexus-symbiote scan <dir> -f cyclonedx -o file` ran as the CLI reference documents |
 
-Missed items: A5, A8, M10, MD1, MD2, MD3, MD4, MD5, MD10, MD11, MD12, MD13, E1, D1, D2, D3, D4, D5, R1, L12, G1, I1, I2, I3, I4, I5, I6. Default run: 2.46s. CycloneDX validation: {"default-1/bom.cdx.json": ["valid", ""]}
+Missed items: A5, A8, M10, MD1, MD2, MD3, MD4, MD5, MD10, MD11, MD12, MD13, E1, D1, D2, D3, D4, D5, R1, R2, R3, L12, G1, I1, I2, I3, I4, I5, I6. Default run: 2.93s. CycloneDX validation: {"default-1/bom.cdx.json": ["valid", ""]}
 
-### agent-bom 0.115.3: 61.8 (C)
+### agent-bom 0.115.3: 62.2 (C)
 
 Run as `agent-bom scan <fixture> -f cyclonedx|json|sarif|spdx` with defaults (vulnerability lookups on) and once with `--offline`. The offline run warns that it needs a pre-populated local vulnerability database and exits 1 while still writing the BOM.
 
@@ -132,7 +151,7 @@ Run as `agent-bom scan <fixture> -f cyclonedx|json|sarif|spdx` with defaults (vu
 
 Failed validating 'oneOf' in schema['properties']['components']['items']['properties']['licenses']:
     {'t |
-| D4.spdx | 2 | 2 | M | SPDX 3.0.1 JSON-LD: 1491 elements, 0 AI-profile, 0 dataset-profile |
+| D4.spdx | 2 | 2 | M | SPDX 3.0.1 JSON-LD: 1484 elements, 0 AI-profile, 0 dataset-profile |
 | D4.sarif | 2 | 2 | M | valid |
 | D4.ml_structures | 3 | 3 | M | typed ML components, modelCard/data, services/formulation/evidence |
 | D4.g7 | 1.14 | 2 | M | 4/7 clusters: metadata, models, datasets, infrastructure |
@@ -148,12 +167,12 @@ Failed validating 'oneOf' in schema['properties']['components']['items']['proper
 | D6.security_policy | 1 | 1 | M | SECURITY.md present |
 | D7.ingest | 0 | 3 | D | no ingestion of exported traces against the BOM |
 | D7.capability | 1.2 | 2 | D | runtime MCP proxy and gateway that alert on or block injected tool results (`--injection-mode enforce`), and `--introspect` connects to live MCP servers; documented, not exercised |
-| D8.gate | 0.6 | 1 | D | --fail-on-severity, --fail-on-kev, --fail-if-ai-risk and --policy |
+| D8.gate | 1 | 1 | M | default run exited 1 with findings while still writing the BOM |
 | D8.ci | 1 | 1 | M | SARIF produced for code-scanning upload |
-| D8.speed | 1 | 1 | M | default run 37.41s |
+| D8.speed | 1 | 1 | M | default run 42.86s |
 | D8.docs | 1 | 1 | M | `agent-bom scan . -f cyclonedx -o sbom.cdx.json` ran as documented |
 
-Missed items: A1, A2, A3, A4, A6, A8, M7, M10, M11, MD4, MD5, MD10, MD11, MD12, MD13, E1, D1, D2, D3, D4, D5, R1, R2, R3, I3, I4. Default run: 37.41s. CycloneDX validation: {"default-1/bom.cdx.json": ["invalid", "[{'license': {'id': 'SEE LICENSE IN LICENSE'}}] is not valid under any of the given schemas\n\nFailed validating 'oneOf' in schema['properties']['components']['items']['properties']['licenses']:\n    {'title': 'License Choice',\n     'description': 'EITHER (li
+Missed items: A1, A2, A3, A4, A6, A8, M7, M10, M11, MD4, MD5, MD10, MD11, MD12, MD13, E1, D1, D2, D3, D4, D5, R1, R2, R3, I3, I4. Default run: 42.86s. CycloneDX validation: {"default-1/bom.cdx.json": ["invalid", "[{'license': {'id': 'SEE LICENSE IN LICENSE'}}] is not valid under any of the given schemas\n\nFailed validating 'oneOf' in schema['properties']['components']['items']['properties']['licenses']:\n    {'title': 'License Choice',\n     'description': 'EITHER (li
 
 ### cdxgen 13.8.0 (OWASP), `aibom` command: 54.0 (D)
 
@@ -195,10 +214,10 @@ Run as `aibom <fixture> -o bom.cdx.json` (the AI-BOM entry point) and as plain `
 | D7.capability | 1 | 2 | D | tracebom profiles running applications and services into CycloneDX 1.7; not agent-specific, not exercised |
 | D8.gate | 0.6 | 1 | D | --introspect-fail-below and cdx-audit exit codes gate CI; --fail-on-error |
 | D8.ci | 0.6 | 1 | D | official GitHub Action and Dependency-Track upload; no SARIF output observed |
-| D8.speed | 1 | 1 | M | default run 7.29s |
+| D8.speed | 1 | 1 | M | default run 7.5s |
 | D8.docs | 1 | 1 | M | `aibom .` ran exactly as the AI-BOM guide documents |
 
-Missed items: A1, A3, A6, A8, M1, M2, M3, M4, M6, M7, M8, M9, M10, M11, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, MD5, MD7, MD11, MD12, MD13, E1, D2, D3, D4, D5, R1, R2, R3, G1, I1, I2, I3, I4, I5. Default run: 7.29s. CycloneDX validation: {"autodetect/bom.cdx.json": ["valid", ""], "default-1/bom.cdx.json": ["valid", ""]}
+Missed items: A1, A3, A6, A8, M1, M2, M3, M4, M6, M7, M8, M9, M10, M11, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, MD5, MD7, MD11, MD12, MD13, E1, D2, D3, D4, D5, R1, R2, R3, G1, I1, I2, I3, I4, I5. Default run: 7.5s. CycloneDX validation: {"autodetect/bom.cdx.json": ["valid", ""], "default-1/bom.cdx.json": ["valid", ""]}
 
 ### Cisco AI BOM 1.10.1 (deterministic tiers only): 52.0 (D)
 
@@ -240,10 +259,10 @@ Missed items: A1, A3, A6, A8, M1, M2, M3, M4, M6, M7, M8, M9, M10, M11, T1, T2, 
 | D7.capability | 1 | 2 | D | cloud scanning of Bedrock, Vertex AI and Azure AI resources inventories deployed AI assets; `watch` re-scans on change; neither exercised |
 | D8.gate | 0.6 | 1 | D | --fail-on severity and --policy YAML gates on `analyze` |
 | D8.ci | 1 | 1 | M | SARIF produced for code-scanning upload |
-| D8.speed | 1 | 1 | M | default run 96.14s |
+| D8.speed | 1 | 1 | M | default run 119.53s |
 | D8.docs | 0.6 | 1 | D | documented quickstart needs an LLM key, so it could not be reproduced here; command syntax matched the CLI help |
 
-Missed items: A1, A4, A7, S3, P1, M7, M9, M10, T6, T7, T8, T9, MD5, MD7, MD10, MD11, MD13, D1, D2, D5, R1, R2, R3, L5, G1, I1, I4, I6. Default run: 96.14s. CycloneDX validation: {"default-1/report.cdx.json": ["valid", ""]}
+Missed items: A1, A4, A7, S3, P1, M7, M9, M10, T6, T7, T8, T9, MD5, MD7, MD10, MD11, MD13, D1, D2, D5, R1, R2, R3, L5, G1, I1, I4, I6. Default run: 119.53s. CycloneDX validation: {"default-1/report.cdx.json": ["valid", ""]}
 
 ### Trusera ai-bom 3.6.0: 36.5 (F)
 
@@ -285,10 +304,10 @@ Run as `ai-bom scan <fixture> -f cyclonedx|json|sarif` with defaults, plus one `
 | D7.capability | 1 | 2 | D | separate Trusera runtime SDKs evaluate Cedar policies on agent HTTP calls; not part of the scanner, not exercised |
 | D8.gate | 0.6 | 1 | D | --fail-on severity and --policy YAML |
 | D8.ci | 1 | 1 | M | SARIF produced for code-scanning upload |
-| D8.speed | 1 | 1 | M | default run 1.72s |
+| D8.speed | 1 | 1 | M | default run 1.42s |
 | D8.docs | 1 | 1 | M | `ai-bom scan . -f cyclonedx -o ai-bom.cdx.json` ran as documented |
 
-Missed items: A1, A2, A3, A4, A6, A7, S1, S2, S3, P1, M2, M7, M8, M9, M10, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, MD1, MD3, MD4, MD5, MD7, MD10, MD11, MD13, E1, D1, D2, D3, D4, D5, R1, R2, R3, L5, L11, L12, L14, G1, I1, I5. Default run: 1.72s. CycloneDX validation: {"default-1/bom.cdx.json": ["invalid", "'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'machine-learning-model', 'data', 'cryptographic-asset']\n\nFailed validating 'enum' in schema['properti
+Missed items: A1, A2, A3, A4, A6, A7, S1, S2, S3, P1, M2, M7, M8, M9, M10, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, MD1, MD3, MD4, MD5, MD7, MD10, MD11, MD13, E1, D1, D2, D3, D4, D5, R1, R2, R3, L5, L11, L12, L14, G1, I1, I5. Default run: 1.42s. CycloneDX validation: {"default-1/bom.cdx.json": ["invalid", "'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'machine-learning-model', 'data', 'cryptographic-asset']\n\nFailed validating 'enum' in schema['properti
 
 ### AIsbom 1.7.0 (model-file scanner): 36.2 (F)
 
@@ -330,10 +349,10 @@ A static scanner for model files (pickle, Keras, GGUF, ONNX, safetensors) that a
 | D7.capability | 0 | 2 | D | not in scope |
 | D8.gate | 0.6 | 1 | D | --fail-on-risk returns exit code 2 |
 | D8.ci | 0.6 | 1 | D | GitHub Action on the Marketplace posts a PR comment; no SARIF output |
-| D8.speed | 1 | 1 | M | default run 1.68s |
+| D8.speed | 1 | 1 | M | default run 1.47s |
 | D8.docs | 1 | 1 | M | `aisbom scan <dir>` ran as documented |
 
-Missed items: A1, A2, A3, A4, A5, A6, A7, A8, S1, S2, S3, P1, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, MD1, MD2, MD3, MD4, MD5, MD10, MD11, MD12, MD13, E1, D1, D2, D3, D4, D5, R1, R2, R3, L12, L13, L14, G1, I1, I2, I3, I4, I5, I6. Default run: 1.68s. CycloneDX validation: {"default-1/bom.cdx.json": ["valid", ""]}
+Missed items: A1, A2, A3, A4, A5, A6, A7, A8, S1, S2, S3, P1, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, MD1, MD2, MD3, MD4, MD5, MD10, MD11, MD12, MD13, E1, D1, D2, D3, D4, D5, R1, R2, R3, L12, L13, L14, G1, I1, I2, I3, I4, I5, I6. Default run: 1.47s. CycloneDX validation: {"default-1/bom.cdx.json": ["valid", ""]}
 
 ### OWASP AIBOM Generator (git main, Hugging Face models): 24.3 (F)
 
@@ -375,10 +394,10 @@ Generates one AIBOM per Hugging Face model id; it does not scan repositories. Th
 | D7.capability | 0 | 2 | D | not in scope |
 | D8.gate | 0 | 1 | D | no pass or fail gate; completeness score only |
 | D8.ci | 0 | 1 | D | web UI and HTTP API; no SARIF or CI action |
-| D8.speed | 1 | 1 | M | default run 22.73s |
+| D8.speed | 1 | 1 | M | default run 26.99s |
 | D8.docs | 1 | 1 | M | ran as the README documents |
 
-Missed items: A1, A2, A3, A4, A5, A6, A7, A8, S1, S2, S3, P1, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, MD1, MD2, MD3, MD5, MD6, MD7, MD8, MD9, MD10, MD11, MD12, MD13, E1, D1, D2, D3, D4, D5, R1, R2, R3, L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13, L14, G1, I1, I2, I3, I4, I5, I6. Default run: 22.73s. CycloneDX validation: {"default-1/aibom.json": ["valid", ""], "default-1/aibom_1_7.json": ["valid", ""]}
+Missed items: A1, A2, A3, A4, A5, A6, A7, A8, S1, S2, S3, P1, M1, M2, M3, M4, M5, M6, M7, M8, M9, M10, M11, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, MD1, MD2, MD3, MD5, MD6, MD7, MD8, MD9, MD10, MD11, MD12, MD13, E1, D1, D2, D3, D4, D5, R1, R2, R3, L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13, L14, G1, I1, I2, I3, I4, I5, I6. Default run: 26.99s. CycloneDX validation: {"default-1/aibom.json": ["valid", ""], "default-1/aibom_1_7.json": ["valid", ""]}
 
 ### k8s-aibom (Google Cloud, Kubernetes controller): 20.2 (F)
 

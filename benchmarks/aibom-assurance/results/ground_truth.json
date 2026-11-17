@@ -778,10 +778,11 @@
       "family": "data",
       "category": "rag",
       "name": "Chroma vector store collection",
-      "path": "rag_config.yaml",
+      "path": "agent/rag.py",
       "tokens": [
         "support-kb",
-        "persist_directory"
+        "persist_directory",
+        "PERSIST_DIR"
       ],
       "names": [],
       "shared_tokens": [],

@@ -1573,15 +1573,16 @@ def sensitivity(results: list[dict]) -> list[str]:
             c["points"] for c in r["criteria"].values() if c["label"] == "M" and c["max"] > 0
         )
         m_max = sum(c["max"] for c in r["criteria"].values() if c["label"] == "M" and c["max"] > 0)
-        measured = 100 * m_pts / m_max if m_max else 0.0
+        m_count = sum(1 for c in r["criteria"].values() if c["label"] == "M" and c["max"] > 0)
+        measured = f"{100 * m_pts / m_max:.1f}" if m_max and m_count >= 10 else "n/a"
         rows.append((r["display"], r["total"], equal, discovery_heavy, equal_family, measured))
     for row in sorted(rows, key=lambda x: -x[1]):
         lines.append(
-            f"| {row[0]} | {row[1]:.1f} | {row[2]:.1f} | {row[3]:.1f} | {row[4]:.1f} | {row[5]:.1f} |"
+            f"| {row[0]} | {row[1]:.1f} | {row[2]:.1f} | {row[3]:.1f} | {row[4]:.1f} | {row[5]} |"
         )
     lines.append("")
     lines.append(
-        "Measured-only divides points earned on M-labelled criteria by their maximum, so a tool graded mostly from documentation shows what little was actually observed."
+        "Measured-only divides points earned on M-labelled criteria by their maximum, so a tool graded mostly from documentation is shown only for tools with at least ten measured criteria."
     )
     return lines
 

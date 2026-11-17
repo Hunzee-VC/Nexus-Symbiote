@@ -5,7 +5,9 @@ components (instruction files, skills, MCP servers and tools, A2A cards, coding-
 settings, workflows), plus the properties a BOM needs to be worth trusting: evidence,
 standards conformance, determinism, signing, and whether the scanner itself is safe to point
 at a hostile repository. The specification is in [BENCHMARK.md](BENCHMARK.md); this page
-summarizes the first run, on 17 November 2026.
+summarizes the rerun of 17 November 2026 after the skeptic's review in
+[CRITIQUE.md](CRITIQUE.md), which removed a fixture file only the host tool reads and
+tightened two scoring rules. The first run's scores are kept in `results/first-run/`.
 
 | File | Purpose |
 | --- | --- |
@@ -15,7 +17,8 @@ summarizes the first run, on 17 November 2026.
 | `cisco_deterministic.py`, `wasmagent_check.mjs` | Helpers for tools that have no plain CLI path for the benchmark |
 | `score.py` | Matches outputs against the ground truth, validates schemas, checks determinism, applies rubrics |
 | `rubric/<tool>.yaml` | Manual criteria with an evidence label and a one-line justification each |
-| `results/RESULTS.md`, `results/scores.json` | Scoreboard and per-criterion detail |
+| `results/RESULTS.md`, `results/scores.json` | Scoreboard, per-criterion detail and weight sensitivity for the rerun; `results/first-run/` holds the first run |
+| `CRITIQUE.md` | The skeptic's review: challenges, what changed, what remains unresolved |
 | `results/evidence/<tool>/<run>/` | Commands, outputs, stdout, stderr and `meta.json` for every run (strace logs and private keys left out) |
 
 ## Scoreboard
@@ -26,8 +29,8 @@ dimensions a tool claims. Evidence labels: M measured here, D documentation only
 
 | Rank | Tool | Full-stack | Grade | In-scope | Evidence M/D/U |
 | --- | --- | ---: | --- | ---: | --- |
-| 1 | Nexus SymBiote 0.2.0 (this repository) | 77.8 | B | 77.8 | 34/1/0 |
-| 2 | agent-bom 0.115.3 | 61.8 | C | 61.8 | 31/4/0 |
+| 1 | Nexus SymBiote 0.2.0 (this repository) | 70.8 | B | 70.8 | 34/1/0 |
+| 2 | agent-bom 0.115.3 | 62.2 | C | 62.2 | 32/3/0 |
 | 3 | cdxgen 13.8.0 (OWASP) | 54.0 | D | 54.0 | 30/5/0 |
 | 4 | Cisco AI BOM 1.10.1, deterministic tiers only | 52.0 | D | 52.0 | 30/5/0 |
 | 5 | Trusera ai-bom 3.6.0 | 36.5 | F | 36.5 | 30/5/0 |
@@ -48,7 +51,7 @@ tools items.
 
 | Tool | agent | mcp | model | data | tools | Planted risks surfaced |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Nexus SymBiote | 10 | 20 | 4 | 2 | 13 | K1 K4 K5 K8 K10 |
+| Nexus SymBiote | 10 | 20 | 4 | 0 | 13 | K1 K4 K5 K8 K10 |
 | agent-bom | 6 | 18 | 7 | 0 | 19 | K1 K2 K3 K4 K8 K10 K11 |
 | cdxgen (`aibom` plus plain `cdxgen`) | 8 | 1 | 8 | 1 | 15 | K7 K11 |
 | Cisco AI BOM (deterministic) | 7 | 14 | 9 | 2 | 16 | none |
@@ -90,9 +93,13 @@ agent-bom, Cisco and Trusera. SPDX 3.0.1 JSON-LD was well formed from five tools
 Cisco (12 elements), Nexus SymBiote (5) and AIsbom (4) used the AI or Dataset profiles;
 agent-bom and cdxgen emitted software-only SPDX.
 
-**Trust in the artifact (D5).** Two runs on identical input gave byte-identical output only
-from Nexus SymBiote. agent-bom, cdxgen, Trusera and AIsbom were identical after removing
-timestamps, UUIDs and process ids. Cisco differed only in randomly generated `bom-ref`
+**Trust in the artifact (D5).** No tool gave byte-identical output on two default runs in the
+rerun. Nexus SymBiote did in the first run, but in the rerun its first run hit a 0.25 second
+TypeScript parse deadline under `strace` and dropped the notes server's two tools, which its
+inventory recorded as a collection failure; coverage that depends on machine speed is not
+reproducible, and `docs/collection-limits.md` says the limits are not wall-clock deadlines.
+agent-bom, cdxgen, Trusera and AIsbom were identical after removing timestamps, UUIDs and
+process ids. Cisco differed only in randomly generated `bom-ref`
 values on its vulnerability entries. The OWASP generator differed in content because it
 names its metadata component after the run time. Signing was exercised and worked in Nexus
 SymBiote (DSSE attestation, verified) and cdxgen (JSON Signature Format); nothing else signs
@@ -112,19 +119,21 @@ local vulnerability database is downloaded.
 
 **Runtime reconciliation (D7).** Only Nexus SymBiote ingests runtime evidence: `trace-diff`
 read the fixture's OTLP export and reported both undeclared items (`gpt-4.1-mini` and
-`export_customers`). It also reported two declared items as undeclared, the agent and the
-primary model, because its inventory does not hold hosted models or code-level agents.
+`export_customers`). It also reported the declared primary model as undeclared, because its
+inventory does not hold hosted models, which costs it a point.
 agent-bom's MCP proxy and k8s-aibom's controller are runtime capabilities the harness could
 not exercise.
 
 ## Verdicts
 
-- **Nexus SymBiote** is the only tool that treats the BOM as evidence: deterministic bytes,
-  verified attestation, hashes, confinement, offline by default, and runtime reconciliation.
-  Its discovery gaps are hosted model references and datasets in code, infrastructure outside
-  the repository root, nested package manifests, and it does not flag plaintext credentials
-  or destructive tools in the scan findings. Conflict of interest: the benchmark lives in its
-  repository (BENCHMARK.md, section 8).
+- **Nexus SymBiote** is the only tool that treats the BOM as evidence: verified attestation,
+  correct hashes, confinement, offline by default, and runtime reconciliation. Its discovery
+  gaps are hosted model references and datasets in code (0 of 8 data items once its own
+  configuration convention was removed from the fixture), infrastructure outside the
+  repository root and nested package manifests; it does not flag plaintext credentials or
+  destructive tools in scan findings; and a wall-clock parse deadline makes its coverage,
+  and therefore its output, depend on machine speed. Conflict of interest: the benchmark
+  lives in its repository (BENCHMARK.md, section 8, and CRITIQUE.md).
 - **agent-bom** has the widest risk coverage and the richest agent, MCP and dependency
   inventory, with a tool-level inventory in its native JSON. Fix the CycloneDX license
   encoding, carry models and tools into the standard export, and make offline mode usable
