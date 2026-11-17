@@ -38,8 +38,8 @@ manual:
     note: "runtime MCP proxy and gateway that alert on or block injected tool results (`--injection-mode enforce`), and `--introspect` connects to live MCP servers; documented, not exercised"
   D8.gate:
     points: 1
-    label: D
-    note: "--fail-on-severity, --fail-on-kev, --fail-if-ai-risk and --policy"
+    label: M
+    note: "default scan exited 1 under its documented exit-code contract once findings were present; --fail-on-severity, --fail-on-kev and --policy refine it"
   D8.docs:
     points: 1
     label: M

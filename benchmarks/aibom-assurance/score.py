@@ -1434,12 +1434,29 @@ class Scorer:
                 u["name"] for u in self.truth["runtime"]["undeclared"] if u["name"].lower() in text
             ]
             result["runtime_undeclared_found"] = undeclared
+            # precision: a declared item reported as undeclared is a false alarm
+            undeclared_section = ""
+            for p in runtime_dir.iterdir():
+                doc = load_json(p) if p.suffix in {".json", ".txt"} else None
+                if isinstance(doc, dict):
+                    undeclared_section += json.dumps(
+                        [v for k, v in walk_key(doc, "undeclared")]
+                    ).lower()
+            false_alarms = [
+                d["name"]
+                for d in self.truth["runtime"]["declared"]
+                if d["name"].lower() in undeclared_section
+            ]
+            result["runtime_false_alarms"] = false_alarms
+            points = {2: 3, 1: 2, 0: 0}[len(undeclared)]
+            if points == 3 and false_alarms:
+                points = 2
             put(
                 "D7.ingest",
-                {2: 3, 1: 2, 0: 0}[len(undeclared)],
+                points,
                 3,
                 "M",
-                f"undeclared items surfaced: {', '.join(undeclared) or 'none'}",
+                f"undeclared items surfaced: {', '.join(undeclared) or 'none'}; declared items reported as undeclared: {', '.join(false_alarms) or 'none'}",
             )
         else:
             p, lab, note = self.manual(rub, "D7.ingest", 3)
@@ -1448,8 +1465,22 @@ class Scorer:
         put("D7.capability", p, 2, lab, note)
 
         # ---- D8
-        p, lab, note = self.manual(rub, "D8.gate", 1)
-        put("D8.gate", p, 1, lab, note)
+        default_meta = metas.get("default-1", {})
+        if (
+            result["runnable"]
+            and default_meta.get("exit_code") not in (0, None)
+            and default_meta.get("outputs")
+        ):
+            put(
+                "D8.gate",
+                1,
+                1,
+                "M",
+                f"default run exited {default_meta['exit_code']} with findings while still writing the BOM",
+            )
+        else:
+            p, lab, note = self.manual(rub, "D8.gate", 1)
+            put("D8.gate", p, 1, lab, note)
         if result["runnable"] and sarif_docs:
             put("D8.ci", 1, 1, "M", "SARIF produced for code-scanning upload")
         else:
@@ -1497,6 +1528,62 @@ class Scorer:
             lab: sum(1 for c in crit.values() if c["label"] == lab) for lab in ("M", "D", "U")
         }
         return result
+
+
+def walk_key(node, key: str, path: str = ""):
+    """Yield (path, value) for every dict entry named ``key`` anywhere in ``node``."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k.lower() == key:
+                yield path + "/" + k, v
+            yield from walk_key(v, key, path + "/" + k)
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from walk_key(v, key, f"{path}[{i}]")
+
+
+def sensitivity(results: list[dict]) -> list[str]:
+    """Rank the tools again under weightings a critic would propose."""
+    lines = [
+        "",
+        "## Sensitivity of the ranking to the weights",
+        "",
+        "The chosen weights encode a view of what a BOM is for. These alternatives check whether the order depends on that view.",
+        "",
+        "| Tool | As weighted | Equal dimensions | Discovery 50% | Equal family weights in D1 | Measured criteria only |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    rows = []
+    for r in results:
+        dims = r["dimensions"]
+        equal = sum(100 / len(DIMENSIONS) * d["points"] / d["max"] for d in dims.values())
+        rest = sum(d["points"] for k, d in dims.items() if k != "D1")
+        rest_max = sum(d["max"] for k, d in dims.items() if k != "D1")
+        discovery_heavy = 50 * dims["D1"]["points"] / dims["D1"]["max"] + 50 * rest / rest_max
+        fr = r.get("family_recall") or {}
+        if fr and r["runnable"]:
+            d1_equal = (
+                30 * sum(v["recall"] for v in fr.values()) / len(fr)
+                + r["criteria"]["D1.decoy_penalty"]["points"]
+            )
+        else:
+            d1_equal = dims["D1"]["points"]
+        equal_family = r["total"] - dims["D1"]["points"] + max(0.0, d1_equal)
+        m_pts = sum(
+            c["points"] for c in r["criteria"].values() if c["label"] == "M" and c["max"] > 0
+        )
+        m_max = sum(c["max"] for c in r["criteria"].values() if c["label"] == "M" and c["max"] > 0)
+        measured = 100 * m_pts / m_max if m_max else 0.0
+        rows.append((r["display"], r["total"], equal, discovery_heavy, equal_family, measured))
+    for row in sorted(rows, key=lambda x: -x[1]):
+        lines.append(
+            f"| {row[0]} | {row[1]:.1f} | {row[2]:.1f} | {row[3]:.1f} | {row[4]:.1f} | {row[5]:.1f} |"
+        )
+    lines.append("")
+    lines.append(
+        "Measured-only divides points earned on M-labelled criteria by their maximum, so a tool graded mostly from documentation shows what little was actually observed."
+    )
+    return lines
 
 
 # --------------------------------------------------------------------------- report
@@ -1589,6 +1676,7 @@ def render_markdown(results: list[dict], truth: dict) -> str:
         lines.append(
             f"| {r['display']} | {', '.join(r['canaries']['any_run']) or 'none'} | {'leaked' if c['D6.confinement']['points'] == 0 else 'confined'} | {'copied' if c['D6.redaction']['points'] == 0 else 'absent'} | {', '.join(default_eg) or 'none observed'} | {(', '.join(safe_eg) or 'none observed') if has_safe else 'no offline mode run'} | {r.get('determinism', {}).get('status', 'n/a')} |"
         )
+    lines += sensitivity(results)
     lines += ["", "## Per-tool criteria", ""]
     for r in results:
         lines.append(f"### {r['display']}: {r['total']} ({r['grade']})")

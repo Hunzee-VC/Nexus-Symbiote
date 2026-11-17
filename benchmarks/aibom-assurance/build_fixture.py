@@ -1471,8 +1471,8 @@ def ground_truth(has_onnx: bool) -> dict:
             "data",
             "rag",
             "Chroma vector store collection",
-            "rag_config.yaml",
-            ["support-kb", "persist_directory"],
+            "agent/rag.py",
+            ["support-kb", "persist_directory", "PERSIST_DIR"],
         ),
         # Tools family -------------------------------------------------------------------
         item("L1", "tools", "library", "langchain", "requirements.txt", [], names=["langchain"]),
@@ -1911,7 +1911,6 @@ def build(out: Path, canary_dir: Path) -> None:
     write(root, "pyproject.toml", PYPROJECT)
     write(root, "requirements.txt", REQUIREMENTS)
     write(root, ".env.example", ENV_EXAMPLE)
-    write(root, "rag_config.yaml", RAG_CONFIG)
     write(root, "infra/Dockerfile", DOCKERFILE)
     write(root, "infra/docker-compose.yml", COMPOSE)
     write(root, "infra/k8s/vllm-deployment.yaml", K8S_VLLM)
