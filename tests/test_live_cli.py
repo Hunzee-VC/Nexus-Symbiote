@@ -38,3 +38,30 @@ def test_static_scan_never_calls_live_discovery(tmp_path, monkeypatch):
     monkeypatch.setattr("nexus_symbiote.live_cli.discover_tools", forbidden)
     result = CliRunner().invoke(main, ["scan", str(tmp_path), "--report-only"])
     assert result.exit_code == 0
+
+
+def test_report_shows_origin_and_path_digest_never_the_endpoint_path(monkeypatch, tmp_path):
+    from nexus_symbiote.core.hashing import hash_canonical
+    from tests.test_live_inventory import REAL_DISCOVER, server
+    from tests.test_live_mcp import ORIGIN, FixtureTransport
+
+    sentinel = "path-credential-sentinel-0123456789"  # noqa: S105 - synthetic fixture
+    endpoint = f"{ORIGIN}/api/mcp/s/{sentinel}/mcp"
+
+    def fixture(url: str, **kwargs):
+        return REAL_DISCOVER(url, transport=FixtureTransport(server()), **kwargs)
+
+    monkeypatch.setattr("nexus_symbiote.live_cli.discover_tools", fixture)
+    report, review = tmp_path / "observed.json", tmp_path / "review.json"
+    args = ["--live", "discover-mcp", endpoint, "--allowed-origin", ORIGIN]
+    written = CliRunner().invoke(main, [*args, "-o", str(report), "--raw-descriptors", str(review)])
+    assert written.exit_code == 0, written.output
+    assert sentinel not in written.output and sentinel not in report.read_text()
+    observed = json.loads(report.read_text())
+    assert observed["endpoint"] == ORIGIN
+    assert observed["observed_endpoint_hash"] == hash_canonical({"observed_endpoint": endpoint})
+    assert json.loads(review.read_text())["endpoint"] == endpoint
+    printed = CliRunner().invoke(main, args)
+    assert printed.exit_code == 0, printed.output
+    assert sentinel not in printed.output
+    assert json.loads(printed.stdout)["endpoint"] == ORIGIN

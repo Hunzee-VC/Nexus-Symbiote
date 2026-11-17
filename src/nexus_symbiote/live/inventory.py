@@ -41,6 +41,15 @@ def default_server_ref(endpoint: str) -> str:
     return "mcp-server:" + hash_canonical({"observed_endpoint": endpoint}).split(":", 1)[1]
 
 
+def endpoint_evidence(endpoint: str) -> dict[str, str]:
+    """The origin and a digest of the full URL: what evidence shows of an endpoint."""
+    parts = urlsplit(endpoint)
+    return {
+        "endpoint": f"{parts.scheme}://{parts.netloc}",
+        "observed_endpoint_hash": hash_canonical({"observed_endpoint": endpoint}),
+    }
+
+
 def observation_inventory(result: DiscoveryResult, *, server_ref: str | None = None) -> AIBOM:
     """Build the inventory of a complete observation; refuse an incomplete one."""
     if not result.complete or result.failures or result.declaration_hash is None:
@@ -48,8 +57,8 @@ def observation_inventory(result: DiscoveryResult, *, server_ref: str | None = N
     ref = server_ref if server_ref is not None else default_server_ref(result.endpoint)
     if not _SERVER_REF.fullmatch(ref):
         raise ValueError("server reference must be 1 to 256 printable ASCII characters")
-    parts = urlsplit(result.endpoint)
-    origin = f"{parts.scheme}://{parts.netloc}"
+    shown_endpoint = endpoint_evidence(result.endpoint)
+    origin = shown_endpoint["endpoint"]
     observed_at = datetime.fromisoformat(result.observed_at)
     bom = AIBOM()
     bom.metadata.timestamp = observed_at
@@ -150,7 +159,7 @@ def observation_inventory(result: DiscoveryResult, *, server_ref: str | None = N
         claims={"server_declaration": claim},
         properties={
             "collection_mode": "live-observation",
-            "observed_endpoint_hash": hash_canonical({"observed_endpoint": result.endpoint}),
+            "observed_endpoint_hash": shown_endpoint["observed_endpoint_hash"],
             **observed_server_properties(shown, result.declaration_hash, result.identity_hash),
         },
     )

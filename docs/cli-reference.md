@@ -137,7 +137,7 @@ Colors are used only on a terminal, and `NO_COLOR` turns them off.
 |---|---|
 | `0` | The command completed and every requested gate passed. |
 | `1` | A gate or check failed (risk gate, integrity, digest or signature mismatch, a `diff` security alert, since `--fail-on-alert` is the default and only `--no-fail-on-alert` turns that gate off, incomplete collection or observation), the input could not be read or parsed, `import-shadowscan` ran without `--report-only`, unverified ShadowScan discovery evidence was imported, validated or scored in CI without `--allow-unsigned-discovery`, a project policy that weakens a gate was applied in CI without `--accept-project-policy`, or an unexpected internal error occurred. |
-| `2` | Usage error: an unknown command or option, a missing argument or file, a `PROJECT_PATH` of `scan` or `baseline` or a `--project` of `validate`, `risk`, `verify-artifact` or `verify-live` that is a file, a `verify-live` launch policy kept where the [launch policy](#launch-policy) rules forbid, a `verify-attestation` `--trusted-key` kept where the [trusted-key rule](#verify-attestation) forbids, an invalid value (including a malformed `verify-artifact --sha256` and an incomplete `--bundle`, `--signer-identity` and `--issuer` set), a relative project path that a symbolic link leads outside the working directory, an invalid `NEXUS_SYMBIOTE_MODE` or collection limit, a `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` shorter than 32 characters, a malformed `SOURCE_DATE_EPOCH` for `scan`, `baseline` or `import-shadowscan`, or a live command run without live mode (`advisories --dry-run` contacts nothing and runs in either mode). |
+| `2` | Usage error: an unknown command or option, a missing argument or file, a `PROJECT_PATH` of `scan` or `baseline` or a `--project` of `validate`, `risk`, `verify-artifact` or `verify-live` that is a file, a `verify-live` launch policy kept where the [launch policy](#launch-policy) rules forbid, a `verify-attestation` `--trusted-key` kept where the [trusted-key rule](#verify-attestation) forbids or a `runtime verify` or `runtime register` public key kept where the same rule forbids, an invalid value (including a malformed `verify-artifact --sha256` and an incomplete `--bundle`, `--signer-identity` and `--issuer` set), a relative project path that a symbolic link leads outside the working directory, an invalid `NEXUS_SYMBIOTE_MODE` or collection limit, a `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` shorter than 32 characters, a malformed `SOURCE_DATE_EPOCH` for `scan`, `baseline` or `import-shadowscan`, or a live command run without live mode (`advisories --dry-run` contacts nothing and runs in either mode). |
 
 What exit status 1 means for each gate:
 
@@ -277,7 +277,7 @@ directory above the policy are owned by root or by you.
 | `digest --json-output` | `file_sha256`, `canonical_digest`, `content_digest`, `content_profile`, `spec_version` and `components`, in that order; a digest that is undefined for the inventory is `null`. |
 | `graph --format json` | `format` (`nexus-symbiote/graph-view/v1`), `inventory`, `focus`, `coverage`, `limitations`, `nodes` (each with its risk classes, `basis`, `assessed`, findings summary and facts), `edges` and `exposure` (sources, sinks and ranked `paths`, with omitted counts); see [graph view](graph-view.md#the-json-document). |
 | `crosswalk` | Sorted keys: `format` (`nexus-symbiote/crosswalk/v1`); `meaning`; `policy_source` (`built-in`), `suppressed_findings` and `ignored_findings`; `coverage_status`; `findings`, each with `category`, `severity`, `component_ref` and a neutralized `detail`; `frameworks`, each with `framework`, `name`, `edition`, `source`, `verification`, `note`, `findings_with_reference`, `findings_without_reference` and `entries` (each with `entry`, `title`, `severity_counts`, the referencing `categories` with their `rationale`, and `findings`, positions in the `findings` list); `unmapped_categories`, each with `category`, `findings` and `in_catalog`. |
-| `discover-mcp` | The observation: `endpoint`, `protocol_version` and `requested_protocol_version`, `collector_id`, `collection_id`, `observed_at`, `completed_at`, `client_info`, `user_agent`, `session_established`, `session_digest`, `server_info`, `server_capabilities`, `instructions` and `instructions_hash`, `declaration_hash` and `identity_hash` with their profiles, `tools` (each with its redacted `descriptor`, `definition_hash`, `fingerprint` and `lints`), `prompts`, `resource_templates`, `failures`, `complete`, `pages_observed`, `bytes_observed` and `coverage`, which names what was not observed. With `--record`, a native AgentBOM instead. |
+| `discover-mcp` | The observation: `endpoint` (the origin only, since a path can hold a credential) and `observed_endpoint_hash` (a digest of the full URL, as `--record` stores it), `protocol_version` and `requested_protocol_version`, `collector_id`, `collection_id`, `observed_at`, `completed_at`, `client_info`, `user_agent`, `session_established`, `session_digest`, `server_info`, `server_capabilities`, `instructions` and `instructions_hash`, `declaration_hash` and `identity_hash` with their profiles, `tools` (each with its redacted `descriptor`, `definition_hash`, `fingerprint` and `lints`), `prompts`, `resource_templates`, `failures`, `complete`, `pages_observed`, `bytes_observed` and `coverage`, which names what was not observed. With `--record`, a native AgentBOM instead. |
 | `advisories` | `components_checked`, `components_skipped` and `components_excluded`, with the `skipped` and `excluded` entries and their reasons; `queries` (the ecosystem, name and version of each package in scope); `advisories`; `errors`; `coverage` (`complete`, `partial` or `none`) and `complete`; `dry_run`; `checked_at`, `tool_version` and `inventory_sha256`; `scope` and `sent_to_osv`. |
 | `verify-live --json-output` | `complete`, `servers_checked`, `servers_reachable`, `servers_skipped`, `has_drift`, `inputs` (the SHA-256 of the inventory and of the launch policy) and `results`: per MCP server, `server`, `server_ref`, `status` (`verified`, `failed` or `not-verifiable`), `reachable`, `reason`, `error`, `transport`, `protocol_version`, `launcher_sha256`, `rug_pull_detected`, `live_schema_hash`, `declaration_hash` and `declaration_status`, `identity_hash` and `identity_status`, and `tools` (each tool's `name`, `definition_hash` and `status`: `match`, `changed`, `new` or `unverifiable`). |
 | `runtime keygen` | `key_id` and `encrypted`. |
@@ -696,13 +696,16 @@ nexus-symbiote runtime verify [OPTIONS] ENVELOPE_PATH
 | Option | Description |
 |---|---|
 | `--kind` `snapshot\|approval\|trust\|model` | Expected contract purpose; a contract signed for another purpose is rejected. (required) |
-| `--public-key` `PATH` | Trusted Ed25519 public key PEM; repeat to build the trusted key ring. (required, repeatable) |
+| `--public-key` `PATH` | Trusted Ed25519 public key PEM; repeat to build the trusted key ring. It must lie outside every git working tree that holds ENVELOPE_PATH, the --bom file or the current directory, which catches misplacement but does not authenticate the key. (required, repeatable) |
 | `--threshold` `INTEGER RANGE` | Minimum number of distinct trusted signatures (default: 1). |
 | `--bom` `PATH` | The exact companion BOM; required for snapshot contracts. |
 
 Revocation, signer scopes, approver identities and an approval's bindings are
 checked only by the gateway. A failure names its reason code, listed in the
-[runtime contract reference](runtime-contract-reference.md#reason-codes).
+[runtime contract reference](runtime-contract-reference.md#reason-codes). A
+`--public-key` file kept where the change under review could write it, or with other
+hard links, is a usage error (exit 2), as for
+[`verify-attestation`](#verify-attestation).
 
 ### `runtime digest`
 
@@ -752,7 +755,11 @@ and shared-key setting the gateways use. Pass the approval keys too when the sco
 map covers them. A scope entry for a key in no ring, or a key in two rings without
 `--allow-shared-keys`, fails with `configuration-invalid` and names the key ID. The
 output names the tenant, deployment, agent, serial and contract `digest` that
-became current.
+became current. A `--snapshot-key`, `--trust-key` or `--approval-key` file inside a
+git working tree that holds SNAPSHOT_PATH, the `--trust`, `--state` or
+`--signer-scopes` file or the current directory, or with other hard links, is a usage
+error (exit 2): a key planted there could register a snapshot or trust status at the
+highest serial and lock the tenant out of every gateway sharing the store.
 
 ### `scan`
 
