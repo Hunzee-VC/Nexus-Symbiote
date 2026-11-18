@@ -296,6 +296,9 @@ Nexus SymBiote 0.2.0):
   warning notification that counts what was left out. The default still refuses.
 - Item 1 is open. It reverses a documented leakage decision (the AgentBOM carries digests,
   not ShadowScan's names, locations or evidence), so it needs an owner's decision first.
+  The one exception since grading is a model: a merged scan names it when it reads the
+  identifier at the file and line the report cites ("Models named from cited evidence"
+  in `docs/shadowscan-integration.md`).
 
 ## Nexus SymBiote: what to fix first
 
