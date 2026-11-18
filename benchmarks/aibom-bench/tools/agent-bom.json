@@ -1,0 +1,178 @@
+{
+  "tool": "agent-bom",
+  "display": "agent-bom",
+  "version": "0.115.4",
+  "license": "Apache-2.0",
+  "source": "PyPI agent-bom",
+  "install": [
+    "python3 -m venv {tooldir}/venv",
+    "{tooldir}/venv/bin/pip install agent-bom==0.115.4"
+  ],
+  "bin": "{tooldir}/venv/bin/agent-bom",
+  "path": [
+    "{tooldir}/venv/bin"
+  ],
+  "env": {},
+  "scans": [
+    {
+      "label": "native",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--offline",
+        "--no-scan",
+        "--exit-zero",
+        "-f",
+        "json",
+        "-o",
+        "{out}/report.json"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/report.json",
+          "format": "native-json"
+        }
+      ]
+    },
+    {
+      "label": "cyclonedx",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--offline",
+        "--no-scan",
+        "--exit-zero",
+        "-f",
+        "cyclonedx",
+        "-o",
+        "{out}/bom.cdx.json"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/bom.cdx.json",
+          "format": "cyclonedx-json"
+        }
+      ]
+    },
+    {
+      "label": "spdx3",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--offline",
+        "--no-scan",
+        "--exit-zero",
+        "-f",
+        "spdx",
+        "-o",
+        "{out}/bom.spdx3.json"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/bom.spdx3.json",
+          "format": "spdx-json"
+        }
+      ]
+    },
+    {
+      "label": "sarif",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--offline",
+        "--no-scan",
+        "--exit-zero",
+        "-f",
+        "sarif",
+        "-o",
+        "{out}/report.sarif"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/report.sarif",
+          "format": "sarif"
+        }
+      ]
+    },
+    {
+      "label": "html",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--offline",
+        "--no-scan",
+        "--exit-zero",
+        "--offline-html",
+        "-f",
+        "html",
+        "-o",
+        "{out}/report.html"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/report.html",
+          "format": "html"
+        }
+      ]
+    },
+    {
+      "label": "markdown",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--offline",
+        "--no-scan",
+        "--exit-zero",
+        "-f",
+        "markdown",
+        "-o",
+        "{out}/report.md"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/report.md",
+          "format": "markdown"
+        }
+      ]
+    },
+    {
+      "label": "manifest",
+      "argv": [
+        "{bin}",
+        "manifest",
+        "-p",
+        "{target}",
+        "-o",
+        "{out}/manifest.json"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/manifest.json",
+          "format": "native-json"
+        }
+      ]
+    }
+  ],
+  "diff": {
+    "argv": [
+      "{bin}",
+      "report",
+      "diff",
+      "{base}/report.json",
+      "{drift}/report.json",
+      "-f",
+      "json",
+      "-o",
+      "{out}/diff.json"
+    ]
+  },
+  "notes": [
+    "--no-scan skips the vulnerability lookup, which needs a local database or api.osv.dev; --exit-zero keeps the gate from failing the run."
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "tool": "ai-bom",
+  "assessed": "2026-11-18",
+  "criteria": {
+    "4.6": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Not found."
+    },
+    "5.2": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No signing or attestation."
+    },
+    "5.4": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Not found."
+    },
+    "5.5": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Not found."
+    },
+    "6.3": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No advisory lookup or VEX."
+    },
+    "7.3": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "`--fail-on low` and `--policy` exited 1."
+    },
+    "7.4": {
+      "level": 0.5,
+      "tier": "D",
+      "evidence": "scan-cloud and the n8n API mode read live systems; no comparison with a BOM."
+    }
+  },
+  "adjudication": {
+    "risk.mcp.plaintext-http": {
+      "verdict": false,
+      "reason": "The flag on 'metrics' is mcp_unknown_server; the http:// URL is listed as metadata only."
+    }
+  }
+}

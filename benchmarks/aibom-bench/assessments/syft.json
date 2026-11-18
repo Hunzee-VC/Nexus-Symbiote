@@ -1,0 +1,42 @@
+{
+  "tool": "syft",
+  "assessed": "2026-11-18",
+  "criteria": {
+    "4.6": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Not found."
+    },
+    "5.2": {
+      "level": 0.5,
+      "tier": "D",
+      "evidence": "`syft attest` signs an SBOM for a container image through cosign; it does not cover a directory scan and was not run."
+    },
+    "5.4": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Not found."
+    },
+    "5.5": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No evidence or confidence fields in the CycloneDX output."
+    },
+    "6.3": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Vulnerability matching is a separate tool (Grype); none in Syft."
+    },
+    "7.3": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No gate."
+    },
+    "7.4": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No runtime comparison."
+    }
+  },
+  "adjudication": {}
+}

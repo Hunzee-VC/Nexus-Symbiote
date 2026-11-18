@@ -1,0 +1,147 @@
+{
+  "tool": "ai-bom",
+  "display": "Trusera ai-bom",
+  "version": "3.6.0",
+  "license": "Apache-2.0",
+  "source": "PyPI ai-bom",
+  "install": [
+    "python3 -m venv {tooldir}/venv",
+    "{tooldir}/venv/bin/pip install ai-bom==3.6.0"
+  ],
+  "bin": "{tooldir}/venv/bin/ai-bom",
+  "path": [
+    "{tooldir}/venv/bin"
+  ],
+  "env": {},
+  "scans": [
+    {
+      "label": "cyclonedx",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--format",
+        "cyclonedx",
+        "--output",
+        "{out}/bom.cdx.json",
+        "--quiet"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/bom.cdx.json",
+          "format": "cyclonedx-json"
+        }
+      ]
+    },
+    {
+      "label": "spdx3",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--format",
+        "spdx3",
+        "--output",
+        "{out}/bom.spdx3.json",
+        "--quiet"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/bom.spdx3.json",
+          "format": "spdx-json"
+        }
+      ]
+    },
+    {
+      "label": "sarif",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--format",
+        "sarif",
+        "--output",
+        "{out}/bom.sarif",
+        "--quiet"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/bom.sarif",
+          "format": "sarif"
+        }
+      ]
+    },
+    {
+      "label": "cisco-aibom",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--format",
+        "cisco-aibom",
+        "--output",
+        "{out}/bom.cisco-aibom.json",
+        "--quiet"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/bom.cisco-aibom.json",
+          "format": "native-json"
+        }
+      ]
+    },
+    {
+      "label": "html",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--format",
+        "html",
+        "--output",
+        "{out}/report.html",
+        "--quiet"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/report.html",
+          "format": "html"
+        }
+      ]
+    },
+    {
+      "label": "markdown",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--format",
+        "markdown",
+        "--output",
+        "{out}/report.md",
+        "--quiet"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/report.md",
+          "format": "markdown"
+        }
+      ]
+    },
+    {
+      "label": "table",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--format",
+        "table"
+      ],
+      "outputs": [],
+      "stdout_format": "text"
+    }
+  ],
+  "notes": [
+    "`ai-bom diff` rejects every format the CLI can write (exit 2), so no drift command is run."
+  ]
+}

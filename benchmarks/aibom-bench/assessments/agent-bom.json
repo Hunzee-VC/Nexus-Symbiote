@@ -1,0 +1,79 @@
+{
+  "tool": "agent-bom",
+  "assessed": "2026-11-18",
+  "criteria": {
+    "4.6": {
+      "level": 0.5,
+      "tier": "V",
+      "evidence": "Findings in the JSON report carry applicable_frameworks tags; no minimum-element or crosswalk report was found."
+    },
+    "5.2": {
+      "level": 1,
+      "tier": "D",
+      "evidence": "`attest sign` and `attest verify` appear in help text; not run."
+    },
+    "5.4": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "HTML and JSON reports state partial coverage."
+    },
+    "5.5": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "Records carry confidence and evidence fields throughout report.json."
+    },
+    "6.3": {
+      "level": 1,
+      "tier": "D",
+      "evidence": "OSV lookup and --generate-vex appear in help; the lookup failed here because api.osv.dev was unreachable."
+    },
+    "7.3": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "Without --exit-zero the scan exited 1 on a high finding."
+    },
+    "7.4": {
+      "level": 0.5,
+      "tier": "D",
+      "evidence": "--introspect contacts live MCP servers; no comparison step was exercised."
+    }
+  },
+  "adjudication": {
+    "risk.agent.toxic-flow": {
+      "verdict": false,
+      "reason": "The finding is a missing-eval notice for the agent, not a statement that untrusted input, private data and an outbound channel combine."
+    },
+    "risk.mcp.unpinned-npx": {
+      "verdict": false,
+      "reason": "Automatic match came from unrelated text near the component name; no finding states this risk."
+    },
+    "risk.mcp.unpinned-uvx": {
+      "verdict": false,
+      "reason": "Automatic match came from unrelated text near the component name; no finding states this risk."
+    },
+    "risk.mcp.shell-launch": {
+      "verdict": false,
+      "reason": "Automatic match came from unrelated text near the component name; no finding states this risk."
+    },
+    "risk.mcp.plaintext-http": {
+      "verdict": false,
+      "reason": "The finding on .cursor/mcp.json is the hardcoded bearer token; nothing reports the http:// endpoint."
+    },
+    "risk.skill.remote-script": {
+      "verdict": false,
+      "reason": "No finding names export.sh or the piped download; the skill findings concern the instruction text and metadata."
+    },
+    "control.mcp-pinned": {
+      "verdict": false,
+      "reason": "Automatic match came from unrelated text near the component name; no finding states this risk."
+    },
+    "control.mcp-toml-pinned": {
+      "verdict": false,
+      "reason": "Automatic match came from unrelated text near the component name; no finding states this risk."
+    },
+    "control.skill-benign": {
+      "verdict": false,
+      "reason": "The findings on refund-processing are missing licence and homepage metadata, not hidden instructions."
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "tool": "cdxgen",
+  "assessed": "2026-11-18",
+  "criteria": {
+    "4.6": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "`cdx-validate --benchmark cisa-ai` ran on the AI BOM and wrote a SARIF report."
+    },
+    "5.2": {
+      "level": 1,
+      "tier": "D",
+      "evidence": "`cdx-sign` and `cdx-verify` appear in help text; not run."
+    },
+    "5.4": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No statement of collection scope or partial coverage found in the output."
+    },
+    "5.5": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "Components carry CycloneDX evidence with identity methods, techniques and confidence."
+    },
+    "6.3": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No advisory lookup or VEX output."
+    },
+    "7.3": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "`cdx-audit` exited 3 when findings reached high severity."
+    },
+    "7.4": {
+      "level": 0.5,
+      "tier": "D",
+      "evidence": "tracebom and obom observe a running system; no comparison with the BOM was exercised."
+    }
+  },
+  "adjudication": {
+    "risk.mcp.plaintext-http": {
+      "verdict": false,
+      "reason": "MCP-001/002/004 report missing authentication on the endpoint, not the lack of TLS."
+    }
+  }
+}

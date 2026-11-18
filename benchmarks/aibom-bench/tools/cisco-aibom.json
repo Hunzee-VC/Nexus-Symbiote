@@ -1,0 +1,192 @@
+{
+  "tool": "cisco-aibom",
+  "display": "Cisco AI BOM",
+  "version": "1.10.1",
+  "license": "Apache-2.0",
+  "source": "PyPI cisco-aibom",
+  "install": [
+    "python3 -m venv {tooldir}/venv",
+    "{tooldir}/venv/bin/pip install 'cisco-aibom[agentic]==1.10.1' langchain-ollama",
+    "download aibom_catalog-1.10.1.duckdb from the project's GitHub release into {tooldir}/catalog/"
+  ],
+  "bin": "{tooldir}/venv/bin/cisco-aibom",
+  "path": [
+    "{tooldir}/venv/bin"
+  ],
+  "env": {
+    "AIBOM_DB_PATH": "{tooldir}/catalog/aibom_catalog-1.10.1.duckdb"
+  },
+  "scans": [
+    {
+      "label": "native",
+      "argv": [
+        "{bin}",
+        "analyze",
+        "{target}",
+        "-o",
+        "json",
+        "-O",
+        "{out}/report.json",
+        "--llm-model",
+        "offline-placeholder",
+        "--llm-provider",
+        "ollama",
+        "--llm-api-base",
+        "http://127.0.0.1:9",
+        "--agentic-max-retry-seconds",
+        "0"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/report.json",
+          "format": "native-json"
+        }
+      ]
+    },
+    {
+      "label": "cyclonedx",
+      "argv": [
+        "{bin}",
+        "analyze",
+        "{target}",
+        "-o",
+        "cyclonedx",
+        "-O",
+        "{out}/bom.cdx.json",
+        "--llm-model",
+        "offline-placeholder",
+        "--llm-provider",
+        "ollama",
+        "--llm-api-base",
+        "http://127.0.0.1:9",
+        "--agentic-max-retry-seconds",
+        "0"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/bom.cdx.json",
+          "format": "cyclonedx-json"
+        }
+      ]
+    },
+    {
+      "label": "spdx",
+      "argv": [
+        "{bin}",
+        "analyze",
+        "{target}",
+        "-o",
+        "spdx",
+        "-O",
+        "{out}/bom.spdx.json",
+        "--llm-model",
+        "offline-placeholder",
+        "--llm-provider",
+        "ollama",
+        "--llm-api-base",
+        "http://127.0.0.1:9",
+        "--agentic-max-retry-seconds",
+        "0"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/bom.spdx.json",
+          "format": "spdx-json"
+        }
+      ]
+    },
+    {
+      "label": "sarif",
+      "argv": [
+        "{bin}",
+        "analyze",
+        "{target}",
+        "-o",
+        "sarif",
+        "-O",
+        "{out}/report.sarif",
+        "--llm-model",
+        "offline-placeholder",
+        "--llm-provider",
+        "ollama",
+        "--llm-api-base",
+        "http://127.0.0.1:9",
+        "--agentic-max-retry-seconds",
+        "0"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/report.sarif",
+          "format": "sarif"
+        }
+      ]
+    },
+    {
+      "label": "html",
+      "argv": [
+        "{bin}",
+        "analyze",
+        "{target}",
+        "-o",
+        "html",
+        "-O",
+        "{out}/report.html",
+        "--llm-model",
+        "offline-placeholder",
+        "--llm-provider",
+        "ollama",
+        "--llm-api-base",
+        "http://127.0.0.1:9",
+        "--agentic-max-retry-seconds",
+        "0"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/report.html",
+          "format": "html"
+        }
+      ]
+    },
+    {
+      "label": "markdown",
+      "argv": [
+        "{bin}",
+        "analyze",
+        "{target}",
+        "-o",
+        "markdown",
+        "-O",
+        "{out}/report.md",
+        "--llm-model",
+        "offline-placeholder",
+        "--llm-provider",
+        "ollama",
+        "--llm-api-base",
+        "http://127.0.0.1:9",
+        "--agentic-max-retry-seconds",
+        "0"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/report.md",
+          "format": "markdown"
+        }
+      ]
+    }
+  ],
+  "diff": {
+    "argv": [
+      "{bin}",
+      "diff",
+      "run",
+      "{base}/report.json",
+      "{drift}/report.json",
+      "--format",
+      "json"
+    ]
+  },
+  "unmeasured": "The tool requires an LLM. No key was supplied, so it ran with an unreachable local provider and marks every component unreviewed (agentic_status: degraded). Its score is a floor for its deterministic analysis only.",
+  "notes": [
+    "Each uncached run includes a fixed 30-second wait in the tool."
+  ]
+}

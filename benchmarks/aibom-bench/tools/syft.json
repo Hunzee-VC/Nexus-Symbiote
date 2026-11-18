@@ -1,0 +1,58 @@
+{
+  "tool": "syft",
+  "display": "Anchore Syft",
+  "version": "1.57.2",
+  "license": "Apache-2.0",
+  "source": "github.com/anchore/syft",
+  "install": [
+    "GOBIN={tooldir}/bin go install github.com/anchore/syft/cmd/syft@v1.57.2"
+  ],
+  "bin": "{tooldir}/bin/syft",
+  "path": [
+    "{tooldir}/bin"
+  ],
+  "env": {
+    "SYFT_CHECK_FOR_APP_UPDATE": "false"
+  },
+  "scans": [
+    {
+      "label": "all",
+      "argv": [
+        "{bin}",
+        "scan",
+        "dir:{target}",
+        "--select-catalogers",
+        "+gguf-cataloger,+safetensors-cataloger",
+        "-o",
+        "syft-json={out}/syft.json",
+        "-o",
+        "cyclonedx-json={out}/bom.cdx.json",
+        "-o",
+        "spdx-json={out}/bom.spdx.json",
+        "-o",
+        "syft-table={out}/table.txt"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/syft.json",
+          "format": "native-json"
+        },
+        {
+          "path": "{out}/bom.cdx.json",
+          "format": "cyclonedx-json"
+        },
+        {
+          "path": "{out}/bom.spdx.json",
+          "format": "spdx-json"
+        },
+        {
+          "path": "{out}/table.txt",
+          "format": "text"
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "The GGUF and SafeTensors catalogers are added to the default set explicitly."
+  ]
+}

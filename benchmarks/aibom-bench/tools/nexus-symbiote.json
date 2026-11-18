@@ -1,0 +1,28 @@
+{
+  "tool": "nexus-symbiote",
+  "display": "Nexus SymBiote",
+  "version": "0.2.0 (this checkout)",
+  "license": "Apache-2.0",
+  "source": "this repository",
+  "install": [
+    "python3 -m venv {tooldir}/venv",
+    "{tooldir}/venv/bin/pip install --require-hashes --only-binary=:all: -r {repo}/requirements-ci.lock",
+    "{tooldir}/venv/bin/pip install --no-deps --no-build-isolation -e {repo}"
+  ],
+  "bin": "{tooldir}/venv/bin/nexus-symbiote",
+  "path": ["{tooldir}/venv/bin"],
+  "env": {},
+  "scans": [
+    {"label": "native", "argv": ["{bin}", "scan", "{target}", "--no-project-policy", "-f", "json", "-o", "{out}/aibom.json"],
+     "outputs": [{"path": "{out}/aibom.json", "format": "native-json"}]},
+    {"label": "cyclonedx", "argv": ["{bin}", "scan", "{target}", "--no-project-policy", "-f", "cyclonedx", "-o", "{out}/aibom.cdx.json"],
+     "outputs": [{"path": "{out}/aibom.cdx.json", "format": "cyclonedx-json"}]},
+    {"label": "spdx", "argv": ["{bin}", "scan", "{target}", "--no-project-policy", "-f", "spdx", "-o", "{out}/aibom.spdx.json"],
+     "outputs": [{"path": "{out}/aibom.spdx.json", "format": "spdx-json"}]},
+    {"label": "sarif", "argv": ["{bin}", "scan", "{target}", "--no-project-policy", "-f", "sarif", "-o", "{out}/aibom.sarif"],
+     "outputs": [{"path": "{out}/aibom.sarif", "format": "sarif"}]},
+    {"label": "risk", "argv": ["{bin}", "risk", "{out}/aibom.json", "--json-output"], "stdout_format": "native-json"}
+  ],
+  "diff": {"argv": ["{bin}", "diff", "{base}/aibom.json", "{drift}/aibom.json"]},
+  "notes": ["scan exits 1 when its gate fails; the inventory is still written"]
+}

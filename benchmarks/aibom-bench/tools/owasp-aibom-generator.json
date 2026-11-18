@@ -1,0 +1,43 @@
+{
+  "tool": "owasp-aibom-generator",
+  "display": "OWASP AIBOM Generator",
+  "version": "commit 45851cb",
+  "license": "Apache-2.0",
+  "source": "github.com/GenAI-Security-Project/aibom-generator",
+  "install": [
+    "git clone https://github.com/GenAI-Security-Project/aibom-generator && git checkout 45851cb96dbe16209f29c88fc3f5b9d9d19ecf7e",
+    "python3 -m venv {tooldir}/venv && {tooldir}/venv/bin/pip install -r requirements.txt",
+    "a launcher at {tooldir}/bin/aibom-generator that runs `python -m src.cli` from the clone"
+  ],
+  "bin": "{tooldir}/bin/aibom-generator",
+  "path": [
+    "{tooldir}/bin",
+    "{tooldir}/venv/bin"
+  ],
+  "env": {},
+  "scans": [
+    {
+      "label": "cyclonedx",
+      "argv": [
+        "{bin}",
+        "meta-llama/Llama-3.1-8B-Instruct",
+        "--output",
+        "{out}/bom.json"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/bom.json",
+          "format": "cyclonedx-json"
+        },
+        {
+          "path": "{out}/bom.html",
+          "format": "html"
+        }
+      ]
+    }
+  ],
+  "unmeasured": "Takes a Hugging Face model ID, not a directory, and has no offline input. huggingface.co was unreachable, so it wrote a placeholder BOM. Its score is a floor, not a measurement of its model-card extraction.",
+  "notes": [
+    "Run with one model ID from the corpus; the project directory is not an input this tool accepts."
+  ]
+}

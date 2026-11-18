@@ -1,0 +1,42 @@
+{
+  "tool": "owasp-aibom-generator",
+  "assessed": "2026-11-18",
+  "criteria": {
+    "4.6": {
+      "level": 0.5,
+      "tier": "S",
+      "evidence": "A completeness score over model-card fields is computed in src/models/scoring.py; it is not a published minimum-element set."
+    },
+    "5.2": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No signing or attestation."
+    },
+    "5.4": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Not found."
+    },
+    "5.5": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Not found."
+    },
+    "6.3": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No advisory lookup or VEX."
+    },
+    "7.3": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No gate."
+    },
+    "7.4": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No runtime comparison."
+    }
+  },
+  "adjudication": {}
+}

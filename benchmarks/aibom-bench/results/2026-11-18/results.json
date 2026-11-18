@@ -1,0 +1,6003 @@
+[
+  {
+    "components_reported": 625,
+    "details": {
+      "1.1": {
+        "classified": [
+          "model.adapter.lora",
+          "model.file.gguf",
+          "model.file.onnx",
+          "model.file.pickle",
+          "model.file.safetensors",
+          "model.hf.pinned"
+        ],
+        "missed": [
+          "model.api.agents-sdk",
+          "model.api.anthropic",
+          "model.api.bedrock",
+          "model.api.embedding",
+          "model.api.openai",
+          "model.config.indirect",
+          "model.docker.download",
+          "model.env.indirect",
+          "model.hf.unpinned",
+          "model.k8s.served",
+          "model.notebook",
+          "model.ollama.modelfile"
+        ],
+        "present_untyped": []
+      },
+      "1.2": {
+        "classified": [
+          "data.vector.chroma"
+        ],
+        "missed": [
+          "data.dvc.pointer",
+          "data.finetune.upload",
+          "data.hf.eval",
+          "data.hf.pinned",
+          "data.local.eval",
+          "data.local.training",
+          "data.memory.pgvector",
+          "data.modelcard.dataset",
+          "data.rag.confluence-source",
+          "data.rag.s3-source"
+        ],
+        "present_untyped": []
+      },
+      "1.3": {
+        "classified": [
+          "tool.framework.chromadb",
+          "tool.framework.crewai",
+          "tool.framework.langchain",
+          "tool.framework.langgraph",
+          "tool.framework.llama-index",
+          "tool.framework.mcp",
+          "tool.framework.openai",
+          "tool.framework.transformers",
+          "tool.function.fetch_url",
+          "tool.function.refund_order",
+          "tool.function.run_shell",
+          "tool.function.send_email",
+          "tool.mcp.get_order",
+          "tool.mcp.issue_refund",
+          "tool.mcp.search_kb"
+        ],
+        "missed": [
+          "tool.framework.npm.sdk.anthropic-ai",
+          "tool.framework.npm.sdk.modelcontextprotocol",
+          "tool.function.search_orders"
+        ],
+        "present_untyped": []
+      },
+      "1.4": {
+        "classified": [
+          "agent.a2a.card",
+          "agent.command",
+          "agent.hook",
+          "agent.instructions.agents-md",
+          "agent.instructions.claude",
+          "agent.instructions.copilot",
+          "agent.instructions.cursor-rule",
+          "agent.mcp.docker",
+          "agent.mcp.gemini",
+          "agent.mcp.http.authenticated",
+          "agent.mcp.http.plaintext",
+          "agent.mcp.local-script",
+          "agent.mcp.source.python",
+          "agent.mcp.stdio.pinned",
+          "agent.mcp.stdio.proxy",
+          "agent.mcp.stdio.shell",
+          "agent.mcp.stdio.unpinned",
+          "agent.mcp.stdio.uvx",
+          "agent.mcp.toml",
+          "agent.permissions",
+          "agent.skill.agents-dir",
+          "agent.skill.benign",
+          "agent.skill.github",
+          "agent.skill.poisoned",
+          "agent.subagent"
+        ],
+        "missed": [
+          "agent.bedrock.terraform",
+          "agent.crewai",
+          "agent.guardrail",
+          "agent.langgraph.supervisor",
+          "agent.mcp.source.typescript",
+          "agent.n8n",
+          "agent.openai-agents.triage",
+          "agent.plugin",
+          "agent.prompt.inline",
+          "agent.prompt.system-file",
+          "agent.prompt.template"
+        ],
+        "present_untyped": []
+      },
+      "1.5": {
+        "classified": [],
+        "missed": [
+          "infra.ci.agent-action",
+          "infra.endpoint.azure-openai",
+          "infra.endpoint.sagemaker",
+          "infra.image.ollama",
+          "infra.image.pgvector",
+          "infra.image.pytorch",
+          "infra.image.qdrant",
+          "infra.image.vllm"
+        ],
+        "present_untyped": []
+      },
+      "2.1": {
+        "reported_as_components": [
+          "decoy.fake-gguf"
+        ],
+        "score": 0.875
+      },
+      "3.1": {
+        "facts_expected": 15,
+        "facts_found": 14,
+        "items_with_fact": 14,
+        "score": 0.9333333333333333
+      },
+      "3.2": {
+        "facts_expected": 9,
+        "facts_found": 9,
+        "items_with_fact": 9,
+        "score": 1.0
+      },
+      "3.3": {
+        "facts_expected": 47,
+        "facts_found": 46,
+        "items_with_fact": 47,
+        "score": 0.9787234042553191
+      },
+      "3.4": {
+        "facts_expected": 35,
+        "facts_found": 25,
+        "items_with_fact": 20,
+        "score": 0.7142857142857143
+      },
+      "3.5": {
+        "satisfied": [
+          "edge.adapter.base-model",
+          "edge.mcp.provides-tool"
+        ],
+        "score": 0.2857142857142857
+      },
+      "4.1": {
+        "documents": {
+          "cyclonedx:cyclonedx-json": {
+            "errors": [],
+            "spec_version": "1.7",
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.2": {
+        "documents": {
+          "spdx:spdx-json": {
+            "errors": [],
+            "spec_version": "3.0",
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.3": {
+        "any_model_card": false,
+        "datasets_typed_data": 0.0,
+        "models_typed_machine_learning_model": 1.0,
+        "score": 0.5
+      },
+      "4.4": {
+        "frameworks_detected": 8,
+        "frameworks_with_purl": 8,
+        "huggingface_purl": false,
+        "score": 0.7
+      },
+      "4.5": {
+        "documents": {
+          "sarif:sarif": {
+            "errors": [],
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.6": {
+        "evidence": "Ran `minimum-elements` (G7 coverage report) and `crosswalk` on the base inventory; both exit 0.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "5.1": {
+        "byte_identical": [
+          "cyclonedx:cyclonedx-json",
+          "native:native-json",
+          "risk:native-json",
+          "sarif:sarif",
+          "spdx:spdx-json"
+        ],
+        "compared": [
+          "cyclonedx:cyclonedx-json",
+          "native:native-json",
+          "risk:native-json",
+          "sarif:sarif",
+          "spdx:spdx-json"
+        ],
+        "identical_after_dropping_time_and_id_fields": [
+          "cyclonedx:cyclonedx-json",
+          "native:native-json",
+          "risk:native-json",
+          "sarif:sarif",
+          "spdx:spdx-json"
+        ],
+        "score": 1.0
+      },
+      "5.2": {
+        "evidence": "Ran `attest` with a throwaway Ed25519 key and `verify-attestation`; a modified subject was rejected (subject-mismatch).",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "5.3": {
+        "malformed_files_named_in": [
+          "native:native-json",
+          "native:console-stderr",
+          "cyclonedx:cyclonedx-json",
+          "cyclonedx:console-stderr",
+          "spdx:spdx-json",
+          "spdx:console-stderr",
+          "sarif:sarif",
+          "sarif:console-stderr",
+          "risk:native-json"
+        ],
+        "score": 1.0
+      },
+      "5.4": {
+        "evidence": "Scan prints which collectors returned partial results; `risk --json-output` carries coverage_status: partial.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "5.5": {
+        "evidence": "Native records carry assurance_level (declared or observed) and per-claim collector and method.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "6.1": {
+        "caught": [
+          "risk.model.pickle-exec",
+          "risk.mcp.unpinned-npx",
+          "risk.mcp.unpinned-uvx",
+          "risk.mcp.shell-launch",
+          "risk.mcp.plaintext-http",
+          "risk.skill.hidden-instruction",
+          "risk.instructions.import-escape",
+          "risk.instructions.hidden-unicode",
+          "risk.agent.broad-permissions"
+        ],
+        "of": 19,
+        "score": 0.47368421052631576
+      },
+      "6.2": {
+        "controls_flagged": [],
+        "score": 1.0
+      },
+      "6.3": {
+        "evidence": "Ran `vex` (exit 0, schema-validated document). `advisories` queries OSV in live mode; api.osv.dev was unreachable, so the lookup is documented only.",
+        "level": 1,
+        "score": 0.5,
+        "tier": "D"
+      },
+      "7.1": {
+        "not_attributable_output_varies_between_identical_runs": [],
+        "score": 0.8,
+        "visible": [
+          "change.tool-description",
+          "change.mcp-version-and-scope",
+          "change.mcp-added",
+          "change.model-bytes",
+          "change.skill-widened",
+          "change.model-revision",
+          "change.permissions-widened",
+          "change.mcp-removed"
+        ]
+      },
+      "7.2": {
+        "exit_code": 1,
+        "reported": [
+          "change.tool-description",
+          "change.mcp-added",
+          "change.model-bytes",
+          "change.skill-widened"
+        ],
+        "score": 0.4
+      },
+      "7.3": {
+        "evidence": "`scan` exited 1 on the base corpus and named the gate reasons; `diff --fail-on-alert` exited 1.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "7.4": {
+        "evidence": "`verify-live`, `discover-mcp` and `trace-diff` are documented; none was run here.",
+        "level": 1,
+        "score": 0.5,
+        "tier": "D"
+      },
+      "8.1": {
+        "canaries_tripped": [],
+        "score": 1.0
+      },
+      "8.2": {
+        "out_of_tree_content_via_import": [],
+        "out_of_tree_content_via_symlink": [],
+        "score": 1.0
+      },
+      "8.3": {
+        "disclosed": {},
+        "score": 1.0
+      },
+      "8.4": {
+        "raw_html_in": [],
+        "raw_terminal_escape_in": [],
+        "score": 1.0
+      },
+      "8.5": {
+        "cases": {
+          "deep-json": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.72,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "escape-names": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.67,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "fifo": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.37,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "header-bomb": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.67,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "large-tree": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 9.09,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "malformed": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.42,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-escape": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.77,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-loop": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.67,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          }
+        },
+        "score": 1.0
+      },
+      "8.6": {
+        "connection_attempts": [],
+        "inventory_produced_without_network": true,
+        "score": 1.0
+      },
+      "risk_verdicts": {
+        "control.mcp-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.mcp-toml-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.model-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.safetensors-safe": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.skill-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.tool-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.broad-permissions": {
+          "auto": true,
+          "final": true,
+          "snippet": "sarif:sarif: {\"level\": \"warning\", \"locations\": [{\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude/settings.json\", \"uribaseid\": \"%srcroot%\"}}}], \"message\": {\"text\": \"ide agent 'claude-code' declares unscoped tool allowances (shell commands, web fetches); effective approval remains unverified.\"}, \"partialfingerprints\": {\"nexus_symbiote/v1\": \"c7ee843cd2bd048f1ec6f031a1465d29fe124d2bffa1bb81fd6154f856095c"
+        },
+        "risk.agent.toxic-flow": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.ci.agent-action": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.data.governance": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.hidden-unicode": {
+          "auto": true,
+          "final": true,
+          "snippet": "native:native-json: .cursor/rules/backend.mdc {\"category\": \"tag_characters\", \"detail\": \"'.cursor/rules/backend.mdc' contains 37 deprecated unicode tag characters (u+e0000\u2013u+e007f) outside a flag emoji. these are invisible and have no legitimate use in prompt files.\", \"recommendation\": \"remove all tag characters \u2014 likely a prompt trojan.\", \"references\": [], \"severity\": \"critical\"}"
+        },
+        "risk.instructions.import-escape": {
+          "auto": true,
+          "final": true,
+          "snippet": "native:console-stderr:   - excluded: claude.md: imports a file outside the project root, which is not inventoried (from prompt) \u0000   - score: 206.0 (fail threshold 50)   - excluded: .mcp.json: mcp server 'healthcheck' launcher identity unknown (inline shell script) (from mcp)   - excluded: claude.md: imports a file outside the project root, which is not inventoried (from prompt)"
+        },
+        "risk.mcp.plaintext-http": {
+          "auto": true,
+          "final": true,
+          "snippet": "native:native-json: metrics {\"category\": \"transport_security\", \"detail\": \"mcp server 'metrics' endpoint is not https: http://10.20.4.7:8080\", \"recommendation\": \"use https for all remote mcp server connections.\", \"references\": [], \"severity\": \"high\"}"
+        },
+        "risk.mcp.shell-launch": {
+          "auto": true,
+          "final": true,
+          "snippet": "native:native-json: healthcheck {\"category\": \"launcher_identity\", \"detail\": \"mcp server 'healthcheck' launcher identity and pin are unknown: inline shell script.\", \"recommendation\": \"launch a registry package pinned to an exact version, or an image pinned by digest, in a form the inventory classifies.\", \"references\": [], \"severity\": \"high\"}"
+        },
+        "risk.mcp.tool-poisoning": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-npx": {
+          "adjudication": "version_pinning/high: MCP server 'crm' uses an unpinned package reference.",
+          "auto": false,
+          "final": true,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-uvx": {
+          "adjudication": "version_pinning/high: MCP server 'git' uses an unpinned package reference.",
+          "auto": false,
+          "final": true,
+          "snippet": ""
+        },
+        "risk.mcp.vulnerable-bridge": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.pickle-exec": {
+          "auto": true,
+          "final": true,
+          "snippet": "native:native-json: models/legacy/reranker.pt {\"category\": \"serialization_format\", \"detail\": \"model 'reranker.pt' has evidence of a potentially code-executing serialization or loader.\", \"recommendation\": \"convert to safetensors. block pickle/pt/pth in production.\", \"references\": [\"https://huggingface.co/blog/safetensors-security-audit\"], \"severity\": \"critical\"}"
+        },
+        "risk.model.unpinned-revision": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.env-file": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.mcp-header": {
+          "adjudication": "The only finding on 'payments' is a completeness note that header values are not bound. The token is redacted but not reported as a committed credential.",
+          "auto": true,
+          "final": false,
+          "snippet": "sarif:sarif: {\"level\": \"error\", \"locations\": [{\"physicallocation\": {\"artifactlocation\": {\"uri\": \".cursor/mcp.json\", \"uribaseid\": \"%srcroot%\"}}}], \"message\": {\"text\": \"mcp server 'metrics' endpoint is not https: http\\\\[:\\\\]//10.20.4.7:8080\"}, \"partialfingerprints\": {\"nexus_symbiote/v1\": \"1664b02e10c20aca57971c023ad8aa07e530738bd23c57945672906914ddc8c8\", \"primarylocationlinehash\": \"1664b02e10c20aca:1\"}, \"propert"
+        },
+        "risk.skill.hidden-instruction": {
+          "auto": true,
+          "final": true,
+          "snippet": "native:native-json: .claude/skills/pdf-export/skill.md {\"category\": \"invisible_characters\", \"detail\": \"'.claude/skills/pdf-export/skill.md' contains invisible unicode characters: zero width space (u+200b) x1, zero width non-joiner (u+200c) x1, zero width joiner (u+200d) x1. these are invisible in most editors and may alter llm behavior.\", \"recommendation\": \"remove all zero-width characters or document their purpose.\""
+        },
+        "risk.skill.remote-script": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.tool.shell": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.typosquat.langchian": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        }
+      }
+    },
+    "display": "Nexus SymBiote",
+    "grade": "B",
+    "groups": {
+      "BOM integrity": {
+        "of": 10.0,
+        "points": 10.0
+      },
+      "Change detection": {
+        "of": 8.0,
+        "points": 5.1
+      },
+      "Discovery": {
+        "of": 30.0,
+        "points": 13.3
+      },
+      "Precision": {
+        "of": 4.0,
+        "points": 3.5
+      },
+      "Record fidelity": {
+        "of": 14.0,
+        "points": 11.67
+      },
+      "Risk analysis": {
+        "of": 12.0,
+        "points": 6.79
+      },
+      "Scanner safety": {
+        "of": 12.0,
+        "points": 12.0
+      },
+      "Standards": {
+        "of": 10.0,
+        "points": 8.7
+      }
+    },
+    "license": "Apache-2.0",
+    "max_rss_mb": 86.1,
+    "points": {
+      "1.1": 2.33,
+      "1.2": 0.55,
+      "1.3": 4.17,
+      "1.4": 6.25,
+      "1.5": 0.0,
+      "2.1": 3.5,
+      "3.1": 3.73,
+      "3.2": 3.0,
+      "3.3": 2.94,
+      "3.4": 1.43,
+      "3.5": 0.57,
+      "4.1": 3.0,
+      "4.2": 2.0,
+      "4.3": 1.0,
+      "4.4": 0.7,
+      "4.5": 1.0,
+      "4.6": 1.0,
+      "5.1": 4.0,
+      "5.2": 3.0,
+      "5.3": 1.0,
+      "5.4": 1.0,
+      "5.5": 1.0,
+      "6.1": 3.79,
+      "6.2": 2.0,
+      "6.3": 1.0,
+      "7.1": 2.4,
+      "7.2": 1.2,
+      "7.3": 1.0,
+      "7.4": 0.5,
+      "8.1": 4.0,
+      "8.2": 2.0,
+      "8.3": 2.0,
+      "8.4": 1.0,
+      "8.5": 2.0,
+      "8.6": 1.0
+    },
+    "recall": 0.516,
+    "seconds": 11.2,
+    "source": "this repository",
+    "tool": "nexus-symbiote",
+    "total": 71.1,
+    "unmeasured": null,
+    "version": "0.2.0 (this checkout)"
+  },
+  {
+    "components_reported": 2516,
+    "details": {
+      "1.1": {
+        "classified": [
+          "model.api.agents-sdk",
+          "model.api.anthropic",
+          "model.api.embedding",
+          "model.api.openai",
+          "model.file.gguf",
+          "model.file.pickle",
+          "model.hf.pinned"
+        ],
+        "missed": [
+          "model.adapter.lora",
+          "model.api.bedrock",
+          "model.config.indirect",
+          "model.docker.download",
+          "model.env.indirect",
+          "model.file.onnx",
+          "model.file.safetensors",
+          "model.hf.unpinned",
+          "model.k8s.served",
+          "model.notebook",
+          "model.ollama.modelfile"
+        ],
+        "present_untyped": []
+      },
+      "1.2": {
+        "classified": [
+          "data.dvc.pointer",
+          "data.vector.chroma"
+        ],
+        "missed": [
+          "data.finetune.upload",
+          "data.hf.eval",
+          "data.hf.pinned",
+          "data.local.eval",
+          "data.local.training",
+          "data.memory.pgvector",
+          "data.modelcard.dataset",
+          "data.rag.confluence-source",
+          "data.rag.s3-source"
+        ],
+        "present_untyped": []
+      },
+      "1.3": {
+        "classified": [
+          "tool.framework.chromadb",
+          "tool.framework.crewai",
+          "tool.framework.langchain",
+          "tool.framework.langgraph",
+          "tool.framework.llama-index",
+          "tool.framework.mcp",
+          "tool.framework.npm.sdk.anthropic-ai",
+          "tool.framework.npm.sdk.modelcontextprotocol",
+          "tool.framework.openai",
+          "tool.framework.transformers",
+          "tool.function.fetch_url",
+          "tool.function.refund_order",
+          "tool.function.run_shell",
+          "tool.function.send_email",
+          "tool.mcp.get_order",
+          "tool.mcp.issue_refund",
+          "tool.mcp.search_kb"
+        ],
+        "missed": [
+          "tool.function.search_orders"
+        ],
+        "present_untyped": []
+      },
+      "1.4": {
+        "classified": [
+          "agent.command",
+          "agent.crewai",
+          "agent.instructions.cursor-rule",
+          "agent.langgraph.supervisor",
+          "agent.mcp.gemini",
+          "agent.mcp.http.authenticated",
+          "agent.mcp.http.plaintext",
+          "agent.mcp.stdio.pinned",
+          "agent.mcp.stdio.proxy",
+          "agent.mcp.stdio.shell",
+          "agent.mcp.stdio.unpinned",
+          "agent.mcp.stdio.uvx",
+          "agent.mcp.toml",
+          "agent.permissions",
+          "agent.prompt.inline",
+          "agent.prompt.system-file",
+          "agent.prompt.template",
+          "agent.skill.agents-dir",
+          "agent.skill.benign",
+          "agent.skill.github",
+          "agent.skill.poisoned"
+        ],
+        "missed": [
+          "agent.a2a.card",
+          "agent.bedrock.terraform",
+          "agent.guardrail",
+          "agent.hook",
+          "agent.instructions.agents-md",
+          "agent.instructions.claude",
+          "agent.instructions.copilot",
+          "agent.mcp.docker",
+          "agent.mcp.source.python",
+          "agent.mcp.source.typescript",
+          "agent.n8n",
+          "agent.openai-agents.triage",
+          "agent.plugin"
+        ],
+        "present_untyped": [
+          "agent.mcp.local-script",
+          "agent.subagent"
+        ]
+      },
+      "1.5": {
+        "classified": [
+          "infra.ci.agent-action",
+          "infra.image.pytorch",
+          "infra.image.vllm"
+        ],
+        "missed": [
+          "infra.endpoint.azure-openai",
+          "infra.endpoint.sagemaker",
+          "infra.image.ollama",
+          "infra.image.pgvector",
+          "infra.image.qdrant"
+        ],
+        "present_untyped": []
+      },
+      "2.1": {
+        "reported_as_components": [
+          "decoy.fake-gguf"
+        ],
+        "score": 0.875
+      },
+      "3.1": {
+        "facts_expected": 23,
+        "facts_found": 22,
+        "items_with_fact": 20,
+        "score": 0.9565217391304348
+      },
+      "3.2": {
+        "facts_expected": 5,
+        "facts_found": 0,
+        "items_with_fact": 5,
+        "score": 0.0
+      },
+      "3.3": {
+        "facts_expected": 52,
+        "facts_found": 45,
+        "items_with_fact": 52,
+        "score": 0.8653846153846154
+      },
+      "3.4": {
+        "facts_expected": 31,
+        "facts_found": 17,
+        "items_with_fact": 19,
+        "score": 0.5483870967741935
+      },
+      "3.5": {
+        "satisfied": [
+          "edge.agent.uses-tool",
+          "edge.agent.uses-model"
+        ],
+        "score": 0.2857142857142857
+      },
+      "4.1": {
+        "documents": {
+          "cyclonedx:cyclonedx-json": {
+            "errors": [],
+            "spec_version": "1.6",
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.2": {
+        "documents": {
+          "spdx3:spdx-json": {
+            "errors": [],
+            "spec_version": "3.0",
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.3": {
+        "any_model_card": true,
+        "datasets_typed_data": 1.0,
+        "models_typed_machine_learning_model": 0.2857142857142857,
+        "score": 0.6428571428571428
+      },
+      "4.4": {
+        "frameworks_detected": 10,
+        "frameworks_with_purl": 10,
+        "huggingface_purl": false,
+        "score": 0.7
+      },
+      "4.5": {
+        "documents": {
+          "sarif:sarif": {
+            "errors": [],
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.6": {
+        "evidence": "Findings in the JSON report carry applicable_frameworks tags; no minimum-element or crosswalk report was found.",
+        "level": 0.5,
+        "score": 0.5,
+        "tier": "V"
+      },
+      "5.1": {
+        "byte_identical": [
+          "cyclonedx:cyclonedx-json",
+          "native:native-json",
+          "sarif:sarif",
+          "spdx3:spdx-json"
+        ],
+        "compared": [
+          "cyclonedx:cyclonedx-json",
+          "manifest:native-json",
+          "native:native-json",
+          "sarif:sarif",
+          "spdx3:spdx-json"
+        ],
+        "identical_after_dropping_time_and_id_fields": [
+          "cyclonedx:cyclonedx-json",
+          "native:native-json",
+          "sarif:sarif",
+          "spdx3:spdx-json"
+        ],
+        "score": 0.0
+      },
+      "5.2": {
+        "evidence": "`attest sign` and `attest verify` appear in help text; not run.",
+        "level": 1,
+        "score": 0.5,
+        "tier": "D"
+      },
+      "5.3": {
+        "malformed_files_named_in": [
+          "native:native-json",
+          "native:console-stderr",
+          "cyclonedx:console-stderr",
+          "spdx3:console-stderr",
+          "sarif:sarif",
+          "sarif:console-stderr",
+          "html:html",
+          "html:console-stderr",
+          "markdown:markdown",
+          "markdown:console-stderr"
+        ],
+        "score": 1.0
+      },
+      "5.4": {
+        "evidence": "HTML and JSON reports state partial coverage.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "5.5": {
+        "evidence": "Records carry confidence and evidence fields throughout report.json.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "6.1": {
+        "caught": [
+          "risk.model.pickle-exec",
+          "risk.tool.shell",
+          "risk.secret.mcp-header",
+          "risk.skill.hidden-instruction",
+          "risk.instructions.hidden-unicode",
+          "risk.agent.broad-permissions",
+          "risk.ci.agent-action",
+          "risk.secret.env-file"
+        ],
+        "of": 19,
+        "score": 0.42105263157894735
+      },
+      "6.2": {
+        "controls_flagged": [],
+        "score": 1.0
+      },
+      "6.3": {
+        "evidence": "OSV lookup and --generate-vex appear in help; the lookup failed here because api.osv.dev was unreachable.",
+        "level": 1,
+        "score": 0.5,
+        "tier": "D"
+      },
+      "7.1": {
+        "not_attributable_output_varies_between_identical_runs": [
+          "change.permissions-widened"
+        ],
+        "score": 0.5,
+        "visible": [
+          "change.tool-description",
+          "change.mcp-version-and-scope",
+          "change.mcp-added",
+          "change.skill-widened",
+          "change.model-revision"
+        ]
+      },
+      "7.2": {
+        "exit_code": 0,
+        "reported": [
+          "change.mcp-version-and-scope",
+          "change.mcp-added"
+        ],
+        "score": 0.2
+      },
+      "7.3": {
+        "evidence": "Without --exit-zero the scan exited 1 on a high finding.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "7.4": {
+        "evidence": "--introspect contacts live MCP servers; no comparison step was exercised.",
+        "level": 0.5,
+        "score": 0.25,
+        "tier": "D"
+      },
+      "8.1": {
+        "canaries_tripped": [],
+        "score": 1.0
+      },
+      "8.2": {
+        "out_of_tree_content_via_import": [],
+        "out_of_tree_content_via_symlink": [],
+        "score": 1.0
+      },
+      "8.3": {
+        "disclosed": {},
+        "score": 1.0
+      },
+      "8.4": {
+        "raw_html_in": [],
+        "raw_terminal_escape_in": [],
+        "score": 1.0
+      },
+      "8.5": {
+        "cases": {
+          "deep-json": {
+            "passed": false,
+            "retention": 0.176,
+            "seconds": 0.9,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "escape-names": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 2.76,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "fifo": {
+            "passed": false,
+            "retention": 0.0,
+            "seconds": 180.03,
+            "timed_out": true,
+            "unhandled_error_in_stderr": false
+          },
+          "header-bomb": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.81,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "large-tree": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 17.52,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "malformed": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.96,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-escape": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.81,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-loop": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 2.11,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          }
+        },
+        "score": 0.75
+      },
+      "8.6": {
+        "connection_attempts": [
+          "8.8.4.4:53",
+          "8.8.8.8:53"
+        ],
+        "inventory_produced_without_network": true,
+        "score": 0.5
+      },
+      "risk_verdicts": {
+        "control.mcp-pinned": {
+          "adjudication": "Automatic match came from unrelated text near the component name; no finding states this risk.",
+          "auto": true,
+          "final": false,
+          "snippet": "html:html:     <details class=\"agent-card\"><summary class=\"agent-summary\"><span>&#x1f916; project:acme-support-copilot</span><span style=\"display:flex;align-items:center;gap:8px\"><span class=\"badge-cred\">2 credentials</span><span style=\"font-size:.72rem;color:#475569\">9 server(s) &middot; 34 pkg(s)</span></span></summary><div class=\"agent-detail\"><div style=\"font-size:.72rem;color:#475569;margin-bottom:12px\""
+        },
+        "control.mcp-toml-pinned": {
+          "adjudication": "Automatic match came from unrelated text near the component name; no finding states this risk.",
+          "auto": true,
+          "final": false,
+          "snippet": "html:html:     <details class=\"agent-card\"><summary class=\"agent-summary\"><span>&#x1f916; project:acme-support-copilot</span><span style=\"display:flex;align-items:center;gap:8px\"><span class=\"badge-cred\">2 credentials</span><span style=\"font-size:.72rem;color:#475569\">9 server(s) &middot; 34 pkg(s)</span></span></summary><div class=\"agent-detail\"><div style=\"font-size:.72rem;color:#475569;margin-bottom:12px\""
+        },
+        "control.model-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.safetensors-safe": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.skill-benign": {
+          "adjudication": "The findings on refund-processing are missing licence and homepage metadata, not hidden instructions.",
+          "auto": true,
+          "final": false,
+          "snippet": "native:native-json:  {\"account_ref\": null, \"advisory_aliases\": [], \"advisory_ids\": [], \"affected_agents\": [], \"affected_servers\": [], \"ai_risk_context\": null, \"ai_summary\": null, \"applicable_frameworks\": [\"owasp-llm\", \"owasp-mcp\", \"owasp-agentic\", \"atlas\", \"attack\", \"nist\", \"eu-ai-act\"], \"asset\": {\"account_ref\": null, \"asset_type\": \"skill_file\", \"canonical_id\": \"66db4ba6-7653-5537-8f81-4a39dc588b8d\", \"environment\": n"
+        },
+        "control.tool-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.broad-permissions": {
+          "auto": true,
+          "final": true,
+          "snippet": "native:native-json:  {\"client\": \"claude-code\", \"config_path\": \".claude/settings.json\", \"description\": \"allow rule bash(*) - every shell command runs without a permission prompt.\", \"key_path\": \"permissions.allow\", \"recommendation\": \"replace it with the commands you need, for example bash(git diff *) or bash(npm run test *).\", \"scope\": \"project\", \"severity\": \"medium\", \"type\": \"unscoped_shell_allow\", \"value\": \"bash(*)\"}"
+        },
+        "risk.agent.toxic-flow": {
+          "adjudication": "The finding is a missing-eval notice for the agent, not a statement that untrusted input, private data and an outbound channel combine.",
+          "auto": true,
+          "final": false,
+          "snippet": "html:html:   <section id=\"policyfindings\" data-tab=\"findings\" role=\"tabpanel\" aria-labelledby=\"tab-findings\"><div class=\"sec-title\">&#x1f6e1;&#xfe0f; policy &amp; security findings<sup style=\"font-size:.7rem;color:#475569;margin-left:6px\">62</sup></div><div class=\"panel\"><div class=\"hint-box\">unified non-cve findings from scanners, policy checks, runtime controls, and mcp intelligence. these are the same fin"
+        },
+        "risk.ci.agent-action": {
+          "auto": true,
+          "final": true,
+          "snippet": "native:native-json:  {\"account_ref\": null, \"advisory_aliases\": [], \"advisory_ids\": [], \"affected_agents\": [], \"affected_servers\": [], \"ai_risk_context\": null, \"ai_summary\": null, \"applicable_frameworks\": [\"nist-800-53\", \"fedramp\", \"cis\"], \"asset\": {\"account_ref\": null, \"asset_type\": \"iac_resource\", \"canonical_id\": \"c871afe6-bb7e-51ec-9921-e7ae6630a358\", \"environment\": null, \"identifier\": \".github/workflows/ai-review."
+        },
+        "risk.data.governance": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.hidden-unicode": {
+          "auto": true,
+          "final": true,
+          "snippet": "native:native-json:  {\"account_ref\": null, \"advisory_aliases\": [], \"advisory_ids\": [], \"affected_agents\": [], \"affected_servers\": [], \"ai_risk_context\": null, \"ai_summary\": null, \"applicable_frameworks\": [\"owasp-llm\", \"owasp-mcp\", \"owasp-agentic\", \"atlas\", \"attack\", \"nist\", \"eu-ai-act\"], \"asset\": {\"account_ref\": null, \"asset_type\": \"skill_file\", \"canonical_id\": \"e3549315-413a-5040-be17-87133aeb598a\", \"environment\": n"
+        },
+        "risk.instructions.import-escape": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.plaintext-http": {
+          "adjudication": "The finding on .cursor/mcp.json is the hardcoded bearer token; nothing reports the http:// endpoint.",
+          "auto": true,
+          "final": false,
+          "snippet": "native:native-json:  {\"account_ref\": null, \"advisory_aliases\": [], \"advisory_ids\": [], \"affected_agents\": [], \"affected_servers\": [], \"ai_risk_context\": null, \"ai_summary\": null, \"applicable_frameworks\": [\"owasp-llm\", \"owasp-mcp\", \"owasp-agentic\", \"atlas\", \"attack\", \"nist\", \"eu-ai-act\"], \"asset\": {\"account_ref\": null, \"asset_type\": \"mcp_server\", \"canonical_id\": \"3d49610c-0d3c-5a9c-9f89-253b03df8946\", \"environment\": n"
+        },
+        "risk.mcp.shell-launch": {
+          "adjudication": "Automatic match came from unrelated text near the component name; no finding states this risk.",
+          "auto": true,
+          "final": false,
+          "snippet": "html:html:   <div style=\"background:#d9770618;border:1px solid #d97706;border-radius:8px;padding:10px 16px;margin-bottom:12px;font-size:.85rem;color:#d97706\">&#x26a0;&#xfe0f; <b>partial coverage</b>: this report does not represent complete coverage. a low or zero finding count is not a clean bill of health.<ul style=\"margin:6px 0 0 18px\"><li>agent-bom: vulnerability scanning skipped by request</li><li>filesy"
+        },
+        "risk.mcp.tool-poisoning": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-npx": {
+          "adjudication": "Automatic match came from unrelated text near the component name; no finding states this risk.",
+          "auto": true,
+          "final": false,
+          "snippet": "html:html:     <details class=\"agent-card\"><summary class=\"agent-summary\"><span>&#x1f916; project:acme-support-copilot</span><span style=\"display:flex;align-items:center;gap:8px\"><span class=\"badge-cred\">2 credentials</span><span style=\"font-size:.72rem;color:#475569\">9 server(s) &middot; 34 pkg(s)</span></span></summary><div class=\"agent-detail\"><div style=\"font-size:.72rem;color:#475569;margin-bottom:12px\""
+        },
+        "risk.mcp.unpinned-uvx": {
+          "adjudication": "Automatic match came from unrelated text near the component name; no finding states this risk.",
+          "auto": true,
+          "final": false,
+          "snippet": "html:html:     <details class=\"agent-card\"><summary class=\"agent-summary\"><span>&#x1f916; project:acme-support-copilot</span><span style=\"display:flex;align-items:center;gap:8px\"><span class=\"badge-cred\">2 credentials</span><span style=\"font-size:.72rem;color:#475569\">9 server(s) &middot; 34 pkg(s)</span></span></summary><div class=\"agent-detail\"><div style=\"font-size:.72rem;color:#475569;margin-bottom:12px\""
+        },
+        "risk.mcp.vulnerable-bridge": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.pickle-exec": {
+          "auto": true,
+          "final": true,
+          "snippet": "native:native-json:  {\"account_ref\": null, \"advisory_aliases\": [], \"advisory_ids\": [], \"affected_agents\": [], \"affected_servers\": [], \"ai_risk_context\": null, \"ai_summary\": null, \"applicable_frameworks\": [\"owasp-llm\", \"owasp-mcp\", \"owasp-agentic\", \"atlas\", \"attack\", \"nist\", \"eu-ai-act\"], \"asset\": {\"account_ref\": null, \"asset_type\": \"model_file\", \"canonical_id\": \"81aa2289-f4db-5a84-86dd-5ea31d01eaec\", \"environment\": n"
+        },
+        "risk.model.unpinned-revision": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.env-file": {
+          "auto": true,
+          "final": true,
+          "snippet": "native:native-json:  {\"account_ref\": null, \"advisory_aliases\": [], \"advisory_ids\": [], \"affected_agents\": [], \"affected_servers\": [], \"ai_risk_context\": null, \"ai_summary\": null, \"applicable_frameworks\": [\"owasp-llm\", \"nist-csf\", \"nist-800-53\", \"fedramp\", \"iso-27001\", \"soc2\", \"cis\"], \"asset\": {\"account_ref\": null, \"asset_type\": \"file\", \"canonical_id\": \"a2ddd66d-f2c2-5615-b1b0-72f3072b74fa\", \"environment\": null, \"iden"
+        },
+        "risk.secret.mcp-header": {
+          "auto": true,
+          "final": true,
+          "snippet": "native:native-json:  {\"account_ref\": null, \"advisory_aliases\": [], \"advisory_ids\": [], \"affected_agents\": [], \"affected_servers\": [], \"ai_risk_context\": null, \"ai_summary\": null, \"applicable_frameworks\": [\"owasp-llm\", \"owasp-mcp\", \"owasp-agentic\", \"atlas\", \"attack\", \"nist\", \"eu-ai-act\"], \"asset\": {\"account_ref\": null, \"asset_type\": \"mcp_server\", \"canonical_id\": \"24dd96c2-a061-5041-9b99-154126f52d0a\", \"environment\": n"
+        },
+        "risk.skill.hidden-instruction": {
+          "auto": true,
+          "final": true,
+          "snippet": "native:native-json:  {\"account_ref\": null, \"advisory_aliases\": [], \"advisory_ids\": [], \"affected_agents\": [], \"affected_servers\": [], \"ai_risk_context\": null, \"ai_summary\": null, \"applicable_frameworks\": [\"owasp-llm\", \"owasp-mcp\", \"owasp-agentic\", \"atlas\", \"attack\", \"nist\", \"eu-ai-act\"], \"asset\": {\"account_ref\": null, \"asset_type\": \"skill_file\", \"canonical_id\": \"1d5ef133-918b-59f1-9b34-8329cb122ce6\", \"environment\": n"
+        },
+        "risk.skill.remote-script": {
+          "adjudication": "No finding names export.sh or the piped download; the skill findings concern the instruction text and metadata.",
+          "auto": true,
+          "final": false,
+          "snippet": "native:native-json:  {\"account_ref\": null, \"advisory_aliases\": [], \"advisory_ids\": [], \"affected_agents\": [], \"affected_servers\": [], \"ai_risk_context\": null, \"ai_summary\": null, \"applicable_frameworks\": [\"owasp-llm\", \"owasp-mcp\", \"owasp-agentic\", \"atlas\", \"attack\", \"nist\", \"eu-ai-act\"], \"asset\": {\"account_ref\": null, \"asset_type\": \"skill_file\", \"canonical_id\": \"1d5ef133-918b-59f1-9b34-8329cb122ce6\", \"environment\": n"
+        },
+        "risk.tool.shell": {
+          "auto": true,
+          "final": true,
+          "snippet": "native:native-json:  {\"account_ref\": null, \"advisory_aliases\": [], \"advisory_ids\": [], \"affected_agents\": [], \"affected_servers\": [], \"ai_risk_context\": null, \"ai_summary\": null, \"applicable_frameworks\": [\"owasp-llm\", \"nist-csf\", \"nist-800-53\", \"fedramp\", \"iso-27001\", \"soc2\", \"cis\", \"pci-dss\"], \"asset\": {\"account_ref\": null, \"asset_type\": \"source_file\", \"canonical_id\": \"38b1e4de-4cb1-54fd-b2f3-baacb47e8580\", \"environ"
+        },
+        "risk.typosquat.langchian": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        }
+      }
+    },
+    "display": "agent-bom",
+    "grade": "C",
+    "groups": {
+      "BOM integrity": {
+        "of": 10.0,
+        "points": 4.5
+      },
+      "Change detection": {
+        "of": 8.0,
+        "points": 3.35
+      },
+      "Discovery": {
+        "of": 30.0,
+        "points": 15.15
+      },
+      "Precision": {
+        "of": 4.0,
+        "points": 3.5
+      },
+      "Record fidelity": {
+        "of": 14.0,
+        "points": 8.1
+      },
+      "Risk analysis": {
+        "of": 12.0,
+        "points": 6.37
+      },
+      "Scanner safety": {
+        "of": 12.0,
+        "points": 11.0
+      },
+      "Standards": {
+        "of": 10.0,
+        "points": 8.49
+      }
+    },
+    "license": "Apache-2.0",
+    "max_rss_mb": 106.6,
+    "points": {
+      "1.1": 2.72,
+      "1.2": 1.09,
+      "1.3": 4.72,
+      "1.4": 5.5,
+      "1.5": 1.12,
+      "2.1": 3.5,
+      "3.1": 3.83,
+      "3.2": 0.0,
+      "3.3": 2.6,
+      "3.4": 1.1,
+      "3.5": 0.57,
+      "4.1": 3.0,
+      "4.2": 2.0,
+      "4.3": 1.29,
+      "4.4": 0.7,
+      "4.5": 1.0,
+      "4.6": 0.5,
+      "5.1": 0.0,
+      "5.2": 1.5,
+      "5.3": 1.0,
+      "5.4": 1.0,
+      "5.5": 1.0,
+      "6.1": 3.37,
+      "6.2": 2.0,
+      "6.3": 1.0,
+      "7.1": 1.5,
+      "7.2": 0.6,
+      "7.3": 1.0,
+      "7.4": 0.25,
+      "8.1": 4.0,
+      "8.2": 2.0,
+      "8.3": 2.0,
+      "8.4": 1.0,
+      "8.5": 1.5,
+      "8.6": 0.5
+    },
+    "recall": 0.56,
+    "seconds": 11.5,
+    "source": "PyPI agent-bom",
+    "tool": "agent-bom",
+    "total": 60.5,
+    "unmeasured": null,
+    "version": "0.115.4"
+  },
+  {
+    "components_reported": 325,
+    "details": {
+      "1.1": {
+        "classified": [
+          "model.adapter.lora",
+          "model.api.agents-sdk",
+          "model.api.anthropic",
+          "model.api.bedrock",
+          "model.api.embedding",
+          "model.api.openai",
+          "model.config.indirect",
+          "model.file.gguf",
+          "model.file.onnx",
+          "model.file.safetensors",
+          "model.hf.pinned",
+          "model.ollama.modelfile"
+        ],
+        "missed": [
+          "model.docker.download",
+          "model.env.indirect",
+          "model.file.pickle",
+          "model.hf.unpinned",
+          "model.k8s.served",
+          "model.notebook"
+        ],
+        "present_untyped": []
+      },
+      "1.2": {
+        "classified": [
+          "data.modelcard.dataset"
+        ],
+        "missed": [
+          "data.dvc.pointer",
+          "data.finetune.upload",
+          "data.hf.eval",
+          "data.hf.pinned",
+          "data.local.eval",
+          "data.local.training",
+          "data.memory.pgvector",
+          "data.rag.confluence-source",
+          "data.rag.s3-source",
+          "data.vector.chroma"
+        ],
+        "present_untyped": []
+      },
+      "1.3": {
+        "classified": [
+          "tool.framework.chromadb",
+          "tool.framework.crewai",
+          "tool.framework.langchain",
+          "tool.framework.langgraph",
+          "tool.framework.llama-index",
+          "tool.framework.mcp",
+          "tool.framework.npm.sdk.anthropic-ai",
+          "tool.framework.npm.sdk.modelcontextprotocol",
+          "tool.framework.openai",
+          "tool.framework.transformers",
+          "tool.mcp.search_kb"
+        ],
+        "missed": [
+          "tool.function.fetch_url",
+          "tool.function.refund_order",
+          "tool.function.run_shell",
+          "tool.function.search_orders",
+          "tool.function.send_email",
+          "tool.mcp.get_order",
+          "tool.mcp.issue_refund"
+        ],
+        "present_untyped": []
+      },
+      "1.4": {
+        "classified": [
+          "agent.command",
+          "agent.crewai",
+          "agent.instructions.agents-md",
+          "agent.instructions.claude",
+          "agent.instructions.copilot",
+          "agent.instructions.cursor-rule",
+          "agent.mcp.http.authenticated",
+          "agent.mcp.http.plaintext",
+          "agent.mcp.source.typescript",
+          "agent.mcp.stdio.pinned",
+          "agent.mcp.stdio.proxy",
+          "agent.mcp.stdio.unpinned",
+          "agent.mcp.stdio.uvx",
+          "agent.mcp.toml",
+          "agent.plugin",
+          "agent.prompt.system-file",
+          "agent.skill.agents-dir",
+          "agent.skill.benign",
+          "agent.skill.poisoned",
+          "agent.subagent"
+        ],
+        "missed": [
+          "agent.a2a.card",
+          "agent.bedrock.terraform",
+          "agent.guardrail",
+          "agent.hook",
+          "agent.langgraph.supervisor",
+          "agent.mcp.docker",
+          "agent.mcp.gemini",
+          "agent.mcp.local-script",
+          "agent.mcp.source.python",
+          "agent.mcp.stdio.shell",
+          "agent.n8n",
+          "agent.openai-agents.triage",
+          "agent.permissions",
+          "agent.prompt.inline",
+          "agent.prompt.template",
+          "agent.skill.github"
+        ],
+        "present_untyped": []
+      },
+      "1.5": {
+        "classified": [
+          "infra.ci.agent-action"
+        ],
+        "missed": [
+          "infra.endpoint.azure-openai",
+          "infra.endpoint.sagemaker",
+          "infra.image.ollama",
+          "infra.image.pgvector",
+          "infra.image.pytorch",
+          "infra.image.qdrant",
+          "infra.image.vllm"
+        ],
+        "present_untyped": []
+      },
+      "2.1": {
+        "reported_as_components": [
+          "decoy.commented-model"
+        ],
+        "score": 0.875
+      },
+      "3.1": {
+        "facts_expected": 27,
+        "facts_found": 26,
+        "items_with_fact": 24,
+        "score": 0.9629629629629629
+      },
+      "3.2": {
+        "facts_expected": 9,
+        "facts_found": 0,
+        "items_with_fact": 9,
+        "score": 0.0
+      },
+      "3.3": {
+        "facts_expected": 45,
+        "facts_found": 45,
+        "items_with_fact": 45,
+        "score": 1.0
+      },
+      "3.4": {
+        "facts_expected": 30,
+        "facts_found": 22,
+        "items_with_fact": 18,
+        "score": 0.7333333333333333
+      },
+      "3.5": {
+        "satisfied": [
+          "edge.model.trained-on",
+          "edge.adapter.base-model"
+        ],
+        "score": 0.2857142857142857
+      },
+      "4.1": {
+        "documents": {
+          "agentic:cyclonedx-json": {
+            "errors": [],
+            "spec_version": "1.7",
+            "valid": true
+          },
+          "aibom:cyclonedx-json": {
+            "errors": [],
+            "spec_version": "1.7",
+            "valid": true
+          },
+          "polyglot:cyclonedx-json": {
+            "errors": [],
+            "spec_version": "1.7",
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.2": {
+        "documents": {
+          "aibom:spdx-json": {
+            "errors": [],
+            "spec_version": "3.0",
+            "valid": true
+          },
+          "polyglot:spdx-json": {
+            "errors": [],
+            "spec_version": "3.0",
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.3": {
+        "any_model_card": true,
+        "datasets_typed_data": 1.0,
+        "models_typed_machine_learning_model": 1.0,
+        "score": 1.0
+      },
+      "4.4": {
+        "frameworks_detected": 10,
+        "frameworks_with_purl": 10,
+        "huggingface_purl": true,
+        "score": 1.0
+      },
+      "4.5": {
+        "documents": {
+          "agentic:sarif": {
+            "errors": [],
+            "valid": true
+          },
+          "aibom-audit:sarif": {
+            "errors": [],
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.6": {
+        "evidence": "`cdx-validate --benchmark cisa-ai` ran on the AI BOM and wrote a SARIF report.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "5.1": {
+        "byte_identical": [],
+        "compared": [
+          "agentic:cyclonedx-json",
+          "agentic:sarif",
+          "aibom-audit:sarif",
+          "aibom:cyclonedx-json",
+          "aibom:spdx-json",
+          "polyglot:cyclonedx-json",
+          "polyglot:spdx-json"
+        ],
+        "identical_after_dropping_time_and_id_fields": [
+          "agentic:cyclonedx-json",
+          "aibom:cyclonedx-json",
+          "aibom:spdx-json",
+          "polyglot:cyclonedx-json",
+          "polyglot:spdx-json"
+        ],
+        "score": 0.0
+      },
+      "5.2": {
+        "evidence": "`cdx-sign` and `cdx-verify` appear in help text; not run.",
+        "level": 1,
+        "score": 0.5,
+        "tier": "D"
+      },
+      "5.3": {
+        "malformed_files_named_in": [
+          "aibom:cyclonedx-json",
+          "aibom:spdx-json",
+          "agentic:cyclonedx-json"
+        ],
+        "score": 1.0
+      },
+      "5.4": {
+        "evidence": "No statement of collection scope or partial coverage found in the output.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.5": {
+        "evidence": "Components carry CycloneDX evidence with identity methods, techniques and confidence.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "6.1": {
+        "caught": [
+          "risk.secret.mcp-header",
+          "risk.ci.agent-action"
+        ],
+        "of": 19,
+        "score": 0.10526315789473684
+      },
+      "6.2": {
+        "controls_flagged": [],
+        "score": 1.0
+      },
+      "6.3": {
+        "evidence": "No advisory lookup or VEX output.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "7.1": {
+        "not_attributable_output_varies_between_identical_runs": [
+          "change.model-bytes",
+          "change.skill-widened",
+          "change.model-revision",
+          "change.system-prompt"
+        ],
+        "score": 0.2,
+        "visible": [
+          "change.mcp-version-and-scope",
+          "change.mcp-added"
+        ]
+      },
+      "7.2": {
+        "note": "no drift command",
+        "score": 0.0
+      },
+      "7.3": {
+        "evidence": "`cdx-audit` exited 3 when findings reached high severity.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "7.4": {
+        "evidence": "tracebom and obom observe a running system; no comparison with the BOM was exercised.",
+        "level": 0.5,
+        "score": 0.25,
+        "tier": "D"
+      },
+      "8.1": {
+        "canaries_tripped": [],
+        "score": 1.0
+      },
+      "8.2": {
+        "out_of_tree_content_via_import": [],
+        "out_of_tree_content_via_symlink": [],
+        "score": 1.0
+      },
+      "8.3": {
+        "disclosed": {},
+        "score": 1.0
+      },
+      "8.4": {
+        "raw_html_in": [],
+        "raw_terminal_escape_in": [],
+        "score": 1.0
+      },
+      "8.5": {
+        "cases": {
+          "deep-json": {
+            "passed": false,
+            "retention": 0.844,
+            "seconds": 4.22,
+            "timed_out": false,
+            "unhandled_error_in_stderr": true
+          },
+          "escape-names": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.12,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "fifo": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.12,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "header-bomb": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.02,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "large-tree": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 11.01,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "malformed": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.12,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-escape": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.02,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-loop": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.22,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          }
+        },
+        "score": 0.875
+      },
+      "8.6": {
+        "connection_attempts": [],
+        "inventory_produced_without_network": true,
+        "score": 1.0
+      },
+      "risk_verdicts": {
+        "control.mcp-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.mcp-toml-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.model-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.safetensors-safe": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.skill-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.tool-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.broad-permissions": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.toxic-flow": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.ci.agent-action": {
+          "auto": true,
+          "final": true,
+          "snippet": "agentic:sarif: {\"level\": \"error\", \"locations\": [{\"logicallocations\": [{\"fullyqualifiedname\": \"pkg:github/actions/checkout@v4\", \"kind\": \"package\"}], \"physicallocation\": {\"artifactlocation\": {\"uri\": \".github/workflows/ai-review.yml\"}}}], \"message\": {\"text\": \"unpinned github action 'actions/checkout@v4' in workflow with write permissions\"}, \"properties\": {\"attacktactics\": [\"ta0001\"], \"attacktechniques\": [\"t1195.001"
+        },
+        "risk.data.governance": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.hidden-unicode": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.import-escape": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.plaintext-http": {
+          "adjudication": "MCP-001/002/004 report missing authentication on the endpoint, not the lack of TLS.",
+          "auto": true,
+          "final": false,
+          "snippet": "agentic:sarif: {\"level\": \"error\", \"locations\": [{\"logicallocations\": [{\"fullyqualifiedname\": \"urn:service:mcp:metrics:latest\", \"kind\": \"package\"}], \"physicallocation\": {\"artifactlocation\": {\"uri\": \".cursor/mcp.json\"}}}], \"message\": {\"text\": \"mcp server 'metrics' exposes tool endpoints without authentication\"}, \"properties\": {\"attacktactics\": [\"ta0001\", \"ta0002\"], \"attacktechniques\": [\"t1190\", \"t1059\"], \"category"
+        },
+        "risk.mcp.shell-launch": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.tool-poisoning": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-npx": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-uvx": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.vulnerable-bridge": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.pickle-exec": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.unpinned-revision": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.env-file": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.mcp-header": {
+          "auto": true,
+          "final": true,
+          "snippet": "agentic:sarif: {\"level\": \"error\", \"locations\": [{\"logicallocations\": [{\"fullyqualifiedname\": \"urn:service:mcp:metrics:latest\", \"kind\": \"package\"}], \"physicallocation\": {\"artifactlocation\": {\"uri\": \".cursor/mcp.json\"}}}], \"message\": {\"text\": \"mcp server 'metrics' exposes tool endpoints without authentication\"}, \"properties\": {\"attacktactics\": [\"ta0001\", \"ta0002\"], \"attacktechniques\": [\"t1190\", \"t1059\"], \"category"
+        },
+        "risk.skill.hidden-instruction": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.skill.remote-script": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.tool.shell": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.typosquat.langchian": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        }
+      }
+    },
+    "display": "OWASP cdxgen",
+    "grade": "C",
+    "groups": {
+      "BOM integrity": {
+        "of": 10.0,
+        "points": 3.5
+      },
+      "Change detection": {
+        "of": 8.0,
+        "points": 1.85
+      },
+      "Discovery": {
+        "of": 30.0,
+        "points": 13.66
+      },
+      "Precision": {
+        "of": 4.0,
+        "points": 3.5
+      },
+      "Record fidelity": {
+        "of": 14.0,
+        "points": 8.89
+      },
+      "Risk analysis": {
+        "of": 12.0,
+        "points": 2.84
+      },
+      "Scanner safety": {
+        "of": 12.0,
+        "points": 11.75
+      },
+      "Standards": {
+        "of": 10.0,
+        "points": 10.0
+      }
+    },
+    "license": "Apache-2.0",
+    "max_rss_mb": 276.6,
+    "points": {
+      "1.1": 4.67,
+      "1.2": 0.55,
+      "1.3": 3.06,
+      "1.4": 5.0,
+      "1.5": 0.38,
+      "2.1": 3.5,
+      "3.1": 3.85,
+      "3.2": 0.0,
+      "3.3": 3.0,
+      "3.4": 1.47,
+      "3.5": 0.57,
+      "4.1": 3.0,
+      "4.2": 2.0,
+      "4.3": 2.0,
+      "4.4": 1.0,
+      "4.5": 1.0,
+      "4.6": 1.0,
+      "5.1": 0.0,
+      "5.2": 1.5,
+      "5.3": 1.0,
+      "5.4": 0.0,
+      "5.5": 1.0,
+      "6.1": 0.84,
+      "6.2": 2.0,
+      "6.3": 0.0,
+      "7.1": 0.6,
+      "7.2": 0.0,
+      "7.3": 1.0,
+      "7.4": 0.25,
+      "8.1": 4.0,
+      "8.2": 2.0,
+      "8.3": 2.0,
+      "8.4": 1.0,
+      "8.5": 1.75,
+      "8.6": 1.0
+    },
+    "recall": 0.495,
+    "seconds": 25.4,
+    "source": "npm @cdxgen/cdxgen",
+    "tool": "cdxgen",
+    "total": 56.0,
+    "unmeasured": null,
+    "version": "13.8.0"
+  },
+  {
+    "components_reported": 427,
+    "details": {
+      "1.1": {
+        "classified": [
+          "model.adapter.lora",
+          "model.api.agents-sdk",
+          "model.api.anthropic",
+          "model.api.bedrock",
+          "model.api.embedding",
+          "model.api.openai",
+          "model.file.gguf",
+          "model.file.onnx",
+          "model.file.pickle",
+          "model.file.safetensors",
+          "model.hf.pinned",
+          "model.hf.unpinned"
+        ],
+        "missed": [
+          "model.config.indirect",
+          "model.docker.download",
+          "model.env.indirect",
+          "model.k8s.served",
+          "model.notebook",
+          "model.ollama.modelfile"
+        ],
+        "present_untyped": []
+      },
+      "1.2": {
+        "classified": [
+          "data.finetune.upload",
+          "data.hf.eval",
+          "data.hf.pinned",
+          "data.local.eval",
+          "data.local.training",
+          "data.vector.chroma"
+        ],
+        "missed": [
+          "data.dvc.pointer",
+          "data.memory.pgvector",
+          "data.modelcard.dataset",
+          "data.rag.confluence-source",
+          "data.rag.s3-source"
+        ],
+        "present_untyped": []
+      },
+      "1.3": {
+        "classified": [
+          "tool.framework.crewai",
+          "tool.framework.langchain",
+          "tool.framework.langgraph",
+          "tool.framework.llama-index",
+          "tool.framework.mcp",
+          "tool.framework.npm.sdk.anthropic-ai",
+          "tool.framework.npm.sdk.modelcontextprotocol",
+          "tool.framework.openai",
+          "tool.framework.transformers"
+        ],
+        "missed": [
+          "tool.framework.chromadb",
+          "tool.function.fetch_url",
+          "tool.function.refund_order",
+          "tool.function.run_shell",
+          "tool.function.search_orders",
+          "tool.function.send_email",
+          "tool.mcp.get_order",
+          "tool.mcp.issue_refund",
+          "tool.mcp.search_kb"
+        ],
+        "present_untyped": []
+      },
+      "1.4": {
+        "classified": [
+          "agent.mcp.source.python",
+          "agent.prompt.inline",
+          "agent.prompt.system-file",
+          "agent.prompt.template"
+        ],
+        "missed": [
+          "agent.a2a.card",
+          "agent.bedrock.terraform",
+          "agent.command",
+          "agent.crewai",
+          "agent.guardrail",
+          "agent.hook",
+          "agent.instructions.agents-md",
+          "agent.instructions.claude",
+          "agent.instructions.copilot",
+          "agent.instructions.cursor-rule",
+          "agent.langgraph.supervisor",
+          "agent.mcp.docker",
+          "agent.mcp.gemini",
+          "agent.mcp.http.authenticated",
+          "agent.mcp.http.plaintext",
+          "agent.mcp.local-script",
+          "agent.mcp.source.typescript",
+          "agent.mcp.stdio.pinned",
+          "agent.mcp.stdio.proxy",
+          "agent.mcp.stdio.shell",
+          "agent.mcp.stdio.unpinned",
+          "agent.mcp.stdio.uvx",
+          "agent.mcp.toml",
+          "agent.n8n",
+          "agent.openai-agents.triage",
+          "agent.permissions",
+          "agent.plugin",
+          "agent.skill.agents-dir",
+          "agent.skill.benign",
+          "agent.skill.github",
+          "agent.skill.poisoned",
+          "agent.subagent"
+        ],
+        "present_untyped": []
+      },
+      "1.5": {
+        "classified": [],
+        "missed": [
+          "infra.ci.agent-action",
+          "infra.endpoint.azure-openai",
+          "infra.endpoint.sagemaker",
+          "infra.image.pgvector",
+          "infra.image.pytorch",
+          "infra.image.qdrant",
+          "infra.image.vllm"
+        ],
+        "present_untyped": [
+          "infra.image.ollama"
+        ]
+      },
+      "2.1": {
+        "reported_as_components": [],
+        "score": 1.0
+      },
+      "3.1": {
+        "facts_expected": 21,
+        "facts_found": 18,
+        "items_with_fact": 17,
+        "score": 0.8571428571428571
+      },
+      "3.2": {
+        "facts_expected": 10,
+        "facts_found": 5,
+        "items_with_fact": 10,
+        "score": 0.5
+      },
+      "3.3": {
+        "facts_expected": 32,
+        "facts_found": 31,
+        "items_with_fact": 32,
+        "score": 0.96875
+      },
+      "3.4": {
+        "facts_expected": 14,
+        "facts_found": 6,
+        "items_with_fact": 7,
+        "score": 0.375
+      },
+      "3.5": {
+        "satisfied": [
+          "edge.adapter.base-model"
+        ],
+        "score": 0.14285714285714285
+      },
+      "4.1": {
+        "documents": {
+          "all:cyclonedx-json": {
+            "errors": [],
+            "spec_version": "1.6",
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.2": {
+        "documents": {
+          "all:spdx-json": {
+            "errors": [
+              ": {'@context': 'https://spdx.org/rdf/3.0.1/spdx-context.jsonld', '@graph': [{'@id': '_:creationInfo', 'created': '2026-11-18T10:23:15Z', 'createdBy': ['https://ai",
+              ": Unevaluated properties are not allowed ('@graph' was unexpected)"
+            ],
+            "spec_version": "3.0",
+            "valid": false
+          }
+        },
+        "score": 0.5
+      },
+      "4.3": {
+        "any_model_card": true,
+        "datasets_typed_data": 1.0,
+        "models_typed_machine_learning_model": 1.0,
+        "score": 1.0
+      },
+      "4.4": {
+        "frameworks_detected": 9,
+        "frameworks_with_purl": 8,
+        "huggingface_purl": false,
+        "score": 0.6222222222222221
+      },
+      "4.5": {
+        "documents": {
+          "all:sarif": {
+            "errors": [],
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.6": {
+        "evidence": "`--compliance nist-ai-rmf --compliance owasp-agentic` wrote a compliance report.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "5.1": {
+        "byte_identical": [],
+        "compared": [
+          "all:cyclonedx-json",
+          "all:native-json",
+          "all:sarif",
+          "all:spdx-json"
+        ],
+        "identical_after_dropping_time_and_id_fields": [
+          "all:cyclonedx-json",
+          "all:native-json",
+          "all:sarif",
+          "all:spdx-json"
+        ],
+        "score": 0.6
+      },
+      "5.2": {
+        "evidence": "No signing or attestation.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.3": {
+        "malformed_files_named_in": [],
+        "score": 0.0
+      },
+      "5.4": {
+        "evidence": "Not found.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.5": {
+        "evidence": "Each occurrence carries a detector ID and a confidence.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "6.1": {
+        "caught": [
+          "risk.model.pickle-exec"
+        ],
+        "of": 19,
+        "score": 0.05263157894736842
+      },
+      "6.2": {
+        "controls_flagged": [],
+        "score": 1.0
+      },
+      "6.3": {
+        "evidence": "OpenVEX output and an OSV lookup exist; the lookup was refused here and never observed to succeed.",
+        "level": 1,
+        "score": 0.5,
+        "tier": "D"
+      },
+      "7.1": {
+        "not_attributable_output_varies_between_identical_runs": [
+          "change.model-revision",
+          "change.system-prompt",
+          "change.dataset-bytes"
+        ],
+        "score": 0.1,
+        "visible": [
+          "change.model-bytes"
+        ]
+      },
+      "7.2": {
+        "exit_code": 0,
+        "reported": [
+          "change.model-bytes"
+        ],
+        "score": 0.1
+      },
+      "7.3": {
+        "evidence": "`--fail-on` returned the configured exit codes on scan and diff.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "7.4": {
+        "evidence": "No runtime comparison.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "8.1": {
+        "canaries_tripped": [],
+        "score": 1.0
+      },
+      "8.2": {
+        "out_of_tree_content_via_import": [],
+        "out_of_tree_content_via_symlink": [],
+        "score": 1.0
+      },
+      "8.3": {
+        "disclosed": {},
+        "score": 1.0
+      },
+      "8.4": {
+        "raw_html_in": [],
+        "raw_terminal_escape_in": [
+          "all:text"
+        ],
+        "score": 0.5
+      },
+      "8.5": {
+        "cases": {
+          "deep-json": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.85,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "escape-names": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.1,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "fifo": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.1,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "header-bomb": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.1,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "large-tree": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.55,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "malformed": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.1,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-escape": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.1,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-loop": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.1,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          }
+        },
+        "score": 1.0
+      },
+      "8.6": {
+        "connection_attempts": [],
+        "inventory_produced_without_network": true,
+        "score": 1.0
+      },
+      "risk_verdicts": {
+        "control.mcp-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.mcp-toml-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.model-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.safetensors-safe": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.skill-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.tool-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.broad-permissions": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.toxic-flow": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.ci.agent-action": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.data.governance": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.hidden-unicode": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.import-escape": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.plaintext-http": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.shell-launch": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.tool-poisoning": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-npx": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-uvx": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.vulnerable-bridge": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.pickle-exec": {
+          "auto": true,
+          "final": true,
+          "snippet": "all:native-json: airom:308c29aa853a81a8 reranker.pt {\"detail\": [\"os.system\"], \"id\": \"airom-risk-pickle-import\", \"occurrence\": {\"confidence\": 0.95, \"detectorid\": \"modelfilex/torch\", \"location\": {\"path\": \"models/legacy/reranker.pt\"}, \"method\": \"binary-analysis\"}, \"severity\": \"high\"}"
+        },
+        "risk.model.unpinned-revision": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.env-file": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.mcp-header": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.skill.hidden-instruction": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.skill.remote-script": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.tool.shell": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.typosquat.langchian": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        }
+      }
+    },
+    "display": "AIROM",
+    "grade": "D",
+    "groups": {
+      "BOM integrity": {
+        "of": 10.0,
+        "points": 3.4
+      },
+      "Change detection": {
+        "of": 8.0,
+        "points": 1.6
+      },
+      "Discovery": {
+        "of": 30.0,
+        "points": 11.63
+      },
+      "Precision": {
+        "of": 4.0,
+        "points": 4.0
+      },
+      "Record fidelity": {
+        "of": 14.0,
+        "points": 8.88
+      },
+      "Risk analysis": {
+        "of": 12.0,
+        "points": 3.42
+      },
+      "Scanner safety": {
+        "of": 12.0,
+        "points": 11.5
+      },
+      "Standards": {
+        "of": 10.0,
+        "points": 8.62
+      }
+    },
+    "license": "Apache-2.0",
+    "max_rss_mb": 48.2,
+    "points": {
+      "1.1": 4.67,
+      "1.2": 3.27,
+      "1.3": 2.5,
+      "1.4": 1.0,
+      "1.5": 0.19,
+      "2.1": 4.0,
+      "3.1": 3.43,
+      "3.2": 1.5,
+      "3.3": 2.91,
+      "3.4": 0.75,
+      "3.5": 0.29,
+      "4.1": 3.0,
+      "4.2": 1.0,
+      "4.3": 2.0,
+      "4.4": 0.62,
+      "4.5": 1.0,
+      "4.6": 1.0,
+      "5.1": 2.4,
+      "5.2": 0.0,
+      "5.3": 0.0,
+      "5.4": 0.0,
+      "5.5": 1.0,
+      "6.1": 0.42,
+      "6.2": 2.0,
+      "6.3": 1.0,
+      "7.1": 0.3,
+      "7.2": 0.3,
+      "7.3": 1.0,
+      "7.4": 0.0,
+      "8.1": 4.0,
+      "8.2": 2.0,
+      "8.3": 2.0,
+      "8.4": 0.5,
+      "8.5": 2.0,
+      "8.6": 1.0
+    },
+    "recall": 0.346,
+    "seconds": 0.1,
+    "source": "github.com/airomhq/airom",
+    "tool": "airom",
+    "total": 53.0,
+    "unmeasured": null,
+    "version": "0.4.7"
+  },
+  {
+    "components_reported": 476,
+    "details": {
+      "1.1": {
+        "classified": [
+          "model.adapter.lora",
+          "model.api.agents-sdk",
+          "model.api.anthropic",
+          "model.api.embedding",
+          "model.api.openai",
+          "model.config.indirect",
+          "model.env.indirect",
+          "model.file.gguf",
+          "model.file.onnx",
+          "model.file.pickle",
+          "model.file.safetensors",
+          "model.notebook"
+        ],
+        "missed": [
+          "model.api.bedrock",
+          "model.docker.download",
+          "model.hf.pinned",
+          "model.hf.unpinned",
+          "model.k8s.served",
+          "model.ollama.modelfile"
+        ],
+        "present_untyped": []
+      },
+      "1.2": {
+        "classified": [
+          "data.dvc.pointer",
+          "data.finetune.upload",
+          "data.local.eval",
+          "data.local.training",
+          "data.memory.pgvector"
+        ],
+        "missed": [
+          "data.hf.eval",
+          "data.hf.pinned",
+          "data.modelcard.dataset",
+          "data.rag.confluence-source",
+          "data.rag.s3-source",
+          "data.vector.chroma"
+        ],
+        "present_untyped": []
+      },
+      "1.3": {
+        "classified": [
+          "tool.framework.chromadb",
+          "tool.framework.crewai",
+          "tool.framework.langchain",
+          "tool.framework.langgraph",
+          "tool.framework.llama-index",
+          "tool.framework.mcp",
+          "tool.framework.npm.sdk.anthropic-ai",
+          "tool.framework.npm.sdk.modelcontextprotocol",
+          "tool.framework.openai",
+          "tool.framework.transformers",
+          "tool.function.fetch_url",
+          "tool.function.refund_order",
+          "tool.function.run_shell",
+          "tool.function.send_email",
+          "tool.mcp.get_order",
+          "tool.mcp.issue_refund"
+        ],
+        "missed": [
+          "tool.function.search_orders",
+          "tool.mcp.search_kb"
+        ],
+        "present_untyped": []
+      },
+      "1.4": {
+        "classified": [
+          "agent.a2a.card",
+          "agent.crewai",
+          "agent.guardrail",
+          "agent.instructions.copilot",
+          "agent.langgraph.supervisor",
+          "agent.mcp.http.authenticated",
+          "agent.mcp.local-script",
+          "agent.mcp.source.python",
+          "agent.mcp.stdio.proxy",
+          "agent.mcp.stdio.shell",
+          "agent.n8n",
+          "agent.skill.benign",
+          "agent.skill.poisoned"
+        ],
+        "missed": [
+          "agent.bedrock.terraform",
+          "agent.command",
+          "agent.hook",
+          "agent.instructions.claude",
+          "agent.instructions.cursor-rule",
+          "agent.mcp.docker",
+          "agent.mcp.gemini",
+          "agent.mcp.source.typescript",
+          "agent.mcp.toml",
+          "agent.openai-agents.triage",
+          "agent.permissions",
+          "agent.plugin",
+          "agent.prompt.inline",
+          "agent.prompt.system-file",
+          "agent.prompt.template",
+          "agent.skill.agents-dir",
+          "agent.skill.github",
+          "agent.subagent"
+        ],
+        "present_untyped": [
+          "agent.instructions.agents-md",
+          "agent.mcp.http.plaintext",
+          "agent.mcp.stdio.pinned",
+          "agent.mcp.stdio.unpinned",
+          "agent.mcp.stdio.uvx"
+        ]
+      },
+      "1.5": {
+        "classified": [
+          "infra.endpoint.azure-openai",
+          "infra.image.ollama"
+        ],
+        "missed": [
+          "infra.ci.agent-action",
+          "infra.endpoint.sagemaker",
+          "infra.image.pgvector",
+          "infra.image.pytorch",
+          "infra.image.qdrant",
+          "infra.image.vllm"
+        ],
+        "present_untyped": []
+      },
+      "2.1": {
+        "reported_as_components": [
+          "decoy.printer-model"
+        ],
+        "score": 0.875
+      },
+      "3.1": {
+        "facts_expected": 22,
+        "facts_found": 21,
+        "items_with_fact": 20,
+        "score": 0.9545454545454546
+      },
+      "3.2": {
+        "facts_expected": 10,
+        "facts_found": 0,
+        "items_with_fact": 10,
+        "score": 0.0
+      },
+      "3.3": {
+        "facts_expected": 53,
+        "facts_found": 53,
+        "items_with_fact": 53,
+        "score": 1.0
+      },
+      "3.4": {
+        "facts_expected": 38,
+        "facts_found": 16,
+        "items_with_fact": 22,
+        "score": 0.42105263157894735
+      },
+      "3.5": {
+        "satisfied": [
+          "edge.mcp.provides-tool"
+        ],
+        "score": 0.14285714285714285
+      },
+      "4.1": {
+        "documents": {
+          "cyclonedx:cyclonedx-json": {
+            "errors": [],
+            "spec_version": "1.6",
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.2": {
+        "documents": {
+          "spdx:spdx-json": {
+            "errors": [
+              "@context: 'https://spdx.org/rdf/3.0.1/spdx-context.jsonld' was expected",
+              ": {'@context': ['https://spdx.org/rdf/3.0.1/spdx-context.jsonld', {'cisco-aibom': 'https://cisco.com/ns/aibom#'}], '@graph': [{'type': 'SpdxDocument', 'spdxId': '",
+              ": Unevaluated properties are not allowed ('@graph' was unexpected)"
+            ],
+            "spec_version": "3.0",
+            "valid": false
+          }
+        },
+        "score": 0.5
+      },
+      "4.3": {
+        "any_model_card": false,
+        "datasets_typed_data": 0.75,
+        "models_typed_machine_learning_model": 1.0,
+        "score": 0.725
+      },
+      "4.4": {
+        "frameworks_detected": 10,
+        "frameworks_with_purl": 0,
+        "huggingface_purl": false,
+        "score": 0.0
+      },
+      "4.5": {
+        "documents": {
+          "sarif:sarif": {
+            "errors": [],
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.6": {
+        "evidence": "Not found.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.1": {
+        "byte_identical": [],
+        "compared": [
+          "cyclonedx:cyclonedx-json",
+          "native:native-json",
+          "sarif:sarif",
+          "spdx:spdx-json"
+        ],
+        "identical_after_dropping_time_and_id_fields": [],
+        "score": 0.0
+      },
+      "5.2": {
+        "evidence": "No signing or attestation.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.3": {
+        "malformed_files_named_in": [
+          "native:native-json",
+          "native:console-stdout",
+          "cyclonedx:cyclonedx-json",
+          "cyclonedx:console-stdout",
+          "spdx:spdx-json",
+          "spdx:console-stdout",
+          "sarif:sarif",
+          "sarif:console-stdout",
+          "html:html",
+          "html:console-stdout",
+          "markdown:markdown",
+          "markdown:console-stdout"
+        ],
+        "score": 1.0
+      },
+      "5.4": {
+        "evidence": "Every output is marked agentic_status: degraded and each component unreviewed; this states review status, not which collectors ran.",
+        "level": 0.5,
+        "score": 0.5,
+        "tier": "V"
+      },
+      "5.5": {
+        "evidence": "Components carry decision_annotation with evidence locations; the confidence review did not run without an LLM.",
+        "level": 0.5,
+        "score": 0.5,
+        "tier": "V"
+      },
+      "6.1": {
+        "caught": [],
+        "of": 19,
+        "score": 0.0
+      },
+      "6.2": {
+        "controls_flagged": [],
+        "score": 0.0
+      },
+      "6.3": {
+        "evidence": "OSV lookup is in source; no VEX output.",
+        "level": 0.5,
+        "score": 0.5,
+        "tier": "S"
+      },
+      "7.1": {
+        "not_attributable_output_varies_between_identical_runs": [],
+        "score": 0.1,
+        "visible": [
+          "change.mcp-added"
+        ]
+      },
+      "7.2": {
+        "exit_code": 0,
+        "reported": [
+          "change.mcp-added"
+        ],
+        "score": 0.1
+      },
+      "7.3": {
+        "evidence": "--fail-on (exit 2) and --policy (exit 1) are in source; not exercised.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "S"
+      },
+      "7.4": {
+        "evidence": "No runtime comparison.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "8.1": {
+        "canaries_tripped": [],
+        "score": 1.0
+      },
+      "8.2": {
+        "out_of_tree_content_via_import": [],
+        "out_of_tree_content_via_symlink": [],
+        "score": 1.0
+      },
+      "8.3": {
+        "disclosed": {},
+        "score": 1.0
+      },
+      "8.4": {
+        "raw_html_in": [],
+        "raw_terminal_escape_in": [
+          "markdown:markdown",
+          "native:console-stderr"
+        ],
+        "score": 0.5
+      },
+      "8.5": {
+        "cases": {
+          "deep-json": {
+            "passed": false,
+            "retention": 0.0,
+            "seconds": 3.12,
+            "timed_out": false,
+            "unhandled_error_in_stderr": true
+          },
+          "escape-names": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 35.52,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "fifo": {
+            "passed": false,
+            "retention": 0.0,
+            "seconds": 180.02,
+            "timed_out": true,
+            "unhandled_error_in_stderr": false
+          },
+          "header-bomb": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 35.48,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "large-tree": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 61.28,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "malformed": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 35.09,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-escape": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.02,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-loop": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.23,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          }
+        },
+        "score": 0.75
+      },
+      "8.6": {
+        "connection_attempts": [
+          "8.8.4.4:53",
+          "8.8.8.8:53"
+        ],
+        "inventory_produced_without_network": true,
+        "score": 0.5
+      },
+      "risk_verdicts": {
+        "control.mcp-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.mcp-toml-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.model-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.safetensors-safe": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.skill-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.tool-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.broad-permissions": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.toxic-flow": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.ci.agent-action": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.data.governance": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.hidden-unicode": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.import-escape": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.plaintext-http": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.shell-launch": {
+          "adjudication": "Automatic match came from unrelated text near the component name; no finding states this risk.",
+          "auto": true,
+          "final": false,
+          "snippet": "html:html:   <script type=\"application/json\" id=\"aibom-graph-data\">{\"nodes\":[{\"id\":\"langchain_/tmp/claude-0/-home-user-nexus-symbiote/7bf94c7d-f990-5f8c-b2c1-7ba518c2ee9a/scratchpad/work/cisco-aibom/target/acme-support-copilot/requirements.txt_1\",\"name\":\"langchain\",\"type\":\"dependency\",\"heuristic_confidence\":1.0,\"file_path\":\"/tmp/claude-0/-home-user-nexus-symbiote/7bf94c7d-f990-5f8c-b2c1-7ba518c2ee9a/scratchp"
+        },
+        "risk.mcp.tool-poisoning": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-npx": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-uvx": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.vulnerable-bridge": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.pickle-exec": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.unpinned-revision": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.env-file": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.mcp-header": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.skill.hidden-instruction": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.skill.remote-script": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.tool.shell": {
+          "adjudication": "run_shell is listed as a tool in the console table; nothing flags it as dangerous.",
+          "auto": true,
+          "final": false,
+          "snippet": "native:console-stdout:   run_shell framework=langgraph  \u0000 /tmp/claude-0/-home-user-nexus-symbiote/7bf94c7d-f990-5f8c-b2c1-7ba518c2ee9a/scr atchpad/work/cisco-aibom/target/acme-support-copilot/services/agent/graph.py:6   run_shell framework=langgraph  /tmp/claude-0/-home-user-nexus-symbiote/7bf94c7d-f990-5f8c-b2c1-7ba518c2ee9a/scr atchpad/work/cisco-aibom/target/acme-support-copilot/services/agent/graph.py:6"
+        },
+        "risk.typosquat.langchian": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        }
+      }
+    },
+    "display": "Cisco AI BOM",
+    "grade": "D",
+    "groups": {
+      "BOM integrity": {
+        "of": 10.0,
+        "points": 2.0
+      },
+      "Change detection": {
+        "of": 8.0,
+        "points": 1.6
+      },
+      "Discovery": {
+        "of": 30.0,
+        "points": 16.47
+      },
+      "Precision": {
+        "of": 4.0,
+        "points": 3.5
+      },
+      "Record fidelity": {
+        "of": 14.0,
+        "points": 7.95
+      },
+      "Risk analysis": {
+        "of": 12.0,
+        "points": 1.0
+      },
+      "Scanner safety": {
+        "of": 12.0,
+        "points": 10.5
+      },
+      "Standards": {
+        "of": 10.0,
+        "points": 6.45
+      }
+    },
+    "license": "Apache-2.0",
+    "max_rss_mb": 347.8,
+    "points": {
+      "1.1": 4.67,
+      "1.2": 2.73,
+      "1.3": 4.44,
+      "1.4": 3.88,
+      "1.5": 0.75,
+      "2.1": 3.5,
+      "3.1": 3.82,
+      "3.2": 0.0,
+      "3.3": 3.0,
+      "3.4": 0.84,
+      "3.5": 0.29,
+      "4.1": 3.0,
+      "4.2": 1.0,
+      "4.3": 1.45,
+      "4.4": 0.0,
+      "4.5": 1.0,
+      "4.6": 0.0,
+      "5.1": 0.0,
+      "5.2": 0.0,
+      "5.3": 1.0,
+      "5.4": 0.5,
+      "5.5": 0.5,
+      "6.1": 0.0,
+      "6.2": 0.0,
+      "6.3": 1.0,
+      "7.1": 0.3,
+      "7.2": 0.3,
+      "7.3": 1.0,
+      "7.4": 0.0,
+      "8.1": 4.0,
+      "8.2": 2.0,
+      "8.3": 2.0,
+      "8.4": 0.5,
+      "8.5": 1.5,
+      "8.6": 0.5
+    },
+    "recall": 0.555,
+    "seconds": 120.9,
+    "source": "PyPI cisco-aibom",
+    "tool": "cisco-aibom",
+    "total": 49.5,
+    "unmeasured": "The tool requires an LLM. No key was supplied, so it ran with an unreachable local provider and marks every component unreviewed (agentic_status: degraded). Its score is a floor for its deterministic analysis only.",
+    "version": "1.10.1"
+  },
+  {
+    "components_reported": 48,
+    "details": {
+      "1.1": {
+        "classified": [
+          "model.file.gguf",
+          "model.file.onnx",
+          "model.file.pickle"
+        ],
+        "missed": [
+          "model.adapter.lora",
+          "model.api.agents-sdk",
+          "model.api.anthropic",
+          "model.api.bedrock",
+          "model.api.embedding",
+          "model.api.openai",
+          "model.config.indirect",
+          "model.docker.download",
+          "model.env.indirect",
+          "model.file.safetensors",
+          "model.hf.pinned",
+          "model.hf.unpinned",
+          "model.k8s.served",
+          "model.notebook",
+          "model.ollama.modelfile"
+        ],
+        "present_untyped": []
+      },
+      "1.2": {
+        "classified": [],
+        "missed": [
+          "data.dvc.pointer",
+          "data.finetune.upload",
+          "data.hf.eval",
+          "data.hf.pinned",
+          "data.local.eval",
+          "data.local.training",
+          "data.memory.pgvector",
+          "data.modelcard.dataset",
+          "data.rag.confluence-source",
+          "data.rag.s3-source",
+          "data.vector.chroma"
+        ],
+        "present_untyped": []
+      },
+      "1.3": {
+        "classified": [
+          "tool.framework.chromadb",
+          "tool.framework.crewai",
+          "tool.framework.langchain",
+          "tool.framework.langgraph",
+          "tool.framework.llama-index",
+          "tool.framework.mcp",
+          "tool.framework.openai",
+          "tool.framework.transformers"
+        ],
+        "missed": [
+          "tool.framework.npm.sdk.anthropic-ai",
+          "tool.framework.npm.sdk.modelcontextprotocol",
+          "tool.function.fetch_url",
+          "tool.function.refund_order",
+          "tool.function.run_shell",
+          "tool.function.search_orders",
+          "tool.function.send_email",
+          "tool.mcp.get_order",
+          "tool.mcp.issue_refund",
+          "tool.mcp.search_kb"
+        ],
+        "present_untyped": []
+      },
+      "1.4": {
+        "classified": [],
+        "missed": [
+          "agent.a2a.card",
+          "agent.bedrock.terraform",
+          "agent.command",
+          "agent.crewai",
+          "agent.guardrail",
+          "agent.hook",
+          "agent.instructions.agents-md",
+          "agent.instructions.claude",
+          "agent.instructions.copilot",
+          "agent.instructions.cursor-rule",
+          "agent.langgraph.supervisor",
+          "agent.mcp.docker",
+          "agent.mcp.gemini",
+          "agent.mcp.http.authenticated",
+          "agent.mcp.http.plaintext",
+          "agent.mcp.local-script",
+          "agent.mcp.source.python",
+          "agent.mcp.source.typescript",
+          "agent.mcp.stdio.pinned",
+          "agent.mcp.stdio.proxy",
+          "agent.mcp.stdio.shell",
+          "agent.mcp.stdio.unpinned",
+          "agent.mcp.stdio.uvx",
+          "agent.mcp.toml",
+          "agent.n8n",
+          "agent.openai-agents.triage",
+          "agent.permissions",
+          "agent.plugin",
+          "agent.prompt.inline",
+          "agent.prompt.system-file",
+          "agent.prompt.template",
+          "agent.skill.agents-dir",
+          "agent.skill.benign",
+          "agent.skill.github",
+          "agent.skill.poisoned",
+          "agent.subagent"
+        ],
+        "present_untyped": []
+      },
+      "1.5": {
+        "classified": [],
+        "missed": [
+          "infra.ci.agent-action",
+          "infra.endpoint.azure-openai",
+          "infra.endpoint.sagemaker",
+          "infra.image.ollama",
+          "infra.image.pgvector",
+          "infra.image.pytorch",
+          "infra.image.qdrant",
+          "infra.image.vllm"
+        ],
+        "present_untyped": []
+      },
+      "2.1": {
+        "reported_as_components": [
+          "decoy.fake-gguf"
+        ],
+        "score": 0.875
+      },
+      "3.1": {
+        "facts_expected": 8,
+        "facts_found": 8,
+        "items_with_fact": 8,
+        "score": 1.0
+      },
+      "3.2": {
+        "facts_expected": 3,
+        "facts_found": 3,
+        "items_with_fact": 3,
+        "score": 0.375
+      },
+      "3.3": {
+        "facts_expected": 11,
+        "facts_found": 0,
+        "items_with_fact": 11,
+        "score": 0.0
+      },
+      "3.4": {
+        "facts_expected": 5,
+        "facts_found": 3,
+        "items_with_fact": 2,
+        "score": 0.15
+      },
+      "3.5": {
+        "satisfied": [],
+        "score": 0.0
+      },
+      "4.1": {
+        "documents": {
+          "cyclonedx:cyclonedx-json": {
+            "errors": [],
+            "spec_version": "1.7",
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.2": {
+        "documents": {
+          "spdx3:spdx-json": {
+            "errors": [],
+            "spec_version": "3.0",
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.3": {
+        "any_model_card": true,
+        "datasets_typed_data": 0.0,
+        "models_typed_machine_learning_model": 1.0,
+        "score": 0.7
+      },
+      "4.4": {
+        "frameworks_detected": 8,
+        "frameworks_with_purl": 0,
+        "huggingface_purl": false,
+        "score": 0.0
+      },
+      "4.5": {
+        "note": "format not emitted",
+        "score": 0.0
+      },
+      "4.6": {
+        "evidence": "Not found.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.1": {
+        "byte_identical": [],
+        "compared": [
+          "cyclonedx:cyclonedx-json",
+          "spdx3:spdx-json"
+        ],
+        "identical_after_dropping_time_and_id_fields": [
+          "cyclonedx:cyclonedx-json",
+          "spdx3:spdx-json"
+        ],
+        "score": 0.6
+      },
+      "5.2": {
+        "evidence": "No signing or attestation.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.3": {
+        "malformed_files_named_in": [],
+        "score": 0.0
+      },
+      "5.4": {
+        "evidence": "Not found.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.5": {
+        "evidence": "Not found.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "6.1": {
+        "caught": [
+          "risk.model.pickle-exec"
+        ],
+        "of": 19,
+        "score": 0.05263157894736842
+      },
+      "6.2": {
+        "controls_flagged": [],
+        "score": 1.0
+      },
+      "6.3": {
+        "evidence": "--vex wrote OpenVEX and CycloneDX VEX files; the OSV lookup was not run because api.osv.dev was unreachable.",
+        "level": 1,
+        "score": 0.5,
+        "tier": "D"
+      },
+      "7.1": {
+        "not_attributable_output_varies_between_identical_runs": [],
+        "score": 0.0,
+        "visible": []
+      },
+      "7.2": {
+        "exit_code": 1,
+        "reported": [],
+        "score": 0.0
+      },
+      "7.3": {
+        "evidence": "Scans exited 2 on the critical pickle finding; `score --fail-under` exited 2.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "7.4": {
+        "evidence": "No runtime comparison.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "8.1": {
+        "canaries_tripped": [],
+        "score": 1.0
+      },
+      "8.2": {
+        "out_of_tree_content_via_import": [],
+        "out_of_tree_content_via_symlink": [],
+        "score": 1.0
+      },
+      "8.3": {
+        "disclosed": {},
+        "score": 1.0
+      },
+      "8.4": {
+        "raw_html_in": [],
+        "raw_terminal_escape_in": [],
+        "score": 1.0
+      },
+      "8.5": {
+        "cases": {
+          "deep-json": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.6,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "escape-names": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.55,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "fifo": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.65,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "header-bomb": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.61,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "large-tree": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 2.21,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "malformed": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.6,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-escape": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.55,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-loop": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.65,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          }
+        },
+        "score": 1.0
+      },
+      "8.6": {
+        "connection_attempts": [],
+        "inventory_produced_without_network": true,
+        "score": 1.0
+      },
+      "risk_verdicts": {
+        "control.mcp-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.mcp-toml-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.model-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.safetensors-safe": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.skill-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.tool-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.broad-permissions": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.toxic-flow": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.ci.agent-action": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.data.governance": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.hidden-unicode": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.import-escape": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.plaintext-http": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.shell-launch": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.tool-poisoning": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-npx": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-uvx": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.vulnerable-bridge": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.pickle-exec": {
+          "auto": true,
+          "final": true,
+          "snippet": "cyclonedx:console-stdout: \u2502 reranker.pt    \u2502 pytorch     \u2502 critical (rce   \u2502 unknown    \u2502 sha256:        \u2502 \u0000 \u2502                \u2502             \u2502                 \u2502            \u2502 {'tensors': 1, \u2502 \u2502                \u2502             \u2502                 \u2502            \u2502 'meta          \u2502 \u2502 reranker.pt    \u2502 pytorch     \u2502 critical (rce   \u2502 unknown    \u2502 sha256:        \u2502 \u2502                \u2502             \u2502 detected:       \u2502            \u2502 fde3f334.."
+        },
+        "risk.model.unpinned-revision": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.env-file": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.mcp-header": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.skill.hidden-instruction": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.skill.remote-script": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.tool.shell": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.typosquat.langchian": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        }
+      }
+    },
+    "display": "AIsbom",
+    "grade": "E",
+    "groups": {
+      "BOM integrity": {
+        "of": 10.0,
+        "points": 2.4
+      },
+      "Change detection": {
+        "of": 8.0,
+        "points": 1.0
+      },
+      "Discovery": {
+        "of": 30.0,
+        "points": 3.39
+      },
+      "Precision": {
+        "of": 4.0,
+        "points": 3.5
+      },
+      "Record fidelity": {
+        "of": 14.0,
+        "points": 5.42
+      },
+      "Risk analysis": {
+        "of": 12.0,
+        "points": 3.42
+      },
+      "Scanner safety": {
+        "of": 12.0,
+        "points": 12.0
+      },
+      "Standards": {
+        "of": 10.0,
+        "points": 6.4
+      }
+    },
+    "license": "Apache-2.0",
+    "max_rss_mb": 50.2,
+    "points": {
+      "1.1": 1.17,
+      "1.2": 0.0,
+      "1.3": 2.22,
+      "1.4": 0.0,
+      "1.5": 0.0,
+      "2.1": 3.5,
+      "3.1": 4.0,
+      "3.2": 1.12,
+      "3.3": 0.0,
+      "3.4": 0.3,
+      "3.5": 0.0,
+      "4.1": 3.0,
+      "4.2": 2.0,
+      "4.3": 1.4,
+      "4.4": 0.0,
+      "4.5": 0.0,
+      "4.6": 0.0,
+      "5.1": 2.4,
+      "5.2": 0.0,
+      "5.3": 0.0,
+      "5.4": 0.0,
+      "5.5": 0.0,
+      "6.1": 0.42,
+      "6.2": 2.0,
+      "6.3": 1.0,
+      "7.1": 0.0,
+      "7.2": 0.0,
+      "7.3": 1.0,
+      "7.4": 0.0,
+      "8.1": 4.0,
+      "8.2": 2.0,
+      "8.3": 2.0,
+      "8.4": 1.0,
+      "8.5": 2.0,
+      "8.6": 1.0
+    },
+    "recall": 0.121,
+    "seconds": 1.6,
+    "source": "PyPI aisbom-cli",
+    "tool": "aisbom",
+    "total": 37.5,
+    "unmeasured": null,
+    "version": "1.7.0"
+  },
+  {
+    "components_reported": 273,
+    "details": {
+      "1.1": {
+        "classified": [
+          "model.adapter.lora",
+          "model.api.openai",
+          "model.file.gguf",
+          "model.file.onnx",
+          "model.file.pickle",
+          "model.file.safetensors"
+        ],
+        "missed": [
+          "model.api.agents-sdk",
+          "model.api.anthropic",
+          "model.api.bedrock",
+          "model.api.embedding",
+          "model.config.indirect",
+          "model.docker.download",
+          "model.env.indirect",
+          "model.hf.pinned",
+          "model.hf.unpinned",
+          "model.k8s.served",
+          "model.notebook",
+          "model.ollama.modelfile"
+        ],
+        "present_untyped": []
+      },
+      "1.2": {
+        "classified": [
+          "data.vector.chroma"
+        ],
+        "missed": [
+          "data.dvc.pointer",
+          "data.finetune.upload",
+          "data.hf.eval",
+          "data.hf.pinned",
+          "data.local.eval",
+          "data.local.training",
+          "data.memory.pgvector",
+          "data.modelcard.dataset",
+          "data.rag.confluence-source",
+          "data.rag.s3-source"
+        ],
+        "present_untyped": []
+      },
+      "1.3": {
+        "classified": [
+          "tool.framework.chromadb",
+          "tool.framework.crewai",
+          "tool.framework.langchain",
+          "tool.framework.langgraph",
+          "tool.framework.llama-index",
+          "tool.framework.mcp",
+          "tool.framework.npm.sdk.anthropic-ai",
+          "tool.framework.openai",
+          "tool.framework.transformers"
+        ],
+        "missed": [
+          "tool.framework.npm.sdk.modelcontextprotocol",
+          "tool.function.fetch_url",
+          "tool.function.refund_order",
+          "tool.function.run_shell",
+          "tool.function.search_orders",
+          "tool.function.send_email",
+          "tool.mcp.get_order",
+          "tool.mcp.issue_refund",
+          "tool.mcp.search_kb"
+        ],
+        "present_untyped": []
+      },
+      "1.4": {
+        "classified": [
+          "agent.mcp.local-script",
+          "agent.mcp.stdio.proxy",
+          "agent.mcp.stdio.shell",
+          "agent.n8n"
+        ],
+        "missed": [
+          "agent.a2a.card",
+          "agent.command",
+          "agent.crewai",
+          "agent.guardrail",
+          "agent.hook",
+          "agent.instructions.agents-md",
+          "agent.instructions.claude",
+          "agent.instructions.copilot",
+          "agent.instructions.cursor-rule",
+          "agent.langgraph.supervisor",
+          "agent.mcp.docker",
+          "agent.mcp.gemini",
+          "agent.mcp.source.python",
+          "agent.mcp.source.typescript",
+          "agent.mcp.toml",
+          "agent.openai-agents.triage",
+          "agent.permissions",
+          "agent.plugin",
+          "agent.prompt.inline",
+          "agent.prompt.system-file",
+          "agent.prompt.template",
+          "agent.skill.agents-dir",
+          "agent.skill.benign",
+          "agent.skill.github",
+          "agent.skill.poisoned",
+          "agent.subagent"
+        ],
+        "present_untyped": [
+          "agent.bedrock.terraform",
+          "agent.mcp.http.authenticated",
+          "agent.mcp.http.plaintext",
+          "agent.mcp.stdio.pinned",
+          "agent.mcp.stdio.unpinned",
+          "agent.mcp.stdio.uvx"
+        ]
+      },
+      "1.5": {
+        "classified": [
+          "infra.ci.agent-action",
+          "infra.image.ollama",
+          "infra.image.pgvector",
+          "infra.image.pytorch",
+          "infra.image.qdrant"
+        ],
+        "missed": [
+          "infra.image.vllm"
+        ],
+        "present_untyped": [
+          "infra.endpoint.azure-openai",
+          "infra.endpoint.sagemaker"
+        ]
+      },
+      "2.1": {
+        "reported_as_components": [
+          "decoy.commented-model",
+          "decoy.fake-gguf"
+        ],
+        "score": 0.75
+      },
+      "3.1": {
+        "facts_expected": 18,
+        "facts_found": 8,
+        "items_with_fact": 17,
+        "score": 0.4444444444444444
+      },
+      "3.2": {
+        "facts_expected": 5,
+        "facts_found": 0,
+        "items_with_fact": 5,
+        "score": 0.0
+      },
+      "3.3": {
+        "facts_expected": 33,
+        "facts_found": 17,
+        "items_with_fact": 33,
+        "score": 0.5151515151515151
+      },
+      "3.4": {
+        "facts_expected": 26,
+        "facts_found": 13,
+        "items_with_fact": 15,
+        "score": 0.5
+      },
+      "3.5": {
+        "satisfied": [],
+        "score": 0.0
+      },
+      "4.1": {
+        "documents": {
+          "cyclonedx:cyclonedx-json": {
+            "errors": [
+              "components/1/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac",
+              "components/36/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac",
+              "components/37/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac",
+              "components/38/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac",
+              "components/39/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac"
+            ],
+            "spec_version": "1.6",
+            "valid": false
+          }
+        },
+        "score": 0.5
+      },
+      "4.2": {
+        "documents": {
+          "spdx3:spdx-json": {
+            "errors": [
+              "creationInfo/created: '2026-11-18T10:16:47.364317+00:00' does not match '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T(([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]|23:59:60)Z$'",
+              "creationInfo: 'creators' is a required property",
+              "creationInfo: Additional properties are not allowed ('createdBy', 'createdUsing', 'specVersion' were unexpected)",
+              ": 'SPDXID' is a required property",
+              ": 'dataLicense' is a required property"
+            ],
+            "spec_version": "2.x",
+            "valid": false
+          }
+        },
+        "score": 0.5
+      },
+      "4.3": {
+        "any_model_card": false,
+        "datasets_typed_data": 0.0,
+        "models_typed_machine_learning_model": 1.0,
+        "score": 0.5
+      },
+      "4.4": {
+        "frameworks_detected": 9,
+        "frameworks_with_purl": 9,
+        "huggingface_purl": false,
+        "score": 0.7
+      },
+      "4.5": {
+        "documents": {
+          "sarif:sarif": {
+            "errors": [],
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.6": {
+        "evidence": "Not found.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.1": {
+        "byte_identical": [],
+        "compared": [
+          "cisco-aibom:native-json",
+          "cyclonedx:cyclonedx-json",
+          "sarif:sarif",
+          "spdx3:spdx-json"
+        ],
+        "identical_after_dropping_time_and_id_fields": [],
+        "score": 0.0
+      },
+      "5.2": {
+        "evidence": "No signing or attestation.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.3": {
+        "malformed_files_named_in": [],
+        "score": 0.0
+      },
+      "5.4": {
+        "evidence": "Not found.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.5": {
+        "evidence": "Not found.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "6.1": {
+        "caught": [
+          "risk.secret.env-file"
+        ],
+        "of": 19,
+        "score": 0.05263157894736842
+      },
+      "6.2": {
+        "controls_flagged": [],
+        "score": 1.0
+      },
+      "6.3": {
+        "evidence": "No advisory lookup or VEX.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "7.1": {
+        "not_attributable_output_varies_between_identical_runs": [
+          "change.model-bytes"
+        ],
+        "score": 0.2,
+        "visible": [
+          "change.mcp-version-and-scope",
+          "change.mcp-added"
+        ]
+      },
+      "7.2": {
+        "note": "no drift command",
+        "score": 0.0
+      },
+      "7.3": {
+        "evidence": "`--fail-on low` and `--policy` exited 1.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "7.4": {
+        "evidence": "scan-cloud and the n8n API mode read live systems; no comparison with a BOM.",
+        "level": 0.5,
+        "score": 0.25,
+        "tier": "D"
+      },
+      "8.1": {
+        "canaries_tripped": [],
+        "score": 1.0
+      },
+      "8.2": {
+        "out_of_tree_content_via_import": [],
+        "out_of_tree_content_via_symlink": [],
+        "score": 1.0
+      },
+      "8.3": {
+        "disclosed": {
+          "secret.openai": [
+            "cisco-aibom:native-json"
+          ]
+        },
+        "score": 0.75
+      },
+      "8.4": {
+        "raw_html_in": [],
+        "raw_terminal_escape_in": [
+          "markdown:markdown"
+        ],
+        "score": 0.5
+      },
+      "8.5": {
+        "cases": {
+          "deep-json": {
+            "passed": true,
+            "retention": 0.966,
+            "seconds": 0.6,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "escape-names": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.6,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "fifo": {
+            "passed": false,
+            "retention": 0.0,
+            "seconds": 180.02,
+            "timed_out": true,
+            "unhandled_error_in_stderr": false
+          },
+          "header-bomb": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.65,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "large-tree": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 13.37,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "malformed": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.65,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-escape": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.55,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-loop": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.51,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          }
+        },
+        "score": 0.875
+      },
+      "8.6": {
+        "connection_attempts": [],
+        "inventory_produced_without_network": true,
+        "score": 1.0
+      },
+      "risk_verdicts": {
+        "control.mcp-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.mcp-toml-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.model-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.safetensors-safe": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.skill-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.tool-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.broad-permissions": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.toxic-flow": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.ci.agent-action": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.data.governance": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.hidden-unicode": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.import-escape": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.plaintext-http": {
+          "adjudication": "The flag on 'metrics' is mcp_unknown_server; the http:// URL is listed as metadata only.",
+          "auto": true,
+          "final": false,
+          "snippet": "markdown:markdown:   - server_name: metrics \u0000 - **flags:** mcp_unknown_server - **metadata:**   - server_name: metrics   - url: http://10.20.4.7:8080/sse "
+        },
+        "risk.mcp.shell-launch": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.tool-poisoning": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-npx": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-uvx": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.vulnerable-bridge": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.pickle-exec": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.unpinned-revision": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.env-file": {
+          "auto": true,
+          "final": true,
+          "snippet": "sarif:sarif: {\"level\": \"note\", \"locations\": [{\"physicallocation\": {\"artifactlocation\": {\"uri\": \"deploy/.env\", \"uribaseid\": \"%srcroot%\"}, \"region\": {\"startline\": 1}}}], \"message\": {\"text\": \"openai endpoint | provider=openai | flags=hardcoded_api_key\"}, \"properties\": {\"component_type\": \"endpoint\", \"flags\": [\"hardcoded_api_key\"], \"risk_score\": 30, \"source_scanner\": \"network\", \"usage_type\": \"completion\"}, \"ruleid\""
+        },
+        "risk.secret.mcp-header": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.skill.hidden-instruction": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.skill.remote-script": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.tool.shell": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.typosquat.langchian": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        }
+      }
+    },
+    "display": "Trusera ai-bom",
+    "grade": "E",
+    "groups": {
+      "BOM integrity": {
+        "of": 10.0,
+        "points": 0.0
+      },
+      "Change detection": {
+        "of": 8.0,
+        "points": 1.85
+      },
+      "Discovery": {
+        "of": 30.0,
+        "points": 9.38
+      },
+      "Precision": {
+        "of": 4.0,
+        "points": 3.0
+      },
+      "Record fidelity": {
+        "of": 14.0,
+        "points": 4.33
+      },
+      "Risk analysis": {
+        "of": 12.0,
+        "points": 2.42
+      },
+      "Scanner safety": {
+        "of": 12.0,
+        "points": 10.75
+      },
+      "Standards": {
+        "of": 10.0,
+        "points": 5.2
+      }
+    },
+    "license": "Apache-2.0",
+    "max_rss_mb": 43.7,
+    "points": {
+      "1.1": 2.33,
+      "1.2": 0.55,
+      "1.3": 2.5,
+      "1.4": 1.75,
+      "1.5": 2.25,
+      "2.1": 3.0,
+      "3.1": 1.78,
+      "3.2": 0.0,
+      "3.3": 1.55,
+      "3.4": 1.0,
+      "3.5": 0.0,
+      "4.1": 1.5,
+      "4.2": 1.0,
+      "4.3": 1.0,
+      "4.4": 0.7,
+      "4.5": 1.0,
+      "4.6": 0.0,
+      "5.1": 0.0,
+      "5.2": 0.0,
+      "5.3": 0.0,
+      "5.4": 0.0,
+      "5.5": 0.0,
+      "6.1": 0.42,
+      "6.2": 2.0,
+      "6.3": 0.0,
+      "7.1": 0.6,
+      "7.2": 0.0,
+      "7.3": 1.0,
+      "7.4": 0.25,
+      "8.1": 4.0,
+      "8.2": 2.0,
+      "8.3": 1.5,
+      "8.4": 0.5,
+      "8.5": 1.75,
+      "8.6": 1.0
+    },
+    "recall": 0.319,
+    "seconds": 3.9,
+    "source": "PyPI ai-bom",
+    "tool": "ai-bom",
+    "total": 36.9,
+    "unmeasured": null,
+    "version": "3.6.0"
+  },
+  {
+    "components_reported": 583,
+    "details": {
+      "1.1": {
+        "classified": [
+          "model.adapter.lora",
+          "model.file.gguf",
+          "model.file.safetensors"
+        ],
+        "missed": [
+          "model.api.agents-sdk",
+          "model.api.anthropic",
+          "model.api.bedrock",
+          "model.api.embedding",
+          "model.api.openai",
+          "model.config.indirect",
+          "model.docker.download",
+          "model.env.indirect",
+          "model.file.onnx",
+          "model.file.pickle",
+          "model.hf.pinned",
+          "model.hf.unpinned",
+          "model.k8s.served",
+          "model.notebook",
+          "model.ollama.modelfile"
+        ],
+        "present_untyped": []
+      },
+      "1.2": {
+        "classified": [],
+        "missed": [
+          "data.dvc.pointer",
+          "data.finetune.upload",
+          "data.hf.eval",
+          "data.hf.pinned",
+          "data.local.eval",
+          "data.local.training",
+          "data.memory.pgvector",
+          "data.modelcard.dataset",
+          "data.rag.confluence-source",
+          "data.rag.s3-source",
+          "data.vector.chroma"
+        ],
+        "present_untyped": []
+      },
+      "1.3": {
+        "classified": [
+          "tool.framework.chromadb",
+          "tool.framework.crewai",
+          "tool.framework.langchain",
+          "tool.framework.langgraph",
+          "tool.framework.llama-index",
+          "tool.framework.mcp",
+          "tool.framework.npm.sdk.anthropic-ai",
+          "tool.framework.npm.sdk.modelcontextprotocol",
+          "tool.framework.openai",
+          "tool.framework.transformers"
+        ],
+        "missed": [
+          "tool.function.fetch_url",
+          "tool.function.refund_order",
+          "tool.function.run_shell",
+          "tool.function.search_orders",
+          "tool.function.send_email",
+          "tool.mcp.get_order",
+          "tool.mcp.issue_refund",
+          "tool.mcp.search_kb"
+        ],
+        "present_untyped": []
+      },
+      "1.4": {
+        "classified": [],
+        "missed": [
+          "agent.a2a.card",
+          "agent.bedrock.terraform",
+          "agent.command",
+          "agent.crewai",
+          "agent.guardrail",
+          "agent.hook",
+          "agent.instructions.agents-md",
+          "agent.instructions.claude",
+          "agent.instructions.copilot",
+          "agent.instructions.cursor-rule",
+          "agent.langgraph.supervisor",
+          "agent.mcp.docker",
+          "agent.mcp.gemini",
+          "agent.mcp.http.authenticated",
+          "agent.mcp.http.plaintext",
+          "agent.mcp.local-script",
+          "agent.mcp.source.python",
+          "agent.mcp.source.typescript",
+          "agent.mcp.stdio.pinned",
+          "agent.mcp.stdio.proxy",
+          "agent.mcp.stdio.shell",
+          "agent.mcp.stdio.unpinned",
+          "agent.mcp.stdio.uvx",
+          "agent.mcp.toml",
+          "agent.n8n",
+          "agent.openai-agents.triage",
+          "agent.permissions",
+          "agent.plugin",
+          "agent.prompt.inline",
+          "agent.prompt.system-file",
+          "agent.prompt.template",
+          "agent.skill.agents-dir",
+          "agent.skill.benign",
+          "agent.skill.github",
+          "agent.skill.poisoned",
+          "agent.subagent"
+        ],
+        "present_untyped": []
+      },
+      "1.5": {
+        "classified": [
+          "infra.ci.agent-action"
+        ],
+        "missed": [
+          "infra.endpoint.azure-openai",
+          "infra.endpoint.sagemaker",
+          "infra.image.ollama",
+          "infra.image.pgvector",
+          "infra.image.pytorch",
+          "infra.image.qdrant",
+          "infra.image.vllm"
+        ],
+        "present_untyped": []
+      },
+      "2.1": {
+        "reported_as_components": [],
+        "score": 1.0
+      },
+      "3.1": {
+        "facts_expected": 11,
+        "facts_found": 11,
+        "items_with_fact": 11,
+        "score": 1.0
+      },
+      "3.2": {
+        "facts_expected": 3,
+        "facts_found": 0,
+        "items_with_fact": 3,
+        "score": 0.0
+      },
+      "3.3": {
+        "facts_expected": 14,
+        "facts_found": 14,
+        "items_with_fact": 14,
+        "score": 1.0
+      },
+      "3.4": {
+        "facts_expected": 11,
+        "facts_found": 10,
+        "items_with_fact": 5,
+        "score": 0.5681818181818181
+      },
+      "3.5": {
+        "satisfied": [],
+        "score": 0.0
+      },
+      "4.1": {
+        "documents": {
+          "all:cyclonedx-json": {
+            "errors": [],
+            "spec_version": "1.7",
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.2": {
+        "documents": {
+          "all:spdx-json": {
+            "errors": [],
+            "spec_version": "SPDX-2.3",
+            "valid": true
+          }
+        },
+        "note": "valid SPDX 2.x only; the AI and Dataset profiles need SPDX 3",
+        "score": 0.5
+      },
+      "4.3": {
+        "any_model_card": false,
+        "datasets_typed_data": 0.0,
+        "models_typed_machine_learning_model": 1.0,
+        "score": 0.5
+      },
+      "4.4": {
+        "frameworks_detected": 10,
+        "frameworks_with_purl": 10,
+        "huggingface_purl": false,
+        "score": 0.7
+      },
+      "4.5": {
+        "note": "format not emitted",
+        "score": 0.0
+      },
+      "4.6": {
+        "evidence": "Not found.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.1": {
+        "byte_identical": [
+          "all:native-json"
+        ],
+        "compared": [
+          "all:cyclonedx-json",
+          "all:native-json",
+          "all:spdx-json"
+        ],
+        "identical_after_dropping_time_and_id_fields": [
+          "all:cyclonedx-json",
+          "all:native-json",
+          "all:spdx-json"
+        ],
+        "score": 0.6
+      },
+      "5.2": {
+        "evidence": "`syft attest` signs an SBOM for a container image through cosign; it does not cover a directory scan and was not run.",
+        "level": 0.5,
+        "score": 0.25,
+        "tier": "D"
+      },
+      "5.3": {
+        "malformed_files_named_in": [],
+        "score": 0.0
+      },
+      "5.4": {
+        "evidence": "Not found.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.5": {
+        "evidence": "No evidence or confidence fields in the CycloneDX output.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "6.1": {
+        "caught": [],
+        "of": 19,
+        "score": 0.0
+      },
+      "6.2": {
+        "controls_flagged": [],
+        "score": 0.0
+      },
+      "6.3": {
+        "evidence": "Vulnerability matching is a separate tool (Grype); none in Syft.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "7.1": {
+        "not_attributable_output_varies_between_identical_runs": [],
+        "score": 0.0,
+        "visible": []
+      },
+      "7.2": {
+        "note": "no drift command",
+        "score": 0.0
+      },
+      "7.3": {
+        "evidence": "No gate.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "7.4": {
+        "evidence": "No runtime comparison.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "8.1": {
+        "canaries_tripped": [],
+        "score": 1.0
+      },
+      "8.2": {
+        "out_of_tree_content_via_import": [],
+        "out_of_tree_content_via_symlink": [],
+        "score": 1.0
+      },
+      "8.3": {
+        "disclosed": {},
+        "score": 1.0
+      },
+      "8.4": {
+        "raw_html_in": [],
+        "raw_terminal_escape_in": [
+          "all:text"
+        ],
+        "score": 0.5
+      },
+      "8.5": {
+        "cases": {
+          "deep-json": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.31,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "escape-names": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.11,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "fifo": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.15,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "header-bomb": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.26,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "large-tree": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.42,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "malformed": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.21,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-escape": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.41,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-loop": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.26,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          }
+        },
+        "score": 1.0
+      },
+      "8.6": {
+        "connection_attempts": [],
+        "inventory_produced_without_network": true,
+        "score": 1.0
+      },
+      "risk_verdicts": {
+        "control.mcp-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.mcp-toml-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.model-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.safetensors-safe": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.skill-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.tool-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.broad-permissions": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.toxic-flow": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.ci.agent-action": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.data.governance": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.hidden-unicode": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.import-escape": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.plaintext-http": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.shell-launch": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.tool-poisoning": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-npx": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-uvx": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.vulnerable-bridge": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.pickle-exec": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.unpinned-revision": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.env-file": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.mcp-header": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.skill.hidden-instruction": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.skill.remote-script": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.tool.shell": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.typosquat.langchian": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        }
+      }
+    },
+    "display": "Anchore Syft",
+    "grade": "E",
+    "groups": {
+      "BOM integrity": {
+        "of": 10.0,
+        "points": 3.15
+      },
+      "Change detection": {
+        "of": 8.0,
+        "points": 0.0
+      },
+      "Discovery": {
+        "of": 30.0,
+        "points": 4.33
+      },
+      "Precision": {
+        "of": 4.0,
+        "points": 4.0
+      },
+      "Record fidelity": {
+        "of": 14.0,
+        "points": 8.14
+      },
+      "Risk analysis": {
+        "of": 12.0,
+        "points": 0.0
+      },
+      "Scanner safety": {
+        "of": 12.0,
+        "points": 11.5
+      },
+      "Standards": {
+        "of": 10.0,
+        "points": 5.7
+      }
+    },
+    "license": "Apache-2.0",
+    "max_rss_mb": 208.2,
+    "points": {
+      "1.1": 1.17,
+      "1.2": 0.0,
+      "1.3": 2.78,
+      "1.4": 0.0,
+      "1.5": 0.38,
+      "2.1": 4.0,
+      "3.1": 4.0,
+      "3.2": 0.0,
+      "3.3": 3.0,
+      "3.4": 1.14,
+      "3.5": 0.0,
+      "4.1": 3.0,
+      "4.2": 1.0,
+      "4.3": 1.0,
+      "4.4": 0.7,
+      "4.5": 0.0,
+      "4.6": 0.0,
+      "5.1": 2.4,
+      "5.2": 0.75,
+      "5.3": 0.0,
+      "5.4": 0.0,
+      "5.5": 0.0,
+      "6.1": 0.0,
+      "6.2": 0.0,
+      "6.3": 0.0,
+      "7.1": 0.0,
+      "7.2": 0.0,
+      "7.3": 0.0,
+      "7.4": 0.0,
+      "8.1": 4.0,
+      "8.2": 2.0,
+      "8.3": 2.0,
+      "8.4": 0.5,
+      "8.5": 2.0,
+      "8.6": 1.0
+    },
+    "recall": 0.154,
+    "seconds": 1.2,
+    "source": "github.com/anchore/syft",
+    "tool": "syft",
+    "total": 36.8,
+    "unmeasured": null,
+    "version": "1.57.2"
+  },
+  {
+    "components_reported": 22,
+    "details": {
+      "1.1": {
+        "classified": [],
+        "missed": [
+          "model.adapter.lora",
+          "model.api.agents-sdk",
+          "model.api.anthropic",
+          "model.api.bedrock",
+          "model.api.embedding",
+          "model.api.openai",
+          "model.config.indirect",
+          "model.docker.download",
+          "model.env.indirect",
+          "model.file.gguf",
+          "model.file.onnx",
+          "model.file.pickle",
+          "model.file.safetensors",
+          "model.hf.pinned",
+          "model.hf.unpinned",
+          "model.k8s.served",
+          "model.notebook",
+          "model.ollama.modelfile"
+        ],
+        "present_untyped": []
+      },
+      "1.2": {
+        "classified": [],
+        "missed": [
+          "data.dvc.pointer",
+          "data.finetune.upload",
+          "data.hf.eval",
+          "data.hf.pinned",
+          "data.local.eval",
+          "data.local.training",
+          "data.memory.pgvector",
+          "data.modelcard.dataset",
+          "data.rag.confluence-source",
+          "data.rag.s3-source",
+          "data.vector.chroma"
+        ],
+        "present_untyped": []
+      },
+      "1.3": {
+        "classified": [],
+        "missed": [
+          "tool.framework.chromadb",
+          "tool.framework.crewai",
+          "tool.framework.langchain",
+          "tool.framework.langgraph",
+          "tool.framework.llama-index",
+          "tool.framework.mcp",
+          "tool.framework.npm.sdk.anthropic-ai",
+          "tool.framework.npm.sdk.modelcontextprotocol",
+          "tool.framework.openai",
+          "tool.framework.transformers",
+          "tool.function.fetch_url",
+          "tool.function.refund_order",
+          "tool.function.run_shell",
+          "tool.function.search_orders",
+          "tool.function.send_email",
+          "tool.mcp.get_order",
+          "tool.mcp.issue_refund",
+          "tool.mcp.search_kb"
+        ],
+        "present_untyped": []
+      },
+      "1.4": {
+        "classified": [
+          "agent.mcp.stdio.pinned",
+          "agent.mcp.stdio.proxy",
+          "agent.mcp.stdio.shell",
+          "agent.mcp.stdio.unpinned",
+          "agent.mcp.stdio.uvx",
+          "agent.skill.benign",
+          "agent.skill.poisoned"
+        ],
+        "missed": [
+          "agent.a2a.card",
+          "agent.bedrock.terraform",
+          "agent.command",
+          "agent.crewai",
+          "agent.guardrail",
+          "agent.hook",
+          "agent.instructions.agents-md",
+          "agent.instructions.claude",
+          "agent.instructions.copilot",
+          "agent.instructions.cursor-rule",
+          "agent.langgraph.supervisor",
+          "agent.mcp.docker",
+          "agent.mcp.gemini",
+          "agent.mcp.http.authenticated",
+          "agent.mcp.http.plaintext",
+          "agent.mcp.local-script",
+          "agent.mcp.source.python",
+          "agent.mcp.source.typescript",
+          "agent.mcp.toml",
+          "agent.n8n",
+          "agent.openai-agents.triage",
+          "agent.permissions",
+          "agent.plugin",
+          "agent.prompt.inline",
+          "agent.prompt.system-file",
+          "agent.prompt.template",
+          "agent.skill.agents-dir",
+          "agent.skill.github",
+          "agent.subagent"
+        ],
+        "present_untyped": []
+      },
+      "1.5": {
+        "classified": [],
+        "missed": [
+          "infra.ci.agent-action",
+          "infra.endpoint.azure-openai",
+          "infra.endpoint.sagemaker",
+          "infra.image.ollama",
+          "infra.image.pgvector",
+          "infra.image.pytorch",
+          "infra.image.qdrant",
+          "infra.image.vllm"
+        ],
+        "present_untyped": []
+      },
+      "2.1": {
+        "reported_as_components": [],
+        "score": 1.0
+      },
+      "3.1": {
+        "facts_expected": 2,
+        "facts_found": 2,
+        "items_with_fact": 2,
+        "score": 0.25
+      },
+      "3.2": {
+        "facts_expected": 0,
+        "facts_found": 0,
+        "items_with_fact": 0,
+        "score": 0.0
+      },
+      "3.3": {
+        "facts_expected": 7,
+        "facts_found": 4,
+        "items_with_fact": 7,
+        "score": 0.5
+      },
+      "3.4": {
+        "facts_expected": 12,
+        "facts_found": 12,
+        "items_with_fact": 7,
+        "score": 0.875
+      },
+      "3.5": {
+        "satisfied": [],
+        "score": 0.0
+      },
+      "4.1": {
+        "note": "format not emitted",
+        "score": 0.0
+      },
+      "4.2": {
+        "note": "format not emitted",
+        "score": 0.0
+      },
+      "4.3": {
+        "any_model_card": false,
+        "datasets_typed_data": 0.0,
+        "models_typed_machine_learning_model": 0.0,
+        "score": 0.0
+      },
+      "4.4": {
+        "frameworks_detected": 0,
+        "frameworks_with_purl": 0,
+        "huggingface_purl": false,
+        "score": 0.0
+      },
+      "4.5": {
+        "note": "format not emitted",
+        "score": 0.0
+      },
+      "4.6": {
+        "evidence": "Not found.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.1": {
+        "byte_identical": [
+          "inspect-skills:native-json",
+          "inspect:native-json"
+        ],
+        "compared": [
+          "inspect-skills:native-json",
+          "inspect:native-json"
+        ],
+        "identical_after_dropping_time_and_id_fields": [
+          "inspect-skills:native-json",
+          "inspect:native-json"
+        ],
+        "score": 1.0
+      },
+      "5.2": {
+        "evidence": "No signing or attestation.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.3": {
+        "malformed_files_named_in": [
+          "inspect-skills:native-json"
+        ],
+        "score": 1.0
+      },
+      "5.4": {
+        "evidence": "Not found.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.5": {
+        "evidence": "Not found.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "6.1": {
+        "caught": [],
+        "of": 19,
+        "score": 0.0
+      },
+      "6.2": {
+        "controls_flagged": [],
+        "score": 0.0
+      },
+      "6.3": {
+        "evidence": "No advisory lookup or VEX.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "7.1": {
+        "not_attributable_output_varies_between_identical_runs": [],
+        "score": 0.3,
+        "visible": [
+          "change.mcp-version-and-scope",
+          "change.mcp-added",
+          "change.skill-widened"
+        ]
+      },
+      "7.2": {
+        "note": "no drift command",
+        "score": 0.0
+      },
+      "7.3": {
+        "evidence": "A --ci gate is in source; `scan` needs a Snyk token and was not run.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "S"
+      },
+      "7.4": {
+        "evidence": "--dangerously-run-mcp-servers starts each declared server to list its tools (observed by strace); there is no comparison with a prior inventory offline.",
+        "level": 0.5,
+        "score": 0.5,
+        "tier": "V"
+      },
+      "8.1": {
+        "canaries_tripped": [],
+        "score": 1.0
+      },
+      "8.2": {
+        "out_of_tree_content_via_import": [],
+        "out_of_tree_content_via_symlink": [],
+        "score": 1.0
+      },
+      "8.3": {
+        "disclosed": {},
+        "score": 1.0
+      },
+      "8.4": {
+        "raw_html_in": [],
+        "raw_terminal_escape_in": [
+          "inspect-text:console-stderr",
+          "inspect:console-stderr"
+        ],
+        "score": 0.5
+      },
+      "8.5": {
+        "cases": {
+          "deep-json": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.06,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "escape-names": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.0,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "fifo": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 0.9,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "header-bomb": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.16,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "large-tree": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.01,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "malformed": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.01,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-escape": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.0,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-loop": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.21,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          }
+        },
+        "score": 1.0
+      },
+      "8.6": {
+        "connection_attempts": [],
+        "inventory_produced_without_network": true,
+        "score": 1.0
+      },
+      "risk_verdicts": {
+        "control.mcp-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.mcp-toml-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.model-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.safetensors-safe": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.skill-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.tool-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.broad-permissions": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.toxic-flow": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.ci.agent-action": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.data.governance": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.hidden-unicode": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.import-escape": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.plaintext-http": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.shell-launch": {
+          "adjudication": "The match is the consent prompt echoing the launch command, not a finding.",
+          "auto": true,
+          "final": false,
+          "snippet": "inspect:console-stderr:       allow agent scan to start 'healthcheck'? [y/n]:       declined: 'healthcheck' will not be started. \u0000 atchpad/work/agent-scan/target/acme-support-copilot/.mcp.json       command: sh -c 'touch /tmp/aibom-bench/canary/mcp-launch; sleep 1'       allow agent scan to start 'healthcheck'? [y/n]:       declined: 'healthcheck' will not be started.  proceeding with 0 of 5 mcp servers. skipped: 5."
+        },
+        "risk.mcp.tool-poisoning": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-npx": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-uvx": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.vulnerable-bridge": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.pickle-exec": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.unpinned-revision": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.env-file": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.mcp-header": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.skill.hidden-instruction": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.skill.remote-script": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.tool.shell": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.typosquat.langchian": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        }
+      }
+    },
+    "display": "Snyk Agent Scan",
+    "grade": "E",
+    "groups": {
+      "BOM integrity": {
+        "of": 10.0,
+        "points": 5.0
+      },
+      "Change detection": {
+        "of": 8.0,
+        "points": 2.4
+      },
+      "Discovery": {
+        "of": 30.0,
+        "points": 1.75
+      },
+      "Precision": {
+        "of": 4.0,
+        "points": 4.0
+      },
+      "Record fidelity": {
+        "of": 14.0,
+        "points": 4.25
+      },
+      "Risk analysis": {
+        "of": 12.0,
+        "points": 0.0
+      },
+      "Scanner safety": {
+        "of": 12.0,
+        "points": 11.5
+      },
+      "Standards": {
+        "of": 10.0,
+        "points": 0.0
+      }
+    },
+    "license": "Apache-2.0",
+    "max_rss_mb": 83.7,
+    "points": {
+      "1.1": 0.0,
+      "1.2": 0.0,
+      "1.3": 0.0,
+      "1.4": 1.75,
+      "1.5": 0.0,
+      "2.1": 4.0,
+      "3.1": 1.0,
+      "3.2": 0.0,
+      "3.3": 1.5,
+      "3.4": 1.75,
+      "3.5": 0.0,
+      "4.1": 0.0,
+      "4.2": 0.0,
+      "4.3": 0.0,
+      "4.4": 0.0,
+      "4.5": 0.0,
+      "4.6": 0.0,
+      "5.1": 4.0,
+      "5.2": 0.0,
+      "5.3": 1.0,
+      "5.4": 0.0,
+      "5.5": 0.0,
+      "6.1": 0.0,
+      "6.2": 0.0,
+      "6.3": 0.0,
+      "7.1": 0.9,
+      "7.2": 0.0,
+      "7.3": 1.0,
+      "7.4": 0.5,
+      "8.1": 4.0,
+      "8.2": 2.0,
+      "8.3": 2.0,
+      "8.4": 0.5,
+      "8.5": 2.0,
+      "8.6": 1.0
+    },
+    "recall": 0.077,
+    "seconds": 2.6,
+    "source": "PyPI snyk-agent-scan",
+    "tool": "agent-scan",
+    "total": 28.9,
+    "unmeasured": "`scan`, which runs the risk analysis, needs a Snyk token and Snyk's API. Only `inspect` ran: it lists what one configuration file declares. Without --dangerously-run-mcp-servers it starts no server, so no tool definitions are read.",
+    "version": "0.6.11"
+  },
+  {
+    "components_reported": 1,
+    "details": {
+      "1.1": {
+        "classified": [
+          "model.hf.pinned"
+        ],
+        "missed": [
+          "model.adapter.lora",
+          "model.api.agents-sdk",
+          "model.api.anthropic",
+          "model.api.bedrock",
+          "model.api.embedding",
+          "model.api.openai",
+          "model.config.indirect",
+          "model.docker.download",
+          "model.env.indirect",
+          "model.file.gguf",
+          "model.file.onnx",
+          "model.file.pickle",
+          "model.file.safetensors",
+          "model.hf.unpinned",
+          "model.k8s.served",
+          "model.notebook",
+          "model.ollama.modelfile"
+        ],
+        "present_untyped": []
+      },
+      "1.2": {
+        "classified": [],
+        "missed": [
+          "data.dvc.pointer",
+          "data.finetune.upload",
+          "data.hf.eval",
+          "data.hf.pinned",
+          "data.local.eval",
+          "data.local.training",
+          "data.memory.pgvector",
+          "data.modelcard.dataset",
+          "data.rag.confluence-source",
+          "data.rag.s3-source",
+          "data.vector.chroma"
+        ],
+        "present_untyped": []
+      },
+      "1.3": {
+        "classified": [],
+        "missed": [
+          "tool.framework.chromadb",
+          "tool.framework.crewai",
+          "tool.framework.langchain",
+          "tool.framework.langgraph",
+          "tool.framework.llama-index",
+          "tool.framework.mcp",
+          "tool.framework.npm.sdk.anthropic-ai",
+          "tool.framework.npm.sdk.modelcontextprotocol",
+          "tool.framework.openai",
+          "tool.framework.transformers",
+          "tool.function.fetch_url",
+          "tool.function.refund_order",
+          "tool.function.run_shell",
+          "tool.function.search_orders",
+          "tool.function.send_email",
+          "tool.mcp.get_order",
+          "tool.mcp.issue_refund",
+          "tool.mcp.search_kb"
+        ],
+        "present_untyped": []
+      },
+      "1.4": {
+        "classified": [],
+        "missed": [
+          "agent.a2a.card",
+          "agent.bedrock.terraform",
+          "agent.command",
+          "agent.crewai",
+          "agent.guardrail",
+          "agent.hook",
+          "agent.instructions.agents-md",
+          "agent.instructions.claude",
+          "agent.instructions.copilot",
+          "agent.instructions.cursor-rule",
+          "agent.langgraph.supervisor",
+          "agent.mcp.docker",
+          "agent.mcp.gemini",
+          "agent.mcp.http.authenticated",
+          "agent.mcp.http.plaintext",
+          "agent.mcp.local-script",
+          "agent.mcp.source.python",
+          "agent.mcp.source.typescript",
+          "agent.mcp.stdio.pinned",
+          "agent.mcp.stdio.proxy",
+          "agent.mcp.stdio.shell",
+          "agent.mcp.stdio.unpinned",
+          "agent.mcp.stdio.uvx",
+          "agent.mcp.toml",
+          "agent.n8n",
+          "agent.openai-agents.triage",
+          "agent.permissions",
+          "agent.plugin",
+          "agent.prompt.inline",
+          "agent.prompt.system-file",
+          "agent.prompt.template",
+          "agent.skill.agents-dir",
+          "agent.skill.benign",
+          "agent.skill.github",
+          "agent.skill.poisoned",
+          "agent.subagent"
+        ],
+        "present_untyped": []
+      },
+      "1.5": {
+        "classified": [],
+        "missed": [
+          "infra.ci.agent-action",
+          "infra.endpoint.azure-openai",
+          "infra.endpoint.sagemaker",
+          "infra.image.ollama",
+          "infra.image.pgvector",
+          "infra.image.pytorch",
+          "infra.image.qdrant",
+          "infra.image.vllm"
+        ],
+        "present_untyped": []
+      },
+      "2.1": {
+        "reported_as_components": [],
+        "score": 0.0
+      },
+      "3.1": {
+        "facts_expected": 2,
+        "facts_found": 1,
+        "items_with_fact": 1,
+        "score": 0.0625
+      },
+      "3.2": {
+        "facts_expected": 0,
+        "facts_found": 0,
+        "items_with_fact": 0,
+        "score": 0.0
+      },
+      "3.3": {
+        "facts_expected": 1,
+        "facts_found": 0,
+        "items_with_fact": 1,
+        "score": 0.0
+      },
+      "3.4": {
+        "facts_expected": 0,
+        "facts_found": 0,
+        "items_with_fact": 0,
+        "score": 0.0
+      },
+      "3.5": {
+        "satisfied": [],
+        "score": 0.0
+      },
+      "4.1": {
+        "documents": {
+          "cyclonedx:cyclonedx-json": {
+            "errors": [],
+            "spec_version": "1.6",
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.2": {
+        "note": "format not emitted",
+        "score": 0.0
+      },
+      "4.3": {
+        "any_model_card": true,
+        "datasets_typed_data": 0.0,
+        "models_typed_machine_learning_model": 1.0,
+        "score": 0.7
+      },
+      "4.4": {
+        "frameworks_detected": 0,
+        "frameworks_with_purl": 0,
+        "huggingface_purl": true,
+        "score": 0.3
+      },
+      "4.5": {
+        "note": "format not emitted",
+        "score": 0.0
+      },
+      "4.6": {
+        "evidence": "A completeness score over model-card fields is computed in src/models/scoring.py; it is not a published minimum-element set.",
+        "level": 0.5,
+        "score": 0.5,
+        "tier": "S"
+      },
+      "5.1": {
+        "byte_identical": [],
+        "compared": [
+          "cyclonedx:cyclonedx-json"
+        ],
+        "identical_after_dropping_time_and_id_fields": [],
+        "score": 0.0
+      },
+      "5.2": {
+        "evidence": "No signing or attestation.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.3": {
+        "malformed_files_named_in": [],
+        "score": 0.0
+      },
+      "5.4": {
+        "evidence": "Not found.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.5": {
+        "evidence": "Not found.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "6.1": {
+        "caught": [],
+        "of": 19,
+        "score": 0.0
+      },
+      "6.2": {
+        "controls_flagged": [],
+        "score": 0.0
+      },
+      "6.3": {
+        "evidence": "No advisory lookup or VEX.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "7.1": {
+        "not_attributable_output_varies_between_identical_runs": [],
+        "score": 0.0,
+        "visible": []
+      },
+      "7.2": {
+        "note": "no drift command",
+        "score": 0.0
+      },
+      "7.3": {
+        "evidence": "No gate.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "7.4": {
+        "evidence": "No runtime comparison.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "8.1": {
+        "canaries_tripped": [],
+        "score": 1.0
+      },
+      "8.2": {
+        "out_of_tree_content_via_import": [],
+        "out_of_tree_content_via_symlink": [],
+        "score": 1.0
+      },
+      "8.3": {
+        "disclosed": {},
+        "score": 1.0
+      },
+      "8.4": {
+        "raw_html_in": [],
+        "raw_terminal_escape_in": [],
+        "score": 1.0
+      },
+      "8.5": {
+        "cases": {
+          "deep-json": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 35.33,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "escape-names": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 35.98,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "fifo": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 35.43,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "header-bomb": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 35.78,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "large-tree": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 35.47,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "malformed": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 35.37,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-escape": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 35.45,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-loop": {
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 35.58,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          }
+        },
+        "score": 1.0
+      },
+      "8.6": {
+        "connection_attempts": [
+          "8.8.4.4:53",
+          "8.8.8.8:53"
+        ],
+        "inventory_produced_without_network": true,
+        "score": 0.5
+      },
+      "risk_verdicts": {
+        "control.mcp-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.mcp-toml-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.model-pinned": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.safetensors-safe": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.skill-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.tool-benign": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.broad-permissions": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.toxic-flow": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.ci.agent-action": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.data.governance": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.hidden-unicode": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.import-escape": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.plaintext-http": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.shell-launch": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.tool-poisoning": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-npx": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-uvx": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.vulnerable-bridge": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.pickle-exec": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.unpinned-revision": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.env-file": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.mcp-header": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.skill.hidden-instruction": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.skill.remote-script": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.tool.shell": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.typosquat.langchian": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        }
+      }
+    },
+    "display": "OWASP AIBOM Generator",
+    "grade": "F",
+    "groups": {
+      "BOM integrity": {
+        "of": 10.0,
+        "points": 0.0
+      },
+      "Change detection": {
+        "of": 8.0,
+        "points": 0.0
+      },
+      "Discovery": {
+        "of": 30.0,
+        "points": 0.39
+      },
+      "Precision": {
+        "of": 4.0,
+        "points": 0.0
+      },
+      "Record fidelity": {
+        "of": 14.0,
+        "points": 0.25
+      },
+      "Risk analysis": {
+        "of": 12.0,
+        "points": 0.0
+      },
+      "Scanner safety": {
+        "of": 12.0,
+        "points": 11.5
+      },
+      "Standards": {
+        "of": 10.0,
+        "points": 5.2
+      }
+    },
+    "license": "Apache-2.0",
+    "max_rss_mb": 105.7,
+    "points": {
+      "1.1": 0.39,
+      "1.2": 0.0,
+      "1.3": 0.0,
+      "1.4": 0.0,
+      "1.5": 0.0,
+      "2.1": 0.0,
+      "3.1": 0.25,
+      "3.2": 0.0,
+      "3.3": 0.0,
+      "3.4": 0.0,
+      "3.5": 0.0,
+      "4.1": 3.0,
+      "4.2": 0.0,
+      "4.3": 1.4,
+      "4.4": 0.3,
+      "4.5": 0.0,
+      "4.6": 0.5,
+      "5.1": 0.0,
+      "5.2": 0.0,
+      "5.3": 0.0,
+      "5.4": 0.0,
+      "5.5": 0.0,
+      "6.1": 0.0,
+      "6.2": 0.0,
+      "6.3": 0.0,
+      "7.1": 0.0,
+      "7.2": 0.0,
+      "7.3": 0.0,
+      "7.4": 0.0,
+      "8.1": 4.0,
+      "8.2": 2.0,
+      "8.3": 2.0,
+      "8.4": 1.0,
+      "8.5": 2.0,
+      "8.6": 0.5
+    },
+    "recall": 0.011,
+    "seconds": 35.4,
+    "source": "github.com/GenAI-Security-Project/aibom-generator",
+    "tool": "owasp-aibom-generator",
+    "total": 17.3,
+    "unmeasured": "Takes a Hugging Face model ID, not a directory, and has no offline input. huggingface.co was unreachable, so it wrote a placeholder BOM. Its score is a floor, not a measurement of its model-card extraction.",
+    "version": "commit 45851cb"
+  }
+]

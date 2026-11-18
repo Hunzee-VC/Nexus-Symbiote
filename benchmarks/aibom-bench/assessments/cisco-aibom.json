@@ -1,0 +1,51 @@
+{
+  "tool": "cisco-aibom",
+  "assessed": "2026-11-18",
+  "criteria": {
+    "4.6": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Not found."
+    },
+    "5.2": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No signing or attestation."
+    },
+    "5.4": {
+      "level": 0.5,
+      "tier": "V",
+      "evidence": "Every output is marked agentic_status: degraded and each component unreviewed; this states review status, not which collectors ran."
+    },
+    "5.5": {
+      "level": 0.5,
+      "tier": "V",
+      "evidence": "Components carry decision_annotation with evidence locations; the confidence review did not run without an LLM."
+    },
+    "6.3": {
+      "level": 0.5,
+      "tier": "S",
+      "evidence": "OSV lookup is in source; no VEX output."
+    },
+    "7.3": {
+      "level": 1,
+      "tier": "S",
+      "evidence": "--fail-on (exit 2) and --policy (exit 1) are in source; not exercised."
+    },
+    "7.4": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No runtime comparison."
+    }
+  },
+  "adjudication": {
+    "risk.mcp.shell-launch": {
+      "verdict": false,
+      "reason": "Automatic match came from unrelated text near the component name; no finding states this risk."
+    },
+    "risk.tool.shell": {
+      "verdict": false,
+      "reason": "run_shell is listed as a tool in the console table; nothing flags it as dangerous."
+    }
+  }
+}

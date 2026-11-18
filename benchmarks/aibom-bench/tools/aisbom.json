@@ -1,0 +1,88 @@
+{
+  "tool": "aisbom",
+  "display": "AIsbom",
+  "version": "1.7.0",
+  "license": "Apache-2.0",
+  "source": "PyPI aisbom-cli",
+  "install": [
+    "python3 -m venv {tooldir}/venv",
+    "{tooldir}/venv/bin/pip install aisbom-cli==1.7.0"
+  ],
+  "bin": "{tooldir}/venv/bin/aisbom",
+  "path": [
+    "{tooldir}/venv/bin"
+  ],
+  "env": {},
+  "scans": [
+    {
+      "label": "cyclonedx",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--offline",
+        "--format",
+        "json",
+        "--output",
+        "{out}/bom.cdx.json"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/bom.cdx.json",
+          "format": "cyclonedx-json"
+        }
+      ]
+    },
+    {
+      "label": "spdx3",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--offline",
+        "--format",
+        "spdx",
+        "--spdx-version",
+        "3.0",
+        "--output",
+        "{out}/bom.spdx3.json"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/bom.spdx3.json",
+          "format": "spdx-json"
+        }
+      ]
+    },
+    {
+      "label": "markdown",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--offline",
+        "--format",
+        "markdown",
+        "--output",
+        "{out}/report.md"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/report.md",
+          "format": "markdown"
+        }
+      ]
+    }
+  ],
+  "diff": {
+    "argv": [
+      "{bin}",
+      "diff",
+      "{base}/bom.cdx.json",
+      "{drift}/bom.cdx.json"
+    ]
+  },
+  "notes": [
+    "--offline is passed because telemetry to api.aisbom.io is on by default."
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "tool": "aisbom",
+  "assessed": "2026-11-18",
+  "criteria": {
+    "4.6": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Not found."
+    },
+    "5.2": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No signing or attestation."
+    },
+    "5.4": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Not found."
+    },
+    "5.5": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Not found."
+    },
+    "6.3": {
+      "level": 1,
+      "tier": "D",
+      "evidence": "--vex wrote OpenVEX and CycloneDX VEX files; the OSV lookup was not run because api.osv.dev was unreachable."
+    },
+    "7.3": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "Scans exited 2 on the critical pickle finding; `score --fail-under` exited 2."
+    },
+    "7.4": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No runtime comparison."
+    }
+  },
+  "adjudication": {}
+}

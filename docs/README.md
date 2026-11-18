@@ -49,6 +49,7 @@ Reference material: exact behavior, fields and limits.
 | [Runtime contract reference](runtime-contract-reference.md) | Signed runtime contracts: envelope, fields, digests, order of checks, reason codes, state store, key lifecycle and what an integrator must build |
 | [Security regression corpus](../benchmarks/README.md) | The committed security fixtures CI enforces, and what passing them does not show |
 | [Inventory regression corpus](../benchmarks/inventory/README.md) | Labeled tool-inventory cases from public MCP servers, with explicit uncertainty bounds |
+| [AIBOM-Bench](../benchmarks/aibom-bench/README.md) | A cross-tool benchmark of AI-BOM generators on a generated corpus: what it measures, how to rerun it, the graded results and their limits |
 
 ## How: guides
 

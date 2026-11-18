@@ -1,0 +1,42 @@
+{
+  "tool": "airom",
+  "assessed": "2026-11-18",
+  "criteria": {
+    "4.6": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "`--compliance nist-ai-rmf --compliance owasp-agentic` wrote a compliance report."
+    },
+    "5.2": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No signing or attestation."
+    },
+    "5.4": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Not found."
+    },
+    "5.5": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "Each occurrence carries a detector ID and a confidence."
+    },
+    "6.3": {
+      "level": 1,
+      "tier": "D",
+      "evidence": "OpenVEX output and an OSV lookup exist; the lookup was refused here and never observed to succeed."
+    },
+    "7.3": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "`--fail-on` returned the configured exit codes on scan and diff."
+    },
+    "7.4": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No runtime comparison."
+    }
+  },
+  "adjudication": {}
+}

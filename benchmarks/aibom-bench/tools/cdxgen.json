@@ -1,0 +1,131 @@
+{
+  "tool": "cdxgen",
+  "display": "OWASP cdxgen",
+  "version": "13.8.0",
+  "license": "Apache-2.0",
+  "source": "npm @cdxgen/cdxgen",
+  "install": [
+    "npm install --prefix {tooldir} --ignore-scripts @cdxgen/cdxgen@13.8.0",
+    "ln -s <node 24 binary> {tooldir}/bin/node"
+  ],
+  "bin": "{tooldir}/node_modules/.bin/cdxgen",
+  "path": [
+    "{tooldir}/bin",
+    "{tooldir}/node_modules/.bin",
+    "/opt/node22/bin",
+    "/usr/local/go/bin"
+  ],
+  "env": {},
+  "scans": [
+    {
+      "label": "polyglot",
+      "argv": [
+        "{bin}",
+        "--no-install-deps",
+        "--no-validate",
+        "--format",
+        "cyclonedx,spdx",
+        "-o",
+        "{out}/bom.cdx.json",
+        "{target}"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/bom.cdx.json",
+          "format": "cyclonedx-json",
+          "smoke_bytes": 1465
+        },
+        {
+          "path": "{out}/bom.spdx.json",
+          "format": "spdx-json",
+          "smoke_bytes": 1212
+        }
+      ]
+    },
+    {
+      "label": "aibom",
+      "argv": [
+        "/tmp/claude-0/-home-user-Nexus-Symbiote/7bf94c7d-f990-5f8c-b2c1-7ba518c2ee9a/scratchpad/tools/cdxgen/node_modules/.bin/aibom",
+        "--no-install-deps",
+        "--no-validate",
+        "--format",
+        "cyclonedx,spdx",
+        "-o",
+        "{out}/aibom.cdx.json",
+        "{target}"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/aibom.cdx.json",
+          "format": "cyclonedx-json",
+          "smoke_bytes": 21002
+        },
+        {
+          "path": "{out}/aibom.spdx.json",
+          "format": "spdx-json",
+          "smoke_bytes": 58113
+        }
+      ]
+    },
+    {
+      "label": "agentic",
+      "argv": [
+        "/bin/sh",
+        "-c",
+        "\"$1\" -t ai -t mcp -t ai-skill --include-formulation --no-install-deps -o \"$3/agentic.cdx.json\" \"$2\" && \"$(dirname \"$1\")/cdx-audit\" --bom \"$3/agentic.cdx.json\" --direct-bom-audit --report sarif -o \"$3/agentic-audit.sarif\"",
+        "sh",
+        "{bin}",
+        "{target}",
+        "{out}"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/agentic.cdx.json",
+          "format": "cyclonedx-json",
+          "smoke_bytes": 24534
+        },
+        {
+          "path": "{out}/agentic-audit.sarif",
+          "format": "sarif",
+          "smoke_bytes": 9844
+        }
+      ]
+    },
+    {
+      "label": "aibom-audit",
+      "argv": [
+        "/bin/sh",
+        "-c",
+        "B=$(dirname \"$1\"); \"$B/aibom\" --no-install-deps -o \"$3/aibom.cdx.json\" \"$2\" && \"$B/cdx-audit\" --bom \"$3/aibom.cdx.json\" --direct-bom-audit --categories ai-bom --report sarif -o \"$3/aibom-audit.sarif\"",
+        "sh",
+        "{bin}",
+        "{target}",
+        "{out}"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/aibom-audit.sarif",
+          "format": "sarif",
+          "smoke_bytes": 1069
+        }
+      ]
+    },
+    {
+      "label": "default",
+      "argv": [
+        "{bin}",
+        "-o",
+        "{out}/default.cdx.json",
+        "{target}"
+      ],
+      "outputs": [],
+      "only": [
+        "base"
+      ]
+    }
+  ],
+  "notes": [
+    "Scored scans pass --no-install-deps. The scan labelled default runs once without it, on the base corpus only, so the execution canaries reflect the default command; its output is not scored.",
+    "SARIF comes from cdx-audit run on the BOM cdxgen wrote."
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "tool": "agent-scan",
+  "assessed": "2026-11-18",
+  "criteria": {
+    "4.6": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Not found."
+    },
+    "5.2": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No signing or attestation."
+    },
+    "5.4": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Not found."
+    },
+    "5.5": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Not found."
+    },
+    "6.3": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No advisory lookup or VEX."
+    },
+    "7.3": {
+      "level": 1,
+      "tier": "S",
+      "evidence": "A --ci gate is in source; `scan` needs a Snyk token and was not run."
+    },
+    "7.4": {
+      "level": 0.5,
+      "tier": "V",
+      "evidence": "--dangerously-run-mcp-servers starts each declared server to list its tools (observed by strace); there is no comparison with a prior inventory offline."
+    }
+  },
+  "adjudication": {
+    "risk.mcp.shell-launch": {
+      "verdict": false,
+      "reason": "The match is the consent prompt echoing the launch command, not a finding."
+    }
+  }
+}

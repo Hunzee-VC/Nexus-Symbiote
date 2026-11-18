@@ -1,0 +1,67 @@
+{
+  "tool": "airom",
+  "display": "AIROM",
+  "version": "0.4.7",
+  "license": "Apache-2.0",
+  "source": "github.com/airomhq/airom",
+  "install": [
+    "GOBIN={tooldir}/bin go install github.com/airomhq/airom/cmd/airom@v0.4.7"
+  ],
+  "bin": "{tooldir}/bin/airom",
+  "path": [
+    "{tooldir}/bin"
+  ],
+  "env": {},
+  "scans": [
+    {
+      "label": "all",
+      "argv": [
+        "{bin}",
+        "fs",
+        "{target}",
+        "--offline",
+        "-o",
+        "json={out}/aibom.json",
+        "-o",
+        "cyclonedx={out}/bom.cdx.json",
+        "-o",
+        "spdx={out}/bom.spdx.json",
+        "-o",
+        "sarif={out}/scan.sarif",
+        "-o",
+        "table={out}/table.txt"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/aibom.json",
+          "format": "native-json"
+        },
+        {
+          "path": "{out}/bom.cdx.json",
+          "format": "cyclonedx-json"
+        },
+        {
+          "path": "{out}/bom.spdx.json",
+          "format": "spdx-json"
+        },
+        {
+          "path": "{out}/scan.sarif",
+          "format": "sarif"
+        },
+        {
+          "path": "{out}/table.txt",
+          "format": "text"
+        }
+      ]
+    }
+  ],
+  "diff": {
+    "argv": [
+      "{bin}",
+      "diff",
+      "{base}/aibom.json",
+      "{drift}/aibom.json"
+    ]
+  },
+  "notes": []
+}

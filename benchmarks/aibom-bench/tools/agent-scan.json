@@ -1,0 +1,54 @@
+{
+  "tool": "agent-scan",
+  "display": "Snyk Agent Scan",
+  "version": "0.6.11",
+  "license": "Apache-2.0",
+  "source": "PyPI snyk-agent-scan",
+  "install": [
+    "python3 -m venv {tooldir}/venv",
+    "{tooldir}/venv/bin/pip install snyk-agent-scan==0.6.11"
+  ],
+  "bin": "{tooldir}/venv/bin/snyk-agent-scan",
+  "path": [
+    "{tooldir}/venv/bin"
+  ],
+  "env": {},
+  "scans": [
+    {
+      "label": "inspect",
+      "argv": [
+        "{bin}",
+        "inspect",
+        "{target}/.mcp.json",
+        "--json"
+      ],
+      "outputs": [],
+      "stdout_format": "native-json"
+    },
+    {
+      "label": "inspect-skills",
+      "argv": [
+        "{bin}",
+        "inspect",
+        "{target}/.claude/skills",
+        "--json"
+      ],
+      "outputs": [],
+      "stdout_format": "native-json"
+    },
+    {
+      "label": "inspect-text",
+      "argv": [
+        "{bin}",
+        "inspect",
+        "{target}/.mcp.json"
+      ],
+      "outputs": [],
+      "stdout_format": "text"
+    }
+  ],
+  "unmeasured": "`scan`, which runs the risk analysis, needs a Snyk token and Snyk's API. Only `inspect` ran: it lists what one configuration file declares. Without --dangerously-run-mcp-servers it starts no server, so no tool definitions are read.",
+  "notes": [
+    "Takes a configuration file or skills directory, not a project directory; the root .mcp.json and .claude/skills were passed."
+  ]
+}
