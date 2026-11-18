@@ -62,6 +62,12 @@ RULES: dict[str, RuleInfo] = {
         "Unknown model serialization safety",
         "The safety of a model artifact's format or loader could not be established.",
     ),
+    "settings_environment": RuleInfo(
+        "Redirecting or code-loading settings environment",
+        "Claude Code settings set environment variables that send the API key and prompts to "
+        "another endpoint, proxy or trust store, or that load code into the session and the "
+        "commands it runs.",
+    ),
     "signing_status": RuleInfo(
         "Unsigned model artifact",
         "A model artifact has no verified signature bound to its bytes.",

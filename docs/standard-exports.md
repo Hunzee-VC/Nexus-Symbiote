@@ -137,6 +137,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `runtime_undeclared` | Runtime component not matched to the inventory | none | none | none | ASI04 | none | GOVERN-1.6 |
 | `serialization_format` | Unsafe model serialization | CWE-502 (critical findings), CWE-1336 (high findings) | LLM03:2025 | LLM04:2026 | ASI04, ASI05 | AML.T0011.000 | MANAGE-3.2 |
 | `serialization_format_unknown` | Unknown model serialization safety | CWE-502 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0011.000 | MANAGE-3.2 |
+| `settings_environment` | Redirecting or code-loading settings environment | none | none | none | ASI03 (high findings), ASI05 (medium findings) | none | MEASURE-2.7 |
 | `shadowscan-heuristic` | Imported discovery risk | none | none | none | none | none | none |
 | `shadowscan-inventory-unmatched` | Imported unmatched discovery | none | none | none | none | none | GOVERN-1.6 |
 | `signing_status` | Unsigned model artifact | CWE-345 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.003 | MANAGE-3.2 |

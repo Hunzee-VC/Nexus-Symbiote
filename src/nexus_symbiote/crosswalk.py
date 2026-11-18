@@ -1069,6 +1069,22 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         _ref(EU_AI_ACT, "Art. 11", _DOCUMENTATION),
         _ref(ISO_42001, "A.4.2", _RESOURCES),
     ),
+    "settings_environment": (
+        _ref(
+            OWASP_ASI_2026,
+            "ASI03",
+            "Settings can send the agent's credential to an endpoint or proxy they choose.",
+            RiskSeverity.HIGH,
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI05",
+            "Settings can load code into the session and every command it starts.",
+            RiskSeverity.MEDIUM,
+        ),
+        _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
+        _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
+    ),
     "signing_status": (
         _ref(
             CWE,

