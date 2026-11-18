@@ -10,6 +10,8 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -131,6 +133,7 @@ def test_cited_model_is_named_from_the_line_the_scan_reads(tmp_path):
         (f"{MODEL}: primary", MODEL),
         (f"  - {MODEL}\r", MODEL),
         ("id = cohere/rerank-english-v3.0", "cohere/rerank-english-v3.0"),
+        (f'models = ["{MODEL}-2024-07-18", "{MODEL}"]', MODEL),
         (
             'model = "anthropic.claude-3-5-haiku-20241022-v1:0"',
             "anthropic.claude-3-5-haiku-20241022-v1:0",
@@ -156,6 +159,17 @@ def test_a_whole_identifier_is_recognised(line, literal):
         (f"{MODEL}@2024", MODEL),
         ("nothing here", MODEL),
         ("", MODEL),
+        ('model = "gpt-4o"', "gpt-4"),
+        (f"{MODEL}2", MODEL),
+        (f"7{MODEL}", MODEL),
+        (f"my_{MODEL}", MODEL),
+        (f"user@{MODEL}", MODEL),
+        (f"c+{MODEL}", MODEL),
+        (f"{MODEL}+tools", MODEL),
+        ("ollama run llama3:latest", "llama3"),
+        ("MODEL = GPT-4O-MINI", MODEL),
+        ("FROM command-r7b:7b", "command-r"),
+        ("FROM codestral:latest", "codestral"),
     ],
 )
 def test_part_of_a_longer_identifier_is_not_a_name(line, literal):
@@ -488,7 +502,8 @@ CREDENTIALS = ["s" + "k-" + "a1B2c3D4" * 4, "AK" + "IA" + "ABCDEFGH12345678"]
 
 @pytest.mark.parametrize("token", CREDENTIALS)
 def test_a_credential_is_never_recorded_as_a_model_name(tmp_path, token):
-    # The line is ordinary, so only the check on the identifier itself can refuse it.
+    # The redactor also withholds the token on its line, so the scan cannot tell which
+    # check refused it; the parse at the end isolates the check on the identifier itself.
     project = _project(
         tmp_path, _report(_evidence("app.py:1", token)), {"app.py": f"FIXTURE = [{token}]\n"}
     )
@@ -896,6 +911,192 @@ def test_the_guide_example_is_what_a_scan_records(tmp_path):
     claims = shown.pop("claims")
     assert shown == {key: model[key] for key in shown}
     assert claims == {"cited_evidence": model["claims"]["cited_evidence"]}
+
+
+@pytest.mark.parametrize("name", shadowscan.REPORT_PATHS)
+def test_no_report_path_confirms_its_own_citations(tmp_path, name):
+    report = _report(_evidence(f"{name}:1", MODEL))
+    row = f'"value": "{MODEL}"'
+    line = _line_of(json.dumps(report, indent=1), row)
+    report["findings"][0]["evidence"][0]["location"] = f"{name}:{line}"
+    project = tmp_path / "proj"
+    (project / name).parent.mkdir(parents=True)
+    (project / name).write_text(json.dumps(report, indent=1))
+    result = ShadowScanImporter().scan(project)
+    assert result.source_report_path == name and not _models(result)
+
+
+OUT_OF_SHAPE = [
+    "2024",
+    "x" * 129,
+    "g",
+    "gpt-4o-",
+    "-gpt-4o",
+    "gpt 4o",
+    "model=gpt-4o",
+    "chat(gpt-4o",
+]
+
+
+@pytest.mark.parametrize("literal", OUT_OF_SHAPE)
+def test_text_that_is_not_identifier_shaped_is_refused_where_it_stands(tmp_path, literal):
+    # The cited line holds the text whole, so only the shape rule can refuse it.
+    result = _scan(
+        tmp_path, _report(_evidence("app.py:1", literal)), {"app.py": f"X = [ {literal} ]\n"}
+    )
+    assert not _models(result)
+    assert (
+        not ShadowScanImporter()
+        .parse_report(json.dumps(_report(_evidence("app.py:1", literal))))
+        .model_citations
+    )
+
+
+IN_SHAPE = [
+    "claude-3.5-sonnet",
+    "qwen2.5-coder:7b",
+    "cohere/rerank-english-v3.0",
+    "org/model@v1",
+    "gpt-4o+tools",
+    "o1",
+    "Meta-Llama-3.1-8B-Instruct",
+]
+
+
+@pytest.mark.parametrize("literal", IN_SHAPE)
+def test_identifier_shapes_are_named_as_written(tmp_path, literal):
+    result = _scan(
+        tmp_path, _report(_evidence("app.py:1", literal)), {"app.py": f'M = "{literal}"\n'}
+    )
+    (model,) = _models(result)
+    assert model.name == literal
+    assert model.bom_ref == MODEL_REF_PREFIX + hashlib.sha256(literal.encode()).hexdigest()
+
+
+def test_an_identifier_made_whole_only_by_redaction_is_not_named(tmp_path):
+    # In the raw line the identifier continues into the token; the redactor cuts it there.
+    token = "s" + "k-" + "a1B2c3D4" * 4
+    files = {"app.py": f'KEY = "{MODEL}{token}"\nM = "{MODEL}" # {token}\n'}
+    joined = _scan(tmp_path / "a", _report(_evidence("app.py:1", MODEL)), files)
+    assert not _models(joined)
+    beside = _scan(tmp_path / "b", _report(_evidence("app.py:2", MODEL)), files)
+    assert [model.name for model in _models(beside)] == [MODEL]
+
+
+@pytest.mark.parametrize(
+    "signal",
+    [
+        "model:provider.OpenAI",
+        "model:provider.openai extra",
+        "model:provider.openai\n",
+        "model:provider.openai\u202e",
+        "models:provider.openai",
+    ],
+)
+def test_a_signal_out_of_shape_names_nothing(tmp_path, signal):
+    result = _scan(tmp_path, _report(_evidence("app.py:3", MODEL, signal=signal)))
+    assert not _models(result)
+
+
+def test_evidence_of_a_finding_the_projection_does_not_map_still_names_a_model(tmp_path):
+    report = _report(_evidence("app.py:3", MODEL))
+    report["findings"][0]["kind"] = "infra"
+    report["findings"].append({"id": "odd", "kind": "agent", "surface": "code", "evidence": 7})
+    result = _scan(tmp_path, report)
+    assert result.source_unmapped_count == 1
+    assert [model.name for model in _models(result)] == [MODEL]
+    assert not result.scan_failures
+
+
+@pytest.mark.parametrize(
+    ("content", "line", "named"),
+    [
+        (f'A = 1\nM = "{MODEL}"', 2, True),
+        (f'A = 1\nM = "{MODEL}"', 0, False),
+        (f'A = 1\x0cB = 2\u2028C = 3\nM = "{MODEL}"\n', 2, True),
+        (f'A = 1\x0cB = 2\u2028C = 3\nM = "{MODEL}"\n', 4, False),
+        (f'M = "{MODEL}"' + " " * (4096 - len(f'M = "{MODEL}"')) + "\n", 1, True),
+        (f'M = "{MODEL}"' + " " * (4097 - len(f'M = "{MODEL}"')) + "\n", 1, False),
+    ],
+    ids=[
+        "last-line-without-a-line-feed",
+        "line-zero",
+        "line-feeds-only",
+        "other-separators",
+        "bound",
+        "past-bound",
+    ],
+)
+def test_lines_are_addressed_by_line_feeds_within_the_bound(tmp_path, content, line, named):
+    result = _scan(tmp_path, _report(_evidence(f"app.py:{line}", MODEL)), {"app.py": content})
+    assert bool(_models(result)) is named
+
+
+@pytest.mark.parametrize("number", ["3x", "\u0663", "12345678", "+3", " 3"])
+def test_a_malformed_line_number_is_unconfirmed_evidence(tmp_path, number):
+    result = _scan(tmp_path, _report(_evidence(f"app.py:{number}", MODEL)))
+    assert result.source_report_digest and not _models(result) and not result.scan_failures
+
+
+def test_identifier_case_is_kept_and_the_first_location_is_by_path_then_line(tmp_path):
+    files = {"b.py": 'M = "GPT-4o-Mini"\n', "a.py": 'X = 1\nM = "GPT-4o-Mini"\n'}
+    report = _report(_evidence("b.py:1", "GPT-4o-Mini"), _evidence("a.py:2", "GPT-4o-Mini"))
+    (model,) = _models(_scan(tmp_path, report, files))
+    assert model.name == "GPT-4o-Mini"
+    assert model.bom_ref == MODEL_REF_PREFIX + hashlib.sha256(b"GPT-4o-Mini").hexdigest()
+    assert model.claims[EVIDENCE_CLAIM].locator == "a.py:2"
+    assert model.claims[EVIDENCE_CLAIM].evidence_refs == ["a.py:2", "b.py:1"]
+
+
+def test_cited_files_are_read_in_path_order_under_the_source_limit(tmp_path):
+    files = {"a.py": f'A = "{MODEL}"\n' + "#" * 2048, "b.py": f'B = "{MODEL}"\n' + "#" * 2048}
+    report = _report(_evidence("b.py:1", MODEL), _evidence("a.py:1", MODEL))
+    project = _project(tmp_path, report, files)
+    with limits.applied(replace(limits.DEFAULTS, source_scan_bytes=3 * limits.KIB)):
+        result = ShadowScanImporter().scan(project)
+    (model,) = _models(result)
+    assert model.claims[EVIDENCE_CLAIM].evidence_refs == ["a.py:1"]
+
+
+def test_the_documented_bounds_and_names():
+    assert (
+        shadowscan.MAX_MODEL_CITATIONS,
+        shadowscan.MAX_CITED_PATH_CHARS,
+        shadowscan.MAX_CITED_LINE_CHARS,
+        shadowscan.MAX_EVIDENCE_LOCATIONS,
+        shadowscan.MAX_NAMED_MODELS,
+        shadowscan.MAX_REDACTED_CHARS,
+    ) == (10_000, 256, 4_096, 16, 500, 1024 * 1024)
+    assert PROJECTION_PROFILE == "nexus-symbiote/shadowscan-projection/v5"
+    assert (EVIDENCE_CLAIM, MODEL_REF_PREFIX) == ("cited_evidence", "shadowscan:model:")
+    assert shadowscan.CITED_LINES_GAP == (
+        "ShadowScan cited lines exceed the text checked for credentials; the rest were not "
+        "confirmed"
+    )
+
+
+def test_scans_in_processes_with_different_hash_seeds_agree(tmp_path):
+    files = {f"m{n}.py": f'A = "{MODEL}"\nB = "text-embedding-3-small"\n' for n in range(6)}
+    entries = [
+        _evidence(f"m{n}.py:{line}", literal, signal=f"model:provider.p{n}")
+        for n in range(6)
+        for line, literal in ((1, MODEL), (2, "text-embedding-3-small"))
+    ]
+    project = _project(tmp_path, _report(*entries), files)
+    outputs = set()
+    for seed in ("1", "2", "3"):
+        out = tmp_path / f"bom-{seed}.json"
+        subprocess.run(  # noqa: S603
+            [sys.executable, "-m", "nexus_symbiote.cli", "scan", str(project)]
+            + ["--no-project-policy", "--report-only", "-o", str(out)],
+            env={**os.environ, "PYTHONHASHSEED": seed, "SOURCE_DATE_EPOCH": "1700000000"},
+            cwd=tmp_path,
+            capture_output=True,
+            check=False,
+            timeout=120,
+        )
+        outputs.add(out.read_bytes())
+    assert len(outputs) == 1 and MODEL_REF_PREFIX.encode() in outputs.pop()
 
 
 def test_shadowscan_fixture_report_is_unchanged_by_the_new_projection():
