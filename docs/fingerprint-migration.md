@@ -235,3 +235,14 @@ do not certify semantic equivalence or admission authority.
 
 Static MCP configuration source binding is a separate versioned contract. See
 [source reconciliation and snapshot migration](verification-source-binding.md).
+
+## Upgrade attribution (`--expect-upgrade`)
+
+When upgrading Nexus SymBiote across a documented profile transition (`0.1.0` or
+`0.2.0`), `nexus-symbiote diff baseline.json candidate.json --expect-upgrade FROM_VERSION`
+partitions alerts caused *exclusively* by the static list of serializer and profile
+transitions since `FROM_VERSION` into `tool_upgrade_changes` while keeping genuine
+supply-chain drift (added or removed components, changed commands or endpoints,
+altered tool definitions, or any component where a profile transition co-occurs
+with a content change) in `security_alerts`. Re-collect and re-approve the baseline
+once the upgrade diff has been reviewed.

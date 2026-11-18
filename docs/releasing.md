@@ -193,7 +193,18 @@ as described below.
    ```
 
    Offline verification with `gh attestation verify --bundle` then stays possible
-   after the run is gone.
+   after the run is gone, and requires no `gh auth login` or network connection when
+   paired with a downloaded Sigstore `trusted_root.json`:
+
+   ```bash
+   sha256sum -c SHA256SUMS
+   gh attestation verify nexus_symbiote-<version>-py3-none-any.whl \
+     --bundle distribution-attestation.jsonl \
+     --custom-trusted-root trusted_root.json \
+     --signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml \
+     --source-ref refs/heads/main --source-digest <release commit SHA> \
+     --deny-self-hosted-runners
+   ```
 8. Update the records that describe the release, in one documentation pull request:
    the changelog heading's date (the day of the PyPI upload, in UTC), `date-released`
    in `CITATION.cff`, the dated rows of the

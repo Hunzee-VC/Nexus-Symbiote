@@ -105,10 +105,22 @@ def standard_component(comp: AnyComponent) -> dict[str, Any]:
     return result
 
 
+MAX_EXPORT_ELEMENTS = 50_000
+
+
 class CycloneDXGenerator(Generator):
     format_name = "cyclonedx-1.7"
 
+    def __init__(self, *, max_elements: int = MAX_EXPORT_ELEMENTS) -> None:
+        self._max_elements = max_elements
+
     def generate(self, aibom: AIBOM) -> dict[str, Any]:
+        from nexus_symbiote.limits import Bound
+
+        if len(aibom.components) + len(aibom.dependencies) > self._max_elements:
+            raise ValueError(
+                Bound(self._max_elements, "export-elements", configurable=False).exceeded()
+            )
         document = self._projection(aibom)
         require_valid(document, "cyclonedx")
         return document

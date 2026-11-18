@@ -114,6 +114,8 @@ class SARIFGenerator(Generator):
         *,
         scan_root: Path | None = None,
         anchor: str | Path | None = None,
+        operator_policy_digest: str | None = None,
+        operator_policy_signers: tuple[str, ...] = (),
     ) -> None:
         self.root = (root or Path.cwd()).resolve()
         self.scan_root = (scan_root or self.root).resolve()
@@ -124,6 +126,8 @@ class SARIFGenerator(Generator):
         if located is None:
             raise ValueError("SARIF anchor must be a file path inside the source root")
         self._anchor = located
+        self._operator_policy_digest = operator_policy_digest
+        self._operator_policy_signers = operator_policy_signers
         roots = {str(self.scan_root), str((scan_root or self.root).absolute())}
         bases = sorted((r for r in roots if Path(r).parent != Path(r)), key=len, reverse=True)
         self._root_text = (
@@ -263,6 +267,16 @@ class SARIFGenerator(Generator):
                     "properties": {
                         "coverage": coverage_aggregate(claim),
                         **({OMITTED_IMPORTED_FINDINGS: omitted} if omitted else {}),
+                        **(
+                            {"operatorPolicyDigest": self._operator_policy_digest}
+                            if self._operator_policy_digest
+                            else {}
+                        ),
+                        **(
+                            {"operatorPolicySigners": list(self._operator_policy_signers)}
+                            if self._operator_policy_signers
+                            else {}
+                        ),
                     },
                 }
             ],
