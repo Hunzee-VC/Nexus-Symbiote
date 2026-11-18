@@ -34,6 +34,7 @@ KINDS = frozenset(
         "model_format",
         "hidden_unicode",
         "mcp_pinning",
+        "literal_credential",
         "tool_drift",
         "credential_export",
         "parse_coverage",
@@ -215,6 +216,14 @@ def _evaluate(case: dict[str, Any], directory: Path) -> dict[str, Any]:
             }
         facts["version_pinned"] = [s.version_pinned for s in servers]
         predicted = any(not s.version_pinned for s in servers)
+    elif kind == "literal_credential":
+        if not any(c.component_type == ComponentType.MCP_SERVER for c in result.components):
+            return {
+                "prediction": None,
+                "unknown_reason": "required server was not collected",
+                "facts": facts,
+            }
+        predicted = "literal_credential" in categories
     elif kind == "tool_drift":
         tools = [c for c in result.components if c.component_type == ComponentType.TOOL]
         if len(tools) != 1 or not tools[0].definition_hash:

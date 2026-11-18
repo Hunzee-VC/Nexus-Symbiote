@@ -136,7 +136,7 @@ An agent's behavior depends on its configuration as much as its code — MCP ser
 | Executable or unsigned model files | Classifies formats without loading them and validates SafeTensors headers; integrity stays `UNKNOWN` until your [signer policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md#operator-signature-policy) verifies the weights |
 | Hidden instructions | Flags bidi and zero-width characters, and text hidden in HTML comments, unused link reference definitions or unreferenced footnotes, in instruction files |
 | Over-broad agent permissions | Flags `bypassPermissions`, blanket grants such as `Bash(*)` and hook commands; a changed setting is a drift alert, and without the binding key a record whose setting values the redaction removes is a medium drift alert that they are unbound |
-| Credential exposure | Records variable names, never values; redacts known secret patterns |
+| Credential exposure | Flags a literal credential in an MCP server definition or in Claude Code settings `env`, by file, position and type; records variable names, never values; redacts known secret patterns |
 
 Every row has limits: [known limitations](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/known-limitations.md). Trust model and design principles: [security model](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/security-model.md).
 

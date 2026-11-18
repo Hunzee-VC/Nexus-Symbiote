@@ -263,6 +263,36 @@
       "parameters": {}
     },
     {
+      "id": "mcp-credential-literal",
+      "kind": "literal_credential",
+      "task": "detection",
+      "truth": true,
+      "rationale": "A bearer value written in a header is a literal credential; the public sentinel has no token format.",
+      "directory": "fixtures/mcp-credential-literal",
+      "references": [
+        {
+          "path": "project/.mcp.json",
+          "sha256": "987f988cdf1085148321c93f90cb6142caa09f24c819dba96f1a99f6209068a2"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "mcp-credential-reference",
+      "kind": "literal_credential",
+      "task": "detection",
+      "truth": false,
+      "rationale": "A reference names where the credential comes from and holds none.",
+      "directory": "fixtures/mcp-credential-reference",
+      "references": [
+        {
+          "path": "project/.mcp.json",
+          "sha256": "30fc07f3214ceba090262a14b079702064d8e34fd484dffc0b49dacb04afb8c1"
+        }
+      ],
+      "parameters": {}
+    },
+    {
       "id": "tool-description-change",
       "kind": "tool_drift",
       "task": "detection",

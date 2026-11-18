@@ -31,10 +31,16 @@ from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import canonical_json, hash_canonical, parse_json_strict
 from nexus_symbiote.core.models import IDEAgentComponent, RiskAssessment, VerifiedExtensionComponent
 from nexus_symbiote.scanners.base import Scanner, ScanResult
+from nexus_symbiote.scanners.credential_literals import (
+    literal_credential,
+    ordered_kinds,
+    value_kinds,
+)
 from nexus_symbiote.scanners.mcp import (
     _CODE_LOADING_ENVIRONMENT,
     SOURCE_BINDING_KEY_ENV,
     _exported_function,
+    _url_literals,
 )
 from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
@@ -2404,6 +2410,26 @@ def _environment_risk(documents: dict[str, dict[str, Any]]) -> RiskAssessment | 
     )
 
 
+def _environment_literals(documents: dict[str, dict[str, Any]]) -> list[RiskAssessment]:
+    """A finding for each settings `env` value that is a literal credential, naming the
+    file and the variable, as the MCP collector reports one in a server's `env`."""
+    found = []
+    for relative, data in documents.items():
+        environment = data.get("env")
+        if not isinstance(environment, dict):
+            continue
+        for name, value in sorted(environment.items()):
+            if not isinstance(value, str):
+                continue
+            kinds = ordered_kinds(value_kinds(value, name) + _url_literals(value))
+            if kinds:
+                position = f"env.{redact_text(name)}"
+                found.append(
+                    literal_credential("IDE agent 'claude-code'", relative, position, kinds)
+                )
+    return found
+
+
 def _hook_commands(value: Any, depth: int = 0) -> int:
     if depth > _MAX_SETTINGS_DEPTH:
         raise ValueError("settings nested too deeply")
@@ -2826,11 +2852,11 @@ class IDEAgentScanner(Scanner):
                     recommendation="Review this setting and approve its exact value.",
                 )
             )
-        environment_risk = _environment_risk(
-            {key: value for key, value in documents.items() if key != CLAUDE_PLUGIN_HOOKS}
-        )
+        declaring = {key: value for key, value in documents.items() if key != CLAUDE_PLUGIN_HOOKS}
+        environment_risk = _environment_risk(declaring)
         if environment_risk is not None:
             risks.append(environment_risk)
+        risks.extend(_environment_literals(declaring))
         helpers = [key for key in _CREDENTIAL_HELPER_KEYS if merged.get(key) is not None]
         commands = "a command that runs" if len(helpers) == 1 else "commands that run"
         for category, severity, present, detail in (

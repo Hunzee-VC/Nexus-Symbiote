@@ -34,6 +34,7 @@ ATLAS_2026_10 = {
     "AML.T0068": ("LLM Prompt Obfuscation", None),
     "AML.T0070": ("RAG Poisoning", None),
     "AML.T0074": ("Masquerading", None),
+    "AML.T0083": ("Credentials from AI Agent Configuration", None),
     "AML.T0105": ("Escape to Host", None),
     "AML.T0109": ("AI Supply Chain Rug Pull", None),
     "AML.T0142": ("Event Triggered Execution", None),
@@ -89,7 +90,8 @@ NIST_AI_RMF = {
 }
 EU_AI_ACT = {"Art. 11", "Art. 12", "Art. 15", "Art. 25", "Art. 53"}
 ISO_42001 = {"A.4.2", "A.6.2.6", "A.6.2.8", "A.7.5", "A.10.3"}
-# Exactly the identifiers of the earlier SARIF catalog, with their CWE names.
+# The identifiers of the earlier SARIF catalog, with their CWE names, and CWE-798, as
+# Appendix A of the OWASP Top 10 for LLM Applications 2026 names it under CWE 4.20.
 CWE_NAMES = {
     "CWE-250": "Execution with Unnecessary Privileges",
     "CWE-306": "Missing Authentication for Critical Function",
@@ -98,6 +100,7 @@ CWE_NAMES = {
     "CWE-451": "User Interface (UI) Misrepresentation of Critical Information",
     "CWE-494": "Download of Code Without Integrity Check",
     "CWE-502": "Deserialization of Untrusted Data",
+    "CWE-798": "Use of Hard-coded Credentials",
     "CWE-829": "Inclusion of Functionality from Untrusted Control Sphere",
     "CWE-1336": "Improper Neutralization of Special Elements Used in a Template Engine",
     "CWE-1427": "Improper Neutralization of Input Used for LLM Prompting",
@@ -398,6 +401,13 @@ def test_the_finding_catalog_lists_each_category_once_in_alphabetical_order():
     rows = documented_category_rows()
     assert len(rows) == len(set(rows))
     assert rows == sorted(rows)
+
+
+def test_the_policy_reference_names_exactly_the_documented_categories():
+    page = (ROOT / "docs" / "policy-reference.md").read_text(encoding="utf-8")
+    section = page.split("### Category names", 1)[1].split("\n## ", 1)[0]
+    listed = section.split("This version emits:", 1)[1].split(" The note that", 1)[0]
+    assert re.findall(r"`([^`]+)`", listed) == documented_category_rows()
 
 
 def test_rationales_claim_no_weakness_or_documentation_gap_that_findings_do_not_record():
