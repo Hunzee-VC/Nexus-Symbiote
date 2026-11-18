@@ -47,6 +47,10 @@ MAX_REFERENCE_CHARS = 16_384
 UNBOUND_VALUES_DETAIL = "values not bound in this inventory"
 """Phrase in the completeness finding for values that only a source binding key binds."""
 
+NAMED_FORMAT_PROPERTY = "named_format"
+"""Model property: the format a file's name claims, recorded when its header did not
+establish it, so the record has no ``serialization_format``."""
+
 _SPEC_VERSION = re.compile(r"(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,5})")
 
 
