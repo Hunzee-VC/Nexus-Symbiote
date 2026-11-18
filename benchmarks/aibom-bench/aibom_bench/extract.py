@@ -30,9 +30,15 @@ MESSAGE_KEY = re.compile(
     re.I,
 )
 FINDING_MAX_CHARS = 6000
+BAG_MAX_CHARS = 20000
+MAX_VALUE_CHARS = 400
+MAX_LIST_ITEMS = 40
+MAX_NESTED_ITEMS = 200
+BOM_REF_PREFIX = re.compile(r"^([A-Za-z][A-Za-z0-9_-]{1,30}):")
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 VOLATILE_KEY = re.compile(
-    r"time|date|created|duration|elapsed|serial|uuid|scan_?id|run_?id|generated|namespace|invocation",
+    r"time|date|created|duration|elapsed|serial|uuid|scan_?id|run_?id|generated|namespace|invocation"
+    r"|_at$|_seen$",
     re.I,
 )
 
@@ -47,6 +53,8 @@ class Record:
     source: str
     ref: str = ""
     cdx_type: str = ""
+    identity: str = ""
+    described: str = ""
 
 
 @dataclass(frozen=True)
@@ -73,7 +81,8 @@ def load_outputs(run: dict[str, Any], out_dir: Path) -> list[Output]:
     outputs = []
     for scan in run.get("scans", []):
         for entry in scan["outputs"]:
-            path = Path(entry["path"])
+            # Recorded paths are absolute; a moved or published work directory still scores.
+            path = out_dir / Path(entry["path"]).name
             if not path.is_file():
                 continue
             output = Output(scan["label"], entry["format"], path, path.read_bytes())
@@ -85,7 +94,7 @@ def load_outputs(run: dict[str, Any], out_dir: Path) -> list[Output]:
             outputs.append(output)
         for stream in ("stdout", "stderr"):
             path = out_dir / f"{scan['label']}.{stream}"
-            declared = any(Path(entry["path"]) == path for entry in scan["outputs"])
+            declared = any(Path(entry["path"]).name == path.name for entry in scan["outputs"])
             if path.is_file() and not declared:
                 outputs.append(Output(scan["label"], f"console-{stream}", path, path.read_bytes()))
     return outputs
@@ -109,13 +118,40 @@ def _json_lines(text: str) -> Any:
 
 
 def _scalars(node: dict[str, Any]) -> Iterator[tuple[str, str]]:
+    """A record's short scalar fields.
+
+    A long string or a long list is bulk content, such as a file's text or every token in
+    it. Content a tool copied is not something the tool said about the component, so it is
+    left out of what a record is matched on. It stays in the record's full text.
+    """
     for key, value in node.items():
         if isinstance(value, (str, int, float)) and not isinstance(value, bool):
-            yield key, str(value)
-        elif isinstance(value, list):
+            if len(str(value)) <= MAX_VALUE_CHARS:
+                yield key, str(value)
+        elif isinstance(value, list) and len(value) <= MAX_LIST_ITEMS:
             for element in value:
                 if isinstance(element, (str, int, float)) and not isinstance(element, bool):
-                    yield key, str(element)
+                    if len(str(element)) <= MAX_VALUE_CHARS:
+                        yield key, str(element)
+
+
+def _described(node: Any) -> str:
+    """The short fields of an object and of everything nested in it, as one text."""
+    parts: list[str] = []
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            parts.extend(f"{key}: {text}" for key, text in _scalars(value))
+            for child in value.values():
+                if isinstance(child, (dict, list)):
+                    walk(child)
+        elif isinstance(value, list) and len(value) <= MAX_NESTED_ITEMS:
+            for child in value:
+                if isinstance(child, (dict, list)):
+                    walk(child)
+
+    walk(node)
+    return " ".join(parts).lower()
 
 
 def _dump(node: Any) -> str:
@@ -133,10 +169,11 @@ def _cyclonedx(doc: dict[str, Any], source: str) -> Iterator[Record]:
         stack += [*component.get("components", []), *component.get("services", [])]
         own = {k: v for k, v in component.items() if k not in {"components", "services"}}
         properties = [p for p in own.get("properties", []) or [] if isinstance(p, dict)]
-        evidence = [str(own.get("type", ""))]
-        if own.get("type") != "file":
-            evidence += [str(own.get("bom-ref", "")), str(own.get("group", ""))]
-        evidence += [str(p.get("name", "")) for p in properties]
+        # Type evidence is what the record says it is: its type, a kind prefix on its
+        # reference, and properties named as a type. Names, paths and property names in
+        # general are not evidence; a path that contains "mcp" does not make a file a server.
+        prefix = BOM_REF_PREFIX.match(str(own.get("bom-ref", "")))
+        evidence = [str(own.get("type", "")), prefix[1] if prefix else ""]
         evidence += [
             str(p.get("value", "")) for p in properties if TYPE_KEY.search(str(p.get("name", "")))
         ]
@@ -151,7 +188,7 @@ def _cyclonedx(doc: dict[str, Any], source: str) -> Iterator[Record]:
         if "endpoints" in own or "authenticated" in own:
             evidence.append("service")
         yield Record(
-            own=_dump(own),
+            own=_described(own),
             names=frozenset({str(own.get("name", "")).lower(), purl.lower()} - {""}),
             full=_dump(component),
             type_evidence=" ".join(evidence).lower(),
@@ -159,6 +196,10 @@ def _cyclonedx(doc: dict[str, Any], source: str) -> Iterator[Record]:
             source=source,
             ref=str(own.get("bom-ref", "")),
             cdx_type=str(own.get("type", "")),
+            identity=" ".join(
+                [str(own.get("name", "")), str(own.get("bom-ref", "")), purl]
+            ).lower(),
+            described=_described(component),
         )
 
 
@@ -179,13 +220,15 @@ def _spdx(doc: dict[str, Any], source: str) -> Iterator[Record]:
                 if isinstance(identifier, dict)
             ]
             yield Record(
-                own=_dump(element),
+                own=_described(element),
                 names=frozenset({str(element.get("name", "")).lower()} - {""}),
                 full=_dump(element),
                 type_evidence=" ".join(evidence).lower(),
                 is_file=kind == "software_File" and not element.get("software_primaryPurpose"),
                 source=source,
                 ref=str(element.get("spdxId", "")),
+                identity=f"{element.get('name', '')} {element.get('spdxId', '')}".lower(),
+                described=_described(element),
             )
         return
     for package in doc.get("packages", []) or []:
@@ -195,7 +238,7 @@ def _spdx(doc: dict[str, Any], source: str) -> Iterator[Record]:
             for ref in package.get("externalRefs", []) or []
         ]
         yield Record(
-            own=_dump(package),
+            own=_described(package),
             names=frozenset({str(package.get("name", "")).lower()} - {""}),
             full=_dump(package),
             type_evidence=" ".join(evidence).lower(),
@@ -207,37 +250,84 @@ def _spdx(doc: dict[str, Any], source: str) -> Iterator[Record]:
         yield Record(_dump(entry), frozenset(), _dump(entry), "file", True, source)
 
 
-def _native(node: Any, source: str, container: str = "", key: str = "") -> Iterator[Record]:
+def _is_record(node: Any) -> bool:
+    return isinstance(node, dict) and any(key.lower() in NAME_KEYS for key in node)
+
+
+def _bag(node: dict[str, Any]) -> Iterator[str]:
+    """Scalars of a record's property bags: nested objects that name no component.
+
+    Tools differ in how deep they put a component's details. One writes ``args`` beside
+    ``name``; another writes ``metadata.args`` or ``evidence.occurrences[].snippet``.
+    Folding unnamed sub-objects into the record that owns them credits both alike.
+    """
+    for value in node.values():
+        children = value if isinstance(value, list) else [value]
+        for child in children:
+            if isinstance(child, dict) and not _is_record(child):
+                yield from (text for _, text in _scalars(child))
+                yield from _bag(child)
+
+
+def _native(
+    node: Any,
+    source: str,
+    container: str = "",
+    key: str = "",
+    listed: bool = False,
+    owned: bool = False,
+) -> Iterator[Record]:
+    """One record per object that names something.
+
+    An object is a record when it has a name-like field, is a value in a map of records,
+    or is an unnamed element of a list that no record owns. An unnamed object inside a
+    record is that record's property bag. An unnamed object that is a plain field of the
+    document, such as a metadata or coverage block, is neither: a list of every path a
+    tool read is not a claim about what those paths contain.
+    """
     if isinstance(node, list):
         for element in node:
-            yield from _native(element, source, container, "")
+            yield from _native(element, source, container, "", True, owned)
         return
     if not isinstance(node, dict):
         return
     scalars = list(_scalars(node))
-    if scalars and container:
+    record = (
+        bool(scalars)
+        and bool(container)
+        and (_is_record(node) or bool(key) or (listed and not owned))
+    )
+    if record:
         types = [value for name, value in scalars if TYPE_KEY.search(name)]
         names = {value.lower() for name, value in scalars if name.lower() in NAME_KEYS}
         if key:
             names.add(key.lower())
-        own = " ".join([key, *(f"{name}: {value}" for name, value in scalars)]).lower()
+        own = " ".join([key, *(f"{name}: {value}" for name, value in scalars)])
+        bag = " ".join(_bag(node))[:BAG_MAX_CHARS]
         yield Record(
-            own=own,
+            own=f"{own} {bag}".lower(),
             names=frozenset(names),
             full=_dump(node) + " " + key.lower(),
             type_evidence=" ".join([container, *types]).lower(),
             is_file=container.lower() in FILE_CONTAINERS
             or any(FILE_TYPES.match(value) for value in types),
             source=source,
+            identity=" ".join(sorted(names)),
+            described=_described(node) + " " + key.lower(),
         )
     all_dicts = bool(node) and all(isinstance(value, dict) for value in node.values())
     for name, value in node.items():
         if isinstance(value, dict):
             yield from _native(
-                value, source, container if all_dicts else name, name if all_dicts else ""
+                value,
+                source,
+                container if all_dicts else name,
+                name if all_dicts else "",
+                False,
+                owned or record,
             )
         elif isinstance(value, list):
-            yield from _native(value, source, name, "")
+            yield from _native(value, source, name, "", True, owned or record)
 
 
 def records(outputs: list[Output]) -> list[Record]:

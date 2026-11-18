@@ -9,8 +9,8 @@
     },
     "5.2": {
       "level": 1,
-      "tier": "D",
-      "evidence": "`cdx-sign` and `cdx-verify` appear in help text; not run."
+      "tier": "V",
+      "evidence": "Ran `cdx-sign -a Ed25519` with a throwaway key and `cdx-verify --public-key`: 'Signature is valid'. After one component name was changed, cdx-verify reported the signature does not verify and exited 1."
     },
     "5.4": {
       "level": 0,
@@ -39,9 +39,131 @@
     }
   },
   "adjudication": {
+    "control.mcp-pinned": {
+      "verdict": false,
+      "reason": "every line is about authentication on partner-billing, a different component",
+      "evidence": ""
+    },
+    "control.mcp-toml-pinned": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.model-pinned": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.safetensors-safe": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.skill-benign": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.tool-benign": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.agent.broad-permissions": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.agent.toxic-flow": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.ci.agent-action": {
+      "verdict": true,
+      "reason": "explicit unpinned-action finding in a write-permission workflow, plus pull_request_target findings",
+      "evidence": "[error] CI-001: Unpinned GitHub Action 'anthropics/claude-code-action@v1' in workflow with write permissions"
+    },
+    "risk.data.governance": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.instructions.hidden-unicode": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.instructions.import-escape": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
     "risk.mcp.plaintext-http": {
       "verdict": false,
-      "reason": "MCP-001/002/004 report missing authentication on the endpoint, not the lack of TLS."
+      "reason": "findings on metrics are about missing authentication; the http URL is only echoed and the same wording is used for an https endpoint",
+      "evidence": "[error] MCP-002: MCP HTTP endpoint 'http://10.20.4.7:8080/sse' is reachable without authentication"
+    },
+    "risk.mcp.shell-launch": {
+      "verdict": false,
+      "reason": "every line is about authentication on partner-billing, a different component",
+      "evidence": ""
+    },
+    "risk.mcp.tool-poisoning": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.unpinned-npx": {
+      "verdict": false,
+      "reason": "every line is about authentication on partner-billing, a different component",
+      "evidence": ""
+    },
+    "risk.mcp.unpinned-uvx": {
+      "verdict": false,
+      "reason": "every line is about authentication on partner-billing, a different component",
+      "evidence": ""
+    },
+    "risk.model.pickle-exec": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.model.unpinned-revision": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.secret.env-file": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.secret.mcp-header": {
+      "verdict": true,
+      "reason": "explicit inline-credentials finding on payments",
+      "evidence": "[error] MCP-005: MCP config entry 'payments' exposes inline credentials"
+    },
+    "risk.skill.hidden-instruction": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.skill.remote-script": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.tool.shell": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.typosquat.langchian": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
     }
-  }
+  },
+  "adjudication_method": "Two blind raters, unanimous on every label; the benchmark's author does not rate."
 }

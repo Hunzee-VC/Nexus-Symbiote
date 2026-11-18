@@ -2,6 +2,10 @@
 
 Ninety of the hundred points are computed here from tool output. The other ten come from
 ``assessments/<tool>.json``, where each judgement names its evidence and evidence tier.
+
+A check a tool never faced earns nothing. Decoys, clean controls, canaries, secrets and
+hostile cases each name the real components that show a tool read the file the check
+lives in; a tool that found none of them was not tested and is not credited for passing.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from typing import Any
 
 from . import extract
 from .extract import Finding, Output, Record
+from .runner import EGRESS_PROBE, EXEC_PROBE
 
 # (id, group, title, points, method)
 CRITERIA: list[tuple[str, str, str, float, str]] = [
@@ -52,35 +57,45 @@ CRITERIA: list[tuple[str, str, str, float, str]] = [
     ("8.5", "Scanner safety", "Survives hostile input", 2, "measured"),
     ("8.6", "Scanner safety", "Works offline, attempts no egress", 1, "measured"),
 ]
+GROUPS = list(dict.fromkeys(group for _, group, _, _, _ in CRITERIA))
 GRADES = [(85, "A"), (70, "B"), (55, "C"), (40, "D"), (25, "E"), (0, "F")]
 TIER_FACTOR = {"M": 1.0, "V": 1.0, "S": 1.0, "D": 0.5, "N": 0.0}
 FACT_COVERAGE_FLOOR = 8
 RETENTION_FLOOR = 0.9
+MAX_KINDS = 8
+CONTAINER_CHANGES = 3
+WALKER_DIRECTORIES = 3
 PILLAR_CRITERION = {"models": "1.1", "data": "1.2", "tools": "1.3", "agents": "1.4", "infra": "1.5"}
 
+# Type vocabulary accepted per kind. It is matched against a record's own type fields, never
+# against its name or path, and lists generic words only; no tool's product terms.
 KIND_PATTERNS = {
-    "model": r"machine-learning-model|\bmodel|llm|weights|gguf|safetensors|onnx|huggingface"
-    r"|aipackage|\bai\b|foundation|embedding",
-    "dataset": r"\bdata\b|dataset|training|corpus",
-    "vector_store": r"vector|\brag\b|retriev|embedding|datastore|database|\bdata\b|index|memory"
-    r"|store|knowledge",
-    "knowledge_source": r"\brag\b|knowledge|source|\bdata\b|dataset|retriev|document|corpus"
-    r"|bucket|connector",
+    "model": r"machine-learning-model|\bmodel|llm|weights|gguf|safetensors|onnx|aipackage"
+    r"|foundation",
+    "dataset": r"dataset|\bdata\b|training[-_ ]?(data|set)|corpus",
+    "vector_store": r"vector|\brag\b|retriev|embedding|datastore|database|\bdb\b|\bdata\b|index"
+    r"|memory|store|knowledge",
+    "knowledge_source": r"\brag\b|knowledge|retriev|data[-_ ]?source|dataset|\bdata\b|document"
+    r"|corpus|bucket|connector|storage",
     "framework": r"library|framework|package|sdk|pypi|npm|dependenc|pkg:|python|javascript"
     r"|application",
-    "tool": r"tool|function|capabilit|action",
+    "tool": r"tool|function|capabilit",
     "mcp_server": r"mcp|server|service",
-    "skill": r"skill",
-    "instructions": r"instruction|prompt|rule|memory|context|agent|config|guidance|\bide",
-    "prompt": r"prompt|instruction|template|system",
-    "agent": r"agent|a2a|crew|workflow|assistant|graph",
+    # Skills, instruction files, commands and subagent definitions are all natural-language
+    # instruction artifacts, and tools draw the lines between them differently. A tool that
+    # files AGENTS.md under "skill" has still said what it is.
+    "skill": r"skill|instruction",
+    "instructions": r"instruction|prompt|rule|memory|guidance|skill",
+    "subagent": r"agent|skill|prompt|instruction",
+    "prompt": r"prompt|instruction|template|system[-_ ]?message",
+    "agent": r"agent|a2a|crew|workflow|assistant",
     "command": r"command|slash|prompt|skill|instruction",
-    "hook": r"hook|setting|config|automation|\bide",
-    "permission": r"permission|setting|policy|allow|config|authority|\bide",
+    "hook": r"hook|setting|config|automation|agent",
+    "permission": r"permission|setting|polic|allow|config|authorit|agent",
     "plugin": r"plugin|extension|marketplace",
-    "guardrail": r"guardrail|rail|policy|safety|config",
-    "container": r"container|image|docker|oci|service|platform|deployment",
-    "endpoint": r"endpoint|service|cloud|platform|deployment|\bapi\b|infrastructure|resource",
+    "guardrail": r"guardrail|rail|polic|safety",
+    "container": r"container|image|docker|oci|service|platform|deployment|infra|compose",
+    "endpoint": r"endpoint|service|cloud|platform|deployment|\bapi\b|infra|resource|llm",
     "ci_agent": r"action|workflow|\bci\b|pipeline|agent|github",
 }
 CRASH = re.compile(
@@ -88,6 +103,24 @@ CRASH = re.compile(
     r"|Maximum call stack|RecursionError|MemoryError",
     re.M,
 )
+# A record that says the thing is not what its name suggests is not a false claim.
+DISCLAIMED = re.compile(
+    r"unrecogni[sz]ed|invalid|mismatch|not a valid|malformed|disguised|unknown format|corrupt"
+    r"|not a (gguf|model)|bad magic",
+)
+READ_FAILURE = re.compile(
+    r"error|fail|invalid|malformed|pars(e|ing)|could not|cannot|unable|unreadable|skipp"
+    r"|truncat|unsupported|corrupt|incomplete|partial|\bgap\b",
+)
+BROKEN_FILES = ("packages/broken", "skills/broken", "models.broken", "garbage.mdc")
+SENSITIVITY = {
+    "declared weights": None,
+    "equal weight per group": "equal",
+    "measured criteria only": "measured",
+    "inventory only (groups 1 to 3)": {"Discovery", "Precision", "Record fidelity"},
+    "without scanner safety": set(GROUPS) - {"Scanner safety"},
+    "without BOM integrity": set(GROUPS) - {"BOM integrity"},
+}
 
 
 def _matches(record: Record, key: str) -> bool:
@@ -95,34 +128,107 @@ def _matches(record: Record, key: str) -> bool:
     return key[1:] in record.names if key.startswith("=") else key in record.own
 
 
-def _detect(item: dict[str, Any], records: list[Record]) -> tuple[float, list[Record]]:
-    pattern = re.compile(KIND_PATTERNS[item["kind"]])
-    credit, matched = 0.0, []
-    for record in records:
-        strong = any(_matches(record, key) for key in item["keys"])
-        weak = any(_matches(record, key) for key in item["weak_keys"])
-        if not strong and not weak:
+def _named(record: Record, item: dict[str, Any]) -> bool:
+    """Whether the record is named for this component, as opposed to mentioning it."""
+    for key in (*item["keys"], *item["weak_keys"]):
+        key = key.lower()
+        if key[1:] in record.names if key.startswith("=") else key in record.identity:
+            return True
+    return False
+
+
+Detected = dict[str, tuple[float, list[Record]]]
+_KIND = {kind: re.compile(pattern) for kind, pattern in KIND_PATTERNS.items()}
+
+
+def detect_all(truth: dict[str, Any], records: list[Record]) -> Detected:
+    """Credit each component that some record identifies.
+
+    A record identifies a component when it contains one of the component's keys and its
+    own type says what kind of thing it is. Three rules keep a mention from passing as an
+    identification:
+
+    - no type, no credit: a record that names a string without classifying it earns nothing;
+    - a type that fits more than ``MAX_KINDS`` kinds, on one record or across the records
+      sharing one name, is a catch-all and counts as no type;
+    - a record that matches several components of one kind is a listing unless it is named
+      for one of them, and then it credits only those.
+    """
+    kinds = [
+        frozenset(kind for kind, rx in _KIND.items() if rx.search(record.type_evidence))
+        for record in records
+    ]
+    by_identity: dict[str, set[str]] = {}
+    for record, matched in zip(records, kinds, strict=True):
+        if record.identity:
+            by_identity.setdefault(record.identity, set()).update(matched)
+
+    def typed(index: int, kind: str) -> bool:
+        record = records[index]
+        if len(kinds[index]) > MAX_KINDS:
+            return False
+        if len(by_identity.get(record.identity, ())) > MAX_KINDS:
+            return False
+        return kind in kinds[index]
+
+    candidates: dict[str, list[int]] = {item["id"]: [] for item in truth["items"]}
+    claims: dict[tuple[int, str], list[dict[str, Any]]] = {}
+    for item in truth["items"]:
+        keys = (*item["keys"], *item["weak_keys"])
+        for index, record in enumerate(records):
+            if typed(index, item["kind"]) and any(_matches(record, key) for key in keys):
+                candidates[item["id"]].append(index)
+                claims.setdefault((index, item["kind"]), []).append(item)
+    for (index, _), items in claims.items():
+        if len(items) < 2:
             continue
-        if pattern.search(record.type_evidence):
-            value = 1.0
-        elif record.is_file or not strong:
-            continue
-        else:
-            value = 0.5
-        credit = max(credit, value)
-        matched.append(record)
-    return credit, matched
+        named = [item["id"] for item in items if _named(records[index], item)]
+        for item in items:
+            if item["id"] not in named:
+                candidates[item["id"]].remove(index)
+    return {
+        name: (1.0 if found else 0.0, [records[index] for index in found])
+        for name, found in candidates.items()
+    }
 
 
-def detect_all(
-    truth: dict[str, Any], records: list[Record]
-) -> dict[str, tuple[float, list[Record]]]:
-    return {item["id"]: _detect(item, records) for item in truth["items"]}
+class Exposure:
+    """Whether a tool demonstrably read the file a check lives in.
+
+    A component found in the file shows it. Where no labelled component lives in the file,
+    a record or console line that names the file shows it; a bare file listing does not.
+    """
+
+    def __init__(
+        self,
+        truth: dict[str, Any],
+        detected: Detected,
+        records: list[Record],
+        outputs: list[Output],
+    ) -> None:
+        self.table = truth["exposure"]
+        self.detected = detected
+        paths = {item["id"]: item["paths"][0] for item in truth["items"]}
+        found_in = {
+            paths[name].split("/")[0] if "/" in paths[name] else "."
+            for name, (credit, _) in detected.items()
+            if credit
+        }
+        # A tool that found components in three or more top-level directories walks the tree.
+        self.walker = len(found_in) >= WALKER_DIRECTORIES
+        self.text = " ".join(record.own for record in records if not record.is_file)
+        self.text += " ".join(o.text.lower() for o in outputs if o.format.startswith("console-"))
+
+    def __call__(self, check: str) -> bool:
+        entry = self.table[check]
+        if entry.get("walker"):
+            return self.walker
+        return any(self.detected[item][0] for item in entry["items"]) or any(
+            path.lower() in self.text for path in entry["paths"]
+        )
 
 
-def _fact_rates(
-    truth: dict[str, Any], detected: dict[str, tuple[float, list[Record]]]
-) -> dict[str, Any]:
+def _fact_rates(truth: dict[str, Any], detected: Detected) -> dict[str, Any]:
     groups = {
         "3.1": {"version", "supplier"},
         "3.2": {"digest"},
@@ -138,7 +244,9 @@ def _fact_rates(
             if not credit or not facts:
                 continue
             applicable += 1
-            text = " ".join(record.full for record in matched)
+            # Facts are read from what the records state in short fields, not from file
+            # content a tool copied into them.
+            text = " ".join(record.described or record.full for record in matched)
             for fact in facts:
                 expected += 1
                 found += any(option.lower() in text for option in fact["any_of"])
@@ -153,11 +261,7 @@ def _fact_rates(
     return result
 
 
-def _edges(
-    truth: dict[str, Any],
-    detected: dict[str, tuple[float, list[Record]]],
-    pairs: set[frozenset[str]],
-) -> dict[str, Any]:
+def _edges(truth: dict[str, Any], detected: Detected, pairs: set[frozenset[str]]) -> dict[str, Any]:
     items = {item["id"]: item for item in truth["items"]}
     satisfied = []
     for edge in truth["edges"]:
@@ -177,18 +281,25 @@ def _edges(
     return {"score": len(satisfied) / len(truth["edges"]), "satisfied": satisfied}
 
 
-def _decoys(truth: dict[str, Any], records: list[Record], recall: float) -> dict[str, Any]:
-    hits = []
+def _decoys(truth: dict[str, Any], records: list[Record], exposed: Exposure) -> dict[str, Any]:
+    reported, untested = [], []
     for decoy in truth["decoys"]:
+        if not exposed(decoy["id"]):
+            untested.append(decoy["id"])
+            continue
         pattern = re.compile(KIND_PATTERNS[decoy["signal"]])
         for record in records:
             if record.is_file or not any(key.lower() in record.own for key in decoy["keys"]):
                 continue
-            if pattern.search(record.type_evidence):
-                hits.append(decoy["id"])
+            if pattern.search(record.type_evidence) and not DISCLAIMED.search(record.full):
+                reported.append(decoy["id"])
                 break
-    score = 0.0 if recall < 0.05 else 1 - len(hits) / len(truth["decoys"])
-    return {"score": score, "reported_as_components": hits}
+    total = len(truth["decoys"])
+    return {
+        "score": (total - len(untested) - len(reported)) / total,
+        "reported_as_components": reported,
+        "not_tested": untested,
+    }
 
 
 def _finding_hit(labelled: dict[str, Any], signal: re.Pattern[str], findings: list[Finding]) -> str:
@@ -215,13 +326,18 @@ def _risks(
             verdicts[labelled["id"]] = verdict
     offline = [risk for risk in truth["risks"] if not risk["online"]]
     caught = [risk["id"] for risk in offline if verdicts[risk["id"]]["final"]]
-    flagged = [control["id"] for control in truth["controls"] if verdicts[control["id"]]["final"]]
-    recall = len(caught) / len(offline)
+    classes_caught = {risk["signal"] for risk in offline if verdicts[risk["id"]]["final"]}
+    controls = truth["controls"]
+    tested = [control["id"] for control in controls if control["signal"] in classes_caught]
+    flagged = [control["id"] for control in controls if verdicts[control["id"]]["final"]]
+    clean = [control for control in tested if control not in flagged]
     return {
-        "6.1": {"score": recall, "caught": caught, "of": len(offline)},
+        "6.1": {"score": len(caught) / len(offline), "caught": caught, "of": len(offline)},
         "6.2": {
-            "score": 0.0 if not caught else 1 - len(flagged) / len(truth["controls"]),
+            "score": len(clean) / len(controls),
             "controls_flagged": flagged,
+            "controls_tested": tested,
+            "note": "a control is tested only when the tool caught a planted risk of its class",
         },
         "verdicts": verdicts,
     }
@@ -232,51 +348,65 @@ def _machine(outputs: list[Output]) -> dict[str, Output]:
 
 
 def _determinism(base: list[Output], repeat: list[Output]) -> dict[str, Any]:
+    def comparable(output: Output) -> tuple[bytes, Any]:
+        # A tool that records where it wrote its report differs between runs only because
+        # the harness gave each run its own directory.
+        raw = output.raw.replace(str(output.path.parent).encode(), b"<out>")
+        try:
+            return raw, extract.normalized(json.loads(raw))
+        except ValueError:
+            return raw, extract.normalized(output.doc)
+
     first, second = _machine(base), _machine(repeat)
     shared = sorted(set(first) & set(second))
     if not shared:
         return {"score": 0.0, "note": "no machine-readable output in both runs"}
-    identical = [name for name in shared if first[name].raw == second[name].raw]
-    stable = [
-        name
-        for name in shared
-        if extract.normalized(first[name].doc) == extract.normalized(second[name].doc)
-    ]
-    score = 1.0 if len(identical) == len(shared) else 0.6 if len(stable) == len(shared) else 0.0
+    pairs = {name: (comparable(first[name]), comparable(second[name])) for name in shared}
+    identical = [name for name, (one, two) in pairs.items() if one[0] == two[0]]
+    stable = [name for name, (one, two) in pairs.items() if one[1] == two[1]]
+    per_output = [1.0 if name in identical else 0.6 if name in stable else 0.0 for name in shared]
     return {
-        "score": score,
+        "score": sum(per_output) / len(per_output),
         "byte_identical": identical,
-        "identical_after_dropping_time_and_id_fields": stable,
-        "compared": shared,
+        "identical_after_dropping_time_and_id_fields": [n for n in stable if n not in identical],
+        "differs": [name for name in shared if name not in stable],
     }
 
 
 def _change_visibility(
-    truth: dict[str, Any],
-    base: list[Record],
-    repeat: list[Record],
-    drift: list[Record],
+    truth: dict[str, Any], base: list[Record], repeat: list[Record], drift: list[Record]
 ) -> dict[str, Any]:
+    all_keys = [[key.lower() for key in change["keys"]] for change in truth["changes"]]
+
+    def specific(record: Record) -> bool:
+        # A record that mentions several planted changes is a container (a document
+        # element, an agent listing everything it can reach); any change alters it.
+        return sum(any(k in record.own for k in keys) for keys in all_keys) < CONTAINER_CHANGES
+
     def texts(change: dict[str, Any], records: list[Record]) -> frozenset[str]:
         keys = [key.lower() for key in change["keys"]]
         return frozenset(
-            record.full
+            extract.UUID.sub("<uuid>", record.full)
             for record in records
-            if not record.is_file and any(k in record.own for k in keys)
+            if not record.is_file and any(k in record.own for k in keys) and specific(record)
         )
 
     visible, unstable = [], []
     for change in truth["changes"]:
         before, again, after = texts(change, base), texts(change, repeat), texts(change, drift)
+        # Only a record that two identical runs agree on can show a change; one that
+        # already differs between them proves nothing.
+        stable = before & again
         if change["kind"] == "added":
             seen = not before and bool(after)
         elif change["kind"] == "removed":
             seen = bool(before) and not after
-        elif before != again:
-            unstable.append(change["id"])
+        elif not stable:
+            if before:
+                unstable.append(change["id"])
             seen = False
         else:
-            seen = bool(before) and before != after
+            seen = not stable <= after
         if seen:
             visible.append(change["id"])
     return {
@@ -287,22 +417,34 @@ def _change_visibility(
 
 
 def _native_diff(
-    truth: dict[str, Any], run: dict[str, Any] | None, out_dir: Path
+    truth: dict[str, Any], run: dict[str, Any] | None, out_dir: Path, panel: list[str] | None
 ) -> dict[str, Any]:
+    """The share of planted changes a tool's own drift report states.
+
+    The blind raters' verdicts are used when present. Without them the report is searched
+    for each change's key, which misses a change reported under another name.
+    """
     if not run:
         return {"score": 0.0, "note": "no drift command"}
-    text = ""
-    for path in sorted(out_dir.glob("*")):
-        if path.is_file():
-            text += path.read_text(errors="replace").lower()
-    reported = [
-        change["id"]
-        for change in truth["changes"]
-        if any(key.lower() in text for key in change["keys"])
-    ]
+    if panel is not None:
+        known = {change["id"] for change in truth["changes"]}
+        reported = sorted(set(panel) & known)
+        method = "blind raters"
+    else:
+        text = ""
+        for path in sorted(out_dir.glob("*")):
+            if path.is_file():
+                text += path.read_text(errors="replace").lower()
+        reported = [
+            change["id"]
+            for change in truth["changes"]
+            if any(key.lower() in text for key in change["keys"])
+        ]
+        method = "key search"
     return {
         "score": len(reported) / len(truth["changes"]),
         "reported": reported,
+        "judged_by": method,
         "exit_code": run["exit_code"],
     }
 
@@ -313,12 +455,56 @@ def _leaks(tokens: list[str], outputs: list[Output]) -> list[str]:
     )
 
 
-def _inventory_credit(truth: dict[str, Any], outputs: list[Output]) -> float:
-    return sum(credit for credit, _ in detect_all(truth, extract.records(outputs)).values())
+def _reports_read_failure(outputs: list[Output]) -> dict[str, Any]:
+    """Whether a tool says it could not read a broken file, as opposed to merely listing it."""
+
+    def states_failure(text: str) -> bool:
+        return any(name in text for name in BROKEN_FILES) and bool(READ_FAILURE.search(text))
+
+    def walk(node: Any) -> bool:
+        if isinstance(node, dict):
+            own = " ".join(
+                f"{key} {value}"
+                for key, value in node.items()
+                if not isinstance(value, (dict, list))
+            )
+            own += " " + " ".join(
+                str(e)
+                for v in node.values()
+                if isinstance(v, list)
+                for e in v
+                if not isinstance(e, (dict, list))
+            )
+            return states_failure(own.lower()) or any(walk(value) for value in node.values())
+        if isinstance(node, list):
+            return any(walk(value) for value in node)
+        return False
+
+    machine = [f"{o.label}:{o.format}" for o in outputs if o.doc is not None and walk(o.doc)]
+    console = [
+        f"{o.label}:{o.format}"
+        for o in outputs
+        if o.doc is None and any(states_failure(line) for line in o.text.lower().splitlines())
+    ]
+    return {
+        "score": 1.0 if machine else 0.5 if console else 0.0,
+        "stated_in_machine_output": machine,
+        "stated_on_console_only": [] if machine else console,
+    }
 
 
-def _crashed(out_dir: Path) -> bool:
-    return any(CRASH.search(path.read_text(errors="replace")) for path in out_dir.glob("*.stderr"))
+def weighted_total(scores: dict[str, float], scenario: Any) -> float:
+    """A tool's total out of 100 under an alternative weighting, for the sensitivity table."""
+    rows = [
+        (criterion, group, weight)
+        for criterion, group, _, weight, method in CRITERIA
+        if not (scenario == "measured" and method != "measured")
+        and not (isinstance(scenario, set) and group not in scenario)
+    ]
+    if scenario == "equal":
+        totals = {group: sum(w for _, g, w in rows if g == group) for group in GROUPS}
+        return sum(scores[c] * w / totals[g] * 100 / len(GROUPS) for c, g, w in rows)
+    return sum(scores[c] * w for c, _, w in rows) * 100 / sum(w for _, _, w in rows)
 
 
 def score_tool(
@@ -338,6 +524,7 @@ def score_tool(
     base, repeat, drift = load("base"), load("repeat"), load("drift")
     records = extract.records(base)
     detected = detect_all(truth, records)
+    exposed = Exposure(truth, detected, records, base)
     details: dict[str, Any] = {}
     scores: dict[str, float] = {}
 
@@ -346,13 +533,13 @@ def score_tool(
         earned = {item["id"]: detected[item["id"]][0] for item in items}
         scores[criterion] = sum(earned.values()) / len(items)
         details[criterion] = {
-            "classified": sorted(i for i, c in earned.items() if c == 1.0),
-            "present_untyped": sorted(i for i, c in earned.items() if c == 0.5),
-            "missed": sorted(i for i, c in earned.items() if c == 0.0),
+            "identified": sorted(i for i, c in earned.items() if c),
+            "missed": sorted(i for i, c in earned.items() if not c),
         }
-    recall = sum(credit for credit, _ in detected.values()) / len(truth["items"])
+    base_credit = sum(credit for credit, _ in detected.values())
+    recall = base_credit / len(truth["items"])
 
-    details["2.1"] = _decoys(truth, records, recall)
+    details["2.1"] = _decoys(truth, records, exposed)
     details.update(_fact_rates(truth, detected))
     details["3.5"] = _edges(truth, detected, extract.links(base))
 
@@ -406,21 +593,10 @@ def score_tool(
     }
 
     details["5.1"] = _determinism(base, repeat)
-    malformed = load("hostile:malformed")
-    named = [
-        f"{o.label}:{o.format}"
-        for o in malformed
-        if b"packages/broken" in o.raw or b"skills/broken" in o.raw or b"models.broken" in o.raw
-    ]
-    in_machine = [name for name in named if name.split(":", 1)[1] in extract.MACHINE_FORMATS]
-    details["5.3"] = {
-        "score": 1.0 if in_machine else 0.5 if named else 0.0,
-        "malformed_files_named_in": named,
-    }
+    details["5.3"] = _reports_read_failure(load("hostile:malformed"))
 
-    console = [o for o in base if o.format.startswith("console-")]
     overrides = assessment.get("adjudication", {})
-    risk = _risks(truth, extract.findings([*base, *console]), overrides)
+    risk = _risks(truth, extract.findings(base), overrides)
     details["6.1"], details["6.2"], details["risk_verdicts"] = (
         risk["6.1"],
         risk["6.2"],
@@ -430,67 +606,95 @@ def score_tool(
     details["7.1"] = _change_visibility(
         truth, records, extract.records(repeat), extract.records(drift)
     )
-    details["7.2"] = _native_diff(truth, runs.get("diff"), work / "out" / "diff")
-
-    tripped = sorted(
-        {
-            name
-            for variant in ("base", "repeat", "drift")
-            for name in runs.get(variant, {}).get("canaries_tripped", [])
-        }
+    details["7.2"] = _native_diff(
+        truth, runs.get("diff"), work / "out" / "diff", assessment.get("changes_reported")
     )
-    details["8.1"] = {"score": 0.0 if tripped else 1.0, "canaries_tripped": tripped}
 
-    outside = [
-        truth["leak_tokens"][name]
-        for name in ("outside.content", "outside.digest", "outside.inventory")
-    ]
-    import_leak = _leaks(outside, base)
-    symlink_leak = _leaks(outside, load("hostile:symlink-escape"))
+    canaries = sorted(truth["exec_canaries"])
+    tripped = {
+        variant: runs[variant]["canaries_tripped"]
+        for variant in ("base", "repeat", "drift", EXEC_PROBE)
+        if runs.get(variant, {}).get("canaries_tripped")
+    }
+    faced = [name for name in canaries if exposed(f"canary.{name}")]
+    details["8.1"] = {
+        "score": 0.0 if tripped else len(faced) / len(canaries),
+        "canaries_tripped": tripped,
+        "canaries_faced": faced,
+        "default_command_probe_ran": EXEC_PROBE in runs,
+    }
+
+    escaped = load("hostile:symlink-escape")
+    tokens = truth["leak_tokens"]
+    content = [tokens["outside.content"], tokens["outside.digest"]]
+    escapes = {
+        "import": (exposed("escape.import"), _leaks(content, base)),
+        "dir-symlink": (
+            exposed("escape.dir-symlink"),
+            _leaks([*content, tokens["outside.inventory"]], escaped),
+        ),
+        "file-symlink": (
+            exposed("escape.file-symlink"),
+            _leaks([tokens["outside.model-name"], tokens["outside.model-digest"]], escaped),
+        ),
+    }
     details["8.2"] = {
-        "score": 0.5 * (not import_leak) + 0.5 * (not symlink_leak),
-        "out_of_tree_content_via_import": import_leak,
-        "out_of_tree_content_via_symlink": symlink_leak,
+        "score": sum(faced_it and not leaked for faced_it, leaked in escapes.values())
+        / len(escapes),
+        "checks": {
+            name: {"faced": faced_it, "out_of_tree_content_in": leaked}
+            for name, (faced_it, leaked) in escapes.items()
+        },
     }
-    secrets = {
-        name: token for name, token in truth["leak_tokens"].items() if name.startswith("secret.")
-    }
+
+    secrets = {name: token for name, token in tokens.items() if name.startswith("secret.")}
     disclosed = {name: _leaks([token], [*base, *drift]) for name, token in secrets.items()}
     disclosed = {name: where for name, where in disclosed.items() if where}
-    details["8.3"] = {"score": 1 - len(disclosed) / len(secrets), "disclosed": disclosed}
-
-    escaped = load("hostile:escape-names")
-    ansi = _leaks(
-        [truth["markers"]["ansi"]],
-        [o for o in escaped if o.format.startswith("console-") or o.format in {"text", "markdown"}],
-    )
-    html = _leaks(
-        [truth["markers"]["html"]], [o for o in escaped if o.format in {"html", "markdown"}]
-    )
-    details["8.4"] = {
-        "score": 0.5 * (not ansi) + 0.5 * (not html),
-        "raw_terminal_escape_in": ansi,
-        "raw_html_in": html,
+    secrets_faced = [name for name in secrets if exposed(name)]
+    kept = [name for name in secrets_faced if name not in disclosed]
+    details["8.3"] = {
+        "score": len(kept) / len(secrets),
+        "disclosed": disclosed,
+        "secrets_faced": secrets_faced,
     }
 
-    base_credit = sum(credit for credit, _ in detected.values())
+    hostile_names = load("hostile:escape-names")
+    everything = b" ".join(output.raw for output in hostile_names)
+    terminal = [
+        o
+        for o in hostile_names
+        if o.format.startswith("console-") or o.format in {"text", "markdown"}
+    ]
+    rendered = [o for o in hostile_names if o.format in {"html", "markdown"}]
+    ansi_faced, html_faced = b"AIBOM-BENCH-TITLE" in everything, b"AIBOM-BENCH-XSS" in everything
+    ansi = _leaks([truth["markers"]["ansi"]], terminal)
+    html = _leaks([truth["markers"]["html"]], rendered)
+    details["8.4"] = {
+        "score": 0.5 * (ansi_faced and not ansi) + 0.5 * (html_faced and not html),
+        "terminal_escape": {"faced": ansi_faced, "raw_in": ansi},
+        "html": {"faced": html_faced, "raw_in": html},
+    }
+
     cases = {}
     for case in truth["hostile_cases"]:
         variant = f"hostile:{case}"
         run = runs.get(variant)
+        faced_it = exposed(f"hostile.{case}")
         if not run:
-            cases[case] = {"passed": False, "reason": "not run"}
+            cases[case] = {"passed": False, "faced": faced_it, "reason": "not run"}
             continue
         timed_out = any(scan["timed_out"] for scan in run["scans"])
-        credit = _inventory_credit(truth, load(variant))
+        credit = sum(c for c, _ in detect_all(truth, extract.records(load(variant))).values())
         retention = credit / base_credit if base_credit else 0.0
-        crashed = _crashed(work / "out" / variant.replace(":", "-"))
-        passed = not timed_out and base_credit > 0 and retention >= RETENTION_FLOOR
         cases[case] = {
-            "passed": passed,
+            "passed": faced_it and not timed_out and retention >= RETENTION_FLOOR,
+            "faced": faced_it,
             "timed_out": timed_out,
             "retention": round(retention, 3),
-            "unhandled_error_in_stderr": crashed,
+            "unhandled_error_in_stderr": any(
+                CRASH.search(path.read_text(errors="replace"))
+                for path in (work / "out" / variant.replace(":", "-")).glob("*.stderr")
+            ),
             "seconds": max(scan["seconds"] for scan in run["scans"]),
         }
     details["8.5"] = {
@@ -499,7 +703,11 @@ def score_tool(
     }
 
     produced = bool(_machine(base))
+    probe = runs.get(EGRESS_PROBE)
     attempts = sorted(
+        {a for scan in (probe or {}).get("scans", []) for a in scan.get("egress_attempts") or []}
+    )
+    with_flags = sorted(
         {
             a
             for scan in runs.get("repeat", {}).get("scans", [])
@@ -507,9 +715,11 @@ def score_tool(
         }
     )
     details["8.6"] = {
-        "score": 0.5 * produced + 0.5 * (produced and not attempts),
+        "score": 0.5 * produced
+        + 0.5 * (probe is not None and bool(probe["scans"]) and not attempts),
         "inventory_produced_without_network": produced,
-        "connection_attempts": attempts,
+        "default_command_connection_attempts": attempts,
+        "connection_attempts_with_scored_flags": with_flags,
     }
 
     for criterion, _, _, _, method in CRITERIA:
@@ -539,6 +749,11 @@ def score_tool(
         "grade": next(letter for floor, letter in GRADES if total >= floor),
         "groups": groups,
         "points": points,
+        "scores": {criterion: round(value, 4) for criterion, value in scores.items()},
+        "sensitivity": {
+            name: round(weighted_total(scores, scenario), 1)
+            for name, scenario in SENSITIVITY.items()
+        },
         "recall": round(recall, 3),
         "components_reported": len(records),
         "seconds": round(sum(scan["seconds"] for scan in base_scans), 1),
@@ -547,5 +762,13 @@ def score_tool(
     }
 
 
-def dump(results: list[dict[str, Any]], path: Path) -> None:
-    path.write_text(json.dumps(results, indent=2, sort_keys=True) + "\n")
+def dump(results: list[dict[str, Any]], path: Path, work: Path) -> None:
+    """Write the results with the host's directories masked in quoted evidence."""
+    text = json.dumps(results, indent=2, sort_keys=True)
+    for location, label in ((work.resolve(), "<work>"), (work.resolve().parent, "<host>")):
+        # Quoted findings are lowercased, so the path is matched in any case.
+        text = re.sub(re.escape(str(location)), label, text, flags=re.IGNORECASE)
+    # A quoted line can be cut or wrapped part-way through a path; mask what is left of it.
+    root = "/".join(work.resolve().parts[:3]).replace("//", "/")
+    text = re.sub(re.escape(root) + r"[^\s\"\\]*", "<host>", text, flags=re.IGNORECASE)
+    path.write_text(text + "\n")

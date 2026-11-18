@@ -25,7 +25,7 @@
     "6.3": {
       "level": 0.5,
       "tier": "S",
-      "evidence": "OSV lookup is in source; no VEX output."
+      "evidence": "Half for advisory lookup, read in source (an OSV query when dependencies exist). No VEX output."
     },
     "7.3": {
       "level": 1,
@@ -39,13 +39,137 @@
     }
   },
   "adjudication": {
+    "control.mcp-pinned": {
+      "verdict": false,
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
+    },
+    "control.mcp-toml-pinned": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.model-pinned": {
+      "verdict": false,
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
+    },
+    "control.safetensors-safe": {
+      "verdict": false,
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
+    },
+    "control.skill-benign": {
+      "verdict": false,
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
+    },
+    "control.tool-benign": {
+      "verdict": false,
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
+    },
+    "risk.agent.broad-permissions": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.agent.toxic-flow": {
+      "verdict": false,
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
+    },
+    "risk.ci.agent-action": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.data.governance": {
+      "verdict": false,
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
+    },
+    "risk.instructions.hidden-unicode": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.instructions.import-escape": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.plaintext-http": {
+      "verdict": false,
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
+    },
     "risk.mcp.shell-launch": {
       "verdict": false,
-      "reason": "Automatic match came from unrelated text near the component name; no finding states this risk."
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
+    },
+    "risk.mcp.tool-poisoning": {
+      "verdict": false,
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
+    },
+    "risk.mcp.unpinned-npx": {
+      "verdict": false,
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
+    },
+    "risk.mcp.unpinned-uvx": {
+      "verdict": false,
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
+    },
+    "risk.model.pickle-exec": {
+      "verdict": false,
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
+    },
+    "risk.model.unpinned-revision": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.secret.env-file": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.secret.mcp-header": {
+      "verdict": false,
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
+    },
+    "risk.skill.hidden-instruction": {
+      "verdict": false,
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
+    },
+    "risk.skill.remote-script": {
+      "verdict": false,
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
     },
     "risk.tool.shell": {
       "verdict": false,
-      "reason": "run_shell is listed as a tool in the console table; nothing flags it as dangerous."
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
+    },
+    "risk.typosquat.langchian": {
+      "verdict": false,
+      "reason": "inventory listing only; no risk finding on this component",
+      "evidence": ""
     }
+  },
+  "adjudication_method": "Two blind raters, unanimous on every label; the benchmark's author does not rate.",
+  "changes_reported": [
+    "change.mcp-added"
+  ],
+  "changes_reported_reasons": {
+    "change.mcp-added": "shadow-sync is the single entry in the added list, typed mcp_server"
   }
 }

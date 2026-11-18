@@ -36,8 +36,18 @@
       ]
     }
   ],
-  "unmeasured": "Takes a Hugging Face model ID, not a directory, and has no offline input. huggingface.co was unreachable, so it wrote a placeholder BOM. Its score is a floor, not a measurement of its model-card extraction.",
   "notes": [
     "Run with one model ID from the corpus; the project directory is not an input this tool accepts."
-  ]
+  ],
+  "default": {
+    "argv": [
+      "{bin}",
+      "meta-llama/Llama-3.1-8B-Instruct",
+      "--output",
+      "{out}/default.json"
+    ],
+    "outputs": []
+  },
+  "default_env": {},
+  "not_gradable": "Takes a Hugging Face model ID, not a project, so it cannot be pointed at the corpus. Given one model ID from the corpus with huggingface.co unreachable, it wrote a schema-valid placeholder BOM and exited 0. Any discovery or safety number for it here would be an echo of its input, so no total is reported."
 }

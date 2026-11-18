@@ -39,9 +39,131 @@
     }
   },
   "adjudication": {
+    "control.mcp-pinned": {
+      "verdict": false,
+      "reason": "filesystem is listed with risk 0 and no flag",
+      "evidence": ""
+    },
+    "control.mcp-toml-pinned": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.model-pinned": {
+      "verdict": false,
+      "reason": "borderline: an unpinned_model flag exists in llm.py (line 8) but it names bert-large-uncased, not the Llama reference, so it reads as a different component",
+      "evidence": "[note] TOOL/huggingface-transformers-model: HuggingFace Transformers Model | provider=HuggingFace | model=bert-large-uncased | flags=unpinned_model"
+    },
+    "control.safetensors-safe": {
+      "verdict": false,
+      "reason": "model.safetensors listed with risk 0 and no flag",
+      "evidence": ""
+    },
+    "control.skill-benign": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.tool-benign": {
+      "verdict": false,
+      "reason": "get_order is only inventoried with risk 0",
+      "evidence": ""
+    },
+    "risk.agent.broad-permissions": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.agent.toxic-flow": {
+      "verdict": false,
+      "reason": "only inventory rows for frameworks, model and tools; no flow finding",
+      "evidence": ""
+    },
+    "risk.ci.agent-action": {
+      "verdict": false,
+      "reason": "action is listed with version v1 and risk 0; no unpinned or trigger finding",
+      "evidence": "- step_number: 2 - action_reference: anthropics/claude-code-action@v1 - step_name: #### transformers"
+    },
+    "risk.data.governance": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.instructions.hidden-unicode": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.instructions.import-escape": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
     "risk.mcp.plaintext-http": {
       "verdict": false,
-      "reason": "The flag on 'metrics' is mcp_unknown_server; the http:// URL is listed as metadata only."
+      "reason": "the http URL is listed as metadata and the only flag is mcp_unknown_server",
+      "evidence": "- **Metadata:** - server_name: metrics - url: http://10.20.4.7:8080/sse #### HuggingFace Transformers Model"
+    },
+    "risk.mcp.shell-launch": {
+      "verdict": false,
+      "reason": "borderline: the only flag is mcp_unknown_server (unknown server identity, also put on three other servers); the sh command is a bare metadata value",
+      "evidence": "[note] TOOL/healthcheck-(mcp-server): healthcheck (MCP Server) | provider=MCP | flags=mcp_unknown_server"
+    },
+    "risk.mcp.tool-poisoning": {
+      "verdict": false,
+      "reason": "issue_refund is listed as a tool definition with risk 0; no poisoning finding",
+      "evidence": ""
+    },
+    "risk.mcp.unpinned-npx": {
+      "verdict": false,
+      "reason": "crm is listed with risk 0 and no flag; the args are echoed as a neutral attribute",
+      "evidence": "- transport: stdio - args: ['-y', '@acme-internal/mcp-crm'] - env_vars: ['CRM_API_TOKEN'] #### git (MCP Server)"
+    },
+    "risk.mcp.unpinned-uvx": {
+      "verdict": false,
+      "reason": "git is listed with risk 0 and no flag; the args are echoed as a neutral attribute",
+      "evidence": "- transport: stdio - args: ['mcp-server-git', '--repository', '.'] #### partner-billing (MCP Server) - **Type:** mcp_server"
+    },
+    "risk.model.pickle-exec": {
+      "verdict": false,
+      "reason": "reranker.pt is only inventoried with risk score 0 and no flag",
+      "evidence": ""
+    },
+    "risk.model.unpinned-revision": {
+      "verdict": false,
+      "reason": "only library imports in rag.py are listed; nothing about an unpinned bge-small revision",
+      "evidence": ""
+    },
+    "risk.secret.env-file": {
+      "verdict": true,
+      "reason": "explicit hardcoded_api_key flag on deploy/.env",
+      "evidence": "- **Risk Score:** 30/100 - **Location:** `deploy/.env` - Line: 1 - **Flags:** hardcoded_api_key"
+    },
+    "risk.secret.mcp-header": {
+      "verdict": false,
+      "reason": "the only flag on payments is mcp_unknown_server; no secret finding",
+      "evidence": "[note] TOOL/mcp-server:-payments: MCP Server: payments | provider=MCP | flags=mcp_unknown_server"
+    },
+    "risk.skill.hidden-instruction": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.skill.remote-script": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.tool.shell": {
+      "verdict": false,
+      "reason": "run_shell is listed as a tool definition with risk 0 and no flag",
+      "evidence": ""
+    },
+    "risk.typosquat.langchian": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
     }
-  }
+  },
+  "adjudication_method": "Two blind raters, unanimous on every label; the benchmark's author does not rate."
 }

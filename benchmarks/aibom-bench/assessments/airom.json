@@ -23,9 +23,9 @@
       "evidence": "Each occurrence carries a detector ID and a confidence."
     },
     "6.3": {
-      "level": 1,
-      "tier": "D",
-      "evidence": "OpenVEX output and an OSV lookup exist; the lookup was refused here and never observed to succeed."
+      "level": 0.75,
+      "tier": "V",
+      "evidence": "Half for VEX: `-o vex=` wrote an OpenVEX document (no statements, since no advisory data was available). A quarter for advisory lookup: the OSV overlay is on by default and was refused here."
     },
     "7.3": {
       "level": 1,
@@ -38,5 +38,138 @@
       "evidence": "No runtime comparison."
     }
   },
-  "adjudication": {}
+  "adjudication": {
+    "control.mcp-pinned": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.mcp-toml-pinned": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.model-pinned": {
+      "verdict": false,
+      "reason": "detection notes and inventory rows only; no risk finding on this component",
+      "evidence": ""
+    },
+    "control.safetensors-safe": {
+      "verdict": false,
+      "reason": "detection notes and inventory rows only; no risk finding on this component",
+      "evidence": ""
+    },
+    "control.skill-benign": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.tool-benign": {
+      "verdict": false,
+      "reason": "detection notes and inventory rows only; no risk finding on this component",
+      "evidence": ""
+    },
+    "risk.agent.broad-permissions": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.agent.toxic-flow": {
+      "verdict": false,
+      "reason": "detection notes and inventory rows only; no risk finding on this component",
+      "evidence": ""
+    },
+    "risk.ci.agent-action": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.data.governance": {
+      "verdict": false,
+      "reason": "detection notes and inventory rows only; no risk finding on this component",
+      "evidence": ""
+    },
+    "risk.instructions.hidden-unicode": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.instructions.import-escape": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.plaintext-http": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.shell-launch": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.tool-poisoning": {
+      "verdict": false,
+      "reason": "detection notes and inventory rows only; no risk finding on this component",
+      "evidence": ""
+    },
+    "risk.mcp.unpinned-npx": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.unpinned-uvx": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.model.pickle-exec": {
+      "verdict": true,
+      "reason": "explicit unsafe pickle import finding (os.system) on reranker.pt",
+      "evidence": "[error] risk/pickle-import: Unsafe pickle import in \"reranker.pt\": os.system"
+    },
+    "risk.model.unpinned-revision": {
+      "verdict": false,
+      "reason": "detection notes and inventory rows only; no risk finding on this component",
+      "evidence": ""
+    },
+    "risk.secret.env-file": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.secret.mcp-header": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.skill.hidden-instruction": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.skill.remote-script": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.tool.shell": {
+      "verdict": false,
+      "reason": "detection notes and inventory rows only; no risk finding on this component",
+      "evidence": ""
+    },
+    "risk.typosquat.langchian": {
+      "verdict": false,
+      "reason": "detection notes and inventory rows only; no risk finding on this component",
+      "evidence": ""
+    }
+  },
+  "adjudication_method": "Two blind raters, unanimous on every label; the benchmark's author does not rate.",
+  "changes_reported": [
+    "change.model-bytes"
+  ],
+  "changes_reported_reasons": {
+    "change.model-bytes": "borderline: the model file at this path is listed under Added (with one Removed), so the report shows it changed as a replace rather than a modification"
+  }
 }

@@ -38,5 +38,132 @@
       "evidence": "No runtime comparison."
     }
   },
-  "adjudication": {}
+  "adjudication": {
+    "control.mcp-pinned": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.mcp-toml-pinned": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.model-pinned": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.safetensors-safe": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.skill-benign": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.tool-benign": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.agent.broad-permissions": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.agent.toxic-flow": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.ci.agent-action": {
+      "verdict": false,
+      "reason": "action and tag v1 are listed as inventory; no finding",
+      "evidence": "anthropic 2.10.0 python anthropics/claude-code-action v1 github-action boto3 1.44.5 python chromadb 1.5.9 python"
+    },
+    "risk.data.governance": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.instructions.hidden-unicode": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.instructions.import-escape": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.plaintext-http": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.shell-launch": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.tool-poisoning": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.unpinned-npx": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.unpinned-uvx": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.model.pickle-exec": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.model.unpinned-revision": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.secret.env-file": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.secret.mcp-header": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.skill.hidden-instruction": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.skill.remote-script": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.tool.shell": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.typosquat.langchian": {
+      "verdict": false,
+      "reason": "langchian appears only as a package row in the inventory; no typosquat finding",
+      "evidence": "langchain-openai 1.8.1 python langchian 0.1.0 python langgraph 1.2.22 python llama-index 0.14.26 python"
+    }
+  },
+  "adjudication_method": "Two blind raters, unanimous on every label; the benchmark's author does not rate."
 }

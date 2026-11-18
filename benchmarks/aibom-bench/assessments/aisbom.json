@@ -23,9 +23,9 @@
       "evidence": "Not found."
     },
     "6.3": {
-      "level": 1,
-      "tier": "D",
-      "evidence": "--vex wrote OpenVEX and CycloneDX VEX files; the OSV lookup was not run because api.osv.dev was unreachable."
+      "level": 0.75,
+      "tier": "V",
+      "evidence": "Half for VEX: `--vex` wrote OpenVEX and CycloneDX VEX files. A quarter for advisory lookup: the OSV lookup is documented and was not run because api.osv.dev was unreachable."
     },
     "7.3": {
       "level": 1,
@@ -38,5 +38,138 @@
       "evidence": "No runtime comparison."
     }
   },
-  "adjudication": {}
+  "adjudication": {
+    "control.mcp-pinned": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.mcp-toml-pinned": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.model-pinned": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.safetensors-safe": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.skill-benign": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.tool-benign": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.agent.broad-permissions": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.agent.toxic-flow": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.ci.agent-action": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.data.governance": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.instructions.hidden-unicode": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.instructions.import-escape": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.plaintext-http": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.shell-launch": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.tool-poisoning": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.unpinned-npx": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.unpinned-uvx": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.model.pickle-exec": {
+      "verdict": true,
+      "reason": "flags reranker.pt CRITICAL with RCE detected via os.system",
+      "evidence": "| model.safetensors | SafeTensors | \ud83d\udfe2 LOW | \ud83d\udfe2 UNKNOWN | 6db2029e | | reranker.pt | PyTorch | \ud83d\udd34 CRITICAL (RCE Detected: os.system) | \ud83d\udfe2 UNKNOWN | fde3f334 | | adapter_model.safetensors | SafeTensors | \ud83d\udfe2 LOW | \ud83d\udfe2 UNKNOWN | 540d12c5 |"
+    },
+    "risk.model.unpinned-revision": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.secret.env-file": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.secret.mcp-header": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.skill.hidden-instruction": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.skill.remote-script": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.tool.shell": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.typosquat.langchian": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    }
+  },
+  "adjudication_method": "Two blind raters, unanimous on every label; the benchmark's author does not rate.",
+  "changes_reported": [
+    "change.model-bytes"
+  ],
+  "changes_reported_reasons": {
+    "change.model-bytes": "borderline: the row is truncated to \"model.safet\u2026\" but is marked Modified with hash drift, which identifies model.safetensors"
+  }
 }

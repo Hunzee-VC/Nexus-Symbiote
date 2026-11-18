@@ -15,7 +15,7 @@
     "5.4": {
       "level": 1,
       "tier": "V",
-      "evidence": "Scan prints which collectors returned partial results; `risk --json-output` carries coverage_status: partial."
+      "evidence": "Native inventory records which collectors ran, each collector's status (partial or failed) and scan_failures; `risk --json-output` carries coverage_status: partial."
     },
     "5.5": {
       "level": 1,
@@ -23,9 +23,9 @@
       "evidence": "Native records carry assurance_level (declared or observed) and per-claim collector and method."
     },
     "6.3": {
-      "level": 1,
-      "tier": "D",
-      "evidence": "Ran `vex` (exit 0, schema-validated document). `advisories` queries OSV in live mode; api.osv.dev was unreachable, so the lookup is documented only."
+      "level": 0.75,
+      "tier": "V",
+      "evidence": "Half for VEX: `vex` ran and wrote a schema-validated document. A quarter for advisory lookup: `advisories` queries OSV in live mode, documented only because api.osv.dev was unreachable."
     },
     "7.3": {
       "level": 1,
@@ -34,22 +34,154 @@
     },
     "7.4": {
       "level": 1,
-      "tier": "D",
-      "evidence": "`verify-live`, `discover-mcp` and `trace-diff` are documented; none was run here."
+      "tier": "V",
+      "evidence": "Ran `trace-diff` on the bundled demo inventory and OTLP trace: it reported 1 matched, 3 undeclared and 2 unobserved items and exited 1. `verify-live` and `discover-mcp` were not run."
     }
   },
   "adjudication": {
+    "control.mcp-pinned": {
+      "verdict": false,
+      "reason": "borderline: the warning says the server pins its package and complains only about transitive dependencies resolved without a lockfile, a different problem",
+      "evidence": "[warning] TOOL/transitive_resolution/medium: MCP server 'filesystem' pins its package but resolves dependencies at launch without a lockfile."
+    },
+    "control.mcp-toml-pinned": {
+      "verdict": false,
+      "reason": "borderline: the warning says the server pins its package and complains only about transitive dependencies resolved without a lockfile, a different problem",
+      "evidence": "[warning] TOOL/transitive_resolution/medium: MCP server 'context7' pins its package but resolves dependencies at launch without a lockfile."
+    },
+    "control.model-pinned": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.safetensors-safe": {
+      "verdict": false,
+      "reason": "only a missing-signature finding, which is a different problem",
+      "evidence": ""
+    },
+    "control.skill-benign": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.tool-benign": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.agent.broad-permissions": {
+      "verdict": true,
+      "reason": "warning of unscoped shell and web-fetch allowances, plus auto-approval of every project MCP server",
+      "evidence": "[warning] TOOL/permission_scope/medium: IDE agent 'claude-code' declares unscoped tool allowances (shell commands, web fetches); effective approval remains unverified."
+    },
+    "risk.agent.toxic-flow": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.ci.agent-action": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.data.governance": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.instructions.hidden-unicode": {
+      "verdict": true,
+      "reason": "critical finding of invisible Unicode tag characters in backend.mdc",
+      "evidence": "[error] TOOL/tag_characters/critical: '.cursor/rules/backend.mdc' contains 37 deprecated Unicode tag characters (U+E0000\u2013U+E007F) outside a flag emoji. These are invisible and have no legitimate use in prompt files."
+    },
+    "risk.instructions.import-escape": {
+      "verdict": true,
+      "reason": "states CLAUDE.md imports a file outside the project root and excludes it for that reason",
+      "evidence": "- excluded: .mcp.json: MCP server 'healthcheck' launcher identity unknown (inline shell script) (from mcp) - excluded: CLAUDE.md: imports a file outside the project root, which is not inventoried (from prompt)"
+    },
+    "risk.mcp.plaintext-http": {
+      "verdict": true,
+      "reason": "explicit finding that the metrics endpoint is not HTTPS",
+      "evidence": "[error] TOOL/transport_security/high: MCP server 'metrics' endpoint is not HTTPS: http\\[:\\]//10.20.4.7:8080"
+    },
+    "risk.mcp.shell-launch": {
+      "verdict": true,
+      "reason": "high finding on healthcheck naming the inline shell script launcher, and the server is excluded for that reason",
+      "evidence": "[error] TOOL/launcher_identity/high: MCP server 'healthcheck' launcher identity and pin are unknown: inline shell script."
+    },
+    "risk.mcp.tool-poisoning": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
     "risk.mcp.unpinned-npx": {
       "verdict": true,
-      "reason": "version_pinning/high: MCP server 'crm' uses an unpinned package reference."
+      "reason": "explicit unpinned package reference finding on the crm server",
+      "evidence": "[error] TOOL/version_pinning/high: MCP server 'crm' uses an unpinned package reference (arguments omitted)."
     },
     "risk.mcp.unpinned-uvx": {
       "verdict": true,
-      "reason": "version_pinning/high: MCP server 'git' uses an unpinned package reference."
+      "reason": "explicit unpinned package reference finding on the git server",
+      "evidence": "[error] TOOL/version_pinning/high: MCP server 'git' uses an unpinned package reference (arguments omitted)."
+    },
+    "risk.model.pickle-exec": {
+      "verdict": true,
+      "reason": "critical finding that reranker.pt uses a potentially code-executing serialization",
+      "evidence": "[error] TOOL/serialization_format/critical: Model 'reranker.pt' has evidence of a potentially code-executing serialization or loader."
+    },
+    "risk.model.unpinned-revision": {
+      "verdict": false,
+      "reason": "only a note that chroma is imported; nothing about the bge-small revision",
+      "evidence": ""
+    },
+    "risk.secret.env-file": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
     },
     "risk.secret.mcp-header": {
       "verdict": false,
-      "reason": "The only finding on 'payments' is a completeness note that header values are not bound. The token is redacted but not reported as a committed credential."
+      "reason": "borderline: only a completeness note that header values are not bound in the inventory; it does not say a secret is committed",
+      "evidence": "[note] TOOL/completeness/low: MCP server 'payments' values not bound in this inventory: header values; endpoint path and query."
+    },
+    "risk.skill.hidden-instruction": {
+      "verdict": true,
+      "reason": "finding of a hidden HTML comment containing an instruction in pdf-export SKILL.md, plus a zero-width character finding",
+      "evidence": "[error] TOOL/hidden_markup/high: '.claude/skills/pdf-export/SKILL.md' contains 1 HTML or Markdown comment(s) (153 characters of HTML comments) that rendered views hide and agents read. At least one comment contains an instruction, a URL or a home-directory path."
+    },
+    "risk.skill.remote-script": {
+      "verdict": false,
+      "reason": "all lines concern hidden markup and invisible characters in SKILL.md; nothing about export.sh or a remote download piped to a shell",
+      "evidence": ""
+    },
+    "risk.tool.shell": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.typosquat.langchian": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
     }
+  },
+  "adjudication_method": "Two blind raters, unanimous on every label; the benchmark's author does not rate.",
+  "changes_reported": [
+    "change.mcp-added",
+    "change.mcp-removed",
+    "change.mcp-version-and-scope",
+    "change.model-bytes",
+    "change.permissions-widened",
+    "change.skill-widened",
+    "change.tool-description"
+  ],
+  "changes_reported_reasons": {
+    "change.mcp-added": "names shadow-sync as a newly added MCP server",
+    "change.mcp-removed": "names the github MCP server as gone, and separately the removed .vscode/mcp.json surface",
+    "change.mcp-version-and-scope": "names the filesystem server as changed, with the version move and a changed launch binding",
+    "change.model-bytes": "names the classifier weights file and says its hash changed",
+    "change.permissions-widened": "names the claude-code agent settings as changed: permission mode, settings hashes and permission rule counts",
+    "change.skill-widened": "names the refund-processing SKILL.md (and its script) as changed by hash",
+    "change.tool-description": "names get_order as changed (source hash changed)"
   }
 }

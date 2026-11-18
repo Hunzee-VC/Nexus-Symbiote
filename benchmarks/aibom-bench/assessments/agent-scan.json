@@ -39,9 +39,131 @@
     }
   },
   "adjudication": {
+    "control.mcp-pinned": {
+      "verdict": false,
+      "reason": "pinned command is echoed in a consent prompt; no unpinned finding",
+      "evidence": ""
+    },
+    "control.mcp-toml-pinned": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.model-pinned": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.safetensors-safe": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.skill-benign": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.tool-benign": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.agent.broad-permissions": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.agent.toxic-flow": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.ci.agent-action": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.data.governance": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.instructions.hidden-unicode": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.instructions.import-escape": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.plaintext-http": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
     "risk.mcp.shell-launch": {
       "verdict": false,
-      "reason": "The match is the consent prompt echoing the launch command, not a finding."
+      "reason": "borderline: healthcheck was skipped by a consent prompt declined for all five servers, not because of its sh -c command, which is only echoed",
+      "evidence": "\u2502 \u25cf [X009 info]: Skipped by user consent (MCP server was not contacted) \u2514\u2500\u2500 healthcheck \u25cf [X009 info]: Skipped by user consent (MCP server was not contacted)"
+    },
+    "risk.mcp.tool-poisoning": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.unpinned-npx": {
+      "verdict": false,
+      "reason": "command is echoed in a consent prompt that was declined for every server; no unpinned finding",
+      "evidence": ""
+    },
+    "risk.mcp.unpinned-uvx": {
+      "verdict": false,
+      "reason": "command is echoed in a consent prompt that was declined for every server; no unpinned finding",
+      "evidence": ""
+    },
+    "risk.model.pickle-exec": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.model.unpinned-revision": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.secret.env-file": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.secret.mcp-header": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.skill.hidden-instruction": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.skill.remote-script": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.tool.shell": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.typosquat.langchian": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
     }
-  }
+  },
+  "adjudication_method": "Two blind raters, unanimous on every label; the benchmark's author does not rate."
 }

@@ -23,6 +23,12 @@ from . import variants
 BASE_TIMEOUT = 300
 HOSTILE_TIMEOUT = 180
 SOURCE_DATE_EPOCH = "1767225600"
+# The two probes run a tool's plain documented command, with none of the safety or offline
+# flags the scored scans may pass. One records attempted connections with no network
+# available. The other runs on a small project with the host's network, so a tool that
+# resolves dependencies by running the project's own install steps can do so.
+EGRESS_PROBE = "probe:default-egress"
+EXEC_PROBE = "probe:default-exec"
 NETNS = ["unshare", "-n", "--", sys.executable, str(Path(__file__).with_name("netns_exec.py"))]
 CONNECT = re.compile(
     r"connect\(\d+, \{sa_family=AF_INET6?, sin6?_port=htons\((\d+)\),"
@@ -37,12 +43,14 @@ def _fill(template: str, values: dict[str, str]) -> str:
 
 
 def _build(variant: str, canary_dir: str) -> corpus_module.Corpus:
+    if variant == EXEC_PROBE:
+        return variants.build_exec_probe(canary_dir)
     built = corpus_module.build_base(canary_dir)
     if variant == "drift":
         variants.apply_drift(built)
     elif variant.startswith("hostile:"):
         variants.apply_hostile(built, variant.split(":", 1)[1])
-    elif variant not in {"base", "repeat"}:
+    elif variant not in {"base", "repeat", EGRESS_PROBE}:
         raise ValueError(f"unknown variant: {variant}")
     return built
 
@@ -109,12 +117,9 @@ def run_tool(
         "repo": str(Path(__file__).resolve().parents[3]),
     }
     values["bin"] = _fill(str(adapter["bin"]), values)
-    home = work / "home"
     cwd = work / "cwd"
-    for directory in (home, cwd):
-        directory.mkdir(parents=True, exist_ok=True)
+    cwd.mkdir(parents=True, exist_ok=True)
     env = {
-        "HOME": str(home),
         "PATH": ":".join(
             [
                 *(_fill(part, values) for part in adapter.get("path", [])),
@@ -125,7 +130,6 @@ def run_tool(
         "LANG": "C.UTF-8",
         "NO_COLOR": "1",
         "SOURCE_DATE_EPOCH": SOURCE_DATE_EPOCH,
-        **{key: _fill(str(value), values) for key, value in adapter.get("env", {}).items()},  # type: ignore[union-attr]
     }
     canaries = Path(canary_dir)
     runs: dict[str, object] = {}
@@ -141,10 +145,25 @@ def run_tool(
         if out.exists():
             shutil.rmtree(out)
         out.mkdir(parents=True)
+        # HOME is emptied for every variant, so a cache from one corpus cannot answer for
+        # another, and keeps one path, so a tool that records it stays comparable.
+        home = work / "home"
+        if home.exists():
+            shutil.rmtree(home)
+        home.mkdir(parents=True)
+        env["HOME"] = str(home)
+        probe = variant in {EGRESS_PROBE, EXEC_PROBE}
+        extra = adapter.get("default_env" if probe else "env", {})
+        run_env = {**env, **{key: _fill(str(value), values) for key, value in extra.items()}}  # type: ignore[union-attr]
         values.update({"target": str(target), "out": str(out)})
         timeout = HOSTILE_TIMEOUT if variant.startswith("hostile:") else BASE_TIMEOUT
         scans = []
-        for scan in adapter["scans"]:  # type: ignore[union-attr]
+        planned = adapter["scans"]
+        if probe:
+            default = adapter.get("default")
+            planned = [{"label": "default", **default}] if default else []  # type: ignore[dict-item]
+        traced = variant in {"repeat", EGRESS_PROBE}
+        for scan in planned:  # type: ignore[union-attr]
             if variant not in scan.get("only", [variant]):
                 continue
             if any(done["timed_out"] for done in scans):
@@ -152,12 +171,12 @@ def run_tool(
             label = scan["label"]
             argv = [_fill(part, values) for part in scan["argv"]]
             trace = out / f"{label}.strace"
-            prefix = [*NETNS]
-            if variant == "repeat":
+            prefix = [] if variant == EXEC_PROBE else [*NETNS]
+            if traced:
                 prefix += ["strace", "-f", "-qq", "-e", "trace=connect", "-o", str(trace)]
             result = _run(
                 [*prefix, *argv],
-                env,
+                run_env,
                 Path(_fill(scan.get("cwd", str(cwd)), values)),
                 out / f"{label}.stdout",
                 out / f"{label}.stderr",
@@ -180,7 +199,7 @@ def run_tool(
                     "argv": argv,
                     **result,
                     "outputs": outputs,
-                    "egress_attempts": _egress(trace) if variant == "repeat" else None,
+                    "egress_attempts": _egress(trace) if traced else None,
                 }
             )
         runs[variant] = {
@@ -202,8 +221,12 @@ def run_tool(
             }
         )
         argv = [_fill(part, values) for part in diff["argv"]]  # type: ignore[index]
+        diff_env = {
+            **env,
+            **{key: _fill(str(value), values) for key, value in adapter.get("env", {}).items()},  # type: ignore[union-attr]
+        }
         result = _run(
-            [*NETNS, *argv], env, cwd, out / "diff.stdout", out / "diff.stderr", BASE_TIMEOUT
+            [*NETNS, *argv], diff_env, cwd, out / "diff.stdout", out / "diff.stderr", BASE_TIMEOUT
         )
         runs["diff"] = {"argv": argv, **result}
     record = {"tool": slug, "version": adapter.get("version"), "runs": runs}

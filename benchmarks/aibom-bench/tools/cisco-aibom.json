@@ -188,5 +188,28 @@
   "unmeasured": "The tool requires an LLM. No key was supplied, so it ran with an unreachable local provider and marks every component unreviewed (agentic_status: degraded). Its score is a floor for its deterministic analysis only.",
   "notes": [
     "Each uncached run includes a fixed 30-second wait in the tool."
-  ]
+  ],
+  "default": {
+    "argv": [
+      "{bin}",
+      "analyze",
+      "{target}",
+      "-o",
+      "json",
+      "-O",
+      "{out}/default.json",
+      "--llm-model",
+      "offline-placeholder",
+      "--llm-provider",
+      "ollama",
+      "--llm-api-base",
+      "http://127.0.0.1:9",
+      "--agentic-max-retry-seconds",
+      "0"
+    ],
+    "outputs": []
+  },
+  "default_env": {
+    "AIBOM_DB_PATH": "{tooldir}/catalog/aibom_catalog-1.10.1.duckdb"
+  }
 }

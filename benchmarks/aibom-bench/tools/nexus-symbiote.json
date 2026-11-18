@@ -10,19 +10,119 @@
     "{tooldir}/venv/bin/pip install --no-deps --no-build-isolation -e {repo}"
   ],
   "bin": "{tooldir}/venv/bin/nexus-symbiote",
-  "path": ["{tooldir}/venv/bin"],
+  "path": [
+    "{tooldir}/venv/bin"
+  ],
   "env": {},
   "scans": [
-    {"label": "native", "argv": ["{bin}", "scan", "{target}", "--no-project-policy", "-f", "json", "-o", "{out}/aibom.json"],
-     "outputs": [{"path": "{out}/aibom.json", "format": "native-json"}]},
-    {"label": "cyclonedx", "argv": ["{bin}", "scan", "{target}", "--no-project-policy", "-f", "cyclonedx", "-o", "{out}/aibom.cdx.json"],
-     "outputs": [{"path": "{out}/aibom.cdx.json", "format": "cyclonedx-json"}]},
-    {"label": "spdx", "argv": ["{bin}", "scan", "{target}", "--no-project-policy", "-f", "spdx", "-o", "{out}/aibom.spdx.json"],
-     "outputs": [{"path": "{out}/aibom.spdx.json", "format": "spdx-json"}]},
-    {"label": "sarif", "argv": ["{bin}", "scan", "{target}", "--no-project-policy", "-f", "sarif", "-o", "{out}/aibom.sarif"],
-     "outputs": [{"path": "{out}/aibom.sarif", "format": "sarif"}]},
-    {"label": "risk", "argv": ["{bin}", "risk", "{out}/aibom.json", "--json-output"], "stdout_format": "native-json"}
+    {
+      "label": "native",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--no-project-policy",
+        "-f",
+        "json",
+        "-o",
+        "{out}/aibom.json"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/aibom.json",
+          "format": "native-json"
+        }
+      ]
+    },
+    {
+      "label": "cyclonedx",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--no-project-policy",
+        "-f",
+        "cyclonedx",
+        "-o",
+        "{out}/aibom.cdx.json"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/aibom.cdx.json",
+          "format": "cyclonedx-json"
+        }
+      ]
+    },
+    {
+      "label": "spdx",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--no-project-policy",
+        "-f",
+        "spdx",
+        "-o",
+        "{out}/aibom.spdx.json"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/aibom.spdx.json",
+          "format": "spdx-json"
+        }
+      ]
+    },
+    {
+      "label": "sarif",
+      "argv": [
+        "{bin}",
+        "scan",
+        "{target}",
+        "--no-project-policy",
+        "-f",
+        "sarif",
+        "-o",
+        "{out}/aibom.sarif"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/aibom.sarif",
+          "format": "sarif"
+        }
+      ]
+    },
+    {
+      "label": "risk",
+      "argv": [
+        "{bin}",
+        "risk",
+        "{out}/aibom.json",
+        "--json-output"
+      ],
+      "stdout_format": "native-json"
+    }
   ],
-  "diff": {"argv": ["{bin}", "diff", "{base}/aibom.json", "{drift}/aibom.json"]},
-  "notes": ["scan exits 1 when its gate fails; the inventory is still written"]
+  "diff": {
+    "argv": [
+      "{bin}",
+      "diff",
+      "{base}/aibom.json",
+      "{drift}/aibom.json"
+    ]
+  },
+  "notes": [
+    "scan exits 1 when its gate fails; the inventory is still written"
+  ],
+  "default": {
+    "argv": [
+      "{bin}",
+      "scan",
+      "{target}",
+      "-o",
+      "{out}/default.json"
+    ],
+    "outputs": []
+  },
+  "default_env": {},
+  "observed": "In an earlier rerun, one of 46 scans hit the tool's 0.25-second wall-clock limit on TypeScript parsing, dropped a TypeScript MCP server and its tool, and so differed from the next scan of identical input. It did not recur in twelve follow-up scans or in the scored run, where 5.1 is full. Two runs cannot rule it out; treat the determinism score as an upper bound."
 }

@@ -13,10 +13,11 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from textwrap import dedent
+from typing import Any
 
 from . import formats
 
-CORPUS_VERSION = "1.0.0"
+CORPUS_VERSION = "1.1.0"
 PROJECT = "acme-support-copilot"
 OUTSIDE = "outside"
 DEFAULT_CANARY_DIR = "/tmp/aibom-bench/canary"  # noqa: S108 - fixed so the corpus digest is stable
@@ -107,6 +108,7 @@ class Corpus:
     risks: list[Labelled] = field(default_factory=list)
     controls: list[Labelled] = field(default_factory=list)
     edges: list[Edge] = field(default_factory=list)
+    exposure: dict[str, dict[str, Any]] = field(default_factory=dict)
     exec_canaries: dict[str, str] = field(default_factory=dict)
     leak_tokens: dict[str, str] = field(default_factory=dict)
 
@@ -151,6 +153,8 @@ class Corpus:
             facts.append(Fact("supplier", "supplier", tuple(supplier)))
         if digest_of:
             raw = self.files[digest_of]
+            # A record that carries the file's SHA-256 is about that file, whatever it is named.
+            keys = [*keys, hashlib.sha256(raw).hexdigest()]
             facts.append(
                 Fact(
                     "digest",
@@ -177,9 +181,16 @@ class Corpus:
         paths: list[str],
         note: str,
         kind: str = "model",
+        *,
+        exercised_by: list[str],
     ) -> None:
-        """A non-component; ``kind`` is what a tool would wrongly report it as."""
+        """A non-component; ``kind`` is what a tool would wrongly report it as.
+
+        ``exercised_by`` names real components found by the detector the decoy targets. A
+        tool that found none of them was never tested by this decoy.
+        """
         self.decoys.append(Labelled(id, title, tuple(keys), tuple(paths), kind, note=note))
+        self.exposure[id] = {"items": exercised_by, "paths": []}
 
     def risk(
         self,
@@ -402,7 +413,7 @@ def _models(c: Corpus) -> None:
         "models",
         "model",
         "Fine-tuned classifier: SafeTensors weights, config.json and a model card",
-        ["intent-classifier"],
+        ["intent-classifier", "=model.safetensors"],
         ["models/intent-classifier/model.safetensors", "models/intent-classifier"],
         license=["mit"],
         digest_of="models/intent-classifier/model.safetensors",
@@ -462,7 +473,7 @@ def _models(c: Corpus) -> None:
         "models",
         "model",
         "ONNX model with producer and metadata properties",
-        ["embedder/model.onnx", "embedder_graph", "models/embedder"],
+        ["embedder/model.onnx", "embedder_graph", "models/embedder", "=model.onnx"],
         ["models/embedder/model.onnx"],
         digest_of="models/embedder/model.onnx",
         domain={"producer": ["acme-export"]},
@@ -476,6 +487,7 @@ def _models(c: Corpus) -> None:
         "models/adapters/support-lora/adapter_config.json",
         {
             "base_model_name_or_path": "meta-llama/Llama-3.1-8B-Instruct",
+            "revision": HF_LLAMA_REVISION,
             "peft_type": "LORA",
             "r": 16,
             "lora_alpha": 32,
@@ -488,7 +500,7 @@ def _models(c: Corpus) -> None:
         "models",
         "model",
         "LoRA adapter with a declared base model",
-        ["support-lora"],
+        ["support-lora", "=adapter_model.safetensors"],
         ["models/adapters/support-lora"],
         digest_of="models/adapters/support-lora/adapter_model.safetensors",
         domain={"base model": ["llama-3.1-8b-instruct"], "adapter type": ["lora"]},
@@ -555,7 +567,14 @@ def _models(c: Corpus) -> None:
         "model",
         "Hosted OpenAI model named in a chat-completions call",
         ["gpt-4o-mini"],
-        ["services/api/llm.py", "services/agent/graph.py"],
+        [
+            "services/api/llm.py",
+            "services/agent/graph.py",
+            "config/models.yaml",
+            "training/openai_finetune.py",
+            "workflows/n8n/lead_enrichment.json",
+            "guardrails/config.yml",
+        ],
         version=["2024-07-18"],
         supplier=["openai"],
     )
@@ -565,6 +584,7 @@ def _models(c: Corpus) -> None:
         ["bert-large-uncased"],
         ["services/api/llm.py"],
         "The line is a comment; the model is not loaded.",
+        exercised_by=["model.hf.pinned", "model.api.openai"],
     )
 
     c.text(
@@ -591,7 +611,7 @@ def _models(c: Corpus) -> None:
         "model",
         "Embedding model loaded by sentence-transformers without a revision",
         ["bge-small-en-v1.5"],
-        ["services/api/rag.py"],
+        ["services/api/rag.py", "rag/ingest.yaml"],
         supplier=["baai"],
     )
     c.risk(
@@ -607,7 +627,7 @@ def _models(c: Corpus) -> None:
         "vector_store",
         "Chroma collection the RAG path reads",
         ["support_kb", "rag/chroma"],
-        ["services/api/rag.py"],
+        ["services/api/rag.py", "rag/ingest.yaml"],
         weak=["chroma"],
     )
     c.edge("edge.rag.embedding-model", "data.vector.chroma", "model.hf.unpinned", "embedded with")
@@ -709,6 +729,13 @@ def _models(c: Corpus) -> None:
         ["models/user"],
         ["services/api/models/user.py"],
         "A SQLAlchemy table, not a machine-learning model.",
+        exercised_by=[
+            "model.hf.pinned",
+            "model.api.openai",
+            "model.hf.unpinned",
+            "model.api.embedding",
+            "model.api.bedrock",
+        ],
     )
 
     c.text(
@@ -885,6 +912,12 @@ def _models(c: Corpus) -> None:
         ["claude-3-opus", "gpt-4-turbo"],
         ["docs/blog/model-comparison.md"],
         "Prose about past evaluations; nothing loads these models.",
+        exercised_by=[
+            "model.api.openai",
+            "model.api.anthropic",
+            "model.config.indirect",
+            "model.env.indirect",
+        ],
     )
     c.file("tests/fixtures/not_a_model.gguf", "placeholder used by the upload-validation test\n")
     c.decoy(
@@ -893,6 +926,7 @@ def _models(c: Corpus) -> None:
         ["not_a_model"],
         ["tests/fixtures/not_a_model.gguf"],
         "No GGUF magic; a format-aware reader rejects it.",
+        exercised_by=["model.file.gguf"],
     )
     c.text(
         "deploy/k8s/printer.yaml",
@@ -912,6 +946,7 @@ def _models(c: Corpus) -> None:
         ["laserjet"],
         ["deploy/k8s/printer.yaml"],
         "The key is named model; the value is office hardware.",
+        exercised_by=["model.config.indirect", "model.k8s.served"],
     )
 
 
@@ -997,7 +1032,7 @@ def _data(c: Corpus) -> None:
         "dataset",
         "Local training set with a dataset card and Croissant metadata",
         ["support_tickets"],
-        ["data/train/support_tickets.jsonl", "data/train"],
+        ["data/train/support_tickets.jsonl", "data/train", "training/finetune.py"],
         license=["cc-by-nc-4.0", "by-nc/4.0"],
         digest_of="data/train/support_tickets.jsonl",
         domain={"sensitivity": ["pii", "personal"]},
@@ -1019,7 +1054,7 @@ def _data(c: Corpus) -> None:
         "dataset",
         "Local evaluation set",
         ["golden_set"],
-        ["data/eval/golden_set.csv"],
+        ["data/eval/golden_set.csv", "evals/run_evals.py"],
         digest_of="data/eval/golden_set.csv",
     )
     c.text(
@@ -1197,7 +1232,7 @@ def _tools(c: Corpus) -> None:
             "tool",
             title,
             [name],
-            ["services/agent/tools.py"],
+            ["services/agent/tools.py", "services/agent/graph.py"],
         )
     c.risk(
         "risk.tool.shell",
@@ -1320,9 +1355,8 @@ def _tools(c: Corpus) -> None:
         "agents",
         "mcp_server",
         "First-party MCP server implemented with FastMCP",
-        ["acme-orders"],
+        ["acme-orders", "fastmcp", "orders_mcp/server.py"],
         ["servers/orders_mcp/server.py"],
-        weak=["orders_mcp"],
     )
     c.item(
         "tool.mcp.get_order",
@@ -1363,7 +1397,7 @@ def _tools(c: Corpus) -> None:
         import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
         import { z } from "zod";
 
-        const server = new McpServer({ name: "acme-kb", version: "1.4.0" });
+        const server = new McpServer({ name: "acme-knowledge", version: "1.4.0" });
 
         server.registerTool(
           "search_kb",
@@ -1381,7 +1415,7 @@ def _tools(c: Corpus) -> None:
     c.json(
         "servers/kb-mcp/package.json",
         {
-            "name": "@acme/kb-mcp",
+            "name": "@acme/knowledge-mcp",
             "version": "1.4.0",
             "type": "module",
             "dependencies": {
@@ -1395,7 +1429,7 @@ def _tools(c: Corpus) -> None:
         "agents",
         "mcp_server",
         "First-party MCP server implemented with the TypeScript SDK",
-        ["acme-kb", "@acme/kb-mcp"],
+        ["acme-knowledge", "@acme/knowledge-mcp", "kb-mcp/src/index.ts"],
         ["servers/kb-mcp/src/index.ts", "servers/kb-mcp/package.json"],
         version=["1.4.0"],
     )
@@ -1483,6 +1517,7 @@ def _tools(c: Corpus) -> None:
         ["web/node_modules/demo-widget/.mcp.json"],
         "A dependency's sample configuration; no agent in this project loads it.",
         kind="mcp_server",
+        exercised_by=["agent.mcp.nested"],
     )
     c.text(
         "web/src/triage.ts",
@@ -1724,6 +1759,7 @@ def _mcp_servers(c: Corpus) -> None:
         [".vscode/mcp.json"],
         "The entry is a comment; VS Code does not load it.",
         kind="mcp_server",
+        exercised_by=["agent.mcp.docker"],
     )
 
     c.json(
@@ -1732,7 +1768,7 @@ def _mcp_servers(c: Corpus) -> None:
             "mcpServers": {
                 "orders": {
                     "command": "python",
-                    "args": ["servers/orders_mcp/server.py"],
+                    "args": ["-m", "orders_mcp.server"],
                     "env": {"GITHUB_TOKEN": synthetic_secret("github")},
                 }
             }
@@ -1743,11 +1779,11 @@ def _mcp_servers(c: Corpus) -> None:
         "agent.mcp.local-script",
         "agents",
         "mcp_server",
-        "MCP entry that runs a script from this repository",
+        "MCP entry that runs a module from this repository",
         ["config/claude_desktop_config.json"],
         ["config/claude_desktop_config.json"],
         weak=["=orders"],
-        domain={"launcher": ["python"], "script": ["servers/orders_mcp/server.py"]},
+        domain={"launcher": ["python"], "module": ["orders_mcp.server"]},
     )
     c.text(
         ".codex/config.toml",
@@ -1777,6 +1813,31 @@ def _mcp_servers(c: Corpus) -> None:
         [".codex/config.toml"],
     )
     c.json(
+        "packages/notifier/.mcp.json",
+        {
+            "mcpServers": {
+                "notifier": {
+                    "command": "npx",
+                    "args": ["-y", "@acme-internal/notifier-mcp@2.1.0"],
+                }
+            }
+        },
+    )
+    c.json(
+        "packages/notifier/package.json",
+        {"name": "@acme/notifier", "version": "2.1.0", "private": True},
+    )
+    c.item(
+        "agent.mcp.nested",
+        "agents",
+        "mcp_server",
+        "MCP server declared in a sub-package of the repository",
+        ["notifier-mcp"],
+        ["packages/notifier/.mcp.json"],
+        version=["2.1.0"],
+        domain={"launcher": ["npx"]},
+    )
+    c.json(
         ".gemini/settings.json",
         {"mcpServers": {"kb": {"command": "node", "args": ["servers/kb-mcp/dist/index.js"]}}},
     )
@@ -1799,18 +1860,18 @@ def _agent_files(c: Corpus) -> None:
         ---
         name: refund-processing
         description: Process a customer refund within policy. Use when a ticket asks for money back.
-        allowed-tools: Read, Bash(python scripts/issue_refund.py:*)
+        allowed-tools: Read, Bash(python scripts/process_refund.py:*)
         ---
 
         # Refund processing
 
         1. Read the ticket and confirm the order number.
         2. Check the amount against `docs/agent-rules.md`.
-        3. Run `python scripts/issue_refund.py <order> <amount>`.
+        3. Run `python scripts/process_refund.py <order> <amount>`.
         """,
     )
     c.text(
-        ".claude/skills/refund-processing/scripts/issue_refund.py",
+        ".claude/skills/refund-processing/scripts/process_refund.py",
         """
         import sys
 
@@ -1825,8 +1886,8 @@ def _agent_files(c: Corpus) -> None:
         ["refund-processing"],
         [".claude/skills/refund-processing/SKILL.md", ".claude/skills/refund-processing"],
         domain={
-            "allowed tools": ["issue_refund.py", "allowed-tools", "allowed_tools"],
-            "bundled script": ["scripts/issue_refund.py"],
+            "allowed tools": ["process_refund.py", "allowed-tools", "allowed_tools"],
+            "bundled script": ["scripts/process_refund.py"],
         },
     )
     c.control(
@@ -1918,7 +1979,7 @@ def _agent_files(c: Corpus) -> None:
         description: Search the knowledge base before answering a policy question.
         ---
 
-        Call the `search_kb` tool with the customer's question and cite the article.
+        Search the knowledge base with the knowledge MCP tool and cite the article.
         """,
     )
     c.item(
@@ -1947,6 +2008,12 @@ def _agent_files(c: Corpus) -> None:
         ["docs/handbook/SKILL.md"],
         "No frontmatter and not under a skills directory; it is an HR table.",
         kind="skill",
+        exercised_by=[
+            "agent.skill.benign",
+            "agent.skill.poisoned",
+            "agent.skill.github",
+            "agent.skill.agents-dir",
+        ],
     )
 
     c.text(
@@ -1979,9 +2046,7 @@ def _agent_files(c: Corpus) -> None:
         ["claude.md", "secret-notes"],
         ["CLAUDE.md"],
     )
-    c.text(
-        "AGENTS.md", "# Agents\n\nUse the refund-processing skill for refunds. Keep diffs small.\n"
-    )
+    c.text("AGENTS.md", "# Agents\n\nUse the refund skill for refunds. Keep diffs small.\n")
     c.item(
         "agent.instructions.agents-md",
         "agents",
@@ -2086,7 +2151,7 @@ def _agent_files(c: Corpus) -> None:
     c.item(
         "agent.subagent",
         "agents",
-        "agent",
+        "subagent",
         "Claude Code subagent definition",
         ["code-reviewer"],
         [".claude/agents/code-reviewer.md"],
@@ -2482,12 +2547,79 @@ def _outside(c: Corpus) -> None:
     c.leak_tokens["outside.content"] = OUTSIDE_TOKEN
     c.leak_tokens["outside.digest"] = hashlib.sha256(c.outside["secret-notes.md"]).hexdigest()
     c.leak_tokens["outside.inventory"] = "outside-only-server"
+    c.outside["outside-model.gguf"] = formats.gguf(
+        {"general.architecture": "llama", "general.name": "outside-canary-model"}
+    )
+    c.leak_tokens["outside.model-name"] = "outside-canary-model"
+    c.leak_tokens["outside.model-digest"] = hashlib.sha256(
+        c.outside["outside-model.gguf"]
+    ).hexdigest()
+
+
+def _exposure(c: Corpus) -> None:
+    """Which real components show that a tool read the file a safety check lives in."""
+    mcp = [item.id for item in c.items if ".mcp.json" in item.paths]
+    skills = [item.id for item in c.items if item.kind == "skill"]
+    npm = [item.id for item in c.items if item.id.startswith("tool.framework.npm.")]
+    python = [
+        item.id
+        for item in c.items
+        if item.kind == "framework" and not item.id.startswith("tool.framework.npm.")
+    ]
+    source = [
+        item.id
+        for item in c.items
+        if any(path.startswith("services/") and path.endswith(".py") for path in item.paths)
+    ]
+    weights = [
+        "model.file.gguf",
+        "model.file.safetensors",
+        "model.file.pickle",
+        "model.file.onnx",
+        "model.adapter.lora",
+    ]
+
+    def items(*ids: str) -> dict[str, Any]:
+        return {"items": list(ids), "paths": []}
+
+    c.exposure.update(
+        {
+            "canary.mcp-launch": items(*mcp),
+            "canary.pickle-load": items("model.file.pickle"),
+            "canary.hook-run": items("agent.hook", "agent.permissions"),
+            "canary.skill-script": items("agent.skill.poisoned"),
+            "canary.npm-lifecycle": items(*npm),
+            "canary.setup-py": items(*python),
+            "canary.py-import": items(*source),
+            "secret.payments": items("agent.mcp.http.authenticated", "agent.mcp.http.plaintext"),
+            "secret.github": items("agent.mcp.local-script"),
+            "secret.openai": {"items": [], "paths": ["deploy/.env"]},
+            "secret.aws": {"items": [], "paths": ["deploy/.env"]},
+            "escape.import": items("agent.instructions.claude"),
+            "escape.dir-symlink": items("agent.mcp.nested"),
+            "escape.file-symlink": items("model.file.gguf"),
+            "hostile.symlink-escape": items("agent.mcp.nested", "model.file.gguf"),
+            "hostile.symlink-loop": {"items": [], "paths": [], "walker": True},
+            "hostile.deep-json": items("agent.mcp.nested", *npm),
+            "hostile.malformed": items("agent.mcp.nested", "model.config.indirect", *skills, *npm),
+            "hostile.header-bomb": items(*weights),
+            "hostile.fifo": items("agent.mcp.nested", "data.local.training", *weights),
+            "hostile.escape-names": items("model.file.gguf", *mcp, *skills),
+            "hostile.large-tree": {"items": [], "paths": [], "walker": True},
+        }
+    )
+    known = {item.id for item in c.items}
+    for check, entry in c.exposure.items():
+        missing = set(entry["items"]) - known
+        if missing or not (entry["items"] or entry["paths"] or entry.get("walker")):
+            raise ValueError(f"{check}: exposure names unknown or no components: {missing}")
 
 
 def build_base(canary_dir: str = DEFAULT_CANARY_DIR) -> Corpus:
     corpus = Corpus(canary_dir)
     for section in (_project, _models, _data, _tools, _mcp_servers, _agent_files, _infra, _outside):
         section(corpus)
+    _exposure(corpus)
     known = {item.id for item in corpus.items}
     if len(known) != len(corpus.items):
         raise ValueError("duplicate ground-truth item id")

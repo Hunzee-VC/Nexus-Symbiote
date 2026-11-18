@@ -63,5 +63,16 @@
       "{drift}/aibom.json"
     ]
   },
-  "notes": []
+  "notes": [],
+  "default": {
+    "argv": [
+      "{bin}",
+      "fs",
+      "{target}",
+      "-o",
+      "json={out}/default.json"
+    ],
+    "outputs": []
+  },
+  "default_env": {}
 }

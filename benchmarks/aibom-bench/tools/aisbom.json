@@ -84,5 +84,18 @@
   },
   "notes": [
     "--offline is passed because telemetry to api.aisbom.io is on by default."
-  ]
+  ],
+  "default": {
+    "argv": [
+      "{bin}",
+      "scan",
+      "{target}",
+      "--format",
+      "json",
+      "--output",
+      "{out}/default.json"
+    ],
+    "outputs": []
+  },
+  "default_env": {}
 }

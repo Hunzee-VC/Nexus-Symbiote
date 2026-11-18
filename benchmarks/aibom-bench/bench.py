@@ -14,7 +14,14 @@ sys.path.insert(0, str(HERE))
 from aibom_bench import corpus, report, runner, scoring, variants  # noqa: E402
 from aibom_bench.validators import Validators  # noqa: E402
 
-ALL_VARIANTS = ["base", "repeat", "drift", *(f"hostile:{case}" for case in variants.HOSTILE_CASES)]
+ALL_VARIANTS = [
+    "base",
+    "repeat",
+    "drift",
+    *(f"hostile:{case}" for case in variants.HOSTILE_CASES),
+    runner.EGRESS_PROBE,
+    runner.EXEC_PROBE,
+]
 
 
 def _truth() -> dict[str, object]:
@@ -83,12 +90,22 @@ def main() -> int:
             validators,
         )
         result.update(
-            {key: adapter.get(key) for key in ("display", "license", "source", "unmeasured")}
+            {
+                key: adapter.get(key)
+                for key in (
+                    "display",
+                    "license",
+                    "source",
+                    "unmeasured",
+                    "not_gradable",
+                    "observed",
+                )
+            }
         )
         results.append(result)
-    results.sort(key=lambda result: -result["total"])
+    results.sort(key=lambda result: (bool(result.get("not_gradable")), -result["total"]))
     args.out.mkdir(parents=True, exist_ok=True)
-    scoring.dump(results, args.out / "results.json")
+    scoring.dump(results, args.out / "results.json", args.work)
     (args.out / "RESULTS.md").write_text(report.render(results, truth, validators.used))
     for result in results:
         print(f"{result['total']:5.1f}  {result['grade']}  {result['display']}")

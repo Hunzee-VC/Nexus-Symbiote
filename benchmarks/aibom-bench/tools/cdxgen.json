@@ -45,7 +45,7 @@
     {
       "label": "aibom",
       "argv": [
-        "/tmp/claude-0/-home-user-Nexus-Symbiote/7bf94c7d-f990-5f8c-b2c1-7ba518c2ee9a/scratchpad/tools/cdxgen/node_modules/.bin/aibom",
+        "{tooldir}/node_modules/.bin/aibom",
         "--no-install-deps",
         "--no-validate",
         "--format",
@@ -109,23 +109,20 @@
           "smoke_bytes": 1069
         }
       ]
-    },
-    {
-      "label": "default",
-      "argv": [
-        "{bin}",
-        "-o",
-        "{out}/default.cdx.json",
-        "{target}"
-      ],
-      "outputs": [],
-      "only": [
-        "base"
-      ]
     }
   ],
   "notes": [
-    "Scored scans pass --no-install-deps. The scan labelled default runs once without it, on the base corpus only, so the execution canaries reflect the default command; its output is not scored.",
+    "Scored scans pass --no-install-deps. The plain command is exercised by the default-command probes.",
     "SARIF comes from cdx-audit run on the BOM cdxgen wrote."
-  ]
+  ],
+  "default": {
+    "argv": [
+      "{bin}",
+      "-o",
+      "{out}/default.json",
+      "{target}"
+    ],
+    "outputs": []
+  },
+  "default_env": {}
 }

@@ -1,0 +1,262 @@
+{
+ "D01": {
+  "change.tool-description": {
+   "reported": true,
+   "evidence": "[HIGH] High change in 'get_order': properties.source_sha256 changed.",
+   "why": "names get_order as changed (source hash changed)"
+  },
+  "change.mcp-version-and-scope": {
+   "reported": true,
+   "evidence": "[CRITICAL] Critical change in 'filesystem': MCP server static source binding changed: launcher, arguments, environment, endpoint or declared tools differ, or the binding key changed. Review before execution.; Version changed: 2025.8.21 → 2026.8.31; properties.static_config_hash changed.; properties.packages changed.; package_url changed.",
+   "why": "names the filesystem server as changed, with the version move and a changed launch binding"
+  },
+  "change.mcp-added": {
+   "reported": true,
+   "evidence": "[MEDIUM] New component 'shadow-sync' (mcp-server) added to supply chain.",
+   "why": "names shadow-sync as a newly added MCP server"
+  },
+  "change.model-bytes": {
+   "reported": true,
+   "evidence": "[HIGH] High change in 'models/intent-classifier/model.safetensors': File hash (sha256) changed.",
+   "why": "names the classifier weights file and says its hash changed"
+  },
+  "change.skill-widened": {
+   "reported": true,
+   "evidence": "[HIGH] High change in '.claude/skills/refund-processing/SKILL.md': File hash (sha256) changed.",
+   "why": "names the refund-processing SKILL.md (and its script) as changed by hash"
+  },
+  "change.model-revision": {
+   "reported": false,
+   "evidence": "",
+   "why": "no line names the Llama model, its revision or services/api/llm.py"
+  },
+  "change.permissions-widened": {
+   "reported": true,
+   "evidence": "[HIGH] High change in 'claude-code': Risk findings added: 1 high (permission_scope), 1 medium (permission_scope).; Risk findings removed: 1 medium (permission_scope).; properties.settings_hashes changed.; properties.declared_permission_rule_counts changed.; permission_mode changed.",
+   "why": "names the claude-code agent settings as changed: permission mode, settings hashes and permission rule counts"
+  },
+  "change.system-prompt": {
+   "reported": false,
+   "evidence": "",
+   "why": "no line names the system prompt or support_agent.md; the prompt collector is only noted as partial"
+  },
+  "change.dataset-bytes": {
+   "reported": false,
+   "evidence": "",
+   "why": "no line names the training set or support_tickets.jsonl"
+  },
+  "change.mcp-removed": {
+   "reported": true,
+   "evidence": "[HIGH] Component 'github' (mcp-server) is no longer in the inventory: confirm it was deleted, not moved out of collector scope.",
+   "why": "names the github MCP server as gone, and separately the removed .vscode/mcp.json surface"
+  }
+ },
+ "D02": {
+  "change.tool-description": {
+   "reported": false,
+   "evidence": "",
+   "why": "the report lists one added component (shadow-sync) and empty removed and changed lists; this component is not named"
+  },
+  "change.mcp-version-and-scope": {
+   "reported": false,
+   "evidence": "",
+   "why": "the report lists one added component (shadow-sync) and empty removed and changed lists; this component is not named"
+  },
+  "change.mcp-added": {
+   "reported": true,
+   "evidence": "\"name\": \"shadow-sync\",",
+   "why": "shadow-sync is the single entry in the added list, typed mcp_server"
+  },
+  "change.model-bytes": {
+   "reported": false,
+   "evidence": "",
+   "why": "the report lists one added component (shadow-sync) and empty removed and changed lists; this component is not named"
+  },
+  "change.skill-widened": {
+   "reported": false,
+   "evidence": "",
+   "why": "the report lists one added component (shadow-sync) and empty removed and changed lists; this component is not named"
+  },
+  "change.model-revision": {
+   "reported": false,
+   "evidence": "",
+   "why": "the report lists one added component (shadow-sync) and empty removed and changed lists; this component is not named"
+  },
+  "change.permissions-widened": {
+   "reported": false,
+   "evidence": "",
+   "why": "the report lists one added component (shadow-sync) and empty removed and changed lists; this component is not named"
+  },
+  "change.system-prompt": {
+   "reported": false,
+   "evidence": "",
+   "why": "the report lists one added component (shadow-sync) and empty removed and changed lists; this component is not named"
+  },
+  "change.dataset-bytes": {
+   "reported": false,
+   "evidence": "",
+   "why": "the report lists one added component (shadow-sync) and empty removed and changed lists; this component is not named"
+  },
+  "change.mcp-removed": {
+   "reported": false,
+   "evidence": "",
+   "why": "the report lists one added component (shadow-sync) and empty removed and changed lists; this component is not named"
+  }
+ },
+ "D03": {
+  "change.tool-description": {
+   "reported": false,
+   "evidence": "",
+   "why": "the report names only the filesystem and shadow-sync servers and their packages; this component is not named"
+  },
+  "change.mcp-version-and-scope": {
+   "reported": true,
+   "evidence": "new_packages[0] = npm:@modelcontextprotocol/server-filesystem@2026.8.31",
+   "why": "shows server-filesystem 2025.8.21 removed and 2026.8.31 added, and the filesystem server removed and re-added; the widened root is not stated"
+  },
+  "change.mcp-added": {
+   "reported": true,
+   "evidence": "inventory_diff.new_servers[1].name = shadow-sync",
+   "why": "lists shadow-sync as a new server with its new package"
+  },
+  "change.model-bytes": {
+   "reported": false,
+   "evidence": "",
+   "why": "the report names only the filesystem and shadow-sync servers and their packages; this component is not named"
+  },
+  "change.skill-widened": {
+   "reported": false,
+   "evidence": "",
+   "why": "the report names only the filesystem and shadow-sync servers and their packages; this component is not named"
+  },
+  "change.model-revision": {
+   "reported": false,
+   "evidence": "",
+   "why": "the report names only the filesystem and shadow-sync servers and their packages; this component is not named"
+  },
+  "change.permissions-widened": {
+   "reported": false,
+   "evidence": "",
+   "why": "the report names only the filesystem and shadow-sync servers and their packages; this component is not named"
+  },
+  "change.system-prompt": {
+   "reported": false,
+   "evidence": "",
+   "why": "the report names only the filesystem and shadow-sync servers and their packages; this component is not named"
+  },
+  "change.dataset-bytes": {
+   "reported": false,
+   "evidence": "",
+   "why": "the report names only the filesystem and shadow-sync servers and their packages; this component is not named"
+  },
+  "change.mcp-removed": {
+   "reported": false,
+   "evidence": "",
+   "why": "the report names only the filesystem and shadow-sync servers and their packages; this component is not named"
+  }
+ },
+ "D04": {
+  "change.tool-description": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only row in the drift table is model.safetensors; this component is not named"
+  },
+  "change.mcp-version-and-scope": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only row in the drift table is model.safetensors; this component is not named"
+  },
+  "change.mcp-added": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only row in the drift table is model.safetensors; this component is not named"
+  },
+  "change.model-bytes": {
+   "reported": true,
+   "evidence": "│ model.safet… │ Modified │ DRIFT │ INTEGRITY │ - │ Hash: │",
+   "why": "borderline: the row is truncated to \"model.safet…\" but is marked Modified with hash drift, which identifies model.safetensors"
+  },
+  "change.skill-widened": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only row in the drift table is model.safetensors; this component is not named"
+  },
+  "change.model-revision": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only row in the drift table is model.safetensors; this component is not named"
+  },
+  "change.permissions-widened": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only row in the drift table is model.safetensors; this component is not named"
+  },
+  "change.system-prompt": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only row in the drift table is model.safetensors; this component is not named"
+  },
+  "change.dataset-bytes": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only row in the drift table is model.safetensors; this component is not named"
+  },
+  "change.mcp-removed": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only row in the drift table is model.safetensors; this component is not named"
+  }
+ },
+ "D05": {
+  "change.tool-description": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only component shown is the intent-classifier model file; this component is not named"
+  },
+  "change.mcp-version-and-scope": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only component shown is the intent-classifier model file; this component is not named"
+  },
+  "change.mcp-added": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only component shown is the intent-classifier model file; this component is not named"
+  },
+  "change.model-bytes": {
+   "reported": true,
+   "evidence": "│ local-model-file │ model │ - │ local │ 0.95 │ models/intent-classifier/model.safetensors │",
+   "why": "borderline: the model file at this path is listed under Added (with one Removed), so the report shows it changed as a replace rather than a modification"
+  },
+  "change.skill-widened": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only component shown is the intent-classifier model file; this component is not named"
+  },
+  "change.model-revision": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only component shown is the intent-classifier model file; this component is not named"
+  },
+  "change.permissions-widened": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only component shown is the intent-classifier model file; this component is not named"
+  },
+  "change.system-prompt": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only component shown is the intent-classifier model file; this component is not named"
+  },
+  "change.dataset-bytes": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only component shown is the intent-classifier model file; this component is not named"
+  },
+  "change.mcp-removed": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only component shown is the intent-classifier model file; this component is not named"
+  }
+ }
+}

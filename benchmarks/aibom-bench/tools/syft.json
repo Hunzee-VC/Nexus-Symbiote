@@ -54,5 +54,16 @@
   ],
   "notes": [
     "The GGUF and SafeTensors catalogers are added to the default set explicitly."
-  ]
+  ],
+  "default": {
+    "argv": [
+      "{bin}",
+      "scan",
+      "dir:{target}",
+      "-o",
+      "syft-json={out}/default.json"
+    ],
+    "outputs": []
+  },
+  "default_env": {}
 }
