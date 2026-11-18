@@ -298,7 +298,7 @@ _HIDDEN_GOAL = "Such text can redirect the agent's goal without a reviewer notic
 _HIDDEN_REVIEW = (
     "Hiding or disguising instruction text from human review is what this technique describes."
 )
-_UI_MISREPRESENTATION = "The file can display differently from what the agent processes."
+_UI_MISREPRESENTATION = "The text can display differently from what the agent processes."
 _PROMPT_INPUT = "Instruction text reaches the model with characters that are not neutralized."
 _MODEL_SUPPLY = "The model artifact is part of the agent's supply chain."
 
@@ -1104,6 +1104,33 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
     ),
     "tag_characters": _HIDDEN_CHARACTERS,
+    "tool_description_instructions": (
+        _ref(
+            OWASP_LLM_2025,
+            "LLM01:2025",
+            "A tool description is part of the model's prompt, and text in it that is written "
+            "as instructions can act as an injected prompt.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI01",
+            "Instructions carried in a tool description can redirect the agent's goal.",
+        ),
+        _ref(
+            OWASP_LLM_2026,
+            "LLM01:2026",
+            "A tool description is part of the model's prompt, and text in it that is written "
+            "as instructions can act as an injected prompt.",
+        ),
+        _ref(
+            MITRE_ATLAS,
+            "AML.T0010.005",
+            "A description that carries instructions for the model is evidence that the tool "
+            "could be a compromised one.",
+        ),
+        _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
+        _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
+    ),
     "transport_ambiguity": (_ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),),
     "transport_security": (
         _ref(

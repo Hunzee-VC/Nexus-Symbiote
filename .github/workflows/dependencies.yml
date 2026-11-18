@@ -160,3 +160,4 @@ jobs:
           tests/test_redaction_union.py
           tests/test_registry_pnpm_index.py
           tests/test_registry_redirects.py
+          tests/test_tool_description_findings.py

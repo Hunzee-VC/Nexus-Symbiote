@@ -656,6 +656,29 @@ A way around a limit that its entry does not describe is worth a
   name with a digest of the declaring file; handlers imported from other modules
   are not covered. Observe the effective tools with `discover-mcp` or
   `verify-live`.
+- **Tool descriptions are checked only where they are stated.** The hidden-character
+  and comment checks and `tool_description_instructions` read the description that a
+  configuration's `tools` array declares, as declared; for a Python tool the collector
+  records, MCP or framework, a string literal `description` argument
+  (`description_override` for the OpenAI Agents SDK) that is not empty, or else the
+  function's docstring, which the SDKs fall back to; and for a TypeScript or JavaScript
+  tool, a string literal, a template without substitutions, or such literals joined with
+  `+`, given as the second argument of `tool` or as the `description` member of the
+  second argument of `registerTool` (the last one, when it is repeated). These are not
+  read and leave no gap: a description that is computed, such as a constant, an
+  f-string, a call, a template with a substitution, a shorthand or spread member or a
+  computed key (for a Python tool the docstring is then checked in its place, though
+  it may not be what the server serves); a `title`; the descriptions of parameters and
+  of schema properties; a server's `instructions`, prompts and resources; the
+  description of a tool the collector does not record; an A2A skill's description; and
+  the descriptions that `discover-mcp` and `verify-live` observe, which are
+  fingerprinted and shown but not checked. So a scan without these findings does not
+  show that a server serves no such description. The rule itself reports a shape, not
+  a meaning; see
+  [known false-positive and false-negative classes](security-model.md#known-false-positive-and-false-negative-classes).
+  A [suppression](policy-reference.md#suppressions) of a finding on a tool declared in
+  source is bound to the digest of the declaring file, so any change to that file
+  retires it.
 - **Tool digests are unkeyed.** A tool's `definition_hash` covers the declared
   descriptor, including text the exported descriptor omits, so anyone holding the
   inventory can confirm a guess of a low-entropy value withheld there.

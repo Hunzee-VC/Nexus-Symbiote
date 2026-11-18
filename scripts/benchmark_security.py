@@ -33,12 +33,17 @@ KINDS = frozenset(
         "model_signature",
         "model_format",
         "hidden_unicode",
+        "tool_description",
         "mcp_pinning",
         "tool_drift",
         "credential_export",
         "parse_coverage",
     }
 )
+# Kinds decided by a finding category on the component the case is about.
+FINDING_KINDS = {
+    "tool_description": (ComponentType.TOOL, "tool_description_instructions"),
+}
 DEFAULT_MANIFEST = Path(__file__).resolve().parents[1] / "benchmarks" / "manifest.json"
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 MAX_FIXTURE_BYTES = 8 * 1024 * 1024
@@ -205,6 +210,15 @@ def _evaluate(case: dict[str, Any], directory: Path) -> dict[str, Any]:
         predicted = bool(
             set(categories) & {"invisible_characters", "bidi_override", "tag_characters"}
         )
+    elif kind in FINDING_KINDS:
+        subject, category = FINDING_KINDS[kind]
+        if not any(c.component_type == subject for c in result.components):
+            return {
+                "prediction": None,
+                "unknown_reason": f"required {subject.value} was not collected",
+                "facts": facts,
+            }
+        predicted = category in categories
     elif kind == "mcp_pinning":
         servers = [c for c in result.components if c.component_type == ComponentType.MCP_SERVER]
         if not servers:

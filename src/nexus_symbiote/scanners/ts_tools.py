@@ -44,6 +44,7 @@ from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import ClaimEvidence, MCPServerComponent, ToolComponent
 from nexus_symbiote.limits import Bound
 from nexus_symbiote.scanners.base import ScanResult
+from nexus_symbiote.scanners.tool_descriptions import tool_description_risks
 
 _SDK = "@modelcontextprotocol/"
 _MODULES = {"@modelcontextprotocol/server", "@modelcontextprotocol/sdk/server/mcp.js"}
@@ -692,6 +693,54 @@ def _operand(node: Node | None, wrappers: Collection[str] = _WRAPPERS) -> Node |
     return node
 
 
+def _literal_text(node: Node | None) -> str | None:
+    """A string, or strings joined with ``+``, as JavaScript reads them, else None.
+
+    The operands of a join are visited from a stack, so a long one costs no recursion.
+    """
+    parts: list[str] = []
+    pending = [node]
+    while pending:
+        current = _operand(pending.pop(), _REFERENCE_WRAPPERS)
+        if current is not None and current.type == "binary_expression":
+            operator = current.child_by_field_name("operator")
+            if operator is None or operator.type != "+":
+                return None
+            pending += (current.child_by_field_name("right"), current.child_by_field_name("left"))
+            continue
+        text = _string_value(current)
+        if text is None:
+            return None
+        parts.append(text)
+    return "".join(parts)
+
+
+_MEMBER_NAMES = frozenset({"property_identifier", "shorthand_property_identifier", "string"})
+
+
+def _stated_description(method: str, values: list[Node]) -> str | None:
+    """The description a registration states as a literal, else None.
+
+    ``tool`` takes it as its second argument and ``registerTool`` as the ``description``
+    member of its second; the last such member counts, as in JavaScript. A description
+    that is computed, shorthand or spread into the object is not read.
+    """
+    stated = values[1] if len(values) > 1 else None
+    if method == "tool":
+        return _literal_text(stated)
+    if stated is None or stated.type != "object":
+        return None
+    description: Node | None = None
+    for member in _parts(stated):
+        pair = member.type == "pair"
+        key = member.child_by_field_name("key") if pair else member
+        if key is None or key.type not in _MEMBER_NAMES:
+            continue
+        if (_string_value(key) if key.type == "string" else _name(key)) == "description":
+            description = member.child_by_field_name("value") if pair else None
+    return _literal_text(description)
+
+
 def _property(member: Node) -> str | None:
     """A member's name as JavaScript reads it, or None when it is computed."""
     if member.type == "member_expression":
@@ -1026,6 +1075,7 @@ def _collect_source(content: bytes, path: Path, result: ScanResult) -> None:
                 f"{location}:{node.start_point.row + 1} (duplicate MCP tool registration)"
             )
             continue
+        description = _stated_description(method, values)
         tool = ToolComponent(
             bom_ref=ref,
             name=name,
@@ -1045,6 +1095,7 @@ def _collect_source(content: bytes, path: Path, result: ScanResult) -> None:
                     unknown_reason="Only the literal registration name was collected; the effective descriptor is unobserved",
                 )
             },
+            risks=tool_description_risks(description, name) if description else [],
         )
         server.tool_refs.append(ref)
         server.tool_count += 1

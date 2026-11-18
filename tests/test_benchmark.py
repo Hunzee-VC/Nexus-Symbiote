@@ -28,14 +28,14 @@ def clone_corpus(tmp_path):
 # The digest of the committed manifest, labels and fixtures. The gate compares results
 # only with the manifest they were produced from, so a label flipped in the same change as
 # the detector would pass it; changing any case must also change this line, visibly.
-CORPUS_DIGEST = "cfa1b7b2ae15f80adbca486a2ae53dd77e54d3a10cddb8f6976765c13382c7cc"
+CORPUS_DIGEST = "913077a7ac1cc309651cf2e43cc9b809ee1da4a664306167f0a3b9bd2f23224d"
 
 
 def test_committed_inputs_have_exact_hashes_and_explicit_labels():
     manifest, digest = benchmark.load_manifest(benchmark.DEFAULT_MANIFEST)
     assert digest == CORPUS_DIGEST
-    assert len(manifest["cases"]) == 22
-    assert sum(c["task"] == "detection" for c in manifest["cases"]) == 20
+    assert len(manifest["cases"]) == 24
+    assert sum(c["task"] == "detection" for c in manifest["cases"]) == 22
     assert any(c["truth"] is True for c in manifest["cases"])
     assert any(c["truth"] is False for c in manifest["cases"])
     assert any(c["truth"] is None for c in manifest["cases"])
@@ -120,10 +120,31 @@ def test_the_key_order_case_needs_canonical_descriptor_hashing(monkeypatch):
     assert benchmark._evaluate(case, directory)["prediction"] is True
 
 
+@pytest.mark.parametrize(
+    "positive, twin",
+    [
+        ("tool-description-instructions", "tool-description-ordinary"),
+    ],
+)
+def test_each_finding_rule_has_a_positive_case_and_a_twin_that_stays_clean(
+    positive, twin, tmp_path
+):
+    manifest, _ = benchmark.load_manifest(benchmark.DEFAULT_MANIFEST)
+    cases = {case["id"]: case for case in manifest["cases"]}
+    corpus = benchmark.DEFAULT_MANIFEST.parent
+    found = benchmark._evaluate(cases[positive], corpus / cases[positive]["directory"])
+    clean = benchmark._evaluate(cases[twin], corpus / cases[twin]["directory"])
+    assert (found["prediction"], clean["prediction"]) == (True, False)
+    assert cases[positive]["truth"] is True and cases[twin]["truth"] is False
+    # Without the component the case is about, the outcome is unknown, not clean.
+    (tmp_path / "project").mkdir()
+    assert benchmark._evaluate(cases[positive], tmp_path)["prediction"] is None
+
+
 def test_actual_corpus_run_records_evidence_and_unknown_coverage():
     report = benchmark.run_benchmark()
-    assert report["corpus"]["cases"] == 22
-    assert report["metrics"]["detection_cases"] == 20
+    assert report["corpus"]["cases"] == 24
+    assert report["metrics"]["detection_cases"] == 22
     assert report["measurement"]["elapsed_seconds"] > 0
     assert report["measurement"]["python_traced_peak_bytes"] > 0
     assert len(report["tool"]["source_digest"]) == 64

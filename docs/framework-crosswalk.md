@@ -393,7 +393,7 @@ every rule.
 | `mitre-atlas-2026.10` | AML.T0068 LLM Prompt Obfuscation | all | Hiding or disguising instruction text from human review is what this technique describes. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
 | `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
-| `cwe` | CWE-451 User Interface (UI) Misrepresentation of Critical Information | all | The file can display differently from what the agent processes. |
+| `cwe` | CWE-451 User Interface (UI) Misrepresentation of Critical Information | all | The text can display differently from what the agent processes. |
 | `cwe` | CWE-1427 Improper Neutralization of Input Used for LLM Prompting | all | Instruction text reaches the model with characters that are not neutralized. |
 
 ### `capability_scope`
@@ -541,7 +541,7 @@ every rule.
 | `mitre-atlas-2026.10` | AML.T0068 LLM Prompt Obfuscation | all | Hiding or disguising instruction text from human review is what this technique describes. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
 | `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
-| `cwe` | CWE-451 User Interface (UI) Misrepresentation of Critical Information | all | The file can display differently from what the agent processes. |
+| `cwe` | CWE-451 User Interface (UI) Misrepresentation of Critical Information | all | The text can display differently from what the agent processes. |
 | `cwe` | CWE-1427 Improper Neutralization of Input Used for LLM Prompting | all | Instruction text reaches the model with characters that are not neutralized. |
 
 ### `launch_context`
@@ -804,8 +804,19 @@ No reference: no entry was defensible for this category.
 | `mitre-atlas-2026.10` | AML.T0068 LLM Prompt Obfuscation | all | Hiding or disguising instruction text from human review is what this technique describes. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
 | `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
-| `cwe` | CWE-451 User Interface (UI) Misrepresentation of Critical Information | all | The file can display differently from what the agent processes. |
+| `cwe` | CWE-451 User Interface (UI) Misrepresentation of Critical Information | all | The text can display differently from what the agent processes. |
 | `cwe` | CWE-1427 Improper Neutralization of Input Used for LLM Prompting | all | Instruction text reaches the model with characters that are not neutralized. |
+
+### `tool_description_instructions`
+
+| Framework | Entry | Severities | Rationale |
+| --- | --- | --- | --- |
+| `owasp-llm-2025` | LLM01:2025 Prompt Injection | all | A tool description is part of the model's prompt, and text in it that is written as instructions can act as an injected prompt. |
+| `owasp-llm-2026` | LLM01:2026 Prompt Injection | all | A tool description is part of the model's prompt, and text in it that is written as instructions can act as an injected prompt. |
+| `owasp-asi-2026` | ASI01 Agent Goal Hijack | all | Instructions carried in a tool description can redirect the agent's goal. |
+| `mitre-atlas-2026.10` | AML.T0010.005 Supply Chain Compromise: AI Agent Tool | all | A description that carries instructions for the model is evidence that the tool could be a compromised one. |
+| `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 
 ### `transitive_resolution`
 

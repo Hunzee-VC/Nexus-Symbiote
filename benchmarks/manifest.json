@@ -355,6 +355,36 @@
         }
       ],
       "parameters": {}
+    },
+    {
+      "id": "tool-description-instructions",
+      "kind": "tool_description",
+      "task": "detection",
+      "truth": true,
+      "rationale": "A tool description holds an element addressed to the model, a directive to keep a step from the user and a credential path.",
+      "directory": "fixtures/tool-description-instructions",
+      "references": [
+        {
+          "path": "project/server.py",
+          "sha256": "37ecdd307360dad9634674931268315cfac4d0657350faaab3c14b7d8f30189d"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "tool-description-ordinary",
+      "kind": "tool_description",
+      "task": "detection",
+      "truth": false,
+      "rationale": "Ordinary descriptions that say IMPORTANT in prose, name the user, a key path or an example element carry at most one mark each.",
+      "directory": "fixtures/tool-description-ordinary",
+      "references": [
+        {
+          "path": "project/server.py",
+          "sha256": "e91c65c3cb7cc6680708297d43ce5a2f7291d1f18d1ea2ab79b8b0b24fc4d4d6"
+        }
+      ],
+      "parameters": {}
     }
   ]
 }
