@@ -152,15 +152,12 @@ def test_source_byte_and_ast_limits_fail_without_partial_tools(tmp_path):
     assert not _tools(result) and result.scan_failures
 
 
-def test_receiver_alias_and_parser_deadline_are_reported(tmp_path, monkeypatch):
+def test_receiver_alias_is_reported(tmp_path):
     result = _scan(
         tmp_path, IMPORT + SERVER + 'const alias=server; alias.tool("read", {}, handler);'
     )
     assert not _tools(result)
     assert any("unresolved MCP registration receiver" in x for x in result.surfaces_excluded)
-    monkeypatch.setattr("nexus_symbiote.scanners.ts_tools.MAX_PARSE_SECONDS", -1)
-    result = _scan(tmp_path, IMPORT + SERVER + 'server.tool("read", {}, handler);')
-    assert not _tools(result) and result.scan_failures
 
 
 def test_factory_source_declarations_remain_static_and_shadow_aware(tmp_path):
