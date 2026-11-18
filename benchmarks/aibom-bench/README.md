@@ -33,15 +33,17 @@ The corpus contains live hostile payloads, so do not generate it on a workstatio
    seed for an independent holdout run:
 
    ```bash
-   python3 generate.py --out /opt/aibom-bench/corpus --seed 20261118
+   python3 generate.py --out /opt/aibom-bench/corpus2 --seed 20261118
    ```
 
-   Expected: `corpus /opt/aibom-bench/corpus seed=20261118 items=124 digest=e771ea4d7f519c31`
+   Expected: `corpus /opt/aibom-bench/corpus2 seed=20261118 items=126 digest=e771ea4d7f519c31`.
+   The payloads embed the absolute canary path, so the digest is reproducible only for
+   the same output directory; `run.py` refuses a corpus moved after generation.
 
 4. Run every tool over every scenario in the sandbox (about 90 minutes for all ten):
 
    ```bash
-   python3 run.py --corpus /opt/aibom-bench/corpus --tools tools.json --tools-root /opt/aibom-bench/tools --runs /opt/aibom-bench/runs
+   python3 run.py --corpus /opt/aibom-bench/corpus2 --tools tools.json --tools-root /opt/aibom-bench/tools --runs /opt/aibom-bench/runs
    ```
 
    Each line shows the tool, the scenario, the exit codes of its commands, the elapsed
@@ -51,7 +53,7 @@ The corpus contains live hostile payloads, so do not generate it on a workstatio
 5. Score:
 
    ```bash
-   python3 score.py --corpus /opt/aibom-bench/corpus --runs /opt/aibom-bench/runs --tools tools.json --out results
+   python3 score.py --corpus /opt/aibom-bench/corpus2 --runs /opt/aibom-bench/runs --tools tools.json --out results
    ```
 
    `results/results.json` holds per-item evidence for every tool; `results/scorecard.md`
@@ -63,7 +65,7 @@ The corpus contains live hostile payloads, so do not generate it on a workstatio
    empty tool, a tool that dumps every file, and one that lists every path):
 
    ```bash
-   python3 calibrate.py --corpus /opt/aibom-bench/corpus --work /tmp/aibom-calibration
+   python3 calibrate.py --corpus /opt/aibom-bench/corpus2 --work /tmp/aibom-calibration
    ```
 
    Expected: oracle 96.5 (A), cat 7.4 (F), lister 0.0 (F), empty 0.0 (F).
@@ -84,6 +86,10 @@ CycloneDX, SPDX, SARIF or JSON and is read incorrectly, fix the generic reader i
 `score.py` and re-score every tool.
 
 ## Security considerations
+
+- Raw outputs of `s09d-terminal-injection` contain the planted terminal escape sequences
+  (a window-title change and an inert OSC 52 clipboard write) wherever a tool echoed
+  them. View those files with `cat -v` or a hex viewer, not a terminal.
 
 - The corpus includes a pickle and a PyTorch checkpoint that write files when loaded, an
   MCP config and project build scripts that do the same when executed, a 3 GiB

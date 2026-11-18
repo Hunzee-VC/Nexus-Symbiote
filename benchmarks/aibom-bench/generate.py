@@ -117,8 +117,11 @@ FINDING_KEYWORDS: dict[str, list[str]] = {
     "C07F": _SECRET,
     "T03F": _POISON,
     "T07F": _POISON,
-    "K02F": ["curl", "exfil", "credential", "remote", "download", "pipe", "shell", "aws",
-             "network", "malicious", "suspicious", "execut"],
+    # Specific to the behaviour (credential theft, curl piped to a shell): generic words
+    # such as "network" or "shell" appear in capability boilerplate on every skill.
+    "K02F": ["curl", "exfil", "~/.aws", ".aws/credentials", "aws credential", "credential theft",
+             "credential exfil", "| sh", "pipe to shell", "piped to sh", "download and execute",
+             "remote script", "malicious", "suspicious"],
     "K09F": ["unicode", "invisible", "hidden", "tag char", "zero-width", "zero width",
              "steganograph", "control char", "bidi", "u+e00", "non-printing"],
     "K10F": ["curl", "network", "exfil", "external", "egress", "url", "contact", "http",
@@ -740,6 +743,10 @@ def build_mcp(c: Corpus) -> None:
         "C05", s, "mcp", "Remote HTTP server with env-referenced credential", [t5], 3,
         [check("url", 1, f"{t5}.mcp.example.com"), check("credential_ref", 1, "acme_crm_token")],
     )  # fmt: skip
+    c.negative("NC3", s, "mcp", "negative_finding", "Env-referenced credential is not called "
+               "hardcoded", [t5], 1, ["hardcoded", "hard-coded", "plaintext", "literal",
+                                      "inline credential", "exposes inline", "embedded secret",
+                                      "embedded credential"])  # fmt: skip
     c.component(
         "C06", s, "mcp", "Server holding a literal credential", [t6], 1,
         [check("credential_name", 1, "github_personal_access_token")],
@@ -906,6 +913,8 @@ def build_skills(c: Corpus) -> None:
         [check("script", 1, helper), check("allowed_tools", 1, "allowed-tools", "allowed_tools",
                                              "grep")],
     )  # fmt: skip
+    c.negative("NK3", s, "skills", "negative_finding", "Benign skill script is not called "
+               "exfiltrating", [t], 1, FINDING_KEYWORDS["K02F"])  # fmt: skip
     c.add(
         id="K01H", scenario=s, domain="skills", kind="component", title="Bundled script digest",
         match=[helper], weight=1, checks=[check("sha256", 1, sha256(script))],

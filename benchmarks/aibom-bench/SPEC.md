@@ -135,8 +135,8 @@ document that inventories nothing conforms trivially and is not counted.
 
 **Safety items** use runner evidence: canary files, `execve` records, output bytes,
 timeouts, peak RSS and `connect` attempts. Canary and build-command checks cover the
-benchmark configuration and the tool's plain invocation (`default_commands`, run on six
-scenarios). X09 also fails when, in any scenario, the tool runs or tries to run a
+benchmark configuration and the tool's plain invocation (`default_commands`, run on
+every scenario). X09 also fails when, in any scenario, the tool runs or tries to run a
 package manager or build on the scanned project (`npm install` without
 `--ignore-scripts`, `pip install -e .` or `-r <project file>`, `python setup.py`, `uv
 sync`, `poetry install`): offline that fails before anything is downloaded, but in a CI

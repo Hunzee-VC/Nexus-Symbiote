@@ -86,7 +86,8 @@ def main() -> None:
     gt = json.loads((args.corpus / "ground_truth.json").read_text())
     runs = args.work / "runs"
     run_record = {"commands": [{"argv": ["synthetic"], "exit": 0, "timed_out": False,
-                                "seconds": 0, "max_rss_bytes": 0}], "canaries": []}  # fmt: skip
+                                "seconds": 0, "max_rss_bytes": 0}], "canaries": [],
+                  "corpus_digest": gt["corpus_digest"]}  # fmt: skip
     tools = ("oracle", "empty", "cat", "lister")
     for tool in tools:
         (runs / tool).mkdir(parents=True, exist_ok=True)

@@ -79,6 +79,8 @@ KIND_WORDS: dict[str, list[str]] = {
 }  # fmt: skip
 KIND_WORDS["safety"] = sorted({w for k in ("mcp", "models") for w in KIND_WORDS[k]})
 # Ground-truth items expected to carry ML-BOM / SPDX 3 AI and Dataset typing.
+# A risk-named property whose value says "no risk" is not a finding.
+NULL_VALUES = {"", "none", "false", "0", "no", "n/a", "null", "low-none"}
 # Safety probes the positive control must trip, or the benchmark cannot see them fail.
 PROBES = ("X01", "X02", "X03", "X04", "X07", "X08", "X09")
 AI_PROFILE_ITEMS = ("M01", "M03", "M05", "M06", "M09", "R01", "R03")
@@ -246,8 +248,10 @@ def read_cyclonedx(doc: dict[str, Any], src: str) -> list[Rec]:
             recs.append(component(e, src))
             for p in e.get("properties") or []:
                 name = str((p or {}).get("name", ""))
-                if isinstance(p, dict) and re.search(
-                    r"(risk|finding|threat|warning|vuln|issue|alert)", name, re.I
+                if (
+                    isinstance(p, dict)
+                    and re.search(r"(risk|finding|threat|warning|vuln|issue|alert)", name, re.I)
+                    and str(p.get("value", "")).strip().lower() not in NULL_VALUES
                 ):
                     sev = norm_severity(p.get("value")) if re.search(
                         r"(severity|level)$", name, re.I) else None  # fmt: skip
@@ -711,7 +715,7 @@ class ToolRun:
                 self.meta[d.name] = json.loads(run_json.read_text())
 
     def stale(self, digest: str) -> list[str]:
-        return [t for t, m in self.meta.items() if m.get("corpus_digest") not in (None, digest)]
+        return [t for t, m in self.meta.items() if m.get("corpus_digest") != digest]
 
     def r(self, scn: str) -> list[Rec]:
         return self.recs.get(scn, [])
@@ -1253,8 +1257,8 @@ def main() -> None:
         dead = sorted(set(PROBES) - failed)
         control["dead_probes"] = dead
         if dead:
-            print(f"WARNING: safety probes that the positive control did not trip: {dead}",
-                  file=sys.stderr)  # fmt: skip
+            sys.exit(f"safety probes that the positive control did not trip: {dead}; the "
+                     "sandbox cannot see these failures, so no grade can be published")  # fmt: skip
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "results.json").write_text(json.dumps(results, indent=2) + "\n")
     (args.out / "scorecard.md").write_text(scorecard(results))
