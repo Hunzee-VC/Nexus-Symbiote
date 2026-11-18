@@ -670,7 +670,8 @@ def build_execs(strace_files: list[Path]) -> list[str]:
                 targets = [args[i + 1] for i, a in enumerate(args[:-1])
                            if a in ("-r", "--requirement", "-e", "--editable")]  # fmt: skip
                 local = [x for x in targets if "/_work/" in x or not x.startswith("/")]
-                hit = "install" in args and ("." in args or bool(local))
+                checkout = [a for a in args if a == "." or "/_work/" in a]
+                hit = "install" in args and bool(local or checkout)
             elif (
                 prog.startswith("python")
                 and any(a.endswith("setup.py") for a in args)
