@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
+from nexus_symbiote import limits
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.models import PromptComponent, SkillPackageComponent
 from nexus_symbiote.scanners.ide_agents import IDEAgentScanner
@@ -543,7 +544,8 @@ def _listed_references(result) -> int:
 
 
 def test_import_below_the_depth_limit_is_a_gap(tmp_path):
-    deep = "/".join(["d"] * 40) + "/x.md"
+    # Deeper than the default depth limit, which is 64 rather than the earlier 32.
+    deep = "/".join(["d"] * (limits.DEFAULTS.depth + 6)) + "/x.md"
     _write(tmp_path, "CLAUDE.md", f"@{deep}")
     result = PromptScanner().scan(tmp_path)
     assert result.surfaces_excluded == [

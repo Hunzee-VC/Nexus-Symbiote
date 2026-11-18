@@ -55,17 +55,18 @@ def test_a_scoped_scan_names_the_collectors_it_left_out(tmp_path):
     assert json.loads(result.stdout)["components"]
 
 
-def test_a_symlink_names_its_collector_and_failure(tmp_path):
+def test_a_symlink_names_its_collectors_and_failure_once(tmp_path):
+    # Every walking collector meets the symlink and records the same failure; the gate
+    # lists it once, naming all six, in alphabetical rather than run order.
     project = _agent(tmp_path / "p")
     (project / "AGENTS.md").symlink_to(project / "CLAUDE.md")
     result = CliRunner().invoke(main, ["scan", str(project), "--no-project-policy", "--check"])
     assert result.exit_code == 1
     failures = [line for line in _lines(result.stderr) if line.startswith("  - collection: ")]
-    assert "  - collection: AGENTS.md: symlink target is absolute (from mcp)" in failures
-    assert any(
-        line.startswith("  - collection: AGENTS.md: ") and line.endswith(" (from prompt)")
-        for line in failures
-    )
+    assert failures == [
+        "  - collection: AGENTS.md: symlink target is absolute "
+        "(from a2a, ide_agents, mcp, model, prompt, rag)"
+    ]
 
 
 def test_a_critical_finding_fails_the_scan_gate_and_is_listed(tmp_path):
@@ -135,14 +136,18 @@ def _more(output: str) -> str:
 
 
 def test_a_gate_that_lists_some_gaps_says_where_the_rest_are(tmp_path):
-    project = _linked(tmp_path / "p", 11)
+    # Six collectors record each link; the gate lists distinct failures, so more than
+    # MAX_SHOWN_FAILURES links are needed before it counts the rest.
+    project = _linked(tmp_path / "p", 21)
     runner = CliRunner()
     output = tmp_path / "bom.json"
     written = runner.invoke(main, ["scan", str(project), "--no-project-policy", "-o", str(output)])
     assert written.exit_code == 1
-    assert _more(written.stderr).endswith(" more in metadata.completeness.scan_failures")
+    assert _more(written.stderr).endswith(
+        " more distinct failures in metadata.completeness.scan_failures"
+    )
     failures = AIBOM.load(output).metadata.completeness.scan_failures
-    assert all(any(f"link{index}:" in failure for failure in failures) for index in range(11))
+    assert all(any(f"link{index}:" in failure for failure in failures) for index in range(21))
     # --check (the pre-commit hooks) and baseline keep no inventory to look in.
     checked = runner.invoke(main, ["scan", str(project), "--no-project-policy", "--check"])
     target = tmp_path / "baseline.json"

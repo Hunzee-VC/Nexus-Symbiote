@@ -109,6 +109,17 @@ A way around a limit that its entry does not describe is worth a
   project, and the answer would hold only on the machine that scans, not on one
   that later opens the checkout. Replace the link with the file, or with a relative
   link inside the project.
+- **A repeated failure is reported once, by its exact text.** The inventory keeps
+  one record per collector, so one escaping link is six identical
+  `metadata.completeness.scan_failures` entries. `scan`, and the GitHub Action log
+  that relays it, prints it once and names the collectors that recorded it. `risk`,
+  `validate` and the `graph` view read only the inventory, which does not say which
+  collector recorded a failure, so they end the line in `(recorded N times)` and
+  name the collectors that are not complete in a separate coverage gap. Failures are
+  grouped by their exact text: two collectors that word one cause differently stay
+  two lines, and a recorded failure whose own text ends in `(recorded 2 times)` reads
+  like a grouped one. The Action's summary counts distinct failures and, when they
+  differ, the records.
 - **Hard links are ordinary files.** A hard-linked file inside the root is read like
   any other, so an inventory can describe a file that also has a name outside the
   root. See [security boundaries](../SECURITY.md#security-boundaries).
