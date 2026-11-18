@@ -262,8 +262,10 @@ A way around a limit that its entry does not describe is worth a
   one program in it (`-v ./node:/usr/local/bin/node`), is rated; a mount over another
   directory of the image's own code (`-v .:/app` or `/usr/local/lib/node_modules`) is
   not. `python -m` is rated after other options, also after a value option such as
-  `-uX dev` or `-EW ignore`, but not after `-I` or `-P`, which keep the working
-  directory off `sys.path`. A command that loads the mounted working directory by a
+  `-uX dev` or `-EW ignore`, and also after `-I` or `-P`: they keep the working
+  directory off `sys.path`, but a module can still load it (`pdb` or `cProfile` run
+  the file they are given, `uvicorn app:app` imports it), so an image-only
+  `python -I -m srv` beside such a mount is rated too. A command that loads the mounted working directory by a
   word without a `/` or a script suffix (`node .`, `node server`, `python app`,
   `ruby -I. /app/x.rb`) is not rated either.
   `HOME`, `ZDOTDIR`, `XDG_CONFIG_HOME` and `PYTHONUSERBASE` passed with `-e` count as

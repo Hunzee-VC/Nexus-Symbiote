@@ -3246,21 +3246,19 @@ def _mounted_command(options: list[tuple[str, str | None]], words: list[str]) ->
     ):
         return True
     if program.startswith("python") and mounted("."):
-        isolated = False
+        # -I and -P keep the working directory off sys.path, but a module run with them can
+        # still load it: pdb and cProfile run the file they are given, and uvicorn, gunicorn
+        # or fastmcp import the app from the working directory. Any -m counts.
         options_before = iter(words[at + 1 :])
         for word in options_before:
-            # -I and -P keep the working directory off sys.path.
             setting = _PYTHON_SETTING.fullmatch(word)
             if setting or word == "--check-hash-based-pycs":
-                isolated = isolated or bool(setting and {"I", "P"} & set(setting[1]))
                 if not (setting and setting[2]):
                     next(options_before, None)
             elif not word.startswith("-") or word in {"-", "--"}:
                 break
             elif _PYTHON_MODULE.fullmatch(word):
-                return not isolated and not {"I", "P"} & set(word[1 : word.index("m")])
-            elif re.fullmatch(rf"-[{_PYTHON_FLAGS}]+", word) and {"I", "P"} & set(word):
-                isolated = True
+                return True
     rest = iter(words[1:])
     for word in rest:
         if word in _CONTAINER_SETTING_OPTIONS:

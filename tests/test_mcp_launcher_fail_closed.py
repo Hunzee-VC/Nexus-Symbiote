@@ -1200,11 +1200,29 @@ def test_container_mount_over_a_program_on_the_default_path_is_rated(tmp_path, m
         ["-uIRm"],
     ],
 )
-def test_isolated_python_module_does_not_load_the_mounted_directory(tmp_path, options):
+def test_isolated_python_module_with_the_mount_as_working_directory_is_rated(tmp_path, options):
+    # -I and -P keep the working directory off sys.path, but the module can load it anyway
+    # (python -I -m uvicorn app:app imports app.py from it), so the rating does not rely on them.
     words = [*options, "srv"] if options[-1].endswith("m") else [*options, "-m", "srv"]
     args = ["run", "-v", ".:/w", "-w", "/w", DIGEST, "python", *words]
     record = assert_no_gap(tmp_path, {"command": "docker", "args": args})
-    assert "code_loading_option" not in record.properties.get("launch_context", {})
+    assert record.properties["launch_context"].get("code_loading_option") == 1
+
+
+@pytest.mark.parametrize(
+    "words",
+    [
+        ["-I", "-m", "pdb", "/w/evil.py"],
+        ["-Im", "pdb", "/w/evil.py"],
+        ["-P", "-m", "cProfile", "evil.py"],
+        ["-I", "-m", "fastmcp", "run", "/w/server.py"],
+        ["-I", "-m", "uvicorn", "app:app"],
+    ],
+)
+def test_isolated_python_module_that_runs_mounted_code_is_rated(tmp_path, words):
+    args = ["run", "-v", ".:/w", "-w", "/w", DIGEST, "python", *words]
+    record = assert_no_gap(tmp_path, {"command": "docker", "args": args})
+    assert record.properties["launch_context"].get("code_loading_option") == 1
 
 
 # A static sample of a differential fuzz: random npx and npm exec argument lists built from
