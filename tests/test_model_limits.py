@@ -105,17 +105,17 @@ def test_many_model_directories_are_scanned_in_linear_time(tmp_path):
     roots = {}
     for scale in (1, 4):
         roots[scale] = tmp_path / f"scale-{scale}"
-        for index in range(125 * scale):
+        for index in range(250 * scale):
             directory = roots[scale] / "models" / f"m{index:04d}"
             directory.mkdir(parents=True)
             (directory / "model.onnx").write_bytes(b"")
         filler = roots[scale] / "filler"
         filler.mkdir()
-        for index in range(1_250 * scale):
+        for index in range(2_500 * scale):
             (filler / f"f{index:05d}.txt").write_bytes(b"")
     assert scaling_ratio(lambda scale: ModelScanner().scan(roots[scale])) < 10
     result = ModelScanner().scan(roots[4])
-    assert len(result.components) == 500
+    assert len(result.components) == 1_000
     assert result.components[0].name == "models/m0000/model.onnx"
 
 

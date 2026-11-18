@@ -6,11 +6,11 @@ import os
 import re
 import subprocess
 import sys
-import time
 
 import pytest
 
 import nexus_symbiote.runtime_validation as validation
+from tests.support import scaling_ratio
 
 
 def outcome(schema, arguments):
@@ -226,20 +226,28 @@ def test_backreference_to_a_group_that_always_takes_part_keeps_its_meaning(
     assert outcome(string_schema(pattern), {"value": value}) == expected
 
 
-@pytest.mark.parametrize(
-    "pattern",
-    [
-        "(" * 20000 + "a" + ")" * 20000,
-        "(a)" + "(?<=" * 10000 + "b" + ")" * 10000 + "(?=" * 10000 + r"\1" * 10000 + ")" * 10000,
-    ],
-)
-def test_backreference_bookkeeping_stays_linear_on_deep_nesting(pattern):
+# Each pattern nested a quarter as deep as this test always used, times ``scale``.
+_DEEP_PATTERNS = {
+    "groups": lambda scale: "(" * (5_000 * scale) + "a" + ")" * (5_000 * scale),
+    "lookarounds": lambda scale: (
+        "(a)"
+        + "(?<=" * (2_500 * scale)
+        + "b"
+        + ")" * (2_500 * scale)
+        + "(?=" * (2_500 * scale)
+        + r"\1" * (2_500 * scale)
+        + ")" * (2_500 * scale)
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_DEEP_PATTERNS))
+def test_backreference_bookkeeping_stays_linear_on_deep_nesting(shape):
     # Bookkeeping that grew with the nesting depth squared spent the worker's budget
     # before Python, which cannot compile such nesting, was reached.
-    start = time.monotonic()
-    validation.ecma_pattern(pattern)
-    assert time.monotonic() - start < 1
-    assert outcome(string_schema(pattern), {"value": "a"}) == "schema-invalid"
+    patterns = {scale: _DEEP_PATTERNS[shape](scale) for scale in (1, 4)}
+    assert scaling_ratio(lambda scale: validation.ecma_pattern(patterns[scale])) < 10
+    assert outcome(string_schema(patterns[4]), {"value": "a"}) == "schema-invalid"
 
 
 @pytest.mark.parametrize(
