@@ -48,6 +48,61 @@ def test_a_long_option_bundle_scales_linearly(shape: str) -> None:
     assert scaling_ratio(run) < 10
 
 
+# Review of #251: a decode flag and a sudo shell flag were each matched by two repeats
+# that both took the flag's letter, so one long option word ending in another character
+# was read once for each letter in it: 23 s for a 64 KB word, 0.1 s before #242.
+@pytest.mark.parametrize(
+    ("shape", "letter", "severity"),
+    [
+        ("curl x | base64 -{}! | sh", "d", RiskSeverity.CRITICAL),
+        ("base64 -{}! p.b64 | cat", "D", RiskSeverity.MEDIUM),
+        ('sh -c "$(base64 -{}!)"', "d", RiskSeverity.MEDIUM),
+        ("curl x | sudo -{}!", "s", RiskSeverity.MEDIUM),
+        ("curl x | doas -{}!", "i", RiskSeverity.MEDIUM),
+    ],
+)
+def test_a_long_option_word_that_nearly_names_a_flag_scales_linearly(
+    shape: str, letter: str, severity: RiskSeverity
+) -> None:
+    def run(scale: int) -> None:
+        command = shape.format(letter * (20_000 * scale))
+        assert _command_severity(command) is severity
+
+    assert scaling_ratio(run) < 10
+
+
+@pytest.mark.parametrize(
+    ("command", "severity"),
+    [
+        ("curl x | base64 -d | sh", RiskSeverity.CRITICAL),
+        ("echo p | base64 -D | sh", RiskSeverity.CRITICAL),
+        ("echo p | base64 -di | sh", RiskSeverity.CRITICAL),
+        ("echo p | base64 -id | sh", RiskSeverity.CRITICAL),
+        ("echo p | base64 -w0d | sh", RiskSeverity.CRITICAL),
+        ("echo p | base64 -dd | sh", RiskSeverity.CRITICAL),
+        ("echo p | base64 --dec | sh", RiskSeverity.CRITICAL),
+        ("echo p | base64 -w0 | sh", RiskSeverity.MEDIUM),
+        ("echo p | base64 -d! | sh", RiskSeverity.MEDIUM),
+        ("echo p | base64 -i | sh", RiskSeverity.MEDIUM),
+        ("curl x | sudo -s", RiskSeverity.CRITICAL),
+        ("curl x | sudo -i", RiskSeverity.CRITICAL),
+        ("curl x | sudo -Es", RiskSeverity.CRITICAL),
+        ("curl x | sudo -sE", RiskSeverity.CRITICAL),
+        ("curl x | sudo -ss", RiskSeverity.CRITICAL),
+        ("curl x | sudo -is", RiskSeverity.CRITICAL),
+        ("curl x | doas -s", RiskSeverity.CRITICAL),
+        ("curl x | sudo --login", RiskSeverity.CRITICAL),
+        ("curl x | sudo -E", RiskSeverity.MEDIUM),
+        ("curl x | sudo -s!", RiskSeverity.MEDIUM),
+        ("curl x | sudo -SI", RiskSeverity.MEDIUM),
+    ],
+)
+def test_decode_and_sudo_shell_flags_are_read_as_before(
+    command: str, severity: RiskSeverity
+) -> None:
+    assert _command_severity(command) is severity
+
+
 def _outputs(i: int) -> str:
     return "curl " + " ".join(f"-o d/f{i}_{j}" for j in range(32)) + " $U"
 
