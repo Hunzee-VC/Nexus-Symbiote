@@ -1096,7 +1096,9 @@ def test_scans_in_processes_with_different_hash_seeds_agree(tmp_path):
             timeout=120,
         )
         outputs.add(out.read_bytes())
-    assert len(outputs) == 1 and MODEL_REF_PREFIX.encode() in outputs.pop()
+    assert len(outputs) == 1
+    (only,) = outputs
+    assert MODEL_REF_PREFIX.encode() in only
 
 
 def test_shadowscan_fixture_report_is_unchanged_by_the_new_projection():
