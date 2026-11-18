@@ -282,6 +282,8 @@ Nexus BOM, scored alone, earns 63.3, slightly *below* Nexus SymBiote alone:
    digest for `verify-discovery`.
 3. Emit SARIF for merged scans, carrying the imported coverage as a run-level note rather
    than refusing.
+4. Close the shared gaps that neither half covers: datasets and RAG stores, poisoned tool
+   descriptions, skill scripts, typosquats, unpinned model revisions (list below).
 
 Fixed on this branch after grading, not reflected in the grades above (they stay pinned to
 Nexus SymBiote 0.2.0):
@@ -294,8 +296,6 @@ Nexus SymBiote 0.2.0):
   warning notification that counts what was left out. The default still refuses.
 - Item 1 is open. It reverses a documented leakage decision (the AgentBOM carries digests,
   not ShadowScan's names, locations or evidence), so it needs an owner's decision first.
-4. Close the shared gaps that neither half covers: datasets and RAG stores, poisoned tool
-   descriptions, skill scripts, typosquats, unpinned model revisions (list below).
 
 ## Nexus SymBiote: what to fix first
 
