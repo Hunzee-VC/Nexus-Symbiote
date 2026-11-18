@@ -1048,10 +1048,30 @@ A way around a limit that its entry does not describe is worth a
   nested `eval` commands takes about two minutes.
 - **Hook scripts outside the hook directories are not read.** Every file under
   `.claude/hooks` and `.cursor/hooks` is bound by digest as a `skill-resource` and
-  checked only for hidden characters, so a change to one alerts. A hook that runs a script elsewhere in the project, such as
+  checked for hidden characters and, when it is a shell script, for a download it runs
+  (see the next entry), so a change to one alerts. A hook that runs a script elsewhere in the project, such as
   `scripts/fmt.sh`, binds only the program word in the settings digest, so changing
   only that script raises no alert; nor does a change to a file a hook script itself
   runs or sources. Keep hook scripts under those directories.
+- **Bundled scripts are read for one shape, and only shell scripts.**
+  `script_download_execution` is raised on the files the `prompt` collector already
+  reads in the skill, command and hook directories, when a file there is not a
+  declaration (`.md`, `.mdc`, `.markdown`, `.txt`, `.yaml`, `.yml`, `.json` or `.toml`
+  in a skill or command directory) and has the suffix `.sh`, `.bash`, `.zsh` or `.ksh`,
+  or a `#!` line that names `sh`, `bash`, `zsh`, `ksh`, `dash` or `ash`, also through
+  `env`. A script in another language, such as Python, JavaScript, PowerShell, fish or
+  csh, a shell script without such a suffix or `#!` line, and a Markdown skill or
+  command file that tells the agent to run such a command are bound by digest and not
+  read by this rule; a script elsewhere in the project, such as a plugin's `scripts/`
+  directory, is not read at all. A script over the
+  [`file-bytes`](collection-limits.md#limits) limit is streamed, digested and checked
+  only for hidden characters. Within a shell script the rule reports one shape, a
+  download that reaches a shell or interpreter without being saved, and follows no
+  variable, function, saved file or quoted string; the shapes it reports and misses are under
+  [known false-positive and false-negative classes](security-model.md#known-false-positive-and-false-negative-classes).
+  A script that is not valid UTF-8 is read with U+FFFD for each invalid sequence.
+  Reading takes time in proportion to the script, a few seconds for each MiB of
+  pipelines, within the collector's `total-bytes` limit.
 - **Effective permissions are not resolved.** User and managed settings, workspace
   trust and session flags are not read, and deny and ask rules are counted, not
   applied to the allow list. A Claude Code allow rule whose command word is a shell,

@@ -34,6 +34,7 @@ KINDS = frozenset(
         "model_format",
         "hidden_unicode",
         "tool_description",
+        "skill_script",
         "mcp_pinning",
         "tool_drift",
         "credential_export",
@@ -43,6 +44,7 @@ KINDS = frozenset(
 # Kinds decided by a finding category on the component the case is about.
 FINDING_KINDS = {
     "tool_description": (ComponentType.TOOL, "tool_description_instructions"),
+    "skill_script": (ComponentType.SKILL_PACKAGE, "script_download_execution"),
 }
 DEFAULT_MANIFEST = Path(__file__).resolve().parents[1] / "benchmarks" / "manifest.json"
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
@@ -157,7 +159,7 @@ def _evaluate(case: dict[str, Any], directory: Path) -> dict[str, Any]:
         ModelScanner()
         if kind.startswith("model_")
         else PromptScanner()
-        if kind == "hidden_unicode"
+        if kind in {"hidden_unicode", "skill_script"}
         else MCPScanner()
     )
     result = scanner.scan(project)

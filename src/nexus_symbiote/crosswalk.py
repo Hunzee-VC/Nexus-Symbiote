@@ -989,6 +989,38 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         _ref(EU_AI_ACT, "Art. 11", _DOCUMENTATION),
         _ref(ISO_42001, "A.4.2", _RESOURCES),
     ),
+    "script_download_execution": (
+        _ref(CWE, "CWE-494", "The script runs code that it downloads without an integrity check."),
+        _ref(CWE, "CWE-829", "What runs comes from an address outside the project's control."),
+        _ref(
+            OWASP_LLM_2025,
+            "LLM03:2025",
+            "Code fetched when a bundled script runs is an unpinned third-party component.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI04",
+            "The download becomes part of the agent's supply chain when the script runs.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI05",
+            "An agent that runs the script executes whatever the address serves.",
+        ),
+        _ref(
+            OWASP_LLM_2026,
+            "LLM04:2026",
+            "Code fetched when a bundled script runs is an unpinned third-party component.",
+        ),
+        _ref(
+            MITRE_ATLAS,
+            "AML.T0109",
+            "What the address serves can change after review without a change to the repository.",
+        ),
+        _ref(NIST_AI_RMF, "MANAGE-3.1", _THIRD_PARTY),
+        _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
+        _ref(ISO_42001, "A.10.3", _SUPPLIER),
+    ),
     "serialization_format": (
         _ref(
             CWE,

@@ -2048,8 +2048,9 @@ def _opens_substitution(command: str, index: int) -> bool:
     )
 
 
-def _substitution_downloads(command: str, index: int) -> bool:
-    """Whether the substitution that opens at `index` starts by downloading or decoding."""
+def _substitution_downloads(command: str, index: int, decodes: bool = True) -> bool:
+    """Whether the substitution that opens at `index` starts by downloading or, with
+    `decodes`, by decoding."""
     if command.startswith("$(", index) or command.startswith("<(", index):
         index += 2
     elif index < len(command) and command[index] == "`":
@@ -2064,7 +2065,7 @@ def _substitution_downloads(command: str, index: int) -> bool:
     names = _name_variants(command[index:end])
     if names & _DOWNLOAD_NAMES:
         return True
-    if "base64" not in names:
+    if not decodes or "base64" not in names:
         return False
     # Its arguments up to the end of the substitution's command; past 64 of them a decode
     # flag may still follow, so this fails closed.
@@ -2081,7 +2082,9 @@ def _substitution_downloads(command: str, index: int) -> bool:
     return True
 
 
-def _substitution_at(command: str, index: int, interpreter: str | None = None) -> bool:
+def _substitution_at(
+    command: str, index: int, interpreter: str | None = None, decodes: bool = True
+) -> bool:
     """Whether the script after a shell word is a download substitution.
 
     Accepts a command flag (`-c`, `-lc`, `-Command`), also with its value attached
@@ -2101,7 +2104,7 @@ def _substitution_at(command: str, index: int, interpreter: str | None = None) -
         while probe < length and command[probe] in "'\"":
             probe += 1
         if _opens_substitution(command, probe):
-            return _substitution_downloads(command, probe)
+            return _substitution_downloads(command, probe, decodes)
         redir = _PREFIX_REDIR.match(command, index)
         if redir is not None and not command.startswith("<(", index):
             index = redir.end()
@@ -2131,7 +2134,7 @@ def _substitution_at(command: str, index: int, interpreter: str | None = None) -
                 while index < length and command[index] in "'\"":
                     index += 1
                 if _opens_substitution(command, index):
-                    return _substitution_downloads(command, index)
+                    return _substitution_downloads(command, index, decodes)
                 return False
             index = end
             continue
@@ -2139,14 +2142,15 @@ def _substitution_at(command: str, index: int, interpreter: str | None = None) -
     return False
 
 
-def _substitution_exec(pipelines: list[list[str]]) -> bool:
-    """Whether a shell, `eval`, `source` or a bare substitution runs a download."""
+def _substitution_exec(pipelines: list[list[str]], decodes: bool = True) -> bool:
+    """Whether a shell, `eval`, `source` or a bare substitution runs a download or, with
+    `decodes`, a decoded payload."""
     for segments in pipelines:
         if not segments:
             continue
         segment = segments[0]
         stripped = segment.lstrip(" \t")
-        if _opens_substitution(stripped, 0) and _substitution_downloads(stripped, 0):
+        if _opens_substitution(stripped, 0) and _substitution_downloads(stripped, 0, decodes):
             return True
         spans = _shell_word_spans(segment)
         words = [segment[start:end] for start, end in spans]
@@ -2155,15 +2159,44 @@ def _substitution_exec(pipelines: list[list[str]]) -> bool:
             continue
         # The command a wrapper or `su -c` runs may itself be the download.
         command = words[index].lstrip("'\"")
-        if _opens_substitution(command, 0) and _substitution_downloads(command, 0):
+        if _opens_substitution(command, 0) and _substitution_downloads(command, 0, decodes):
             return True
         names = _name_variants(words[index])
         if not (names & (_SHELL_NAMES | _EVAL_NAMES | _IEX_NAMES | _STDIN_INTERPRETERS.keys())):
             continue
         interpreter = next(iter(sorted(names & _STDIN_INTERPRETERS.keys())), None)
-        if _substitution_at(segment, spans[index][1], interpreter):
+        if _substitution_at(segment, spans[index][1], interpreter, decodes):
             return True
     return False
+
+
+def _piped_to_executor(pipelines: list[list[str]], fetches: Callable[[str], bool]) -> bool:
+    """Whether a segment that `fetches` has a shell, `iex` or a stdin interpreter later in
+    its pipeline, or writes to a `>(...)` that starts one. One forward pass per pipeline."""
+    for segments in pipelines:
+        fetched = False
+        for segment in segments:
+            if fetched and _segment_executes(segment):
+                return True
+            if fetches(segment):
+                fetched = True
+            if fetched and _output_substitution_executes(segment):
+                return True
+    return False
+
+
+def runs_download(command: str) -> bool:
+    """Whether a download reaches a shell or interpreter without being saved first.
+
+    The shapes of ``_fetch_exec`` that name a downloader and no file: one in a pipeline
+    with a shell, ``iex`` or a stdin interpreter later in it, and a shell, ``eval``,
+    ``source`` or interpreter given a substitution that downloads. A decoded payload, a
+    saved download run later and encoded PowerShell are left to ``_fetch_exec``.
+    """
+    pipelines = _command_pipelines(command)
+    return _substitution_exec(pipelines, decodes=False) or _piped_to_executor(
+        pipelines, _segment_downloads
+    )
 
 
 def _fetch_exec(command: str) -> bool:
@@ -2178,17 +2211,7 @@ def _fetch_exec(command: str) -> bool:
     pipelines = _command_pipelines(command)
     if _substitution_exec(pipelines) or _download_then_run(pipelines):
         return True
-    for segments in pipelines:
-        # One forward pass: a fetch and an executor later in the same pipeline.
-        fetched = False
-        for segment in segments:
-            if fetched and _segment_executes(segment):
-                return True
-            if _segment_fetches(segment):
-                fetched = True
-            if fetched and _output_substitution_executes(segment):
-                return True
-    return _encoded_powershell(command)
+    return _piped_to_executor(pipelines, _segment_fetches) or _encoded_powershell(command)
 
 
 def _output_substitution_executes(segment: str) -> bool:

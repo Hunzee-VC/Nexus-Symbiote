@@ -735,6 +735,21 @@ every rule.
 | `eu-ai-act-2024` | Art. 11 Technical documentation of the system and its elements (Annex IV) | all | Records an element of the system that the inventory does not show as declared. |
 | `iso-iec-42001-2023` | A.4.2 Resources of the AI system are documented | all | Records a resource of the AI system that the inventory does not show as declared. |
 
+### `script_download_execution`
+
+| Framework | Entry | Severities | Rationale |
+| --- | --- | --- | --- |
+| `owasp-llm-2025` | LLM03:2025 Supply Chain | all | Code fetched when a bundled script runs is an unpinned third-party component. |
+| `owasp-llm-2026` | LLM04:2026 Supply Chain | all | Code fetched when a bundled script runs is an unpinned third-party component. |
+| `owasp-asi-2026` | ASI04 Agentic Supply Chain Vulnerabilities | all | The download becomes part of the agent's supply chain when the script runs. |
+| `owasp-asi-2026` | ASI05 Unexpected Code Execution (RCE) | all | An agent that runs the script executes whatever the address serves. |
+| `mitre-atlas-2026.10` | AML.T0109 AI Supply Chain Rug Pull | all | What the address serves can change after review without a change to the repository. |
+| `nist-ai-rmf-1.0` | MANAGE-3.1 Third-party AI risks are monitored and controlled | all | Records a third-party component whose identity, version or resolution is not established. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
+| `iso-iec-42001-2023` | A.10.3 Suppliers are managed | all | Records a supplied component whose identity, version or resolution is not established. |
+| `cwe` | CWE-494 Download of Code Without Integrity Check | all | The script runs code that it downloads without an integrity check. |
+| `cwe` | CWE-829 Inclusion of Functionality from Untrusted Control Sphere | all | What runs comes from an address outside the project's control. |
+
 ### `serialization_format`
 
 | Framework | Entry | Severities | Rationale |

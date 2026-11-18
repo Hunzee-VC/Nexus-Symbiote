@@ -248,6 +248,12 @@ RULES: dict[str, RuleInfo] = {
         "the model, a directive to keep something from the user and a reference to a "
         "credential location. A model reads the description as instructions.",
     ),
+    "script_download_execution": RuleInfo(
+        "Download run by a bundled script",
+        "A shell script bundled with a skill, command or hook runs a network download in a "
+        "shell or interpreter, through a pipe or a substitution, so that what runs is not "
+        "bound by the repository.",
+    ),
     "runtime_undeclared": RuleInfo(
         "Runtime component not matched to the inventory",
         "The agent's runtime telemetry reports a tool, model, agent or MCP endpoint that no "

@@ -135,6 +135,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `rag_discovery` | Undeclared retrieval source | none | LLM08:2025 | LLM09:2026 | ASI06 | none | GOVERN-1.6 |
 | `registry_origin` | Non-default package registry | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.001 | MANAGE-3.1 |
 | `runtime_undeclared` | Runtime component not matched to the inventory | none | none | none | ASI04 | none | GOVERN-1.6 |
+| `script_download_execution` | Download run by a bundled script | CWE-494, CWE-829 | LLM03:2025 | LLM04:2026 | ASI04, ASI05 | AML.T0109 | MANAGE-3.1 |
 | `serialization_format` | Unsafe model serialization | CWE-502 (critical findings), CWE-1336 (high findings) | LLM03:2025 | LLM04:2026 | ASI04, ASI05 | AML.T0011.000 | MANAGE-3.2 |
 | `serialization_format_unknown` | Unknown model serialization safety | CWE-502 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0011.000 | MANAGE-3.2 |
 | `settings_environment` | Redirecting or code-loading settings environment | none | none | none | ASI03 (high findings), ASI05 (medium findings) | none | MEASURE-2.7 |
