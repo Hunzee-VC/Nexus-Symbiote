@@ -973,6 +973,59 @@ def test_identifier_shapes_are_named_as_written(tmp_path, literal):
     assert model.bom_ref == MODEL_REF_PREFIX + hashlib.sha256(literal.encode()).hexdigest()
 
 
+BEDROCK = "arn:aws:bedrock:us-east-1:123456789012:"
+BEDROCK_MODELS = [
+    "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
+    "arn:aws-us-gov:bedrock:us-gov-west-1::foundation-model/amazon.titan-embed-text-v2:0",
+    BEDROCK + "inference-profile/us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+    BEDROCK + "application-inference-profile/q3xmpl8zadbf",
+    BEDROCK + "provisioned-model/q3xmpl8zadbf",
+    BEDROCK + "custom-model/amazon.titan-text-express-v1:0:8k/q3xmpl8zadbf",
+    BEDROCK + "imported-model/q3xmpl8zadbf",
+]
+BEDROCK_OTHERS = [
+    BEDROCK + "guardrail/benchb",
+    BEDROCK + "guardrail",
+    BEDROCK + "agent/Q3XMPL8ZAD",
+    BEDROCK + "agent-alias/Q3XMPL8ZAD/TSTALIASID",
+    BEDROCK + "knowledge-base/Q3XMPL8ZAD",
+    BEDROCK + "flow/Q3XMPL8ZAD",
+    BEDROCK + "prompt/Q3XMPL8ZAD",
+    BEDROCK + "model-customization-job/q3xmpl8zadbf",
+    "ARN:AWS:BEDROCK:us-east-1:123456789012:foundation-model/amazon.nova-pro-v1:0",
+    "arn:aws:bedrock:us-east-1::Foundation-Model/amazon.nova-pro-v1:0",
+]
+
+
+@pytest.mark.parametrize("literal", BEDROCK_MODELS)
+def test_a_bedrock_resource_name_of_a_model_kind_is_named(tmp_path, literal):
+    result = _scan(
+        tmp_path, _report(_evidence("main.tf:1", literal)), {"main.tf": f'model_id = "{literal}"\n'}
+    )
+    assert [model.name for model in _models(result)] == [literal]
+
+
+@pytest.mark.parametrize("literal", BEDROCK_OTHERS)
+def test_a_bedrock_resource_name_of_another_kind_is_not_named_as_a_model(tmp_path, literal):
+    # ShadowScan 0.1.4 labels a guardrail name in Terraform as model evidence. The cited
+    # line holds the text whole, so only the kind the name states can refuse it.
+    report = _report(_evidence("main.tf:1", literal, signal="model:provider.aws-bedrock"))
+    result = _scan(tmp_path, report, {"main.tf": f'guardrail = "{literal}"\n'})
+    assert not _models(result)
+    assert UNNAMED in (result.source_projection_limitations or [])
+    imported = ShadowScanImporter().parse_report(json.dumps(report))
+    assert (imported.model_citations, imported.uncited_model_evidence) == ([], 1)
+
+
+def test_the_kind_check_reads_bedrock_names_only(tmp_path):
+    # No other identifier states what it names in a form the scan can check.
+    literal = "arn:aws:sagemaker:us-east-1:123456789012:endpoint/support-llm"
+    result = _scan(
+        tmp_path, _report(_evidence("main.tf:1", literal)), {"main.tf": f'endpoint = "{literal}"\n'}
+    )
+    assert [model.name for model in _models(result)] == [literal]
+
+
 def test_an_identifier_made_whole_only_by_redaction_is_not_named(tmp_path):
     # In the raw line the identifier continues into the token; the redactor cuts it there.
     token = "s" + "k-" + "a1B2c3D4" * 4

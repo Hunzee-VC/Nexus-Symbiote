@@ -197,6 +197,13 @@ All of these must hold.
   Lines are counted by line feeds.
 - **The identifier is model-shaped.** It is 2 to 128 characters of ASCII letters,
   digits and `._:/@+-`, starts and ends with a letter or digit, and contains a letter.
+- **An Amazon Bedrock resource name is a model's.** A report can label any resource
+  name as model evidence: ShadowScan 0.1.4 does so for a guardrail name in Terraform.
+  An identifier that starts with `arn:aws:bedrock:`, in any partition, is named only
+  when its resource is a `foundation-model`, `inference-profile`,
+  `application-inference-profile`, `provisioned-model`, `custom-model` or
+  `imported-model`. A guardrail, agent, knowledge-base or flow name is counted as
+  unconfirmed. This is the only check on what an identifier names.
 - **Nothing reads as a credential.** The identifier and the signal label must pass
   the scan's own redactor unchanged, and the identifier must still stand on the cited
   line after that line is redacted, so one assigned to a name such as `API_TOKEN` is

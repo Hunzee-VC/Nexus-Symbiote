@@ -74,6 +74,15 @@ UNRECOGNIZED_VALUES_GAP = "ShadowScan report contains values the projection does
 # A source-reported label such as ``model:provider.aws-bedrock``: short parts only.
 _MODEL_SIGNAL = re.compile(r"model:[a-z0-9]{1,24}(?:[.-][a-z0-9]{1,24}){0,3}", re.ASCII)
 _MODEL_LITERAL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,126}[A-Za-z0-9]", re.ASCII)
+# An Amazon Bedrock resource name states its kind after the account, and a report can
+# label any of them as model evidence. Only these kinds identify a model.
+_BEDROCK_NAME = re.compile(r"arn:aws[a-z-]{0,16}:bedrock:", re.ASCII | re.IGNORECASE)
+_BEDROCK_MODEL_NAME = re.compile(
+    r"arn:aws[a-z-]{0,16}:bedrock:[a-z0-9-]{0,32}:[0-9]{0,12}:"
+    r"(?:foundation-model|(?:application-)?inference-profile|provisioned-model"
+    r"|custom-model|imported-model)/",
+    re.ASCII,
+)
 _CITED_LINE = re.compile(r"[1-9][0-9]{0,6}", re.ASCII)
 # A JSON file with one of these top-level keys is a bill of materials or a scan report
 # (CycloneDX, SPDX 2 and 3, SARIF, a ShadowScan report, a native inventory or risk report).
@@ -256,7 +265,8 @@ def _model_citation(item: dict[str, Any]) -> ModelCitation | None:
     The identifier must be the entry's own ``attributes.value``, in the characters model
     identifiers use, and neither it nor the signal label may read as a credential to the
     redactor: a report cannot make a scan record text the report does not state, nor a
-    credential the redactor recognises.
+    credential the redactor recognises. An Amazon Bedrock resource name must be a model's:
+    a guardrail or an agent that a report labels as model evidence is not named as one.
     """
     signal, location, attributes = item["signal"], item.get("location"), item.get("attributes")
     literal = attributes.get("value") if isinstance(attributes, dict) else None
@@ -270,6 +280,7 @@ def _model_citation(item: dict[str, Any]) -> ModelCitation | None:
         or not _MODEL_SIGNAL.fullmatch(signal)
         or not _MODEL_LITERAL.fullmatch(literal)
         or not any(char.isalpha() for char in literal)
+        or (_BEDROCK_NAME.match(literal) and not _BEDROCK_MODEL_NAME.match(literal))
         or redact_text(literal) != literal
         or redact_text(signal) != signal
     ):

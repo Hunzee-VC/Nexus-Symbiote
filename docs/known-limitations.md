@@ -1314,8 +1314,10 @@ A way around a limit that its entry does not describe is worth a
   not named, including identifiers that ShadowScan reports by a matched prefix or on a
   neighbouring line. A bill of materials or scan report in the tree confirms nothing, but
   that rule knows only JSON formats: a Markdown or HTML report kept in the tree can still
-  confirm an identifier. The same model written two ways, such as `anthropic/<model>` and
-  `<model>`, is two components. Findings of other kinds, container images, infrastructure
+  confirm an identifier. The kind is the report's: the scan checks that the identifier
+  stands at the cited line, not that it names a model, except that an Amazon Bedrock
+  resource name of another kind, such as a guardrail, is not named. The same model written
+  two ways, such as `anthropic/<model>` and `<model>`, is two components. Findings of other kinds, container images, infrastructure
   and data are not named this way, and a standalone `import-shadowscan` names nothing; see
   [models named from cited evidence](shadowscan-integration.md#models-named-from-cited-evidence).
 - **`verify-discovery --bundle` checks direct imports only.** It accepts only a BOM
