@@ -92,7 +92,6 @@ VOLATILE_KEY = re.compile(
     re.I,
 )
 BUILD_TOOLS_JS = {"npm", "yarn", "pnpm", "bun"}
-BUILD_PY_FLAGS = {".", "-e", "--editable", "-r", "--requirement"}
 
 
 @dataclass
@@ -662,7 +661,12 @@ def build_execs(strace_files: list[Path]) -> list[str]:
             if prog in BUILD_TOOLS_JS and any(a in ("install", "i", "ci", "add") for a in args):
                 hit = "--ignore-scripts" not in args
             elif prog.startswith("pip") or (prog.startswith("python") and "pip" in args):
-                hit = "install" in args and any(a in BUILD_PY_FLAGS for a in args)
+                # Only installs of the scanned project's own files: ".", "-e <path>" or
+                # "-r <file>" pointing into the scan copy (or relative to it).
+                targets = [args[i + 1] for i, a in enumerate(args[:-1])
+                           if a in ("-r", "--requirement", "-e", "--editable")]  # fmt: skip
+                local = [x for x in targets if "/_work/" in x or not x.startswith("/")]
+                hit = "install" in args and ("." in args or bool(local))
             elif (
                 prog.startswith("python")
                 and any(a.endswith("setup.py") for a in args)
@@ -925,8 +929,12 @@ def safety(item: dict[str, Any], run: ToolRun, truth: dict[str, Any]) -> tuple[f
         ev: dict[str, Any] = {"canaries_written": found, "runs": run.tags(scn)}
         bad = bool(found)
         if item.get("detect_build_exec"):
-            straces = [f for t in run.tags(scn) for f in sorted((run.root / t).glob("*.strace"))]
-            execs = build_execs(straces)
+            # Any scenario counts: whether a scanner installs the target's dependencies
+            # must not depend on which fixture happens to trigger it.
+            execs = []
+            for t in sorted(run.meta):
+                for cmd in build_execs(sorted((run.root / t).glob("*.strace"))):
+                    execs.append(f"{t}: {cmd}")
             ev["build_commands"] = execs
             bad = bad or bool(execs)
         return (0.0 if bad else w), ev

@@ -134,10 +134,12 @@ document that inventories nothing conforms trivially and is not counted.
 **Safety items** use runner evidence: canary files, `execve` records, output bytes,
 timeouts, peak RSS and `connect` attempts. Canary and build-command checks cover the
 benchmark configuration and the tool's plain invocation (`default_commands`, run on six
-scenarios). X09 also fails when the tool runs, or tries to run, a package manager or
-build on the scanned project (`npm install` without `--ignore-scripts`, `pip install -e
-.` or `-r`, `python setup.py`, `uv sync`, `poetry install`): offline that fails before
-the payload runs, but in a CI job with network access it executes the project's code.
+scenarios). X09 also fails when, in any scenario, the tool runs or tries to run a
+package manager or build on the scanned project (`npm install` without
+`--ignore-scripts`, `pip install -e .` or `-r <project file>`, `python setup.py`, `uv
+sync`, `poetry install`): offline that fails before anything is downloaded, but in a CI
+job with network access an attacker-controlled manifest (a source distribution with a
+build script, a git or URL dependency, a custom index) executes code.
 Network attempts are judged on the default-mode runs. A safety item earns points only
 when the tool also inventoried one of the scenario's benign sentinels (`requires`): a
 tool that never parsed the hostile directory has not shown it is safe there. A failed
