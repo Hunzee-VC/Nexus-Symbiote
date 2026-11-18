@@ -760,9 +760,26 @@ A way around a limit that its entry does not describe is worth a
 
 - **Instruction files under other names are not recorded.** The `prompt` collector
   reads the fixed files the [collector reference lists](collectors.md#what-each-collector-reads),
-  `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` and `.cursorrules` in any subdirectory, and
-  every file in the rule, prompt and subagent directories, apart from files named as
-  holding credentials (see below). Another spelling of a
+  `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` and `.cursorrules` in any subdirectory,
+  every file in the rule, prompt and subagent directories, and every text file under
+  a directory named `prompts` and every `*.prompt.md`, `*.prompt.yaml` or
+  `*.prompt.yml` file at any depth, apart from files named as holding credentials
+  (see below). A `prompts` directory or `*.prompt.*` file under `tests`, `test`,
+  `dist`, `build`, `docs`, `benchmarks`, `examples`, `node_modules` or `vendor`, the
+  names the mcp collector's source search skips, is not read and not recorded as a
+  gap; those names match exactly, as in the source search, so `Tests/prompts` is
+  read. Neither is a file under another spelling of the directory name, such as
+  `Prompts`. Under `prompts`, only the text suffixes the
+  [collector reference lists](collectors.md#what-each-collector-reads) and names
+  without a suffix are read: code such as `prompts/__init__.py`, images and dotfiles
+  such as `.DS_Store` are not, and a text-named file there that is not UTF-8 is a gap,
+  not a failure. `llms.txt`, a prompt stored under another name, such as
+  `app/system.yaml`, and a prompt held in code or a database are not read either. A
+  file under a `prompts` directory that is not Markdown and not named `*.prompt.*`,
+  such as `prompts/settings.yaml`, is inventoried without a content hash, as the next
+  entry explains. More prompt files than the
+  [`prompt-files`](collection-limits.md#limits) limit are a collection failure, as
+  past every operator limit, until the limit is raised. Another spelling of a
   nested name, such as `claude.md` in a subdirectory, is a
   [failure](#every-collector), not a file that is read, unless one of those
   directories, or a skill or command directory, holds it. `CLAUDE.local.md`,
@@ -799,7 +816,8 @@ A way around a limit that its entry does not describe is worth a
   the collector records: an instruction, nested memory, rule, prompt or subagent file
   keeps its content hash only when its name is Markdown, or is an instruction file name
   without one (`.cursorrules`, `.clinerules`, `.windsurfrules`, `system_prompt.txt`),
-  or, in a rule, prompt or subagent directory, has no suffix at all; and when a symlink
+  or is a prompt template named `*.prompt.yaml` or `*.prompt.yml`, or, in a rule,
+  prompt or subagent directory, has no suffix at all; and when a symlink
   there leads to a file with a Markdown suffix, the same test an import of that file
   passes. So `AGENTS.md` linked to `config/app.json` or `config/.windsurfrules`,
   `.cursorrules` linked to `docs/rules.txt` or `shared/.cursorrules`, and

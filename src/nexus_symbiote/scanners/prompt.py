@@ -24,6 +24,7 @@ from nexus_symbiote.scanners.credential_files import MARKDOWN_SUFFIXES as _MARKU
 from nexus_symbiote.scanners.credential_files import credential_gap as _credential_gap
 from nexus_symbiote.scanners.credential_files import credential_shaped as _credential_shaped
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
+from nexus_symbiote.scanners.mcp_sources import SOURCE_SEARCH_SKIPPED
 from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection, fold_name
 from nexus_symbiote.utils.markdown import hidden_text, text_outside_code
@@ -644,6 +645,24 @@ _INSTRUCTION_DIRECTORY_PARTS = tuple(
     PurePosixPath(directory).parts for directory in INSTRUCTION_DIRECTORIES
 )
 
+# Prompt files a project names as such, at any depth: every text file under a directory
+# named `prompts`, and a file whose name ends in one of these suffixes.
+PROMPT_DIRECTORY_NAME = "prompts"
+PROMPT_FILE_SUFFIXES = (".prompt.md", ".prompt.yaml", ".prompt.yml")
+# A prompts directory also holds code, images and editor files, which no host loads as a
+# prompt; only these suffixes, or a name with no suffix that is not a dotfile, are read.
+PROMPT_TEXT_SUFFIXES = frozenset(
+    {
+        *(".md", ".mdc", ".mdx", ".markdown", ".txt", ".yaml", ".yml", ".json", ".toml"),
+        *(".j2", ".jinja", ".jinja2", ".tmpl", ".tpl", ".hbs", ".mustache", ".prompt"),
+    }
+)
+PROMPT_TEMPLATE_TYPE = "prompt-template"
+# Test, build output, documentation, example, dependency and vendored trees hold prompts
+# that illustrate or ship with something else; the mcp collector's source search skips
+# the same names.
+PROMPT_SEARCH_SKIPPED = frozenset({*SOURCE_SEARCH_SKIPPED, "node_modules", "vendor"})
+
 SKILL_DIRECTORIES = [
     ".claude/skills",
     ".claude/commands",
@@ -682,6 +701,36 @@ def _markdown(path: str) -> bool:
     return PurePosixPath(path).suffix.lower() in _MARKUP_SUFFIXES
 
 
+def _prompt_named(name: str) -> bool:
+    return name.lower().endswith(PROMPT_FILE_SUFFIXES)
+
+
+def _prompt_text(name: str) -> bool:
+    suffix = PurePosixPath(name).suffix.lower()
+    return suffix in PROMPT_TEXT_SUFFIXES or (not suffix and not name.startswith("."))
+
+
+def _prompt_surface(parts: tuple[str, ...]) -> bool:
+    """Whether the walk records the file at ``parts`` as a prompt template: a text file
+    under a ``prompts`` directory or a file named ``*.prompt.md``, ``*.prompt.yaml`` or
+    ``*.prompt.yml``, outside the trees ``PROMPT_SEARCH_SKIPPED`` names and outside the
+    rule, prompt, subagent, skill and command directories, whose own walks inventory their
+    files. A walk of one of those directories through a symlink reaches files outside
+    them too; ``scan`` leaves those to that walk.
+    """
+    directories = parts[:-1]
+    if PROMPT_SEARCH_SKIPPED.intersection(directories):
+        return False
+    if any(
+        parts[: len(directory)] == directory
+        for directory in (*_INSTRUCTION_DIRECTORY_PARTS, *_SKILL_PARTS)
+    ):
+        return False
+    if _prompt_named(parts[-1]):
+        return True
+    return PROMPT_DIRECTORY_NAME in directories and _prompt_text(parts[-1])
+
+
 def _read_unless_credential(
     path: str,
     files: ConfinedCollection,
@@ -716,8 +765,9 @@ def _read_unless_credential(
 
 
 def _found_by_name(path: str, prompt_type: str | None, directory: object = None) -> bool:
-    """Whether a walk recorded ``path`` because a host loads a file of that name, or a rule,
-    prompt or subagent file of that directory whose name has no suffix at all, such as
+    """Whether a walk recorded ``path`` because a host loads a file of that name, a
+    prompt template is named ``*.prompt.md``, ``*.prompt.yaml`` or ``*.prompt.yml``, or
+    a rule, prompt or subagent file of that directory has no suffix at all, such as
     ``.clinerules/style``, which the collector reads as Markdown.
 
     ``directory`` names the rule, prompt or subagent directory whose walk reached
@@ -728,6 +778,8 @@ def _found_by_name(path: str, prompt_type: str | None, directory: object = None)
         return False
     parts = PurePosixPath(path).parts
     if path in INSTRUCTION_FILES or (len(parts) > 1 and parts[-1] in NESTED_INSTRUCTION_NAMES):
+        return True
+    if prompt_type == PROMPT_TEMPLATE_TYPE and _prompt_named(parts[-1]):
         return True
     if directory in INSTRUCTION_DIRECTORIES and "." not in parts[-1]:
         return True
@@ -950,6 +1002,8 @@ class PromptScanner(Scanner):
             # over the directory that holds the file. A host that loads a nested CLAUDE.md
             # or GEMINI.md, as it does in a session started in that directory, expands its
             # imports too. Dependency trees and other default-excluded names stay skipped.
+            # Prompt files are recorded once the directory walks below have claimed theirs.
+            prompt_candidates: list[str] = []
             for path in sorted(files.iter_files()):
                 relative = path.as_posix()
                 nested_type = NESTED_INSTRUCTION_NAMES.get(path.name)
@@ -957,6 +1011,12 @@ class PromptScanner(Scanner):
                     canonical = _FOLDED_NESTED_NAMES.get(fold_name(path.name))
                     if canonical is not None:
                         variants.append((path, path.with_name(canonical)))
+                if (
+                    nested_type is None
+                    and relative not in INSTRUCTION_FILES
+                    and _prompt_surface(path.parts)
+                ):
+                    prompt_candidates.append(relative)
                 if (
                     nested_type is None
                     or len(path.parts) < 2
@@ -975,12 +1035,16 @@ class PromptScanner(Scanner):
                         importers.append(relative)
 
             reported: set[Path] = set()
+            # Files a rule, prompt, subagent, skill or command directory walk reaches, also
+            # through a directory symlink, keep the kind that walk gives them.
+            walked: set[str] = set()
             for directory, prompt_type in INSTRUCTION_DIRECTORIES.items():
                 if directory in INSTRUCTION_FILES and not files.is_directory(directory):
                     continue
                 skipped: list[Path] = []
                 for path in files.iter_files(directory, skipped=skipped):
                     relative = path.as_posix()
+                    walked.add(relative)
                     if relative in recorded:
                         continue
                     content = _read_unless_credential(relative, files, result)
@@ -1001,9 +1065,18 @@ class PromptScanner(Scanner):
                         texts[relative] = content.decode("utf-8")
                 _report_skipped(skipped, reported, result)
 
+            skill_listing = self._list_skills(files)
+            walked.update(path.as_posix() for _, paths, _ in skill_listing for path in paths)
+            self._record_prompt_templates(
+                [path for path in prompt_candidates if path not in walked],
+                recorded,
+                texts,
+                files,
+                result,
+            )
             importers += self._variant_importers(variants, texts, set(importers), files)
             self._follow_imports(importers, texts, recorded, files, result)
-            self._scan_skills(files, result, reported)
+            self._scan_skills(skill_listing, files, result, reported)
             # A spelling that a walk inventories is recorded and checked under its own
             # name; any other is a file the collector does not read.
             inventoried = {component.source_path for component in result.components}
@@ -1056,11 +1129,14 @@ class PromptScanner(Scanner):
         files: ConfinedCollection,
         result: ScanResult,
         directory: str | None = None,
+        *,
+        text_gap: bool = False,
     ) -> PromptComponent | None:
         """Record the instruction file read from ``rel_path``, or None.
 
         ``directory`` names the rule, prompt or subagent directory whose walk reached the
-        file through a directory symlink; the record keeps it.
+        file through a directory symlink; the record keeps it. With ``text_gap``, content
+        that is not UTF-8 is a gap rather than a failure.
 
         Every walk reads through ``_read_unless_credential``; the check is repeated on
         the symlink the read followed, so no walk, and no import of a file a walk
@@ -1074,7 +1150,12 @@ class PromptScanner(Scanner):
         try:
             text = content.decode("utf-8")
         except UnicodeDecodeError:
-            result.scan_failures.append(f"{rel_path}: invalid UTF-8 instruction")
+            if text_gap:
+                result.surfaces_excluded.append(
+                    f"{rel_path}: not UTF-8 text in a prompts directory; not inventoried"
+                )
+            else:
+                result.scan_failures.append(f"{rel_path}: invalid UTF-8 instruction")
             return None
         result.surfaces_scanned.append(rel_path)
         component = self._scan_instruction_file(
@@ -1283,13 +1364,63 @@ class PromptScanner(Scanner):
             target, files, result, context=f"imported by {importer} but ", missing_ok=True
         )
 
+    def _record_prompt_templates(
+        self,
+        candidates: list[str],
+        recorded: dict[str, PromptComponent],
+        texts: dict[str, str],
+        files: ConfinedCollection,
+        result: ScanResult,
+    ) -> None:
+        """Record each prompt file no other walk inventories, up to ``prompt-files``.
+
+        A file met only because a ``prompts`` directory holds it, and that is not UTF-8,
+        such as an editor's binary file under a text name, is a gap, not a failure; a
+        file named ``*.prompt.*`` is an instruction file and must be UTF-8.
+        """
+        bound = limits.bound("prompt-files")
+        for count, relative in enumerate(candidates, start=1):
+            if count > bound.value:
+                result.scan_failures.append(
+                    f"{relative}: prompt files from this one on are not inventoried; "
+                    + bound.exceeded()
+                )
+                return
+            content = _read_unless_credential(relative, files, result)
+            if content is None:
+                continue
+            named = _prompt_named(PurePosixPath(relative).name)
+            component = self._record(
+                relative, PROMPT_TEMPLATE_TYPE, content, files, result, text_gap=not named
+            )
+            if component is not None:
+                recorded[relative] = component
+                texts[relative] = content.decode("utf-8")
+
+    @staticmethod
+    def _list_skills(
+        files: ConfinedCollection,
+    ) -> list[tuple[str, list[Path], list[Path]]]:
+        """Each skill and command directory with the files its walk reaches and the
+        default-excluded names it skipped, listed before prompt templates are recorded so
+        a directory symlink to a ``prompts`` tree leaves those files to the skill walk.
+        """
+        listing: list[tuple[str, list[Path], list[Path]]] = []
+        for directory in SKILL_DIRECTORIES:
+            skipped: list[Path] = []
+            listing.append((directory, list(files.iter_files(directory, skipped=skipped)), skipped))
+        return listing
+
     def _scan_skills(
-        self, files: ConfinedCollection, result: ScanResult, reported: set[Path]
+        self,
+        listing: list[tuple[str, list[Path], list[Path]]],
+        files: ConfinedCollection,
+        result: ScanResult,
+        reported: set[Path],
     ) -> None:
         seen: set[str] = set()
-        for skill_dir in SKILL_DIRECTORIES:
-            skipped: list[Path] = []
-            for path in files.iter_files(skill_dir, skipped=skipped):
+        for skill_dir, paths, skipped in listing:
+            for path in paths:
                 relative = path.as_posix()
                 if relative in seen:
                     continue

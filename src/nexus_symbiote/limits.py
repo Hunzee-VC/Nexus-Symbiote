@@ -124,6 +124,13 @@ SPECS: dict[str, LimitSpec] = {
             "Memory and context files whose @path imports the prompt collector follows, "
             "and distinct import targets it looks up, in one collection.",
         ),
+        LimitSpec(
+            "prompt-files",
+            "count",
+            1_000_000,
+            "Text files under prompts directories, and *.prompt.md, *.prompt.yaml and "
+            "*.prompt.yml files, that the prompt collector records in one collection.",
+        ),
     )
 }
 
@@ -143,6 +150,7 @@ class CollectionLimits:
     ts_nodes: int = 20_000
     python_nodes: int = 200_000
     import_lookups: int = 5_000
+    prompt_files: int = 5_000
 
     def value(self, name: str) -> int:
         value: int = getattr(self, SPECS[name].attribute)
