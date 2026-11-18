@@ -30,6 +30,7 @@ from nexus_symbiote.scanners.model import (
     GGUF_MISMATCH,
     GGUF_TOO_SHORT,
     MAX_MODEL_HEADER_BYTES,
+    PICKLE_NAME_UNEVIDENCED,
     ModelScanner,
 )
 from nexus_symbiote.validators.risk import RiskScorer, _intrinsic_model_risks
@@ -38,6 +39,7 @@ from nexus_symbiote.validators.risk import RiskScorer, _intrinsic_model_risks
 PLACEHOLDER = b"placeholder used by the upload-validation test\n"
 INERT_PICKLE = pickle.dumps({"weights": [0.0, 1.0]}, protocol=4)
 NO_VALIDATOR = "No bounded structural validator for this format/loader"
+BINARY_PICKLE = "Recognized binary pickle opcode stream; object loading can execute code"
 MALFORMED = "Malformed or unsupported SafeTensors structure"
 UNREAD = "Artifact could not be inspected"
 UNKNOWN_FORMAT = ("high", "serialization_format_unknown")
@@ -288,18 +290,21 @@ def test_a_zip_archive_named_as_gguf_is_not_recorded_as_gguf(tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize(
-    ("name", "recorded", "rating", "explanation"),
+    ("name", "content", "recorded", "rating", "explanation"),
     [
-        ("model.onnx", "onnx", "unknown", NO_VALIDATOR),
-        ("model.tflite", "tensorflow-lite", "unknown", NO_VALIDATOR),
-        ("model.ggml", "llama.cpp-legacy", "unknown", NO_VALIDATOR),
-        ("model.pkl", "pickle", "unsafe-code-execution", "Potential code-executing loader format"),
+        ("model.onnx", PLACEHOLDER, "onnx", "unknown", NO_VALIDATOR),
+        ("model.tflite", PLACEHOLDER, "tensorflow-lite", "unknown", NO_VALIDATOR),
+        ("model.ggml", PLACEHOLDER, "llama.cpp-legacy", "unknown", NO_VALIDATOR),
+        # The content of a pickle-family name decides its rating, not what is recorded.
+        ("model.pkl", PLACEHOLDER, "pickle", "unknown", PICKLE_NAME_UNEVIDENCED),
+        ("model.pkl", INERT_PICKLE, "pickle", "unsafe-code-execution", BINARY_PICKLE),
     ],
+    ids=["onnx", "tflite", "ggml", "pickle-name-without-a-pickle", "pickle-name-with-a-pickle"],
 )
 def test_a_suffix_without_a_header_check_is_recorded_from_the_name(
-    tmp_path: Path, name: str, recorded: str, rating: str, explanation: str
+    tmp_path: Path, name: str, content: bytes, recorded: str, rating: str, explanation: str
 ) -> None:
-    component = _scan(tmp_path, name, PLACEHOLDER)
+    component = _scan(tmp_path, name, content)
     assert component.serialization_format == recorded
     assert component.model_type == "foundation"
     assert component.serialization_safety.value == rating
