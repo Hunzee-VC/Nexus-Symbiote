@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Literal
 
 from nexus_symbiote.core.enums import AssuranceLevel
+from nexus_symbiote.core.identifiers import neutralize_identifiers
 from nexus_symbiote.core.models import (
     AnyComponent,
     ClaimEvidence,
@@ -81,7 +82,13 @@ def merge_collected(
     The comparison happens before the provenance claim is attached: two collectors that
     report the same subject would otherwise always differ in that claim. An identical
     duplicate is kept once and names the second collector in its evidence references.
+
+    The component's name, description, supplier and nested tool names are neutralized
+    here, before anything else reads them: this is the one step that every collected
+    component passes through on both paths, so a fresh scan and a reconciliation record
+    the same text, and a second collector's copy of the same subject compares equal.
     """
+    neutralize_identifiers(component)
     component.assurance_level = measured_assurance(component)
     existing = collected.get(component.bom_ref)
     if existing is not None:

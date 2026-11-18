@@ -24,6 +24,7 @@ from nexus_symbiote.core.hashing import (
     pathname_identity,
     tool_definition_extensions,
 )
+from nexus_symbiote.core.identifiers import neutralize_identifiers
 from nexus_symbiote.core.models import (
     AnyComponent,
     MCPServerComponent,
@@ -326,6 +327,9 @@ class IntegrityValidator:
             scanner.configure(exclude_paths)
             for local in scanner.scan(project_root, config_only=True).components:
                 if isinstance(local, ToolComponent):
+                    # Collected tools are recorded with neutralized names, and the
+                    # displayed digest bound to that name; compare like with like.
+                    neutralize_identifiers(local)
                     local_tools[local.bom_ref] = None if local.bom_ref in local_tools else local
         for comp in bom.components:
             report.components_checked += 1

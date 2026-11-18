@@ -127,6 +127,37 @@ Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a server that declares one carries 
 launch values are unbound for it, even between identical inventories. Set the key
 on both collections to compare those values, or review and accept the alert.
 
+## Neutralized identifiers
+
+A component's `name`, `description` and `supplier`, and the tool names under an MCP
+server's `client_settings.auto_approved_tools` and `tool_filter_names`, are now
+neutralized where collector output is merged into the inventory, and on the
+repository agent and the components its `agent.yaml` declares: a tab becomes a
+space, and C0 and C1 controls, ESC, bidirectional and other format characters and CI
+log-command introducers become U+FFFD. The component carries a high
+`identifier_characters` finding ([finding catalog](finding-catalog.md#categories)).
+The details and recommendations of every component's findings, and the text of
+`surfaces_excluded` and `scan_failures`, are neutralized the same way without a
+finding of their own, since they quote such names.
+
+A component whose fields and finding details held no such character is recorded
+exactly as before, so its content digest, its `bom_ref` and its findings are
+unchanged, and `diff` against an earlier baseline reports nothing for it. A
+component that held one records different text, and a new finding when the
+character was in an identifier rather than only in a finding detail, so its content
+digest changes once: `diff` reports the change, and `validate --project` against a
+baseline collected by an earlier release reports it as a mismatch. Recollect that
+baseline and review the finding, which records the SHA-256 of each raw value, before
+approving it. A tool whose name changed keeps its `definition_hash` over the original
+descriptor, and its `redacted_definition_hash` is bound to the neutralized name, so
+integrity validation still verifies it.
+
+A `bom_ref` is not neutralized. MCP server and tool references are digests of the
+raw name, so the raw text never appears in them; references derived from a path,
+such as a prompt import's, keep the path as collected, as do `source_path`, evidence
+locators and `surfaces_scanned`
+([known limitations](known-limitations.md#every-collector)).
+
 ## SARIF rule identifiers
 
 0.1.0 keyed SARIF rules by category (`nexus_symbiote/<category>`) and raised a

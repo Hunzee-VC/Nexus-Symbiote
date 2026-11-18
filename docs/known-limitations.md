@@ -112,6 +112,29 @@ A way around a limit that its entry does not describe is worth a
 - **Hard links are ordinary files.** A hard-linked file inside the root is read like
   any other, so an inventory can describe a file that also has a name outside the
   root. See [security boundaries](../SECURITY.md#security-boundaries).
+- **Only identifiers and coverage reasons are neutralized.** A component's `name`,
+  `description` and `supplier` and the tool names under an MCP server's
+  `client_settings` have control, format and CI log-command characters replaced,
+  and an [`identifier_characters`](finding-catalog.md#categories) finding records
+  them; the details of its findings and the text of `surfaces_excluded` and
+  `scan_failures` are replaced the same way without a finding. Kept as collected: a
+  tool's `description_text`, which its definition digest binds, so a control
+  character in it reaches the native export and the native document embedded in
+  CycloneDX and SPDX as an escape such as `\u001b`; values derived from a path,
+  such as a prompt import's `bom_ref`, `source_path`, evidence locators and
+  `surfaces_scanned`, which validation opens the file at again; other fields, such
+  as an agent manifest's `version` and `framework` and a model's
+  `requested_alias`; and every field of a [live mode](#live-mode) inventory, which
+  is built from what a server serves rather than collected. A consumer that decodes
+  these strings and prints them must neutralize them itself.
+- **Mixed scripts are judged by Unicode character names.** A letter's script is
+  the first script word of its Unicode name, such as `LATIN` or `CYRILLIC`, so a
+  modifier or mathematical letter belongs to no script and does not make a mix. A
+  name written wholly in one script that looks like another, such as an all-Cyrillic
+  `раура`, is not reported. Han with kana, with bopomofo or with hangul counts as
+  one writing system, and Latin beside one of them is not a mix, as in Unicode
+  UTS #39's Highly Restrictive level; only MCP server and tool names are checked for
+  a mix.
 
 ## MCP servers and tools
 
@@ -877,9 +900,11 @@ A way around a limit that its entry does not describe is worth a
   zero-width or bidirectional characters each separated by another byte, plane-14
   characters spread so that no 4,096 characters hold 16 of them, and a UTF-16 or
   UTF-32 file without a byte-order mark.
-- **Hidden-character detection is character-based.** Lookalike letters are not
-  detected, and neither are control characters such as ESC, spaces other than
-  U+0020, such as U+00A0 and U+3000, or private-use characters.
+- **Hidden-character detection is character-based.** In instruction file text,
+  lookalike letters are not detected, and neither are control characters such as
+  ESC, spaces other than U+0020, such as U+00A0 and U+3000, or private-use
+  characters. Component identifiers are checked separately; see
+  [every collector](#every-collector).
 - **Hidden markup means comments, unused definitions and footnotes.** HTML and
   Markdown comments are reported by count, not text, and only in Markdown files and
   instruction files without a suffix, such as `.cursorrules`. They are HTML comments,

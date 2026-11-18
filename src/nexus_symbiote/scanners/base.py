@@ -22,6 +22,7 @@ from nexus_symbiote.core.models import (
 )
 from nexus_symbiote.limits import Bound
 from nexus_symbiote.utils.confined import BoundedRecords, ConfinedCollection
+from nexus_symbiote.utils.terminal import neutralize
 
 MAX_CONFIG_BYTES = 4 * 1024 * 1024
 MAX_MODEL_BYTES = 1024 * 1024 * 1024
@@ -160,8 +161,10 @@ class ScanResult:
                     component.properties[key] = [
                         relative(value) if isinstance(value, str) else value for value in values
                     ]
-        for records in (self.surfaces_scanned, self.surfaces_excluded, self.scan_failures):
-            records[:] = [relative(record) for record in records]
+        self.surfaces_scanned[:] = [relative(record) for record in self.surfaces_scanned]
+        # Coverage reasons quote checkout text, such as a server name, and are exported.
+        for records in (self.surfaces_excluded, self.scan_failures):
+            records[:] = [neutralize(relative(record)) for record in records]
 
 
 class SourceBudget:

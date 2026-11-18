@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import AssuranceLevel, AutonomyLevel, ComponentType, RiskSeverity
 from nexus_symbiote.core.hashing import hash_bytes
+from nexus_symbiote.core.identifiers import neutralize_identifiers
 from nexus_symbiote.core.models import (
     MAX_REFERENCE_CHARS,
     UNBOUND_VALUES_DETAIL,
@@ -403,6 +404,9 @@ def assemble_repository_agent(
     index: dict[str, AnyComponent] = {c.bom_ref: c for c in bom.components}
     accepted: list[AnyComponent] = []
     for addition in additions:
+        # Manifest entries are checkout text like any collector's, and are recorded the
+        # way ``merge_collected`` records a collected component.
+        neutralize_identifiers(addition)
         existing = index.get(addition.bom_ref)
         if existing is not None and existing != addition:
             problems.append(f"{MANIFEST}: declares a component reference that is already in use")
@@ -471,6 +475,7 @@ def assemble_repository_agent(
                 ),
             )
         )
+    neutralize_identifiers(agent)
     if declared:
         if declared.autonomy_level is not None:
             agent.properties["declared_autonomy_level"] = declared.autonomy_level.value
