@@ -188,6 +188,30 @@ INSPECTION_FAILED = (
     "Artifact could not be read or its content inspected; no bounded structural "
     "validator for this format/loader"
 )
+PICKLE_NAME_UNREADABLE = "Potential code-executing loader format (artifact could not be inspected)"
+PICKLE_NAME_UNEVIDENCED = "Named pickle-family format; no pickle evidence in the inspected prefix"
+PICKLE_NAME_EMPTY = "empty file"
+PICKLE_NAME_WRAPPED = (
+    "Potential code-executing loader format (compressed or archived stream; decompressed "
+    "content not inspected)"
+)
+_UNVALIDATED = "; no bounded structural validator for this format/loader"
+# Compression and archive magic that pandas, joblib and torch unwrap before unpickling.
+_WRAPPER_MAGIC = (
+    b"\x1f\x8b",
+    b"BZh",
+    b"\xfd7zXZ\x00",
+    b"\x5d\x00\x00",
+    b"\x28\xb5\x2f\xfd",
+    b"\x04\x22\x4d\x18",
+    b"ZF",
+    b"\x78\x01",
+    b"\x78\x5e",
+    b"\x78\x9c",
+    b"\x78\xda",
+)
+_TAR_MAGIC_OFFSET = 257
+_TAR_MAGIC = b"ustar"
 # Content that a bound left unread: a file no model name rates is inventoried for it.
 _CONTENT_UNREAD = frozenset(
     {
@@ -956,7 +980,17 @@ def inspect_model_format(
     """Inspect bounded structure without deserializing a model or running code.
 
     A file that cannot be read, or whose content check fails, is unknown: a SafeTensors
-    one as malformed SafeTensors, any other as ``INSPECTION_FAILED``.
+    one as malformed SafeTensors, any other as ``INSPECTION_FAILED``, except a
+    pickle-family name, which keeps the code-executing rating its loader implies.
+
+    A pickle-family name is rated by its inspected content, not by the name alone: it
+    keeps the code-executing rating when the content is a recognized pickle, a NumPy
+    object-dtype array, a ZIP archive with a pickle member or such an array, content a
+    bound left unread, or a compressed or archived stream (by a wrapper suffix or its
+    magic), whose decompressed content is not inspected. A ZIP archive read whole with
+    no pickle member keeps that unknown verdict; anything else is unknown with
+    ``PICKLE_NAME_UNEVIDENCED`` (``PICKLE_NAME_EMPTY`` for a zero-length file), which
+    keeps the high unknown-format finding.
 
     ``budget`` is shared with the other files of one scan; NumPy array headers spend it.
     A file that no model name rates is inspected for what it holds, so the collector
@@ -966,12 +1000,13 @@ def inspect_model_format(
     layout. It is not a claim about model behavior, parser vulnerabilities,
     adjacent repository code, or the safety of the eventual loader.
     """
-    if _pickle_family(path):
-        return SerializationSafety.UNSAFE_CODE_EXECUTION, "Potential code-executing loader format"
+    pickle_family = _pickle_family(path)
     safetensors = path.suffix.lower() == ".safetensors"
     try:
         context = nullcontext(stream) if stream is not None else open_regular_file(path)
-        with context as opened:
+        with context as source:
+            head = _HeadReader(source) if pickle_family else None
+            opened = cast(BinaryIO, head) if head is not None else source
             size = os.fstat(opened.fileno()).st_size
             prefix = opened.read(8)
             length = int.from_bytes(prefix, "little")
@@ -989,9 +1024,12 @@ def inspect_model_format(
                     by_content=model_format(path) is None,
                 )
                 if container is not None and (
-                    container[0] is SerializationSafety.UNSAFE_CODE_EXECUTION or not safetensors
+                    container[0] is SerializationSafety.UNSAFE_CODE_EXECUTION
+                    or not (safetensors or pickle_family)
                 ):
                     return container
+            if head is not None:
+                return _pickle_name_rating(path, head, size, container)
             if not safetensors:
                 return (
                     SerializationSafety.UNKNOWN,
@@ -1004,7 +1042,66 @@ def inspect_model_format(
     except (OSError, ValueError, RecursionError, UnicodeError):
         if safetensors:
             return SerializationSafety.UNKNOWN, "Malformed or unsupported SafeTensors structure"
+        if pickle_family:
+            return SerializationSafety.UNSAFE_CODE_EXECUTION, PICKLE_NAME_UNREADABLE
         return SerializationSafety.UNKNOWN, INSPECTION_FAILED
+
+
+def _pickle_name_rating(
+    path: Path,
+    head: _HeadReader,
+    size: int,
+    container: tuple[SerializationSafety, str] | None,
+) -> tuple[SerializationSafety, str]:
+    """Rate a pickle-family name whose inspected content showed no code-bearing container.
+
+    Content a bound left unread, and a compressed or archived stream, which its loader
+    unwraps before it unpickles, keep the code-executing rating the name implies.
+    """
+    if size == 0:
+        return SerializationSafety.UNKNOWN, PICKLE_NAME_EMPTY
+    if container is not None and container[1] in _CONTENT_UNREAD:
+        return SerializationSafety.UNSAFE_CODE_EXECUTION, _loader_rated(container[1])
+    start = head.start(min(size, _TAR_MAGIC_OFFSET + len(_TAR_MAGIC)))
+    if (
+        path.suffixes[-1].lower() in _PICKLE_WRAPPERS
+        or start.startswith(_WRAPPER_MAGIC)
+        or start[_TAR_MAGIC_OFFSET:] == _TAR_MAGIC
+    ):
+        return SerializationSafety.UNSAFE_CODE_EXECUTION, PICKLE_NAME_WRAPPED
+    if container is not None:
+        return container
+    return SerializationSafety.UNKNOWN, PICKLE_NAME_UNEVIDENCED
+
+
+def _loader_rated(evidence: str) -> str:
+    """The rating of a pickle-family name whose content the bounds left unrated."""
+    return f"Potential code-executing loader format ({evidence.removesuffix(_UNVALIDATED)})"
+
+
+class _HeadReader:
+    """Keep the first bytes read from ``stream``, where an archive's magic sits."""
+
+    def __init__(self, stream: BinaryIO) -> None:
+        self._stream = stream
+        self._head = bytearray()
+
+    def fileno(self) -> int:
+        return self._stream.fileno()
+
+    def read(self, size: int) -> bytes:
+        data = self._stream.read(size)
+        self._head.extend(data[: max(0, _TAR_MAGIC_OFFSET + len(_TAR_MAGIC) - len(self._head))])
+        return data
+
+    def reread(self, offset: int, size: int) -> bytes:
+        return _reread(self._stream, offset, size)
+
+    def start(self, length: int) -> bytes:
+        """The first ``length`` bytes, reading on past what inspection read if needed."""
+        while len(self._head) < length and self.read(length - len(self._head)):
+            pass
+        return bytes(self._head[:length])
 
 
 class _HashingModelReader:
@@ -2293,7 +2390,7 @@ class ModelScanner(Scanner):
             safety, format_evidence = observation.safety, observation.explanation
             weight_hash: str | None = observation.digest
         elif _pickle_family(path):
-            # The name alone rates these formats; an unreadable file keeps that rating.
+            # Content rates these formats; an unreadable file keeps the loader's rating.
             safety = SerializationSafety.UNSAFE_CODE_EXECUTION
             format_evidence = (
                 "Potential code-executing loader format (artifact could not be hashed)"
