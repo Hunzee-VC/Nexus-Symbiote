@@ -21,6 +21,8 @@ from nexus_symbiote.core.models import (
 IMPORTED_MODE = "imported-unverified-report"
 PRESENCE_CLAIM = "repository_presence"
 DISCOVERY_CLAIM = "discovery_report_entry"
+# On an imported model: where a scan read the identifier that a report cites.
+CITED_EVIDENCE_CLAIM = "cited_evidence"
 IMPORTING_COLLECTORS = frozenset({"shadowscan"})
 
 
