@@ -312,6 +312,47 @@ def test_a_suffix_without_a_header_check_is_recorded_from_the_name(
     assert component.properties == {"format_inspection": explanation}
 
 
+@pytest.mark.parametrize(
+    ("name", "content", "recorded", "named", "rating", "explanation"),
+    [
+        (
+            "model.safetensors.bin",
+            _safetensors(),
+            "pytorch-legacy",
+            None,
+            "unknown",
+            PICKLE_NAME_UNEVIDENCED,
+        ),
+        ("model.gguf.pt", _gguf(), "pytorch", None, "unknown", PICKLE_NAME_UNEVIDENCED),
+        (
+            "model.bin.safetensors",
+            INERT_PICKLE,
+            None,
+            "safe-tensors",
+            "unsafe-code-execution",
+            BINARY_PICKLE,
+        ),
+        ("model.pt.gguf", b"\0" * 64, None, "llama.cpp", "unknown", GGUF_MISMATCH),
+    ],
+)
+def test_the_last_suffix_decides_which_check_a_name_with_two_gets(
+    tmp_path: Path,
+    name: str,
+    content: bytes,
+    recorded: str | None,
+    named: str | None,
+    rating: str,
+    explanation: str,
+) -> None:
+    # The pickle-evidence check and the header check never both apply to one file: a
+    # pickle-family name keeps the format it claims, a header-checked one loses it.
+    component = _scan(tmp_path, name, content)
+    assert component.serialization_format == recorded
+    assert component.properties.get("named_format") == named
+    assert component.serialization_safety.value == rating
+    assert component.properties["format_inspection"] == explanation
+
+
 def _guide(page: str) -> str:
     return " ".join((DOCS / page).read_text(encoding="utf-8").split())
 
