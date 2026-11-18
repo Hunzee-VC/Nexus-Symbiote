@@ -36,6 +36,7 @@ from nexus_symbiote.diff.differ import AIBOMDiffer, _values_unbound
 from nexus_symbiote.scanners.base import sanitized_origin
 from nexus_symbiote.scanners.registry import RegistryScanner
 from nexus_symbiote.utils.secrets import redact_descriptor, redact_text, redact_url
+from tests.support import scaling_ratio
 
 # Names every version of the AI-package filter has to recognise.
 AI_NAMES = st.sampled_from(
@@ -351,42 +352,43 @@ def test_a_secret_planted_anywhere_in_a_tool_descriptor_is_redacted(secret, valu
     assert secret not in json.dumps(redacted, ensure_ascii=False)
 
 
-def _elapsed(action) -> float:
-    started = time.perf_counter()
-    action()
-    return time.perf_counter() - started
+# Each input a quarter of the size this test always used, times ``scale``: a few hundred
+# kilobytes at the larger size, where a quadratic regular expression takes minutes.
+HOSTILE_REQUIREMENTS = {
+    "brackets": lambda scale: "torch" + "[" * (50_000 * scale),
+    "long-version": lambda scale: "torch==" + "1." * (25_000 * scale),
+    "long-url": lambda scale: "torch @ https://" + "a" * (50_000 * scale),
+    "spaces-before-comment": lambda scale: "torch" + " " * (50_000 * scale) + "#",
+    "continuations": lambda scale: "torch" + "\\\n" * (25_000 * scale),
+    "long-marker": lambda scale: "torch;" + " and python_version" * (2_500 * scale),
+    "hash-options": lambda scale: "torch==1.0" + " --hash=sha256:" * (2_500 * scale),
+}
 
 
-# Each input is a few hundred kilobytes: linear parsing takes milliseconds, while a
-# quadratic regular expression would take minutes, so the bound is far from either.
-HOSTILE_REQUIREMENTS = [
-    "torch" + "[" * 200_000,
-    "torch==" + "1." * 100_000,
-    "torch @ https://" + "a" * 200_000,
-    "torch" + " " * 200_000 + "#",
-    "torch" + "\\\n" * 100_000,
-    "torch;" + " and python_version" * 10_000,
-    "torch==1.0" + " --hash=sha256:" * 10_000,
-]
+@pytest.mark.parametrize("shape", sorted(HOSTILE_REQUIREMENTS))
+def test_hostile_requirements_lines_parse_in_bounded_time(tmp_path, shape):
+    roots = {}
+    for scale in (1, 4):
+        roots[scale] = tmp_path / f"scale-{scale}"
+        roots[scale].mkdir()
+        (roots[scale] / "requirements.txt").write_bytes(HOSTILE_REQUIREMENTS[shape](scale).encode())
+    assert scaling_ratio(lambda scale: RegistryScanner().scan(roots[scale])) < 10
 
 
-def test_hostile_requirements_lines_parse_in_bounded_time():
-    for line in HOSTILE_REQUIREMENTS:
-        assert _elapsed(lambda line=line: scan({"requirements.txt": line.encode()})) < 10, line[:20]
+# Each text a quarter of the size this test always used, times ``scale``.
+HOSTILE_TEXT = {
+    "letters-then-scheme": lambda scale: "a" * (75_000 * scale) + "://",
+    "token-then-equals": lambda scale: "token" + "=" * (75_000 * scale),
+    "bearer-words": lambda scale: "Bearer " * (12_500 * scale),
+    "scheme-then-at-signs": lambda scale: "https://" + "@" * (75_000 * scale),
+    "letters-then-password": lambda scale: "x" * (75_000 * scale) + "password: ",
+}
 
 
-HOSTILE_TEXT = [
-    "a" * 300_000 + "://",
-    "token" + "=" * 300_000,
-    "Bearer " * 50_000,
-    "https://" + "@" * 300_000,
-    "x" * 300_000 + "password: ",
-]
-
-
-def test_hostile_text_redacts_in_bounded_time():
-    for text in HOSTILE_TEXT:
-        assert _elapsed(lambda text=text: redact_text(text, ["secretvalue"])) < 10, text[:20]
+@pytest.mark.parametrize("shape", sorted(HOSTILE_TEXT))
+def test_hostile_text_redacts_in_bounded_time(shape):
+    texts = {scale: HOSTILE_TEXT[shape](scale) for scale in (1, 4)}
+    assert scaling_ratio(lambda scale: redact_text(texts[scale], ["secretvalue"])) < 10
 
 
 COLLECTED_FILES = [
