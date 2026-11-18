@@ -57,6 +57,13 @@ from nexus_symbiote.scanners.base import (
     sanitized_origin,
     source_collection_bytes,
 )
+from nexus_symbiote.scanners.credential_literals import (
+    URL_PASSWORD,
+    candidate_kinds,
+    literal_credential,
+    ordered_kinds,
+    value_kinds,
+)
 from nexus_symbiote.scanners.mcp_launch import (
     NPM_CONFIG_FLAGS,
     NPM_CONFIG_VALUES,
@@ -552,8 +559,9 @@ def _url_secrets(value: str) -> list[str]:
     return found
 
 
-def _header_line_secrets(text: str) -> list[str]:
-    """Credentials in an inline ``Header-Name: value`` string such as ``Authorization: Bearer ...``."""
+def _header_line(text: str) -> tuple[str, str] | None:
+    """The name and value of an inline ``Header-Name: value`` string, also after ``--header=``
+    or ``-H``; None when the text is no header line or its value is empty."""
     candidate = text.strip()
     lowered = candidate.lower()
     for prefix in _HEADER_PREFIXES:
@@ -564,14 +572,21 @@ def _header_line_secrets(text: str) -> list[str]:
         if candidate.startswith("-H") and len(candidate) > 2 and not candidate.startswith("-H="):
             candidate = candidate[2:].strip()
     if ":" not in candidate:
-        return []
+        return None
     hdr_name, _, hdr_val = candidate.partition(":")
     hdr_name = hdr_name.strip(" \"'")
     if hdr_val.startswith("//") or not _HEADER_NAME.fullmatch(hdr_name):
-        return []
+        return None
     hdr_val = hdr_val.strip(" \"'")
-    if not hdr_val or is_reference(hdr_val):
+    return (hdr_name, hdr_val) if hdr_val else None
+
+
+def _header_line_secrets(text: str) -> list[str]:
+    """Credentials in an inline ``Header-Name: value`` string such as ``Authorization: Bearer ...``."""
+    line = _header_line(text)
+    if line is None or is_reference(line[1]):
         return []
+    hdr_name, hdr_val = line
     found: list[str] = []
     if secret_like(hdr_name, hdr_val):
         found.append(hdr_val)
@@ -706,6 +721,85 @@ def _server_secrets(config: dict[str, Any], launch: Launch) -> list[str]:
         )
     )
     return list(dict.fromkeys(values))
+
+
+def _url_literals(value: str) -> list[str]:
+    """The types of the literal credentials in the URLs of a value: a password in user
+    information, and the value of a query parameter that is named for a credential."""
+    kinds: list[str] = []
+    for locator in _locators(value):
+        try:
+            parsed = urlsplit(locator)
+            password = parsed.password
+        except ValueError:
+            continue
+        if password:
+            kinds += candidate_kinds(unquote(password), URL_PASSWORD)
+        for name, item in parse_qsl(parsed.query):
+            kinds += value_kinds(item, name)
+    return kinds
+
+
+def _launch_literals(previous: str, word: str, *, assignment: bool) -> list[str]:
+    """The types of the literal credentials that one word of a launch holds by its place.
+
+    The word counts as a header line after a header option, as the value of the option
+    before it and, when ``assignment`` holds, as ``NAME=value``, ``--name=value`` or
+    ``--env=NAME=value``, which a requirement such as ``pkg==1.2`` is not.
+    """
+    kinds: list[str] = []
+    line = _header_line(word)
+    if line is not None and (
+        previous.lower() in _HEADER_FLAGS or word.lstrip().lower().startswith(("-h", "--header="))
+    ):
+        kinds += value_kinds(line[1], line[0])
+    if _CLI_FLAG.fullmatch(previous) and not word.startswith("-"):
+        kinds += value_kinds(word, previous)
+    rest = word
+    for _ in range(2 if assignment else 0):
+        name, equals, rest = rest.partition("=")
+        if not equals or _requirement(name, rest):
+            break
+        kinds += value_kinds(rest.strip(" \"'"), name.lstrip("-").strip(" \"'"))
+    return kinds
+
+
+def _literal_credentials(config: dict[str, Any]) -> list[tuple[str, str, list[str]]]:
+    """Each place in a server definition that holds a literal credential: its field, its
+    name in a header or environment map, and the credential types found there.
+
+    Endpoint fields come first, then header and environment values by name, the command
+    and each argument. A command or argument is read by its shape and its URLs, and by
+    its place among the words around it. One that holds white space is also read as the
+    words of an inline script, and as an assignment only word by word, where a value
+    ends with its word.
+    """
+    found: list[tuple[str, str, list[str]]] = []
+
+    def add(field: str, name: str, value: str) -> list[str]:
+        kinds = value_kinds(value, name) + _url_literals(value)
+        found.append((field, name, kinds))
+        return kinds
+
+    for field in _ENDPOINT_FIELDS:
+        add(field, "", config.get(field, ""))
+    for field in ("headers", "http_headers", "env"):
+        mapping = config.get(field, {})
+        for name in sorted(mapping):
+            add(field, name, mapping[name])
+    command = config.get("command", "")
+    texts = [("command", command)] if command else []
+    texts += [(f"args[{index}]", arg) for index, arg in enumerate(config.get("args", []))]
+    previous = ""
+    for position, text in texts:
+        kinds = add(position, "", text)
+        words = _launch_words([text])
+        if len(words) > 1:
+            kinds.extend(_launch_literals(previous, text, assignment=False))
+        for word in words[1:] or words:
+            kinds.extend(_launch_literals(previous, word, assignment=True))
+            previous = word
+    return [(field, name, ordered_kinds(kinds)) for field, name, kinds in found if kinds]
 
 
 def _value_binding(
@@ -2371,6 +2465,12 @@ class MCPScanner(Scanner):
             endpoints=endpoints,
             remote_type=_declared_transport(config) not in (None, "stdio"),
         )
+        for position, held, kinds in _literal_credentials(config):
+            if held:
+                # A name is shown as the record exports names; one that holds a value is not.
+                hidden = scrubber.contains(held)
+                position += "." + ("[redacted]" if hidden else _exported_names([held])[0])
+            risks.append(literal_credential(f"MCP server '{name}'", config_scope, position, kinds))
         resolver = sorted(view.binding)
         # The launcher package and its version are recorded; every other argument
         # (a served directory, a mount, a flag) is a redacted position.

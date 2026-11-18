@@ -83,6 +83,9 @@ MODULE_FLOORS: dict[str, tuple[int, int | None]] = {
     # The pickle.load interpreter that content sniffing rates pickles by; measured at 100%
     # of statements and branches when it replaced the opcode stack model.
     "nexus_symbiote/utils/pickle_load.py": (98, 98),
+    # The rule that decides what a literal credential is; measured at 100% of statements
+    # and branches when the finding was added.
+    "nexus_symbiote/scanners/credential_literals.py": (98, 98),
 }
 COUNTS = (
     ("statement", "covered_lines", "num_statements"),

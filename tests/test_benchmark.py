@@ -28,14 +28,14 @@ def clone_corpus(tmp_path):
 # The digest of the committed manifest, labels and fixtures. The gate compares results
 # only with the manifest they were produced from, so a label flipped in the same change as
 # the detector would pass it; changing any case must also change this line, visibly.
-CORPUS_DIGEST = "cfa1b7b2ae15f80adbca486a2ae53dd77e54d3a10cddb8f6976765c13382c7cc"
+CORPUS_DIGEST = "230e9b35f7ee3c4f67ccfa5454d8af739cf28e0d209881c4cd89d96b7281bde7"
 
 
 def test_committed_inputs_have_exact_hashes_and_explicit_labels():
     manifest, digest = benchmark.load_manifest(benchmark.DEFAULT_MANIFEST)
     assert digest == CORPUS_DIGEST
-    assert len(manifest["cases"]) == 22
-    assert sum(c["task"] == "detection" for c in manifest["cases"]) == 20
+    assert len(manifest["cases"]) == 24
+    assert sum(c["task"] == "detection" for c in manifest["cases"]) == 22
     assert any(c["truth"] is True for c in manifest["cases"])
     assert any(c["truth"] is False for c in manifest["cases"])
     assert any(c["truth"] is None for c in manifest["cases"])
@@ -110,6 +110,24 @@ def test_predictions_do_not_read_labels_and_use_real_scanner():
     assert "invisible_characters" in original["facts"]["risk_categories"]
 
 
+def test_the_literal_credential_cases_are_decided_by_the_finding():
+    manifest, _ = benchmark.load_manifest(benchmark.DEFAULT_MANIFEST)
+    cases = {c["id"]: c for c in manifest["cases"] if c["kind"] == "literal_credential"}
+    assert {name: case["truth"] for name, case in cases.items()} == {
+        "mcp-credential-literal": True,
+        "mcp-credential-reference": False,
+    }
+    for name, case in cases.items():
+        directory = benchmark.DEFAULT_MANIFEST.parent / case["directory"]
+        outcome = benchmark._evaluate(case, directory)
+        assert outcome["prediction"] is case["truth"], name
+        found = "literal_credential" in outcome["facts"]["risk_categories"]
+        assert found is case["truth"], name
+    # Without a collected server the case is unknown, never a clean negative.
+    empty = benchmark.DEFAULT_MANIFEST.parent / "fixtures" / "prompt-ascii"
+    assert benchmark._evaluate(cases["mcp-credential-reference"], empty)["prediction"] is None
+
+
 def test_the_key_order_case_needs_canonical_descriptor_hashing(monkeypatch):
     manifest, _ = benchmark.load_manifest(benchmark.DEFAULT_MANIFEST)
     case = next(c for c in manifest["cases"] if c["id"] == "tool-key-order-only")
@@ -122,8 +140,8 @@ def test_the_key_order_case_needs_canonical_descriptor_hashing(monkeypatch):
 
 def test_actual_corpus_run_records_evidence_and_unknown_coverage():
     report = benchmark.run_benchmark()
-    assert report["corpus"]["cases"] == 22
-    assert report["metrics"]["detection_cases"] == 20
+    assert report["corpus"]["cases"] == 24
+    assert report["metrics"]["detection_cases"] == 22
     assert report["measurement"]["elapsed_seconds"] > 0
     assert report["measurement"]["python_traced_peak_bytes"] > 0
     assert len(report["tool"]["source_digest"]) == 64

@@ -171,6 +171,7 @@ FRAMEWORKS: tuple[Framework, ...] = (
             Entry("AML.T0068", "LLM Prompt Obfuscation"),
             Entry("AML.T0070", "RAG Poisoning"),
             Entry("AML.T0074", "Masquerading"),
+            Entry("AML.T0083", "Credentials from AI Agent Configuration"),
             Entry("AML.T0105", "Escape to Host"),
             Entry("AML.T0109", "AI Supply Chain Rug Pull"),
             Entry("AML.T0142", "Event Triggered Execution"),
@@ -235,9 +236,10 @@ FRAMEWORKS: tuple[Framework, ...] = (
         source="https://cwe.mitre.org/",
         verification="secondary",
         note=(
-            "Identifiers from the earlier SARIF catalog. The names of CWE-494, CWE-829 and "
-            "CWE-1427 match CWE 4.20 as the OWASP Top 10 for LLM Applications 2026 cites "
-            "them; the others were not checked against the CWE site for this release."
+            "Identifiers from the earlier SARIF catalog, and CWE-798, added with the literal "
+            "credential findings. The names of CWE-494, CWE-798, CWE-829 and CWE-1427 match "
+            "CWE 4.20 as the OWASP Top 10 for LLM Applications 2026 cites them; the others "
+            "were not checked against the CWE site for this release."
         ),
         entries=(
             Entry("CWE-250", "Execution with Unnecessary Privileges"),
@@ -247,6 +249,7 @@ FRAMEWORKS: tuple[Framework, ...] = (
             Entry("CWE-451", "User Interface (UI) Misrepresentation of Critical Information"),
             Entry("CWE-494", "Download of Code Without Integrity Check"),
             Entry("CWE-502", "Deserialization of Untrusted Data"),
+            Entry("CWE-798", "Use of Hard-coded Credentials"),
             Entry("CWE-829", "Inclusion of Functionality from Untrusted Control Sphere"),
             Entry(
                 "CWE-1336", "Improper Neutralization of Special Elements Used in a Template Engine"
@@ -646,6 +649,22 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
             MITRE_ATLAS,
             "AML.T0010.005",
             "A tool whose identity and pin are unknown could be compromised without detection.",
+        ),
+        _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
+        _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
+    ),
+    "literal_credential": (
+        _ref(CWE, "CWE-798", "The configuration holds a credential as a literal value."),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI03",
+            "Whoever reads the configuration holds the credential, with the identity and "
+            "privileges that it gives the agent or its tool server.",
+        ),
+        _ref(
+            MITRE_ATLAS,
+            "AML.T0083",
+            "A credential written in an agent's configuration is what this technique collects.",
         ),
         _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
         _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),

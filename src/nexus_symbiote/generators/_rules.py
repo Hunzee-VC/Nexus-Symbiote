@@ -195,6 +195,12 @@ RULES: dict[str, RuleInfo] = {
         "Unknown MCP launcher identity",
         "The package that an MCP server launches, and its pin, cannot be established.",
     ),
+    "literal_credential": RuleInfo(
+        "Literal credential in configuration",
+        "An MCP server definition or a Claude Code settings file holds a credential as a "
+        "literal value: in a header, a URL, a launch argument or an environment value. The "
+        "finding names the file, the position and the credential type, never the value.",
+    ),
     "lockfile_resolution_mismatch": RuleInfo(
         "Lockfile resolution mismatch",
         "An npm lockfile record's tarball URL names another package or version than the record.",

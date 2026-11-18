@@ -243,7 +243,7 @@ every rule.
 - `nist-ai-rmf-1.0`: Subcategory identifiers of the AI RMF Core, checked against secondary sources only. Titles are short summaries in this project's words, not the subcategory text.
 - `eu-ai-act-2024`: Regulation (EU) 2024/1689. An article is named where a finding can serve as evidence. Whether it applies depends on the system's risk class and the operator's role, which an inventory cannot establish. Titles are this project's words.
 - `iso-iec-42001-2023`: Control identifiers only: the standard's text is copyrighted and was not consulted, and the labels are this project's words.
-- `cwe`: Identifiers from the earlier SARIF catalog. The names of CWE-494, CWE-829 and CWE-1427 match CWE 4.20 as the OWASP Top 10 for LLM Applications 2026 cites them; the others were not checked against the CWE site for this release.
+- `cwe`: Identifiers from the earlier SARIF catalog, and CWE-798, added with the literal credential findings. The names of CWE-494, CWE-798, CWE-829 and CWE-1427 match CWE 4.20 as the OWASP Top 10 for LLM Applications 2026 cites them; the others were not checked against the CWE site for this release.
 
 ## Entries
 
@@ -294,6 +294,7 @@ every rule.
 | AML.T0068 | LLM Prompt Obfuscation |  |
 | AML.T0070 | RAG Poisoning |  |
 | AML.T0074 | Masquerading |  |
+| AML.T0083 | Credentials from AI Agent Configuration |  |
 | AML.T0105 | Escape to Host |  |
 | AML.T0109 | AI Supply Chain Rug Pull |  |
 | AML.T0142 | Event Triggered Execution |  |
@@ -333,6 +334,7 @@ every rule.
 | CWE-451 | User Interface (UI) Misrepresentation of Critical Information |
 | CWE-494 | Download of Code Without Integrity Check |
 | CWE-502 | Deserialization of Untrusted Data |
+| CWE-798 | Use of Hard-coded Credentials |
 | CWE-829 | Inclusion of Functionality from Untrusted Control Sphere |
 | CWE-1336 | Improper Neutralization of Special Elements Used in a Template Engine |
 | CWE-1427 | Improper Neutralization of Input Used for LLM Prompting |
@@ -569,6 +571,16 @@ every rule.
 | --- | --- | --- | --- |
 | `owasp-llm-2025` | LLM01:2025 Prompt Injection | all | A line or paragraph separator can split instruction text in some renderers. |
 | `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
+
+### `literal_credential`
+
+| Framework | Entry | Severities | Rationale |
+| --- | --- | --- | --- |
+| `owasp-asi-2026` | ASI03 Identity & Privilege Abuse | all | Whoever reads the configuration holds the credential, with the identity and privileges that it gives the agent or its tool server. |
+| `mitre-atlas-2026.10` | AML.T0083 Credentials from AI Agent Configuration | all | A credential written in an agent's configuration is what this technique collects. |
+| `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
+| `cwe` | CWE-798 Use of Hard-coded Credentials | all | The configuration holds a credential as a literal value. |
 
 ### `local_process`
 

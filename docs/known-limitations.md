@@ -322,6 +322,48 @@ A way around a limit that its entry does not describe is worth a
   issuer) are not scrubbed. In an inline shell or `cmd` script a credential is found
   by its shape or in a `NAME=value`, `--name=value` or `--name value` word, which
   covers cmd's `set NAME=<scheme> <credential>`.
+- **A literal credential is reported only where the rule reads.** The
+  `literal_credential` finding reads an MCP server definition's endpoint URLs,
+  header and `env` values, command and arguments, and the `env` values of Claude
+  Code settings files ([finding catalog](finding-catalog.md#categories)). A
+  credential anywhere else raises no finding: in an `oauth` or `auth` object,
+  another field of the definition or a declared tool; pasted as a header or
+  variable name; in Codex's `shell_environment_policy.set`, a hook or helper
+  command or the settings of another coding agent; in an A2A card or client, a RAG
+  locator, `.npmrc` or another resolver file, or source code. Files that a server's
+  `envFile` names and `.env` files are not searched. No finding therefore does not
+  mean that the project holds no credential: run a secret scanner over the
+  repository as well.
+- **Literal credentials are found by format, by `Bearer` and by name.** Not
+  reported: a credential without a known format under a name that does not end in a
+  credential word, such as `OPENAI_KEY`, `ENCRYPTION_KEY`, `NPM_AUTH`, `SESSION`,
+  `COOKIE`, `GOOGLE_CREDENTIALS`, `CONNECTION_STRING`, `GITHUB_TOKEN_PROD` or a
+  short option (`-p`); one inside a JSON document or another structure in one value,
+  in an assignment written with spaces around `=`, in a URL path, or in a query
+  parameter with another name; a URL user name without a password, unless it is a
+  token in a known format; the default in `${VAR:-default}`; a value under eight
+  characters, with fewer than five different characters, or without a digit, unless
+  it has 20 characters and both cases, so `correct-horse-battery-staple` is not
+  reported; a value written as an upper-case variable name; a value that holds
+  `%NAME%`, a backquote, or `$` before a letter, digit, `{`, `(` or another `$`,
+  which read as an expansion (`pa$sword1`); under a credential name, a value that
+  starts as a path does or ends in a file suffix, as about one base64 value in 64
+  starts with `/`; an `sk-` key without a run of 12 letters and digits that holds
+  both; and a credential that holds a placeholder mark by chance, which about 1 in
+  12,000 random tokens of 40 letters and digits does, and about 1 in 650 JSON Web
+  Tokens of 800 characters. Reported wrongly: a default or test value that holds a
+  digit, such as `password1` or `dev-token-123`; a token in a known format that is
+  meant to be public, such as a publishable or anonymous key; the name of a secret,
+  or another identifier, passed to an option named for a credential
+  (`--secret app-secret-2`); a word of eight or more characters with a digit after
+  `Bearer`; and `PWD` set to a relative directory with a digit. The type names the
+  format, not the issuer: another provider's `sk-` key reads as an OpenAI key. The
+  finding does not establish that a credential is valid, in use or committed, and
+  nothing checks it with a service. Its text names only the position and the type,
+  so the finding, and the fingerprint of a
+  [suppression](policy-reference.md#suppressions) of it, stay the same when the
+  value is replaced by another of the same type: remove the suppression when you
+  rotate the credential.
 - **Resolver settings outside the root are not read.** Settings are read from the
   root `.npmrc`, `bunfig.toml`, `.yarnrc.yml`, `.yarnrc`, `.env.yarn`, `uv.toml`
   and the `[tool.uv]` table of `pyproject.toml`. User and global configuration,
@@ -954,6 +996,11 @@ A way around a limit that its entry does not describe is worth a
   instruction, declaration, CDATA section or other such form is counted to the end
   CommonMark gives it (`?>`, `>` or `]]>`), or to the end of its HTML block when it
   is not closed, although an HTML parser hides it only up to its first `>`.
+- **Literal credentials are reported only in Claude Code settings `env`.** A
+  credential in a hook, helper or status line command, in a permission rule, in
+  Codex's `shell_environment_policy.set` or in another coding agent's settings is
+  redacted and raises no `literal_credential` finding. The rule, and what it misses
+  and reports wrongly, are under [MCP servers and tools](#mcp-servers-and-tools).
 - **Settings alerts do not say what changed.** Rules, hook commands and other
   settings are bound by a digest of each settings file, not recorded. A changed
   value, such as an added hook command or a removed deny rule, raises a high
