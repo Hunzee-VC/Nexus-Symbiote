@@ -7,6 +7,10 @@ and how safely it behaves when that repository is hostile.
 
 - [`SPEC.md`](SPEC.md): what is measured, why, how it is scored, and the threats to validity.
 - [`CATALOG.md`](CATALOG.md): every case, with its weight and attribute checks.
+- [`RESULTS.md`](RESULTS.md): audited grades for ten tools at the versions listed there,
+  with analysis and the audit trail.
+- [`results/scorecard.md`](results/scorecard.md) and [`results/results.json`](results/results.json):
+  the generated scorecard and per-item evidence for every tool.
 
 This directory is self-contained. It imports nothing from `nexus_symbiote`; Nexus
 SymBiote is graded as one tool among the others.
@@ -68,7 +72,7 @@ The corpus contains live hostile payloads, so do not generate it on a workstatio
    python3 calibrate.py --corpus /opt/aibom-bench/corpus2 --work /tmp/aibom-calibration
    ```
 
-   Expected: oracle 96.5 (A), cat 7.4 (F), lister 0.0 (F), empty 0.0 (F).
+   Expected: oracle 96.5 (A), cat 8.5 (F), lister 1.9 (F), empty 0.0 (F).
 
    The positive control in `tools.json` (`executor.py`) runs through the real sandbox in
    step 4. It executes every payload on purpose, so `score.py` can confirm that each

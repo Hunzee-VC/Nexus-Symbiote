@@ -15,6 +15,7 @@ omitted; `ground_truth.json` in a generated corpus has the full values.
 | C04 | component | Container server on a floating tag | MCP client configurations across agents | 1 |  |
 | C04F | finding | Floating container tag :latest | MCP client configurations across agents | 2 |  |
 | C05 | component | Remote HTTP server with env-referenced credential | MCP client configurations across agents | 3 | url (+1), credential_ref (+1) |
+| NC3 | negative_finding | Env-referenced credential is not called hardcoded | MCP client configurations across agents | -1 |  |
 | C06 | component | Server holding a literal credential | MCP client configurations across agents | 1 | credential_name (+1) |
 | C06F | finding | Hardcoded credential in MCP env | MCP client configurations across agents | 3 |  |
 | C07 | component | Remote server with a literal bearer token | MCP client configurations across agents | 1 |  |
@@ -48,6 +49,7 @@ omitted; `ground_truth.json` in a generated corpus has the full values.
 | ID | Kind | Case | Scenario | Points | Attribute checks |
 |---|---|---|---|---:|---|
 | K01 | component | Claude skill with bundled script | Skills, instruction files, hooks, plugins, commands | 3 | script (+1), allowed_tools (+1) |
+| NK3 | negative_finding | Benign skill script is not called exfiltrating | Skills, instruction files, hooks, plugins, commands | -1 |  |
 | K01H | component | Bundled script digest | Skills, instruction files, hooks, plugins, commands | 1 | sha256 (+1) |
 | K02 | component | Skill with exfiltrating script | Skills, instruction files, hooks, plugins, commands | 1 |  |
 | K02F | finding | Skill script exfiltrates credentials / curl|sh | Skills, instruction files, hooks, plugins, commands | 3 |  |

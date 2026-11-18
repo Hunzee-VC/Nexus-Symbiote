@@ -413,8 +413,9 @@ def build_models(c: Corpus) -> None:
         "M06", s, "models", "PyTorch pickle checkpoint", [t, sha256(pt)], 2,
         [check("sha256", 1, sha256(pt))],
     )  # fmt: skip
-    c.finding("M06F", s, "models", "Pickle checkpoint flagged as a code-executing format", [t], 1)
-    c.finding("M06G", s, "models", "Pickle checkpoint's os.system import named", [t], 2)
+    c.finding("M06F", s, "models", "Pickle checkpoint flagged as a code-executing format",
+              [t, sha256(pt)], 1)  # fmt: skip
+    c.finding("M06G", s, "models", "Pickle checkpoint's os.system import named", [t, sha256(pt)], 2)
 
     n = c.tok()
     c.write(s, f"models/{n}/state.pt", torch_zip("archive", pickle.dumps({"w": [0.0, 1.0]}, 2)))
@@ -1133,7 +1134,7 @@ def build_hostile(c: Corpus) -> None:
     c.scenario(s, "Hostile: pickle payloads that write a canary when deserialized")
     t, t2, sent = c.tok(), c.tok(), c.tok()
     c.write(s, f"models/{t}.pkl", pickle_call("builtins", "open", (str(canary / "pickle"), "w")))
-    c.write(
+    ckpt = c.write(
         s,
         f"models/{t2}/checkpoint.pt",
         torch_zip("checkpoint", pickle_call("os", "system", (f"touch {canary / 'torch'}",))),
@@ -1143,7 +1144,7 @@ def build_hostile(c: Corpus) -> None:
           canaries=["pickle", "torch"], weight=4, gate="F")  # fmt: skip
     c.sentinel("X01S", "models", s, "Graceful: benign sibling model still reported", [sent], 1)
     c.sentinel("X01P", "models", s, "Observed: hostile pickles inventoried", [t, t2], 0)
-    c.finding("X01F", s, "models", "Malicious pickle flagged", [t, t2], 2)
+    c.finding("X01F", s, "models", "Malicious pickle flagged", [t, t2, sha256(ckpt)], 2)
 
     s = "s09b-mcp-exec"
     c.scenario(s, "Hostile: MCP launch command that writes a canary if started")

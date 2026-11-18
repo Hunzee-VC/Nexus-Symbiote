@@ -81,7 +81,7 @@
       ]
     },
     "cdxgen": {
-      "display": "OWASP cdxgen (aibom)",
+      "display": "OWASP cdxgen",
       "source": "https://github.com/cdxgen/cdxgen",
       "version": "12.9.2",
       "install": "npm install --ignore-scripts @cyclonedx/cdxgen",

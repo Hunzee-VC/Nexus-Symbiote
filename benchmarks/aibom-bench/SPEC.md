@@ -78,8 +78,9 @@ format reader. No reader knows any tool.
 
 - CycloneDX: components and services, nested; `metadata.component` when it is a model,
   dataset or library rather than the scanned project; `formulation`. Findings come from
-  `vulnerabilities` (affected refs resolved), `annotations` that name a severity or a
-  component, and risk-named component properties.
+  `vulnerabilities` (affected refs resolved), `annotations` (informational unless their
+  text states a severity), and risk-named component properties whose value is not a
+  null value such as `none` or `0`.
 - SPDX 3: elements of `@graph`, `element` or `elements` other than relationships,
   creation info, agents and licences. Annotations and vulnerability assessments are
   findings, attributed through `subject`, `from` and `to`.
@@ -153,9 +154,9 @@ memory was not observed.
 | Synthetic tool | What it emits | Score |
 |---|---|---:|
 | oracle | Exactly the ground truth, as CycloneDX plus SARIF | 96.5 (no SPDX, package URLs or dependency edges) |
-| cat | Every file's path, SHA-256 and full contents | 7.4 (F; X07 gate) |
+| cat | Every file's path, SHA-256 and full contents | 8.5 (F; X07 gate) |
 | positive control | Executes every payload and echoes every file (`executor.py`, run in the sandbox) | F; trips all seven safety probes and the F, D and C gates |
-| lister | Every file's path and SHA-256 | 0.0 |
+| lister | Every file's path and SHA-256 | 1.9 (only `AGENTS.md` and `CLAUDE.md`, whose names are their identity) |
 | empty | Valid, empty documents | 0.0 |
 
 The cat tool's residue comes from one-line files (a SafeTensors header, single-line
@@ -235,7 +236,7 @@ unshare -n -p -f --kill-child -m -- sh -c '<private /tmp, /var/tmp, /dev/shm; lo
   typing separately. Conversely, a record whose only kind evidence is an unusual word
   is missed.
 - **Residual echo credit.** A tool that dumps one-line files can still match a few
-  items (7.4 points in calibration).
+  items (8.5 points in calibration).
 - **Keyword-based finding classes.** Keyword sets are broad on purpose and matched at word
   boundaries in the finding's own text; a finding phrased with none of them is missed.
   Sets are published per case in `generate.py`.

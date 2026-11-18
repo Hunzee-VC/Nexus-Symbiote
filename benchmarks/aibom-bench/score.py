@@ -79,6 +79,11 @@ KIND_WORDS: dict[str, list[str]] = {
 }  # fmt: skip
 KIND_WORDS["safety"] = sorted({w for k in ("mcp", "models") for w in KIND_WORDS[k]})
 # Ground-truth items expected to carry ML-BOM / SPDX 3 AI and Dataset typing.
+# Annotations are free text: only an explicitly labelled severity counts ("severity:
+# high", "cdx:audit:severity | critical"), not any severity-like word ("confidence=low").
+ANNOTATION_SEVERITY = re.compile(
+    r"severity[^a-z0-9]{0,8}(critical|high|medium|moderate|low|info)\b", re.I
+)
 # A risk-named property whose value says "no risk" is not a finding.
 NULL_VALUES = {"", "none", "false", "0", "no", "n/a", "null", "low-none"}
 # Safety probes the positive control must trip, or the benchmark cannot see them fail.
@@ -185,12 +190,15 @@ def message_text(obj: Any) -> str:
 
 
 def identity(d: dict[str, Any]) -> str:
-    """Short scalar fields of an entry, used to attribute findings to it."""
+    """Short scalar fields and content digests of an entry, used to attribute findings."""
     parts = [
         f"{k}={v}"
         for k, v in d.items()
         if isinstance(v, (str, int)) and not isinstance(v, bool) and len(str(v)) < 300
     ]
+    for h in d.get("hashes") or []:
+        if isinstance(h, dict) and isinstance(h.get("content"), str):
+            parts.append(f"hash={h['content']}")
     return " ".join(parts).lower()
 
 
@@ -297,10 +305,13 @@ def read_cyclonedx(doc: dict[str, Any], src: str) -> list[Rec]:
             continue
         subjects = [s for s in a.get("subjects") or [] if isinstance(s, str)]
         text = str(a.get("text", ""))
-        m = re.search(r"\b(?:severity\W+)?(critical|high|medium|moderate|low|info)\b", text, re.I)
+        m = ANNOTATION_SEVERITY.search(text)
         sev = norm_severity(m.group(1)) if m else None
         if sev is None and all(s == meta_ref for s in subjects):
             continue  # a document-level note, not a finding about a component
+        # An annotation is a comment by definition; without a stated severity it is
+        # informational, not a risk finding.
+        sev = sev or "info"
         ctx = " ".join(by_ref.get(s, s) for s in subjects).lower()
         recs.append(finding(a, src, sev, ctx, text.lower()))
     return recs
@@ -324,7 +335,11 @@ def read_spdx3(doc: dict[str, Any], src: str) -> list[Rec]:
             refs = [e.get(k) for k in ("subject", "from", "to")]
             refs = [x for r in refs for x in (r if isinstance(r, list) else [r]) if x]
             ctx = " ".join(ids.get(r, str(r)) for r in refs).lower()
-            recs.append(finding(e, src, severity_of(e), ctx))
+            sev = severity_of(e)
+            if "annotation" in typ and sev is None:
+                m = ANNOTATION_SEVERITY.search(str(e.get("statement", "")))
+                sev = norm_severity(m.group(1)) if m else "info"  # a comment, not a finding
+            recs.append(finding(e, src, sev, ctx))
         elif not any(typ.endswith(s) for s in skip):
             recs.append(component(e, src))
     return recs
@@ -429,9 +444,11 @@ def read_generic(doc: Any, src: str) -> list[Rec]:
 
 
 def parse_json_outputs(data: bytes) -> list[Any]:
+    """JSON documents in a tool output; anything unparseable (including hostile nesting a
+    tool echoed) is treated as text, never as a scorer failure."""
     try:
         return [json.loads(data)]
-    except (ValueError, UnicodeDecodeError):
+    except (ValueError, UnicodeDecodeError, RecursionError):
         pass
     docs = []
     text = data.decode("utf-8", "replace")
@@ -439,14 +456,14 @@ def parse_json_outputs(data: bytes) -> list[Any]:
     if start > 0:
         try:
             return [json.loads(text[start:])]
-        except ValueError:
+        except (ValueError, RecursionError):
             pass
     for line in text.splitlines():
         line = line.strip()
         if line.startswith("{") and line.endswith("}"):
             try:
                 docs.append(json.loads(line))
-            except ValueError:
+            except (ValueError, RecursionError):
                 continue
     return docs
 
@@ -521,6 +538,12 @@ def short(v: str) -> bool:
     return len(v) <= VALUE_LIMIT and "\n" not in v
 
 
+def name_like(v: str) -> bool:
+    return (
+        len(v) <= 120 and "/" not in v and "\\" not in v and not v.lstrip().startswith(("{", "["))
+    )
+
+
 def qualifying(r: Rec, match: list[str], tokens: list[str], domain: str) -> int | None:
     """How many scenario tokens a qualifying record names, or None if it does not qualify.
 
@@ -540,6 +563,10 @@ def qualifying(r: Rec, match: list[str], tokens: list[str], domain: str) -> int 
         # type, a key, or the list that holds the record.
         others = [x for x in r.values if x is not v and short(x) and "/" not in x
                   and "\\" not in x]  # fmt: skip
+        # A name-like value may state its own kind ("crewai tool_definition: x"); a path
+        # or a serialized document may not.
+        if name_like(v):
+            others.append(v)
         if has_word(" ".join(others) + " " + r.keys, words):
             return sum(t in r.text for t in tokens)
     return None
@@ -923,7 +950,7 @@ def standards(
                     x = canonical(volatile_normalize(json.loads(a[name]), subs))
                     y = canonical(volatile_normalize(json.loads(b[name]), subs))
                     ok = x == y
-                except ValueError:
+                except (ValueError, RecursionError):
                     ok = text_normalize(a[name], subs) == text_normalize(b[name], subs)
                 same += ok
                 if not ok:
