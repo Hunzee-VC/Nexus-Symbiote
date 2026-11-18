@@ -11,7 +11,6 @@ import string
 import subprocess
 import sys
 import time
-import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -383,17 +382,38 @@ def test_what_is_listed_past_the_bound_does_not_depend_on_hash_order(tmp_path):
     assert "imported_by_count" in only
 
 
+_PEAKS = """
+import json, sys, tracemalloc
+from pathlib import Path
+from nexus_symbiote.scanners.prompt import PromptScanner
+peaks = {}
+for root in sys.argv[1:]:
+    tracemalloc.start()
+    try:
+        PromptScanner().scan(Path(root))
+        peaks[Path(root).name] = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+print(json.dumps(peaks))
+"""
+
+
 def test_scan_memory_grows_with_the_files_not_with_the_paths_they_reference(tmp_path):
-    peaks = {}
+    roots = []
     for files in (50, 100, 200):
-        root = tmp_path / str(files)
-        _deep(root, files)
-        tracemalloc.start()
-        try:
-            PromptScanner().scan(root)
-            peaks[files] = tracemalloc.get_traced_memory()[1]
-        finally:
-            tracemalloc.stop()
+        roots.append(tmp_path / str(files))
+        _deep(roots[-1], files)
+    # A fresh interpreter: tracemalloc traces every allocation in the process, so state
+    # an earlier test leaves behind can allocate inside the window and skew one peak.
+    measured = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", _PEAKS, *map(str, roots)],
+        cwd=tmp_path,
+        capture_output=True,
+        check=True,
+        text=True,
+        timeout=120,
+    ).stdout
+    peaks = {int(name): peak for name, peak in json.loads(measured).items()}
     # References quadruple at each step and name 3 KB paths: 120 MB of them at 200
     # files before they were bounded.
     assert peaks[200] < 16 * limits.MIB
