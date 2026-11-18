@@ -254,8 +254,9 @@ def _model_citation(item: dict[str, Any]) -> ModelCitation | None:
     """The citation a model evidence entry carries, or ``None`` when it cannot be re-read.
 
     The identifier must be the entry's own ``attributes.value``, in the characters model
-    identifiers use, and neither it nor the signal label may read as a credential: a
-    report cannot make a scan record text the report does not state, or a secret it does.
+    identifiers use, and neither it nor the signal label may read as a credential to the
+    redactor: a report cannot make a scan record text the report does not state, nor a
+    credential the redactor recognises.
     """
     signal, location, attributes = item["signal"], item.get("location"), item.get("attributes")
     literal = attributes.get("value") if isinstance(attributes, dict) else None
