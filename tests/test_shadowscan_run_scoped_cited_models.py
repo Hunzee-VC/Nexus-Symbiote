@@ -169,10 +169,16 @@ def test_a_rerun_with_new_pseudonyms_keeps_the_cited_model_and_is_not_drift(tmp_
 def test_project_validation_reproduces_a_run_scoped_import_with_a_cited_model(tmp_path):
     bom = _scan(tmp_path, "project", _report("a"))
     assert MODEL_REF in _imported(_load(bom))
-    args = ["--project", str(tmp_path / "project"), "--no-project-policy"]
-    result = CliRunner().invoke(main, ["validate", str(bom), *args, "--allow-unsigned-discovery"])
-    assert "discovery report" not in result.output
-    assert "discovery content digest" not in result.output
+    report = tmp_path / "project" / "shadowscan.json"
+    args = ["validate", str(bom), "--project", str(tmp_path / "project"), "--no-project-policy"]
+    result = CliRunner().invoke(main, [*args, "--allow-unsigned-discovery"])
+    assert "Basis: project-reconciled" in result.output
+    assert "ERROR [shadowscan]" not in result.output
+    # A rerun is not drift for diff, but the inventory still binds the exact report bytes.
+    report.write_text(json.dumps(_report("bb")))
+    rerun = CliRunner().invoke(main, [*args, "--allow-unsigned-discovery"])
+    assert rerun.exit_code != 0
+    assert "Local discovery report differs from the recorded digest." in rerun.output
 
 
 def test_an_identity_scope_switch_is_a_profile_change_on_every_imported_component(tmp_path):
