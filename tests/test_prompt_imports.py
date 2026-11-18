@@ -11,7 +11,6 @@ import string
 import subprocess
 import sys
 import time
-import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -383,21 +382,66 @@ def test_what_is_listed_past_the_bound_does_not_depend_on_hash_order(tmp_path):
     assert "imported_by_count" in only
 
 
+_PEAKS = """
+import json, sys, tracemalloc
+from pathlib import Path
+from nexus_symbiote.scanners.prompt import PromptScanner
+roots = [Path(arg) for arg in sys.argv[1:]]
+held = [None] * 1_000_000
+tracemalloc.start()
+for index in range(len(held)):
+    before = tracemalloc.get_traced_memory()[0]
+    held[index] = sys.intern(f"held-{index}")
+    if tracemalloc.get_traced_memory()[0] - before > 100_000:
+        break
+tracemalloc.stop()
+runs = {}
+for root in roots:
+    tracemalloc.start(8)
+    try:
+        result = PromptScanner().scan(root)
+        current, peak = tracemalloc.get_traced_memory()
+        largest = tracemalloc.take_snapshot().statistics("traceback")[:3]
+    finally:
+        tracemalloc.stop()
+    runs[root.name] = {
+        "peak": peak,
+        "current": current,
+        "components": len(result.components),
+        "failures": len(result.scan_failures),
+        "largest": [[stat.size, stat.count, stat.traceback.format()] for stat in largest],
+    }
+print(json.dumps(runs))
+"""
+
+
 def test_scan_memory_grows_with_the_files_not_with_the_paths_they_reference(tmp_path):
-    peaks = {}
+    roots = []
     for files in (50, 100, 200):
-        root = tmp_path / str(files)
-        _deep(root, files)
-        tracemalloc.start()
-        try:
-            PromptScanner().scan(root)
-            peaks[files] = tracemalloc.get_traced_memory()[1]
-        finally:
-            tracemalloc.stop()
+        roots.append(tmp_path / str(files))
+        _deep(roots[-1], files)
+    # pathlib interns every path component it parses. Once the interpreter's table of
+    # interned strings has no room left, the next string rebuilds it at a size set by
+    # every string the process holds (about 1 to 4 MB on CPython 3.11 to 3.14), which
+    # tracemalloc charges to whatever scan runs then. The measuring interpreter first
+    # interns and holds strings until the table is rebuilt: the new table has room for at
+    # least as many strings again as it holds, far more than the scans add.
+    measured = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", _PEAKS, *map(str, roots)],
+        cwd=tmp_path,
+        capture_output=True,
+        check=True,
+        text=True,
+        timeout=120,
+    ).stdout
+    runs = {int(name): run for name, run in json.loads(measured).items()}
+    peaks = {files: run["peak"] for files, run in runs.items()}
+    # What the scan still holds afterwards, and where, so a failure says what grew.
+    detail = json.dumps(runs, indent=1)
     # References quadruple at each step and name 3 KB paths: 120 MB of them at 200
     # files before they were bounded.
-    assert peaks[200] < 16 * limits.MIB
-    assert peaks[200] < 2.5 * peaks[100] < 2.5 * 2.5 * peaks[50]
+    assert peaks[200] < 16 * limits.MIB, detail
+    assert peaks[200] < 2.5 * peaks[100] < 2.5 * 2.5 * peaks[50], detail
 
 
 _CAPPED_CLI = """

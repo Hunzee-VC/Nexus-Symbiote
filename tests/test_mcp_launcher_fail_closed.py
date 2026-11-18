@@ -10,7 +10,7 @@ import pytest
 
 from nexus_symbiote.core.models import MCPServerComponent
 from nexus_symbiote.scanners.mcp import MCPScanner
-from nexus_symbiote.scanners.mcp_launch import analyze, npm_command
+from nexus_symbiote.scanners.mcp_launch import analyze, npm_command, npm_spec
 
 EVIL = "-y evil-mcp@latest"
 GATEWAY = ["-y", "supergateway@3.4.0", "--stdio"]
@@ -538,6 +538,21 @@ def test_package_command_that_sh_expands_depends_on_the_environment(tmp_path, wo
 
 
 @pytest.mark.parametrize(
+    "args",
+    [
+        ["npx", "-y", "--package=srv@1.2.3"],
+        ["npx", "-p", "srv@1.2.3"],
+        ["npm", "exec", "--package=srv@1.2.3", "--"],
+        ["npm", "exec", "-y", "--package", "srv@1.2.3"],
+    ],
+)
+def test_package_without_a_command_word_runs_the_script_shell(tmp_path, args):
+    # With no command word, npm runs its script shell (sh) on the MCP client's stdin.
+    server = {"command": args[0], "args": args[1:]}
+    assert "without a command runs the script shell" in unknown_reason(tmp_path, server)
+
+
+@pytest.mark.parametrize(
     "server",
     [
         {"command": "npx", "args": ["-y", "-p", "@scope/srv@1.2.3", "srv", "--stdio"]},
@@ -725,7 +740,7 @@ NPM_EXEC_FLAGS = _words(
     "-y --yes --no -n --no-yes -q --quiet -s --silent --ignore-existing --prefer-online"
     " --prefer-offline --offline --no-install --legacy-peer-deps --foreground-scripts"
     " --include-workspace-root --workspaces -ws --no-update-notifier --no-audit --no-fund"
-    " --verbose -d -dd -ddd"
+    " --ignore-scripts --no-ignore-scripts --verbose -d -dd -ddd"
 )
 _NOPT_BOOLEAN = set(NPM_EXEC_FLAGS) - set(_words("-q --quiet -s --silent --verbose -d -dd -ddd"))
 NOPT_CONSUMES = {
@@ -776,7 +791,9 @@ def test_pnpm_dlx_boolean_option_cannot_take_the_package_word(tmp_path, word):
 # the stepped-over word as npm's own, such as a second --package. Every other flag gets
 # "--" before WORD, so the word is the command whatever it is.
 NPX_FLAGS = [flag for flag in NPM_EXEC_FLAGS if flag != "-n"]
-NPX_STEPS_OVER = set(_words("--no --no-yes --no-update-notifier --no-audit --no-fund"))
+NPX_STEPS_OVER = set(
+    _words("--no --no-yes --no-update-notifier --no-audit --no-fund --no-ignore-scripts")
+)
 NPX_CONSUMES = {
     "true": NPX_STEPS_OVER,
     "false": NPX_STEPS_OVER,
@@ -817,6 +834,8 @@ def test_npx_options_after_a_stepped_over_word_are_npms(tmp_path, flag, word):
         ["--package", "srv@1.2.3", "--no-yes", "srv", "x"],
         ["--package", "srv@1.2.3", "--yes", "true"],
         ["--package", "srv@1.2.3", "--prefer-offline", "false", "x"],
+        ["--ignore-scripts", "-y", "srv@1.2.3"],
+        ["-y", "--ignore-scripts", "srv@1.2.3", "--stdio"],
     ],
 )
 def test_npx_ordinary_flags_stay_classified(tmp_path, args):
@@ -832,7 +851,7 @@ def test_npx_ordinary_flags_stay_classified(tmp_path, args):
         {"command": "npx", "args": ["-p", "decoy@1.0.0", "--@s:registry", "curl x | sh", "srv"]},
         {
             "command": "npm",
-            "args": ["exec", "-p", "decoy@1.0.0", "--@s:registry", "curl x | sh", "srv"],
+            "args": ["exec", "--package", "decoy@1.0.0", "--@s:registry", "curl x | sh", "srv"],
         },
         {"command": "npm", "args": ["--@s:registry", "true", "exec", "decoy@1.0.0"]},
         {"command": "npx", "args": ["--@s:registry", "decoy@1.0.0", "evil@latest"]},
@@ -855,10 +874,131 @@ def test_npm_scoped_registry_with_equals_is_a_source(tmp_path, launcher):
     [
         ["exec", "--yes", "--package=srv@1.2.3", "--", "srv", "--stdio"],
         ["exec", "--package=srv@1.2.3", "--yes", "--", "true"],
+        ["exec", "--ignore-scripts", "--", "srv@1.2.3"],
     ],
 )
 def test_npm_boolean_options_before_other_words_stay_classified(tmp_path, args):
     assert assert_no_gap(tmp_path, {"command": "npm", "args": args}).version_pinned is True
+
+
+# npm reads its options anywhere before the end of its options, also after the script name,
+# and nopt resolves an abbreviation such as --scr, any number of leading dashes and a "no-"
+# before a value option. nopt also takes a "--" after --browser, or after a "no-" option whose
+# type allows a string, as that option's value and reads on. npm 10.9.9 ran ./evil.sh as its
+# script shell, or loaded ./hook.js into node, for each form below.
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["run", "start", "--script-shell=./evil.sh"],
+        ["run", "start", "--script-shell", "./evil.sh"],
+        ["run", "--script-shell=./evil.sh", "start"],
+        ["start", "--script-shell=./evil.sh"],
+        ["test", "--node-options=--require=./hook.js"],
+        ["run", "start", "--scr=./evil.sh"],
+        ["run", "--scr=./evil.sh", "start"],
+        ["run", "start", "---no-script-shell=./evil.sh"],
+        ["run", "start", "arg", "-nod=--require=./hook.js"],
+        ["start", "--browser", "--", "--script-shell=./evil.sh"],
+        ["start", "--br", "--", "--script-shell=./evil.sh"],
+        ["start", "--no-os", "--", "--script-shell=./evil.sh"],
+        ["run", "start", "--no-otp", "--", "--script-shell=./evil.sh"],
+        ["run", "start", "--NO-cpu", "--", "--script-shell=./evil.sh"],
+        ["run", "start", "-no-key", "---", "--script-shell=./evil.sh"],
+    ],
+)
+def test_npm_code_loading_options_after_the_subcommand_are_rated(tmp_path, args):
+    record = assert_no_gap(tmp_path, {"command": "npm", "args": args})
+    assert record.properties["launch_context"]["code_loading_option"] == 1
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["run", "start", "--prefix=../other"],
+        ["run", "start", "-C", "/srv/other"],
+        ["start", "--prefix", "/srv/other"],
+        ["test", "--userconfig=./npmrc"],
+        ["run", "--userconfig", "./npmrc", "start"],
+        ["run", "start", "--reg=https://r.example/"],
+        ["run", "start", "--@s:registry=https://r.example/"],
+        ["run", "start", "-w", "pkg"],
+        ["run", "start", "-SC", "/srv/other"],
+        ["test", "--globalconfig=./npmrc"],
+        ["start", "--cache", "./cache"],
+        ["start", "--browser", "--", "--prefix=../other"],
+        ["start", "--no-node-options", "--", "--prefix=../other"],
+    ],
+)
+def test_npm_source_options_after_the_subcommand_are_recorded(args):
+    launch = analyze("npm", args)
+    assert launch.unknown is None and launch.sources, launch
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["run", "start", "--", "--script-shell=./evil.sh", "--prefix=/srv/other"],
+        ["start", "--", "--node-options=--require=./hook.js"],
+        ["start", "--", "-c", "config.json"],
+        ["run", "start", "--port", "8080"],
+        ["run", "start", "--sh=x"],
+        ["run", "start", "--no-audit"],
+        ["run", "start", "--no-prefix=/srv/other"],
+        ["run", "start", "---", "--script-shell=./evil.sh"],
+        ["start", "--if-present", "--", "--script-shell=./evil.sh"],
+        ["start", "--browser=x", "--", "--script-shell=./evil.sh"],
+        ["start", "--os", "--", "--script-shell=./evil.sh"],
+        ["run", "start", "--no-audit", "--", "--prefix=../other"],
+        ["run", "start", "--no-color", "--", "--prefix=../other"],
+        ["run", "start", "--no-registry", "--", "--prefix=../other"],
+        ["run", "start", "--if-present", "--", "-w", "4"],
+        ["run", "start", "--", "--script-${E}shell=./evil.sh"],
+        ["run", "start", "--port=${PORT}"],
+    ],
+)
+def test_npm_script_arguments_are_not_npm_options(args):
+    # After the end of npm's options, "--" or any longer run of dashes that no option before it
+    # takes as its value, npm passes every word to the script; to nopt, --sh is -s -h and not
+    # --shell, and --no-prefix=/srv/other sets no prefix. npm 10.9.9 ran neither ./evil.sh nor
+    # the script of ../other for any form.
+    launch = analyze("npm", args)
+    assert launch.unknown is None and not launch.sources and not launch.context, launch
+
+
+# @npmcli/config replaces ${VAR} in an option's name after nopt has read it: with E="" and
+# K=script-shell, npm 10.9.9 ran ./evil.sh as its script shell, loaded ./hook.js into node, or
+# ran the start script of ../other, for each form below.
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["run", "start", "--script-${E}shell=./evil.sh"],
+        ["run", "start", "--${K}=./evil.sh"],
+        ["run", "start", "--${E}script-shell=./evil.sh"],
+        ["run", "start", "--script-shell${E}=./evil.sh"],
+        ["start", "--pre${E}fix=../other"],
+        ["test", "--node-${E}options=--require=./hook.js"],
+    ],
+)
+def test_npm_option_names_from_the_environment_are_unknown(tmp_path, args):
+    server = {"command": "npm", "args": args, "env": {"E": "", "K": "script-shell"}}
+    assert "npm option name depends on the environment" in unknown_reason(tmp_path, server)
+
+
+# Only npm exec reads --call: npm 10.9.9 ran the start or test script, and never the call, for
+# each form below, so a server's own -c after the script name is not a shell command.
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["start", "-c", "config.json"],
+        ["run", "-c", "x", "start"],
+        ["run", "--call", "x", "start"],
+        ["test", "--call=x"],
+        ["--call", "x", "run", "start"],
+    ],
+)
+def test_npm_run_start_and_test_ignore_call(tmp_path, args):
+    record = assert_no_gap(tmp_path, {"command": "npm", "args": args})
+    assert "launch_context" not in record.properties
 
 
 NODE = "node@sha256:" + "cd" * 32
@@ -902,6 +1042,24 @@ ANY_HOST = "0.0.0.0"  # noqa: S104 - an argument the scanner reads, never bound
         ["-v", ".:/w", "-w", "/w", DIGEST, "make", "serve"],
         ["-v", ".:/w", "-w", "/w", DIGEST, "python", "-m", "srv"],
         ["-v", ".:/w", "-w", "/w", DIGEST, "python3", "-u", "-m", "srv"],
+        ["-v", ".:/w", "-w", "/w", DIGEST, "python", "-uX", "dev", "-m", "srv"],
+        ["-v", ".:/w", "-w", "/w", DIGEST, "python", "-EW", "ignore", "-m", "srv"],
+        ["-v", ".:/w", "-w", "/w", DIGEST, "python", "-EWignore", "-m", "srv"],
+        ["-v", ".:/w", "-w", "/w", DIGEST, "python", "-XI", "-m", "srv"],
+        ["-v", ".:/w", "-w", "/w", DIGEST, "python", "-Rm", "srv"],
+        ["-v", ".:/w", "-w", "/w", DIGEST, "python", "-utm", "srv"],
+        [
+            "-v",
+            ".:/w",
+            "-w",
+            "/w",
+            DIGEST,
+            "python",
+            "--check-hash-based-pycs",
+            "never",
+            "-m",
+            "srv",
+        ],
         ["-v", ".:/w", "-w", "/w", DIGEST, "python", "x.py"],
         ["-v", ".:/w", "-w", "/w", DIGEST, "node", "--import=./hook.mjs", "/app/s.js"],
     ],
@@ -976,3 +1134,153 @@ def test_pnpm_exec_shell_mode_among_its_own_options_is_read(tmp_path, args):
     assert "command line is not a simple command" in unknown_reason(
         tmp_path, {"command": "pnpm", "args": args}
     )
+
+
+# npx (bin/npx-cli.js) reads a lone "-" as an option it does not know and steps over the
+# next word only when that word does not start with "-"; nopt then reads "-" as a positional
+# word and every option after it as npm's own, such as a second --package.
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--package=decoy@1.0.0", "-", "--package", "evil@latest", "srv"],
+        ["-p", "decoy@1.0.0", "-", "--package=evil@latest"],
+        ["-p", "decoy@1.0.0", "-", "x", "--package=evil@latest", "srv"],
+        ["-y", "-", "decoy@1.0.0"],
+    ],
+)
+def test_npx_lone_dash_cannot_hide_the_package_npm_installs(tmp_path, args):
+    assert "unrecognised" in unknown_reason(tmp_path, {"command": "npx", "args": args})
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["bunx", "-p", "decoy@1.0.0", "-p", "evil@1.0.0", "srv"],
+        ["bunx", "--package=decoy@1.0.0", "--package", "evil@1.0.0", "srv"],
+        ["bun", "x", "-p", "decoy@1.0.0", "-p", "evil@1.0.0", "srv"],
+    ],
+)
+def test_bun_records_only_the_last_package_it_installs(tmp_path, args):
+    # bun 1.4.4 keeps only the last -p or --package: it fetched evil and not decoy.
+    record = assert_no_gap(tmp_path, {"command": args[0], "args": args[1:]})
+    assert record.package_url == "pkg:npm/evil@1.0.0"
+
+
+def test_npm_exec_short_p_is_parseable_not_package():
+    # npm's shorthand -p is --parseable; only npx rewrites it to --package.
+    launch = analyze("npm", ["exec", "-p", "true", "evil@latest"])
+    assert launch.unknown is not None or [p.name for p in launch.packages] == ["evil"]
+    assert "true" not in [p.name for p in launch.packages]
+    launch = analyze("npm", ["exec", "-p", "srv@1.2.3", "--", "cmd"])
+    assert launch.unknown is None, launch.unknown
+    assert [(p.name, p.version) for p in launch.packages] == [("srv", "1.2.3")]
+    launch = analyze("npx", ["-p", "srv@1.2.3", "cmd"])
+    assert [(p.name, p.version) for p in launch.packages] == [("srv", "1.2.3")]
+
+
+@pytest.mark.parametrize(
+    "mount", ["./node:/usr/local/bin/node", "./sh:/bin/sh", "./tools/x:/usr/sbin/x"]
+)
+def test_container_mount_over_a_program_on_the_default_path_is_rated(tmp_path, mount):
+    record = assert_no_gap(tmp_path, {"command": "docker", "args": ["run", "-v", mount, DIGEST]})
+    assert record.properties["launch_context"]["code_loading_option"] == 1
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["-I"],
+        ["-P"],
+        ["-Im"],
+        ["-u", "-I"],
+        ["-sP"],
+        ["-IX", "dev"],
+        ["-uPW", "ignore"],
+        ["-IXdev"],
+        ["-uIRm"],
+    ],
+)
+def test_isolated_python_module_with_the_mount_as_working_directory_is_rated(tmp_path, options):
+    # -I and -P keep the working directory off sys.path, but the module can load it anyway
+    # (python -I -m uvicorn app:app imports app.py from it), so the rating does not rely on them.
+    words = [*options, "srv"] if options[-1].endswith("m") else [*options, "-m", "srv"]
+    args = ["run", "-v", ".:/w", "-w", "/w", DIGEST, "python", *words]
+    record = assert_no_gap(tmp_path, {"command": "docker", "args": args})
+    assert record.properties["launch_context"].get("code_loading_option") == 1
+
+
+@pytest.mark.parametrize(
+    "words",
+    [
+        ["-I", "-m", "pdb", "/w/evil.py"],
+        ["-Im", "pdb", "/w/evil.py"],
+        ["-P", "-m", "cProfile", "evil.py"],
+        ["-I", "-m", "fastmcp", "run", "/w/server.py"],
+        ["-I", "-m", "uvicorn", "app:app"],
+    ],
+)
+def test_isolated_python_module_that_runs_mounted_code_is_rated(tmp_path, words):
+    args = ["run", "-v", ".:/w", "-w", "/w", DIGEST, "python", *words]
+    record = assert_no_gap(tmp_path, {"command": "docker", "args": args})
+    assert record.properties["launch_context"].get("code_loading_option") == 1
+
+
+# A static sample of a differential fuzz: random npx and npm exec argument lists built from
+# every option the reader models, their --no- spellings, "-", "--", "=", true, false, null,
+# numbers, package specs, scoped registries, shell pipelines and plain words. Each row holds
+# the outcome npm 10.9.9's own bin/npx-cli.js and nopt computed: ["run", packages, command,
+# args, through_sh], or "error", "other" (npm runs no exec), "call" or "shell". A run through
+# sh with no command runs npm's script shell. The rows marked pre-fix-miss were recorded as a
+# pinned or different package, or missed a shell line, by the reader this port replaced.
+DIFFERENTIAL = json.loads(
+    (Path(__file__).parent / "fixtures" / "npm-exec-differential.json").read_text()
+)["rows"]
+
+
+def _identity(specs: list[str]) -> list[tuple[str, str, bool]]:
+    return sorted((p.name or "", p.version or "", p.pinned) for p in map(npm_spec, specs))
+
+
+def test_npx_and_npm_exec_record_what_npm_installs_and_runs(monkeypatch):
+    from nexus_symbiote.scanners import mcp_launch as launch_module
+
+    seen: dict[str, list[str]] = {}
+    start, program = launch_module._start, launch_module._package_program
+
+    def spy_start(words, launch, *, package_entry=False):
+        seen.setdefault("start", list(words))
+        start(words, launch, package_entry=package_entry)
+
+    def spy_program(package, words, launch):
+        seen.setdefault("program", list(words))
+        program(package, words, launch)
+
+    monkeypatch.setattr(launch_module, "_start", spy_start)
+    monkeypatch.setattr(launch_module, "_package_program", spy_program)
+    misses = []
+    for kind, launcher, args, npm in DIFFERENTIAL:
+        seen.clear()
+        launch = analyze(launcher, args)
+        if launch.unknown is not None:
+            continue  # a gap only over-flags
+        recorded = sorted((p.name or "", p.version or "", p.pinned) for p in launch.packages)
+        if npm[0] != "run":
+            if npm[0] in {"call", "shell"} or (launch.launcher in {"npx", "npm exec"} and recorded):
+                misses.append((kind, launcher, args, npm, recorded))
+            continue
+        _, specs, command, rest, through_sh = npm
+        if recorded != _identity(specs):
+            misses.append((kind, launcher, args, npm, recorded))
+        elif through_sh and not command:
+            # npm runs its script shell on the client's stdin.
+            misses.append((kind, launcher, args, npm, "script shell"))
+        elif through_sh:
+            script = launch_module._split_script(command[0])
+            if script is None or seen.get("start") != [*script, *rest]:
+                misses.append((kind, launcher, args, npm, seen.get("start")))
+        elif not through_sh and seen.get("program") != rest:
+            misses.append((kind, launcher, args, npm, seen.get("program")))
+    assert not misses, misses[:5]
+    assert {row[0] for row in DIFFERENTIAL} == {"review", "pre-fix-miss", "random"}
+    # Ordinary launches in the sample stay classified.
+    assert analyze("npx", ["-y", "srv@1.0.0", "--stdio"]).unknown is None
