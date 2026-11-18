@@ -50,7 +50,7 @@ an operator-supplied expected digest. To verify a Sigstore bundle as well, pass
 policy must come from a trusted source. This verifies the selected artifact, not
 its association with a discovery finding, deployment, or safety.
 
-The importer maps native `agent`, `mcp-server` and `local-model` findings,
+The importer maps native `agent`, `mcp-server`, `local-model` and `model` findings,
 including MCP tool observations distinguished by resource type. It
 also accepts ShadowScan's CycloneDX 1.6/1.7 components and services, marking the
 projection partial. Unmapped entries are counted with source indexes. For
@@ -85,9 +85,10 @@ The projection profile `nexus-symbiote/shadowscan-projection/v5` identifies the
 SymBiote mapping, not a ShadowScan report schema or authenticated producer
 version. A native report that declares per-scan credential pseudonyms is projected
 under `nexus-symbiote/shadowscan-projection/v6`, which is v5 with those pseudonyms
-renamed (see [Compare discovery across reruns](#compare-discovery-across-reruns)). Each projected component records the exact report digest
+renamed (see [Compare discovery across reruns](#compare-discovery-across-reruns)). Each component projected from a finding records the exact report digest
 (`shadowscan:report-sha256`) and a content digest of its own source finding
-(`shadowscan:finding-sha256`, see below). CycloneDX `dependsOn` edges are copied
+(`shadowscan:finding-sha256`, see below); a model named from cited evidence
+records neither. CycloneDX `dependsOn` edges are copied
 only when both endpoints map to components. They remain declared, source-reported
 relationships, with the dependency-array index recorded on the edge; the BOM
 metadata binds them to the report digest. Unmapped endpoint
@@ -404,7 +405,7 @@ written by an earlier version may have no content digests or an older projection
 profile. The first comparison after an upgrade then falls back to the exact report
 digest, which raises a high alert when the report bytes differ, and raises a medium
 alert for every imported component, even when the report bytes are unchanged,
-because the new inventory adds the content digests, the v4 projection profile and
+because the new inventory adds the content digests, the current projection profile and
 the per-component finding digests. Later comparisons use the content digests. The content
 digests are not authentication; `validate --project` compares them with the
 local report as it does the exact digest. Text output prints the note under
