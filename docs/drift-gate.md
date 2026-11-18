@@ -118,13 +118,21 @@ request with itself, and that gate can never fail.
   `agent:repository:cdb4ee2aea69cc6a83331bbe`, named `repository`, wherever the
   checkout is. An
   [agent manifest](agent-manifest.md) `id` gives it a stable, named reference.
+- **Upgrading from 0.2.0: re-record the baseline.** This release writes native
+  format 1.2.0, and a baseline that 0.2.0 wrote is format 1.1.0, so `diff` of the
+  two raises a high `Snapshot metadata spec_version changed.` alert even when the
+  commit and everything else are the same. Take a new baseline with this release
+  at the commit the old one was reviewed at, review `diff old.json new.json`, and
+  adopt it through your usual review. Upgrade the readers of your inventories,
+  such as the hosts that run `verify-attestation` and the Action pins, before the
+  scans that write them: builds that write 1.1.0 refuse a 1.2.0 inventory.
 - **Upgrading from 0.1.0: re-create the baseline.** Snapshots written by 0.1.0
   record absolute paths and a path-derived agent reference. `diff` does not treat
   `/old/root/CLAUDE.md` and `CLAUDE.md` as the same location, because the old root
   is not recorded and guessing it could hide a file that really moved. It adds a
   note when one snapshot has absolute paths and the other relative ones. The new
-  native format version also alerts: `spec_version` 1.0.0 against 1.1.0 is high,
-  and the policy record 1.1.0 adds (`policy_source`, `policy_weakened`) is medium.
+  native format version also alerts: `spec_version` 1.0.0 against 1.2.0 is high,
+  and the policy record 1.1.0 added (`policy_source`, `policy_weakened`) is medium.
   To migrate, check out the commit the old baseline was reviewed at, take a new
   baseline there with this release, and review `diff old.json new.json`: on the
   same commit it should show only how the evidence is recorded, not what it

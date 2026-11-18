@@ -164,7 +164,7 @@ def test_scalars_are_as_strict_as_the_published_schema(field, value):
 
 @pytest.mark.parametrize(
     ("version", "shown"),
-    [("2.0.0", "version 2.0.0"), ("1.2.0", "version 1.2.0"), ("\x1b[2Jx", "an unrecognised")],
+    [("2.0.0", "version 2.0.0"), ("1.3.0", "version 1.3.0"), ("\x1b[2Jx", "an unrecognised")],
 )
 def test_unsupported_native_versions_fail_with_the_supported_versions(tmp_path, version, shown):
     from nexus_symbiote.core.aibom import NativeFormatError
@@ -174,17 +174,20 @@ def test_unsupported_native_versions_fail_with_the_supported_versions(tmp_path, 
     document["metadata"]["future_field"] = True
     path = tmp_path / "bom.json"
     path.write_text(json.dumps(document))
-    with pytest.raises(NativeFormatError, match="supported: 1.0.x, 1.1.x") as raised:
+    listed = "(supported: 1.0.x, 1.1.x, 1.2.x)"
+    with pytest.raises(NativeFormatError, match=re.escape(listed)) as raised:
         AIBOM.load(path)
     assert shown in str(raised.value) and "\x1b" not in str(raised.value)
     result = CliRunner().invoke(main, ["summary", str(path)])
-    assert result.exit_code == 1 and "supported: 1.0.x, 1.1.x" in result.output
+    assert result.exit_code == 1 and listed in result.output
 
 
-def test_format_1_0_documents_still_load_and_new_documents_are_1_1(tmp_path):
+def test_format_1_0_documents_still_load_and_new_documents_are_current(tmp_path):
+    from nexus_symbiote.core.models import NATIVE_SPEC_VERSION
+
     example = Path(__file__).parents[1] / "schemas/examples/minimal-aibom.json"
     assert AIBOM.load(example).metadata.spec_version == "1.0.0"
-    assert AIBOM().to_dict()["metadata"]["spec_version"] == "1.1.0"
+    assert AIBOM().to_dict()["metadata"]["spec_version"] == NATIVE_SPEC_VERSION
 
 
 def test_loader_refuses_links_and_special_files_without_blocking(tmp_path):
@@ -335,7 +338,7 @@ def test_a_document_that_declares_no_format_version_is_read_as_format_1_0(tmp_pa
 def test_objects_built_in_process_keep_the_format_this_build_writes(tmp_path):
     from nexus_symbiote.core.models import NATIVE_SPEC_VERSION, AIBOMMetadata
 
-    assert NATIVE_SPEC_VERSION == "1.1.0"
+    assert NATIVE_SPEC_VERSION == "1.2.0"
     assert AIBOM().metadata.spec_version == NATIVE_SPEC_VERSION
     assert AIBOM(components=[]).metadata.spec_version == NATIVE_SPEC_VERSION
     built = AIBOM(metadata=AIBOMMetadata(authors=["a"]))

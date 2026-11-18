@@ -15,6 +15,7 @@ from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.models import (
     NATIVE_SPEC_VERSION,
+    SUPPORTED_SPEC_MINORS,
     A2AClientComponent,
     AgentComponent,
     CompletenessClaim,
@@ -735,7 +736,20 @@ def test_unsupported_spec_version_and_reversed_arguments_are_reported():
     assert any("check the argument order" in note["detail"] for note in report.notes)
 
 
-@pytest.mark.parametrize("version", ["1.0.0", "1.0.7", NATIVE_SPEC_VERSION])
+READ_VERSIONS = [
+    f"{major}.{minor}.{patch}"
+    for major, minors in SUPPORTED_SPEC_MINORS.items()
+    for minor in minors
+    for patch in (0, 7)
+]
+
+
+def test_the_read_versions_include_the_one_this_build_writes():
+    assert NATIVE_SPEC_VERSION in READ_VERSIONS
+    assert {"1.0.0", "1.1.0", "1.2.0"} <= set(READ_VERSIONS)
+
+
+@pytest.mark.parametrize("version", READ_VERSIONS)
 def test_the_differ_supports_every_format_version_the_reader_accepts(version):
     old, new = AIBOM(), AIBOM()
     old.metadata.spec_version = version
@@ -744,6 +758,33 @@ def test_the_differ_supports_every_format_version_the_reader_accepts(version):
     new.metadata.spec_version = "1.9.0"
     report = AIBOMDiffer().diff(old, new)
     assert any("does not support" in a["alert"] for a in report.security_alerts)
+
+
+def test_a_1_1_baseline_of_the_same_content_is_one_high_metadata_alert(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "CLAUDE.md").write_text("Read-only triage.\n")
+    (project / ".mcp.json").write_text('{"mcpServers": {"fs": {"command": "mcp-fs"}}}')
+    candidate = tmp_path / "candidate.json"
+    _scan(project, candidate)
+    document = json.loads(candidate.read_text())
+    assert document["metadata"]["spec_version"] == NATIVE_SPEC_VERSION == "1.2.0"
+    document["metadata"]["spec_version"] = "1.1.0"
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps(document))
+    result = CliRunner().invoke(
+        main, ["diff", str(baseline), str(candidate), "--json-output", "--fail-on-alert"]
+    )
+    assert result.exit_code == 1, result.output
+    report = json.loads(result.stdout)
+    assert report["security_alerts"] == [
+        {
+            "severity": "high",
+            "component": "metadata",
+            "alert": "Snapshot metadata spec_version changed.",
+        }
+    ]
+    assert [change["field"] for change in report["metadata_changes"]] == ["spec_version"]
 
 
 def test_legacy_absolute_paths_are_explained():

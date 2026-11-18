@@ -101,8 +101,8 @@ print one JSON line; key IDs and times differ on every run, and the digests are 
 of this tree's scan of the demo:
 
 ```text
-{"key_id": "04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39", "encrypted": false}
-{"out": "reviewed.json.att", "subject_sha256": "7aa24ad2e0cecd0c7103e8f313640fb7bf070eed5ea84f97f0fdc25b11c9d9fa", "subject_format": "nexus-symbiote-aibom", "content_digest": "sha256:cd54b9ae533148e13cd85f9b6febbc782dc6c949592d34eafd9827ecbe5dd1df", "purpose": "reviewed", "signers": ["04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39"], "signed": true}
+{"key_id": "6f34eb48c92cab0cc5e48eb60d6985a9f4895ed4efca47818b1cc1bde172a93e", "encrypted": false}
+{"out": "reviewed.json.att", "subject_sha256": "05bfc7642c01de6b0b35d7f2c17956fe24a804d3d9ea44118da28c067dbf7ee0", "subject_format": "nexus-symbiote-aibom", "content_digest": "sha256:c8cd1edc7338403fb3cd19a76e68ef8c8b7bfc15a607101b11afedae86af73e7", "purpose": "reviewed", "signers": ["6f34eb48c92cab0cc5e48eb60d6985a9f4895ed4efca47818b1cc1bde172a93e"], "signed": true}
 ```
 
 Verify it with the public key:
@@ -113,12 +113,12 @@ nexus-symbiote verify-attestation reviewed.json reviewed.json.att --trusted-key 
 
 ```text
 Attestation verified: purpose reviewed, 1 trusted key. It does not establish that the file is accurate, complete or safe.
-Signer key ID: 04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39
-Subject SHA-256: 7aa24ad2e0cecd0c7103e8f313640fb7bf070eed5ea84f97f0fdc25b11c9d9fa
+Signer key ID: 6f34eb48c92cab0cc5e48eb60d6985a9f4895ed4efca47818b1cc1bde172a93e
+Subject SHA-256: 05bfc7642c01de6b0b35d7f2c17956fe24a804d3d9ea44118da28c067dbf7ee0
 Match: bytes
-Subject format: nexus-symbiote-aibom 1.1.0
-Content digest: sha256:cd54b9ae533148e13cd85f9b6febbc782dc6c949592d34eafd9827ecbe5dd1df (nexus-symbiote/inventory-content/v1)
-Signed at (signer's clock): 2026-11-12T11:09:57Z
+Subject format: nexus-symbiote-aibom 1.2.0
+Content digest: sha256:c8cd1edc7338403fb3cd19a76e68ef8c8b7bfc15a607101b11afedae86af73e7 (nexus-symbiote/inventory-content/v1)
+Signed at (signer's clock): 2026-11-18T20:48:50Z
 ```
 
 Change one byte, the inventory's `version` from 1 to 2, and the same check fails with
@@ -147,12 +147,12 @@ nexus-symbiote verify-attestation candidate.json reviewed.json.att --trusted-key
 
 ```text
 Attestation verified: purpose reviewed, 1 trusted key. It does not establish that the file is accurate, complete or safe.
-Signer key ID: 04dd7d9aae8c50a5198c1d0afb768051addeda362dfcdf2d795fd36258205f39
-Subject SHA-256: d536bc8339edf711fec4c9543414f0a2345cec1d28954a6b68a57c0b3cd384b9
-Match: content; the attested file's SHA-256 is 7aa24ad2e0cecd0c7103e8f313640fb7bf070eed5ea84f97f0fdc25b11c9d9fa
-Subject format: nexus-symbiote-aibom 1.1.0
-Content digest: sha256:cd54b9ae533148e13cd85f9b6febbc782dc6c949592d34eafd9827ecbe5dd1df (nexus-symbiote/inventory-content/v1)
-Signed at (signer's clock): 2026-11-12T11:09:57Z
+Signer key ID: 6f34eb48c92cab0cc5e48eb60d6985a9f4895ed4efca47818b1cc1bde172a93e
+Subject SHA-256: 53116606080b67e8c6b9dee2b049cbd9166919ad6dad4fe19281025e17005be6
+Match: content; the attested file's SHA-256 is 05bfc7642c01de6b0b35d7f2c17956fe24a804d3d9ea44118da28c067dbf7ee0
+Subject format: nexus-symbiote-aibom 1.2.0
+Content digest: sha256:c8cd1edc7338403fb3cd19a76e68ef8c8b7bfc15a607101b11afedae86af73e7 (nexus-symbiote/inventory-content/v1)
+Signed at (signer's clock): 2026-11-18T20:48:50Z
 ```
 
 `--json-output` prints the same facts as one JSON object, with `subject_sha256` (the
@@ -320,7 +320,9 @@ cannot read, is `other`. The depth bound is part of the rule so that the same by
 the same answer on every interpreter and through every entry point; a more deeply
 nested inventory that other commands still read is `other` here. For a native subject,
 verification recomputes the format version and the content digest from the file and
-requires both to equal the recorded ones.
+requires both to equal the recorded ones; a file within those bounds whose
+`metadata.spec_version` is newer than every version this build reads is refused with
+`subject-format-unsupported` rather than `subject-not-inventory`.
 
 ### Checking an attestation without this tool
 
@@ -416,6 +418,7 @@ same codes. The message never quotes the file, the envelope or a key.
 | `predicate-not-canonical` | The predicate is not in canonical form |
 | `subject-mismatch` | The file's bytes, or with `--match content` its content, differ from the attested ones |
 | `subject-not-inventory` | The file is not a native inventory this build reads, but the check needs its content |
+| `subject-format-unsupported` | The file declares a native format version newer than this build reads, but the check needs its content; verify with a build that reads that version |
 | `purpose-mismatch` | The attestation was signed for the other purpose |
 | `attestation-not-yet-valid` | `signed_at` is more than 5 minutes after the current time |
 | `attestation-expired` | `signed_at` is more than `--max-age-days` days before the current time |
@@ -446,9 +449,11 @@ nothing is written.
   signer can date an attestation in the past.
 - **The verifying build must read the inventory's format.** An attestation of a native
   inventory records its format version and content digest, and verification
-  recomputes both, even with `--match bytes`. A build that cannot read that format
-  version refuses the attestation with `subject-not-inventory`; verify it with a build
-  that reads the format.
+  recomputes both, even with `--match bytes`. This build refuses an inventory of a
+  newer format version with `subject-format-unsupported`, and builds that write
+  native format 1.1.0 refuse a 1.2.0 inventory with `subject-not-inventory`; verify it
+  with a build that reads the format, and upgrade verifiers before the scans whose
+  inventories they check.
 - **Deeply nested inventories are `other`.** An inventory whose arrays and objects nest
   more than 256 levels deep is attested by its bytes only, without a content digest,
   so `--match content` cannot be used for it; see [content digest](#content-digest).

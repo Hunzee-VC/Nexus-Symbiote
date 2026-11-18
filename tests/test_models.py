@@ -23,6 +23,7 @@ from nexus_symbiote.core.hashing import (
     hash_tool_definition,
 )
 from nexus_symbiote.core.models import (
+    NATIVE_SPEC_VERSION,
     AgentComponent,
     AIBOMMetadata,
     AuthorizationRecord,
@@ -134,7 +135,7 @@ class TestModels:
 
     def test_metadata_defaults(self):
         meta = AIBOMMetadata()
-        assert meta.spec_version == "1.1.0"
+        assert meta.spec_version == NATIVE_SPEC_VERSION
         assert meta.tool_name == "nexus-symbiote"
 
     def test_model_roundtrip(self):

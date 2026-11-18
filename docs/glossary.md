@@ -9,7 +9,7 @@ another format uses a different word for the same thing, the entry says so.
 
 The agent bill of materials that Nexus SymBiote writes: an agent's components, the
 relationships between them, findings and coverage. The native form is JSON, format
-1.1.0 ([schemas](../schemas/README.md)); CycloneDX, SPDX, SARIF and VEX output are
+1.2.0 ([schemas](../schemas/README.md)); CycloneDX, SPDX, SARIF and VEX output are
 exports of it.
 
 ### AIBOM

@@ -23,6 +23,7 @@ from nexus_symbiote.core.enums import AssuranceLevel, ComponentType, TrustTier
 from nexus_symbiote.core.evidence import ClaimState, VerificationStatus
 from nexus_symbiote.core.hashing import canonical_json
 from nexus_symbiote.core.models import (
+    NATIVE_SPEC_VERSION,
     AgentComponent,
     AnyComponent,
     ClaimEvidence,
@@ -34,6 +35,7 @@ from nexus_symbiote.core.models import (
     RiskAssessment,
     ToolComponent,
     VerifiedExtensionComponent,
+    spec_version_numbers,
 )
 from nexus_symbiote.scanner_catalog import BUILTIN_SCANNER_NAMES
 from nexus_symbiote.utils.confined import DEFAULT_EXCLUDES, ConfinedCollection
@@ -249,6 +251,29 @@ def _unestablished_trust(ref: str) -> str:
     )
 
 
+def _recollect_hint(spec_version: str) -> str | None:
+    """Why an inventory of an earlier native format may not reconcile, or None."""
+    if spec_version.startswith("1.0."):
+        return (
+            "The inventory uses native format 1.0, which records absolute scan-host paths; "
+            "re-collect it with this version before reconciling it with a project."
+        )
+    declared = spec_version_numbers(spec_version)
+    current = spec_version_numbers(NATIVE_SPEC_VERSION)
+    if (
+        declared is None
+        or current is None
+        or declared[0] != current[0]
+        or declared[1] >= current[1]
+    ):
+        return None
+    return (
+        f"The inventory uses native format {declared[0]}.{declared[1]}, written by an earlier "
+        "release whose collectors record less; re-collect it with this version before "
+        "reconciling it with a project."
+    )
+
+
 class CompletenessValidator:
     """Validates that an AIBOM covers all expected attack surfaces."""
 
@@ -442,13 +467,9 @@ class CompletenessValidator:
                 else:
                     for claim in (*additions, *self._supplier_findings(declared, actual)):
                         report.add_supplier_claim(claim)
-        if mismatched and bom.metadata.spec_version.startswith("1.0."):
-            incomplete(
-                "format",
-                "The inventory uses native format 1.0, which records absolute scan-host paths; "
-                "re-collect it with this version before reconciling it with a project.",
-                "info",
-            )
+        hint = _recollect_hint(bom.metadata.spec_version) if mismatched else None
+        if hint is not None:
+            incomplete("format", hint, "info")
 
         self._reconcile_relationships(bom, expected, local_refs, supplied, report)
         for extra in supplied.values():

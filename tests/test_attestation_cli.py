@@ -23,6 +23,7 @@ from nexus_symbiote import attestation_cli, runtime_cli
 from nexus_symbiote.attestation import MAX_NATIVE_DEPTH, build_statement, sign_statement
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.models import NATIVE_SPEC_VERSION
 from nexus_symbiote.runtime import TrustStatus, key_id
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -171,7 +172,7 @@ def test_native_inventory_round_trip(runner, setup):
         f"Signer key ID: {key_id(key.public_key())}",
         f"Subject SHA-256: {signed['subject_sha256']}",
         "Match: bytes",
-        "Subject format: nexus-symbiote-aibom 1.1.0",
+        f"Subject format: nexus-symbiote-aibom {NATIVE_SPEC_VERSION}",
         f"Content digest: {signed['content_digest']} (nexus-symbiote/inventory-content/v1)",
     ]
     assert re.fullmatch(r"Signed at \(signer's clock\): \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", lines[6])
@@ -187,7 +188,7 @@ def test_native_inventory_round_trip(runner, setup):
         "subject_sha256": signed["subject_sha256"],
         "attested_sha256": signed["subject_sha256"],
         "subject_format": "nexus-symbiote-aibom",
-        "spec_version": "1.1.0",
+        "spec_version": NATIVE_SPEC_VERSION,
         "content_digest": signed["content_digest"],
         "content_profile": "nexus-symbiote/inventory-content/v1",
         "signed_at": document["signed_at"],

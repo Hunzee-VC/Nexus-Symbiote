@@ -37,7 +37,11 @@ from nexus_symbiote.attestation import (
     verify_attestation,
 )
 from nexus_symbiote.core.aibom import AIBOM, MAX_NATIVE_BYTES
-from nexus_symbiote.core.content_digest import INVENTORY_CONTENT_PROFILE
+from nexus_symbiote.core.content_digest import (
+    INVENTORY_CONTENT_PROFILE,
+    inventory_content_digest,
+)
+from nexus_symbiote.core.models import NATIVE_SPEC_VERSION
 from nexus_symbiote.runtime import (
     MAX_STATEMENT_BYTES,
     PREDICATES,
@@ -211,7 +215,7 @@ def test_native_inventory_round_trip_records_its_format_and_content_digest():
     built = statement(source_revision=REVISION)
     predicate = built["predicate"]
     assert predicate["subject_format"] == "nexus-symbiote-aibom"
-    assert predicate["spec_version"] == "1.1.0"
+    assert predicate["spec_version"] == NATIVE_SPEC_VERSION
     assert re.fullmatch(r"sha256:[0-9a-f]{64}", predicate["content_digest"])
     verified = verify(sign_statement(built, [A]))
     assert verified.predicate.source_revision == REVISION
@@ -535,6 +539,38 @@ def test_content_match_refusals():
     refused("subject-mismatch", verify, envelope, changed.to_json().encode(), match="content")
 
 
+def _declaring(version: str) -> bytes:
+    document = json.loads(NATIVE)
+    document["metadata"]["spec_version"] = version
+    return json.dumps(document, indent=2).encode()
+
+
+def test_a_newer_native_format_is_refused_with_its_own_reason():
+    # A later release attests an inventory of a format this build cannot read: the
+    # verifier names the format and says to upgrade, rather than "not an inventory".
+    for version in ("1.3.0", "2.0.0"):
+        newer = _declaring(version)
+        future = statement()
+        future["subject"][0]["digest"]["sha256"] = hashlib.sha256(newer).hexdigest()
+        future["predicate"] |= {
+            "spec_version": version,
+            "content_digest": inventory_content_digest(json.loads(newer)),
+        }
+        envelope = signed(future)
+        refused("subject-format-unsupported", verify, envelope, newer)
+        refused("subject-format-unsupported", verify, envelope, newer, match="content")
+        refused("subject-format-unsupported", verify, signed(statement()), newer, match="content")
+        # Signing such a file still records it by its bytes only.
+        assert statement(newer)["predicate"]["subject_format"] == "other"
+    # A malformed version, or one older than every version this build reads, is no reason
+    # to upgrade, so it stays a file that is not an inventory.
+    for version in ("01.2.0", "1.2", "0.9.0"):
+        declared = _declaring(version)
+        refused("subject-not-inventory", verify, signed(statement()), declared, match="content")
+    current = _declaring(NATIVE_SPEC_VERSION)
+    assert verify(signed(statement(current)), current).predicate.spec_version == "1.2.0"
+
+
 def test_native_claims_are_recomputed_from_the_attested_bytes():
     claims_other_content = mutated(set_predicate(content_digest="sha256:" + "0" * 64))
     refused("subject-mismatch", verify, signed(claims_other_content))
@@ -753,7 +789,7 @@ def test_subject_format_is_decided_from_the_bytes(subject, native):
     ]
     assert (predicate["subject_format"] == "nexus-symbiote-aibom") is native
     if native:
-        assert predicate["spec_version"] in {"1.0.0", "1.1.0"}
+        assert predicate["spec_version"] in {"1.0.0", NATIVE_SPEC_VERSION}
 
 
 def depth(value: object) -> int:

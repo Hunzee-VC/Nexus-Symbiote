@@ -50,6 +50,7 @@ from pydantic_core import PydanticCustomError
 from nexus_symbiote.core.aibom import AIBOM, MAX_NATIVE_BYTES
 from nexus_symbiote.core.content_digest import INVENTORY_CONTENT_PROFILE, inventory_content_digest
 from nexus_symbiote.core.hashing import hash_bytes, parse_json_strict
+from nexus_symbiote.core.models import SUPPORTED_SPEC_MINORS, spec_version_numbers
 from nexus_symbiote.runtime import (
     MAX_SIGNATURES,
     MAX_STATEMENT_BYTES,
@@ -98,6 +99,8 @@ REASONS: dict[str, str] = {
     "predicate-not-canonical": "attestation predicate is not in canonical form",
     "subject-mismatch": "file does not match the attested subject",
     "subject-not-inventory": "file is not a native inventory this build reads",
+    "subject-format-unsupported": "file is a native inventory of a format version newer than "
+    "this build reads; upgrade nexus-symbiote",
     "purpose-mismatch": "attestation was signed for another purpose",
     "attestation-not-yet-valid": "attestation is dated more than 5 minutes after the current time",
     "attestation-expired": "attestation is older than the maximum age",
@@ -214,11 +217,26 @@ def _nested_deeper_than(value: object, limit: int) -> bool:
     return False
 
 
+class _NewerFormatError(Exception):
+    """The subject declares a native format version newer than every one this build reads."""
+
+
+def _newer_format(document: dict[str, Any]) -> bool:
+    metadata = document.get("metadata")
+    if not isinstance(metadata, dict):
+        return False
+    declared = spec_version_numbers(metadata.get("spec_version"))
+    newest = max((major, max(minors)) for major, minors in SUPPORTED_SPEC_MINORS.items())
+    return declared is not None and declared[:2] > newest
+
+
 def _native_facts(subject: bytes) -> tuple[str, str] | None:
     """The format version and content digest of a native inventory this build reads.
 
-    The nesting is bounded lexically before ``json.loads`` and again on the parsed value
-    before the strict parse and the content digest, which both serialize recursively.
+    Raises ``_NewerFormatError`` for an object, within the same bounds, that declares a newer
+    format version, of which this build can tell nothing else. The nesting is bounded
+    lexically before ``json.loads`` and again on the parsed value before the strict parse
+    and the content digest, which both serialize recursively.
     """
     from nexus_symbiote.core.hashing import MAX_JSON_NESTING, json_nesting_exceeds
 
@@ -233,6 +251,8 @@ def _native_facts(subject: bytes) -> tuple[str, str] | None:
         document = parse_json_strict(text, max_bytes=MAX_NATIVE_BYTES)
         if not isinstance(document, dict):
             return None
+        if _newer_format(document):
+            raise _NewerFormatError
         content = inventory_content_digest(document)
         bom = AIBOM.from_native(document)
     except (ValueError, RecursionError):
@@ -257,7 +277,10 @@ def build_statement(
     shown = subject_name(name)
     if not shown:
         raise AttestationError("statement-invalid")
-    facts = _native_facts(subject)
+    try:
+        facts = _native_facts(subject)
+    except _NewerFormatError:
+        facts = None
     fields: dict[str, Any] = {
         "version": "1",
         "purpose": purpose,
@@ -428,7 +451,11 @@ def _verification_time(
     return when
 
 
-def _same_content(predicate: InventoryPredicate, facts: tuple[str, str] | None) -> None:
+def _same_content(predicate: InventoryPredicate, subject: bytes) -> None:
+    try:
+        facts = _native_facts(subject)
+    except _NewerFormatError:
+        raise AttestationError("subject-format-unsupported") from None
     if facts is None:
         raise AttestationError("subject-not-inventory")
     spec_version, content = facts
@@ -477,7 +504,7 @@ def verify_attestation(
     elif predicate.content_digest is None:
         raise AttestationError("content-digest-unavailable")
     else:
-        _same_content(predicate, _native_facts(subject))
+        _same_content(predicate, subject)
     if predicate.purpose != purpose:
         raise AttestationError("purpose-mismatch")
     if predicate.signed_at - when > CLOCK_SKEW:
@@ -485,7 +512,7 @@ def verify_attestation(
     if max_age is not None and when - predicate.signed_at > max_age:
         raise AttestationError("attestation-expired")
     if match == "bytes" and predicate.subject_format == NATIVE_FORMAT:
-        _same_content(predicate, _native_facts(subject))
+        _same_content(predicate, subject)
     return VerifiedAttestation(
         predicate=predicate,
         signers=tuple(sorted(accepted)),

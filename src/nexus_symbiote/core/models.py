@@ -35,10 +35,11 @@ from nexus_symbiote.core.enums import (
 )
 from nexus_symbiote.core.evidence import DeploymentProfile, Timestamp
 
-NATIVE_SPEC_VERSION = "1.1.0"
-"""Version written by this build. 1.1.0 records scan-root-relative POSIX paths."""
+NATIVE_SPEC_VERSION = "1.2.0"
+"""Version written by this build. 1.2.0 adds a declared package URL and licence on models,
+and the ShadowScan content profile v2."""
 
-SUPPORTED_SPEC_MINORS = {1: (0, 1)}
+SUPPORTED_SPEC_MINORS = {1: (0, 1, 2)}
 """Native format versions this build reads, as major -> supported minor versions."""
 
 MAX_REFERENCE_CHARS = 16_384
@@ -60,16 +61,22 @@ def supported_spec_versions() -> str:
     )
 
 
+def spec_version_numbers(value: object) -> tuple[int, int, int] | None:
+    """The major, minor and patch numbers of a well-formed native format version, or None."""
+    match = _SPEC_VERSION.fullmatch(value) if isinstance(value, str) else None
+    return None if match is None else (int(match[1]), int(match[2]), int(match[3]))
+
+
 def check_spec_version(value: object) -> None:
     """Refuse a native format version this build does not understand.
 
     The message quotes the declared version only when it has the expected numeric
     form, so document text cannot reach a terminal through it.
     """
-    match = _SPEC_VERSION.fullmatch(value) if isinstance(value, str) else None
-    if match is not None and int(match[2]) in SUPPORTED_SPEC_MINORS.get(int(match[1]), ()):
+    numbers = spec_version_numbers(value)
+    if numbers is not None and numbers[1] in SUPPORTED_SPEC_MINORS.get(numbers[0], ()):
         return
-    shown = f"version {value}" if match is not None else "an unrecognised version"
+    shown = f"version {value}" if numbers is not None else "an unrecognised version"
     raise UnsupportedSpecVersionError(
         f"Native format {shown} is not supported by this build (supported: "
         f"{supported_spec_versions()}); upgrade nexus-symbiote or re-collect the inventory."
@@ -315,6 +322,17 @@ class ModelComponent(ComponentBase):
     resolved_revision: str | None = Field(
         default=None, description="Provider-specific snapshot identifier"
     )
+    package_url: str | None = Field(
+        default=None,
+        description=(
+            "Declared package URL of the model identity, such as pkg:huggingface; not proof "
+            "of artifact identity"
+        ),
+    )
+    license: str | None = Field(
+        default=None,
+        description="Declared licence: an SPDX identifier or expression, else the declared name",
+    )
     serialization_format: str | None = None
     serialization_safety: SerializationSafety = SerializationSafety.UNKNOWN
     signing_status: str | None = Field(
@@ -344,7 +362,8 @@ class ModelComponent(ComponentBase):
     )
     safetensors_header_hash: str | None = None
     trust_remote_code: StrictBool | None = Field(
-        default=None, description="Declared configuration only; the runtime value may differ"
+        default=None,
+        description="Declared in configuration or in a loading call; the runtime value may differ",
     )
     risks: list[RiskAssessment] = Field(default_factory=list)
 
@@ -431,10 +450,7 @@ class RAGSourceComponent(ComponentBase):
 
 
 class DataSourceComponent(ComponentBase):
-    """A training or fine-tuning dataset.
-
-    Reserved: no built-in collector emits this type; it appears only in supplied inventories.
-    """
+    """A training or fine-tuning dataset."""
 
     component_type: Literal[ComponentType.DATA_SOURCE] = ComponentType.DATA_SOURCE
     dataset_type: str | None = Field(
@@ -694,8 +710,9 @@ class AIBOMMetadata(InventoryModel):
     spec_version: str = Field(
         default=NATIVE_SPEC_VERSION,
         description=(
-            "Native format version. This build reads 1.0.x and 1.1.x; 1.1.0 records "
-            "scan-root-relative paths"
+            "Native format version. This build reads 1.0.x, 1.1.x and 1.2.x; 1.1.0 records "
+            "scan-root-relative paths, and 1.2.0 adds a declared package URL and licence on "
+            "models and the ShadowScan content profile v2"
         ),
     )
     serial_number: str | None = None

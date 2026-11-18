@@ -19,8 +19,10 @@ from nexus_symbiote.core.models import (
     MAX_REFERENCE_CHARS,
     AIBOMMetadata,
     AnyComponent,
+    ModelComponent,
     UnsupportedSpecVersionError,
     check_spec_version,
+    spec_version_numbers,
 )
 
 MAX_NATIVE_BYTES = 16 * 1024 * 1024
@@ -41,6 +43,8 @@ SCHEMA_ID = (
 
 UNDECLARED_SPEC_VERSION = "1.0.0"
 """The format of a native document that declares no version, as release 0.1.0 read it."""
+
+_SHADOWSCAN_CONTENT_V2 = "nexus-symbiote/shadowscan-content/v2"
 
 Relationship = Literal[
     "invokes",
@@ -280,10 +284,24 @@ class AIBOM(BaseModel):
 
         Indented output is preferred; a document that only fits without indentation is
         written compactly rather than being written in a form ``load`` rejects. The
-        refusal names the limit or the check the inventory fails, never its content.
+        refusal names the limit or the check the inventory fails, never its content. A
+        declared format version must be one this build reads and at least the version
+        whose fields the inventory records (``required_spec_version``): a reader of an
+        earlier version refuses those fields.
         """
         from nexus_symbiote.core.hashing import canonical_json
 
+        declared = self.metadata.spec_version
+        try:
+            check_spec_version(declared)
+        except UnsupportedSpecVersionError as exc:
+            raise NativeFormatError(str(exc)) from exc
+        required = required_spec_version(self)
+        if required != declared:
+            raise NativeFormatError(
+                f"It declares native format {declared} but uses fields of {required}, which "
+                f"readers of {declared} refuse."
+            )
         try:
             payload = self.to_dict()
         except ContentSerialError as exc:
@@ -392,6 +410,26 @@ class AIBOM(BaseModel):
                 else None
             ),
         }
+
+
+def required_spec_version(bom: AIBOM) -> str:
+    """The native format version ``bom`` must declare: the one it declares, or 1.2.0 when
+    that is earlier and ``bom`` records a field 1.2.0 added (a model's package URL or
+    licence, or the ShadowScan content profile v2), which earlier readers refuse.
+    """
+    declared = bom.metadata.spec_version
+    numbers = spec_version_numbers(declared)
+    if numbers is not None and numbers >= (1, 2, 0):
+        return declared
+    claim = bom.metadata.completeness
+    uses_1_2 = (
+        claim is not None and claim.source_report_content_profile == _SHADOWSCAN_CONTENT_V2
+    ) or any(
+        isinstance(component, ModelComponent)
+        and (component.package_url is not None or component.license is not None)
+        for component in bom.components
+    )
+    return "1.2.0" if uses_1_2 else declared
 
 
 def prepare(bom: AIBOM) -> AIBOM:

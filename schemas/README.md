@@ -4,7 +4,7 @@ These JSON Schemas (draft 2020-12) describe the native Nexus SymBiote formats. T
 
 | File | Describes | Kept in sync by |
 | --- | --- | --- |
-| [`nexus-symbiote-aibom-1.0.schema.json`](nexus-symbiote-aibom-1.0.schema.json) | A native AgentBOM document of format 1.x (this build writes 1.1.0): `metadata`, `components` and `dependencies` | `tests/test_native_contract.py` |
+| [`nexus-symbiote-aibom-1.0.schema.json`](nexus-symbiote-aibom-1.0.schema.json) | A native AgentBOM document of format 1.x (this build writes 1.2.0): `metadata`, `components` and `dependencies` | `tests/test_native_contract.py` |
 | [`deployment-profile-1.0.schema.json`](deployment-profile-1.0.schema.json) | The optional `deployment_profile` on an agent component; see [deployment evidence](../docs/deployment-evidence.md) | `tests/test_deployment_evidence_profile.py` |
 | [`agent-manifest-1.0.schema.json`](agent-manifest-1.0.schema.json) | The optional `agent.yaml` at a project root; see [agent manifest](../docs/agent-manifest.md) | `tests/test_agent_manifest.py` |
 | [`examples/minimal-aibom.json`](examples/minimal-aibom.json) | A minimal schema-valid AgentBOM: one agent, an MCP server and its tools, a model, a prompt and a registry entry | `tests/test_native_contract.py` |
@@ -46,21 +46,23 @@ Unknown fields are rejected rather than ignored, on every object including depen
 | Version | Written by | Change |
 | --- | --- | --- |
 | 1.0.0 | 0.1.0 | Initial format. Collectors recorded absolute scan-host paths. |
-| 1.1.0 | this build | Collectors record POSIX paths relative to the scan root (`source_path`, claim locators, `surfaces_scanned`), so the same tree produces the same inventory wherever it is checked out. Adds `metadata.policy_source` and `metadata.policy_weakened`, and on the completeness claim `discovery_verification` (how an imported ShadowScan report was authenticated) and `source_report_path` (the report's location relative to the scan root, or its file name when imported from outside one); dependency edges refuse unknown fields; `bom_ref` and edge endpoints are limited to 16,384 characters. |
+| 1.1.0 | 0.2.0 | Collectors record POSIX paths relative to the scan root (`source_path`, claim locators, `surfaces_scanned`), so the same tree produces the same inventory wherever it is checked out. Adds `metadata.policy_source` and `metadata.policy_weakened`, and on the completeness claim `discovery_verification` (how an imported ShadowScan report was authenticated) and `source_report_path` (the report's location relative to the scan root, or its file name when imported from outside one); dependency edges refuse unknown fields; `bom_ref` and edge endpoints are limited to 16,384 characters. |
+| 1.2.0 | this build | Adds `package_url` (a declared package URL, such as `pkg:huggingface/<namespace>/<name>@<commit>`) and `license` (an SPDX identifier or expression, else the declared name) on model components, and the completeness claim's `source_report_content_profile` value `nexus-symbiote/shadowscan-content/v2`, the content digest profile of a ShadowScan report whose credential pseudonyms change on every run. |
 
 The rule for readers:
 
-- A build reads every minor version of its major version up to its own. This build reads 1.0.x and 1.1.x.
-- A newer minor or major version, or a malformed version, is refused with a message that names the supported versions, rather than the generic schema error an unknown field would cause. Upgrade the tool or re-collect the inventory.
+- A build reads every minor version of its major version up to its own. This build reads 1.0.x, 1.1.x and 1.2.x.
+- A newer minor or major version, or a malformed version, is refused with a message that names the supported versions, rather than the generic schema error an unknown field would cause. Upgrade the tool or re-collect the inventory. Builds that write 1.1.0 refuse a 1.2.0 inventory this way; release 0.1.0 checks no version, and refuses one that records a field 1.2.0 added with a schema error.
 - A minor version only adds optional fields or narrows what collectors record; a major version changes or removes meaning.
+- A document declares at least the version whose fields it records. `AIBOM.save` and the commands that write an inventory refuse one that declares an earlier version, such as a 1.1.0 document with a model `license`, since a reader of that version would refuse it; `verify-live --record`, which writes back the inventory it read, raises the declared version to the lowest one that covers what the candidate records and otherwise keeps it.
 
-A 1.0.0 inventory still loads, so `summary`, `diff` and the exports read it, but it does not reconcile: its absolute paths, provenance locators and assurance labels differ from a fresh collection, so `validate --project` and `risk --project` report its components as mismatched and say that the inventory must be re-collected. `diff` against a 1.1.0 inventory reports those differences too. Re-collect inventories, and regenerate drift baselines, with this version.
+A 1.0.0 inventory still loads, so `summary`, `diff` and the exports read it, but it does not reconcile: its absolute paths, provenance locators and assurance labels differ from a fresh collection, so `validate --project` and `risk --project` report its components as mismatched and say that the inventory must be re-collected. `diff` against a current inventory reports those differences too. A 1.1.0 inventory still loads, so `summary`, `diff` and the exports read it, but it does not reconcile with this release's collectors once they record more; re-collect it. `validate --project` says so when its components do not match, and `diff` against a 1.2.0 inventory of the same content reports one high `spec_version` alert. Re-collect inventories, and regenerate drift baselines, with this version.
 
 Native documents are limited to 16 MiB. `scan`, `import-shadowscan` and `AIBOM.save` write a document no reader would accept compactly when the indented form exceeds the limit, and refuse to write it when even the compact form does. `AIBOM.load` opens only a regular file, without following a symbolic link or blocking on a FIFO.
 
 ### Reserved types and fields
 
-`guardrail-policy`, `memory-store` and `data-source` components, `egress_domains` and `filesystem_paths` in capability declarations, `registry_source` on MCP servers, and the `huggingface`, `mcp-registry` and `skill-marketplace` registry types are defined for supplied inventories. No built-in collector emits them; their descriptions in the schema say so.
+`guardrail-policy` and `memory-store` components, `egress_domains` and `filesystem_paths` in capability declarations, `registry_source` on MCP servers, and the `huggingface`, `mcp-registry` and `skill-marketplace` registry types are defined for supplied inventories. No built-in collector emits them; their descriptions in the schema say so.
 
 When a model changes, regenerate the affected schema from it and review the diff together with the model change. These commands reproduce the committed files byte for byte:
 

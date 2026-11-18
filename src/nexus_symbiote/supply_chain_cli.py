@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 import click
 
 from nexus_symbiote import modes
-from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
+from nexus_symbiote.core.aibom import AIBOM, NativeFormatError, required_spec_version
 from nexus_symbiote.live_cli import review_notice
 from nexus_symbiote.utils.files import create_staging_file
 from nexus_symbiote.utils.terminal import (
@@ -281,6 +281,8 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 record_candidate(bom, report)
             except ValueError:
                 raise click.ClickException("incomplete inventory; candidate not emitted") from None
+            # A loaded inventory keeps its format version unless what it records needs a later one.
+            bom.metadata.spec_version = required_spec_version(bom)
             try:
                 candidate = bom.to_native_json()
             except NativeFormatError as exc:
