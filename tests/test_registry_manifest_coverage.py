@@ -412,7 +412,7 @@ def test_requirement_path_parsing_is_linear(tmp_path):
         roots[scale].mkdir()
         (roots[scale] / "requirements.txt").write_text(
             "".join(
-                f"{prefix}{'[' * (62_500 * scale)}\n" for prefix in ("x", "openai @ ", "./", "x]")
+                f"{prefix}{'[' * (250_000 * scale)}\n" for prefix in ("x", "openai @ ", "./", "x]")
             )
         )
     assert scaling_ratio(lambda scale: RegistryScanner().scan(roots[scale])) < 10
@@ -706,11 +706,14 @@ def test_dockerfile_parsing_is_linear(tmp_path):
         roots[scale] = tmp_path / f"scale-{scale}"
         roots[scale].mkdir()
         (roots[scale] / "Dockerfile").write_text("FROM" + " " * (1_000_000 * scale))
+        # Just under the 4 MiB read limit at the larger size: a file over it is refused
+        # unread, and a ratio over input that is never parsed measures nothing.
         (roots[scale] / "Dockerfile.agent").write_text(
-            "FROM a AS b \\\n" * (75_000 * scale) + "RUN x\n"
+            "FROM a AS b \\\n" * (74_000 * scale) + "RUN x\n"
         )
     assert scaling_ratio(lambda scale: RegistryScanner().scan(roots[scale])) < 10
     result = RegistryScanner().scan(roots[4])
+    assert not result.scan_failures
     assert result.surfaces_excluded == ["Dockerfile: FROM instruction not parsed"]
 
 

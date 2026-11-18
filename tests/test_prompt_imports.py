@@ -387,16 +387,20 @@ import json, sys, tracemalloc
 from pathlib import Path
 from nexus_symbiote.scanners.prompt import PromptScanner
 roots = [Path(arg) for arg in sys.argv[1:]]
-held = {sys.intern(part) for root in roots for path in root.rglob("*") for part in path.parts}
-interned = getattr(sys, "getunicodeinternedsize", lambda: None)
+held = [None] * 1_000_000
+tracemalloc.start()
+for index in range(len(held)):
+    before = tracemalloc.get_traced_memory()[0]
+    held[index] = sys.intern(f"held-{index}")
+    if tracemalloc.get_traced_memory()[0] - before > 100_000:
+        break
+tracemalloc.stop()
 runs = {}
 for root in roots:
-    before = interned()
     tracemalloc.start(8)
     try:
         result = PromptScanner().scan(root)
         current, peak = tracemalloc.get_traced_memory()
-        after = interned()
         largest = tracemalloc.take_snapshot().statistics("traceback")[:3]
     finally:
         tracemalloc.stop()
@@ -405,7 +409,6 @@ for root in roots:
         "current": current,
         "components": len(result.components),
         "failures": len(result.scan_failures),
-        "newly_interned": None if before is None else after - before,
         "largest": [[stat.size, stat.count, stat.traceback.format()] for stat in largest],
     }
 print(json.dumps(runs))
@@ -417,11 +420,12 @@ def test_scan_memory_grows_with_the_files_not_with_the_paths_they_reference(tmp_
     for files in (50, 100, 200):
         roots.append(tmp_path / str(files))
         _deep(roots[-1], files)
-    # pathlib interns every path component it parses, and the interpreter's table of
-    # interned strings grows in steps that allocate room for every string the process has
-    # interned: 0.96 MB at 2^16 slots and 3.8 MB at 2^18 on CPython 3.11 and 3.12. Which
-    # scan crosses a step depends on the interpreter and on what it imported, not on the
-    # scan, so the measuring interpreter interns and holds the fixture's components first.
+    # pathlib interns every path component it parses. Once the interpreter's table of
+    # interned strings has no room left, the next string rebuilds it at a size set by
+    # every string the process holds (about 1 to 4 MB on CPython 3.11 to 3.14), which
+    # tracemalloc charges to whatever scan runs then. The measuring interpreter first
+    # interns and holds strings until the table is rebuilt: the new table has room for at
+    # least as many strings again as it holds, far more than the scans add.
     measured = subprocess.run(  # noqa: S603
         [sys.executable, "-c", _PEAKS, *map(str, roots)],
         cwd=tmp_path,
