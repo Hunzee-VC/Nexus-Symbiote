@@ -78,6 +78,8 @@ KIND_WORDS: dict[str, list[str]] = {
 }  # fmt: skip
 KIND_WORDS["safety"] = sorted({w for k in ("mcp", "models") for w in KIND_WORDS[k]})
 # Ground-truth items expected to carry ML-BOM / SPDX 3 AI and Dataset typing.
+# Safety probes the positive control must trip, or the benchmark cannot see them fail.
+PROBES = ("X01", "X02", "X03", "X04", "X07", "X08", "X09")
 AI_PROFILE_ITEMS = ("M01", "M03", "M05", "M06", "M09", "R01", "R03")
 DATASET_PROFILE_ITEMS = ("D01", "D02", "D03")
 SPDX3_AI_TYPES = {"ai_AIPackage", "AIPackage", "ai:AIPackage"}
@@ -538,8 +540,8 @@ def qualifying(r: Rec, match: list[str], tokens: list[str], domain: str) -> int 
 def score_component(
     item: dict[str, Any], recs: list[Rec], tokens: list[str]
 ) -> tuple[float, dict[str, Any]]:
-    scored = [(n, r) for r in recs if (n := qualifying(r, item["match"], tokens,
-                                                        item["domain"])) is not None]  # fmt: skip
+    dom = item.get("kind_domain") or item["domain"]
+    scored = [(n, r) for r in recs if (n := qualifying(r, item["match"], tokens, dom)) is not None]
     ev: dict[str, Any] = {"detected": bool(scored), "records": len(scored)}
     if not scored:
         return 0.0, ev
@@ -638,6 +640,8 @@ def egress(strace_files: list[Path]) -> list[str]:
             m = STRACE_CONNECT4.search(line) or STRACE_CONNECT6.search(line)
             if m:
                 port, addr = m.group(1), m.group(2)
+                if addr.startswith("::ffff:"):
+                    addr = addr[7:]
                 if addr.startswith("127.") or addr in ("::1", "0.0.0.0", "::"):  # noqa: S104
                     continue
                 dests.add(f"{addr}:{port}")
@@ -696,6 +700,9 @@ class ToolRun:
             run_json = d / "_run.json"
             if run_json.exists():
                 self.meta[d.name] = json.loads(run_json.read_text())
+
+    def stale(self, digest: str) -> list[str]:
+        return [t for t, m in self.meta.items() if m.get("corpus_digest") not in (None, digest)]
 
     def r(self, scn: str) -> list[Rec]:
         return self.recs.get(scn, [])
@@ -940,7 +947,7 @@ def safety(item: dict[str, Any], run: ToolRun, truth: dict[str, Any]) -> tuple[f
         return (0.0 if bad else w), ev
     if kind == "outside_absent":
         leaked = [f"{t}/{n}" for t in run.tags(scn) for n, d in run.raw.get(t, {}).items()
-                  if any(tok.encode() in d for tok in item["match"])]  # fmt: skip
+                  if any(tok.lower().encode() in d.lower() for tok in item["match"])]  # fmt: skip
         return (0.0 if leaked else w), {"leaked_in": leaked}
     if kind == "ansi_absent":
         hits = [f"{t}/{n}" for t in run.tags(scn) for n, d in run.raw.get(t, {}).items()
@@ -948,11 +955,13 @@ def safety(item: dict[str, Any], run: ToolRun, truth: dict[str, Any]) -> tuple[f
         return (0.0 if hits else w), {"raw_escape_in": hits}
     if kind == "completes":
         cmds = run.meta.get(scn, {}).get("commands") or []
-        bad = [c["argv"][0] for c in cmds if c["timed_out"]]
-        return (0.0 if bad or not cmds else w), {
-            "timed_out": bool(bad),
-            "seconds": [c["seconds"] for c in cmds],
-        }
+        timed = [c["argv"][0] for c in cmds if c["timed_out"]]
+        killed = [c["exit"] for c in cmds if c["exit"] < 0 or c["exit"] in (137, 139)]
+        produced = bool(run.docs.get(scn))
+        ok = bool(cmds) and not timed and not killed and produced
+        return (w if ok else 0.0), {"timed_out": bool(timed), "killed_by_signal": killed,
+                                    "produced_output": produced,
+                                    "seconds": [c["seconds"] for c in cmds]}  # fmt: skip
     if kind == "bounded_memory":
         cmds = run.meta.get(scn, {}).get("commands") or []
         peak = max((c["max_rss_bytes"] for c in cmds), default=0)
@@ -1090,6 +1099,15 @@ def score_tool(
     # Gates still apply whenever a check fails.
     detected = {i["id"]: i["evidence"].get("detected") for i in items_out}
     requires = {i["id"]: i.get("requires") for i in truth["items"]}
+    default_ok = any(
+        score_component(i, run.r(t), toks(i["scenario"]))[0] > 0
+        for i in truth["items"] if i["kind"] == "component"
+        for t in run.tags(i["scenario"]) if t.endswith("#default")
+    )  # fmt: skip
+    for i in truth["items"]:
+        if i.get("requires_default_detection"):
+            requires[i["id"]] = ["<plain invocation detected a component>"]
+            detected["<plain invocation detected a component>"] = default_ok
     for out in items_out:
         req = requires.get(out["id"])
         if req and not any(detected.get(r) for r in req) and out["earned"] > 0:
@@ -1146,7 +1164,8 @@ def scorecard(results: dict[str, Any]) -> str:
         + "|".join("---:" if h not in ("Tool", "Version", "Gates") else "---" for h in head)
         + "|",
     ]
-    ranked = sorted(results["tools"].items(), key=lambda kv: rank_key(kv[1]))
+    ranked = sorted(((k, v) for k, v in results["tools"].items() if not v.get("calibration")),
+                    key=lambda kv: rank_key(kv[1]))  # fmt: skip
     rank = 0
     for _, e in ranked:
         if e.get("grade") == "N/R":
@@ -1163,6 +1182,13 @@ def scorecard(results: dict[str, Any]) -> str:
         cells += [f"{e['domains'][d]['pct']:.0f}" for d in doms] + [gates]
         lines.append("| " + " | ".join(cells) + " |")
     lines.append("")
+    for _, e in results["tools"].items():
+        if e.get("calibration"):
+            failed = [i["id"] for i in e["items"] if i["domain"] == "safety"
+                      and i["kind"] != "component" and i["earned"] < i["possible"]]  # fmt: skip
+            lines.append(f"- **{e['display']}** (calibration, not ranked): grade {e['grade']}, "
+                         f"gates {[g['item'] for g in e['gates']]}, failed safety checks {failed}, "
+                         f"probes that did not fire {e.get('dead_probes', [])}.")  # fmt: skip
     for _, e in ranked:
         if e.get("grade") == "N/R":
             lines.append(f"- **{e['display']}** not run: {e['not_run_reason']}")
@@ -1200,11 +1226,26 @@ def main() -> None:
                 sys.exit(f"{name}: runs were made on corpus {meta.get('corpus_digest')}, "
                          f"not {truth['corpus_digest']}; regenerate or re-run")  # fmt: skip
         run = ToolRun(args.runs, name)
+        stale = run.stale(truth["corpus_digest"])
+        if stale:
+            sys.exit(f"{name}: runs {stale[:3]} were made on a different corpus; re-run them")
         entry.update(score_tool(truth, run, validate, spec.get("declared_scope", [])))
+        entry["calibration"] = bool(spec.get("calibration"))
         entry["runtime_seconds"] = round(sum(c["seconds"] for m in run.meta.values()
                                              for c in m["commands"]), 1)  # fmt: skip
         entry["exit_codes"] = {t: [c["exit"] for c in m["commands"]] for t, m in run.meta.items()}
         results["tools"][name] = entry
+    control = results["tools"].get("positive-control")
+    if control and "items" in control:
+        evidence_keys = ("canaries_written", "build_commands", "leaked_in", "raw_escape_in",
+                         "connect_attempts")  # fmt: skip
+        failed = {i["id"] for i in control["items"]
+                  if any(i["evidence"].get(k) for k in evidence_keys)}  # fmt: skip
+        dead = sorted(set(PROBES) - failed)
+        control["dead_probes"] = dead
+        if dead:
+            print(f"WARNING: safety probes that the positive control did not trip: {dead}",
+                  file=sys.stderr)  # fmt: skip
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "results.json").write_text(json.dumps(results, indent=2) + "\n")
     (args.out / "scorecard.md").write_text(scorecard(results))

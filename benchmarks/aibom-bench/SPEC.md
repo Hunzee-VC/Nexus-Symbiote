@@ -152,6 +152,7 @@ memory was not observed.
 |---|---|---:|
 | oracle | Exactly the ground truth, as CycloneDX plus SARIF | 96.5 (no SPDX, package URLs or dependency edges) |
 | cat | Every file's path, SHA-256 and full contents | 11.7 (F; X07 gate) |
+| positive control | Executes every payload and echoes every file (`executor.py`, run in the sandbox) | F; trips all seven safety probes and the F, D and C gates |
 | lister | Every file's path and SHA-256 | 0.0 |
 | empty | Valid, empty documents | 0.0 |
 
@@ -184,24 +185,38 @@ decimal. Tools are ranked by grade after gates, then by score.
 `run.py` executes each command as:
 
 ```
-unshare -n -- strace -f -s 256 -e trace=connect,execve -- setpriv --reuid=bench ... -- env -i HOME=<fresh> PATH=<tool> <tool argv>
+unshare -n -p -f --kill-child -m -- sh -c '<private /tmp, /var/tmp, /dev/shm; loopback up>; exec "$@"' \
+  strace -f -s 256 -e trace=connect,execve -- \
+  setpriv --no-new-privs --reuid=bench --regid=bench --clear-groups -- \
+  sh -c '"$@"; kill -KILL -1' env -i HOME=<fresh> TMPDIR=<fresh> CI=true PATH=<tool> <tool argv>
 ```
 
-- The network namespace has no interfaces up, so no request leaves the machine. Every
-  `connect()` attempt is still recorded, and every program the tool starts.
-- The tool scans a fresh copy of the scenario, owned by the sandbox user and writable,
-  laid out next to a copy of the directory its escaping symlinks reach. The corpus
-  itself stays root-owned. The canary directory is world-writable so an executed payload
-  can prove it ran.
-- Each scenario gets a fresh output directory, HOME and TMPDIR, and the session's
-  process group is killed after each command, so nothing carries over.
-- `s01-models` and `s04-mcp` are scanned twice for determinism. The plain invocation runs
-  on `s01`, `s04`, `s08`, `s09a`, `s09b` and `s09f`.
+- Network, PID and mount namespaces: only loopback is up, so no request leaves the
+  machine, and every `connect()` attempt is recorded. Processes the tool leaves behind
+  are killed when its main process exits, and nothing survives the namespace.
+- The tool's working directory is a fresh copy of the scenario, owned by the sandbox
+  user and writable, as in a CI checkout. A new copy is made for every command. The copy
+  sits next to a copy of the directory its escaping symlinks reach. The corpus stays
+  root-owned, and its ground truth is readable only by root.
+- Evidence the runner records (stdout, stderr, strace, `_run.json`) lives in a root-owned
+  directory; the tool can write only its `out/` subdirectory, its HOME and the checkout.
+- `CI=true` is set, as in a CI job. Each command gets a fresh HOME and TMPDIR.
+- `s01-models` and `s04-mcp` are scanned twice for determinism. The plain invocation
+  (`default_commands`) runs on every scenario, without the tool's environment overrides.
+- The runner refuses a corpus generated for another directory (the canary path is baked
+  into the payloads) and holds a lock on the canary directory for the whole run.
+- A positive control (`executor.py`) runs through the same sandbox. It deserializes
+  the pickles, starts the shell-wrapped MCP server, builds the project with pip and npm,
+  connects out, reads through the escaping symlinks and echoes everything. Scoring warns
+  if any of X01, X02, X03, X04, X07, X08 or X09 does not catch it. In v1.0 all seven do.
 
 ## Fairness rules
 
-1. Use the tool's most complete documented configuration for repository scanning.
-   Ask the tool's maintainers to correct `tools.json` when a better one exists.
+1. Use the tool's most complete documented configuration for scanning an untrusted
+   repository, in its safe mode where it documents one (for cdxgen,
+   `--no-install-deps`). The tool's plain documented invocation also runs on every
+   scenario, and its execution gates apply to both. Ask the tool's maintainers to
+   correct `tools.json` when a better configuration exists.
 2. Do not write per-tool adapters. If a valid output shape is not read correctly, fix
    the generic reader for every tool and re-score all of them.
 3. Report a tool that cannot run in the sandbox as N/R with the reason, not as F.
@@ -227,9 +242,49 @@ unshare -n -- strace -f -s 256 -e trace=connect,execve -- setpriv --reuid=bench 
 - **Offline-only.** Tools whose value comes from network enrichment (Hugging Face
   metadata, OSV, an LLM classifier) score lower here than online. That is intended for
   the CI threat model, but it is still a limitation.
+- **Peak memory is per process.** `wait4()` reports the largest single process, not the
+  process tree; a tool that spreads work over many processes can stay under the X06
+  bound while the tree does not. No memory limit is enforced (cgroups were not
+  available).
+- **Safety weight for specialists.** About half of the safety points need an MCP or skill
+  sentinel, so a model-only tool cannot earn them even when it behaves safely. The
+  in-scope score does not correct for this.
 - **Point in time.** Tools in this space ship weekly. Results describe the listed
   versions only.
 - **Author conflict of interest.** v1.0 was written inside the Nexus SymBiote repository,
   by the assistant working on it. Mitigations: cases derive from the threat model and
   from public formats, not from Nexus collectors; no adapters; all raw outputs kept.
   Independent replication with a private seed is the proper check.
+
+## Roadmap for v1.1
+
+From the independent design review, ranked by how much a silent miss would hurt a real
+deployment:
+
+1. Remote-code model loading: `trust_remote_code`, `auto_map` custom code, `torch.hub`,
+   dataset loading scripts.
+2. Agent posture: auto-approved MCP servers, `bypassPermissions`, broad Bash allows,
+   `apiKeyHelper` commands, base-URL overrides, folder-open tasks, CI agent actions.
+3. Tool-poisoning breadth: poisoned parameter descriptions and tool names, cross-server
+   shadowing and name collisions, MCP prompts and resources.
+4. Scanner self-execution beyond the current canaries: importing in-repo server or agent
+   modules, YAML unsafe load, local `npx ./pkg` or `uvx --from ./pkg` launches,
+   zip-slip, in-repo scanner configuration that suppresses findings.
+5. Remote MCP posture: plain `http://`, SSE, unauthenticated remotes, `mcp-remote`
+   bridges, privileged container launches, filesystem servers rooted at `/`.
+6. Model-format breadth with benign controls: `STACK_GLOBAL` and non-denylisted
+   callables, joblib, NumPy object arrays, legacy torch, H5 Lambda, ONNX external data,
+   tokenizer template injection.
+7. Dataset and RAG provenance: unpinned datasets, URL data files, a FAISS `index.pkl`
+   with `allow_dangerous_deserialization`, a poisoned document in a RAG corpus.
+8. Instruction-file injection beyond tag characters: visible directives, HTML comments,
+   zero-width and bidi variants, `@import` outside the repository.
+9. Config-level drift pairs (pins, digests, skill scripts, weights) alongside the
+   tool-description pair.
+10. SPDX 3 JSON-schema and SHACL validation, SARIF and SPDX 2.3 validation, minimum
+    elements from standard fields only.
+11. A local mock Hugging Face Hub and a pinned local LLM inside the sandbox, so Hub- and
+    LLM-dependent tools can be graded on equal terms.
+12. Per-surface safety sub-scores, cgroup memory accounting, and an `openat` trace for
+    symlink reads.
+

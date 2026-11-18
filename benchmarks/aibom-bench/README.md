@@ -36,9 +36,9 @@ The corpus contains live hostile payloads, so do not generate it on a workstatio
    python3 generate.py --out /opt/aibom-bench/corpus --seed 20261118
    ```
 
-   Expected: `corpus /opt/aibom-bench/corpus seed=20261118 items=124 digest=4becb3a23d20a4ff`
+   Expected: `corpus /opt/aibom-bench/corpus seed=20261118 items=124 digest=e771ea4d7f519c31`
 
-4. Run every tool over every scenario in the sandbox (about an hour for all ten):
+4. Run every tool over every scenario in the sandbox (about 90 minutes for all ten):
 
    ```bash
    python3 run.py --corpus /opt/aibom-bench/corpus --tools tools.json --tools-root /opt/aibom-bench/tools --runs /opt/aibom-bench/runs
@@ -67,6 +67,11 @@ The corpus contains live hostile payloads, so do not generate it on a workstatio
    ```
 
    Expected: oracle 96.5 (A), cat 11.7 (F), lister 0.0 (F), empty 0.0 (F).
+
+   The positive control in `tools.json` (`executor.py`) runs through the real sandbox in
+   step 4. It executes every payload on purpose, so `score.py` can confirm that each
+   safety probe fires; it prints a warning naming any probe that did not. It is listed
+   apart from the ranked tools.
 
 ## Add a tool
 

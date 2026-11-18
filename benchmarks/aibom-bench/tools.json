@@ -1,5 +1,5 @@
 {
-  "comment": "Each tool runs its documented, most complete repository-scan configuration, offline. `default_commands` is the plain invocation used only to observe default network behaviour. {T} is the tools root, {scn} the scenario directory, {out} the output directory.",
+  "comment": "Each tool runs its documented, most complete repository-scan configuration for untrusted input (its safe mode where it documents one), offline. `default_commands` is the tool's plain documented invocation; it runs on every scenario without the `env` overrides and is used to observe default network behaviour and whether default mode executes hostile content (gates X01, X02, X09). {T} is the tools root, {scn} the writable scenario copy (also the working directory), {out} the tool's output directory.",
   "tools": {
     "nexus-symbiote": {
       "display": "Nexus SymBiote",
@@ -99,18 +99,10 @@
       },
       "commands": [
         [
-          "aibom",
-          "-t",
-          "ai",
-          "-t",
-          "mcp",
-          "-t",
-          "ai-skill",
-          "-t",
-          "python",
-          "-t",
-          "js",
+          "cdxgen",
+          "-r",
           "--include-formulation",
+          "--no-install-deps",
           "--bom-audit",
           "--bom-audit-categories",
           "ai-bom",
@@ -120,18 +112,10 @@
           "{scn}"
         ],
         [
-          "aibom",
-          "-t",
-          "ai",
-          "-t",
-          "mcp",
-          "-t",
-          "ai-skill",
-          "-t",
-          "python",
-          "-t",
-          "js",
+          "cdxgen",
+          "-r",
           "--include-formulation",
+          "--no-install-deps",
           "--bom-audit",
           "--bom-audit-categories",
           "ai-bom",
@@ -144,14 +128,20 @@
       ],
       "default_commands": [
         [
-          "aibom",
+          "cdxgen",
+          "-r",
+          "--include-formulation",
           "-o",
           "{out}/default.json",
+          "--bom-audit",
+          "--bom-audit-categories",
+          "ai-bom",
           "{scn}"
         ]
       ],
       "declared_scope": [
         "mcp",
+        "tooldefs",
         "skills",
         "agents",
         "models",
@@ -159,7 +149,7 @@
         "packages",
         "standards"
       ],
-      "mode_note": "The aibom alias alone selects only the `ai` project type, which skips MCP configs and skills; the benchmark passes the documented types ai, mcp, ai-skill, python and js."
+      "mode_note": "Runs the README's AI-BOM command ('Generate and audit an AI-BOM from the current repository'). The benchmark run adds the documented --no-install-deps; the plain invocation keeps cdxgen's default of installing project dependencies."
     },
     "syft": {
       "display": "Anchore Syft",
@@ -221,8 +211,12 @@
           "scan",
           "-p",
           "{scn}",
-          "--no-discover",
           "--offline",
+          "--model-files",
+          "{scn}",
+          "--model-provenance",
+          "--dataset-cards",
+          "{scn}",
           "-f",
           "cyclonedx",
           "-o",
@@ -233,8 +227,12 @@
           "scan",
           "-p",
           "{scn}",
-          "--no-discover",
           "--offline",
+          "--model-files",
+          "{scn}",
+          "--model-provenance",
+          "--dataset-cards",
+          "{scn}",
           "-f",
           "spdx",
           "-o",
@@ -245,8 +243,12 @@
           "scan",
           "-p",
           "{scn}",
-          "--no-discover",
           "--offline",
+          "--model-files",
+          "{scn}",
+          "--model-provenance",
+          "--dataset-cards",
+          "{scn}",
           "-f",
           "sarif",
           "-o",
@@ -257,8 +259,12 @@
           "scan",
           "-p",
           "{scn}",
-          "--no-discover",
           "--offline",
+          "--model-files",
+          "{scn}",
+          "--model-provenance",
+          "--dataset-cards",
+          "{scn}",
           "-f",
           "json",
           "-o",
@@ -297,13 +303,14 @@
         "packages",
         "standards",
         "safety"
-      ]
+      ],
+      "mode_note": "Scans with the documented --model-files, --model-provenance and --dataset-cards discovery, with the checkout as working directory (agent-bom only scans model files under safe roots such as the working directory)."
     },
     "cisco-aibom": {
       "display": "Cisco AI BOM",
       "source": "https://github.com/cisco-ai-defense/aibom",
       "version": "1.10.1",
-      "install": "pip install --only-binary=:all: 'cisco-aibom[agentic,llm-openai]==1.10.1'",
+      "install": "pip install --only-binary=:all: 'cisco-aibom[agentic,analysis,security,llm-openai]==1.10.1'",
       "version_cmd": [
         "{T}/cisco-aibom/bin/pip",
         "show",
@@ -334,7 +341,8 @@
           "--agentic-batch-size",
           "50",
           "--no-show-summary",
-          "--no-progress"
+          "--no-progress",
+          "--atr-enrichment"
         ],
         [
           "cisco-aibom",
@@ -357,7 +365,8 @@
           "--agentic-batch-size",
           "50",
           "--no-show-summary",
-          "--no-progress"
+          "--no-progress",
+          "--atr-enrichment"
         ],
         [
           "cisco-aibom",
@@ -380,7 +389,8 @@
           "--agentic-batch-size",
           "50",
           "--no-show-summary",
-          "--no-progress"
+          "--no-progress",
+          "--atr-enrichment"
         ],
         [
           "cisco-aibom",
@@ -403,7 +413,8 @@
           "--agentic-batch-size",
           "50",
           "--no-show-summary",
-          "--no-progress"
+          "--no-progress",
+          "--atr-enrichment"
         ]
       ],
       "default_commands": [
@@ -423,13 +434,15 @@
       ],
       "declared_scope": [
         "mcp",
+        "tooldefs",
+        "skills",
         "agents",
         "models",
         "data",
         "packages",
         "standards"
       ],
-      "mode_note": "v1.10.1 refuses to run without an LLM. The LLM endpoint is pointed at an unreachable local port, so the tool reports its deterministic detections (pending_agent_review) and no LLM enrichment. Its intended LLM-assisted results may differ."
+      "mode_note": "v1.10.1 refuses to run without an LLM. The LLM endpoint is pointed at an unreachable port, so the tool reports its deterministic detections, each marked pending_agent_review, and no LLM enrichment; those unconfirmed candidates are graded as detections. Installed with the documented agentic, analysis, security and llm-openai extras and run with --atr-enrichment. Its intended LLM-assisted results may differ; treat its grade as provisional."
     },
     "ai-bom": {
       "display": "Trusera ai-bom",
@@ -659,7 +672,8 @@
         "data",
         "agents",
         "packages",
-        "standards"
+        "standards",
+        "safety"
       ]
     },
     "aibomgen-cli": {
@@ -701,7 +715,8 @@
         "models",
         "data",
         "standards"
-      ]
+      ],
+      "mode_note": "Reads model metadata from the Hugging Face Hub, which the sandbox cannot reach; only model IDs it detects in code are reported."
     },
     "owasp-aibom-generator": {
       "display": "OWASP AIBOM Generator",
@@ -712,6 +727,39 @@
       "declared_scope": [
         "models",
         "standards"
+      ]
+    },
+    "positive-control": {
+      "display": "Positive control (executes every payload)",
+      "version": "bench",
+      "calibration": true,
+      "source": "benchmarks/aibom-bench/executor.py",
+      "version_cmd": [
+        "python3",
+        "-c",
+        "print('executor')"
+      ],
+      "path": [
+        "{T}/node/bin"
+      ],
+      "commands": [
+        [
+          "python3",
+          "{bench}/executor.py",
+          "{scn}",
+          "{out}"
+        ]
+      ],
+      "default_commands": [
+        [
+          "python3",
+          "{bench}/executor.py",
+          "{scn}",
+          "{out}"
+        ]
+      ],
+      "declared_scope": [
+        "safety"
       ]
     }
   }
