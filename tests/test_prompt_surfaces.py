@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import time
 from pathlib import Path
 
 import pytest
@@ -22,6 +21,7 @@ from nexus_symbiote.scanners.prompt import (
     detect_hidden_markup,
     detect_invisible_characters,
 )
+from tests.support import scaling_ratio
 
 RLO = "\u202e"
 
@@ -331,9 +331,12 @@ def test_hidden_markup_reports_counts_without_text(tmp_path):
 
 
 def test_hidden_markup_scan_is_linear():
-    started = time.perf_counter()
-    assert detect_hidden_markup("<!--" * 1_000_000, "x.md")
-    assert time.perf_counter() - started < 2
+    # Factor 8 keeps the old 1,000,000-character input as the larger size while the
+    # smaller one stays large enough for a quadratic to show.
+    texts = {scale: "<!--" * (125_000 * scale) for scale in (1, 8)}
+    ratio = scaling_ratio(lambda scale: detect_hidden_markup(texts[scale], "x.md"), factor=8)
+    assert ratio < 16
+    assert detect_hidden_markup(texts[8], "x.md")
 
 
 def test_inventory_is_identical_when_scanned_at_two_locations(tmp_path):
@@ -402,10 +405,15 @@ def _importing_tree(root: Path, importers: int, tokens: int = 1000, entries: int
 
 
 def test_missing_import_lookups_stay_fast_beside_a_large_directory(tmp_path):
-    _importing_tree(tmp_path, importers=4, entries=10_000)
-    start = time.perf_counter()
-    result = PromptScanner().scan(tmp_path)
-    assert time.perf_counter() - start < 10
+    # Lookups and the entries beside them grow together, so listing the directory
+    # again for each missing file grows with the square of the scale.
+    roots = {}
+    for scale in (1, 4):
+        roots[scale] = tmp_path / f"scale-{scale}"
+        roots[scale].mkdir()
+        _importing_tree(roots[scale], importers=scale, entries=2_500 * scale)
+    assert scaling_ratio(lambda scale: PromptScanner().scan(roots[scale])) < 10
+    result = PromptScanner().scan(roots[4])
     assert not result.scan_failures
     assert len(_components(result)) == 5
 
@@ -508,17 +516,22 @@ def test_padded_imports_that_leave_the_root_are_gaps(tmp_path, token):
     ]
 
 
-# The bound tells the linear bookkeeping from the quadratic one; coverage tracing alone
-# nearly reaches it, so the coverage job runs this test untraced.
+# The ratio tells the linear bookkeeping from the quadratic one; coverage tracing makes
+# this test about three times slower, so the coverage job runs it untraced.
 @pytest.mark.no_cover
 def test_import_bookkeeping_counts_every_importer_once_with_large_fan_in(tmp_path):
     names = [f"{index:03d}" for index in range(1000)]
-    _write(tmp_path, "CLAUDE.md", " ".join(f"@d/{name}" for name in names))
-    for name in names:
-        _write(tmp_path, f"d/{name}", " ".join(f"@{other}" for other in names))
-    start = time.perf_counter()
-    result = PromptScanner().scan(tmp_path)
-    assert time.perf_counter() - start < 10
+    roots = {}
+    for scale in (1, 8):
+        roots[scale] = tmp_path / f"scale-{scale}"
+        _write(roots[scale], "CLAUDE.md", " ".join(f"@d/{name}" for name in names))
+        # The first 125 * scale files import every file, so each file's importers and
+        # all references grow with the scale; at the larger size every file imports all.
+        for position, name in enumerate(names):
+            imports = names if position < 125 * scale else []
+            _write(roots[scale], f"d/{name}", " ".join(f"@{other}" for other in imports))
+    assert scaling_ratio(lambda scale: PromptScanner().scan(roots[scale]), factor=8) < 16
+    result = PromptScanner().scan(roots[8])
     components = _components(result)
     # Past the inventory's recording limit references are counted, not listed;
     # tests/test_prompt_imports.py covers the lists below it.
