@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 from collections import Counter
@@ -19,6 +20,7 @@ spec = importlib.util.spec_from_file_location("other_score", BENCH / "score.py")
 other = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(other)
 FORMATS = ("json", "cyclonedx", "spdx", "sarif")
+UNSHARE = shutil.which("unshare") or "/usr/bin/unshare"
 
 
 def scan(name: str, src: str, corpus: str) -> Path:
@@ -52,7 +54,7 @@ def scan(name: str, src: str, corpus: str) -> Path:
         codes[fmt] = done.returncode
         (out / f"{fmt}.stderr").write_text(done.stderr)
     risk = subprocess.run(  # noqa: S603
-        ["unshare", "-rn", PYTHON, "-m", "nexus_symbiote.cli", "risk", str(out / "bom.json.json")],
+        [UNSHARE, "-rn", PYTHON, "-m", "nexus_symbiote.cli", "risk", str(out / "bom.json.json")],
         env=env,
         capture_output=True,
         text=True,
