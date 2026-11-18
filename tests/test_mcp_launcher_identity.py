@@ -12,6 +12,7 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.core.models import MCPServerComponent
 from nexus_symbiote.scanners.mcp import MCPScanner
 from nexus_symbiote.scanners.mcp_launch import known_executable
+from tests.support import scaling_ratio
 
 
 def write_project(project: Path, command: str, args: list[str]) -> None:
@@ -994,11 +995,10 @@ def test_argument_scan_cost_is_bounded_by_characters_not_steps():
 
 @pytest.mark.parametrize("runner,cluster", [("sh", "e"), ("npm", "y"), ("python", "u")])
 def test_long_option_clusters_are_checked_in_linear_time(runner, cluster):
-    import time
-
     from nexus_symbiote.scanners.mcp_launch import analyze
 
-    args = [word for _ in range(20) for word in (runner, "-" + cluster * 100_000)]
-    start = time.perf_counter()
-    analyze("nice", args)
-    assert time.perf_counter() - start < 3.0
+    args = {
+        scale: [word for _ in range(20) for word in (runner, "-" + cluster * (25_000 * scale))]
+        for scale in (1, 4)
+    }
+    assert scaling_ratio(lambda scale: analyze("nice", args[scale])) < 10
