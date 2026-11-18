@@ -1321,6 +1321,17 @@ A way around a limit that its entry does not describe is worth a
   each repository's discovery workflow its own signer identity, or pin the report
   with `expected_sha256` in a version 2 `sigstore-message-signature` entry; see
   [require a signed report in CI](shadowscan-integration.md#require-a-signed-report-in-ci).
+- **A cited model shows that text is in the repository, not that code uses it.** A merged
+  `scan` names a model when its identifier stands at the file and line a ShadowScan report
+  cites. Anyone who can write the report and a file in the checkout can add such a component,
+  which is why it keeps declared assurance. Evidence the scan does not confirm is counted and
+  not named, including identifiers that ShadowScan reports by a matched prefix or on a
+  neighbouring line. A bill of materials or scan report in the tree confirms nothing, but
+  that rule knows only JSON formats: a Markdown or HTML report kept in the tree can still
+  confirm an identifier. The same model written two ways, such as `anthropic/<model>` and
+  `<model>`, is two components. Findings of other kinds, container images, infrastructure
+  and data are not named this way, and a standalone `import-shadowscan` names nothing; see
+  [models named from cited evidence](shadowscan-integration.md#models-named-from-cited-evidence).
 - **`verify-discovery --bundle` checks direct imports only.** It accepts only a BOM
   written by `import-shadowscan`. For a merged `scan` BOM, use the signature policy
   with `--project`.
