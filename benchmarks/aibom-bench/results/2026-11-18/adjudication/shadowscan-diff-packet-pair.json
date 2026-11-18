@@ -1,0 +1,157 @@
+{
+ "rule": "A change counts as reported when the drift report states that this component was added, removed or modified, in any words, so that a reader of the report alone would know this component changed. A count of changes with no component named does not count. A change to a different component does not count, even in the same file.",
+ "changes": [
+  {
+   "id": "change.tool-description",
+   "statement": "get_order's description gained an instruction (a rug pull)",
+   "files": [
+    "servers/orders_mcp/server.py"
+   ]
+  },
+  {
+   "id": "change.mcp-version-and-scope",
+   "statement": "server-filesystem moved to another version and its root widened to /",
+   "files": [
+    ".mcp.json"
+   ]
+  },
+  {
+   "id": "change.mcp-added",
+   "statement": "A new MCP server, shadow-sync, was added",
+   "files": [
+    ".mcp.json"
+   ]
+  },
+  {
+   "id": "change.model-bytes",
+   "statement": "The classifier's weights changed under the same file name",
+   "files": [
+    "models/intent-classifier/model.safetensors"
+   ]
+  },
+  {
+   "id": "change.skill-widened",
+   "statement": "refund-processing now allows every shell command and its script changed",
+   "files": [
+    ".claude/skills/refund-processing/SKILL.md"
+   ]
+  },
+  {
+   "id": "change.model-revision",
+   "statement": "The pinned Llama revision changed",
+   "files": [
+    "services/api/llm.py"
+   ]
+  },
+  {
+   "id": "change.permissions-widened",
+   "statement": "Agent permissions switched to bypass mode with a write wildcard",
+   "files": [
+    ".claude/settings.json"
+   ]
+  },
+  {
+   "id": "change.system-prompt",
+   "statement": "The system prompt's refund rule was reversed",
+   "files": [
+    "prompts/system/support_agent.md"
+   ]
+  },
+  {
+   "id": "change.dataset-bytes",
+   "statement": "A row was appended to the training set",
+   "files": [
+    "data/train/support_tickets.jsonl"
+   ]
+  },
+  {
+   "id": "change.mcp-removed",
+   "statement": "The GitHub MCP server configuration was removed",
+   "files": [
+    ".vscode/mcp.json"
+   ]
+  }
+ ],
+ "reports": {
+  "Q01": [
+   "34 changes detected",
+   "Security Alerts:",
+   "[HIGH] 1 scanned surface removed (.vscode/mcp.json): coverage narrowed; components found there are no longer compared.",
+   "[HIGH] ShadowScan report content changed; review the report and the imported components.",
+   "[MEDIUM] Medium change in 'Acme Billing Agent': Values are unbound in one snapshot without the binding key; a change to them is undetectable and no value is recorded. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "[HIGH] High change in 'repository': tool_refs changed.",
+   "[HIGH] High change in 'claude-code': Risk findings added: 1 high (permission_scope), 1 medium (permission_scope).; Risk findings removed: 1 medium (permission_scope).; properties.settings_hashes changed.; properties.declared_permission_rule_counts changed.; permission_mode changed.",
+   "[MEDIUM] Medium change in 'codex': Values are unbound in one snapshot without the binding key; a change to them is undetectable and no value is recorded. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "[MEDIUM] Medium change in 'gemini': Values are unbound in one snapshot without the binding key; a change to them is undetectable and no value is recorded. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "[HIGH] High change in 'claude-code MCP client': server_refs changed.",
+   "[HIGH] High change in 'mcp': properties.source_sha256 changed.",
+   "[MEDIUM] Medium change in 'healthcheck': MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "[CRITICAL] Critical change in 'filesystem': MCP server static source binding changed: launcher, arguments, environment, endpoint or declared tools differ, or the binding key changed. Review before execution.; Version changed: 2025.8.21 \u2192 2026.8.31; properties.static_config_hash changed.; properties.packages changed.; package_url changed.",
+   "[MEDIUM] Medium change in 'orders': MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "[MEDIUM] Medium change in 'kb': MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "[MEDIUM] Medium change in 'crm': MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "[MEDIUM] Medium change in 'metrics': MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "[MEDIUM] Medium change in 'partner-billing': MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "[MEDIUM] Medium change in 'notifier': MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "[MEDIUM] Medium change in 'git': MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "[MEDIUM] Medium change in 'payments': MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "[HIGH] High change in 'models/intent-classifier/model.safetensors': File hash (sha256) changed.",
+   "[MEDIUM] Medium change in 'ShadowScan agent 9e995c52cd15': ShadowScan finding content changed, including fields this inventory does not project.",
+   "[MEDIUM] Medium change in 'ShadowScan mcp-server a619572ba98c': ShadowScan finding content changed, including fields this inventory does not project.",
+   "[HIGH] High change in '.claude/skills/refund-processing/SKILL.md': File hash (sha256) changed.",
+   "[HIGH] High change in '.claude/skills/refund-processing/scripts/process_refund.py': File hash (sha256) changed.",
+   "[HIGH] High change in 'get_order': properties.source_sha256 changed.",
+   "[HIGH] High change in 'issue_refund': properties.source_sha256 changed.; properties.declaration_line changed.",
+   "[MEDIUM] New component 'shadow-sync' (mcp-server) added to supply chain.",
+   "[HIGH] Component 'vscode MCP client' (mcp-client) is no longer in the inventory: confirm it was deleted, not moved out of collector scope.",
+   "[HIGH] Component 'github' (mcp-server) is no longer in the inventory: confirm it was deleted, not moved out of collector scope.",
+   "[HIGH] Component 'ShadowScan mcp-server 365f63d8ac02' (mcp-server) is no longer in the inventory: confirm it was deleted, not moved out of collector scope.",
+   "Notes:",
+   "[INFO] Unmapped ShadowScan entries moved within the report; their number is unchanged.",
+   "[NOTE] Both snapshots are incomplete (collectors not complete in either: mcp (partial), prompt (partial), shadowscan (partial); 3 coverage gap(s) in both). The baseline was already incomplete; changes inside these gaps cannot be detected.",
+   "+1 added",
+   "+ shadow-sync (mcp-server)",
+   "-3 removed",
+   "- vscode MCP client (mcp-client)",
+   "- github (mcp-server)",
+   "- ShadowScan mcp-server 365f63d8ac02 (mcp-server)",
+   "~24 modified",
+   "~ Acme Billing Agent: Values are unbound in one snapshot without the binding key; a change to them is undetectable and no value is recorded. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "~ repository: tool_refs changed.",
+   "~ claude-code: Risk findings added: 1 high (permission_scope), 1 medium (permission_scope).; Risk findings removed: 1 medium (permission_scope).; properties.settings_hashes changed.; properties.declared_permission_rule_counts changed.; permission_mode changed.",
+   "~ codex: Values are unbound in one snapshot without the binding key; a change to them is undetectable and no value is recorded. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "~ gemini: Values are unbound in one snapshot without the binding key; a change to them is undetectable and no value is recorded. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "~ claude-code MCP client: server_refs changed.",
+   "~ mcp: properties.source_sha256 changed.",
+   "~ healthcheck: MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "~ filesystem: MCP server static source binding changed: launcher, arguments, environment, endpoint or declared tools differ, or the binding key changed. Review before execution.; Version changed: 2025.8.21 \u2192 2026.8.31; properties.static_config_hash changed.; properties.packages changed.; package_url changed.",
+   "~ orders: MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "~ kb: MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "~ crm: MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "~ metrics: MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "~ partner-billing: MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "~ notifier: MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "~ git: MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "~ payments: MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set TOOL_SOURCE_BINDING_KEY during both collections.",
+   "~ models/intent-classifier/model.safetensors: File hash (sha256) changed.",
+   "~ ShadowScan agent 9e995c52cd15: ShadowScan finding content changed, including fields this inventory does not project.",
+   "~ ShadowScan mcp-server a619572ba98c: ShadowScan finding content changed, including fields this inventory does not project.",
+   "~ .claude/skills/refund-processing/SKILL.md: File hash (sha256) changed.",
+   "~ .claude/skills/refund-processing/scripts/process_refund.py: File hash (sha256) changed.",
+   "~ get_order: properties.source_sha256 changed.",
+   "~ issue_refund: properties.source_sha256 changed.; properties.declaration_line changed.",
+   "+1 relationships added",
+   "+ [MEDIUM] agent:repository:cdb4ee2aea69cc6a83331bbe configured-with mcp-server:77efde17369e1f8aafcc5e1f0b580a0b7bc34daa542dc3d2601d036fb9f4c147 (when repository association; runtime use and authority unobserved)",
+   "-2 relationships removed",
+   "- [MEDIUM] agent:repository:cdb4ee2aea69cc6a83331bbe configured-with mcp-client:vscode (when repository association; runtime use and authority unobserved)",
+   "- [MEDIUM] agent:repository:cdb4ee2aea69cc6a83331bbe configured-with mcp-server:7eaa2c037fbbdc6e758fcc43614f8967ce4a56c351dd276e8237bb1a35297e12 (when repository association; runtime use and authority unobserved)"
+  ],
+  "Q02": [
+   "0 new, 1 resolved, 0 unknown, 2 changed, 0 not comparable",
+   "drift: inventory 1, capability 2, autonomy 0, governance 0, coverage 0 (adverse: capability)",
+   "- high MCP configuration: .vscode/mcp.json .vscode/mcp.json",
+   "~ MCP configuration: .mcp.json: risk.factors, risk.score, tags (risk 64 \u2192 74) [capability]",
+   "~ Claude Code configured in repository root: risk.factors, tags (risk 100 \u2192 100) [capability]"
+  ]
+ }
+}

@@ -1,0 +1,106 @@
+{
+ "Q01": {
+  "change.tool-description": {
+   "reported": true,
+   "evidence": "[HIGH] High change in 'get_order': properties.source_sha256 changed.",
+   "why": "names get_order as changed, by its source hash"
+  },
+  "change.mcp-version-and-scope": {
+   "reported": true,
+   "evidence": "[CRITICAL] Critical change in 'filesystem': MCP server static source binding changed: launcher, arguments, environment, endpoint or declared tools differ, or the binding key changed. Review before execution.; Version changed: 2025.8.21 → 2026.8.31; properties.static_config_hash changed.; properties.packages changed.; package_url changed.",
+   "why": "names the filesystem server as changed, with the version move and a changed launch binding"
+  },
+  "change.mcp-added": {
+   "reported": true,
+   "evidence": "[MEDIUM] New component 'shadow-sync' (mcp-server) added to supply chain.",
+   "why": "states that shadow-sync was added"
+  },
+  "change.model-bytes": {
+   "reported": true,
+   "evidence": "[HIGH] High change in 'models/intent-classifier/model.safetensors': File hash (sha256) changed.",
+   "why": "states that the file hash of the classifier weights changed"
+  },
+  "change.skill-widened": {
+   "reported": true,
+   "evidence": "[HIGH] High change in '.claude/skills/refund-processing/SKILL.md': File hash (sha256) changed.",
+   "why": "states that the refund-processing SKILL.md hash changed; a second line covers its script"
+  },
+  "change.model-revision": {
+   "reported": false,
+   "evidence": "",
+   "why": "nothing names llm.py, the Llama reference or a model revision; the changed imported findings are identified only by digest"
+  },
+  "change.permissions-widened": {
+   "reported": true,
+   "evidence": "[HIGH] High change in 'claude-code': Risk findings added: 1 high (permission_scope), 1 medium (permission_scope).; Risk findings removed: 1 medium (permission_scope).; properties.settings_hashes changed.; properties.declared_permission_rule_counts changed.; permission_mode changed.",
+   "why": "names the claude-code agent settings as changed, including permission_mode and permission findings"
+  },
+  "change.system-prompt": {
+   "reported": false,
+   "evidence": "",
+   "why": "nothing names the system prompt file; the report only notes that prompt collection was partial"
+  },
+  "change.dataset-bytes": {
+   "reported": false,
+   "evidence": "",
+   "why": "nothing names the training set file"
+  },
+  "change.mcp-removed": {
+   "reported": true,
+   "evidence": "[HIGH] Component 'github' (mcp-server) is no longer in the inventory: confirm it was deleted, not moved out of collector scope.",
+   "why": "states that the github MCP server is gone; another line says .vscode/mcp.json was removed"
+  }
+ },
+ "Q02": {
+  "change.tool-description": {
+   "reported": false,
+   "evidence": "",
+   "why": "get_order is not named"
+  },
+  "change.mcp-version-and-scope": {
+   "reported": false,
+   "evidence": "~ MCP configuration: .mcp.json: risk.factors, risk.score, tags (risk 64 → 74) [capability]",
+   "why": "Borderline: the report says the .mcp.json configuration changed in risk factors and score but does not name the filesystem server, so a reader would not know this server changed"
+  },
+  "change.mcp-added": {
+   "reported": false,
+   "evidence": "~ MCP configuration: .mcp.json: risk.factors, risk.score, tags (risk 64 → 74) [capability]",
+   "why": "Borderline: the report says the .mcp.json configuration changed but does not name shadow-sync or say a server was added"
+  },
+  "change.model-bytes": {
+   "reported": false,
+   "evidence": "",
+   "why": "the classifier weights file is not named"
+  },
+  "change.skill-widened": {
+   "reported": false,
+   "evidence": "~ Claude Code configured in repository root: risk.factors, tags (risk 100 → 100) [capability]",
+   "why": "Borderline: only the repository-wide Claude Code configuration is named as changed; the refund-processing skill is not"
+  },
+  "change.model-revision": {
+   "reported": false,
+   "evidence": "",
+   "why": "llm.py and the Llama reference are not named"
+  },
+  "change.permissions-widened": {
+   "reported": true,
+   "evidence": "~ Claude Code configured in repository root: risk.factors, tags (risk 100 → 100) [capability]",
+   "why": "Borderline: the Claude Code agent configuration is named as changed in its capability risk factors, which identifies the agent, though permissions and settings.json are not mentioned"
+  },
+  "change.system-prompt": {
+   "reported": false,
+   "evidence": "",
+   "why": "the system prompt file is not named"
+  },
+  "change.dataset-bytes": {
+   "reported": false,
+   "evidence": "",
+   "why": "the training set file is not named"
+  },
+  "change.mcp-removed": {
+   "reported": true,
+   "evidence": "- high MCP configuration: .vscode/mcp.json .vscode/mcp.json",
+   "why": "lists the .vscode/mcp.json MCP configuration as the one removed (resolved) item"
+  }
+ }
+}

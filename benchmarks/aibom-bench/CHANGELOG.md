@@ -1,5 +1,14 @@
 # AIBOM-Bench changelog
 
+## Entries added on 18 November 2026
+
+Nexus ShadowScan 0.1.4 and the documented ShadowScan-into-SymBiote workflow were run on the
+same corpus and harness and added to the results as two entries. ShadowScan's repository
+surface is the only one of its nine that the corpus exercises. The raters' packet for these
+two entries did not mask the name ShadowScan, so they were not blind to it, and its 60-line
+cap hid two of SymBiote's findings; that correction and one unresolved disagreement are
+recorded in the assessment files.
+
 ## 1.1.0, 18 November 2026
 
 Version 1.0 was audited by its author acting as a hostile reviewer, by an independent

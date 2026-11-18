@@ -1,0 +1,133 @@
+{
+  "tool": "shadowscan",
+  "display": "Nexus ShadowScan",
+  "version": "0.1.4 (commit 2b80f19)",
+  "license": "Apache-2.0",
+  "source": "github.com/Hunzee-VC/Nexus-ShadowScan",
+  "install": [
+    "python3 -m venv {tooldir}/venv",
+    "{tooldir}/venv/bin/pip install --require-hashes -r requirements.lock",
+    "{tooldir}/venv/bin/pip install --no-deps ."
+  ],
+  "bin": "{tooldir}/venv/bin/shadowscan",
+  "path": [
+    "{tooldir}/venv/bin"
+  ],
+  "env": {},
+  "scans": [
+    {
+      "label": "native",
+      "argv": [
+        "{bin}",
+        "code",
+        "{target}",
+        "--format",
+        "json",
+        "-o",
+        "{out}/report.json"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/report.json",
+          "format": "native-json"
+        }
+      ]
+    },
+    {
+      "label": "cyclonedx",
+      "argv": [
+        "{bin}",
+        "code",
+        "{target}",
+        "--format",
+        "cyclonedx",
+        "-o",
+        "{out}/report.cdx.json"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/report.cdx.json",
+          "format": "cyclonedx-json"
+        }
+      ]
+    },
+    {
+      "label": "sarif",
+      "argv": [
+        "{bin}",
+        "code",
+        "{target}",
+        "--format",
+        "sarif",
+        "-o",
+        "{out}/report.sarif"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/report.sarif",
+          "format": "sarif"
+        }
+      ]
+    },
+    {
+      "label": "html",
+      "argv": [
+        "{bin}",
+        "code",
+        "{target}",
+        "--format",
+        "html",
+        "-o",
+        "{out}/report.html"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/report.html",
+          "format": "html"
+        }
+      ]
+    },
+    {
+      "label": "markdown",
+      "argv": [
+        "{bin}",
+        "code",
+        "{target}",
+        "--format",
+        "markdown",
+        "-o",
+        "{out}/report.md"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/report.md",
+          "format": "markdown"
+        }
+      ]
+    }
+  ],
+  "diff": {
+    "argv": [
+      "{bin}",
+      "diff",
+      "{base}/report.json",
+      "{drift}/report.json"
+    ]
+  },
+  "default": {
+    "argv": [
+      "{bin}",
+      "code",
+      "{target}",
+      "--format",
+      "json",
+      "-o",
+      "{out}/default.json"
+    ],
+    "outputs": []
+  },
+  "default_env": {},
+  "notes": [
+    "Only the code surface is exercised; the other eight surfaces need live systems."
+  ]
+}

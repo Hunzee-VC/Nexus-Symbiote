@@ -1,0 +1,178 @@
+{
+  "tool": "nexus-pair",
+  "assessed": "2026-11-18",
+  "criteria": {
+    "4.6": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "Ran `minimum-elements` (G7 coverage report) and `crosswalk` on the base inventory; both exit 0."
+    },
+    "5.2": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "Ran `attest` with a throwaway Ed25519 key and `verify-attestation`; a modified subject was rejected (subject-mismatch)."
+    },
+    "5.4": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "Native inventory records which collectors ran, each collector's status (partial or failed) and scan_failures; `risk --json-output` carries coverage_status: partial."
+    },
+    "5.5": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "Native records carry assurance_level (declared or observed) and per-claim collector and method."
+    },
+    "6.3": {
+      "level": 0.75,
+      "tier": "V",
+      "evidence": "Half for VEX: `vex` ran and wrote a schema-validated document. A quarter for advisory lookup: `advisories` queries OSV in live mode, documented only because api.osv.dev was unreachable."
+    },
+    "7.3": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "`scan` exited 1 on the base corpus and named the gate reasons; `diff --fail-on-alert` exited 1."
+    },
+    "7.4": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "Ran `trace-diff` on the bundled demo inventory and OTLP trace: it reported 1 matched, 3 undeclared and 2 unobserved items and exited 1. `verify-live` and `discover-mcp` were not run."
+    }
+  },
+  "adjudication": {
+    "control.mcp-pinned": {
+      "verdict": false,
+      "reason": "the file-level unpinned risk factor names no server and nothing says filesystem is unpinned",
+      "evidence": "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .mcp.json \u2014 risk high (64), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; reads or writes files and databases directly (exfiltration / tampering surface); MCP server package or image"
+    },
+    "control.mcp-toml-pinned": {
+      "verdict": false,
+      "reason": "borderline: the finding says the server pins its package and complains only about transitive dependencies resolved without a lockfile, a different problem",
+      "evidence": "context7 | severity=medium; category=transitive_resolution; detail=MCP server 'context7' pins its package but resolves dependencies at launch without a lockfile.; recommendation=Vendor a lockfile-installed server, or launch an image by digest."
+    },
+    "control.model-pinned": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.safetensors-safe": {
+      "verdict": false,
+      "reason": "only a missing-signature finding, which is a different problem",
+      "evidence": ""
+    },
+    "control.skill-benign": {
+      "verdict": false,
+      "reason": "the hidden-content risk factors sit on repository-level skill and agent findings that do not name refund-processing",
+      "evidence": "[warning] shadowscan/agent-config/coding-agent.agent-skills: Agent skill instructions configured in repository root \u2014 risk high (50), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; instruction file carries content hidden from the rendered view; instruction file contains "
+    },
+    "control.tool-benign": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.agent.broad-permissions": {
+      "verdict": true,
+      "reason": "warning on the Claude Code configuration with the risk factor \"agent may run any shell command\"; it does not name settings.json",
+      "evidence": "[warning] shadowscan/agent-config/coding-agent.claude-code: Claude Code configured in repository root \u2014 risk critical (100), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions; runs without a human in the loop; orch"
+    },
+    "risk.agent.toxic-flow": {
+      "verdict": false,
+      "reason": "borderline: a repository-level agent finding lists web access and SaaS write actions as separate risk factors, but names no agent and does not state the combined flow",
+      "evidence": "[warning] shadowscan/agent/framework.langgraph: Agent in repository root: LangGraph, CrewAI, LangChain, LlamaIndex \u2014 risk high (60), confidence 1.00. Risk factors: agent finding; no identifiable owner; calls tools / functions; orchestrates or delegates to other agents; retrieves internal documents; "
+    },
+    "risk.ci.agent-action": {
+      "verdict": false,
+      "reason": "the only line is the Claude Code configuration finding; nothing about the workflow, its trigger or a mutable tag",
+      "evidence": ""
+    },
+    "risk.data.governance": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.instructions.hidden-unicode": {
+      "verdict": true,
+      "reason": "critical finding of invisible Unicode tag characters in backend.mdc",
+      "evidence": ".cursor/rules/backend.mdc | severity=critical; category=tag_characters; detail='.cursor/rules/backend.mdc' contains 37 deprecated Unicode tag characters (U+E0000\u2013U+E007F) outside a flag emoji. These are invisible and have no legitimate use in prompt files.; recommendation=Remove all tag characters \u2014"
+    },
+    "risk.instructions.import-escape": {
+      "verdict": true,
+      "reason": "states CLAUDE.md imports a file outside the project root and excludes it for that reason",
+      "evidence": "- excluded: .mcp.json: MCP server 'healthcheck' launcher identity unknown (inline shell script) (from mcp) - excluded: CLAUDE.md: imports a file outside the project root, which is not inventoried (from prompt) - excluded: ShadowScan report contains unmapped entries (from shadowscan)"
+    },
+    "risk.mcp.plaintext-http": {
+      "verdict": true,
+      "reason": "explicit finding that the metrics endpoint is not HTTPS",
+      "evidence": "metrics | severity=high; category=transport_security; detail=MCP server 'metrics' endpoint is not HTTPS: http://10.20.4.7:8080; recommendation=Use HTTPS for all remote MCP server connections."
+    },
+    "risk.mcp.shell-launch": {
+      "verdict": true,
+      "reason": "high finding on healthcheck naming the inline shell script launcher, and the server is excluded for that reason",
+      "evidence": "healthcheck | severity=high; category=launcher_identity; detail=MCP server 'healthcheck' launcher identity and pin are unknown: inline shell script.; recommendation=Launch a registry package pinned to an exact version, or an image pinned by digest, in a form the inventory classifies."
+    },
+    "risk.mcp.tool-poisoning": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.mcp.unpinned-npx": {
+      "verdict": true,
+      "evidence": "MCP server 'crm' uses an unpinned package reference (arguments omitted).",
+      "reason": "The raters marked this false because the packet's 60-line cap cut SymBiote's per-server findings; both noted the gap. The same finding is present verbatim in this entry's native inventory and risk report, and both raters ruled it true in SymBiote's own packet."
+    },
+    "risk.mcp.unpinned-uvx": {
+      "verdict": true,
+      "evidence": "MCP server 'git' uses an unpinned package reference (arguments omitted).",
+      "reason": "The raters marked this false because the packet's 60-line cap cut SymBiote's per-server findings; both noted the gap. The same finding is present verbatim in this entry's native inventory and risk report, and both raters ruled it true in SymBiote's own packet."
+    },
+    "risk.model.pickle-exec": {
+      "verdict": true,
+      "reason": "critical finding that reranker.pt uses a potentially code-executing serialization",
+      "evidence": "models/legacy/reranker.pt | severity=critical; category=serialization_format; detail=Model 'reranker.pt' has evidence of a potentially code-executing serialization or loader.; recommendation=Convert to SafeTensors. Block pickle/pt/pth in production."
+    },
+    "risk.model.unpinned-revision": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.secret.env-file": {
+      "verdict": true,
+      "reason": "warning that a provider credential is hard-coded in deploy/.env",
+      "evidence": "[warning] shadowscan/secret/provider.openai: LLM provider credential in deploy/.env \u2014 risk high (69), confidence 0.98. Risk factors: secret finding; no identifiable owner; credential hard-coded in source; 2 credentials in one place"
+    },
+    "risk.secret.mcp-header": {
+      "verdict": true,
+      "reason": "warning on the .cursor/mcp.json configuration with the risk factor \"secrets inline in MCP configuration\"; the label is itself file-level",
+      "evidence": "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .cursor/mcp.json \u2014 risk high (59), confidence 0.96. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; secrets inline in MCP configuration; MCP servers frequently expose local filesystem / shell / databas"
+    },
+    "risk.skill.hidden-instruction": {
+      "verdict": true,
+      "reason": "finding of a hidden HTML comment containing an instruction in pdf-export SKILL.md, plus a zero-width character finding",
+      "evidence": ".claude/skills/pdf-export/SKILL.md | severity=high; category=hidden_markup; detail='.claude/skills/pdf-export/SKILL.md' contains 1 HTML or Markdown comment(s) (153 characters of HTML comments) that rendered views hide and agents read. At least one comment contains an instruction, a URL or a home-dir"
+    },
+    "risk.skill.remote-script": {
+      "verdict": false,
+      "reason": "all lines concern hidden content in SKILL.md or agent-level factors; nothing about export.sh or a remote download piped to a shell",
+      "evidence": ""
+    },
+    "risk.tool.shell": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.typosquat.langchian": {
+      "verdict": false,
+      "reason": "the only line is a repository-level agent finding; nothing about langchian or a typosquat",
+      "evidence": ""
+    }
+  },
+  "adjudication_method": "Two raters, unanimous on these labels. Blinding failed for this packet: the name ShadowScan was not masked.",
+  "changes_reported": [
+    "change.mcp-added",
+    "change.mcp-removed",
+    "change.mcp-version-and-scope",
+    "change.model-bytes",
+    "change.permissions-widened",
+    "change.skill-widened",
+    "change.tool-description"
+  ]
+}

@@ -1,0 +1,1039 @@
+{
+ "rule": "A risk counts as reported when the tool states it as a finding, a warning, or an explicit risk flag attached to the affected component, and the statement is about this risk. A neutral attribute the reader must interpret (the bare string 'latest', a listed URL, an echo of file content) does not count. A finding about a different problem on the same component does not count. For a control (a benign item), answer whether the tool wrongly reports the named problem on it.",
+ "tools": {
+  "P1": [
+   {
+    "id": "risk.typosquat.langchian",
+    "kind": "planted risk",
+    "statement": "requirements.txt pins langchian, a transposition of langchain",
+    "risk_class": "typosquat",
+    "component": [
+     "langchian"
+    ],
+    "files": [
+     "requirements.txt"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent/framework.langgraph: Agent in repository root: LangGraph, CrewAI, LangChain, LlamaIndex \u2014 risk high (60), confidence 1.00. Risk factors: agent finding; no identifiable owner; calls tools / functions; orchestrates or delegates to other agents; retrieves internal documents; exposes tools to other agents over MCP; has live web access (prompt-injection surface); performs write actions in SaaS / business systems; third-party inference host; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; DashScope endpoints process data in Alibaba Cloud regions (PRC or"
+    ]
+   },
+   {
+    "id": "risk.model.pickle-exec",
+    "kind": "planted risk",
+    "statement": "reranker.pt runs a shell command when loaded",
+    "risk_class": "unsafe deserialization",
+    "component": [
+     "reranker"
+    ],
+    "files": [
+     "models/legacy/reranker.pt"
+    ],
+    "evidence": [
+     "models/legacy/reranker.pt | severity=critical; category=serialization_format; detail=Model 'reranker.pt' has evidence of a potentially code-executing serialization or loader.; recommendation=Convert to SafeTensors. Block pickle/pt/pth in production.",
+     "models/legacy/reranker.pt | severity=high; category=signing_status; detail=Model 'reranker.pt' has no verified artifact-bound signature (signature-not-found).; recommendation=Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.",
+     "- collection coverage is unknown or incomplete - finding: critical models/legacy/reranker.pt [serialization_format] Model 'reranker.pt' has evidence of a potentially code-executing serialization or loader. - finding: critical .cursor/rules/backend.mdc [tag_characters] '.cursor/rules/backend.mdc' contains 37 deprecated Unicode tag characters (U+E0000\u2013U+E007F) outside a flag emoji. These are invisible and have no legitimate use in prompt files. - score: 278.0 (fail threshold 50)",
+     "| overall_score=278.0; risk_level=critical; coverage_status=partial; ignored_findings=0; total_components=79; components_with_risks=36; assessment_basis=supplied-bom; supplier_claims_omitted=0; discovery_producer=not-verified; fail_on_severity=critical; score_threshold=50.0; policy_source=built-in",
+     "| component_ref=model:models/legacy/reranker.pt; component_name=models/legacy/reranker.pt; severity=critical; category=serialization_format; detail=Model 'reranker.pt' has evidence of a potentially code-executing serialization or loader.; recommendation=Convert to SafeTensors. Block pickle/pt/pth in production.; score=10.0; fingerprint=sha256:56f41b5d98aae7f647a72790f974e90b31d5000fe89985d890097a88fadf924e",
+     "| component_ref=model:models/legacy/reranker.pt; component_name=models/legacy/reranker.pt; severity=high; category=signing_status; detail=Model 'reranker.pt' has no verified artifact-bound signature (signature-not-found).; recommendation=Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.; score=7.0; fingerprint=sha256:8e4e6b4be76f401a58bdb5b337e5c701ee591d84ef24ecb6664b04ef7283f6dc"
+    ]
+   },
+   {
+    "id": "risk.model.unpinned-revision",
+    "kind": "planted risk",
+    "statement": "bge-small-en-v1.5 is loaded without a pinned revision",
+    "risk_class": "unpinned",
+    "component": [
+     "bge-small-en-v1.5"
+    ],
+    "files": [
+     "services/api/rag.py"
+    ],
+    "evidence": []
+   },
+   {
+    "id": "risk.data.governance",
+    "kind": "planted risk",
+    "statement": "Training data holds personal data under a non-commercial licence",
+    "risk_class": "data governance",
+    "component": [
+     "support_tickets",
+     "data/train"
+    ],
+    "files": [
+     "data/train/README.md"
+    ],
+    "evidence": []
+   },
+   {
+    "id": "risk.tool.shell",
+    "kind": "planted risk",
+    "statement": "run_shell passes model-chosen text to a shell",
+    "risk_class": "dangerous tool",
+    "component": [
+     "run_shell"
+    ],
+    "files": [
+     "services/agent/tools.py"
+    ],
+    "evidence": []
+   },
+   {
+    "id": "risk.agent.toxic-flow",
+    "kind": "planted risk",
+    "statement": "One agent reads untrusted pages, reaches the CRM and can send email",
+    "risk_class": "toxic flow",
+    "component": [
+     "support_supervisor",
+     "fetch_url",
+     "send_email"
+    ],
+    "files": [
+     "services/agent/graph.py"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent/framework.langgraph: Agent in repository root: LangGraph, CrewAI, LangChain, LlamaIndex \u2014 risk high (60), confidence 1.00. Risk factors: agent finding; no identifiable owner; calls tools / functions; orchestrates or delegates to other agents; retrieves internal documents; exposes tools to other agents over MCP; has live web access (prompt-injection surface); performs write actions in SaaS / business systems; third-party inference host; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; DashScope endpoints process data in Alibaba Cloud regions (PRC or"
+    ]
+   },
+   {
+    "id": "risk.mcp.tool-poisoning",
+    "kind": "planted risk",
+    "statement": "issue_refund's description tells the model to read and send private files",
+    "risk_class": "tool poisoning",
+    "component": [
+     "issue_refund"
+    ],
+    "files": [
+     "servers/orders_mcp/server.py"
+    ],
+    "evidence": []
+   },
+   {
+    "id": "risk.mcp.unpinned-npx",
+    "kind": "planted risk",
+    "statement": "npx -y runs whatever version of @acme-internal/mcp-crm is newest",
+    "risk_class": "unpinned",
+    "component": [
+     "mcp-crm"
+    ],
+    "files": [
+     ".mcp.json"
+    ],
+    "evidence": [
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .mcp.json \u2014 risk high (64), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; reads or writes files and databases directly (exfiltration / tampering surface); MCP server package or image is not pinned to an exact version; MCP server started through a shell command line; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: packages/notifier/.mcp.json \u2014 risk medium (39), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "claude-code | severity=medium; category=mcp_auto_approval; detail=IDE agent 'claude-code' approves every MCP server in the project's .mcp.json without a prompt.; recommendation=Review this setting and approve its exact value.",
+     "- score: 278.0 (fail threshold 50) - excluded: .mcp.json: MCP server 'healthcheck' launcher identity unknown (inline shell script) (from mcp) - excluded: CLAUDE.md: imports a file outside the project root, which is not inventoried (from prompt) - excluded: ShadowScan report contains unmapped entries (from shadowscan)",
+     "| component_ref=ide-agent:claude-code; component_name=claude-code; severity=medium; category=mcp_auto_approval; detail=IDE agent 'claude-code' approves every MCP server in the project's .mcp.json without a prompt.; recommendation=Review this setting and approve its exact value.; score=4.0; fingerprint=sha256:22e15b1cc2db49fb531ac2fba27a57f9ff4cf99a7e7e86c7f6e93eaac5e0191e"
+    ]
+   },
+   {
+    "id": "risk.mcp.unpinned-uvx",
+    "kind": "planted risk",
+    "statement": "uvx resolves mcp-server-git at launch time",
+    "risk_class": "unpinned",
+    "component": [
+     "mcp-server-git"
+    ],
+    "files": [
+     ".mcp.json"
+    ],
+    "evidence": [
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .mcp.json \u2014 risk high (64), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; reads or writes files and databases directly (exfiltration / tampering surface); MCP server package or image is not pinned to an exact version; MCP server started through a shell command line; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: packages/notifier/.mcp.json \u2014 risk medium (39), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "claude-code | severity=medium; category=mcp_auto_approval; detail=IDE agent 'claude-code' approves every MCP server in the project's .mcp.json without a prompt.; recommendation=Review this setting and approve its exact value.",
+     "- score: 278.0 (fail threshold 50) - excluded: .mcp.json: MCP server 'healthcheck' launcher identity unknown (inline shell script) (from mcp) - excluded: CLAUDE.md: imports a file outside the project root, which is not inventoried (from prompt) - excluded: ShadowScan report contains unmapped entries (from shadowscan)",
+     "| component_ref=ide-agent:claude-code; component_name=claude-code; severity=medium; category=mcp_auto_approval; detail=IDE agent 'claude-code' approves every MCP server in the project's .mcp.json without a prompt.; recommendation=Review this setting and approve its exact value.; score=4.0; fingerprint=sha256:22e15b1cc2db49fb531ac2fba27a57f9ff4cf99a7e7e86c7f6e93eaac5e0191e"
+    ]
+   },
+   {
+    "id": "risk.mcp.shell-launch",
+    "kind": "planted risk",
+    "statement": "The healthcheck entry launches sh -c with an inline script",
+    "risk_class": "launch command",
+    "component": [
+     "healthcheck"
+    ],
+    "files": [
+     ".mcp.json"
+    ],
+    "evidence": [
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .mcp.json \u2014 risk high (64), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; reads or writes files and databases directly (exfiltration / tampering surface); MCP server package or image is not pinned to an exact version; MCP server started through a shell command line; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: packages/notifier/.mcp.json \u2014 risk medium (39), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "claude-code | severity=medium; category=mcp_auto_approval; detail=IDE agent 'claude-code' approves every MCP server in the project's .mcp.json without a prompt.; recommendation=Review this setting and approve its exact value.",
+     "healthcheck | severity=high; category=launcher_identity; detail=MCP server 'healthcheck' launcher identity and pin are unknown: inline shell script.; recommendation=Launch a registry package pinned to an exact version, or an image pinned by digest, in a form the inventory classifies.",
+     "healthcheck | severity=medium; category=local_process; detail=MCP server 'healthcheck' uses stdio transport (local process).; recommendation=Ensure the command binary is integrity-checked.",
+     "healthcheck | severity=low; category=completeness; detail=MCP server 'healthcheck' values not bound in this inventory: launch arguments.; recommendation=Set TOOL_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+     "- score: 278.0 (fail threshold 50) - excluded: .mcp.json: MCP server 'healthcheck' launcher identity unknown (inline shell script) (from mcp) - excluded: CLAUDE.md: imports a file outside the project root, which is not inventoried (from prompt) - excluded: ShadowScan report contains unmapped entries (from shadowscan)",
+     "| overall_score=278.0; risk_level=critical; coverage_status=partial; ignored_findings=0; total_components=79; components_with_risks=36; assessment_basis=supplied-bom; supplier_claims_omitted=0; discovery_producer=not-verified; fail_on_severity=critical; score_threshold=50.0; policy_source=built-in",
+     "| component_ref=mcp-server:031a62e783d46ee294aa0e9d95863aca56d7db7cabefb4f715d6c3970411f4df; component_name=healthcheck; severity=high; category=launcher_identity; detail=MCP server 'healthcheck' launcher identity and pin are unknown: inline shell script.; recommendation=Launch a registry package pinned to an exact version, or an image pinned by digest, in a form the inventory classifies.; score=7.0; fingerprint=sha256:afe492c740c7ca16451927d1c8dfe2b9fefb8f73cdd038baa6f4424cb059dc80",
+     "| component_ref=ide-agent:claude-code; component_name=claude-code; severity=medium; category=mcp_auto_approval; detail=IDE agent 'claude-code' approves every MCP server in the project's .mcp.json without a prompt.; recommendation=Review this setting and approve its exact value.; score=4.0; fingerprint=sha256:22e15b1cc2db49fb531ac2fba27a57f9ff4cf99a7e7e86c7f6e93eaac5e0191e",
+     "| component_ref=mcp-server:031a62e783d46ee294aa0e9d95863aca56d7db7cabefb4f715d6c3970411f4df; component_name=healthcheck; severity=medium; category=local_process; detail=MCP server 'healthcheck' uses stdio transport (local process).; recommendation=Ensure the command binary is integrity-checked.; score=4.0; fingerprint=sha256:f2ddc7742fd470888833722873454b841229a792108ad83f9e408b0ceb1ab0ae",
+     "| component_ref=mcp-server:031a62e783d46ee294aa0e9d95863aca56d7db7cabefb4f715d6c3970411f4df; component_name=healthcheck; severity=low; category=completeness; detail=MCP server 'healthcheck' values not bound in this inventory: launch arguments.; recommendation=Set TOOL_SOURCE_BINDING_KEY during collection to detect changes to these values.; score=1.0; fingerprint=sha256:52a3ea79520aa6dcab6fc0a7577d2e771ba8c9eaea6f4d9c721e039b9c25d006"
+    ]
+   },
+   {
+    "id": "risk.secret.mcp-header",
+    "kind": "planted risk",
+    "statement": "A live-looking bearer token is committed in .cursor/mcp.json",
+    "risk_class": "secret",
+    "component": [
+     "payments",
+     ".cursor/mcp.json"
+    ],
+    "files": [
+     ".cursor/mcp.json"
+    ],
+    "evidence": [
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .cursor/mcp.json \u2014 risk high (59), confidence 0.96. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; secrets inline in MCP configuration; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; remote MCP server over plain HTTP",
+     "payments | severity=low; category=completeness; detail=MCP server 'payments' values not bound in this inventory: header values; endpoint path and query.; recommendation=Set TOOL_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+     "| component_ref=mcp-server:f445738848b1ac4b6812fcea4b86153af760ee3ad6433192b09997760f03c6a0; component_name=payments; severity=low; category=completeness; detail=MCP server 'payments' values not bound in this inventory: header values; endpoint path and query.; recommendation=Set TOOL_SOURCE_BINDING_KEY during collection to detect changes to these values.; score=1.0; fingerprint=sha256:38f4d61e944339a3b01c3237c50eb4c8459f53035df322730058a9b2c7b3f707"
+    ]
+   },
+   {
+    "id": "risk.mcp.plaintext-http",
+    "kind": "planted risk",
+    "statement": "The metrics server is reached over http:// with no TLS",
+    "risk_class": "plaintext transport",
+    "component": [
+     "10.20.4.7",
+     "metrics"
+    ],
+    "files": [
+     ".cursor/mcp.json"
+    ],
+    "evidence": [
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .cursor/mcp.json \u2014 risk high (59), confidence 0.96. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; secrets inline in MCP configuration; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; remote MCP server over plain HTTP",
+     "metrics | severity=high; category=transport_security; detail=MCP server 'metrics' endpoint is not HTTPS: http://10.20.4.7:8080; recommendation=Use HTTPS for all remote MCP server connections.",
+     "metrics | severity=low; category=completeness; detail=MCP server 'metrics' values not bound in this inventory: endpoint path and query.; recommendation=Set TOOL_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+     "| overall_score=278.0; risk_level=critical; coverage_status=partial; ignored_findings=0; total_components=79; components_with_risks=36; assessment_basis=supplied-bom; supplier_claims_omitted=0; discovery_producer=not-verified; fail_on_severity=critical; score_threshold=50.0; policy_source=built-in",
+     "| component_ref=mcp-server:9967f89533aa47d5b3ab1b1bdd75b6d842c155a191d8b46dc8f9d2878cd40519; component_name=metrics; severity=high; category=transport_security; detail=MCP server 'metrics' endpoint is not HTTPS: http://10.20.4.7:8080; recommendation=Use HTTPS for all remote MCP server connections.; score=7.0; fingerprint=sha256:a78d3cdd3071a4face2e6733cc9a7d4075d469ca7fc38cb8d67c3844a8c34f7c",
+     "| component_ref=mcp-server:9967f89533aa47d5b3ab1b1bdd75b6d842c155a191d8b46dc8f9d2878cd40519; component_name=metrics; severity=low; category=completeness; detail=MCP server 'metrics' values not bound in this inventory: endpoint path and query.; recommendation=Set TOOL_SOURCE_BINDING_KEY during collection to detect changes to these values.; score=1.0; fingerprint=sha256:f02e2d8c74ca1d206371a10ff4f80a0fe496abf04ac2e06716ee979fb9d03b8d"
+    ]
+   },
+   {
+    "id": "risk.skill.hidden-instruction",
+    "kind": "planted risk",
+    "statement": "pdf-export hides an exfiltration instruction in an HTML comment and zero-width text",
+    "risk_class": "instruction injection",
+    "component": [
+     "pdf-export"
+    ],
+    "files": [
+     ".claude/skills/pdf-export/SKILL.md"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent-config/coding-agent.claude-code: Claude Code configured in repository root \u2014 risk critical (100), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions; runs without a human in the loop; orchestrates or delegates to other agents; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters; agent may run any shell command; orchestrates other agents and executes code: one compromise reaches every delegate; executes code with no human in the loop: nothing reviews what it runs; 1 sub-agent definition(s)",
+     "[warning] shadowscan/agent-config/coding-agent.agent-skills: Agent skill instructions configured in repository root \u2014 risk high (50), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters",
+     ".claude/skills/pdf-export/SKILL.md | severity=high; category=invisible_characters; detail='.claude/skills/pdf-export/SKILL.md' contains invisible Unicode characters: ZERO WIDTH SPACE (U+200B) x1, ZERO WIDTH NON-JOINER (U+200C) x1, ZERO WIDTH JOINER (U+200D) x1. These are invisible in most editors and may alter LLM behavior.; recommendation=Remove all zero-width characters or document their purpose.",
+     ".claude/skills/pdf-export/SKILL.md | severity=high; category=hidden_markup; detail='.claude/skills/pdf-export/SKILL.md' contains 1 HTML or Markdown comment(s) (153 characters of HTML comments) that rendered views hide and agents read. At least one comment contains an instruction, a URL or a home-directory path.; recommendation=Review comment text in the raw file; move notes out of agent instructions.",
+     "| component_ref=skill:.claude/skills/pdf-export/SKILL.md; component_name=.claude/skills/pdf-export/SKILL.md; severity=high; category=invisible_characters; detail='.claude/skills/pdf-export/SKILL.md' contains invisible Unicode characters: ZERO WIDTH SPACE (U+200B) x1, ZERO WIDTH NON-JOINER (U+200C) x1, ZERO WIDTH JOINER (U+200D) x1. These are invisible in most editors and may alter LLM behavior.; recommendation=Remove all zero-width characters or document their purpose.; score=7.0; fingerprint=sha256:3ec2ce74c7c2fbe0077061dbc2f7d827172ea4833debeb426fb8c48eacd6ee5f",
+     "| component_ref=skill:.claude/skills/pdf-export/SKILL.md; component_name=.claude/skills/pdf-export/SKILL.md; severity=high; category=hidden_markup; detail='.claude/skills/pdf-export/SKILL.md' contains 1 HTML or Markdown comment(s) (153 characters of HTML comments) that rendered views hide and agents read. At least one comment contains an instruction, a URL or a home-directory path.; recommendation=Review comment text in the raw file; move notes out of agent instructions.; score=7.0; fingerprint=sha256:81aafad94d94ca8d3d9ec94d9f0d5c6dcd2ce962a915f0c8db79ec00f4d0da91"
+    ]
+   },
+   {
+    "id": "risk.skill.remote-script",
+    "kind": "planted risk",
+    "statement": "pdf-export's script pipes a remote download to a shell",
+    "risk_class": "dangerous script",
+    "component": [
+     "export.sh",
+     "pdf-export"
+    ],
+    "files": [
+     ".claude/skills/pdf-export/scripts/export.sh"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent-config/coding-agent.claude-code: Claude Code configured in repository root \u2014 risk critical (100), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions; runs without a human in the loop; orchestrates or delegates to other agents; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters; agent may run any shell command; orchestrates other agents and executes code: one compromise reaches every delegate; executes code with no human in the loop: nothing reviews what it runs; 1 sub-agent definition(s)",
+     "[warning] shadowscan/agent-config/coding-agent.agent-skills: Agent skill instructions configured in repository root \u2014 risk high (50), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters",
+     ".claude/skills/pdf-export/SKILL.md | severity=high; category=invisible_characters; detail='.claude/skills/pdf-export/SKILL.md' contains invisible Unicode characters: ZERO WIDTH SPACE (U+200B) x1, ZERO WIDTH NON-JOINER (U+200C) x1, ZERO WIDTH JOINER (U+200D) x1. These are invisible in most editors and may alter LLM behavior.; recommendation=Remove all zero-width characters or document their purpose.",
+     ".claude/skills/pdf-export/SKILL.md | severity=high; category=hidden_markup; detail='.claude/skills/pdf-export/SKILL.md' contains 1 HTML or Markdown comment(s) (153 characters of HTML comments) that rendered views hide and agents read. At least one comment contains an instruction, a URL or a home-directory path.; recommendation=Review comment text in the raw file; move notes out of agent instructions.",
+     "| component_ref=skill:.claude/skills/pdf-export/SKILL.md; component_name=.claude/skills/pdf-export/SKILL.md; severity=high; category=invisible_characters; detail='.claude/skills/pdf-export/SKILL.md' contains invisible Unicode characters: ZERO WIDTH SPACE (U+200B) x1, ZERO WIDTH NON-JOINER (U+200C) x1, ZERO WIDTH JOINER (U+200D) x1. These are invisible in most editors and may alter LLM behavior.; recommendation=Remove all zero-width characters or document their purpose.; score=7.0; fingerprint=sha256:3ec2ce74c7c2fbe0077061dbc2f7d827172ea4833debeb426fb8c48eacd6ee5f",
+     "| component_ref=skill:.claude/skills/pdf-export/SKILL.md; component_name=.claude/skills/pdf-export/SKILL.md; severity=high; category=hidden_markup; detail='.claude/skills/pdf-export/SKILL.md' contains 1 HTML or Markdown comment(s) (153 characters of HTML comments) that rendered views hide and agents read. At least one comment contains an instruction, a URL or a home-directory path.; recommendation=Review comment text in the raw file; move notes out of agent instructions.; score=7.0; fingerprint=sha256:81aafad94d94ca8d3d9ec94d9f0d5c6dcd2ce962a915f0c8db79ec00f4d0da91"
+    ]
+   },
+   {
+    "id": "risk.instructions.import-escape",
+    "kind": "planted risk",
+    "statement": "CLAUDE.md imports a file outside the repository",
+    "risk_class": "path escape",
+    "component": [
+     "claude.md",
+     "secret-notes"
+    ],
+    "files": [
+     "CLAUDE.md"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent-config/coding-agent.claude-code: Claude Code configured in repository root \u2014 risk critical (100), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions; runs without a human in the loop; orchestrates or delegates to other agents; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters; agent may run any shell command; orchestrates other agents and executes code: one compromise reaches every delegate; executes code with no human in the loop: nothing reviews what it runs; 1 sub-agent definition(s)",
+     "- excluded: .mcp.json: MCP server 'healthcheck' launcher identity unknown (inline shell script) (from mcp) - excluded: CLAUDE.md: imports a file outside the project root, which is not inventoried (from prompt) - excluded: ShadowScan report contains unmapped entries (from shadowscan)"
+    ]
+   },
+   {
+    "id": "risk.instructions.hidden-unicode",
+    "kind": "planted risk",
+    "statement": "backend.mdc carries an instruction written in invisible Unicode tag characters",
+    "risk_class": "instruction injection",
+    "component": [
+     "backend.mdc"
+    ],
+    "files": [
+     ".cursor/rules/backend.mdc"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent-config/coding-agent.cursor: Cursor configured in repository root \u2014 risk high (62), confidence 0.97. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions; orchestrates or delegates to other agents; instruction file contains invisible or bidirectional control characters; orchestrates other agents and executes code: one compromise reaches every delegate; 1 sub-agent definition(s)",
+     ".cursor/rules/backend.mdc | severity=critical; category=tag_characters; detail='.cursor/rules/backend.mdc' contains 37 deprecated Unicode tag characters (U+E0000\u2013U+E007F) outside a flag emoji. These are invisible and have no legitimate use in prompt files.; recommendation=Remove all tag characters \u2014 likely a prompt trojan.",
+     "- finding: critical models/legacy/reranker.pt [serialization_format] Model 'reranker.pt' has evidence of a potentially code-executing serialization or loader. - finding: critical .cursor/rules/backend.mdc [tag_characters] '.cursor/rules/backend.mdc' contains 37 deprecated Unicode tag characters (U+E0000\u2013U+E007F) outside a flag emoji. These are invisible and have no legitimate use in prompt files. - score: 278.0 (fail threshold 50) - excluded: .mcp.json: MCP server 'healthcheck' launcher identity unknown (inline shell script) (from mcp)",
+     "| overall_score=278.0; risk_level=critical; coverage_status=partial; ignored_findings=0; total_components=79; components_with_risks=36; assessment_basis=supplied-bom; supplier_claims_omitted=0; discovery_producer=not-verified; fail_on_severity=critical; score_threshold=50.0; policy_source=built-in",
+     "| component_ref=prompt:.cursor/rules/backend.mdc; component_name=.cursor/rules/backend.mdc; severity=critical; category=tag_characters; detail='.cursor/rules/backend.mdc' contains 37 deprecated Unicode tag characters (U+E0000\u2013U+E007F) outside a flag emoji. These are invisible and have no legitimate use in prompt files.; recommendation=Remove all tag characters \u2014 likely a prompt trojan.; score=10.0; fingerprint=sha256:36a988641425f617d63a5af7e1d74ca8982dd7e7fc9493ba40de53d0c5caa209"
+    ]
+   },
+   {
+    "id": "risk.agent.broad-permissions",
+    "kind": "planted risk",
+    "statement": "settings.json allows every shell command, reads of ~/.ssh and all project MCP servers",
+    "risk_class": "broad permissions",
+    "component": [
+     ".claude/settings.json",
+     "bash(*)"
+    ],
+    "files": [
+     ".claude/settings.json"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent-config/coding-agent.claude-code: Claude Code configured in repository root \u2014 risk critical (100), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions; runs without a human in the loop; orchestrates or delegates to other agents; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters; agent may run any shell command; orchestrates other agents and executes code: one compromise reaches every delegate; executes code with no human in the loop: nothing reviews what it runs; 1 sub-agent definition(s)"
+    ]
+   },
+   {
+    "id": "risk.ci.agent-action",
+    "kind": "planted risk",
+    "statement": "A write-scoped agent runs on pull_request_target from a mutable tag",
+    "risk_class": "unpinned",
+    "component": [
+     "claude-code-action",
+     "ai-review.yml"
+    ],
+    "files": [
+     ".github/workflows/ai-review.yml"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent-config/coding-agent.claude-code: Claude Code configured in repository root \u2014 risk critical (100), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions; runs without a human in the loop; orchestrates or delegates to other agents; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters; agent may run any shell command; orchestrates other agents and executes code: one compromise reaches every delegate; executes code with no human in the loop: nothing reviews what it runs; 1 sub-agent definition(s)"
+    ]
+   },
+   {
+    "id": "risk.secret.env-file",
+    "kind": "planted risk",
+    "statement": "deploy/.env is committed with provider credentials",
+    "risk_class": "secret",
+    "component": [
+     "deploy/.env"
+    ],
+    "files": [
+     "deploy/.env"
+    ],
+    "evidence": [
+     "[warning] shadowscan/secret/provider.openai: LLM provider credential in deploy/.env \u2014 risk high (69), confidence 0.98. Risk factors: secret finding; no identifiable owner; credential hard-coded in source; 2 credentials in one place",
+     "[warning] shadowscan/agent/framework.langgraph: Agent in repository root: LangGraph, CrewAI, LangChain, LlamaIndex \u2014 risk high (60), confidence 1.00. Risk factors: agent finding; no identifiable owner; calls tools / functions; orchestrates or delegates to other agents; retrieves internal documents; exposes tools to other agents over MCP; has live web access (prompt-injection surface); performs write actions in SaaS / business systems; third-party inference host; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; DashScope endpoints process data in Alibaba Cloud regions (PRC or"
+    ]
+   },
+   {
+    "id": "control.safetensors-safe",
+    "kind": "control (benign item)",
+    "statement": "SafeTensors weights are not a deserialization risk",
+    "risk_class": "unsafe deserialization",
+    "component": [
+     "intent-classifier"
+    ],
+    "files": [
+     "models/intent-classifier/model.safetensors"
+    ],
+    "evidence": [
+     "models/intent-classifier/model.safetensors | severity=high; category=signing_status; detail=Model 'model.safetensors' has no verified artifact-bound signature (signature-not-found).; recommendation=Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.",
+     "| component_ref=model:models/intent-classifier/model.safetensors; component_name=models/intent-classifier/model.safetensors; severity=high; category=signing_status; detail=Model 'model.safetensors' has no verified artifact-bound signature (signature-not-found).; recommendation=Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.; score=7.0; fingerprint=sha256:ddfb55bfd8d416dc7453a2b42f755e752e004c8c7d4c6da67b6b9c6e1beaf2f2"
+    ]
+   },
+   {
+    "id": "control.model-pinned",
+    "kind": "control (benign item)",
+    "statement": "The Llama reference pins a commit revision",
+    "risk_class": "unpinned",
+    "component": [
+     "llama-3.1-8b-instruct"
+    ],
+    "files": [
+     "services/api/llm.py"
+    ],
+    "evidence": []
+   },
+   {
+    "id": "control.tool-benign",
+    "kind": "control (benign item)",
+    "statement": "get_order has a plain description",
+    "risk_class": "tool poisoning",
+    "component": [
+     "get_order"
+    ],
+    "files": [
+     "servers/orders_mcp/server.py"
+    ],
+    "evidence": []
+   },
+   {
+    "id": "control.mcp-pinned",
+    "kind": "control (benign item)",
+    "statement": "server-filesystem is pinned to an exact version",
+    "risk_class": "unpinned",
+    "component": [
+     "server-filesystem"
+    ],
+    "files": [
+     ".mcp.json"
+    ],
+    "evidence": [
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .mcp.json \u2014 risk high (64), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; reads or writes files and databases directly (exfiltration / tampering surface); MCP server package or image is not pinned to an exact version; MCP server started through a shell command line; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: packages/notifier/.mcp.json \u2014 risk medium (39), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "claude-code | severity=medium; category=mcp_auto_approval; detail=IDE agent 'claude-code' approves every MCP server in the project's .mcp.json without a prompt.; recommendation=Review this setting and approve its exact value.",
+     "- score: 278.0 (fail threshold 50) - excluded: .mcp.json: MCP server 'healthcheck' launcher identity unknown (inline shell script) (from mcp) - excluded: CLAUDE.md: imports a file outside the project root, which is not inventoried (from prompt) - excluded: ShadowScan report contains unmapped entries (from shadowscan)",
+     "| component_ref=ide-agent:claude-code; component_name=claude-code; severity=medium; category=mcp_auto_approval; detail=IDE agent 'claude-code' approves every MCP server in the project's .mcp.json without a prompt.; recommendation=Review this setting and approve its exact value.; score=4.0; fingerprint=sha256:22e15b1cc2db49fb531ac2fba27a57f9ff4cf99a7e7e86c7f6e93eaac5e0191e"
+    ]
+   },
+   {
+    "id": "control.mcp-toml-pinned",
+    "kind": "control (benign item)",
+    "statement": "context7-mcp is pinned to an exact version",
+    "risk_class": "unpinned",
+    "component": [
+     "context7"
+    ],
+    "files": [
+     ".codex/config.toml"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent-config/coding-agent.openai-codex: OpenAI Codex (CLI / cloud agent) configured in repository root \u2014 risk medium (40), confidence 0.99. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions",
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .codex/config.toml \u2014 risk medium (39), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "codex | severity=low; category=completeness; detail=IDE agent 'codex' settings values not bound in this inventory: the redacted values of .codex/config.toml.; recommendation=Set TOOL_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+     "context7 | severity=medium; category=transitive_resolution; detail=MCP server 'context7' pins its package but resolves dependencies at launch without a lockfile.; recommendation=Vendor a lockfile-installed server, or launch an image by digest.",
+     "context7 | severity=medium; category=local_process; detail=MCP server 'context7' uses stdio transport (local process).; recommendation=Ensure the command binary is integrity-checked.",
+     "| component_ref=mcp-server:67c857282f5f665087bcde0e4de71ce92f0614529d7d7fdd8eda9412a42d83eb; component_name=context7; severity=medium; category=transitive_resolution; detail=MCP server 'context7' pins its package but resolves dependencies at launch without a lockfile.; recommendation=Vendor a lockfile-installed server, or launch an image by digest.; score=4.0; fingerprint=sha256:08c994297a148cc621238cf805bf07ad54dbe0b3cda3ba9c49b4c0c2a122f060",
+     "| component_ref=ide-agent:codex; component_name=codex; severity=low; category=completeness; detail=IDE agent 'codex' settings values not bound in this inventory: the redacted values of .codex/config.toml.; recommendation=Set TOOL_SOURCE_BINDING_KEY during collection to detect changes to these values.; score=1.0; fingerprint=sha256:2d991db391fc2e04a686abdd90871fe8d4b53ac2d84222fa41498d883c33c8dc"
+    ]
+   },
+   {
+    "id": "control.skill-benign",
+    "kind": "control (benign item)",
+    "statement": "refund-processing contains no hidden instructions",
+    "risk_class": "instruction injection",
+    "component": [
+     "refund-processing"
+    ],
+    "files": [
+     ".claude/skills/refund-processing/SKILL.md"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent-config/coding-agent.claude-code: Claude Code configured in repository root \u2014 risk critical (100), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions; runs without a human in the loop; orchestrates or delegates to other agents; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters; agent may run any shell command; orchestrates other agents and executes code: one compromise reaches every delegate; executes code with no human in the loop: nothing reviews what it runs; 1 sub-agent definition(s)",
+     "[warning] shadowscan/agent-config/coding-agent.agent-skills: Agent skill instructions configured in repository root \u2014 risk high (50), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters"
+    ]
+   }
+  ],
+  "P2": [
+   {
+    "id": "risk.typosquat.langchian",
+    "kind": "planted risk",
+    "statement": "requirements.txt pins langchian, a transposition of langchain",
+    "risk_class": "typosquat",
+    "component": [
+     "langchian"
+    ],
+    "files": [
+     "requirements.txt"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent/framework.langgraph: Agent in repository root: LangGraph, CrewAI, LangChain, LlamaIndex \u2014 risk high (60), confidence 1.00. Risk factors: agent finding; no identifiable owner; calls tools / functions; orchestrates or delegates to other agents; retrieves internal documents; exposes tools to other agents over MCP; has live web access (prompt-injection surface); performs write actions in SaaS / business systems; third-party inference host; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; DashScope endpoints process data in Alibaba Cloud regions (PRC or",
+     "0.97 dependency matched CrewAI: crewai \u2014 pyproject.toml pypi: crewai crewai>=1.15 0.97 dependency matched CrewAI: crewai \u2014 requirements.txt:11 pypi: crewai ==1.15.41 0.97 IaC resource matched Amazon Bedrock Agents / AgentCore / Flows: aws_bedrockagent_agent \u2014 deploy/terraform/bedrock.tf:1 resource: aws_bedrockagent_agent 0.97 import matched CrewAI: from crewai \u2014 services/crew/crew.py:1 from crewai import Agent, Crew",
+     "0.95 dependency matched LangGraph: langgraph \u2014 pyproject.toml pypi: langgraph langgraph>=1.2 0.95 dependency matched LangGraph: langgraph \u2014 requirements.txt:3 pypi: langgraph ==1.2.22 0.95 code pattern matched n8n: @n8n/n8n-nodes-langchain.agent \u2014 workflows/n8n/lead_enrichment.json 0.95 config file matched Agent2Agent Protocol (A2A): .well-known/agent-card.json \u2014 .well-known/agent-card.json",
+     "``` - (0.97) dependency matched CrewAI: crewai \u2014 `requirements.txt:11` ```text pypi: crewai ==1.15.41",
+     "``` - (0.95) dependency matched LangGraph: langgraph \u2014 `requirements.txt:3` ```text pypi: langgraph ==1.2.22"
+    ]
+   },
+   {
+    "id": "risk.model.pickle-exec",
+    "kind": "planted risk",
+    "statement": "reranker.pt runs a shell command when loaded",
+    "risk_class": "unsafe deserialization",
+    "component": [
+     "reranker"
+    ],
+    "files": [
+     "models/legacy/reranker.pt"
+    ],
+    "evidence": []
+   },
+   {
+    "id": "risk.model.unpinned-revision",
+    "kind": "planted risk",
+    "statement": "bge-small-en-v1.5 is loaded without a pinned revision",
+    "risk_class": "unpinned",
+    "component": [
+     "bge-small-en-v1.5"
+    ],
+    "files": [
+     "services/api/rag.py"
+    ],
+    "evidence": []
+   },
+   {
+    "id": "risk.data.governance",
+    "kind": "planted risk",
+    "statement": "Training data holds personal data under a non-commercial licence",
+    "risk_class": "data governance",
+    "component": [
+     "support_tickets",
+     "data/train"
+    ],
+    "files": [
+     "data/train/README.md"
+    ],
+    "evidence": []
+   },
+   {
+    "id": "risk.tool.shell",
+    "kind": "planted risk",
+    "statement": "run_shell passes model-chosen text to a shell",
+    "risk_class": "dangerous tool",
+    "component": [
+     "run_shell"
+    ],
+    "files": [
+     "services/agent/tools.py"
+    ],
+    "evidence": []
+   },
+   {
+    "id": "risk.agent.toxic-flow",
+    "kind": "planted risk",
+    "statement": "One agent reads untrusted pages, reaches the CRM and can send email",
+    "risk_class": "toxic flow",
+    "component": [
+     "support_supervisor",
+     "fetch_url",
+     "send_email"
+    ],
+    "files": [
+     "services/agent/graph.py"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent/framework.langgraph: Agent in repository root: LangGraph, CrewAI, LangChain, LlamaIndex \u2014 risk high (60), confidence 1.00. Risk factors: agent finding; no identifiable owner; calls tools / functions; orchestrates or delegates to other agents; retrieves internal documents; exposes tools to other agents over MCP; has live web access (prompt-injection surface); performs write actions in SaaS / business systems; third-party inference host; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; DashScope endpoints process data in Alibaba Cloud regions (PRC or",
+     "0.95 config file matched Agent2Agent Protocol (A2A): .well-known/agent-card.json \u2014 .well-known/agent-card.json 0.95 import matched LangGraph: from langgraph \u2014 services/agent/graph.py:4 from langgraph.prebuilt import create_react_agent 0.95 code pattern matched n8n: @n8n/n8n-nodes-langchain.lmChatOpenAi \u2014 workflows/n8n/lead_enrichment.json 0.95 import matched LangGraph: langgraph.prebuilt \u2014 services/agent/graph.py:4 from langgraph.prebuilt import create_react_agent",
+     "0.95 code pattern matched n8n: @n8n/n8n-nodes-langchain.lmChatOpenAi \u2014 workflows/n8n/lead_enrichment.json 0.95 import matched LangGraph: langgraph.prebuilt \u2014 services/agent/graph.py:4 from langgraph.prebuilt import create_react_agent 0.90 code pattern matched import-bound agent construction: crewai:Agent( \u2014 services/crew/crew.py:11 return Agent(config=self.agents_config[\"refund_specialist\"]) 0.90 code pattern matched CrewAI: Crew( \u2014 services/crew/crew.py:15 return Crew(agents=self.agents)"
+    ]
+   },
+   {
+    "id": "risk.mcp.tool-poisoning",
+    "kind": "planted risk",
+    "statement": "issue_refund's description tells the model to read and send private files",
+    "risk_class": "tool poisoning",
+    "component": [
+     "issue_refund"
+    ],
+    "files": [
+     "servers/orders_mcp/server.py"
+    ],
+    "evidence": [
+     "\"get_order\", \"issue_refund\" ], \"contextual_capabilities\": [",
+     "{ \"file\": \"servers/orders_mcp/server.py\", \"line\": 5, \"construct\": \"mcp.server.fastmcp:FastMCP(\","
+    ]
+   },
+   {
+    "id": "risk.mcp.unpinned-npx",
+    "kind": "planted risk",
+    "statement": "npx -y runs whatever version of @acme-internal/mcp-crm is newest",
+    "risk_class": "unpinned",
+    "component": [
+     "mcp-crm"
+    ],
+    "files": [
+     ".mcp.json"
+    ],
+    "evidence": [
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .mcp.json \u2014 risk high (64), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; reads or writes files and databases directly (exfiltration / tampering surface); MCP server package or image is not pinned to an exact version; MCP server started through a shell command line; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: packages/notifier/.mcp.json \u2014 risk medium (39), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "} high 64 code mcp-server MCP configuration: .mcp.json .mcp.json \u2014 0.95 protocol.mcp Id ss-2955519e7df1ad74 \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ?",
+     "high 64 code mcp-server MCP configuration: .mcp.json .mcp.json \u2014 0.95 protocol.mcp Id ss-2955519e7df1ad74 \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ? Capabilities tool-use data-access",
+     "Evidence 0.95 MCP client/server configuration file .mcp.json \u2014 .mcp.json 0.00 MCP server 'crm' fetches its package or image without an exact version (@acme-internal/mcp-crm) \u2014 .mcp.json 0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json",
+     "0.95 MCP client/server configuration file .mcp.json \u2014 .mcp.json 0.00 MCP server 'crm' fetches its package or image without an exact version (@acme-internal/mcp-crm) \u2014 .mcp.json 0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json 0.00 MCP server 'healthcheck' is started through a shell command line (sh) \u2014 .mcp.json",
+     "0.00 MCP server 'crm' fetches its package or image without an exact version (@acme-internal/mcp-crm) \u2014 .mcp.json 0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json 0.00 MCP server 'healthcheck' is started through a shell command line (sh) \u2014 .mcp.json metadata",
+     "0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json 0.00 MCP server 'healthcheck' is started through a shell command line (sh) \u2014 .mcp.json metadata {",
+     "{ \"path\": \".mcp.json\", \"servers\": [ {",
+     "\"-y\", \"@acme-internal/mcp-crm\" ], \"url\": null,",
+     "} medium 39 code mcp-server MCP configuration: packages/notifier/.mcp.json packages/notifier/.mcp.json \u2014 0.95 protocol.mcp Id ss-fa7e939244362cbe \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ?",
+     "medium 39 code mcp-server MCP configuration: packages/notifier/.mcp.json packages/notifier/.mcp.json \u2014 0.95 protocol.mcp Id ss-fa7e939244362cbe \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ? Capabilities tool-use",
+     "Evidence 0.95 MCP client/server configuration file packages/notifier/.mcp.json \u2014 packages/notifier/.mcp.json metadata {",
+     "{ \"path\": \"packages/notifier/.mcp.json\", \"servers\": [ {",
+     "| \ud83d\udfe0 high (69) | | code | secret | LLM provider credential in deploy/.env | \u2014 | 0.98 | provider.openai | | \ud83d\udfe0 high (64) | | code | mcp-server | MCP configuration: .mcp.json | \u2014 | 0.95 | protocol.mcp | | \ud83d\udfe0 high (62) | | code | agent-config | Cursor configured in repository root | \u2014 | 0.97 | coding-agent.cursor | | \ud83d\udfe0 high (60) | | code | agent | Agent in repository root: LangGraph, CrewAI, LangChain, LlamaIndex | \u2014 | 1.00 | framework.langgraph, framework.crewai, cloud.aws-bedrock-agents, platform.n8n |",
+     "| \ud83d\udfe1 medium (39) | | code | mcp-server | MCP configuration: .gemini/settings.json | \u2014 | 0.95 | protocol.mcp | | \ud83d\udfe1 medium (39) | | code | mcp-server | MCP configuration: packages/notifier/.mcp.json | \u2014 | 0.95 | protocol.mcp | | \ud83d\udfe1 medium (38) | | code | agent-config | Gemini CLI / Jules configured in repository root | \u2014 | 0.90 | coding-agent.gemini-cli | | \ud83d\udfe1 medium (38) | | code | agent-config | GitHub Copilot (coding agent / custom agents) configured in repository root | \u2014 | 0.85 | coding-agent.github-copilot |",
+     "``` ### \ud83d\udfe0 MCP configuration: .mcp.json - **Id:** `ss-2955519e7df1ad74` - **Resource:** `.mcp.json` (mcp-config) on **code** via `code.filesystem`",
+     "- **Id:** `ss-2955519e7df1ad74` - **Resource:** `.mcp.json` (mcp-config) on **code** via `code.filesystem` - **Where:** filesystem - **Risk:** high (64) \u00b7 **Confidence:** 0.95 (strong) \u00b7 **Shadow:** n/a",
+     "**Evidence** - (0.95) MCP client/server configuration file .mcp.json \u2014 `.mcp.json` - (0.00) MCP server 'crm' fetches its package or image without an exact version (\\[@\\]acme-internal/mcp-crm) \u2014 `.mcp.json` - (0.00) MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 `.mcp.json`",
+     "- (0.95) MCP client/server configuration file .mcp.json \u2014 `.mcp.json` - (0.00) MCP server 'crm' fetches its package or image without an exact version (\\[@\\]acme-internal/mcp-crm) \u2014 `.mcp.json` - (0.00) MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 `.mcp.json` - (0.00) MCP server 'healthcheck' is started through a shell command line (sh) \u2014 `.mcp.json`",
+     "- (0.00) MCP server 'crm' fetches its package or image without an exact version (\\[@\\]acme-internal/mcp-crm) \u2014 `.mcp.json` - (0.00) MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 `.mcp.json` - (0.00) MCP server 'healthcheck' is started through a shell command line (sh) \u2014 `.mcp.json` ### \ud83d\udfe0 Cursor configured in repository root",
+     "- (0.00) MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 `.mcp.json` - (0.00) MCP server 'healthcheck' is started through a shell command line (sh) \u2014 `.mcp.json` ### \ud83d\udfe0 Cursor configured in repository root - **Id:** `ss-0ed0ae49f4bcd0dd`",
+     "- (0.95) MCP client/server configuration file .gemini/settings.json \u2014 `.gemini/settings.json` ### \ud83d\udfe1 MCP configuration: packages/notifier/.mcp.json - **Id:** `ss-fa7e939244362cbe` - **Resource:** `packages/notifier/.mcp.json` (mcp-config) on **code** via `code.filesystem`",
+     "- **Id:** `ss-fa7e939244362cbe` - **Resource:** `packages/notifier/.mcp.json` (mcp-config) on **code** via `code.filesystem` - **Where:** filesystem - **Risk:** medium (39) \u00b7 **Confidence:** 0.95 (strong) \u00b7 **Shadow:** n/a",
+     "**Evidence** - (0.95) MCP client/server configuration file packages/notifier/.mcp.json \u2014 `packages/notifier/.mcp.json` ### \ud83d\udfe1 Gemini CLI / Jules configured in repository root - **Id:** `ss-7790bd453a1ac417`"
+    ]
+   },
+   {
+    "id": "risk.mcp.unpinned-uvx",
+    "kind": "planted risk",
+    "statement": "uvx resolves mcp-server-git at launch time",
+    "risk_class": "unpinned",
+    "component": [
+     "mcp-server-git"
+    ],
+    "files": [
+     ".mcp.json"
+    ],
+    "evidence": [
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .mcp.json \u2014 risk high (64), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; reads or writes files and databases directly (exfiltration / tampering surface); MCP server package or image is not pinned to an exact version; MCP server started through a shell command line; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: packages/notifier/.mcp.json \u2014 risk medium (39), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "} high 64 code mcp-server MCP configuration: .mcp.json .mcp.json \u2014 0.95 protocol.mcp Id ss-2955519e7df1ad74 \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ?",
+     "high 64 code mcp-server MCP configuration: .mcp.json .mcp.json \u2014 0.95 protocol.mcp Id ss-2955519e7df1ad74 \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ? Capabilities tool-use data-access",
+     "Evidence 0.95 MCP client/server configuration file .mcp.json \u2014 .mcp.json 0.00 MCP server 'crm' fetches its package or image without an exact version (@acme-internal/mcp-crm) \u2014 .mcp.json 0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json",
+     "0.95 MCP client/server configuration file .mcp.json \u2014 .mcp.json 0.00 MCP server 'crm' fetches its package or image without an exact version (@acme-internal/mcp-crm) \u2014 .mcp.json 0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json 0.00 MCP server 'healthcheck' is started through a shell command line (sh) \u2014 .mcp.json",
+     "0.00 MCP server 'crm' fetches its package or image without an exact version (@acme-internal/mcp-crm) \u2014 .mcp.json 0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json 0.00 MCP server 'healthcheck' is started through a shell command line (sh) \u2014 .mcp.json metadata",
+     "0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json 0.00 MCP server 'healthcheck' is started through a shell command line (sh) \u2014 .mcp.json metadata {",
+     "{ \"path\": \".mcp.json\", \"servers\": [ {",
+     "\"args\": [ \"mcp-server-git\", \"--repository\", \".\"",
+     "} medium 39 code mcp-server MCP configuration: packages/notifier/.mcp.json packages/notifier/.mcp.json \u2014 0.95 protocol.mcp Id ss-fa7e939244362cbe \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ?",
+     "medium 39 code mcp-server MCP configuration: packages/notifier/.mcp.json packages/notifier/.mcp.json \u2014 0.95 protocol.mcp Id ss-fa7e939244362cbe \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ? Capabilities tool-use",
+     "Evidence 0.95 MCP client/server configuration file packages/notifier/.mcp.json \u2014 packages/notifier/.mcp.json metadata {",
+     "{ \"path\": \"packages/notifier/.mcp.json\", \"servers\": [ {",
+     "| \ud83d\udfe0 high (69) | | code | secret | LLM provider credential in deploy/.env | \u2014 | 0.98 | provider.openai | | \ud83d\udfe0 high (64) | | code | mcp-server | MCP configuration: .mcp.json | \u2014 | 0.95 | protocol.mcp | | \ud83d\udfe0 high (62) | | code | agent-config | Cursor configured in repository root | \u2014 | 0.97 | coding-agent.cursor | | \ud83d\udfe0 high (60) | | code | agent | Agent in repository root: LangGraph, CrewAI, LangChain, LlamaIndex | \u2014 | 1.00 | framework.langgraph, framework.crewai, cloud.aws-bedrock-agents, platform.n8n |",
+     "| \ud83d\udfe1 medium (39) | | code | mcp-server | MCP configuration: .gemini/settings.json | \u2014 | 0.95 | protocol.mcp | | \ud83d\udfe1 medium (39) | | code | mcp-server | MCP configuration: packages/notifier/.mcp.json | \u2014 | 0.95 | protocol.mcp | | \ud83d\udfe1 medium (38) | | code | agent-config | Gemini CLI / Jules configured in repository root | \u2014 | 0.90 | coding-agent.gemini-cli | | \ud83d\udfe1 medium (38) | | code | agent-config | GitHub Copilot (coding agent / custom agents) configured in repository root | \u2014 | 0.85 | coding-agent.github-copilot |",
+     "``` ### \ud83d\udfe0 MCP configuration: .mcp.json - **Id:** `ss-2955519e7df1ad74` - **Resource:** `.mcp.json` (mcp-config) on **code** via `code.filesystem`",
+     "- **Id:** `ss-2955519e7df1ad74` - **Resource:** `.mcp.json` (mcp-config) on **code** via `code.filesystem` - **Where:** filesystem - **Risk:** high (64) \u00b7 **Confidence:** 0.95 (strong) \u00b7 **Shadow:** n/a",
+     "**Evidence** - (0.95) MCP client/server configuration file .mcp.json \u2014 `.mcp.json` - (0.00) MCP server 'crm' fetches its package or image without an exact version (\\[@\\]acme-internal/mcp-crm) \u2014 `.mcp.json` - (0.00) MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 `.mcp.json`",
+     "- (0.95) MCP client/server configuration file .mcp.json \u2014 `.mcp.json` - (0.00) MCP server 'crm' fetches its package or image without an exact version (\\[@\\]acme-internal/mcp-crm) \u2014 `.mcp.json` - (0.00) MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 `.mcp.json` - (0.00) MCP server 'healthcheck' is started through a shell command line (sh) \u2014 `.mcp.json`",
+     "- (0.00) MCP server 'crm' fetches its package or image without an exact version (\\[@\\]acme-internal/mcp-crm) \u2014 `.mcp.json` - (0.00) MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 `.mcp.json` - (0.00) MCP server 'healthcheck' is started through a shell command line (sh) \u2014 `.mcp.json` ### \ud83d\udfe0 Cursor configured in repository root",
+     "- (0.00) MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 `.mcp.json` - (0.00) MCP server 'healthcheck' is started through a shell command line (sh) \u2014 `.mcp.json` ### \ud83d\udfe0 Cursor configured in repository root - **Id:** `ss-0ed0ae49f4bcd0dd`",
+     "- (0.95) MCP client/server configuration file .gemini/settings.json \u2014 `.gemini/settings.json` ### \ud83d\udfe1 MCP configuration: packages/notifier/.mcp.json - **Id:** `ss-fa7e939244362cbe` - **Resource:** `packages/notifier/.mcp.json` (mcp-config) on **code** via `code.filesystem`",
+     "- **Id:** `ss-fa7e939244362cbe` - **Resource:** `packages/notifier/.mcp.json` (mcp-config) on **code** via `code.filesystem` - **Where:** filesystem - **Risk:** medium (39) \u00b7 **Confidence:** 0.95 (strong) \u00b7 **Shadow:** n/a",
+     "**Evidence** - (0.95) MCP client/server configuration file packages/notifier/.mcp.json \u2014 `packages/notifier/.mcp.json` ### \ud83d\udfe1 Gemini CLI / Jules configured in repository root - **Id:** `ss-7790bd453a1ac417`"
+    ]
+   },
+   {
+    "id": "risk.mcp.shell-launch",
+    "kind": "planted risk",
+    "statement": "The healthcheck entry launches sh -c with an inline script",
+    "risk_class": "launch command",
+    "component": [
+     "healthcheck"
+    ],
+    "files": [
+     ".mcp.json"
+    ],
+    "evidence": [
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .mcp.json \u2014 risk high (64), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; reads or writes files and databases directly (exfiltration / tampering surface); MCP server package or image is not pinned to an exact version; MCP server started through a shell command line; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: packages/notifier/.mcp.json \u2014 risk medium (39), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "} high 64 code mcp-server MCP configuration: .mcp.json .mcp.json \u2014 0.95 protocol.mcp Id ss-2955519e7df1ad74 \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ?",
+     "high 64 code mcp-server MCP configuration: .mcp.json .mcp.json \u2014 0.95 protocol.mcp Id ss-2955519e7df1ad74 \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ? Capabilities tool-use data-access",
+     "Evidence 0.95 MCP client/server configuration file .mcp.json \u2014 .mcp.json 0.00 MCP server 'crm' fetches its package or image without an exact version (@acme-internal/mcp-crm) \u2014 .mcp.json 0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json",
+     "0.95 MCP client/server configuration file .mcp.json \u2014 .mcp.json 0.00 MCP server 'crm' fetches its package or image without an exact version (@acme-internal/mcp-crm) \u2014 .mcp.json 0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json 0.00 MCP server 'healthcheck' is started through a shell command line (sh) \u2014 .mcp.json",
+     "0.00 MCP server 'crm' fetches its package or image without an exact version (@acme-internal/mcp-crm) \u2014 .mcp.json 0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json 0.00 MCP server 'healthcheck' is started through a shell command line (sh) \u2014 .mcp.json metadata",
+     "0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json 0.00 MCP server 'healthcheck' is started through a shell command line (sh) \u2014 .mcp.json metadata {",
+     "{ \"path\": \".mcp.json\", \"servers\": [ {",
+     "{ \"name\": \"healthcheck\", \"transport\": \"stdio\", \"command\": \"sh\",",
+     "} medium 39 code mcp-server MCP configuration: packages/notifier/.mcp.json packages/notifier/.mcp.json \u2014 0.95 protocol.mcp Id ss-fa7e939244362cbe \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ?",
+     "medium 39 code mcp-server MCP configuration: packages/notifier/.mcp.json packages/notifier/.mcp.json \u2014 0.95 protocol.mcp Id ss-fa7e939244362cbe \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ? Capabilities tool-use",
+     "Evidence 0.95 MCP client/server configuration file packages/notifier/.mcp.json \u2014 packages/notifier/.mcp.json metadata {",
+     "{ \"path\": \"packages/notifier/.mcp.json\", \"servers\": [ {",
+     "| \ud83d\udfe0 high (69) | | code | secret | LLM provider credential in deploy/.env | \u2014 | 0.98 | provider.openai | | \ud83d\udfe0 high (64) | | code | mcp-server | MCP configuration: .mcp.json | \u2014 | 0.95 | protocol.mcp | | \ud83d\udfe0 high (62) | | code | agent-config | Cursor configured in repository root | \u2014 | 0.97 | coding-agent.cursor | | \ud83d\udfe0 high (60) | | code | agent | Agent in repository root: LangGraph, CrewAI, LangChain, LlamaIndex | \u2014 | 1.00 | framework.langgraph, framework.crewai, cloud.aws-bedrock-agents, platform.n8n |",
+     "| \ud83d\udfe1 medium (39) | | code | mcp-server | MCP configuration: .gemini/settings.json | \u2014 | 0.95 | protocol.mcp | | \ud83d\udfe1 medium (39) | | code | mcp-server | MCP configuration: packages/notifier/.mcp.json | \u2014 | 0.95 | protocol.mcp | | \ud83d\udfe1 medium (38) | | code | agent-config | Gemini CLI / Jules configured in repository root | \u2014 | 0.90 | coding-agent.gemini-cli | | \ud83d\udfe1 medium (38) | | code | agent-config | GitHub Copilot (coding agent / custom agents) configured in repository root | \u2014 | 0.85 | coding-agent.github-copilot |",
+     "``` ### \ud83d\udfe0 MCP configuration: .mcp.json - **Id:** `ss-2955519e7df1ad74` - **Resource:** `.mcp.json` (mcp-config) on **code** via `code.filesystem`",
+     "- **Id:** `ss-2955519e7df1ad74` - **Resource:** `.mcp.json` (mcp-config) on **code** via `code.filesystem` - **Where:** filesystem - **Risk:** high (64) \u00b7 **Confidence:** 0.95 (strong) \u00b7 **Shadow:** n/a",
+     "**Evidence** - (0.95) MCP client/server configuration file .mcp.json \u2014 `.mcp.json` - (0.00) MCP server 'crm' fetches its package or image without an exact version (\\[@\\]acme-internal/mcp-crm) \u2014 `.mcp.json` - (0.00) MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 `.mcp.json`",
+     "- (0.95) MCP client/server configuration file .mcp.json \u2014 `.mcp.json` - (0.00) MCP server 'crm' fetches its package or image without an exact version (\\[@\\]acme-internal/mcp-crm) \u2014 `.mcp.json` - (0.00) MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 `.mcp.json` - (0.00) MCP server 'healthcheck' is started through a shell command line (sh) \u2014 `.mcp.json`",
+     "- (0.00) MCP server 'crm' fetches its package or image without an exact version (\\[@\\]acme-internal/mcp-crm) \u2014 `.mcp.json` - (0.00) MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 `.mcp.json` - (0.00) MCP server 'healthcheck' is started through a shell command line (sh) \u2014 `.mcp.json` ### \ud83d\udfe0 Cursor configured in repository root",
+     "- (0.00) MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 `.mcp.json` - (0.00) MCP server 'healthcheck' is started through a shell command line (sh) \u2014 `.mcp.json` ### \ud83d\udfe0 Cursor configured in repository root - **Id:** `ss-0ed0ae49f4bcd0dd`",
+     "- (0.95) MCP client/server configuration file .gemini/settings.json \u2014 `.gemini/settings.json` ### \ud83d\udfe1 MCP configuration: packages/notifier/.mcp.json - **Id:** `ss-fa7e939244362cbe` - **Resource:** `packages/notifier/.mcp.json` (mcp-config) on **code** via `code.filesystem`",
+     "- **Id:** `ss-fa7e939244362cbe` - **Resource:** `packages/notifier/.mcp.json` (mcp-config) on **code** via `code.filesystem` - **Where:** filesystem - **Risk:** medium (39) \u00b7 **Confidence:** 0.95 (strong) \u00b7 **Shadow:** n/a",
+     "**Evidence** - (0.95) MCP client/server configuration file packages/notifier/.mcp.json \u2014 `packages/notifier/.mcp.json` ### \ud83d\udfe1 Gemini CLI / Jules configured in repository root - **Id:** `ss-7790bd453a1ac417`"
+    ]
+   },
+   {
+    "id": "risk.secret.mcp-header",
+    "kind": "planted risk",
+    "statement": "A live-looking bearer token is committed in .cursor/mcp.json",
+    "risk_class": "secret",
+    "component": [
+     "payments",
+     ".cursor/mcp.json"
+    ],
+    "files": [
+     ".cursor/mcp.json"
+    ],
+    "evidence": [
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .cursor/mcp.json \u2014 risk high (59), confidence 0.96. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; secrets inline in MCP configuration; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; remote MCP server over plain HTTP",
+     "} high 59 code mcp-server MCP configuration: .cursor/mcp.json .cursor/mcp.json \u2014 0.96 protocol.mcp Id ss-f43e45a6b817db1b \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ?",
+     "high 59 code mcp-server MCP configuration: .cursor/mcp.json .cursor/mcp.json \u2014 0.96 protocol.mcp Id ss-f43e45a6b817db1b \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ? Capabilities tool-use",
+     "Evidence 0.95 MCP client/server configuration file .cursor/mcp.json \u2014 .cursor/mcp.json 0.30 MCP server 'payments' has credential-looking values inline (headers) \u2014 .cursor/mcp.json 0.00 MCP server 'metrics' is reached over plaintext HTTP (10.20.4.7) \u2014 .cursor/mcp.json",
+     "0.95 MCP client/server configuration file .cursor/mcp.json \u2014 .cursor/mcp.json 0.30 MCP server 'payments' has credential-looking values inline (headers) \u2014 .cursor/mcp.json 0.00 MCP server 'metrics' is reached over plaintext HTTP (10.20.4.7) \u2014 .cursor/mcp.json metadata",
+     "0.30 MCP server 'payments' has credential-looking values inline (headers) \u2014 .cursor/mcp.json 0.00 MCP server 'metrics' is reached over plaintext HTTP (10.20.4.7) \u2014 .cursor/mcp.json metadata {",
+     "{ \"path\": \".cursor/mcp.json\", \"servers\": [ {",
+     "{ \"name\": \"payments\", \"transport\": \"http\", \"command\": null,",
+     "\"args\": [], \"url\": \"https://mcp.payments.example.com/mcp\", \"urls\": [ \"https://mcp.payments.example.com/mcp\"",
+     "\"urls\": [ \"https://mcp.payments.example.com/mcp\" ], \"env_names\": [],",
+     "\"remote_urls\": [ \"https://mcp.payments.example.com/mcp\", \"http://10.20.4.7:8080/sse\" ],",
+     "| \ud83d\udfe0 high (60) | | code | secret | Hard-coded credential in config/claude\\_desktop\\_config.json | \u2014 | 0.80 | | | \ud83d\udfe0 high (59) | | code | mcp-server | MCP configuration: .cursor/mcp.json | \u2014 | 0.96 | protocol.mcp | | \ud83d\udfe0 high (54) | | code | mcp-server | MCP configuration: config/claude\\_desktop\\_config.json | \u2014 | 0.96 | protocol.mcp | | \ud83d\udfe0 high (54) | | code | mcp-server | MCP configuration: .vscode/mcp.json | \u2014 | 0.95 | protocol.mcp |",
+     "``` ### \ud83d\udfe0 MCP configuration: .cursor/mcp.json - **Id:** `ss-f43e45a6b817db1b` - **Resource:** `.cursor/mcp.json` (mcp-config) on **code** via `code.filesystem`",
+     "- **Id:** `ss-f43e45a6b817db1b` - **Resource:** `.cursor/mcp.json` (mcp-config) on **code** via `code.filesystem` - **Where:** filesystem - **Risk:** high (59) \u00b7 **Confidence:** 0.96 (strong) \u00b7 **Shadow:** n/a",
+     "**Evidence** - (0.95) MCP client/server configuration file .cursor/mcp.json \u2014 `.cursor/mcp.json` - (0.30) MCP server 'payments' has credential-looking values inline (headers) \u2014 `.cursor/mcp.json` - (0.00) MCP server 'metrics' is reached over plaintext HTTP (10.20.4.7) \u2014 `.cursor/mcp.json`",
+     "- (0.95) MCP client/server configuration file .cursor/mcp.json \u2014 `.cursor/mcp.json` - (0.30) MCP server 'payments' has credential-looking values inline (headers) \u2014 `.cursor/mcp.json` - (0.00) MCP server 'metrics' is reached over plaintext HTTP (10.20.4.7) \u2014 `.cursor/mcp.json` ### \ud83d\udfe0 MCP configuration: config/claude\\_desktop\\_config.json",
+     "- (0.30) MCP server 'payments' has credential-looking values inline (headers) \u2014 `.cursor/mcp.json` - (0.00) MCP server 'metrics' is reached over plaintext HTTP (10.20.4.7) \u2014 `.cursor/mcp.json` ### \ud83d\udfe0 MCP configuration: config/claude\\_desktop\\_config.json - **Id:** `ss-03c4b8faa916aba4`"
+    ]
+   },
+   {
+    "id": "risk.mcp.plaintext-http",
+    "kind": "planted risk",
+    "statement": "The metrics server is reached over http:// with no TLS",
+    "risk_class": "plaintext transport",
+    "component": [
+     "10.20.4.7",
+     "metrics"
+    ],
+    "files": [
+     ".cursor/mcp.json"
+    ],
+    "evidence": [
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .cursor/mcp.json \u2014 risk high (59), confidence 0.96. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; secrets inline in MCP configuration; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; remote MCP server over plain HTTP",
+     "} high 59 code mcp-server MCP configuration: .cursor/mcp.json .cursor/mcp.json \u2014 0.96 protocol.mcp Id ss-f43e45a6b817db1b \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ?",
+     "high 59 code mcp-server MCP configuration: .cursor/mcp.json .cursor/mcp.json \u2014 0.96 protocol.mcp Id ss-f43e45a6b817db1b \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ? Capabilities tool-use",
+     "Evidence 0.95 MCP client/server configuration file .cursor/mcp.json \u2014 .cursor/mcp.json 0.30 MCP server 'payments' has credential-looking values inline (headers) \u2014 .cursor/mcp.json 0.00 MCP server 'metrics' is reached over plaintext HTTP (10.20.4.7) \u2014 .cursor/mcp.json",
+     "0.95 MCP client/server configuration file .cursor/mcp.json \u2014 .cursor/mcp.json 0.30 MCP server 'payments' has credential-looking values inline (headers) \u2014 .cursor/mcp.json 0.00 MCP server 'metrics' is reached over plaintext HTTP (10.20.4.7) \u2014 .cursor/mcp.json metadata",
+     "0.30 MCP server 'payments' has credential-looking values inline (headers) \u2014 .cursor/mcp.json 0.00 MCP server 'metrics' is reached over plaintext HTTP (10.20.4.7) \u2014 .cursor/mcp.json metadata {",
+     "{ \"path\": \".cursor/mcp.json\", \"servers\": [ {",
+     "{ \"name\": \"metrics\", \"transport\": \"http\", \"command\": null,",
+     "\"args\": [], \"url\": \"http://10.20.4.7:8080/sse\", \"urls\": [ \"http://10.20.4.7:8080/sse\"",
+     "\"urls\": [ \"http://10.20.4.7:8080/sse\" ], \"env_names\": [],",
+     "\"https://mcp.payments.example.com/mcp\", \"http://10.20.4.7:8080/sse\" ], \"client\": \"Cursor\",",
+     "| \ud83d\udfe0 high (60) | | code | secret | Hard-coded credential in config/claude\\_desktop\\_config.json | \u2014 | 0.80 | | | \ud83d\udfe0 high (59) | | code | mcp-server | MCP configuration: .cursor/mcp.json | \u2014 | 0.96 | protocol.mcp | | \ud83d\udfe0 high (54) | | code | mcp-server | MCP configuration: config/claude\\_desktop\\_config.json | \u2014 | 0.96 | protocol.mcp | | \ud83d\udfe0 high (54) | | code | mcp-server | MCP configuration: .vscode/mcp.json | \u2014 | 0.95 | protocol.mcp |",
+     "``` ### \ud83d\udfe0 MCP configuration: .cursor/mcp.json - **Id:** `ss-f43e45a6b817db1b` - **Resource:** `.cursor/mcp.json` (mcp-config) on **code** via `code.filesystem`",
+     "- **Id:** `ss-f43e45a6b817db1b` - **Resource:** `.cursor/mcp.json` (mcp-config) on **code** via `code.filesystem` - **Where:** filesystem - **Risk:** high (59) \u00b7 **Confidence:** 0.96 (strong) \u00b7 **Shadow:** n/a",
+     "**Evidence** - (0.95) MCP client/server configuration file .cursor/mcp.json \u2014 `.cursor/mcp.json` - (0.30) MCP server 'payments' has credential-looking values inline (headers) \u2014 `.cursor/mcp.json` - (0.00) MCP server 'metrics' is reached over plaintext HTTP (10.20.4.7) \u2014 `.cursor/mcp.json`",
+     "- (0.95) MCP client/server configuration file .cursor/mcp.json \u2014 `.cursor/mcp.json` - (0.30) MCP server 'payments' has credential-looking values inline (headers) \u2014 `.cursor/mcp.json` - (0.00) MCP server 'metrics' is reached over plaintext HTTP (10.20.4.7) \u2014 `.cursor/mcp.json` ### \ud83d\udfe0 MCP configuration: config/claude\\_desktop\\_config.json",
+     "- (0.30) MCP server 'payments' has credential-looking values inline (headers) \u2014 `.cursor/mcp.json` - (0.00) MCP server 'metrics' is reached over plaintext HTTP (10.20.4.7) \u2014 `.cursor/mcp.json` ### \ud83d\udfe0 MCP configuration: config/claude\\_desktop\\_config.json - **Id:** `ss-03c4b8faa916aba4`"
+    ]
+   },
+   {
+    "id": "risk.skill.hidden-instruction",
+    "kind": "planted risk",
+    "statement": "pdf-export hides an exfiltration instruction in an HTML comment and zero-width text",
+    "risk_class": "instruction injection",
+    "component": [
+     "pdf-export"
+    ],
+    "files": [
+     ".claude/skills/pdf-export/SKILL.md"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent-config/coding-agent.claude-code: Claude Code configured in repository root \u2014 risk critical (100), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions; runs without a human in the loop; orchestrates or delegates to other agents; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters; agent may run any shell command; orchestrates other agents and executes code: one compromise reaches every delegate; executes code with no human in the loop: nothing reviews what it runs; 1 sub-agent definition(s)",
+     "[warning] shadowscan/agent-config/coding-agent.agent-skills: Agent skill instructions configured in repository root \u2014 risk high (50), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters",
+     "0.80 config file matched Claude Code: .claude/commands/ship.md \u2014 .claude/commands/ship.md 0.80 config file matched Claude Code: .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md 0.80 config file matched Claude Code: .claude/skills/refund-processing/SKILL.md \u2014 .claude/skills/refund-processing/SKILL.md 0.80 HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:10",
+     "0.80 config file matched Claude Code: .claude/skills/refund-processing/SKILL.md \u2014 .claude/skills/refund-processing/SKILL.md 0.80 HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:10 0.70 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:13 0.50 code pattern matched Claude Code: \"permissions\": {\"allow\": [\"Bash(*)\" \u2014 .claude/settings.json",
+     "0.80 HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:10 0.70 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:13 0.50 code pattern matched Claude Code: \"permissions\": {\"allow\": [\"Bash(*)\" \u2014 .claude/settings.json 0.00 claude-code may run any shell command (permissions.allow = Bash(*)) \u2014 .claude/settings.json",
+     "\".claude/settings.json\", \".claude/skills/pdf-export/SKILL.md\", \".claude/skills/refund-processing/SKILL.md\", \".github/workflows/ai-review.yml\",",
+     "\"files\": [ \".claude/skills/pdf-export/SKILL.md\" ] },",
+     "Evidence 0.80 HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:10 0.75 config file matched Agent skill instructions: docs/handbook/SKILL.md \u2014 docs/handbook/SKILL.md 0.75 config file matched Agent skill instructions: .github/skills/ticket-triage/SKILL.md \u2014 .github/skills/ticket-triage/SKILL.md",
+     "0.75 config file matched Agent skill instructions: .agents/skills/kb-search/SKILL.md \u2014 .agents/skills/kb-search/SKILL.md 0.75 config file matched Agent skill instructions: .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md 0.75 config file matched Agent skill instructions: .claude/skills/refund-processing/SKILL.md \u2014 .claude/skills/refund-processing/SKILL.md 0.70 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:13",
+     "0.75 config file matched Agent skill instructions: .claude/skills/refund-processing/SKILL.md \u2014 .claude/skills/refund-processing/SKILL.md 0.70 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:13 metadata {",
+     "\".agents/skills/kb-search/SKILL.md\", \".claude/skills/pdf-export/SKILL.md\", \".claude/skills/refund-processing/SKILL.md\", \".github/skills/ticket-triage/SKILL.md\",",
+     "{ \"path\": \".claude/skills/pdf-export/SKILL.md\", \"method\": \"bounded-static-instruction-review-v1\", \"status\": \"no-indicators-observed\",",
+     "- (0.80) config file matched Claude Code: .claude/commands/ship.md \u2014 `.claude/commands/ship.md` - (0.80) config file matched Claude Code: .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md` - (0.80) config file matched Claude Code: .claude/skills/refund-processing/SKILL.md \u2014 `.claude/skills/refund-processing/SKILL.md` - (0.80) HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:10`",
+     "- (0.80) config file matched Claude Code: .claude/skills/refund-processing/SKILL.md \u2014 `.claude/skills/refund-processing/SKILL.md` - (0.80) HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:10` - (0.70) 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:13` - (0.50) code pattern matched Claude Code: \"permissions\": {\"allow\": \\[\"Bash(\\*)\" \u2014 `.claude/settings.json`",
+     "- (0.80) HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:10` - (0.70) 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:13` - (0.50) code pattern matched Claude Code: \"permissions\": {\"allow\": \\[\"Bash(\\*)\" \u2014 `.claude/settings.json` - \u2026 1 more",
+     "**Evidence** - (0.80) HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:10` - (0.75) config file matched Agent skill instructions: docs/handbook/SKILL.md \u2014 `docs/handbook/SKILL.md` - (0.75) config file matched Agent skill instructions: .github/skills/ticket-triage/SKILL.md \u2014 `.github/skills/ticket-triage/SKILL.md`",
+     "- (0.75) config file matched Agent skill instructions: .agents/skills/kb-search/SKILL.md \u2014 `.agents/skills/kb-search/SKILL.md` - (0.75) config file matched Agent skill instructions: .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md` - (0.75) config file matched Agent skill instructions: .claude/skills/refund-processing/SKILL.md \u2014 `.claude/skills/refund-processing/SKILL.md` - (0.70) 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:13`",
+     "- (0.75) config file matched Agent skill instructions: .claude/skills/refund-processing/SKILL.md \u2014 `.claude/skills/refund-processing/SKILL.md` - (0.70) 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:13` ### \ud83d\udfe1 OpenAI Codex (CLI / cloud agent) configured in repository root - **Id:** `ss-1644617b39fb4aa2`"
+    ]
+   },
+   {
+    "id": "risk.skill.remote-script",
+    "kind": "planted risk",
+    "statement": "pdf-export's script pipes a remote download to a shell",
+    "risk_class": "dangerous script",
+    "component": [
+     "export.sh",
+     "pdf-export"
+    ],
+    "files": [
+     ".claude/skills/pdf-export/scripts/export.sh"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent-config/coding-agent.claude-code: Claude Code configured in repository root \u2014 risk critical (100), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions; runs without a human in the loop; orchestrates or delegates to other agents; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters; agent may run any shell command; orchestrates other agents and executes code: one compromise reaches every delegate; executes code with no human in the loop: nothing reviews what it runs; 1 sub-agent definition(s)",
+     "[warning] shadowscan/agent-config/coding-agent.agent-skills: Agent skill instructions configured in repository root \u2014 risk high (50), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters",
+     "0.80 config file matched Claude Code: .claude/commands/ship.md \u2014 .claude/commands/ship.md 0.80 config file matched Claude Code: .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md 0.80 config file matched Claude Code: .claude/skills/refund-processing/SKILL.md \u2014 .claude/skills/refund-processing/SKILL.md 0.80 HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:10",
+     "0.80 config file matched Claude Code: .claude/skills/refund-processing/SKILL.md \u2014 .claude/skills/refund-processing/SKILL.md 0.80 HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:10 0.70 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:13 0.50 code pattern matched Claude Code: \"permissions\": {\"allow\": [\"Bash(*)\" \u2014 .claude/settings.json",
+     "0.80 HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:10 0.70 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:13 0.50 code pattern matched Claude Code: \"permissions\": {\"allow\": [\"Bash(*)\" \u2014 .claude/settings.json 0.00 claude-code may run any shell command (permissions.allow = Bash(*)) \u2014 .claude/settings.json",
+     "\".claude/settings.json\", \".claude/skills/pdf-export/SKILL.md\", \".claude/skills/refund-processing/SKILL.md\", \".github/workflows/ai-review.yml\",",
+     "\"files\": [ \".claude/skills/pdf-export/SKILL.md\" ] },",
+     "Evidence 0.80 HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:10 0.75 config file matched Agent skill instructions: docs/handbook/SKILL.md \u2014 docs/handbook/SKILL.md 0.75 config file matched Agent skill instructions: .github/skills/ticket-triage/SKILL.md \u2014 .github/skills/ticket-triage/SKILL.md",
+     "0.75 config file matched Agent skill instructions: .agents/skills/kb-search/SKILL.md \u2014 .agents/skills/kb-search/SKILL.md 0.75 config file matched Agent skill instructions: .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md 0.75 config file matched Agent skill instructions: .claude/skills/refund-processing/SKILL.md \u2014 .claude/skills/refund-processing/SKILL.md 0.70 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:13",
+     "0.75 config file matched Agent skill instructions: .claude/skills/refund-processing/SKILL.md \u2014 .claude/skills/refund-processing/SKILL.md 0.70 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:13 metadata {",
+     "\".agents/skills/kb-search/SKILL.md\", \".claude/skills/pdf-export/SKILL.md\", \".claude/skills/refund-processing/SKILL.md\", \".github/skills/ticket-triage/SKILL.md\",",
+     "{ \"path\": \".claude/skills/pdf-export/SKILL.md\", \"method\": \"bounded-static-instruction-review-v1\", \"status\": \"no-indicators-observed\",",
+     "- (0.80) config file matched Claude Code: .claude/commands/ship.md \u2014 `.claude/commands/ship.md` - (0.80) config file matched Claude Code: .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md` - (0.80) config file matched Claude Code: .claude/skills/refund-processing/SKILL.md \u2014 `.claude/skills/refund-processing/SKILL.md` - (0.80) HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:10`",
+     "- (0.80) config file matched Claude Code: .claude/skills/refund-processing/SKILL.md \u2014 `.claude/skills/refund-processing/SKILL.md` - (0.80) HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:10` - (0.70) 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:13` - (0.50) code pattern matched Claude Code: \"permissions\": {\"allow\": \\[\"Bash(\\*)\" \u2014 `.claude/settings.json`",
+     "- (0.80) HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:10` - (0.70) 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:13` - (0.50) code pattern matched Claude Code: \"permissions\": {\"allow\": \\[\"Bash(\\*)\" \u2014 `.claude/settings.json` - \u2026 1 more",
+     "**Evidence** - (0.80) HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:10` - (0.75) config file matched Agent skill instructions: docs/handbook/SKILL.md \u2014 `docs/handbook/SKILL.md` - (0.75) config file matched Agent skill instructions: .github/skills/ticket-triage/SKILL.md \u2014 `.github/skills/ticket-triage/SKILL.md`",
+     "- (0.75) config file matched Agent skill instructions: .agents/skills/kb-search/SKILL.md \u2014 `.agents/skills/kb-search/SKILL.md` - (0.75) config file matched Agent skill instructions: .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md` - (0.75) config file matched Agent skill instructions: .claude/skills/refund-processing/SKILL.md \u2014 `.claude/skills/refund-processing/SKILL.md` - (0.70) 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:13`",
+     "- (0.75) config file matched Agent skill instructions: .claude/skills/refund-processing/SKILL.md \u2014 `.claude/skills/refund-processing/SKILL.md` - (0.70) 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:13` ### \ud83d\udfe1 OpenAI Codex (CLI / cloud agent) configured in repository root - **Id:** `ss-1644617b39fb4aa2`"
+    ]
+   },
+   {
+    "id": "risk.instructions.import-escape",
+    "kind": "planted risk",
+    "statement": "CLAUDE.md imports a file outside the repository",
+    "risk_class": "path escape",
+    "component": [
+     "claude.md",
+     "secret-notes"
+    ],
+    "files": [
+     "CLAUDE.md"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent-config/coding-agent.claude-code: Claude Code configured in repository root \u2014 risk critical (100), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions; runs without a human in the loop; orchestrates or delegates to other agents; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters; agent may run any shell command; orchestrates other agents and executes code: one compromise reaches every delegate; executes code with no human in the loop: nothing reviews what it runs; 1 sub-agent definition(s)",
+     "0.90 config file matched Claude Code: .claude/settings.json \u2014 .claude/settings.json 0.90 config file matched Claude Code: CLAUDE.md \u2014 CLAUDE.md 0.80 config file matched Claude Code: .claude/hooks/audit.sh \u2014 .claude/hooks/audit.sh 0.80 config file matched Claude Code project launch configuration, rules, output styles and plugin manifests: .claude-plugin/plugin.json \u2014 .claude-plugin/plugin.json",
+     "\".github/workflows/ai-review.yml\", \"CLAUDE.md\" ], \"instruction_content\": {",
+     "- (0.90) config file matched Claude Code: .claude/settings.json \u2014 `.claude/settings.json` - (0.90) config file matched Claude Code: CLAUDE.md \u2014 `CLAUDE.md` - (0.80) config file matched Claude Code: .claude/hooks/audit.sh \u2014 `.claude/hooks/audit.sh` - (0.80) config file matched Claude Code project launch configuration, rules, output styles and plugin manifests: .claude-plugin/plugin.json \u2014 `.claude-plugin/plugin.json`"
+    ]
+   },
+   {
+    "id": "risk.instructions.hidden-unicode",
+    "kind": "planted risk",
+    "statement": "backend.mdc carries an instruction written in invisible Unicode tag characters",
+    "risk_class": "instruction injection",
+    "component": [
+     "backend.mdc"
+    ],
+    "files": [
+     ".cursor/rules/backend.mdc"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent-config/coding-agent.cursor: Cursor configured in repository root \u2014 risk high (62), confidence 0.97. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions; orchestrates or delegates to other agents; instruction file contains invisible or bidirectional control characters; orchestrates other agents and executes code: one compromise reaches every delegate; 1 sub-agent definition(s)",
+     "Evidence 0.90 config file matched Cursor: .cursor/rules/backend.mdc \u2014 .cursor/rules/backend.mdc 0.70 37 invisible or control character(s) in .cursor/rules/backend.mdc \u2014 .cursor/rules/backend.mdc:7 metadata",
+     "0.90 config file matched Cursor: .cursor/rules/backend.mdc \u2014 .cursor/rules/backend.mdc 0.70 37 invisible or control character(s) in .cursor/rules/backend.mdc \u2014 .cursor/rules/backend.mdc:7 metadata {",
+     "\"files\": [ \".cursor/rules/backend.mdc\" ], \"instruction_content\": {",
+     "\"files\": [ \".cursor/rules/backend.mdc\" ] },",
+     "{ \"file\": \".cursor/rules/backend.mdc\", \"name\": \"backend\", \"description\": \"Backend conventions\",",
+     "**Evidence** - (0.90) config file matched Cursor: .cursor/rules/backend.mdc \u2014 `.cursor/rules/backend.mdc` - (0.70) 37 invisible or control character(s) in .cursor/rules/backend.mdc \u2014 `.cursor/rules/backend.mdc:7` ### \ud83d\udfe0 Agent in repository root: LangGraph, CrewAI, LangChain, LlamaIndex",
+     "- (0.90) config file matched Cursor: .cursor/rules/backend.mdc \u2014 `.cursor/rules/backend.mdc` - (0.70) 37 invisible or control character(s) in .cursor/rules/backend.mdc \u2014 `.cursor/rules/backend.mdc:7` ### \ud83d\udfe0 Agent in repository root: LangGraph, CrewAI, LangChain, LlamaIndex - **Id:** `ss-61bd2e958d9aea2e`"
+    ]
+   },
+   {
+    "id": "risk.agent.broad-permissions",
+    "kind": "planted risk",
+    "statement": "settings.json allows every shell command, reads of ~/.ssh and all project MCP servers",
+    "risk_class": "broad permissions",
+    "component": [
+     ".claude/settings.json",
+     "bash(*)"
+    ],
+    "files": [
+     ".claude/settings.json"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent-config/coding-agent.claude-code: Claude Code configured in repository root \u2014 risk critical (100), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions; runs without a human in the loop; orchestrates or delegates to other agents; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters; agent may run any shell command; orchestrates other agents and executes code: one compromise reaches every delegate; executes code with no human in the loop: nothing reviews what it runs; 1 sub-agent definition(s)",
+     "0.95 code pattern matched Claude Code: uses: anthropics/claude-code-action \u2014 .github/workflows/ai-review.yml:15 uses: anthropics/claude-code-action@v1 0.90 config file matched Claude Code: .claude/settings.json \u2014 .claude/settings.json 0.90 config file matched Claude Code: CLAUDE.md \u2014 CLAUDE.md 0.80 config file matched Claude Code: .claude/hooks/audit.sh \u2014 .claude/hooks/audit.sh",
+     "0.70 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:13 0.50 code pattern matched Claude Code: \"permissions\": {\"allow\": [\"Bash(*)\" \u2014 .claude/settings.json 0.00 claude-code may run any shell command (permissions.allow = Bash(*)) \u2014 .claude/settings.json metadata",
+     "0.50 code pattern matched Claude Code: \"permissions\": {\"allow\": [\"Bash(*)\" \u2014 .claude/settings.json 0.00 claude-code may run any shell command (permissions.allow = Bash(*)) \u2014 .claude/settings.json metadata {",
+     "\".claude/hooks/audit.sh\", \".claude/settings.json\", \".claude/skills/pdf-export/SKILL.md\", \".claude/skills/refund-processing/SKILL.md\",",
+     "\"setting\": \"permissions.allow\", \"value\": \"Bash(*)\", \"file\": \".claude/settings.json\" }",
+     "\"value\": \"Bash(*)\", \"file\": \".claude/settings.json\" } ],",
+     "\"scope\": \"some-actions\", \"file\": \".claude/settings.json\" }, {",
+     "\"scope\": \"some-actions\", \"file\": \".claude/settings.json\" } ]",
+     "``` - (0.90) config file matched Claude Code: .claude/settings.json \u2014 `.claude/settings.json` - (0.90) config file matched Claude Code: CLAUDE.md \u2014 `CLAUDE.md` - (0.80) config file matched Claude Code: .claude/hooks/audit.sh \u2014 `.claude/hooks/audit.sh`",
+     "- (0.70) 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:13` - (0.50) code pattern matched Claude Code: \"permissions\": {\"allow\": \\[\"Bash(\\*)\" \u2014 `.claude/settings.json` - \u2026 1 more ### \ud83d\udfe0 LLM provider credential in deploy/.env"
+    ]
+   },
+   {
+    "id": "risk.ci.agent-action",
+    "kind": "planted risk",
+    "statement": "A write-scoped agent runs on pull_request_target from a mutable tag",
+    "risk_class": "unpinned",
+    "component": [
+     "claude-code-action",
+     "ai-review.yml"
+    ],
+    "files": [
+     ".github/workflows/ai-review.yml"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent-config/coding-agent.claude-code: Claude Code configured in repository root \u2014 risk critical (100), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions; runs without a human in the loop; orchestrates or delegates to other agents; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters; agent may run any shell command; orchestrates other agents and executes code: one compromise reaches every delegate; executes code with no human in the loop: nothing reviews what it runs; 1 sub-agent definition(s)",
+     "0.97 config file matched Claude Code sub-agent definition: .claude/agents/code-reviewer.md \u2014 .claude/agents/code-reviewer.md 0.95 code pattern matched Claude Code: uses: anthropics/claude-code-action \u2014 .github/workflows/ai-review.yml:15 uses: anthropics/claude-code-action@v1 0.90 config file matched Claude Code: .claude/settings.json \u2014 .claude/settings.json 0.90 config file matched Claude Code: CLAUDE.md \u2014 CLAUDE.md",
+     "\".claude/skills/refund-processing/SKILL.md\", \".github/workflows/ai-review.yml\", \"CLAUDE.md\" ],",
+     "- (0.97) config file matched Claude Code sub-agent definition: .claude/agents/code-reviewer.md \u2014 `.claude/agents/code-reviewer.md` - (0.95) code pattern matched Claude Code: uses: anthropics/claude-code-action \u2014 `.github/workflows/ai-review.yml:15` ```text uses: anthropics/claude-code-action@v1",
+     "```text uses: anthropics/claude-code-action@v1 ``` - (0.90) config file matched Claude Code: .claude/settings.json \u2014 `.claude/settings.json`"
+    ]
+   },
+   {
+    "id": "risk.secret.env-file",
+    "kind": "planted risk",
+    "statement": "deploy/.env is committed with provider credentials",
+    "risk_class": "secret",
+    "component": [
+     "deploy/.env"
+    ],
+    "files": [
+     "deploy/.env"
+    ],
+    "evidence": [
+     "[warning] shadowscan/secret/provider.openai: LLM provider credential in deploy/.env \u2014 risk high (69), confidence 0.98. Risk factors: secret finding; no identifiable owner; credential hard-coded in source; 2 credentials in one place",
+     "[warning] shadowscan/agent/framework.langgraph: Agent in repository root: LangGraph, CrewAI, LangChain, LlamaIndex \u2014 risk high (60), confidence 1.00. Risk factors: agent finding; no identifiable owner; calls tools / functions; orchestrates or delegates to other agents; retrieves internal documents; exposes tools to other agents over MCP; has live web access (prompt-injection surface); performs write actions in SaaS / business systems; third-party inference host; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; DashScope endpoints process data in Alibaba Cloud regions (PRC or",
+     "} high 69 code secret LLM provider credential in deploy/.env deploy/.env \u2014 0.98 provider.openai Id ss-c372fec607d1b97c \u00b7 connector code.filesystem \u00b7 type file \u00b7 where filesystem \u00b7 seen ? \u2192 ?",
+     "high 69 code secret LLM provider credential in deploy/.env deploy/.env \u2014 0.98 provider.openai Id ss-c372fec607d1b97c \u00b7 connector code.filesystem \u00b7 type file \u00b7 where filesystem \u00b7 seen ? \u2192 ? Tags hardcoded-credential",
+     "Evidence 0.90 credential matched OpenAI API key: credential:hmac-sha256:71b16395be30f9949a00eedbf7f87518d40e29a35835c4aefae609007726e83c \u2014 deploy/.env:1 OPENAI_API_KEY=[REDACTED] 0.80 credential matched High-entropy assigned credential or recognized token prefix: credential:hmac-sha256:3130a1fa5217cf8260c46cb9303c65088dddca12c4d1c0f7adea0ed344d39249 \u2014 deploy/.env:2 AWS_ACCESS_KEY_ID=[REDACTED] metadata",
+     "0.90 credential matched OpenAI API key: credential:hmac-sha256:71b16395be30f9949a00eedbf7f87518d40e29a35835c4aefae609007726e83c \u2014 deploy/.env:1 OPENAI_API_KEY=[REDACTED] 0.80 credential matched High-entropy assigned credential or recognized token prefix: credential:hmac-sha256:3130a1fa5217cf8260c46cb9303c65088dddca12c4d1c0f7adea0ed344d39249 \u2014 deploy/.env:2 AWS_ACCESS_KEY_ID=[REDACTED] metadata {",
+     "{ \"path\": \"deploy/.env\", \"providers\": [ \"heuristic.inline-credential\",",
+     "| \ud83d\udd34 critical (100) | | code | agent-config | Claude Code configured in repository root | \u2014 | 1.00 | coding-agent.claude-code | | \ud83d\udfe0 high (69) | | code | secret | LLM provider credential in deploy/.env | \u2014 | 0.98 | provider.openai | | \ud83d\udfe0 high (64) | | code | mcp-server | MCP configuration: .mcp.json | \u2014 | 0.95 | protocol.mcp | | \ud83d\udfe0 high (62) | | code | agent-config | Cursor configured in repository root | \u2014 | 0.97 | coding-agent.cursor |",
+     "- \u2026 1 more ### \ud83d\udfe0 LLM provider credential in deploy/.env - **Id:** `ss-c372fec607d1b97c` - **Resource:** `deploy/.env` (file) on **code** via `code.filesystem`",
+     "- **Id:** `ss-c372fec607d1b97c` - **Resource:** `deploy/.env` (file) on **code** via `code.filesystem` - **Where:** filesystem - **Risk:** high (69) \u00b7 **Confidence:** 0.98 (strong) \u00b7 **Shadow:** n/a",
+     "**Evidence** - (0.90) credential matched OpenAI API key: credential:hmac-sha256:1b603cfc210f05538e94b935be7a1b142061efae8f1677ead2580a88e7bca7b1 \u2014 `deploy/.env:1` ```text OPENAI_API_KEY=[REDACTED]",
+     "``` - (0.80) credential matched High-entropy assigned credential or recognized token prefix: credential:hmac-sha256:a6a0b27629d89da9344952007e55a36963ad887048c884d9d1f0d76c686a0699 \u2014 `deploy/.env:2` ```text AWS_ACCESS_KEY_ID=[REDACTED]"
+    ]
+   },
+   {
+    "id": "control.safetensors-safe",
+    "kind": "control (benign item)",
+    "statement": "SafeTensors weights are not a deserialization risk",
+    "risk_class": "unsafe deserialization",
+    "component": [
+     "intent-classifier"
+    ],
+    "files": [
+     "models/intent-classifier/model.safetensors"
+    ],
+    "evidence": []
+   },
+   {
+    "id": "control.model-pinned",
+    "kind": "control (benign item)",
+    "statement": "The Llama reference pins a commit revision",
+    "risk_class": "unpinned",
+    "component": [
+     "llama-3.1-8b-instruct"
+    ],
+    "files": [
+     "services/api/llm.py"
+    ],
+    "evidence": []
+   },
+   {
+    "id": "control.tool-benign",
+    "kind": "control (benign item)",
+    "statement": "get_order has a plain description",
+    "risk_class": "tool poisoning",
+    "component": [
+     "get_order"
+    ],
+    "files": [
+     "servers/orders_mcp/server.py"
+    ],
+    "evidence": [
+     "\"mcp_tools\": [ \"get_order\", \"issue_refund\" ],",
+     "{ \"file\": \"servers/orders_mcp/server.py\", \"line\": 5, \"construct\": \"mcp.server.fastmcp:FastMCP(\","
+    ]
+   },
+   {
+    "id": "control.mcp-pinned",
+    "kind": "control (benign item)",
+    "statement": "server-filesystem is pinned to an exact version",
+    "risk_class": "unpinned",
+    "component": [
+     "server-filesystem"
+    ],
+    "files": [
+     ".mcp.json"
+    ],
+    "evidence": [
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .mcp.json \u2014 risk high (64), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; reads or writes files and databases directly (exfiltration / tampering surface); MCP server package or image is not pinned to an exact version; MCP server started through a shell command line; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: packages/notifier/.mcp.json \u2014 risk medium (39), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "} high 64 code mcp-server MCP configuration: .mcp.json .mcp.json \u2014 0.95 protocol.mcp Id ss-2955519e7df1ad74 \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ?",
+     "high 64 code mcp-server MCP configuration: .mcp.json .mcp.json \u2014 0.95 protocol.mcp Id ss-2955519e7df1ad74 \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ? Capabilities tool-use data-access",
+     "Evidence 0.95 MCP client/server configuration file .mcp.json \u2014 .mcp.json 0.00 MCP server 'crm' fetches its package or image without an exact version (@acme-internal/mcp-crm) \u2014 .mcp.json 0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json",
+     "0.95 MCP client/server configuration file .mcp.json \u2014 .mcp.json 0.00 MCP server 'crm' fetches its package or image without an exact version (@acme-internal/mcp-crm) \u2014 .mcp.json 0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json 0.00 MCP server 'healthcheck' is started through a shell command line (sh) \u2014 .mcp.json",
+     "0.00 MCP server 'crm' fetches its package or image without an exact version (@acme-internal/mcp-crm) \u2014 .mcp.json 0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json 0.00 MCP server 'healthcheck' is started through a shell command line (sh) \u2014 .mcp.json metadata",
+     "0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json 0.00 MCP server 'healthcheck' is started through a shell command line (sh) \u2014 .mcp.json metadata {",
+     "{ \"path\": \".mcp.json\", \"servers\": [ {",
+     "\"-y\", \"@modelcontextprotocol/server-filesystem@2025.8.21\", \"/srv/support-data\" ],",
+     "} medium 39 code mcp-server MCP configuration: packages/notifier/.mcp.json packages/notifier/.mcp.json \u2014 0.95 protocol.mcp Id ss-fa7e939244362cbe \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ?",
+     "medium 39 code mcp-server MCP configuration: packages/notifier/.mcp.json packages/notifier/.mcp.json \u2014 0.95 protocol.mcp Id ss-fa7e939244362cbe \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ? Capabilities tool-use",
+     "Evidence 0.95 MCP client/server configuration file packages/notifier/.mcp.json \u2014 packages/notifier/.mcp.json metadata {",
+     "{ \"path\": \"packages/notifier/.mcp.json\", \"servers\": [ {",
+     "| \ud83d\udfe0 high (69) | | code | secret | LLM provider credential in deploy/.env | \u2014 | 0.98 | provider.openai | | \ud83d\udfe0 high (64) | | code | mcp-server | MCP configuration: .mcp.json | \u2014 | 0.95 | protocol.mcp | | \ud83d\udfe0 high (62) | | code | agent-config | Cursor configured in repository root | \u2014 | 0.97 | coding-agent.cursor | | \ud83d\udfe0 high (60) | | code | agent | Agent in repository root: LangGraph, CrewAI, LangChain, LlamaIndex | \u2014 | 1.00 | framework.langgraph, framework.crewai, cloud.aws-bedrock-agents, platform.n8n |",
+     "| \ud83d\udfe1 medium (39) | | code | mcp-server | MCP configuration: .gemini/settings.json | \u2014 | 0.95 | protocol.mcp | | \ud83d\udfe1 medium (39) | | code | mcp-server | MCP configuration: packages/notifier/.mcp.json | \u2014 | 0.95 | protocol.mcp | | \ud83d\udfe1 medium (38) | | code | agent-config | Gemini CLI / Jules configured in repository root | \u2014 | 0.90 | coding-agent.gemini-cli | | \ud83d\udfe1 medium (38) | | code | agent-config | GitHub Copilot (coding agent / custom agents) configured in repository root | \u2014 | 0.85 | coding-agent.github-copilot |",
+     "``` ### \ud83d\udfe0 MCP configuration: .mcp.json - **Id:** `ss-2955519e7df1ad74` - **Resource:** `.mcp.json` (mcp-config) on **code** via `code.filesystem`",
+     "- **Id:** `ss-2955519e7df1ad74` - **Resource:** `.mcp.json` (mcp-config) on **code** via `code.filesystem` - **Where:** filesystem - **Risk:** high (64) \u00b7 **Confidence:** 0.95 (strong) \u00b7 **Shadow:** n/a",
+     "**Evidence** - (0.95) MCP client/server configuration file .mcp.json \u2014 `.mcp.json` - (0.00) MCP server 'crm' fetches its package or image without an exact version (\\[@\\]acme-internal/mcp-crm) \u2014 `.mcp.json` - (0.00) MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 `.mcp.json`",
+     "- (0.95) MCP client/server configuration file .mcp.json \u2014 `.mcp.json` - (0.00) MCP server 'crm' fetches its package or image without an exact version (\\[@\\]acme-internal/mcp-crm) \u2014 `.mcp.json` - (0.00) MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 `.mcp.json` - (0.00) MCP server 'healthcheck' is started through a shell command line (sh) \u2014 `.mcp.json`",
+     "- (0.00) MCP server 'crm' fetches its package or image without an exact version (\\[@\\]acme-internal/mcp-crm) \u2014 `.mcp.json` - (0.00) MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 `.mcp.json` - (0.00) MCP server 'healthcheck' is started through a shell command line (sh) \u2014 `.mcp.json` ### \ud83d\udfe0 Cursor configured in repository root",
+     "- (0.00) MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 `.mcp.json` - (0.00) MCP server 'healthcheck' is started through a shell command line (sh) \u2014 `.mcp.json` ### \ud83d\udfe0 Cursor configured in repository root - **Id:** `ss-0ed0ae49f4bcd0dd`",
+     "- (0.95) MCP client/server configuration file .gemini/settings.json \u2014 `.gemini/settings.json` ### \ud83d\udfe1 MCP configuration: packages/notifier/.mcp.json - **Id:** `ss-fa7e939244362cbe` - **Resource:** `packages/notifier/.mcp.json` (mcp-config) on **code** via `code.filesystem`",
+     "- **Id:** `ss-fa7e939244362cbe` - **Resource:** `packages/notifier/.mcp.json` (mcp-config) on **code** via `code.filesystem` - **Where:** filesystem - **Risk:** medium (39) \u00b7 **Confidence:** 0.95 (strong) \u00b7 **Shadow:** n/a",
+     "**Evidence** - (0.95) MCP client/server configuration file packages/notifier/.mcp.json \u2014 `packages/notifier/.mcp.json` ### \ud83d\udfe1 Gemini CLI / Jules configured in repository root - **Id:** `ss-7790bd453a1ac417`"
+    ]
+   },
+   {
+    "id": "control.mcp-toml-pinned",
+    "kind": "control (benign item)",
+    "statement": "context7-mcp is pinned to an exact version",
+    "risk_class": "unpinned",
+    "component": [
+     "context7"
+    ],
+    "files": [
+     ".codex/config.toml"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent-config/coding-agent.openai-codex: OpenAI Codex (CLI / cloud agent) configured in repository root \u2014 risk medium (40), confidence 0.99. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions",
+     "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .codex/config.toml \u2014 risk medium (39), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+     "Evidence 0.90 config file matched OpenAI Codex (CLI / cloud agent): .codex/config.toml \u2014 .codex/config.toml 0.90 config file matched OpenAI Codex (CLI / cloud agent): .agents/skills/kb-search/SKILL.md \u2014 .agents/skills/kb-search/SKILL.md metadata",
+     "\".agents/skills/kb-search/SKILL.md\", \".codex/config.toml\" ], \"runtime_activity\": {",
+     "} medium 39 code mcp-server MCP configuration: .codex/config.toml .codex/config.toml \u2014 0.95 protocol.mcp Id ss-5f0785b7c63ccf47 \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ?",
+     "medium 39 code mcp-server MCP configuration: .codex/config.toml .codex/config.toml \u2014 0.95 protocol.mcp Id ss-5f0785b7c63ccf47 \u00b7 connector code.filesystem \u00b7 type mcp-config \u00b7 where filesystem \u00b7 seen ? \u2192 ? Capabilities tool-use",
+     "Evidence 0.95 MCP client/server configuration file .codex/config.toml \u2014 .codex/config.toml metadata {",
+     "{ \"path\": \".codex/config.toml\", \"servers\": [ {",
+     "{ \"name\": \"context7\", \"transport\": \"stdio\", \"command\": \"npx\",",
+     "\"-y\", \"@upstash/context7-mcp@4.7.3\" ], \"url\": null,",
+     "| \ud83d\udfe1 medium (39) | | code | agent | A2A agent card: Acme Billing Agent | \u2014 | 0.95 | protocol.a2a | | \ud83d\udfe1 medium (39) | | code | mcp-server | MCP configuration: .codex/config.toml | \u2014 | 0.95 | protocol.mcp | | \ud83d\udfe1 medium (39) | | code | mcp-server | MCP configuration: .gemini/settings.json | \u2014 | 0.95 | protocol.mcp | | \ud83d\udfe1 medium (39) | | code | mcp-server | MCP configuration: packages/notifier/.mcp.json | \u2014 | 0.95 | protocol.mcp |",
+     "**Evidence** - (0.90) config file matched OpenAI Codex (CLI / cloud agent): .codex/config.toml \u2014 `.codex/config.toml` - (0.90) config file matched OpenAI Codex (CLI / cloud agent): .agents/skills/kb-search/SKILL.md \u2014 `.agents/skills/kb-search/SKILL.md` ### \ud83d\udfe1 A2A agent card: Acme Billing Agent",
+     "- (0.95) A2A Agent Card \u2014 `.well-known/agent-card.json` ### \ud83d\udfe1 MCP configuration: .codex/config.toml - **Id:** `ss-5f0785b7c63ccf47` - **Resource:** `.codex/config.toml` (mcp-config) on **code** via `code.filesystem`",
+     "- **Id:** `ss-5f0785b7c63ccf47` - **Resource:** `.codex/config.toml` (mcp-config) on **code** via `code.filesystem` - **Where:** filesystem - **Risk:** medium (39) \u00b7 **Confidence:** 0.95 (strong) \u00b7 **Shadow:** n/a",
+     "**Evidence** - (0.95) MCP client/server configuration file .codex/config.toml \u2014 `.codex/config.toml` ### \ud83d\udfe1 MCP configuration: .gemini/settings.json - **Id:** `ss-8d1d7425cd2174a2`"
+    ]
+   },
+   {
+    "id": "control.skill-benign",
+    "kind": "control (benign item)",
+    "statement": "refund-processing contains no hidden instructions",
+    "risk_class": "instruction injection",
+    "component": [
+     "refund-processing"
+    ],
+    "files": [
+     ".claude/skills/refund-processing/SKILL.md"
+    ],
+    "evidence": [
+     "[warning] shadowscan/agent-config/coding-agent.claude-code: Claude Code configured in repository root \u2014 risk critical (100), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions; runs without a human in the loop; orchestrates or delegates to other agents; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters; agent may run any shell command; orchestrates other agents and executes code: one compromise reaches every delegate; executes code with no human in the loop: nothing reviews what it runs; 1 sub-agent definition(s)",
+     "[warning] shadowscan/agent-config/coding-agent.agent-skills: Agent skill instructions configured in repository root \u2014 risk high (50), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters",
+     "0.80 config file matched Claude Code: .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md 0.80 config file matched Claude Code: .claude/skills/refund-processing/SKILL.md \u2014 .claude/skills/refund-processing/SKILL.md 0.80 HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:10 0.70 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:13",
+     "\".claude/skills/pdf-export/SKILL.md\", \".claude/skills/refund-processing/SKILL.md\", \".github/workflows/ai-review.yml\", \"CLAUDE.md\"",
+     "0.75 config file matched Agent skill instructions: .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md 0.75 config file matched Agent skill instructions: .claude/skills/refund-processing/SKILL.md \u2014 .claude/skills/refund-processing/SKILL.md 0.70 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:13 metadata",
+     "\".claude/skills/pdf-export/SKILL.md\", \".claude/skills/refund-processing/SKILL.md\", \".github/skills/ticket-triage/SKILL.md\", \"docs/handbook/SKILL.md\"",
+     "{ \"path\": \".claude/skills/refund-processing/SKILL.md\", \"method\": \"bounded-static-instruction-review-v1\", \"status\": \"no-indicators-observed\",",
+     "- (0.80) config file matched Claude Code: .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md` - (0.80) config file matched Claude Code: .claude/skills/refund-processing/SKILL.md \u2014 `.claude/skills/refund-processing/SKILL.md` - (0.80) HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:10` - (0.70) 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:13`",
+     "- (0.75) config file matched Agent skill instructions: .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md` - (0.75) config file matched Agent skill instructions: .claude/skills/refund-processing/SKILL.md \u2014 `.claude/skills/refund-processing/SKILL.md` - (0.70) 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md \u2014 `.claude/skills/pdf-export/SKILL.md:13` ### \ud83d\udfe1 OpenAI Codex (CLI / cloud agent) configured in repository root"
+    ]
+   }
+  ]
+ }
+}

@@ -1,5 +1,752 @@
 [
   {
+    "components_reported": 793,
+    "details": {
+      "1.1": {
+        "identified": [
+          "model.adapter.lora",
+          "model.file.gguf",
+          "model.file.onnx",
+          "model.file.pickle",
+          "model.file.safetensors"
+        ],
+        "missed": [
+          "model.api.agents-sdk",
+          "model.api.anthropic",
+          "model.api.bedrock",
+          "model.api.embedding",
+          "model.api.openai",
+          "model.config.indirect",
+          "model.docker.download",
+          "model.env.indirect",
+          "model.hf.pinned",
+          "model.hf.unpinned",
+          "model.k8s.served",
+          "model.notebook",
+          "model.ollama.modelfile"
+        ]
+      },
+      "1.2": {
+        "identified": [
+          "data.memory.pgvector",
+          "data.vector.chroma"
+        ],
+        "missed": [
+          "data.dvc.pointer",
+          "data.finetune.upload",
+          "data.hf.eval",
+          "data.hf.pinned",
+          "data.local.eval",
+          "data.local.training",
+          "data.modelcard.dataset",
+          "data.rag.confluence-source",
+          "data.rag.s3-source"
+        ]
+      },
+      "1.3": {
+        "identified": [
+          "tool.framework.chromadb",
+          "tool.framework.crewai",
+          "tool.framework.langchain",
+          "tool.framework.langgraph",
+          "tool.framework.llama-index",
+          "tool.framework.mcp",
+          "tool.framework.npm.sdk.modelcontextprotocol",
+          "tool.framework.openai",
+          "tool.framework.transformers",
+          "tool.function.fetch_url",
+          "tool.function.refund_order",
+          "tool.function.run_shell",
+          "tool.function.send_email",
+          "tool.mcp.get_order",
+          "tool.mcp.issue_refund",
+          "tool.mcp.search_kb"
+        ],
+        "missed": [
+          "tool.framework.npm.sdk.anthropic-ai",
+          "tool.function.search_orders"
+        ]
+      },
+      "1.4": {
+        "identified": [
+          "agent.a2a.card",
+          "agent.command",
+          "agent.crewai",
+          "agent.hook",
+          "agent.instructions.agents-md",
+          "agent.instructions.claude",
+          "agent.instructions.copilot",
+          "agent.instructions.cursor-rule",
+          "agent.mcp.docker",
+          "agent.mcp.gemini",
+          "agent.mcp.http.authenticated",
+          "agent.mcp.http.plaintext",
+          "agent.mcp.local-script",
+          "agent.mcp.nested",
+          "agent.mcp.source.python",
+          "agent.mcp.source.typescript",
+          "agent.mcp.stdio.pinned",
+          "agent.mcp.stdio.proxy",
+          "agent.mcp.stdio.shell",
+          "agent.mcp.stdio.unpinned",
+          "agent.mcp.stdio.uvx",
+          "agent.mcp.toml",
+          "agent.n8n",
+          "agent.permissions",
+          "agent.skill.agents-dir",
+          "agent.skill.benign",
+          "agent.skill.github",
+          "agent.skill.poisoned",
+          "agent.subagent"
+        ],
+        "missed": [
+          "agent.bedrock.terraform",
+          "agent.guardrail",
+          "agent.langgraph.supervisor",
+          "agent.openai-agents.triage",
+          "agent.plugin",
+          "agent.prompt.inline",
+          "agent.prompt.system-file",
+          "agent.prompt.template"
+        ]
+      },
+      "1.5": {
+        "identified": [
+          "infra.ci.agent-action",
+          "infra.endpoint.sagemaker",
+          "infra.image.vllm"
+        ],
+        "missed": [
+          "infra.endpoint.azure-openai",
+          "infra.image.ollama",
+          "infra.image.pgvector",
+          "infra.image.pytorch",
+          "infra.image.qdrant"
+        ]
+      },
+      "2.1": {
+        "not_tested": [
+          "decoy.commented-model",
+          "decoy.orm-models",
+          "decoy.prose-models",
+          "decoy.printer-model"
+        ],
+        "reported_as_components": [
+          "decoy.fake-gguf"
+        ],
+        "score": 0.375
+      },
+      "3.1": {
+        "facts_expected": 18,
+        "facts_found": 17,
+        "items_with_fact": 18,
+        "score": 0.9444444444444444
+      },
+      "3.2": {
+        "facts_expected": 9,
+        "facts_found": 9,
+        "items_with_fact": 9,
+        "score": 1.0
+      },
+      "3.3": {
+        "facts_expected": 55,
+        "facts_found": 52,
+        "items_with_fact": 55,
+        "score": 0.9454545454545454
+      },
+      "3.4": {
+        "facts_expected": 38,
+        "facts_found": 30,
+        "items_with_fact": 23,
+        "score": 0.7894736842105263
+      },
+      "3.5": {
+        "satisfied": [
+          "edge.mcp.provides-tool"
+        ],
+        "score": 0.14285714285714285
+      },
+      "4.1": {
+        "documents": {
+          "cyclonedx:cyclonedx-json": {
+            "errors": [],
+            "spec_version": "1.7",
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.2": {
+        "documents": {
+          "spdx:spdx-json": {
+            "errors": [],
+            "spec_version": "3.0",
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.3": {
+        "any_model_card": false,
+        "datasets_typed_data": 0.0,
+        "models_typed_machine_learning_model": 1.0,
+        "score": 0.5
+      },
+      "4.4": {
+        "frameworks_detected": 9,
+        "frameworks_with_purl": 8,
+        "huggingface_purl": false,
+        "score": 0.6222222222222221
+      },
+      "4.5": {
+        "documents": {
+          "discover-sarif:sarif": {
+            "errors": [],
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.6": {
+        "evidence": "Ran `minimum-elements` (G7 coverage report) and `crosswalk` on the base inventory; both exit 0.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "5.1": {
+        "byte_identical": [
+          "risk:native-json"
+        ],
+        "differs": [
+          "cyclonedx:cyclonedx-json",
+          "discover-copy:native-json",
+          "discover-sarif:sarif",
+          "native:native-json",
+          "spdx:spdx-json"
+        ],
+        "identical_after_dropping_time_and_id_fields": [],
+        "score": 0.16666666666666666
+      },
+      "5.2": {
+        "evidence": "Ran `attest` with a throwaway Ed25519 key and `verify-attestation`; a modified subject was rejected (subject-mismatch).",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "5.3": {
+        "score": 1.0,
+        "stated_in_machine_output": [
+          "discover-copy:native-json",
+          "discover-sarif:sarif",
+          "native:native-json",
+          "cyclonedx:cyclonedx-json",
+          "spdx:spdx-json",
+          "risk:native-json"
+        ],
+        "stated_on_console_only": []
+      },
+      "5.4": {
+        "evidence": "Native inventory records which collectors ran, each collector's status (partial or failed) and scan_failures; `risk --json-output` carries coverage_status: partial.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "5.5": {
+        "evidence": "Native records carry assurance_level (declared or observed) and per-claim collector and method.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "6.1": {
+        "caught": [
+          "risk.model.pickle-exec",
+          "risk.mcp.unpinned-npx",
+          "risk.mcp.unpinned-uvx",
+          "risk.mcp.shell-launch",
+          "risk.secret.mcp-header",
+          "risk.mcp.plaintext-http",
+          "risk.skill.hidden-instruction",
+          "risk.instructions.import-escape",
+          "risk.instructions.hidden-unicode",
+          "risk.agent.broad-permissions",
+          "risk.secret.env-file"
+        ],
+        "of": 19,
+        "score": 0.5789473684210527
+      },
+      "6.2": {
+        "controls_flagged": [],
+        "controls_tested": [
+          "control.safetensors-safe",
+          "control.model-pinned",
+          "control.mcp-pinned",
+          "control.mcp-toml-pinned",
+          "control.skill-benign"
+        ],
+        "note": "a control is tested only when the tool caught a planted risk of its class",
+        "score": 0.8333333333333334
+      },
+      "6.3": {
+        "evidence": "Half for VEX: `vex` ran and wrote a schema-validated document. A quarter for advisory lookup: `advisories` queries OSV in live mode, documented only because api.osv.dev was unreachable.",
+        "level": 0.75,
+        "score": 0.75,
+        "tier": "V"
+      },
+      "7.1": {
+        "not_attributable_output_varies_between_identical_runs": [],
+        "score": 0.7,
+        "visible": [
+          "change.tool-description",
+          "change.mcp-version-and-scope",
+          "change.mcp-added",
+          "change.model-bytes",
+          "change.skill-widened",
+          "change.permissions-widened",
+          "change.mcp-removed"
+        ]
+      },
+      "7.2": {
+        "exit_code": 1,
+        "judged_by": "blind raters",
+        "reported": [
+          "change.mcp-added",
+          "change.mcp-removed",
+          "change.mcp-version-and-scope",
+          "change.model-bytes",
+          "change.permissions-widened",
+          "change.skill-widened",
+          "change.tool-description"
+        ],
+        "score": 0.7
+      },
+      "7.3": {
+        "evidence": "`scan` exited 1 on the base corpus and named the gate reasons; `diff --fail-on-alert` exited 1.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "7.4": {
+        "evidence": "Ran `trace-diff` on the bundled demo inventory and OTLP trace: it reported 1 matched, 3 undeclared and 2 unobserved items and exited 1. `verify-live` and `discover-mcp` were not run.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "8.1": {
+        "canaries_faced": [
+          "hook-run",
+          "mcp-launch",
+          "npm-lifecycle",
+          "pickle-load",
+          "py-import",
+          "setup-py",
+          "skill-script"
+        ],
+        "canaries_tripped": {},
+        "default_command_probe_ran": true,
+        "score": 1.0
+      },
+      "8.2": {
+        "checks": {
+          "dir-symlink": {
+            "faced": true,
+            "out_of_tree_content_in": []
+          },
+          "file-symlink": {
+            "faced": true,
+            "out_of_tree_content_in": []
+          },
+          "import": {
+            "faced": true,
+            "out_of_tree_content_in": []
+          }
+        },
+        "score": 1.0
+      },
+      "8.3": {
+        "disclosed": {},
+        "score": 1.0,
+        "secrets_faced": [
+          "secret.payments",
+          "secret.github",
+          "secret.openai",
+          "secret.aws"
+        ]
+      },
+      "8.4": {
+        "html": {
+          "faced": false,
+          "raw_in": []
+        },
+        "score": 0.5,
+        "terminal_escape": {
+          "faced": true,
+          "raw_in": []
+        }
+      },
+      "8.5": {
+        "cases": {
+          "deep-json": {
+            "faced": true,
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 5.12,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "escape-names": {
+            "faced": true,
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 5.62,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "fifo": {
+            "faced": true,
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.92,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "header-bomb": {
+            "faced": true,
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 5.37,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "large-tree": {
+            "faced": true,
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 11.64,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "malformed": {
+            "faced": true,
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 4.78,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-escape": {
+            "faced": true,
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 5.68,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-loop": {
+            "faced": true,
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 5.02,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          }
+        },
+        "score": 1.0
+      },
+      "8.6": {
+        "connection_attempts_with_scored_flags": [],
+        "default_command_connection_attempts": [],
+        "inventory_produced_without_network": true,
+        "score": 1.0
+      },
+      "risk_verdicts": {
+        "control.mcp-pinned": {
+          "adjudication": "the file-level unpinned risk factor names no server and nothing says filesystem is unpinned",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.mcp-toml-pinned": {
+          "adjudication": "borderline: the finding says the server pins its package and complains only about transitive dependencies resolved without a lockfile, a different problem",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.model-pinned": {
+          "adjudication": "no statement",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.safetensors-safe": {
+          "adjudication": "only a missing-signature finding, which is a different problem",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.skill-benign": {
+          "adjudication": "the hidden-content risk factors sit on repository-level skill and agent findings that do not name refund-processing",
+          "auto": true,
+          "final": false,
+          "snippet": "discover-sarif:sarif: {\"level\": \"warning\", \"locations\": [{\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude/settings.json\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude/hooks/audit.sh\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \"claude.md\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude-plugi"
+        },
+        "control.tool-benign": {
+          "adjudication": "no statement",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.broad-permissions": {
+          "adjudication": "warning on the Claude Code configuration with the risk factor \"agent may run any shell command\"; it does not name settings.json",
+          "auto": true,
+          "final": true,
+          "snippet": "discover-sarif:sarif: {\"level\": \"warning\", \"locations\": [{\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude/settings.json\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude/hooks/audit.sh\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \"claude.md\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude-plugi"
+        },
+        "risk.agent.toxic-flow": {
+          "adjudication": "borderline: a repository-level agent finding lists web access and SaaS write actions as separate risk factors, but names no agent and does not state the combined flow",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.ci.agent-action": {
+          "adjudication": "the only line is the Claude Code configuration finding; nothing about the workflow, its trigger or a mutable tag",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.data.governance": {
+          "adjudication": "no statement",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.hidden-unicode": {
+          "adjudication": "critical finding of invisible Unicode tag characters in backend.mdc",
+          "auto": true,
+          "final": true,
+          "snippet": "discover-sarif:sarif: {\"level\": \"warning\", \"locations\": [{\"physicallocation\": {\"artifactlocation\": {\"uri\": \".cursor/rules/backend.mdc\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \".cursor/rules/backend.mdc\", \"uribaseid\": \"%srcroot%\"}, \"region\": {\"startline\": 7}}}], \"message\": {\"text\": \"cursor configured in repository root \u2014 risk high (62), confidence 0.97. risk factors: agent-config "
+        },
+        "risk.instructions.import-escape": {
+          "adjudication": "states CLAUDE.md imports a file outside the project root and excludes it for that reason",
+          "auto": true,
+          "final": true,
+          "snippet": "native:console-stderr:   - excluded: claude.md: imports a file outside the project root, which is not inventoried (from prompt) \u0000   - score: 278.0 (fail threshold 50)   - excluded: .mcp.json: mcp server 'healthcheck' launcher identity unknown (inline shell script) (from mcp)   - excluded: claude.md: imports a file outside the project root, which is not inventoried (from prompt)   - excluded: shadowscan report contains u"
+        },
+        "risk.mcp.plaintext-http": {
+          "adjudication": "explicit finding that the metrics endpoint is not HTTPS",
+          "auto": true,
+          "final": true,
+          "snippet": "native:native-json: metrics {\"category\": \"transport_security\", \"detail\": \"mcp server 'metrics' endpoint is not https: http://10.20.4.7:8080\", \"recommendation\": \"use https for all remote mcp server connections.\", \"references\": [], \"severity\": \"high\"}"
+        },
+        "risk.mcp.shell-launch": {
+          "adjudication": "high finding on healthcheck naming the inline shell script launcher, and the server is excluded for that reason",
+          "auto": true,
+          "final": true,
+          "snippet": "native:native-json: healthcheck {\"category\": \"launcher_identity\", \"detail\": \"mcp server 'healthcheck' launcher identity and pin are unknown: inline shell script.\", \"recommendation\": \"launch a registry package pinned to an exact version, or an image pinned by digest, in a form the inventory classifies.\", \"references\": [], \"severity\": \"high\"}"
+        },
+        "risk.mcp.tool-poisoning": {
+          "adjudication": "no statement",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-npx": {
+          "adjudication": "The raters marked this false because the packet's 60-line cap cut SymBiote's per-server findings; both noted the gap. The same finding is present verbatim in this entry's native inventory and risk report, and both raters ruled it true in SymBiote's own packet.",
+          "auto": false,
+          "final": true,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-uvx": {
+          "adjudication": "The raters marked this false because the packet's 60-line cap cut SymBiote's per-server findings; both noted the gap. The same finding is present verbatim in this entry's native inventory and risk report, and both raters ruled it true in SymBiote's own packet.",
+          "auto": false,
+          "final": true,
+          "snippet": ""
+        },
+        "risk.mcp.vulnerable-bridge": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.pickle-exec": {
+          "adjudication": "critical finding that reranker.pt uses a potentially code-executing serialization",
+          "auto": true,
+          "final": true,
+          "snippet": "native:native-json: models/legacy/reranker.pt {\"category\": \"serialization_format\", \"detail\": \"model 'reranker.pt' has evidence of a potentially code-executing serialization or loader.\", \"recommendation\": \"convert to safetensors. block pickle/pt/pth in production.\", \"references\": [\"https://huggingface.co/blog/safetensors-security-audit\"], \"severity\": \"critical\"}"
+        },
+        "risk.model.unpinned-revision": {
+          "adjudication": "no statement",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.env-file": {
+          "adjudication": "warning that a provider credential is hard-coded in deploy/.env",
+          "auto": true,
+          "final": true,
+          "snippet": "discover-sarif:sarif: {\"level\": \"warning\", \"locations\": [{\"physicallocation\": {\"artifactlocation\": {\"uri\": \"deploy/.env\", \"uribaseid\": \"%srcroot%\"}, \"region\": {\"snippet\": {\"text\": \"aws_access_key_id=[redacted]\"}, \"startline\": 2}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \"deploy/.env\", \"uribaseid\": \"%srcroot%\"}, \"region\": {\"snippet\": {\"text\": \"openai_api_key=[redacted]\"}, \"startline\": 1}}}], \"message\": {\"text"
+        },
+        "risk.secret.mcp-header": {
+          "adjudication": "warning on the .cursor/mcp.json configuration with the risk factor \"secrets inline in MCP configuration\"; the label is itself file-level",
+          "auto": true,
+          "final": true,
+          "snippet": "discover-sarif:sarif: {\"level\": \"warning\", \"locations\": [{\"physicallocation\": {\"artifactlocation\": {\"uri\": \".cursor/mcp.json\", \"uribaseid\": \"%srcroot%\"}}}], \"message\": {\"text\": \"mcp configuration: .cursor/mcp.json \u2014 risk high (59), confidence 0.96. risk factors: mcp-server finding; no identifiable owner; calls tools / functions; secrets inline in mcp configuration; mcp servers frequently expose local filesystem / shell"
+        },
+        "risk.skill.hidden-instruction": {
+          "adjudication": "finding of a hidden HTML comment containing an instruction in pdf-export SKILL.md, plus a zero-width character finding",
+          "auto": true,
+          "final": true,
+          "snippet": "discover-sarif:sarif: {\"level\": \"warning\", \"locations\": [{\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude/settings.json\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude/hooks/audit.sh\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \"claude.md\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude-plugi"
+        },
+        "risk.skill.remote-script": {
+          "adjudication": "all lines concern hidden content in SKILL.md or agent-level factors; nothing about export.sh or a remote download piped to a shell",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.tool.shell": {
+          "adjudication": "no statement",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.typosquat.langchian": {
+          "adjudication": "the only line is a repository-level agent finding; nothing about langchian or a typosquat",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        }
+      }
+    },
+    "display": "ShadowScan + SymBiote",
+    "grade": "C",
+    "groups": {
+      "BOM integrity": {
+        "of": 10.0,
+        "points": 6.67
+      },
+      "Change detection": {
+        "of": 8.0,
+        "points": 6.2
+      },
+      "Discovery": {
+        "of": 30.0,
+        "points": 15.64
+      },
+      "Precision": {
+        "of": 4.0,
+        "points": 1.5
+      },
+      "Record fidelity": {
+        "of": 14.0,
+        "points": 11.49
+      },
+      "Risk analysis": {
+        "of": 12.0,
+        "points": 7.8
+      },
+      "Scanner safety": {
+        "of": 12.0,
+        "points": 11.5
+      },
+      "Standards": {
+        "of": 10.0,
+        "points": 8.62
+      }
+    },
+    "license": "Apache-2.0",
+    "max_rss_mb": 82.2,
+    "not_gradable": null,
+    "observed": "This entry is the two tools' combined output. Counting SymBiote's merged inventory alone, the pair identifies the same 48 components as SymBiote alone: ShadowScan found 13 components SymBiote does not, and none reaches the inventory in identifiable form. The import maps mcp-server and agent findings to components named by a hash, does not reconcile them with the servers SymBiote already found, and records the other finding kinds as unmapped.",
+    "points": {
+      "1.1": 1.94,
+      "1.2": 1.09,
+      "1.3": 4.44,
+      "1.4": 7.05,
+      "1.5": 1.12,
+      "2.1": 1.5,
+      "3.1": 3.78,
+      "3.2": 3.0,
+      "3.3": 2.84,
+      "3.4": 1.58,
+      "3.5": 0.29,
+      "4.1": 3.0,
+      "4.2": 2.0,
+      "4.3": 1.0,
+      "4.4": 0.62,
+      "4.5": 1.0,
+      "4.6": 1.0,
+      "5.1": 0.67,
+      "5.2": 3.0,
+      "5.3": 1.0,
+      "5.4": 1.0,
+      "5.5": 1.0,
+      "6.1": 4.63,
+      "6.2": 1.67,
+      "6.3": 1.5,
+      "7.1": 2.1,
+      "7.2": 2.1,
+      "7.3": 1.0,
+      "7.4": 1.0,
+      "8.1": 4.0,
+      "8.2": 2.0,
+      "8.3": 2.0,
+      "8.4": 0.5,
+      "8.5": 2.0,
+      "8.6": 1.0
+    },
+    "recall": 0.598,
+    "scores": {
+      "1.1": 0.2778,
+      "1.2": 0.1818,
+      "1.3": 0.8889,
+      "1.4": 0.7838,
+      "1.5": 0.375,
+      "2.1": 0.375,
+      "3.1": 0.9444,
+      "3.2": 1.0,
+      "3.3": 0.9455,
+      "3.4": 0.7895,
+      "3.5": 0.1429,
+      "4.1": 1.0,
+      "4.2": 1.0,
+      "4.3": 0.5,
+      "4.4": 0.6222,
+      "4.5": 1.0,
+      "4.6": 1.0,
+      "5.1": 0.1667,
+      "5.2": 1.0,
+      "5.3": 1.0,
+      "5.4": 1.0,
+      "5.5": 1.0,
+      "6.1": 0.5789,
+      "6.2": 0.8333,
+      "6.3": 0.75,
+      "7.1": 0.7,
+      "7.2": 0.7,
+      "7.3": 1.0,
+      "7.4": 1.0,
+      "8.1": 1.0,
+      "8.2": 1.0,
+      "8.3": 1.0,
+      "8.4": 0.5,
+      "8.5": 1.0,
+      "8.6": 1.0
+    },
+    "seconds": 17.4,
+    "sensitivity": {
+      "declared weights": 69.4,
+      "equal weight per group": 70.4,
+      "inventory only (groups 1 to 3)": 59.7,
+      "measured criteria only": 66.6,
+      "without BOM integrity": 69.7,
+      "without scanner safety": 65.8
+    },
+    "source": "both repositories",
+    "tool": "nexus-pair",
+    "total": 69.4,
+    "unmeasured": null,
+    "version": "ShadowScan 0.1.4, SymBiote 0.2.0"
+  },
+  {
     "components_reported": 493,
     "details": {
       "1.1": {
@@ -3641,6 +4388,722 @@
     "total": 45.0,
     "unmeasured": null,
     "version": "0.4.7"
+  },
+  {
+    "components_reported": 312,
+    "details": {
+      "1.1": {
+        "identified": [
+          "model.api.agents-sdk",
+          "model.api.anthropic",
+          "model.api.bedrock",
+          "model.api.embedding",
+          "model.api.openai",
+          "model.env.indirect"
+        ],
+        "missed": [
+          "model.adapter.lora",
+          "model.config.indirect",
+          "model.docker.download",
+          "model.file.gguf",
+          "model.file.onnx",
+          "model.file.pickle",
+          "model.file.safetensors",
+          "model.hf.pinned",
+          "model.hf.unpinned",
+          "model.k8s.served",
+          "model.notebook",
+          "model.ollama.modelfile"
+        ]
+      },
+      "1.2": {
+        "identified": [
+          "data.memory.pgvector",
+          "data.vector.chroma"
+        ],
+        "missed": [
+          "data.dvc.pointer",
+          "data.finetune.upload",
+          "data.hf.eval",
+          "data.hf.pinned",
+          "data.local.eval",
+          "data.local.training",
+          "data.modelcard.dataset",
+          "data.rag.confluence-source",
+          "data.rag.s3-source"
+        ]
+      },
+      "1.3": {
+        "identified": [
+          "tool.framework.crewai",
+          "tool.framework.langchain",
+          "tool.framework.langgraph",
+          "tool.framework.npm.sdk.modelcontextprotocol"
+        ],
+        "missed": [
+          "tool.framework.chromadb",
+          "tool.framework.llama-index",
+          "tool.framework.mcp",
+          "tool.framework.npm.sdk.anthropic-ai",
+          "tool.framework.openai",
+          "tool.framework.transformers",
+          "tool.function.fetch_url",
+          "tool.function.refund_order",
+          "tool.function.run_shell",
+          "tool.function.search_orders",
+          "tool.function.send_email",
+          "tool.mcp.get_order",
+          "tool.mcp.issue_refund",
+          "tool.mcp.search_kb"
+        ]
+      },
+      "1.4": {
+        "identified": [
+          "agent.a2a.card",
+          "agent.crewai",
+          "agent.hook",
+          "agent.mcp.docker",
+          "agent.mcp.gemini",
+          "agent.mcp.http.authenticated",
+          "agent.mcp.http.plaintext",
+          "agent.mcp.local-script",
+          "agent.mcp.nested",
+          "agent.mcp.stdio.pinned",
+          "agent.mcp.stdio.proxy",
+          "agent.mcp.stdio.shell",
+          "agent.mcp.stdio.unpinned",
+          "agent.mcp.stdio.uvx",
+          "agent.mcp.toml",
+          "agent.n8n",
+          "agent.permissions",
+          "agent.subagent"
+        ],
+        "missed": [
+          "agent.bedrock.terraform",
+          "agent.command",
+          "agent.guardrail",
+          "agent.instructions.agents-md",
+          "agent.instructions.claude",
+          "agent.instructions.copilot",
+          "agent.instructions.cursor-rule",
+          "agent.langgraph.supervisor",
+          "agent.mcp.source.python",
+          "agent.mcp.source.typescript",
+          "agent.openai-agents.triage",
+          "agent.plugin",
+          "agent.prompt.inline",
+          "agent.prompt.system-file",
+          "agent.prompt.template",
+          "agent.skill.agents-dir",
+          "agent.skill.benign",
+          "agent.skill.github",
+          "agent.skill.poisoned"
+        ]
+      },
+      "1.5": {
+        "identified": [
+          "infra.ci.agent-action",
+          "infra.endpoint.sagemaker",
+          "infra.image.vllm"
+        ],
+        "missed": [
+          "infra.endpoint.azure-openai",
+          "infra.image.ollama",
+          "infra.image.pgvector",
+          "infra.image.pytorch",
+          "infra.image.qdrant"
+        ]
+      },
+      "2.1": {
+        "not_tested": [
+          "decoy.fake-gguf",
+          "decoy.printer-model",
+          "decoy.hr-skill-doc"
+        ],
+        "reported_as_components": [],
+        "score": 0.625
+      },
+      "3.1": {
+        "facts_expected": 19,
+        "facts_found": 14,
+        "items_with_fact": 17,
+        "score": 0.7368421052631579
+      },
+      "3.2": {
+        "facts_expected": 0,
+        "facts_found": 0,
+        "items_with_fact": 0,
+        "score": 0.0
+      },
+      "3.3": {
+        "facts_expected": 33,
+        "facts_found": 10,
+        "items_with_fact": 33,
+        "score": 0.30303030303030304
+      },
+      "3.4": {
+        "facts_expected": 24,
+        "facts_found": 23,
+        "items_with_fact": 16,
+        "score": 0.9583333333333334
+      },
+      "3.5": {
+        "satisfied": [],
+        "score": 0.0
+      },
+      "4.1": {
+        "documents": {
+          "cyclonedx:cyclonedx-json": {
+            "errors": [],
+            "spec_version": "1.6",
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.2": {
+        "note": "format not emitted",
+        "score": 0.0
+      },
+      "4.3": {
+        "any_model_card": false,
+        "datasets_typed_data": 0.0,
+        "models_typed_machine_learning_model": 1.0,
+        "score": 0.5
+      },
+      "4.4": {
+        "frameworks_detected": 4,
+        "frameworks_with_purl": 0,
+        "huggingface_purl": false,
+        "score": 0.0
+      },
+      "4.5": {
+        "documents": {
+          "sarif:sarif": {
+            "errors": [],
+            "valid": true
+          }
+        },
+        "score": 1.0
+      },
+      "4.6": {
+        "evidence": "`controls` lists findings per AI governance control; read in help, not run.",
+        "level": 1,
+        "score": 0.5,
+        "tier": "D"
+      },
+      "5.1": {
+        "byte_identical": [],
+        "differs": [
+          "native:native-json"
+        ],
+        "identical_after_dropping_time_and_id_fields": [
+          "cyclonedx:cyclonedx-json",
+          "sarif:sarif"
+        ],
+        "score": 0.39999999999999997
+      },
+      "5.2": {
+        "evidence": "Report signing was not assessed; SymBiote verifies a Sigstore bundle over a report, but producing one was not exercised.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "5.3": {
+        "score": 1.0,
+        "stated_in_machine_output": [
+          "native:native-json",
+          "sarif:sarif"
+        ],
+        "stated_on_console_only": []
+      },
+      "5.4": {
+        "evidence": "The JSON report carries per-connector coverage, incomplete reasons and declared omissions; scans of the hostile cases exited 3 for incomplete coverage.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "5.5": {
+        "evidence": "Not assessed.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "6.1": {
+        "caught": [
+          "risk.mcp.unpinned-npx",
+          "risk.mcp.unpinned-uvx",
+          "risk.mcp.shell-launch",
+          "risk.secret.mcp-header",
+          "risk.mcp.plaintext-http",
+          "risk.skill.hidden-instruction",
+          "risk.instructions.hidden-unicode",
+          "risk.agent.broad-permissions",
+          "risk.secret.env-file"
+        ],
+        "of": 19,
+        "score": 0.47368421052631576
+      },
+      "6.2": {
+        "controls_flagged": [],
+        "controls_tested": [
+          "control.model-pinned",
+          "control.mcp-pinned",
+          "control.mcp-toml-pinned",
+          "control.skill-benign"
+        ],
+        "note": "a control is tested only when the tool caught a planted risk of its class",
+        "score": 0.6666666666666666
+      },
+      "6.3": {
+        "evidence": "No advisory lookup or VEX found in help.",
+        "level": 0,
+        "score": 0.0,
+        "tier": "N"
+      },
+      "7.1": {
+        "not_attributable_output_varies_between_identical_runs": [],
+        "score": 0.5,
+        "visible": [
+          "change.mcp-version-and-scope",
+          "change.mcp-added",
+          "change.skill-widened",
+          "change.permissions-widened",
+          "change.mcp-removed"
+        ]
+      },
+      "7.2": {
+        "exit_code": 0,
+        "judged_by": "blind raters",
+        "reported": [
+          "change.mcp-removed"
+        ],
+        "score": 0.1
+      },
+      "7.3": {
+        "evidence": "Exit 3 on incomplete coverage observed; --fail-on documents exit 2 at a risk level.",
+        "level": 1,
+        "score": 1.0,
+        "tier": "V"
+      },
+      "7.4": {
+        "evidence": "Reconciles findings against a sanctioned inventory and reads gateway logs and endpoints; documented, not run.",
+        "level": 0.5,
+        "score": 0.25,
+        "tier": "D"
+      },
+      "8.1": {
+        "canaries_faced": [
+          "hook-run",
+          "mcp-launch",
+          "npm-lifecycle",
+          "py-import",
+          "setup-py"
+        ],
+        "canaries_tripped": {},
+        "default_command_probe_ran": true,
+        "score": 0.7142857142857143
+      },
+      "8.2": {
+        "checks": {
+          "dir-symlink": {
+            "faced": true,
+            "out_of_tree_content_in": []
+          },
+          "file-symlink": {
+            "faced": false,
+            "out_of_tree_content_in": []
+          },
+          "import": {
+            "faced": false,
+            "out_of_tree_content_in": []
+          }
+        },
+        "score": 0.3333333333333333
+      },
+      "8.3": {
+        "disclosed": {},
+        "score": 1.0,
+        "secrets_faced": [
+          "secret.payments",
+          "secret.github",
+          "secret.openai",
+          "secret.aws"
+        ]
+      },
+      "8.4": {
+        "html": {
+          "faced": false,
+          "raw_in": []
+        },
+        "score": 0.5,
+        "terminal_escape": {
+          "faced": true,
+          "raw_in": []
+        }
+      },
+      "8.5": {
+        "cases": {
+          "deep-json": {
+            "faced": true,
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 2.17,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "escape-names": {
+            "faced": true,
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 2.21,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "fifo": {
+            "faced": true,
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 2.31,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "header-bomb": {
+            "faced": false,
+            "passed": false,
+            "retention": 1.0,
+            "seconds": 1.96,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "large-tree": {
+            "faced": true,
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 11.14,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "malformed": {
+            "faced": true,
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 2.01,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-escape": {
+            "faced": true,
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 2.21,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          },
+          "symlink-loop": {
+            "faced": true,
+            "passed": true,
+            "retention": 1.0,
+            "seconds": 1.96,
+            "timed_out": false,
+            "unhandled_error_in_stderr": false
+          }
+        },
+        "score": 0.875
+      },
+      "8.6": {
+        "connection_attempts_with_scored_flags": [],
+        "default_command_connection_attempts": [],
+        "inventory_produced_without_network": true,
+        "score": 1.0
+      },
+      "risk_verdicts": {
+        "control.mcp-pinned": {
+          "adjudication": "only crm and git are named as unpinned; the filesystem arguments are echoed as metadata",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.mcp-toml-pinned": {
+          "adjudication": "the .codex/config.toml finding carries only generic MCP risk factors; nothing about pinning",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.model-pinned": {
+          "adjudication": "no statement",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.safetensors-safe": {
+          "adjudication": "no statement",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "control.skill-benign": {
+          "adjudication": "hidden content is flagged only in pdf-export; the review of refund-processing reports no indicators",
+          "auto": true,
+          "final": false,
+          "snippet": "sarif:sarif: {\"level\": \"warning\", \"locations\": [{\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude/settings.json\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude/hooks/audit.sh\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \"claude.md\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude-plugi"
+        },
+        "control.tool-benign": {
+          "adjudication": "get_order is only listed as a tool name",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.agent.broad-permissions": {
+          "adjudication": "states that claude-code may run any shell command because of Bash(*) in .claude/settings.json",
+          "auto": true,
+          "final": true,
+          "snippet": "sarif:sarif: {\"level\": \"warning\", \"locations\": [{\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude/settings.json\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude/hooks/audit.sh\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \"claude.md\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude-plugi"
+        },
+        "risk.agent.toxic-flow": {
+          "adjudication": "borderline: a repository-level agent finding lists web access and SaaS write actions as separate risk factors, but names no agent and does not state the combined flow",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.ci.agent-action": {
+          "adjudication": "the action line is quoted only as a detection match; nothing about the mutable tag, the trigger or write scope",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.data.governance": {
+          "adjudication": "no statement",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.instructions.hidden-unicode": {
+          "adjudication": "flags 37 invisible characters in backend.mdc under an invisible-control-character risk factor",
+          "auto": true,
+          "final": true,
+          "snippet": "sarif:sarif: {\"level\": \"warning\", \"locations\": [{\"physicallocation\": {\"artifactlocation\": {\"uri\": \".cursor/rules/backend.mdc\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \".cursor/rules/backend.mdc\", \"uribaseid\": \"%srcroot%\"}, \"region\": {\"startline\": 7}}}], \"message\": {\"text\": \"cursor configured in repository root \u2014 risk high (62), confidence 0.97. risk factors: agent-config "
+        },
+        "risk.instructions.import-escape": {
+          "adjudication": "CLAUDE.md is only listed as a matched configuration file; nothing about an import outside the repository",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.plaintext-http": {
+          "adjudication": "the .cursor/mcp.json finding names metrics as reached over plaintext HTTP",
+          "auto": true,
+          "final": true,
+          "snippet": "html:html: }</pre></details></td></tr><tr class='row' data-score='59' data-level='high' data-shadow='' data-surface='code' data-kind='mcp-server' data-title='mcp configuration: .cursor/mcp.json' data-owner='' data-confidence='0.965' data-text='mcp configuration: .cursor/mcp.json <work>/shadowscan/target/acme-support-copilot"
+        },
+        "risk.mcp.shell-launch": {
+          "adjudication": "the .mcp.json finding names healthcheck as started through a shell command line",
+          "auto": true,
+          "final": true,
+          "snippet": "html:html: }</pre></details></td></tr><tr class='row' data-score='64' data-level='high' data-shadow='' data-surface='code' data-kind='mcp-server' data-title='mcp configuration: .mcp.json' data-owner='' data-confidence='0.95' data-text='mcp configuration: .mcp.json <work>/shadowscan/target/acme-support-copilot/.mcp.json  pro"
+        },
+        "risk.mcp.tool-poisoning": {
+          "adjudication": "issue_refund is only listed as a tool name",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.mcp.unpinned-npx": {
+          "adjudication": "the .mcp.json finding names crm as fetching its package without an exact version",
+          "auto": true,
+          "final": true,
+          "snippet": "html:html: }</pre></details></td></tr><tr class='row' data-score='64' data-level='high' data-shadow='' data-surface='code' data-kind='mcp-server' data-title='mcp configuration: .mcp.json' data-owner='' data-confidence='0.95' data-text='mcp configuration: .mcp.json <work>/shadowscan/target/acme-support-copilot/.mcp.json  pro"
+        },
+        "risk.mcp.unpinned-uvx": {
+          "adjudication": "the .mcp.json finding names git as fetching its package without an exact version",
+          "auto": true,
+          "final": true,
+          "snippet": "html:html: }</pre></details></td></tr><tr class='row' data-score='64' data-level='high' data-shadow='' data-surface='code' data-kind='mcp-server' data-title='mcp configuration: .mcp.json' data-owner='' data-confidence='0.95' data-text='mcp configuration: .mcp.json <work>/shadowscan/target/acme-support-copilot/.mcp.json  pro"
+        },
+        "risk.mcp.vulnerable-bridge": {
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.pickle-exec": {
+          "adjudication": "no statement",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.model.unpinned-revision": {
+          "adjudication": "no statement",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.secret.env-file": {
+          "adjudication": "warning that a provider credential is hard-coded in deploy/.env",
+          "auto": true,
+          "final": true,
+          "snippet": "sarif:sarif: {\"level\": \"warning\", \"locations\": [{\"physicallocation\": {\"artifactlocation\": {\"uri\": \"deploy/.env\", \"uribaseid\": \"%srcroot%\"}, \"region\": {\"snippet\": {\"text\": \"aws_access_key_id=[redacted]\"}, \"startline\": 2}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \"deploy/.env\", \"uribaseid\": \"%srcroot%\"}, \"region\": {\"snippet\": {\"text\": \"openai_api_key=[redacted]\"}, \"startline\": 1}}}], \"message\": {\"text"
+        },
+        "risk.secret.mcp-header": {
+          "adjudication": "the .cursor/mcp.json finding names payments as holding inline credential-looking header values",
+          "auto": true,
+          "final": true,
+          "snippet": "sarif:sarif: {\"level\": \"warning\", \"locations\": [{\"physicallocation\": {\"artifactlocation\": {\"uri\": \".cursor/mcp.json\", \"uribaseid\": \"%srcroot%\"}}}], \"message\": {\"text\": \"mcp configuration: .cursor/mcp.json \u2014 risk high (59), confidence 0.96. risk factors: mcp-server finding; no identifiable owner; calls tools / functions; secrets inline in mcp configuration; mcp servers frequently expose local filesystem / shell"
+        },
+        "risk.skill.hidden-instruction": {
+          "adjudication": "flags a hidden HTML comment and invisible characters in pdf-export SKILL.md under a hidden-content risk factor; it reports the concealment, not the instruction",
+          "auto": true,
+          "final": true,
+          "snippet": "sarif:sarif: {\"level\": \"warning\", \"locations\": [{\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude/settings.json\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude/hooks/audit.sh\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \"claude.md\", \"uribaseid\": \"%srcroot%\"}}}, {\"physicallocation\": {\"artifactlocation\": {\"uri\": \".claude-plugi"
+        },
+        "risk.skill.remote-script": {
+          "adjudication": "all lines concern SKILL.md matches and hidden content; nothing about export.sh or a remote download piped to a shell",
+          "auto": true,
+          "final": false,
+          "snippet": "html:html: </style></head><body><header><h1>shadowscan report <span>v0.1.4 \u00b7 2026-11-18t15:47:05+00:00</span></h1><div class='muted'>shadow ai agent discovery across code, identity, gateways, low-code, saas, cloud, endpoints, network logs and running processes.</div></header><div class='stats'><div class='stat'><b>24</b>findings</div><div class='stat'><b><span class='pill critical'>1</span></b>critical</div>"
+        },
+        "risk.tool.shell": {
+          "adjudication": "no statement",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        },
+        "risk.typosquat.langchian": {
+          "adjudication": "requirements.txt appears only as the source of crewai and langgraph matches; nothing about langchian",
+          "auto": false,
+          "final": false,
+          "snippet": ""
+        }
+      }
+    },
+    "display": "Nexus ShadowScan",
+    "grade": "D",
+    "groups": {
+      "BOM integrity": {
+        "of": 10.0,
+        "points": 3.6
+      },
+      "Change detection": {
+        "of": 8.0,
+        "points": 3.05
+      },
+      "Discovery": {
+        "of": 30.0,
+        "points": 10.03
+      },
+      "Precision": {
+        "of": 4.0,
+        "points": 2.5
+      },
+      "Record fidelity": {
+        "of": 14.0,
+        "points": 5.78
+      },
+      "Risk analysis": {
+        "of": 12.0,
+        "points": 5.12
+      },
+      "Scanner safety": {
+        "of": 12.0,
+        "points": 8.78
+      },
+      "Standards": {
+        "of": 10.0,
+        "points": 5.5
+      }
+    },
+    "license": "Apache-2.0",
+    "max_rss_mb": 53.5,
+    "not_gradable": null,
+    "observed": null,
+    "points": {
+      "1.1": 2.33,
+      "1.2": 1.09,
+      "1.3": 1.11,
+      "1.4": 4.38,
+      "1.5": 1.12,
+      "2.1": 2.5,
+      "3.1": 2.95,
+      "3.2": 0.0,
+      "3.3": 0.91,
+      "3.4": 1.92,
+      "3.5": 0.0,
+      "4.1": 3.0,
+      "4.2": 0.0,
+      "4.3": 1.0,
+      "4.4": 0.0,
+      "4.5": 1.0,
+      "4.6": 0.5,
+      "5.1": 1.6,
+      "5.2": 0.0,
+      "5.3": 1.0,
+      "5.4": 1.0,
+      "5.5": 0.0,
+      "6.1": 3.79,
+      "6.2": 1.33,
+      "6.3": 0.0,
+      "7.1": 1.5,
+      "7.2": 0.3,
+      "7.3": 1.0,
+      "7.4": 0.25,
+      "8.1": 2.86,
+      "8.2": 0.67,
+      "8.3": 2.0,
+      "8.4": 0.5,
+      "8.5": 1.75,
+      "8.6": 1.0
+    },
+    "recall": 0.359,
+    "scores": {
+      "1.1": 0.3333,
+      "1.2": 0.1818,
+      "1.3": 0.2222,
+      "1.4": 0.4865,
+      "1.5": 0.375,
+      "2.1": 0.625,
+      "3.1": 0.7368,
+      "3.2": 0.0,
+      "3.3": 0.303,
+      "3.4": 0.9583,
+      "3.5": 0.0,
+      "4.1": 1.0,
+      "4.2": 0.0,
+      "4.3": 0.5,
+      "4.4": 0.0,
+      "4.5": 1.0,
+      "4.6": 0.5,
+      "5.1": 0.4,
+      "5.2": 0.0,
+      "5.3": 1.0,
+      "5.4": 1.0,
+      "5.5": 0.0,
+      "6.1": 0.4737,
+      "6.2": 0.6667,
+      "6.3": 0.0,
+      "7.1": 0.5,
+      "7.2": 0.1,
+      "7.3": 1.0,
+      "7.4": 0.25,
+      "8.1": 0.7143,
+      "8.2": 0.3333,
+      "8.3": 1.0,
+      "8.4": 0.5,
+      "8.5": 0.875,
+      "8.6": 1.0
+    },
+    "seconds": 9.2,
+    "sensitivity": {
+      "declared weights": 44.4,
+      "equal weight per group": 47.8,
+      "inventory only (groups 1 to 3)": 38.1,
+      "measured criteria only": 46.2,
+      "without BOM integrity": 45.3,
+      "without scanner safety": 40.4
+    },
+    "source": "github.com/Hunzee-VC/Nexus-ShadowScan",
+    "tool": "shadowscan",
+    "total": 44.4,
+    "unmeasured": null,
+    "version": "0.1.4 (commit 2b80f19)"
   },
   {
     "components_reported": 170,

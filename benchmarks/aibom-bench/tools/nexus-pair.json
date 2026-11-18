@@ -1,0 +1,173 @@
+{
+  "tool": "nexus-pair",
+  "display": "ShadowScan + SymBiote",
+  "version": "ShadowScan 0.1.4, SymBiote 0.2.0",
+  "license": "Apache-2.0",
+  "source": "both repositories",
+  "install": [
+    "{tooldir}/shadowscan and {tooldir}/nexus-symbiote are links to the two tools' entry points"
+  ],
+  "bin": "{tooldir}/nexus-symbiote",
+  "path": [
+    "{tooldir}"
+  ],
+  "env": {},
+  "scans": [
+    {
+      "label": "discover",
+      "argv": [
+        "{tooldir}/shadowscan",
+        "code",
+        "{target}",
+        "--format",
+        "json",
+        "-o",
+        "{target}/shadowscan.json"
+      ],
+      "outputs": []
+    },
+    {
+      "label": "discover-copy",
+      "argv": [
+        "cp",
+        "{target}/shadowscan.json",
+        "{out}/shadowscan.json"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/shadowscan.json",
+          "format": "native-json"
+        }
+      ]
+    },
+    {
+      "label": "discover-sarif",
+      "argv": [
+        "{tooldir}/shadowscan",
+        "code",
+        "{target}",
+        "--exclude",
+        "shadowscan.json",
+        "--format",
+        "sarif",
+        "-o",
+        "{out}/shadowscan.sarif"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/shadowscan.sarif",
+          "format": "sarif"
+        }
+      ]
+    },
+    {
+      "label": "native",
+      "argv": [
+        "{tooldir}/nexus-symbiote",
+        "scan",
+        "{target}",
+        "--no-project-policy",
+        "-f",
+        "json",
+        "-o",
+        "{out}/aibom.json"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/aibom.json",
+          "format": "native-json"
+        }
+      ]
+    },
+    {
+      "label": "cyclonedx",
+      "argv": [
+        "{tooldir}/nexus-symbiote",
+        "scan",
+        "{target}",
+        "--no-project-policy",
+        "-f",
+        "cyclonedx",
+        "-o",
+        "{out}/aibom.cdx.json"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/aibom.cdx.json",
+          "format": "cyclonedx-json"
+        }
+      ]
+    },
+    {
+      "label": "spdx",
+      "argv": [
+        "{tooldir}/nexus-symbiote",
+        "scan",
+        "{target}",
+        "--no-project-policy",
+        "-f",
+        "spdx",
+        "-o",
+        "{out}/aibom.spdx.json"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/aibom.spdx.json",
+          "format": "spdx-json"
+        }
+      ]
+    },
+    {
+      "label": "sarif",
+      "argv": [
+        "{tooldir}/nexus-symbiote",
+        "scan",
+        "{target}",
+        "--no-project-policy",
+        "-f",
+        "sarif",
+        "-o",
+        "{out}/aibom.sarif"
+      ],
+      "outputs": [
+        {
+          "path": "{out}/aibom.sarif",
+          "format": "sarif"
+        }
+      ]
+    },
+    {
+      "label": "risk",
+      "argv": [
+        "{tooldir}/nexus-symbiote",
+        "risk",
+        "{out}/aibom.json",
+        "--json-output"
+      ],
+      "stdout_format": "native-json"
+    }
+  ],
+  "diff": {
+    "argv": [
+      "{tooldir}/nexus-symbiote",
+      "diff",
+      "{base}/aibom.json",
+      "{drift}/aibom.json"
+    ]
+  },
+  "default": {
+    "argv": [
+      "{tooldir}/nexus-symbiote",
+      "scan",
+      "{target}",
+      "-o",
+      "{out}/default.json"
+    ],
+    "outputs": []
+  },
+  "default_env": {},
+  "notes": [
+    "The documented merged workflow: ShadowScan writes its report into the project, then SymBiote scans the project and reads it."
+  ],
+  "observed": "This entry is the two tools' combined output. Counting SymBiote's merged inventory alone, the pair identifies the same 48 components as SymBiote alone: ShadowScan found 13 components SymBiote does not, and none reaches the inventory in identifiable form. The import maps mcp-server and agent findings to components named by a hash, does not reconcile them with the servers SymBiote already found, and records the other finding kinds as unmapped."
+}

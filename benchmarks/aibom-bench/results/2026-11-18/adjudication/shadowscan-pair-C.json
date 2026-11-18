@@ -1,0 +1,256 @@
+{
+ "P1": {
+  "risk.typosquat.langchian": {
+   "reported": false,
+   "evidence": "",
+   "why": "the only line is a repository-level agent finding; nothing about the langchian package"
+  },
+  "risk.model.pickle-exec": {
+   "reported": true,
+   "evidence": "models/legacy/reranker.pt | severity=critical; category=serialization_format; detail=Model 'reranker.pt' has evidence of a potentially code-executing serialization or loader.; recommendation=Convert to SafeTensors. Block pickle/pt/pth in production.",
+   "why": "critical finding that reranker.pt uses a potentially code-executing serialization"
+  },
+  "risk.model.unpinned-revision": {
+   "reported": false,
+   "evidence": "",
+   "why": "no statement"
+  },
+  "risk.data.governance": {
+   "reported": false,
+   "evidence": "",
+   "why": "no statement"
+  },
+  "risk.tool.shell": {
+   "reported": false,
+   "evidence": "",
+   "why": "no statement"
+  },
+  "risk.agent.toxic-flow": {
+   "reported": false,
+   "evidence": "[warning] shadowscan/agent/framework.langgraph: Agent in repository root: LangGraph, CrewAI, LangChain, LlamaIndex — risk high (60), confidence 1.00. Risk factors: agent finding; no identifiable owner; calls tools / functions; orchestrates or delegates to other agents; retrieves internal documents; exposes tools to other agents over MCP; has live web access (prompt-injection surface); performs write actions in SaaS / business systems; third-party inference host; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; DashScope endpoints process data in Alibaba Cloud regions (PRC or",
+   "why": "Borderline: the repository-level agent finding lists web access and business write actions as separate risk factors but names no agent and does not state the untrusted-page-to-CRM-to-email flow"
+  },
+  "risk.mcp.tool-poisoning": {
+   "reported": false,
+   "evidence": "",
+   "why": "no statement"
+  },
+  "risk.mcp.unpinned-npx": {
+   "reported": false,
+   "evidence": "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .mcp.json — risk high (64), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; reads or writes files and databases directly (exfiltration / tampering surface); MCP server package or image is not pinned to an exact version; MCP server started through a shell command line; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+   "why": "Borderline: the not-pinned risk factor is attached to the .mcp.json file as a whole and no line names the crm server or its package, so it is not attached to this component"
+  },
+  "risk.mcp.unpinned-uvx": {
+   "reported": false,
+   "evidence": "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .mcp.json — risk high (64), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; reads or writes files and databases directly (exfiltration / tampering surface); MCP server package or image is not pinned to an exact version; MCP server started through a shell command line; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+   "why": "Borderline: the not-pinned risk factor is attached to the .mcp.json file as a whole and no line names the git server or its package, so it is not attached to this component"
+  },
+  "risk.mcp.shell-launch": {
+   "reported": true,
+   "evidence": "healthcheck | severity=high; category=launcher_identity; detail=MCP server 'healthcheck' launcher identity and pin are unknown: inline shell script.; recommendation=Launch a registry package pinned to an exact version, or an image pinned by digest, in a form the inventory classifies.",
+   "why": "high finding on healthcheck that names the inline shell script as the cause"
+  },
+  "risk.secret.mcp-header": {
+   "reported": true,
+   "evidence": "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .cursor/mcp.json — risk high (59), confidence 0.96. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; secrets inline in MCP configuration; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; remote MCP server over plain HTTP",
+   "why": "warning on .cursor/mcp.json with the risk factor that secrets are inline in the MCP configuration"
+  },
+  "risk.mcp.plaintext-http": {
+   "reported": true,
+   "evidence": "metrics | severity=high; category=transport_security; detail=MCP server 'metrics' endpoint is not HTTPS: http://10.20.4.7:8080; recommendation=Use HTTPS for all remote MCP server connections.",
+   "why": "high finding that the metrics endpoint is not HTTPS"
+  },
+  "risk.skill.hidden-instruction": {
+   "reported": true,
+   "evidence": ".claude/skills/pdf-export/SKILL.md | severity=high; category=hidden_markup; detail='.claude/skills/pdf-export/SKILL.md' contains 1 HTML or Markdown comment(s) (153 characters of HTML comments) that rendered views hide and agents read. At least one comment contains an instruction, a URL or a home-directory path.; recommendation=Review comment text in the raw file; move notes out of agent instructions.",
+   "why": "high finding that the skill has a hidden HTML comment containing an instruction; a second finding covers the zero-width characters"
+  },
+  "risk.skill.remote-script": {
+   "reported": false,
+   "evidence": "",
+   "why": "findings concern hidden markup and invisible characters in SKILL.md, not export.sh piping a download to a shell"
+  },
+  "risk.instructions.import-escape": {
+   "reported": true,
+   "evidence": "- excluded: .mcp.json: MCP server 'healthcheck' launcher identity unknown (inline shell script) (from mcp) - excluded: CLAUDE.md: imports a file outside the project root, which is not inventoried (from prompt) - excluded: ShadowScan report contains unmapped entries (from shadowscan)",
+   "why": "CLAUDE.md is excluded for the stated reason that it imports a file outside the project root"
+  },
+  "risk.instructions.hidden-unicode": {
+   "reported": true,
+   "evidence": ".cursor/rules/backend.mdc | severity=critical; category=tag_characters; detail='.cursor/rules/backend.mdc' contains 37 deprecated Unicode tag characters (U+E0000–U+E007F) outside a flag emoji. These are invisible and have no legitimate use in prompt files.; recommendation=Remove all tag characters — likely a prompt trojan.",
+   "why": "critical finding of invisible Unicode tag characters in backend.mdc"
+  },
+  "risk.agent.broad-permissions": {
+   "reported": true,
+   "evidence": "[warning] shadowscan/agent-config/coding-agent.claude-code: Claude Code configured in repository root — risk critical (100), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions; runs without a human in the loop; orchestrates or delegates to other agents; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters; agent may run any shell command; orchestrates other agents and executes code: one compromise reaches every delegate; executes code with no human in the loop: nothing reviews what it runs; 1 sub-agent definition(s)",
+   "why": "warning on the Claude Code configuration with the risk factor that the agent may run any shell command"
+  },
+  "risk.ci.agent-action": {
+   "reported": false,
+   "evidence": "[warning] shadowscan/agent-config/coding-agent.claude-code: Claude Code configured in repository root — risk critical (100), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; can execute code or shell commands; calls tools / functions; runs without a human in the loop; orchestrates or delegates to other agents; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters; agent may run any shell command; orchestrates other agents and executes code: one compromise reaches every delegate; executes code with no human in the loop: nothing reviews what it runs; 1 sub-agent definition(s)",
+   "why": "the only line is the Claude Code configuration finding; it flags running without a human in the loop but not the mutable tag, pull_request_target or write scope"
+  },
+  "risk.secret.env-file": {
+   "reported": true,
+   "evidence": "[warning] shadowscan/secret/provider.openai: LLM provider credential in deploy/.env — risk high (69), confidence 0.98. Risk factors: secret finding; no identifiable owner; credential hard-coded in source; 2 credentials in one place",
+   "why": "warning of a hard-coded provider credential in deploy/.env"
+  },
+  "control.safetensors-safe": {
+   "reported": false,
+   "evidence": "models/intent-classifier/model.safetensors | severity=high; category=signing_status; detail=Model 'model.safetensors' has no verified artifact-bound signature (signature-not-found).; recommendation=Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.",
+   "why": "the finding is a missing signature, a different problem from unsafe deserialization"
+  },
+  "control.model-pinned": {
+   "reported": false,
+   "evidence": "",
+   "why": "no statement"
+  },
+  "control.tool-benign": {
+   "reported": false,
+   "evidence": "",
+   "why": "no statement"
+  },
+  "control.mcp-pinned": {
+   "reported": false,
+   "evidence": "[warning] shadowscan/mcp-server/protocol.mcp: MCP configuration: .mcp.json — risk high (64), confidence 0.95. Risk factors: mcp-server finding; no identifiable owner; calls tools / functions; reads or writes files and databases directly (exfiltration / tampering surface); MCP server package or image is not pinned to an exact version; MCP server started through a shell command line; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; local stdio MCP servers run with the user's full privileges",
+   "why": "the not-pinned risk factor sits on the .mcp.json file and no line says the filesystem server is unpinned"
+  },
+  "control.mcp-toml-pinned": {
+   "reported": false,
+   "evidence": "context7 | severity=medium; category=transitive_resolution; detail=MCP server 'context7' pins its package but resolves dependencies at launch without a lockfile.; recommendation=Vendor a lockfile-installed server, or launch an image by digest.",
+   "why": "Borderline: the finding says the package is pinned and flags unlocked transitive dependencies, a different problem from an unpinned server"
+  },
+  "control.skill-benign": {
+   "reported": false,
+   "evidence": "[warning] shadowscan/agent-config/coding-agent.agent-skills: Agent skill instructions configured in repository root — risk high (50), confidence 1.00. Risk factors: agent-config finding; no identifiable owner; instruction file carries content hidden from the rendered view; instruction file contains invisible or bidirectional control characters",
+   "why": "Borderline: hidden-content risk factors sit on repository-wide skill and Claude Code findings and do not name refund-processing"
+  }
+ },
+ "P2": {
+  "risk.typosquat.langchian": {
+   "reported": false,
+   "evidence": "",
+   "why": "dependency matches for crewai and langgraph in requirements.txt are listed; langchian is not flagged"
+  },
+  "risk.model.pickle-exec": {
+   "reported": false,
+   "evidence": "",
+   "why": "no statement"
+  },
+  "risk.model.unpinned-revision": {
+   "reported": false,
+   "evidence": "",
+   "why": "no statement"
+  },
+  "risk.data.governance": {
+   "reported": false,
+   "evidence": "",
+   "why": "no statement"
+  },
+  "risk.tool.shell": {
+   "reported": false,
+   "evidence": "",
+   "why": "no statement"
+  },
+  "risk.agent.toxic-flow": {
+   "reported": false,
+   "evidence": "[warning] shadowscan/agent/framework.langgraph: Agent in repository root: LangGraph, CrewAI, LangChain, LlamaIndex — risk high (60), confidence 1.00. Risk factors: agent finding; no identifiable owner; calls tools / functions; orchestrates or delegates to other agents; retrieves internal documents; exposes tools to other agents over MCP; has live web access (prompt-injection surface); performs write actions in SaaS / business systems; third-party inference host; MCP servers frequently expose local filesystem / shell / database access; verify auth and transport.; Client configs commonly embed API keys and tokens in plain text.; DashScope endpoints process data in Alibaba Cloud regions (PRC or",
+   "why": "Borderline: the repository-level agent finding lists web access and business write actions as separate risk factors but names no agent and does not state the untrusted-page-to-CRM-to-email flow"
+  },
+  "risk.mcp.tool-poisoning": {
+   "reported": false,
+   "evidence": "",
+   "why": "the tool names and the server construct are listed only; nothing about the description"
+  },
+  "risk.mcp.unpinned-npx": {
+   "reported": true,
+   "evidence": "Evidence 0.95 MCP client/server configuration file .mcp.json — .mcp.json 0.00 MCP server 'crm' fetches its package or image without an exact version (@acme-internal/mcp-crm) — .mcp.json 0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) — .mcp.json",
+   "why": "the high-risk .mcp.json finding states that server 'crm' fetches @acme-internal/mcp-crm without an exact version"
+  },
+  "risk.mcp.unpinned-uvx": {
+   "reported": true,
+   "evidence": "Evidence 0.95 MCP client/server configuration file .mcp.json — .mcp.json 0.00 MCP server 'crm' fetches its package or image without an exact version (@acme-internal/mcp-crm) — .mcp.json 0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) — .mcp.json",
+   "why": "the high-risk .mcp.json finding states that server 'git' fetches mcp-server-git without an exact version"
+  },
+  "risk.mcp.shell-launch": {
+   "reported": true,
+   "evidence": "0.95 MCP client/server configuration file .mcp.json — .mcp.json 0.00 MCP server 'crm' fetches its package or image without an exact version (@acme-internal/mcp-crm) — .mcp.json 0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) — .mcp.json 0.00 MCP server 'healthcheck' is started through a shell command line (sh) — .mcp.json",
+   "why": "the high-risk .mcp.json finding states that server 'healthcheck' is started through a shell command line (sh)"
+  },
+  "risk.secret.mcp-header": {
+   "reported": true,
+   "evidence": "Evidence 0.95 MCP client/server configuration file .cursor/mcp.json — .cursor/mcp.json 0.30 MCP server 'payments' has credential-looking values inline (headers) — .cursor/mcp.json 0.00 MCP server 'metrics' is reached over plaintext HTTP (10.20.4.7) — .cursor/mcp.json",
+   "why": "the finding states that server 'payments' has credential-looking values inline in its headers"
+  },
+  "risk.mcp.plaintext-http": {
+   "reported": true,
+   "evidence": "Evidence 0.95 MCP client/server configuration file .cursor/mcp.json — .cursor/mcp.json 0.30 MCP server 'payments' has credential-looking values inline (headers) — .cursor/mcp.json 0.00 MCP server 'metrics' is reached over plaintext HTTP (10.20.4.7) — .cursor/mcp.json",
+   "why": "the finding states that server 'metrics' is reached over plaintext HTTP"
+  },
+  "risk.skill.hidden-instruction": {
+   "reported": true,
+   "evidence": "0.80 HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md — .claude/skills/pdf-export/SKILL.md:10 0.70 3 invisible or control character(s) in .claude/skills/pdf-export/SKILL.md — .claude/skills/pdf-export/SKILL.md:13 0.50 code pattern matched Claude Code: \"permissions\": {\"allow\": [\"Bash(*)\" — .claude/settings.json 0.00 claude-code may run any shell command (permissions.allow = Bash(*)) — .claude/settings.json",
+   "why": "Borderline: flags an HTML comment and invisible characters in pdf-export SKILL.md under a hidden-content risk factor, though it does not call the hidden text an instruction"
+  },
+  "risk.skill.remote-script": {
+   "reported": false,
+   "evidence": "",
+   "why": "evidence concerns hidden content in SKILL.md; nothing about export.sh piping a download to a shell"
+  },
+  "risk.instructions.import-escape": {
+   "reported": false,
+   "evidence": "",
+   "why": "CLAUDE.md is listed as a matched Claude Code config file; nothing about an import outside the repository"
+  },
+  "risk.instructions.hidden-unicode": {
+   "reported": true,
+   "evidence": "Evidence 0.90 config file matched Cursor: .cursor/rules/backend.mdc — .cursor/rules/backend.mdc 0.70 37 invisible or control character(s) in .cursor/rules/backend.mdc — .cursor/rules/backend.mdc:7 metadata",
+   "why": "the Cursor finding reports 37 invisible or control characters in backend.mdc under an invisible-characters risk factor"
+  },
+  "risk.agent.broad-permissions": {
+   "reported": true,
+   "evidence": "0.50 code pattern matched Claude Code: \"permissions\": {\"allow\": [\"Bash(*)\" — .claude/settings.json 0.00 claude-code may run any shell command (permissions.allow = Bash(*)) — .claude/settings.json metadata {",
+   "why": "the critical Claude Code finding states that claude-code may run any shell command via Bash(*) in .claude/settings.json"
+  },
+  "risk.ci.agent-action": {
+   "reported": false,
+   "evidence": "0.97 config file matched Claude Code sub-agent definition: .claude/agents/code-reviewer.md — .claude/agents/code-reviewer.md 0.95 code pattern matched Claude Code: uses: anthropics/claude-code-action — .github/workflows/ai-review.yml:15 uses: anthropics/claude-code-action@v1 0.90 config file matched Claude Code: .claude/settings.json — .claude/settings.json 0.90 config file matched Claude Code: CLAUDE.md — CLAUDE.md",
+   "why": "Borderline: the action reference with its v1 tag is echoed as match evidence and the finding flags running without a human in the loop, but nothing states the mutable tag, pull_request_target or write scope"
+  },
+  "risk.secret.env-file": {
+   "reported": true,
+   "evidence": "[warning] shadowscan/secret/provider.openai: LLM provider credential in deploy/.env — risk high (69), confidence 0.98. Risk factors: secret finding; no identifiable owner; credential hard-coded in source; 2 credentials in one place",
+   "why": "warning of a hard-coded provider credential in deploy/.env"
+  },
+  "control.safetensors-safe": {
+   "reported": false,
+   "evidence": "",
+   "why": "no statement"
+  },
+  "control.model-pinned": {
+   "reported": false,
+   "evidence": "",
+   "why": "no statement"
+  },
+  "control.tool-benign": {
+   "reported": false,
+   "evidence": "",
+   "why": "get_order is listed as a tool name only; no poisoning claim"
+  },
+  "control.mcp-pinned": {
+   "reported": false,
+   "evidence": "",
+   "why": "the not-pinned statements name crm and git only; filesystem is listed with its exact version"
+  },
+  "control.mcp-toml-pinned": {
+   "reported": false,
+   "evidence": "",
+   "why": "the .codex/config.toml finding carries no not-pinned factor and context7 is listed with its exact version"
+  },
+  "control.skill-benign": {
+   "reported": false,
+   "evidence": "{ \"path\": \".claude/skills/refund-processing/SKILL.md\", \"method\": \"bounded-static-instruction-review-v1\", \"status\": \"no-indicators-observed\",",
+   "why": "hidden-content evidence names pdf-export only and the review of refund-processing reports no indicators"
+  }
+ }
+}

@@ -1,0 +1,175 @@
+{
+  "tool": "shadowscan",
+  "assessed": "2026-11-18",
+  "criteria": {
+    "4.6": {
+      "level": 1,
+      "tier": "D",
+      "evidence": "`controls` lists findings per AI governance control; read in help, not run."
+    },
+    "5.2": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Report signing was not assessed; SymBiote verifies a Sigstore bundle over a report, but producing one was not exercised."
+    },
+    "5.4": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "The JSON report carries per-connector coverage, incomplete reasons and declared omissions; scans of the hostile cases exited 3 for incomplete coverage."
+    },
+    "5.5": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "Not assessed."
+    },
+    "6.3": {
+      "level": 0,
+      "tier": "N",
+      "evidence": "No advisory lookup or VEX found in help."
+    },
+    "7.3": {
+      "level": 1,
+      "tier": "V",
+      "evidence": "Exit 3 on incomplete coverage observed; --fail-on documents exit 2 at a risk level."
+    },
+    "7.4": {
+      "level": 0.5,
+      "tier": "D",
+      "evidence": "Reconciles findings against a sanctioned inventory and reads gateway logs and endpoints; documented, not run."
+    }
+  },
+  "adjudication": {
+    "control.mcp-pinned": {
+      "verdict": false,
+      "reason": "only crm and git are named as unpinned; the filesystem arguments are echoed as metadata",
+      "evidence": "\"-y\", \"@modelcontextprotocol/server-filesystem@2025.8.21\", \"/srv/support-data\" ],"
+    },
+    "control.mcp-toml-pinned": {
+      "verdict": false,
+      "reason": "the .codex/config.toml finding carries only generic MCP risk factors; nothing about pinning",
+      "evidence": ""
+    },
+    "control.model-pinned": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.safetensors-safe": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "control.skill-benign": {
+      "verdict": false,
+      "reason": "hidden content is flagged only in pdf-export; the review of refund-processing reports no indicators",
+      "evidence": "{ \"path\": \".claude/skills/refund-processing/SKILL.md\", \"method\": \"bounded-static-instruction-review-v1\", \"status\": \"no-indicators-observed\","
+    },
+    "control.tool-benign": {
+      "verdict": false,
+      "reason": "get_order is only listed as a tool name",
+      "evidence": ""
+    },
+    "risk.agent.broad-permissions": {
+      "verdict": true,
+      "reason": "states that claude-code may run any shell command because of Bash(*) in .claude/settings.json",
+      "evidence": "0.50 code pattern matched Claude Code: \"permissions\": {\"allow\": [\"Bash(*)\" \u2014 .claude/settings.json 0.00 claude-code may run any shell command (permissions.allow = Bash(*)) \u2014 .claude/settings.json metadata {"
+    },
+    "risk.agent.toxic-flow": {
+      "verdict": false,
+      "reason": "borderline: a repository-level agent finding lists web access and SaaS write actions as separate risk factors, but names no agent and does not state the combined flow",
+      "evidence": "[warning] shadowscan/agent/framework.langgraph: Agent in repository root: LangGraph, CrewAI, LangChain, LlamaIndex \u2014 risk high (60), confidence 1.00. Risk factors: agent finding; no identifiable owner; calls tools / functions; orchestrates or delegates to other agents; retrieves internal documents; "
+    },
+    "risk.ci.agent-action": {
+      "verdict": false,
+      "reason": "the action line is quoted only as a detection match; nothing about the mutable tag, the trigger or write scope",
+      "evidence": "```text uses: anthropics/claude-code-action@v1 ``` - (0.90) config file matched Claude Code: .claude/settings.json \u2014 `.claude/settings.json`"
+    },
+    "risk.data.governance": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.instructions.hidden-unicode": {
+      "verdict": true,
+      "reason": "flags 37 invisible characters in backend.mdc under an invisible-control-character risk factor",
+      "evidence": "0.90 config file matched Cursor: .cursor/rules/backend.mdc \u2014 .cursor/rules/backend.mdc 0.70 37 invisible or control character(s) in .cursor/rules/backend.mdc \u2014 .cursor/rules/backend.mdc:7 metadata {"
+    },
+    "risk.instructions.import-escape": {
+      "verdict": false,
+      "reason": "CLAUDE.md is only listed as a matched configuration file; nothing about an import outside the repository",
+      "evidence": ""
+    },
+    "risk.mcp.plaintext-http": {
+      "verdict": true,
+      "reason": "the .cursor/mcp.json finding names metrics as reached over plaintext HTTP",
+      "evidence": "0.30 MCP server 'payments' has credential-looking values inline (headers) \u2014 .cursor/mcp.json 0.00 MCP server 'metrics' is reached over plaintext HTTP (10.20.4.7) \u2014 .cursor/mcp.json metadata {"
+    },
+    "risk.mcp.shell-launch": {
+      "verdict": true,
+      "reason": "the .mcp.json finding names healthcheck as started through a shell command line",
+      "evidence": "0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json 0.00 MCP server 'healthcheck' is started through a shell command line (sh) \u2014 .mcp.json metadata {"
+    },
+    "risk.mcp.tool-poisoning": {
+      "verdict": false,
+      "reason": "issue_refund is only listed as a tool name",
+      "evidence": ""
+    },
+    "risk.mcp.unpinned-npx": {
+      "verdict": true,
+      "reason": "the .mcp.json finding names crm as fetching its package without an exact version",
+      "evidence": "Evidence 0.95 MCP client/server configuration file .mcp.json \u2014 .mcp.json 0.00 MCP server 'crm' fetches its package or image without an exact version (@acme-internal/mcp-crm) \u2014 .mcp.json 0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json"
+    },
+    "risk.mcp.unpinned-uvx": {
+      "verdict": true,
+      "reason": "the .mcp.json finding names git as fetching its package without an exact version",
+      "evidence": "0.00 MCP server 'git' fetches its package or image without an exact version (mcp-server-git) \u2014 .mcp.json 0.00 MCP server 'healthcheck' is started through a shell command line (sh) \u2014 .mcp.json metadata {"
+    },
+    "risk.model.pickle-exec": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.model.unpinned-revision": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.secret.env-file": {
+      "verdict": true,
+      "reason": "warning that a provider credential is hard-coded in deploy/.env",
+      "evidence": "[warning] shadowscan/secret/provider.openai: LLM provider credential in deploy/.env \u2014 risk high (69), confidence 0.98. Risk factors: secret finding; no identifiable owner; credential hard-coded in source; 2 credentials in one place"
+    },
+    "risk.secret.mcp-header": {
+      "verdict": true,
+      "reason": "the .cursor/mcp.json finding names payments as holding inline credential-looking header values",
+      "evidence": "0.30 MCP server 'payments' has credential-looking values inline (headers) \u2014 .cursor/mcp.json 0.00 MCP server 'metrics' is reached over plaintext HTTP (10.20.4.7) \u2014 .cursor/mcp.json metadata {"
+    },
+    "risk.skill.hidden-instruction": {
+      "verdict": true,
+      "reason": "flags a hidden HTML comment and invisible characters in pdf-export SKILL.md under a hidden-content risk factor; it reports the concealment, not the instruction",
+      "evidence": "Evidence 0.80 HTML comment holding 23 words in .claude/skills/pdf-export/SKILL.md \u2014 .claude/skills/pdf-export/SKILL.md:10 0.75 config file matched Agent skill instructions: docs/handbook/SKILL.md \u2014 docs/handbook/SKILL.md 0.75 config file matched Agent skill instructions: .github/skills/ticket-triage"
+    },
+    "risk.skill.remote-script": {
+      "verdict": false,
+      "reason": "all lines concern SKILL.md matches and hidden content; nothing about export.sh or a remote download piped to a shell",
+      "evidence": ""
+    },
+    "risk.tool.shell": {
+      "verdict": false,
+      "reason": "no statement",
+      "evidence": ""
+    },
+    "risk.typosquat.langchian": {
+      "verdict": false,
+      "reason": "requirements.txt appears only as the source of crewai and langgraph matches; nothing about langchian",
+      "evidence": ""
+    }
+  },
+  "adjudication_method": "Two raters, unanimous on these labels. Blinding failed for this packet: the name ShadowScan was not masked.",
+  "changes_reported": [
+    "change.mcp-removed"
+  ],
+  "changes_disputed": {
+    "change.permissions-widened": "The raters disagreed and no third rater was used; counted as not reported."
+  }
+}
