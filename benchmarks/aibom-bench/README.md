@@ -7,7 +7,8 @@ and how safely it behaves when that repository is hostile.
 
 - [`SPEC.md`](SPEC.md): what is measured, why, how it is scored, and the threats to validity.
 - [`CATALOG.md`](CATALOG.md): every case, with its weight and attribute checks.
-- [`RESULTS.md`](RESULTS.md): audited grades for ten tools at the versions listed there,
+- [`RESULTS.md`](RESULTS.md): audited grades for ten tools and the Nexus SymBiote +
+  ShadowScan pipeline at the versions listed there,
   with analysis and the audit trail.
 - [`results/scorecard.md`](results/scorecard.md) and [`results/results.json`](results/results.json):
   the generated scorecard and per-item evidence for every tool.

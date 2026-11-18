@@ -1,7 +1,8 @@
 # AIBOM-Bench 1.0 results
 
 Run on 2026-11-18. Seed `20261118`, corpus digest `e771ea4d7f519c31`, 126 scored items in 15
-scenarios. Every tool ran its documented safe configuration for untrusted repositories,
+scenarios. Ten third-party tools were graded, plus Nexus SymBiote with its discovery
+companion Nexus-ShadowScan, both alone and as the documented pipeline. Every tool ran its documented safe configuration for untrusted repositories,
 offline, and its plain documented invocation on every scenario. Both ran in the same
 sandbox: network, PID and mount namespaces, an unprivileged user, and a fresh writable
 checkout. A positive control that executes every payload ran in that sandbox too. It
@@ -18,16 +19,18 @@ percentages.
 
 | # | Tool | Version | Grade | Score | In-scope | Risk findings | MCP | Tool defs | Skills | Agents | Models | Data | Pkgs | Standards | Safety | Gates |
 |--:|---|---|:-:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|
-| 1 | Nexus SymBiote | 0.2.0 | **C** | 65.3 | 65.3 | 44 | 82 | 47 | 72 | 39 | 55 | 0 | 91 | 77 | 100 | – |
-| 2 | agent-bom | 0.115.4 | **D** | 51.2 | 51.2 | 36 | 72 | 0 | 66 | 22 | 55 | 0 | 91 | 69 | 67 | – |
-| 3 | Cisco AI BOM ¹ | 1.10.1 | **F** (D before gates) | 50.3 | 47.7 | 0 | 59 | 40 | 28 | 28 | 43 | 25 | 91 | 78 | 67 | executes MCP launch commands → F; reads through escaping symlinks → C |
-| 4 | AIROM | 0.4.7 | **F** | 39.4 | 60.8 | 19 | 0 | 13 | 3 | 11 | 66 | 58 | 91 | 89 | 53 | – |
-| 5 | OWASP cdxgen ² | 12.9.2 | **F** | 35.0 | 38.0 | 14 | 49 | 13 | 31 | 11 | 41 | 0 | 91 | 72 | 17 | default mode builds the scanned project → F |
-| 6 | Trusera ai-bom | 3.6.0 | **F** | 34.5 | 33.9 | 0 | 41 | 27 | 0 | 0 | 29 | 0 | 36 | 52 | 92 | reads through escaping symlinks → C |
-| 7 | aibom-scanner | 1.3.5 | **F** | 29.8 | 38.5 | 14 | 77 | 0 | 0 | 6 | 3 | 0 | 91 | 17 | 78 | – |
-| 8 | AIsbom | 1.7.0 | **F** | 27.7 | 60.1 | 22 | 0 | 0 | 0 | 0 | 59 | 0 | 54 | 73 | 53 | – |
-| 9 | Anchore Syft | 1.57.2 | **F** | 25.1 | 52.9 | 0 | 0 | 0 | 0 | 0 | 36 | 0 | 91 | 63 | 58 | – |
-| 10 | AIBoMGen CLI ³ | 0.3.0 | **F** | 11.7 | 29.3 | 0 | 0 | 0 | 9 | 0 | 17 | 0 | 0 | 65 | 0 | – |
+| 1 | Nexus SymBiote + ShadowScan ⁵ | 0.2.0 + 0.1.4 | **B** | 72.8 | 72.8 | 58 | 95 | 67 | 78 | 78 | 62 | 0 | 91 | 65 | 100 | – |
+| 2 | Nexus SymBiote | 0.2.0 | **C** | 65.3 | 65.3 | 44 | 82 | 47 | 72 | 39 | 55 | 0 | 91 | 77 | 100 | – |
+| 3 | Nexus-ShadowScan | 0.1.4 | **D** | 53.8 | 53.8 | 39 | 87 | 47 | 53 | 78 | 7 | 0 | 91 | 58 | 78 | – |
+| 4 | agent-bom | 0.115.4 | **D** | 51.2 | 51.2 | 36 | 72 | 0 | 66 | 22 | 55 | 0 | 91 | 69 | 67 | – |
+| 5 | Cisco AI BOM ¹ | 1.10.1 | **F** (D before gates) | 50.3 | 47.7 | 0 | 59 | 40 | 28 | 28 | 43 | 25 | 91 | 78 | 67 | executes MCP launch commands → F; reads through escaping symlinks → C |
+| 6 | AIROM | 0.4.7 | **F** | 39.4 | 60.8 | 19 | 0 | 13 | 3 | 11 | 66 | 58 | 91 | 89 | 53 | – |
+| 7 | OWASP cdxgen ² | 12.9.2 | **F** | 35.0 | 38.0 | 14 | 49 | 13 | 31 | 11 | 41 | 0 | 91 | 72 | 17 | default mode builds the scanned project → F |
+| 8 | Trusera ai-bom | 3.6.0 | **F** | 34.5 | 33.9 | 0 | 41 | 27 | 0 | 0 | 29 | 0 | 36 | 52 | 92 | reads through escaping symlinks → C |
+| 9 | aibom-scanner | 1.3.5 | **F** | 29.8 | 38.5 | 14 | 77 | 0 | 0 | 6 | 3 | 0 | 91 | 17 | 78 | – |
+| 10 | AIsbom | 1.7.0 | **F** | 27.7 | 60.1 | 22 | 0 | 0 | 0 | 0 | 59 | 0 | 54 | 73 | 53 | – |
+| 11 | Anchore Syft | 1.57.2 | **F** | 25.1 | 52.9 | 0 | 0 | 0 | 0 | 0 | 36 | 0 | 91 | 63 | 58 | – |
+| 12 | AIBoMGen CLI ³ | 0.3.0 | **F** | 11.7 | 29.3 | 0 | 0 | 0 | 9 | 0 | 17 | 0 | 0 | 65 | 0 | – |
 | – | OWASP AIBOM Generator ⁴ | main, 2026-10-17 | N/R | – | – | – | – | – | – | – | – | – | – | – | – | – |
 
 ¹ v1.10.1 refuses to run without an LLM. The endpoint pointed at an unreachable port, so
@@ -39,6 +42,10 @@ plain run does not.
 ³ Reads model metadata from the Hugging Face Hub, which the sandbox cannot reach.
 ⁴ Accepts only a Hugging Face model ID and needs the live Hub API. It cannot scan a
 repository, so it is reported as not run, not as failed.
+⁵ The documented merged workflow (`docs/shadowscan-integration.md`): ShadowScan writes
+`shadowscan.json` into the checkout, then `nexus-symbiote scan` merges it. It is graded
+on both artifacts the workflow delivers, the merged BOM and ShadowScan's report. The
+merged BOM alone scores 63.3 (see below).
 
 Synthetic calibration tools, not ranked:
 
@@ -78,16 +85,17 @@ Synthetic calibration tools, not ranked:
    - the typosquat `langchian` (P06F)
    - the unpinned Hugging Face revision (R02F)
 
-   The best risk-finding share is 44% (Nexus SymBiote). Inventory is ahead of detection
-   across the field.
+   The best risk-finding share is 58% (Nexus SymBiote with ShadowScan; 44% for Nexus
+   SymBiote alone). Inventory is ahead of detection across the field.
 
 4. **Data and agents are the blind spots.**
-   - Seven of ten tools score 0% on data, and no tool names the Chroma collection or
-     Pinecone index (D04, D05). Only AIROM records the pinned Hugging Face dataset (D01).
-   - No tool found the OpenAI Agents SDK agent (A01), and each other agent framework is
-     covered by at most two tools.
-   - No tool inventoried the Claude Code plugin manifest (K11) or the hook command's
-     destination (K10).
+   - Ten of the twelve graded rows score 0% on data, the Nexus pipeline included, and no
+     tool names the Chroma collection or Pinecone index (D04, D05). Only AIROM records the
+     pinned Hugging Face dataset (D01).
+   - No tool found the OpenAI Agents SDK agent (A01). Only ShadowScan covers the other
+     agent frameworks broadly (agents 78%).
+   - Only ShadowScan inventories the Claude Code plugin manifest (K11), and no tool records
+     the hook command's destination (K10).
 
 5. **Specialists are good in their lane.** Their in-scope scores are 53–60:
    - **AIsbom** is the only tool that names the Keras Lambda layer.
@@ -125,6 +133,21 @@ Synthetic calibration tools, not ranked:
   - Literal credentials redacted but never flagged.
   - Drift visible only at file level (no per-tool fingerprint).
   - No agent SDK definitions.
+
+**Nexus-ShadowScan (D, 53.8).** The discovery half of the Nexus system, graded on its own.
+- *Strengths:*
+  - Broad, typed discovery across MCP configs, agent frameworks (LangGraph, CrewAI,
+    AutoGen, ADK), A2A, coding-agent configs (skills, subagents, slash commands, plugin
+    manifests) and AI dependencies.
+  - Flags literal MCP credentials, unpinned and `:latest` launches, and invisible Unicode
+    in rules.
+  - Safe and offline in both modes.
+  - Deterministic with `SHADOWSCAN_IDENTITY_KEY` set.
+- *Gaps:*
+  - Almost no model files (models 7%) and no datasets.
+  - No SPDX output.
+  - One false positive: a repository-level Cursor finding lists the clean rule file among
+    the files with invisible characters.
 
 **agent-bom (D, 51.2).**
 - *Strengths:*
@@ -207,6 +230,56 @@ Synthetic calibration tools, not ranked:
 - Built around Hugging Face Hub lookups, which this offline sandbox cannot serve.
 - It also reads skill script paths as Hugging Face model IDs (`pkg:huggingface/scripts/...`).
 
+## Nexus SymBiote with ShadowScan
+
+ShadowScan is the discovery half of the Nexus system, so the pipeline row is the fair
+grade for "Nexus". It ran exactly as `docs/shadowscan-integration.md` documents.
+
+**What the pipeline delivers:** B, 72.8.
+- ShadowScan alone earns D (53.8): strong MCP coverage (87%), agents (78%) and
+  coding-agent configs, including the plugin manifest and subagent files no other
+  standalone tool finds.
+- It flags the literal MCP credentials Nexus only redacts (C06F, C07F).
+- It never executed anything, never followed the escaping symlinks, and made no network
+  attempt.
+- Together the two cover MCP 95%, tool definitions 67%, skills 78% and agents 78%,
+  with Nexus's perfect safety record.
+
+**Where the points come from.** The B is earned by the two artifacts together. The merged
+Nexus BOM, scored alone, earns 63.3, slightly *below* Nexus SymBiote alone:
+
+- **The merge carries almost none of ShadowScan's extra coverage.** The importer projects
+  only `agent`, `mcp-server` and `local-model` findings, as report and source-ID digests
+  rather than names, locations or snippets. That is a deliberate leakage trade-off in the
+  docs. The result is that none of ShadowScan's credential findings, agent, skill,
+  subagent and plugin identities, or package evidence reaches the AgentBOM. Anyone who
+  keeps only the AgentBOM cannot answer "where is the GitHub token?" or "which agents
+  exist?" from it.
+- **The merged BOM is no longer reproducible.** Nexus's byte-identical output guarantee
+  is lost, for two reasons:
+  - Without `SHADOWSCAN_IDENTITY_KEY`, ShadowScan keys its credential fingerprints per
+    scan. The benchmark sets the key, as ShadowScan's `docs/api/engine.md` documents.
+  - Even with the key, ShadowScan writes wall-clock `started_at`/`finished_at` and does
+    not honour `SOURCE_DATE_EPOCH`. Nexus records the SHA-256 of the raw report bytes
+    (`shadowscan:report-sha256`), so two scans of the same commit produce different
+    BOMs. A `nexus-symbiote diff` between them reports drift that is not there.
+- **No SARIF.** Nexus refuses SARIF once imported discovery is present, so the pipeline's
+  findings never reach a code-scanning dashboard.
+
+**Fixes, in order:**
+1. Project ShadowScan's typed evidence into the AgentBOM, behind an explicit option if
+   leakage is the concern: credential findings, agent and coding-agent-config identities,
+   skills, subagents, plugins and package evidence. Today the AgentBOM is a subset of what
+   the operator must keep anyway.
+2. Make merged BOMs reproducible. Have ShadowScan honour `SOURCE_DATE_EPOCH`, or have
+   Nexus bind a canonical digest of the report that excludes run timing, keeping the
+   raw-bytes digest for `verify-discovery`. Add `SHADOWSCAN_IDENTITY_KEY` (as a CI secret)
+   to the integration guide's commands.
+3. Emit SARIF for merged scans, carrying the imported coverage as a run-level note rather
+   than refusing.
+4. Close the shared gaps that neither half covers: datasets and RAG stores, poisoned tool
+   descriptions, skill scripts, typosquats, unpinned model revisions (list below).
+
 ## Nexus SymBiote: what to fix first
 
 Ranked by how much a silent miss hurts a deployment. Item IDs refer to [`CATALOG.md`](CATALOG.md).
@@ -248,6 +321,10 @@ Ranked by how much a silent miss hurts a deployment. Item IDs refer to [`CATALOG
   - A final synthesis checked the survivors against this run.
   - Every upheld defect was fixed generically, and the full run repeated: commits
     `444b371` to `3d67c25`.
+- **Pipeline added after the first publication.** Nexus-ShadowScan and the documented
+  Nexus SymBiote + ShadowScan workflow were added once it was pointed out that ShadowScan
+  is the discovery half of the system. Both ran through the same sandbox on the same
+  corpus.
 - **Fairness corrections that changed grades.** agent-bom's working directory now lets its
   model scan run (it rose from F to D). cdxgen uses its README command in safe mode. Cisco
   AI BOM got its documented extras.
@@ -258,6 +335,9 @@ Ranked by how much a silent miss hurts a deployment. Item IDs refer to [`CATALOG
   - Generic fixes that came out of this, applied to every tool and recalibrated:
     - A name-like value may state its own kind.
     - Findings on generically named files are attributed by the file's digest.
+    - An entry listed under a findings key that states an asset type (`kind`,
+      `asset_type`, `resource_type`, `component_type`) is inventory as well as a finding.
+      This was found when ShadowScan was added. It changed only the two ShadowScan rows.
     - A severity-less annotation is informational.
     - An annotation's severity must be labelled as one.
     - A risk property whose value is `none` is not a finding.

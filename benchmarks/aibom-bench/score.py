@@ -79,6 +79,7 @@ KIND_WORDS: dict[str, list[str]] = {
 }  # fmt: skip
 KIND_WORDS["safety"] = sorted({w for k in ("mcp", "models") for w in KIND_WORDS[k]})
 # Ground-truth items expected to carry ML-BOM / SPDX 3 AI and Dataset typing.
+ASSET_TYPE_KEYS = ("kind", "asset_type", "resource_type", "component_type")
 # Annotations are free text: only an explicitly labelled severity counts ("severity:
 # high", "cdx:audit:severity | critical"), not any severity-like word ("confidence=low").
 ANNOTATION_SEVERITY = re.compile(
@@ -408,6 +409,10 @@ def read_generic(doc: Any, src: str) -> list[Rec]:
         if as_finding:
             ctx = identity(parent) if parent else ""
             recs.append(finding(e, src, severity_of(e), ctx))
+            # Some tools list discovered assets under "findings"; an entry that states an
+            # asset type is inventory as well as a finding.
+            if any(isinstance(e.get(k), str) and e.get(k) for k in ASSET_TYPE_KEYS):
+                recs.append(component(e, src, key_hint))
         else:
             recs.append(component(e, src, key_hint))
             sev = severity_of(e)

@@ -89,7 +89,9 @@ format reader. No reader knows any tool.
   Results of kind `pass`, `notApplicable` or `informational` are informational.
 - Native JSON: every object in a list, and every entry of an object keyed by name,
   becomes a record. Lists under a key naming findings (`risk`, `finding`, `issue`,
-  `vuln`, …) become findings carrying the identity of their parent object. An inventory
+  `vuln`, …) become findings carrying the identity of their parent object; an entry there
+  that states an asset type (`kind`, `asset_type`, `resource_type`, `component_type`) is
+  also inventory, since some tools list discovered assets as findings. An inventory
   object with a non-informational `severity` also yields a finding. Bookkeeping keys
   (statistics, framework catalogues, control mappings, failure and skip lists) are not read.
 
@@ -220,12 +222,15 @@ unshare -n -p -f --kill-child -m -- sh -c '<private /tmp, /var/tmp, /dev/shm; lo
    `--no-install-deps`). The tool's plain documented invocation also runs on every
    scenario, and its execution gates apply to both. Ask the tool's maintainers to
    correct `tools.json` when a better configuration exists.
-2. Do not write per-tool adapters. If a valid output shape is not read correctly, fix
+2. A documented multi-tool workflow (such as Nexus SymBiote with Nexus-ShadowScan) may be
+   graded as its own row, on every artifact the workflow documents as its output. Its
+   parts are also graded alone, and the write-up says which artifact earned what.
+3. Do not write per-tool adapters. If a valid output shape is not read correctly, fix
    the generic reader for every tool and re-score all of them.
-3. Report a tool that cannot run in the sandbox as N/R with the reason, not as F.
-4. Report both the overall and the in-scope score, so a specialist tool is not presented
+4. Report a tool that cannot run in the sandbox as N/R with the reason, not as F.
+5. Report both the overall and the in-scope score, so a specialist tool is not presented
    as a failed generalist.
-5. Publish the seed, corpus digest, tool versions, raw outputs and per-item evidence.
+6. Publish the seed, corpus digest, tool versions, raw outputs and per-item evidence.
 
 ## Threats to validity
 
