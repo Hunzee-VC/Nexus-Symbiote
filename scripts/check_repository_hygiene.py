@@ -57,6 +57,18 @@ _BLANK = frozenset({0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x2800, 0x3164, 0xFF
 # Dated audits record what was inspected under the owner live at the time.
 # Rewriting their links would falsify the record rather than fix a stale one.
 OWNER_EXEMPT_PREFIXES = (Path("docs/audits"),)
+# Type identifiers minted under an earlier owner. Signed evidence binds to them, so
+# a transfer keeps them; documents quote them verbatim and are not stale links.
+STABLE_IDENTIFIERS = ((Path("src/nexus_symbiote/attestation.py"), "PREDICATE_TYPE"),)
+# v0.1.0 was published while the Hunzee-VC organization owned the repository, and its
+# attestation certificate names that repository and workflow. The README's verified
+# install of that release must pass the same identity, or verification cannot succeed.
+SIGNED_RELEASE_IDENTITIES = {
+    Path("README.md"): (
+        "--repo Hunzee-VC/Nexus-Symbiote",
+        "--signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml",
+    ),
+}
 
 
 def read_file(root: Path, relative: Path) -> bytes:
@@ -212,17 +224,40 @@ def canonical_repository(root: Path) -> tuple[str, str]:
     return match[1], match[2]
 
 
+def stable_identifiers(root: Path) -> list[str]:
+    """The string constants named in STABLE_IDENTIFIERS, read without importing the package."""
+    values = []
+    for relative, name in STABLE_IDENTIFIERS:
+        try:
+            module = ast.parse(read_file(root, relative).decode("utf-8"))
+        except (OSError, ValueError, SyntaxError, UnicodeError):
+            continue
+        for node in module.body:
+            if (
+                isinstance(node, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == name for t in node.targets)
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+                and node.value.value
+            ):
+                values.append(node.value.value)
+    return values
+
+
 def owner_issues(root: Path, files: list[Path]) -> list[str]:
     """Reject links to this repository under a stale owner.
 
     Absolute GitHub URLs are deliberately skipped by the inline local-link
     check, so a repository transfer can leave them pointing at the previous
-    owner and survive review on redirects alone.
+    owner and survive review on redirects alone. The exact type identifiers in
+    STABLE_IDENTIFIERS are not links and may keep the owner they were minted under,
+    and SIGNED_RELEASE_IDENTITIES may name the identity a release was signed under.
     """
     try:
         owner, repository = canonical_repository(root)
     except (OSError, ValueError, KeyError, TypeError):
         return ["canonical repository owner could not be determined"]
+    identifiers = stable_identifiers(root)
     errors = []
     for relative in files:
         if relative.suffix not in OWNER_TEXT_SUFFIXES:
@@ -234,6 +269,8 @@ def owner_issues(root: Path, files: list[Path]) -> list[str]:
         except (OSError, ValueError, UnicodeError):
             errors.append(f"{relative}: source is unavailable or unsafe")
             continue
+        for identifier in (*identifiers, *SIGNED_RELEASE_IDENTITIES.get(relative, ())):
+            text = text.replace(identifier, " ")
         # The bare owner/repo slug is matched too: a transfer leaves it stale in
         # command examples, where it is an argument rather than a link.
         name = re.escape(repository)

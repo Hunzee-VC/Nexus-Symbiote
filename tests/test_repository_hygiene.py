@@ -282,6 +282,48 @@ def test_dated_audits_keep_the_owner_recorded_at_the_time(tmp_path):
     assert hygiene.owner_issues(tmp_path, [Path("docs/audits/a.md")]) == []
 
 
+def test_a_stable_type_identifier_keeps_the_owner_it_was_minted_under(tmp_path):
+    _project(tmp_path)
+    identifier = "https://github.com/old-owner/Widget/attestation/inventory/v1"
+    source = tmp_path / "src" / "nexus_symbiote"
+    source.mkdir(parents=True)
+    source.joinpath("attestation.py").write_text(f'PREDICATE_TYPE = "{identifier}"\n')
+    tmp_path.joinpath("guide.md").write_text(f"| `predicateType` | `{identifier}` |\n")
+    assert hygiene.owner_issues(tmp_path, [Path("guide.md")]) == []
+    tmp_path.joinpath("guide.md").write_text(
+        f"`{identifier}`, [issues](https://github.com/old-owner/Widget/issues)\n"
+    )
+    assert hygiene.owner_issues(tmp_path, [Path("guide.md")]) == [
+        "guide.md: links to old-owner/Widget instead of Canonical-Org/Widget"
+    ]
+
+
+def test_without_the_identifier_source_a_quoted_identifier_is_stale(tmp_path):
+    _project(tmp_path)
+    tmp_path.joinpath("guide.md").write_text(
+        "`https://github.com/old-owner/Widget/attestation/inventory/v1`\n"
+    )
+    assert len(hygiene.owner_issues(tmp_path, [Path("guide.md")])) == 1
+
+
+def test_the_signed_release_identity_is_accepted_only_in_the_readme(tmp_path):
+    _project(tmp_path, homepage="https://github.com/aisecnomad/Nexus-Symbiote")
+    command = (
+        "gh attestation verify w.whl --repo Hunzee-VC/Nexus-Symbiote \\\n"
+        "  --signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml\n"
+    )
+    for name in ("README.md", "guide.md"):
+        tmp_path.joinpath(name).write_text(command)
+    assert hygiene.owner_issues(tmp_path, [Path("README.md")]) == []
+    assert hygiene.owner_issues(tmp_path, [Path("guide.md")]) == [
+        "guide.md: links to Hunzee-VC/Nexus-Symbiote instead of aisecnomad/Nexus-Symbiote"
+    ]
+    tmp_path.joinpath("README.md").write_text(
+        command + "git clone https://github.com/Hunzee-VC/Nexus-Symbiote.git\n"
+    )
+    assert len(hygiene.owner_issues(tmp_path, [Path("README.md")])) == 1
+
+
 def test_unparseable_homepage_fails_closed(tmp_path):
     _project(tmp_path, homepage="https://example.invalid/widget")
     assert hygiene.owner_issues(tmp_path, [Path("README.md")]) == [
