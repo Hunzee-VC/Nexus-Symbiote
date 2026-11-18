@@ -1,0 +1,892 @@
+{
+  "comment": "Each tool runs its documented, most complete repository-scan configuration for untrusted input (its safe mode where it documents one), offline. `default_commands` is the tool's plain documented invocation; it runs on every scenario without the `env` overrides and is used to observe default network behaviour and whether default mode executes hostile content (gates X01, X02, X09). {T} is the tools root, {scn} the writable scenario copy (also the working directory), {out} the tool's output directory.",
+  "tools": {
+    "nexus-symbiote": {
+      "display": "Nexus SymBiote",
+      "source": "https://github.com/aisecnomad/Nexus-Symbiote",
+      "version": "0.2.0 (a13b622)",
+      "install": "pip install <checkout> (commit under test)",
+      "version_cmd": [
+        "{T}/nexus/bin/nexus-symbiote",
+        "--version"
+      ],
+      "path": [
+        "{T}/nexus/bin"
+      ],
+      "commands": [
+        [
+          "nexus-symbiote",
+          "scan",
+          "{scn}",
+          "--no-project-policy",
+          "--report-only",
+          "-f",
+          "cyclonedx",
+          "-o",
+          "{out}/bom.cdx.json"
+        ],
+        [
+          "nexus-symbiote",
+          "scan",
+          "{scn}",
+          "--no-project-policy",
+          "--report-only",
+          "-f",
+          "spdx",
+          "-o",
+          "{out}/bom.spdx.json"
+        ],
+        [
+          "nexus-symbiote",
+          "scan",
+          "{scn}",
+          "--no-project-policy",
+          "--report-only",
+          "-f",
+          "sarif",
+          "-o",
+          "{out}/findings.sarif"
+        ],
+        [
+          "nexus-symbiote",
+          "scan",
+          "{scn}",
+          "--no-project-policy",
+          "--report-only",
+          "-f",
+          "json",
+          "-o",
+          "{out}/native.json"
+        ]
+      ],
+      "default_commands": [
+        [
+          "nexus-symbiote",
+          "scan",
+          "{scn}",
+          "-o",
+          "{out}/default.json"
+        ]
+      ],
+      "declared_scope": [
+        "mcp",
+        "tooldefs",
+        "skills",
+        "agents",
+        "models",
+        "data",
+        "packages",
+        "standards",
+        "safety"
+      ]
+    },
+    "nexus-symbiote+shadowscan": {
+      "display": "Nexus SymBiote + ShadowScan",
+      "source": "https://github.com/aisecnomad/Nexus-Symbiote (docs/shadowscan-integration.md)",
+      "version": "SymBiote 0.2.0 (a13b622) + ShadowScan 0.1.4 (2b80f19)",
+      "install": "both, as above",
+      "version_cmd": [
+        "{T}/nexus/bin/nexus-symbiote",
+        "--version"
+      ],
+      "path": [
+        "{T}/nexus/bin",
+        "{T}/shadowscan/bin"
+      ],
+      "commands": [
+        [
+          "sh",
+          "-c",
+          "shadowscan code \"$1\" --profile ci --no-incremental -f json -o \"$1/shadowscan.json\"; cp \"$1/shadowscan.json\" \"$2/shadowscan.json\" 2>/dev/null; for f in cyclonedx spdx sarif json; do case $f in cyclonedx) o=bom.cdx.json;; spdx) o=bom.spdx.json;; sarif) o=findings.sarif;; json) o=native.json;; esac; nexus-symbiote scan \"$1\" --no-project-policy --report-only -f $f -o \"$2/$o\"; done",
+          "sh",
+          "{scn}",
+          "{out}"
+        ]
+      ],
+      "default_commands": [
+        [
+          "sh",
+          "-c",
+          "shadowscan code \"$1\" -f json -o \"$1/shadowscan.json\"; nexus-symbiote scan \"$1\" -o \"$2/default.json\"",
+          "sh",
+          "{scn}",
+          "{out}"
+        ]
+      ],
+      "mode_note": "The documented merged workflow (docs/shadowscan-integration.md): ShadowScan writes shadowscan.json into the checkout and `nexus-symbiote scan` merges it with its own collectors. ShadowScan's report is kept beside the BOM as the authoritative discovery record. Nexus refuses SARIF once imported discovery is present (it cannot carry the imported coverage), so this pipeline's findings come from its native JSON and CycloneDX. The benchmark run sets SHADOWSCAN_IDENTITY_KEY (documented in ShadowScan's docs/api/engine.md; a public test key here, a CI secret in practice) so finding identities are stable across scans; without it ShadowScan keys its credential fingerprints per run and the report, and the merged BOM, differ on every scan of the same commit.",
+      "declared_scope": [
+        "mcp",
+        "tooldefs",
+        "skills",
+        "agents",
+        "models",
+        "data",
+        "packages",
+        "standards",
+        "safety"
+      ],
+      "env": {
+        "SHADOWSCAN_IDENTITY_KEY": "hex:dc5e047ea361369d05998b16c876c597fbeb8769a4fb61b532ff92f73c8c9a50"
+      }
+    },
+    "nexus-shadowscan": {
+      "display": "Nexus-ShadowScan",
+      "source": "https://github.com/Hunzee-VC/nexus-shadowscan",
+      "version": "0.1.4 (2b80f19)",
+      "install": "pip install --require-hashes -r requirements.lock && pip install --no-deps <checkout at 2b80f19>",
+      "version_cmd": [
+        "{T}/shadowscan/bin/shadowscan",
+        "--version"
+      ],
+      "path": [
+        "{T}/shadowscan/bin"
+      ],
+      "commands": [
+        [
+          "shadowscan",
+          "code",
+          "{scn}",
+          "--profile",
+          "ci",
+          "--no-incremental",
+          "-f",
+          "json",
+          "-o",
+          "{out}/shadowscan.json"
+        ],
+        [
+          "shadowscan",
+          "code",
+          "{scn}",
+          "--profile",
+          "ci",
+          "--no-incremental",
+          "-f",
+          "cyclonedx",
+          "-o",
+          "{out}/bom.cdx.json"
+        ],
+        [
+          "shadowscan",
+          "code",
+          "{scn}",
+          "--profile",
+          "ci",
+          "--no-incremental",
+          "-f",
+          "sarif",
+          "-o",
+          "{out}/findings.sarif"
+        ]
+      ],
+      "default_commands": [
+        [
+          "shadowscan",
+          "code",
+          "{scn}",
+          "-f",
+          "json",
+          "-o",
+          "{out}/default.json"
+        ]
+      ],
+      "mode_note": "The discovery half of the Nexus pipeline, graded on its own: `shadowscan code` with its CI profile and no incremental cache. Its cloud, identity, gateway and endpoint connectors are out of scope for a repository benchmark. The benchmark run sets SHADOWSCAN_IDENTITY_KEY (documented in ShadowScan's docs/api/engine.md; a public test key here, a CI secret in practice) so finding identities are stable across scans; without it ShadowScan keys its credential fingerprints per run and the report, and the merged BOM, differ on every scan of the same commit.",
+      "declared_scope": [
+        "mcp",
+        "tooldefs",
+        "skills",
+        "agents",
+        "models",
+        "data",
+        "packages",
+        "standards",
+        "safety"
+      ],
+      "env": {
+        "SHADOWSCAN_IDENTITY_KEY": "hex:dc5e047ea361369d05998b16c876c597fbeb8769a4fb61b532ff92f73c8c9a50"
+      }
+    },
+    "cdxgen": {
+      "display": "OWASP cdxgen",
+      "source": "https://github.com/cdxgen/cdxgen",
+      "version": "12.9.2",
+      "install": "npm install --ignore-scripts @cyclonedx/cdxgen",
+      "version_cmd": [
+        "{T}/node/bin/node",
+        "{T}/cdxgen/node_modules/@cyclonedx/cdxgen/bin/cdxgen.js",
+        "--version"
+      ],
+      "path": [
+        "{T}/cdxgen/node_modules/.bin",
+        "{T}/node/bin"
+      ],
+      "env": {
+        "CDXGEN_NO_BANNER": "true"
+      },
+      "commands": [
+        [
+          "cdxgen",
+          "-r",
+          "--include-formulation",
+          "--no-install-deps",
+          "--bom-audit",
+          "--bom-audit-categories",
+          "ai-bom",
+          "--json-pretty",
+          "-o",
+          "{out}/bom.cdx.json",
+          "{scn}"
+        ],
+        [
+          "cdxgen",
+          "-r",
+          "--include-formulation",
+          "--no-install-deps",
+          "--bom-audit",
+          "--bom-audit-categories",
+          "ai-bom",
+          "--format",
+          "spdx",
+          "-o",
+          "{out}/bom.spdx.json",
+          "{scn}"
+        ]
+      ],
+      "default_commands": [
+        [
+          "cdxgen",
+          "-r",
+          "--include-formulation",
+          "-o",
+          "{out}/default.json",
+          "--bom-audit",
+          "--bom-audit-categories",
+          "ai-bom",
+          "{scn}"
+        ]
+      ],
+      "declared_scope": [
+        "mcp",
+        "tooldefs",
+        "skills",
+        "agents",
+        "models",
+        "data",
+        "packages",
+        "standards"
+      ],
+      "mode_note": "Runs the README's AI-BOM command ('Generate and audit an AI-BOM from the current repository'). The benchmark run adds the documented --no-install-deps; the plain invocation keeps cdxgen's default of installing project dependencies."
+    },
+    "syft": {
+      "display": "Anchore Syft",
+      "source": "https://github.com/anchore/syft",
+      "version": "1.57.2",
+      "install": "go install github.com/anchore/syft/cmd/syft@v1.57.2",
+      "version_cmd": [
+        "{T}/go/bin/syft",
+        "version"
+      ],
+      "path": [
+        "{T}/go/bin"
+      ],
+      "env": {
+        "SYFT_CHECK_FOR_APP_UPDATE": "false"
+      },
+      "commands": [
+        [
+          "syft",
+          "scan",
+          "dir:{scn}",
+          "-o",
+          "cyclonedx-json={out}/bom.cdx.json",
+          "-o",
+          "spdx-json={out}/bom.spdx.json",
+          "-o",
+          "syft-json={out}/syft.json"
+        ]
+      ],
+      "default_commands": [
+        [
+          "syft",
+          "dir:{scn}",
+          "-o",
+          "cyclonedx-json={out}/default.json"
+        ]
+      ],
+      "declared_scope": [
+        "models",
+        "packages",
+        "standards"
+      ]
+    },
+    "agent-bom": {
+      "display": "agent-bom",
+      "source": "https://github.com/koda-ai-studio/agent-bom",
+      "version": "0.115.4",
+      "install": "pip install --only-binary=:all: agent-bom==0.115.4",
+      "version_cmd": [
+        "{T}/agent-bom/bin/agent-bom",
+        "--version"
+      ],
+      "path": [
+        "{T}/agent-bom/bin"
+      ],
+      "commands": [
+        [
+          "agent-bom",
+          "scan",
+          "-p",
+          "{scn}",
+          "--offline",
+          "--model-files",
+          "{scn}",
+          "--model-provenance",
+          "--dataset-cards",
+          "{scn}",
+          "-f",
+          "cyclonedx",
+          "-o",
+          "{out}/bom.cdx.json"
+        ],
+        [
+          "agent-bom",
+          "scan",
+          "-p",
+          "{scn}",
+          "--offline",
+          "--model-files",
+          "{scn}",
+          "--model-provenance",
+          "--dataset-cards",
+          "{scn}",
+          "-f",
+          "spdx",
+          "-o",
+          "{out}/bom.spdx.json"
+        ],
+        [
+          "agent-bom",
+          "scan",
+          "-p",
+          "{scn}",
+          "--offline",
+          "--model-files",
+          "{scn}",
+          "--model-provenance",
+          "--dataset-cards",
+          "{scn}",
+          "-f",
+          "sarif",
+          "-o",
+          "{out}/findings.sarif"
+        ],
+        [
+          "agent-bom",
+          "scan",
+          "-p",
+          "{scn}",
+          "--offline",
+          "--model-files",
+          "{scn}",
+          "--model-provenance",
+          "--dataset-cards",
+          "{scn}",
+          "-f",
+          "json",
+          "-o",
+          "{out}/native.json"
+        ],
+        [
+          "agent-bom",
+          "skills",
+          "scan",
+          "{scn}",
+          "-f",
+          "json",
+          "-o",
+          "{out}/skills.json"
+        ]
+      ],
+      "default_commands": [
+        [
+          "agent-bom",
+          "scan",
+          "-p",
+          "{scn}",
+          "-f",
+          "json",
+          "-o",
+          "{out}/default.json"
+        ]
+      ],
+      "declared_scope": [
+        "mcp",
+        "tooldefs",
+        "skills",
+        "agents",
+        "models",
+        "data",
+        "packages",
+        "standards",
+        "safety"
+      ],
+      "mode_note": "Scans with the documented --model-files, --model-provenance and --dataset-cards discovery, with the checkout as working directory (agent-bom only scans model files under safe roots such as the working directory)."
+    },
+    "cisco-aibom": {
+      "display": "Cisco AI BOM",
+      "source": "https://github.com/cisco-ai-defense/aibom",
+      "version": "1.10.1",
+      "install": "pip install --only-binary=:all: 'cisco-aibom[agentic,analysis,security,llm-openai]==1.10.1'",
+      "version_cmd": [
+        "{T}/cisco-aibom/bin/pip",
+        "show",
+        "cisco-aibom"
+      ],
+      "path": [
+        "{T}/cisco-aibom/bin"
+      ],
+      "commands": [
+        [
+          "cisco-aibom",
+          "analyze",
+          "{scn}",
+          "-o",
+          "json",
+          "-O",
+          "{out}/report.json",
+          "--llm-model",
+          "gpt-5.4",
+          "--llm-provider",
+          "openai",
+          "--llm-api-key",
+          "dummy-not-a-key",
+          "--llm-api-base",
+          "http://127.0.0.1:9/v1",
+          "--agentic-timeout",
+          "10",
+          "--agentic-batch-size",
+          "50",
+          "--no-show-summary",
+          "--no-progress",
+          "--atr-enrichment"
+        ],
+        [
+          "cisco-aibom",
+          "analyze",
+          "{scn}",
+          "-o",
+          "cyclonedx",
+          "-O",
+          "{out}/bom.cdx.json",
+          "--llm-model",
+          "gpt-5.4",
+          "--llm-provider",
+          "openai",
+          "--llm-api-key",
+          "dummy-not-a-key",
+          "--llm-api-base",
+          "http://127.0.0.1:9/v1",
+          "--agentic-timeout",
+          "10",
+          "--agentic-batch-size",
+          "50",
+          "--no-show-summary",
+          "--no-progress",
+          "--atr-enrichment"
+        ],
+        [
+          "cisco-aibom",
+          "analyze",
+          "{scn}",
+          "-o",
+          "spdx",
+          "-O",
+          "{out}/bom.spdx.json",
+          "--llm-model",
+          "gpt-5.4",
+          "--llm-provider",
+          "openai",
+          "--llm-api-key",
+          "dummy-not-a-key",
+          "--llm-api-base",
+          "http://127.0.0.1:9/v1",
+          "--agentic-timeout",
+          "10",
+          "--agentic-batch-size",
+          "50",
+          "--no-show-summary",
+          "--no-progress",
+          "--atr-enrichment"
+        ],
+        [
+          "cisco-aibom",
+          "analyze",
+          "{scn}",
+          "-o",
+          "sarif",
+          "-O",
+          "{out}/findings.sarif",
+          "--llm-model",
+          "gpt-5.4",
+          "--llm-provider",
+          "openai",
+          "--llm-api-key",
+          "dummy-not-a-key",
+          "--llm-api-base",
+          "http://127.0.0.1:9/v1",
+          "--agentic-timeout",
+          "10",
+          "--agentic-batch-size",
+          "50",
+          "--no-show-summary",
+          "--no-progress",
+          "--atr-enrichment"
+        ]
+      ],
+      "default_commands": [
+        [
+          "cisco-aibom",
+          "analyze",
+          "{scn}",
+          "-o",
+          "json",
+          "-O",
+          "{out}/default.json",
+          "--llm-model",
+          "gpt-5.4",
+          "--llm-api-key",
+          "dummy-not-a-key"
+        ]
+      ],
+      "declared_scope": [
+        "mcp",
+        "tooldefs",
+        "skills",
+        "agents",
+        "models",
+        "data",
+        "packages",
+        "standards"
+      ],
+      "mode_note": "v1.10.1 refuses to run without an LLM. The LLM endpoint is pointed at an unreachable port, so the tool reports its deterministic detections, each marked pending_agent_review, and no LLM enrichment; those unconfirmed candidates are graded as detections. Installed with the documented agentic, analysis, security and llm-openai extras and run with --atr-enrichment. Its intended LLM-assisted results may differ; treat its grade as provisional. With the documented `security` extra, `analyze` hands each discovered MCP config to cisco-ai-mcp-scanner, which starts every declared stdio server to enumerate its tools; in the benchmark it ran `sh -c touch \u2026` from s09b's .mcp.json (X02) and `npx -y \u2026` / `docker run \u2026` from s04. A base install without that extra does not start servers (observed in an earlier run of this benchmark)."
+    },
+    "ai-bom": {
+      "display": "Trusera ai-bom",
+      "source": "https://github.com/Trusera/ai-bom",
+      "version": "3.6.0",
+      "install": "pip install --only-binary=:all: ai-bom==3.6.0",
+      "version_cmd": [
+        "{T}/ai-bom/bin/pip",
+        "show",
+        "ai-bom"
+      ],
+      "path": [
+        "{T}/ai-bom/bin"
+      ],
+      "commands": [
+        [
+          "ai-bom",
+          "scan",
+          "{scn}",
+          "--deep",
+          "--no-telemetry",
+          "-f",
+          "cyclonedx",
+          "-o",
+          "{out}/bom.cdx.json"
+        ],
+        [
+          "ai-bom",
+          "scan",
+          "{scn}",
+          "--deep",
+          "--no-telemetry",
+          "-f",
+          "spdx3",
+          "-o",
+          "{out}/bom.spdx.json"
+        ],
+        [
+          "ai-bom",
+          "scan",
+          "{scn}",
+          "--deep",
+          "--no-telemetry",
+          "-f",
+          "sarif",
+          "-o",
+          "{out}/findings.sarif"
+        ],
+        [
+          "ai-bom",
+          "scan",
+          "{scn}",
+          "--deep",
+          "--no-telemetry",
+          "-f",
+          "json",
+          "-o",
+          "{out}/native.json"
+        ]
+      ],
+      "default_commands": [
+        [
+          "ai-bom",
+          "scan",
+          "{scn}",
+          "-f",
+          "json",
+          "-o",
+          "{out}/default.json"
+        ]
+      ],
+      "declared_scope": [
+        "mcp",
+        "agents",
+        "models",
+        "packages",
+        "standards"
+      ]
+    },
+    "aisbom": {
+      "display": "AIsbom",
+      "source": "https://github.com/Lab700xOrg/aisbom",
+      "version": "1.7.0",
+      "install": "pip install --only-binary=:all: aisbom-cli==1.7.0",
+      "version_cmd": [
+        "{T}/aisbom/bin/aisbom",
+        "--version"
+      ],
+      "path": [
+        "{T}/aisbom/bin"
+      ],
+      "commands": [
+        [
+          "aisbom",
+          "scan",
+          "{scn}",
+          "--offline",
+          "--no-fail-on-risk",
+          "--format",
+          "json",
+          "--output",
+          "{out}/bom.cdx.json"
+        ],
+        [
+          "aisbom",
+          "scan",
+          "{scn}",
+          "--offline",
+          "--no-fail-on-risk",
+          "--format",
+          "spdx",
+          "--spdx-version",
+          "3.0",
+          "--output",
+          "{out}/bom.spdx.json"
+        ]
+      ],
+      "default_commands": [
+        [
+          "aisbom",
+          "scan",
+          "{scn}",
+          "--output",
+          "{out}/default.json"
+        ]
+      ],
+      "declared_scope": [
+        "models",
+        "packages",
+        "standards",
+        "safety"
+      ]
+    },
+    "aibom-scanner": {
+      "display": "aibom-scanner (saasvista)",
+      "source": "https://github.com/saasvista/aibom-scanner",
+      "version": "1.3.5",
+      "install": "pip install --only-binary=:all: aibom-scanner==1.3.5",
+      "version_cmd": [
+        "{T}/aibom-scanner/bin/aibom-scanner",
+        "--version"
+      ],
+      "path": [
+        "{T}/aibom-scanner/bin"
+      ],
+      "commands": [
+        [
+          "aibom-scanner",
+          "scan",
+          "--path",
+          "{scn}",
+          "--format",
+          "json",
+          "-o",
+          "{out}/report.json"
+        ],
+        [
+          "aibom-scanner",
+          "scan",
+          "--path",
+          "{scn}",
+          "--format",
+          "sarif",
+          "-o",
+          "{out}/findings.sarif"
+        ]
+      ],
+      "default_commands": [
+        [
+          "aibom-scanner",
+          "scan",
+          "--path",
+          "{scn}",
+          "--format",
+          "json",
+          "-o",
+          "{out}/default.json"
+        ]
+      ],
+      "declared_scope": [
+        "mcp",
+        "agents",
+        "models",
+        "packages"
+      ]
+    },
+    "airom": {
+      "display": "AIROM",
+      "source": "https://github.com/airomhq/airom",
+      "version": "0.4.7",
+      "install": "go install github.com/airomhq/airom/cmd/airom@v0.4.7",
+      "version_cmd": [
+        "{T}/go/bin/airom",
+        "version"
+      ],
+      "path": [
+        "{T}/go/bin"
+      ],
+      "commands": [
+        [
+          "airom",
+          "fs",
+          "{scn}",
+          "--offline",
+          "--auto-update-rules=false",
+          "-o",
+          "json={out}/airom.json",
+          "-o",
+          "cyclonedx={out}/bom.cdx.json",
+          "-o",
+          "spdx={out}/bom.spdx.json",
+          "-o",
+          "sarif={out}/findings.sarif"
+        ]
+      ],
+      "default_commands": [
+        [
+          "airom",
+          "fs",
+          "{scn}",
+          "-o",
+          "json={out}/default.json"
+        ]
+      ],
+      "declared_scope": [
+        "models",
+        "data",
+        "agents",
+        "packages",
+        "standards",
+        "safety"
+      ]
+    },
+    "aibomgen-cli": {
+      "display": "AIBoMGen CLI",
+      "source": "https://github.com/idlab-discover/aibomgen-cli",
+      "version": "0.3.0",
+      "install": "go install github.com/idlab-discover/aibomgen-cli@v0.3.0",
+      "version_cmd": [
+        "{T}/go/bin/aibomgen-cli",
+        "version"
+      ],
+      "path": [
+        "{T}/go/bin"
+      ],
+      "commands": [
+        [
+          "aibomgen-cli",
+          "scan",
+          "{scn}",
+          "--no-input",
+          "--no-security-scan",
+          "--hf-timeout",
+          "5",
+          "-o",
+          "{out}/dist"
+        ]
+      ],
+      "default_commands": [
+        [
+          "aibomgen-cli",
+          "scan",
+          "{scn}",
+          "--no-input",
+          "-o",
+          "{out}/default"
+        ]
+      ],
+      "declared_scope": [
+        "models",
+        "data",
+        "standards"
+      ],
+      "mode_note": "Reads model metadata from the Hugging Face Hub, which the sandbox cannot reach; only model IDs it detects in code are reported."
+    },
+    "owasp-aibom-generator": {
+      "display": "OWASP AIBOM Generator",
+      "source": "https://github.com/GenAI-Security-Project/aibom-generator",
+      "version": "main@2026-10-17",
+      "runnable": false,
+      "not_run_reason": "Takes a Hugging Face model ID and reads metadata from the live Hugging Face Hub API; it has no mode for scanning a local repository or local model files, and the Hub is unreachable from the benchmark sandbox by design.",
+      "declared_scope": [
+        "models",
+        "standards"
+      ]
+    },
+    "positive-control": {
+      "display": "Positive control (executes every payload)",
+      "version": "bench",
+      "calibration": true,
+      "source": "benchmarks/aibom-bench/executor.py",
+      "version_cmd": [
+        "python3",
+        "-c",
+        "print('executor')"
+      ],
+      "path": [
+        "{T}/node/bin"
+      ],
+      "commands": [
+        [
+          "python3",
+          "{bench}/executor.py",
+          "{scn}",
+          "{out}"
+        ]
+      ],
+      "default_commands": [
+        [
+          "python3",
+          "{bench}/executor.py",
+          "{scn}",
+          "{out}"
+        ]
+      ],
+      "declared_scope": [
+        "safety"
+      ]
+    }
+  }
+}

@@ -487,3 +487,10 @@ def test_imported_discovery_findings_are_omitted_and_counted(tmp_path):
     run = SARIFGenerator(tmp_path).generate(bom)["runs"][0]
     assert [r["properties"]["component_ref"] for r in run["results"]] == ["local"]
     assert run["properties"]["nexus-symbiote:omittedImportedFindings"] == 2
+    assert {
+        "level": "warning",
+        "message": {
+            "text": "This run leaves out 1 imported ShadowScan component(s) and their 2 "
+            "finding(s); the native inventory and the ShadowScan report keep them."
+        },
+    } in run["invocations"][0]["toolExecutionNotifications"]

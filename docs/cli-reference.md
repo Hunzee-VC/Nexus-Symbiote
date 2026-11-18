@@ -781,6 +781,7 @@ nexus-symbiote scan [OPTIONS] [PROJECT_PATH]
 | `--accept-project-policy` | In CI, accept a project policy that weakens the built-in gates explicitly; without it such a policy fails the command there (exit 1). Interactive runs only warn. |
 | `--fail-on-unsigned-discovery` | With `--check`, exit with status 1 when ShadowScan discovery evidence is unverified. |
 | `--allow-unsigned-discovery` | With `--check`, accept unverified ShadowScan discovery evidence explicitly (still warns); required in CI when no `--signature-policy` verifies the report. |
+| `--sarif-omit-imported-discovery` | With SARIF output, accept leaving imported ShadowScan components and their findings out of the run, which says how many it left out. Without it, `scan` refuses SARIF for an inventory that merges a ShadowScan report. A usage error (exit 2) without SARIF output or with `--check`. |
 
 `PROJECT_PATH` is resolved before collection, because the collectors refuse a root
 reached through a symbolic link. When it resolves through a link, `scan` names the

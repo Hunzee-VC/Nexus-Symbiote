@@ -84,7 +84,15 @@ inputs:
   sarif-upload:
     description: >-
       Generate SARIF and upload it with security-events write permission. Skipped, with a
-      warning, for an inventory that merges imported ShadowScan discovery
+      warning, for an inventory that merges imported ShadowScan discovery, unless
+      sarif-omit-imported-discovery is 'true'
+    default: "false"
+  sarif-omit-imported-discovery:
+    description: >-
+      'true' writes and uploads SARIF for an inventory that merges imported ShadowScan
+      discovery, leaving the imported components and their findings out of it; the SARIF run
+      states how many it left out. With 'false', that SARIF upload is skipped with a warning and
+      format 'sarif' fails collection
     default: "false"
   sarif-category:
     description: Code scanning category for the SARIF upload
@@ -207,6 +215,7 @@ runs:
         SYMBIOTE_SIGNATURE_POLICY: ${{ inputs.signature-policy }}
         SYMBIOTE_LIMITS: ${{ inputs.limits }}
         SYMBIOTE_ALLOW_UNSIGNED_DISCOVERY: ${{ inputs.allow-unsigned-discovery }}
+        SYMBIOTE_SARIF_OMIT_IMPORTED_DISCOVERY: ${{ inputs.sarif-omit-imported-discovery }}
       run: '"$SYMBIOTE_ACTION_PYTHON" -I "$SYMBIOTE_ACTION_PATH/scripts/run_action.py"'
     - name: Upload SARIF
       if: always() && inputs.sarif-upload == 'true' && steps.scan.outputs.sarif_path != ''

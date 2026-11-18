@@ -53,6 +53,18 @@ PROJECTION_PROFILE = "nexus-symbiote/shadowscan-projection/v5"
 EVIDENCE_CLAIM = CITED_EVIDENCE_CLAIM
 MODEL_REF_PREFIX = "shadowscan:model:"
 CONTENT_PROFILE = "nexus-symbiote/shadowscan-content/v1"
+# For a native report that declares run-scoped credential identities: ShadowScan keyed
+# its credential and caller pseudonyms with a random per-scan key, so they differ on
+# every run over identical input. These profiles are v4 and v1 with each such
+# pseudonym renamed by its order of first appearance.
+RUN_SCOPED_PROJECTION_PROFILE = "nexus-symbiote/shadowscan-projection/v5"
+RUN_SCOPED_CONTENT_PROFILE = "nexus-symbiote/shadowscan-content/v2"
+RUN_SCOPED_IDENTITIES_GAP = (
+    "ShadowScan keyed credential pseudonyms to this scan only; diff cannot tell a "
+    "different credential from a rerun. Set SHADOWSCAN_IDENTITY_KEY for stable pseudonyms"
+)
+_CREDENTIAL_IDENTITY_SCHEMA = "shadowscan.credential-identity/v1"
+_RUN_SCOPED_PSEUDONYM = re.compile(r"(credential|caller):hmac-sha256:[0-9a-f]{64}", re.ASCII)
 # The fields that only record when a collection run happened. The list is closed:
 # any other field, including one a later ShadowScan release adds, stays content,
 # and so does a listed field whose value is not the expected run-event shape.
@@ -108,6 +120,7 @@ class ImportedReport:
     dependencies: list[DependencyEdge] = field(default_factory=list)
     digest: str = ""
     content_digest: str = ""
+    content_profile: str = CONTENT_PROFILE
     source_format: str = ""
     source_status: str = "unknown"
     unmapped_count: int = 0
@@ -154,7 +167,7 @@ class ImportedReport:
             scanner_status={"shadowscan": "partial"},
             source_report_digest=self.digest,
             source_report_content_digest=self.content_digest or None,
-            source_report_content_profile=CONTENT_PROFILE if self.content_digest else None,
+            source_report_content_profile=self.content_profile if self.content_digest else None,
             source_report_format=self.source_format,
             source_report_status=self.source_status,
             source_unmapped_count=self.unmapped_count,
@@ -194,14 +207,30 @@ def _without(
     }
 
 
+def declares_run_scoped_identities(data: dict[str, Any]) -> bool:
+    """Whether a native report says its credential pseudonyms are keyed to this scan only."""
+    scope = data.get("collection_scope")
+    return (
+        data.get("bomFormat") != "CycloneDX"
+        and isinstance(scope, dict)
+        and scope.get("credential_identity_schema") == _CREDENTIAL_IDENTITY_SCHEMA
+        and scope.get("credential_identity_scope") == "run"
+    )
+
+
+def content_profile(data: dict[str, Any]) -> str:
+    return RUN_SCOPED_CONTENT_PROFILE if declares_run_scoped_identities(data) else CONTENT_PROFILE
+
+
 def report_content_digest(data: dict[str, Any]) -> str:
-    """Digest a strictly parsed report under CONTENT_PROFILE, for drift and not authentication.
+    """Digest a strictly parsed report under its content profile, for drift and not authentication.
 
     RFC 8785 canonical JSON of the report without its run-event fields: native
     top-level and per-connector ``started_at``/``finished_at`` and per-finding
     ``last_seen``; CycloneDX ``serialNumber`` and ``metadata.timestamp``. A field is
     dropped only when null or shaped as an RFC 3339 timestamp (a URN UUID for the
-    serial number).
+    serial number). Under RUN_SCOPED_CONTENT_PROFILE, run-scoped pseudonyms are
+    also renamed, numbered across the whole report.
     """
     if data.get("bomFormat") == "CycloneDX":
         content = _without(data, _CYCLONEDX_RUN_EVENT_FIELDS, _SERIAL_NUMBER)
@@ -210,11 +239,41 @@ def report_content_digest(data: dict[str, Any]) -> str:
     content = _without(data, _RUN_EVENT_FIELDS)
     content["stats"] = [_without(stat, _RUN_EVENT_FIELDS) for stat in data["stats"]]
     content["findings"] = [finding_content(finding) for finding in data["findings"]]
+    if declares_run_scoped_identities(data):
+        content = _rename_pseudonyms(content, {})
     return hash_canonical(content)
 
 
-def finding_content(finding: dict[str, Any]) -> dict[str, Any]:
-    return _without(finding, _FINDING_RUN_EVENT_FIELDS)
+def finding_content(finding: dict[str, Any], *, run_scoped: bool = False) -> dict[str, Any]:
+    content = _without(finding, _FINDING_RUN_EVENT_FIELDS)
+    return _rename_pseudonyms(content, {}) if run_scoped else content
+
+
+def _rename_pseudonyms(value: Any, ordinals: dict[str, str]) -> Any:
+    """Rename each distinct run-scoped pseudonym by its order of first appearance.
+
+    Object keys are visited in sorted order, so layout does not change the numbering.
+    The replacement keeps the pseudonym's prefix and length, so renaming is a
+    consistent relabelling: it never merges a pseudonym with text around it, and two
+    references to one credential stay equal while references to two stay distinct.
+    """
+    if isinstance(value, str):
+        return _RUN_SCOPED_PSEUDONYM.sub(lambda match: _ordinal(match, ordinals), value)
+    if isinstance(value, list):
+        return [_rename_pseudonyms(item, ordinals) for item in value]
+    if isinstance(value, dict):
+        return {
+            _rename_pseudonyms(key, ordinals): _rename_pseudonyms(value[key], ordinals)
+            for key in sorted(value)
+        }
+    return value
+
+
+def _ordinal(match: re.Match[str], ordinals: dict[str, str]) -> str:
+    pseudonym = match.group(0)
+    if pseudonym not in ordinals:
+        ordinals[pseudonym] = f"{match.group(1)}:hmac-sha256:{len(ordinals) + 1:064x}"
+    return ordinals[pseudonym]
 
 
 def _unrecognized(
@@ -446,6 +505,7 @@ def _make_component(
     cdx_model: bool = False,
     cdx_mcp: bool = False,
     resource_type: Any = None,
+    projection_profile: str = PROJECTION_PROFILE,
 ) -> AnyComponent | None:
     # ShadowScan's endpoint connector emits an MCP tool as kind=mcp-server
     # and resource_type=mcp-tool. The latter is an observation type, not
@@ -467,7 +527,7 @@ def _make_component(
         "shadowscan:finding-index": index,
         "shadowscan:source-id-sha256": identity_hash,
         "collection_mode": "imported-unverified-report",
-        "shadowscan:projection-profile": PROJECTION_PROFILE,
+        "shadowscan:projection-profile": projection_profile,
     }
     if surface in _ALLOWED_SURFACES:
         props["shadowscan:surface"] = surface
@@ -585,7 +645,7 @@ class ShadowScanImporter(Scanner):
                 result.dependencies.extend(imported.dependencies)
                 result.source_report_digest = imported.digest
                 result.source_report_content_digest = imported.content_digest
-                result.source_report_content_profile = CONTENT_PROFILE
+                result.source_report_content_profile = imported.content_profile
                 result.source_report_path = relative
                 result.source_report_format = imported.source_format
                 result.source_report_status = imported.source_status
@@ -723,6 +783,7 @@ class ShadowScanImporter(Scanner):
         else:
             result = self._from_native(data, digest)
         result.content_digest = report_content_digest(data)
+        result.content_profile = content_profile(data)
         # The import-time verification outcome, bound to these exact bytes and
         # to whatever repository/commit/time the report itself carries. No
         # signature is checked here, so an import without --bundle records
@@ -742,6 +803,8 @@ class ShadowScanImporter(Scanner):
         result.limitations.append(
             "Names, detailed evidence, and unmapped relationships remain in the source report"
         )
+        if result.content_profile == RUN_SCOPED_CONTENT_PROFILE:
+            result.limitations.append(RUN_SCOPED_IDENTITIES_GAP)
         if result.unmapped_count:
             result.limitations.append(
                 f"{result.unmapped_count} source entries were not mapped into BOM components"
@@ -786,7 +849,9 @@ class ShadowScanImporter(Scanner):
         return complete
 
     @staticmethod
-    def _project_native_findings(findings: list[Any], result: ImportedReport) -> None:
+    def _project_native_findings(
+        findings: list[Any], result: ImportedReport, *, run_scoped: bool = False
+    ) -> None:
         ids: set[str] = set()
         for index, finding in enumerate(findings):
             if (
@@ -820,11 +885,14 @@ class ShadowScanImporter(Scanner):
                 source_id,
                 index,
                 result.digest,
-                hash_canonical(finding_content(finding)),
+                hash_canonical(finding_content(finding, run_scoped=run_scoped)),
                 surface,
                 level,
                 finding.get("shadow"),
                 resource_type=finding.get("resource_type"),
+                projection_profile=(
+                    RUN_SCOPED_PROJECTION_PROFILE if run_scoped else PROJECTION_PROFILE
+                ),
             )
             if comp is None:
                 result.unmapped_count += 1
@@ -890,7 +958,9 @@ class ShadowScanImporter(Scanner):
             source_format="shadowscan-json",
             source_status="complete" if complete else "incomplete",
         )
-        self._project_native_findings(findings, result)
+        self._project_native_findings(
+            findings, result, run_scoped=declares_run_scoped_identities(data)
+        )
         self._check_native_breakdowns(summary, findings)
         return result
 

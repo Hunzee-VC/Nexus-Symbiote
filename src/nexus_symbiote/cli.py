@@ -726,6 +726,15 @@ def _render_aibom(aibom: AIBOM, output_format: str, root: Path) -> str:
         "required in CI."
     ),
 )
+@click.option(
+    "--sarif-omit-imported-discovery",
+    is_flag=True,
+    help=(
+        "With SARIF output, accept leaving imported ShadowScan components and their findings "
+        "out of the run, which says how many it left out. Without it, scan refuses SARIF for "
+        "an inventory that merges a ShadowScan report."
+    ),
+)
 def scan(
     project_path: str,
     output: str | None,
@@ -738,6 +747,7 @@ def scan(
     check_only: bool = False,
     fail_on_unsigned_discovery: bool = False,
     allow_unsigned_discovery: bool = False,
+    sarif_omit_imported_discovery: bool = False,
 ) -> None:
     """Scan a project and generate an AIBOM."""
     _unsigned_discovery_flags(fail_on_unsigned_discovery, allow_unsigned_discovery)
@@ -764,6 +774,8 @@ def scan(
     )
     signature_policies = _signer_policies(signature_policy, root)
     output_format = output_format or policy.output.default_format
+    if sarif_omit_imported_discovery and (check_only or output_format != "sarif"):
+        raise click.UsageError("--sarif-omit-imported-discovery requires SARIF output")
     all_scanners = _get_scanners()
     selected = scanners or tuple(policy.scan.scanners)
     unknown = set(selected) - set(all_scanners)
@@ -968,10 +980,10 @@ def scan(
     staged = _staged_inventory()
 
     if not check_only:
-        if source_report_digest and output_format == "sarif":
+        if source_report_digest and output_format == "sarif" and not sarif_omit_imported_discovery:
             raise click.ClickException(
                 "SARIF cannot preserve imported discovery coverage; use native JSON, CycloneDX "
-                "or SPDX."
+                "or SPDX, or pass --sarif-omit-imported-discovery to write SARIF without it."
             )
         try:
             out_data = _render_aibom(aibom, output_format, root)

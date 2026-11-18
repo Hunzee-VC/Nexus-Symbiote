@@ -1324,8 +1324,11 @@ A way around a limit that its entry does not describe is worth a
   written by `import-shadowscan`. For a merged `scan` BOM, use the signature policy
   with `--project`.
 - **Reruns need keyed credential identities.** When a report records
-  `collection_scope.credential_identity_scope` as `run`, its redacted credential
-  findings get new ids on every run, and `diff` reports them as removed and added.
+  `collection_scope.credential_identity_scope` as `run`, ShadowScan gives each
+  credential a new pseudonym on every run. The content digests rename those
+  pseudonyms, so a rerun is not drift, but they cannot show one credential replacing
+  another, and a finding identifier ShadowScan derives from a pseudonym, such as a
+  gateway caller's, still changes on every run, which `diff` reports as a change.
   Set `SHADOWSCAN_IDENTITY_KEY` for every ShadowScan run; see
   [compare discovery across reruns](shadowscan-integration.md#compare-discovery-across-reruns).
 - **`export-inventory` approves only the repository's root project.** Components,

@@ -1234,7 +1234,10 @@
         "source_report_content_profile": {
           "anyOf": [
             {
-              "const": "nexus-symbiote/shadowscan-content/v1",
+              "enum": [
+                "nexus-symbiote/shadowscan-content/v1",
+                "nexus-symbiote/shadowscan-content/v2"
+              ],
               "type": "string"
             },
             {
