@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import ClaimEvidence, MCPServerComponent, ToolComponent
-from nexus_symbiote.scanners.base import ScanResult
+from nexus_symbiote.scanners.base import ScanResult, declared_server_name
 
 PYTHON_TOOL_HINTS = ("mcp", "langchain", "crewai", "function_tool", "smolagents", "pydantic_ai")
 
@@ -788,13 +788,15 @@ def _server_from_assignment(
         or any(kw.arg is None or kw.arg in _REGISTERING_KEYWORDS for kw in call.keywords)
     ):
         return None
-    # The variable is bound once in this file, so path and name identify the
-    # server; the line is informational and moving it is not a new server.
+    # The variable is bound once in this file, so path and variable identify the
+    # server, where a declared name can repeat; the line is informational and moving
+    # it is not a new server.
     server = MCPServerComponent(
         bom_ref=f"mcp-python:{quote(path.as_posix(), safe='')}:{target.id}",
-        name=target.id,
+        name=_declared_python_name(call) or target.id,
         source_path=path.as_posix(),
         properties={
+            "binding": target.id,
             "method": "python-ast",
             "collection_mode": "static-source-declaration",
             "runtime_registration": "unknown",
@@ -803,6 +805,14 @@ def _server_from_assignment(
         },
     )
     return call, server
+
+
+def _declared_python_name(call: ast.Call) -> str | None:
+    """The name a constructor declares as a string literal, first or as ``name=``."""
+    given = [*call.args[:1], *(kw.value for kw in call.keywords if kw.arg == "name")]
+    if len(given) != 1 or not isinstance(given[0], ast.Constant):
+        return None
+    return declared_server_name(given[0].value)
 
 
 def _tool_decorator(deco: ast.expr) -> tuple[str, ast.Call | ast.Attribute] | None:
@@ -1906,12 +1916,13 @@ def collect_python_tools(
                 path,
                 source_digest,
             )
-            if found is None:
+            target = stmt.targets[0]
+            if found is None or not isinstance(target, ast.Name):
                 continue
             call, server = found
             handled.add(call)
-            handled.add(stmt.targets[0])
-            servers[server.name] = server
+            handled.add(target)
+            servers[target.id] = server
             result.components.append(server)
         elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
             _record_decorated_tools(stmt, servers, handled, path, source_digest, result)

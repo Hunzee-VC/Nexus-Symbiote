@@ -433,6 +433,10 @@ A way around a limit that its entry does not describe is worth a
   `pydantic_ai.mcp`, a client base class there, is not a gap. So a
   server built from a class a project module re-exports is a gap on the file that
   builds it, even when the re-exporting module's own server is inventoried.
+  A server whose declared name is computed, such as an f-string or a variable, or
+  outside the [supported form](collectors.md#mcp-servers-declared-in-source) is
+  named by its variable without a gap, so its inventory name can differ from the
+  name clients see.
   A `tool` decorator with a positional argument, or a keyword other than `name`,
   `title`, `description`, `tags`, `annotations`, `output_schema`, `exclude_args`,
   `meta`, `structured_output`, `icons`, `enabled`, `version`, `app`, `task`,
@@ -627,7 +631,10 @@ A way around a limit that its entry does not describe is worth a
   literal `tool` or `registerTool` call, such as `server.server`, a wrapped
   `registerTool` or the server passed to code in a file that does not name the SDK,
   which can register tools the inventory does not show; and servers built with
-  other frameworks.
+  other frameworks. A server whose declared name is computed, such as a template
+  literal with a substitution or a variable, or outside the
+  [supported form](collectors.md#mcp-servers-declared-in-source) is named by its
+  variable without a gap, so its inventory name can differ from the name clients see.
 - **Some directories are skipped.** Server source under directories named `build`,
   `dist`, `test`, `tests`, `docs`, `benchmarks` or `examples`, and `__tests__` for
   TypeScript and JavaScript, is skipped without a gap, and so are TypeScript

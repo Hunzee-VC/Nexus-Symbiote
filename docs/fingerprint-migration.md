@@ -127,6 +127,26 @@ Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a server that declares one carries 
 launch values are unbound for it, even between identical inventories. Set the key
 on both collections to compare those values, or review and accept the alert.
 
+## Source MCP server names
+
+An MCP server collected from source is named by the literal name its constructor
+declares, `new McpServer({ name: "analytics-mcp" })` or `FastMCP("analytics-mcp")`,
+instead of the variable it is bound to; the variable is kept in the `binding`
+property. A TypeScript or JavaScript server's reference carries that name, so for
+a server with a literal name both the reference and the references of its tools
+change once: `mcp-source:src%2Fserver.ts:server:2:84` becomes
+`mcp-source:src%2Fserver.ts:analytics-mcp:2:84`, and `diff` against an earlier
+baseline reports the server and its tools as removed and added, with a high alert
+for each removal and a medium alert for each addition. The repository agent lists
+the old tool references, so it is reported as modified with a high
+`tool_refs changed` alert, and its `configured-with` relationships to the server
+and its tools and the server's `provides-tool` relationships are reported as
+removed and added. A Python server keeps its `mcp-python:<path>:<variable>`
+reference, so `diff` reports it as modified once, with `properties.binding added`
+and `name changed`. A server whose name is computed keeps its name and reference,
+and `diff` reports it as modified once, with a medium alert for
+`properties.binding added`. Recollect and review the baseline once after upgrading.
+
 ## SARIF rule identifiers
 
 0.1.0 keyed SARIF rules by category (`nexus_symbiote/<category>`) and raised a

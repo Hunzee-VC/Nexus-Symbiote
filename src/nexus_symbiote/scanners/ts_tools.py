@@ -43,7 +43,7 @@ from nexus_symbiote import limits
 from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import ClaimEvidence, MCPServerComponent, ToolComponent
 from nexus_symbiote.limits import Bound
-from nexus_symbiote.scanners.base import ScanResult
+from nexus_symbiote.scanners.base import ScanResult, declared_server_name
 
 _SDK = "@modelcontextprotocol/"
 _MODULES = {"@modelcontextprotocol/server", "@modelcontextprotocol/sdk/server/mcp.js"}
@@ -831,6 +831,51 @@ def _sdk_uses(index: _Index, root: Node, found: _Declarations, resolver: _Resolv
                 found.gaps.append((node, reason))
 
 
+def _literal_key(node: Node | None) -> str | None:
+    """A property key as JavaScript reads it, or None when it is computed."""
+    if node is None:
+        return None
+    if node.type in {"property_identifier", "shorthand_property_identifier"}:
+        return _name(node)
+    if node.type == "computed_property_name":
+        inner = _parts(node)
+        return _string_value(_operand(inner[0], _REFERENCE_WRAPPERS)) if inner else None
+    return _string_value(node) if node.type in {"string", "template_string"} else _value(node)
+
+
+def _declared_name(constructor: Node) -> str | None:
+    """The literal ``name`` of a constructor's first argument, an object literal, else None.
+
+    A later ``name`` entry replaces an earlier one, and a spread or a computed key
+    after it can, so only a literal that nothing after it can replace counts.
+    """
+    arguments = constructor.child_by_field_name("arguments")
+    listed = arguments is not None and arguments.type == "arguments"
+    values = _parts(arguments) if arguments is not None and listed else []
+    options = _operand(values[0], _REFERENCE_WRAPPERS) if values else None
+    if options is None or options.type != "object":
+        return None
+    name: str | None = None
+    for entry in _parts(options):
+        literal = None
+        if entry.type == "pair":
+            key = _literal_key(entry.child_by_field_name("key"))
+            literal = _string_value(
+                _operand(entry.child_by_field_name("value"), _REFERENCE_WRAPPERS)
+            )
+        elif entry.type == "method_definition":
+            key = _literal_key(entry.child_by_field_name("name"))
+        elif entry.type == "shorthand_property_identifier":
+            key = _literal_key(entry)
+        else:
+            key = None
+        if key is None:
+            name = None
+        elif key == "name":
+            name = declared_server_name(literal)
+    return name
+
+
 def _sdk_constructor(callee: Node | None, resolver: _Resolver) -> bool:
     """Whether a ``new`` expression's callee is the collected ``McpServer`` class."""
     if callee is not None and callee.type in {"member_expression", "subscript_expression"}:
@@ -957,12 +1002,15 @@ def _collect_source(content: bytes, path: Path, result: ScanResult) -> None:
             )
             continue
         line = declaration.start_point.row + 1
-        ref = f"mcp-source:{quote(location, safe='')}:{receiver}:{line}:{node.start_byte}"
+        literal = _declared_name(node)
+        identity = receiver if literal is None else quote(literal, safe="")
+        ref = f"mcp-source:{quote(location, safe='')}:{identity}:{line}:{node.start_byte}"
         server = MCPServerComponent(
             bom_ref=ref,
-            name=receiver,
+            name=receiver if literal is None else literal,
             source_path=location,
             properties={
+                "binding": receiver,
                 "declaration_line": line,
                 "method": "typescript-ast",
                 "collection_mode": "static-source-declaration",

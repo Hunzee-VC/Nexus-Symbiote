@@ -10,6 +10,22 @@ as `import { "McpServer" as Server }` included) or through a namespace import
 Type-only imports, shadowed constructor parameters and shadowed server variables
 do not establish SDK server bindings.
 
+A server is named by the string literal its constructor declares as `name` in the
+object literal it is given first, as in
+`new McpServer({ name: "analytics-mcp", version: "1.0.0" })`: that is the name
+clients see, and the component reference
+(`mcp-source:<path>:<name>:<line>:<offset>`) carries it too. The `binding` and
+`declaration_line` properties record the variable the server is bound to and the
+line of its declaration. A name the analysis would have to compute keeps the
+variable as the name and in the reference: a template literal with a substitution,
+a variable, a concatenation, a getter, or a `name` entry that a later spread,
+computed key or `name` entry can replace. So does a literal of more than 128
+characters, one with characters other than ASCII letters, digits, `_`, `.`, `-` and
+single spaces between words, one without a letter or digit, or one that
+redaction would change. A template
+literal without a substitution is a literal. Each constructor is its own
+component, so two servers in one file are two, even with the same name.
+
 Each tool record has declared assurance, a digest of its registration call
 (`registration_source_sha256`) and a digest of the whole declaring file
 (`source_sha256`), so editing a handler defined elsewhere in that file changes the

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Iterator
@@ -22,11 +23,14 @@ from nexus_symbiote.core.models import (
 )
 from nexus_symbiote.limits import Bound
 from nexus_symbiote.utils.confined import BoundedRecords, ConfinedCollection
+from nexus_symbiote.utils.secrets import redact_text
 
 MAX_CONFIG_BYTES = 4 * 1024 * 1024
 MAX_MODEL_BYTES = 1024 * 1024 * 1024
 # The default only: a source budget reads the operator's source-scan-bytes limit.
 MAX_SOURCE_BYTES = limits.DEFAULTS.source_scan_bytes
+MAX_SERVER_NAME_CHARS = 128
+_SERVER_NAME = re.compile(r"(?=.*[A-Za-z0-9])[A-Za-z0-9_.-]+(?: [A-Za-z0-9_.-]+)*")
 
 
 def read_regular_text(path: Path, *, max_bytes: int = MAX_CONFIG_BYTES) -> str:
@@ -89,6 +93,19 @@ def parse_python(source: str) -> ast.Module:
             return ast.parse(source.removeprefix("\ufeff"))
         except (MemoryError, RecursionError, OverflowError):
             raise ValueError("Python source too complex to parse") from None
+
+
+def declared_server_name(literal: object) -> str | None:
+    """The name a server constructor declares as a literal, when it is in the supported form.
+
+    A source collector names a server by this literal, the name clients see, and by
+    its binding otherwise, as it does when redaction would change the literal.
+    """
+    if not isinstance(literal, str) or len(literal) > MAX_SERVER_NAME_CHARS:
+        return None
+    if _SERVER_NAME.fullmatch(literal) is None:
+        return None
+    return literal if redact_text(literal, identifier=True) == literal else None
 
 
 def project_relative(root: Path) -> Callable[[str], str]:
