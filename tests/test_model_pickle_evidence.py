@@ -5,6 +5,7 @@ from __future__ import annotations
 import bz2
 import gzip
 import io
+import json
 import lzma
 import os
 import pickle
@@ -339,6 +340,49 @@ def test_gguf_content_under_a_pickle_family_name_keeps_the_critical_rating(
     passed, findings = _gate([component])
     assert ("serialization_format", "critical") in findings
     assert not passed
+
+
+def test_gguf_content_under_a_wrapper_suffix_is_rated_by_the_wrapper_first(tmp_path: Path) -> None:
+    path = tmp_path / "ggml-model.pth.tar"
+    path.write_bytes(_gguf(BENIGN_TEMPLATE))
+    assert inspect_model_format(path) == (UNSAFE, PICKLE_NAME_WRAPPED)
+
+
+def test_gguf_content_past_the_head_bound_keeps_the_gguf_evidence(tmp_path: Path) -> None:
+    path = tmp_path / "ggml-model.bin"
+    path.write_bytes(_gguf(BENIGN_TEMPLATE) + b"\0" * (MAX_PICKLE_INSPECTION_BYTES + 1))
+    assert inspect_model_format(path) == (UNSAFE, PICKLE_NAME_GGUF)
+
+
+def _safetensors() -> bytes:
+    header = json.dumps({"w": {"dtype": "U8", "shape": [4], "data_offsets": [0, 4]}}).encode()
+    return len(header).to_bytes(8, "little") + header + b"\0" * 4
+
+
+def test_safetensors_content_under_a_pickle_family_name_beside_a_hostile_template(
+    tmp_path: Path,
+) -> None:
+    # The directory template adds its critical finding under either name and fails the
+    # gate; under a pickle-family name the rating stays unknown, as the template check
+    # lifts only a safe rating (docs/security-model.md), while .safetensors is rated by
+    # the template.
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "chat_template.jinja").write_text(HOSTILE_TEMPLATE)
+    (tmp_path / "models" / "model.bin").write_bytes(_safetensors())
+    (tmp_path / "models" / "model.safetensors").write_bytes(_safetensors())
+    found, failures = _scan(tmp_path)
+    assert failures == []
+    renamed = found["models/model.bin"]
+    assert renamed.serialization_safety is UNKNOWN
+    assert renamed.properties["format_inspection"] == PICKLE_NAME_UNEVIDENCED
+    severities = _severities(renamed)
+    assert ("serialization_format", "critical") in severities
+    assert ("serialization_format_unknown", "high") in severities
+    passed, findings = _gate([renamed])
+    assert ("serialization_format", "critical") in findings
+    assert not passed
+    own = found["models/model.safetensors"]
+    assert own.serialization_safety is SerializationSafety.UNSAFE_TEMPLATE_INJECTION
 
 
 def test_the_same_gguf_bytes_are_rated_by_their_template_under_their_own_name(

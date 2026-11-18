@@ -20,6 +20,7 @@ from nexus_symbiote.runtime_validation import ValidationBudgetError, check_json_
 from nexus_symbiote.scanners.base import sanitized_origin
 from nexus_symbiote.scanners.model import (
     PICKLE_NAME_EMPTY,
+    PICKLE_NAME_GGUF,
     PICKLE_NAME_UNEVIDENCED,
     inspect_model_format,
 )
@@ -174,3 +175,15 @@ def test_model_inspection_classifies_arbitrary_bytes_without_raising(payload, su
         ):
             # Bytes that start no pickle, ZIP archive or NumPy array are no evidence.
             assert (safety, reason) == (SerializationSafety.UNKNOWN, PICKLE_NAME_UNEVIDENCED)
+
+
+@settings(PROPERTY_SETTINGS, max_examples=60)
+@given(st.binary(max_size=512), st.sampled_from([".bin", ".pkl", ".pt"]))
+def test_gguf_magic_under_a_pickle_family_name_is_critical_whatever_follows(tail, suffix):
+    # 'G' is an opcode byte, so the property above never reaches these bytes; llama.cpp
+    # opens a model by this magic, and the chat-template check runs only under .gguf.
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / f"model{suffix}"
+        path.write_bytes(b"GGUF" + tail)
+        verdict = inspect_model_format(path)
+    assert verdict == (SerializationSafety.UNSAFE_CODE_EXECUTION, PICKLE_NAME_GGUF)
