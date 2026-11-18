@@ -24,6 +24,7 @@ from nexus_symbiote.core.models import (
     ClaimEvidence,
     CompletenessClaim,
     DiscoveryVerification,
+    IDEAgentComponent,
     MCPServerComponent,
     ModelComponent,
     RiskAssessment,
@@ -49,7 +50,7 @@ CITED_LINES_GAP = (
 MAX_EVIDENCE_LOCATIONS = 16
 # With the bounds above, the named models of one report stay under 3 MiB of inventory.
 MAX_NAMED_MODELS = 500
-PROJECTION_PROFILE = "nexus-symbiote/shadowscan-projection/v5"
+PROJECTION_PROFILE = "nexus-symbiote/shadowscan-projection/v6"
 EVIDENCE_CLAIM = CITED_EVIDENCE_CLAIM
 MODEL_REF_PREFIX = "shadowscan:model:"
 CONTENT_PROFILE = "nexus-symbiote/shadowscan-content/v1"
@@ -68,8 +69,38 @@ REPORT_PATHS = (".shadowscan/report.json", "shadowscan-report.json", "shadowscan
 _ALLOWED_SURFACES = frozenset(
     {"code", "identity", "gateway", "lowcode", "saas", "cloud", "endpoint", "network", "runtime"}
 )
-_PROJECTED_KINDS = frozenset({"agent", "mcp-server", "local-model", "model"})
+# Other ShadowScan connectors use these kinds for a lockfile, a platform setting or a
+# registry skill, so each is projected for one resource type only.
+_RESOURCE_BOUND_KINDS = {"agent-config": "coding-agent-config", "framework-usage": "project"}
+_PROJECTED_KINDS = frozenset(
+    {"agent", "mcp-server", "local-model", "model", *_RESOURCE_BOUND_KINDS}
+)
+# The kinds of ShadowScan 0.1.4. An unmapped entry is named from this list and never by
+# the report's own text.
+_SOURCE_KINDS = frozenset(
+    {
+        "agent",
+        "agent-config",
+        "ai-app",
+        "bot-app",
+        "cloud-resource",
+        "framework-usage",
+        "gateway-caller",
+        "iam-grant",
+        "infra",
+        "local-model",
+        "mcp-server",
+        "network-contact",
+        "oauth-grant",
+        "runtime-process",
+        "secret",
+        "service-identity",
+        "token",
+        "workflow",
+    }
+)
 _RISK_LEVELS = frozenset(level.value for level in RiskSeverity)
+UNMAPPED_ENTRIES_GAP = "ShadowScan report contains unmapped entries"
 UNRECOGNIZED_VALUES_GAP = "ShadowScan report contains values the projection does not recognize"
 # A source-reported label such as ``model:provider.aws-bedrock``: short parts only.
 _MODEL_SIGNAL = re.compile(r"model:[a-z0-9]{1,24}(?:[.-][a-z0-9]{1,24}){0,3}", re.ASCII)
@@ -112,6 +143,8 @@ class ImportedReport:
     source_status: str = "unknown"
     unmapped_count: int = 0
     unmapped_indexes: list[int] = field(default_factory=list)
+    # Unmapped entries by the label the projection gives them, never the report's text.
+    unmapped_kinds: Counter[str] = field(default_factory=Counter)
     limitations: list[str] = field(default_factory=list)
     unrecognized: Counter[str] = field(default_factory=Counter)
     # Signature-verification outcome for this report, recorded in the BOM.
@@ -231,6 +264,15 @@ def _unrecognized(
     if surface is not None and surface not in _ALLOWED_SURFACES:
         found.append("a surface")
     return found
+
+
+def _unmapped_label(kind: str) -> str:
+    """How an unmapped entry is named: a constant of this module, whatever the report says."""
+    if kind in _PROJECTED_KINDS:
+        return kind + " (unprojected form)"
+    if kind in _SOURCE_KINDS:
+        return kind
+    return "unrecognized kind" if kind else "no kind"
 
 
 def _clean_binding(value: Any) -> str | None:
@@ -458,6 +500,9 @@ def _make_component(
         cdx_mcp and kind not in {"", "mcp-server"}
     ):
         return None
+    bound = _RESOURCE_BOUND_KINDS.get(kind)
+    if bound is not None and resource_type != bound:
+        return None
     is_mcp_tool = kind == "mcp-server" and resource_type == "mcp-tool"
     identity_hash = _short_hash(source_id)
     ref = "shadowscan:" + identity_hash
@@ -488,11 +533,17 @@ def _make_component(
     if is_mcp_tool:
         props["shadowscan:resource-type"] = "mcp-tool"
         return ToolComponent(**common)
+    if bound is not None:
+        props["shadowscan:resource-type"] = bound
     if kind == "mcp-server" or cdx_mcp:
         return MCPServerComponent(**common)
     if kind in {"local-model", "model"} or cdx_model:
         return ModelComponent(**common)
-    if kind == "agent":
+    if kind == "agent-config":
+        return IDEAgentComponent(**common)
+    # One finding id moves between framework-usage and agent as ShadowScan sees agent
+    # indicators, so both are one component type and a promotion is not a new component.
+    if kind in {"agent", "framework-usage"}:
         return AgentComponent(autonomy_level=None, **common)
     return None
 
@@ -596,7 +647,10 @@ class ShadowScanImporter(Scanner):
                 result.source_projection_limitations = list(imported.limitations)
                 report = imported
                 if imported.unmapped_count:
-                    result.surfaces_excluded.append("ShadowScan report contains unmapped entries")
+                    # Kinds without counts: the gap changes only when the set of kinds does.
+                    result.surfaces_excluded.append(
+                        f"{UNMAPPED_ENTRIES_GAP}: {', '.join(sorted(imported.unmapped_kinds))}"
+                    )
                 if imported.unrecognized:
                     result.surfaces_excluded.append(UNRECOGNIZED_VALUES_GAP)
                 if imported.source_format == "shadowscan-cyclonedx":
@@ -743,8 +797,12 @@ class ShadowScanImporter(Scanner):
             "Names, detailed evidence, and unmapped relationships remain in the source report"
         )
         if result.unmapped_count:
+            kinds = "; ".join(
+                f"{label}: {count}" for label, count in sorted(result.unmapped_kinds.items())
+            )
             result.limitations.append(
-                f"{result.unmapped_count} source entries were not mapped into BOM components"
+                f"{result.unmapped_count} source entries were not mapped into BOM components "
+                f"({kinds})"
             )
         for value, count in sorted(result.unrecognized.items()):
             result.limitations.append(
@@ -829,6 +887,7 @@ class ShadowScanImporter(Scanner):
             if comp is None:
                 result.unmapped_count += 1
                 result.unmapped_indexes.append(index)
+                result.unmapped_kinds[_unmapped_label(kind)] += 1
             else:
                 result.components.append(comp)
             evidence = finding.get("evidence")
@@ -1043,6 +1102,7 @@ class ShadowScanImporter(Scanner):
             if comp is None:
                 result.unmapped_count += 1
                 result.unmapped_indexes.append(index)
+                result.unmapped_kinds[_unmapped_label(kind)] += 1
             else:
                 result.components.append(comp)
                 mapped_refs[ref] = comp.bom_ref

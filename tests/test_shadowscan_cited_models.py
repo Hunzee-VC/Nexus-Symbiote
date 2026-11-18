@@ -1120,7 +1120,7 @@ def test_the_documented_bounds_and_names():
         shadowscan.MAX_NAMED_MODELS,
         shadowscan.MAX_REDACTED_CHARS,
     ) == (10_000, 256, 4_096, 16, 500, 1024 * 1024)
-    assert PROJECTION_PROFILE == "nexus-symbiote/shadowscan-projection/v5"
+    assert PROJECTION_PROFILE == "nexus-symbiote/shadowscan-projection/v6"
     assert (EVIDENCE_CLAIM, MODEL_REF_PREFIX) == ("cited_evidence", "shadowscan:model:")
     assert shadowscan.CITED_LINES_GAP == (
         "ShadowScan cited lines exceed the text checked for credentials; the rest were not "

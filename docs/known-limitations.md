@@ -1320,6 +1320,23 @@ A way around a limit that its entry does not describe is worth a
   two ways, such as `anthropic/<model>` and `<model>`, is two components. Findings of other kinds, container images, infrastructure
   and data are not named this way, and a standalone `import-shadowscan` names nothing; see
   [models named from cited evidence](shadowscan-integration.md#models-named-from-cited-evidence).
+- **Two finding kinds are projected for one resource type each; the rest are gaps.** An
+  `agent-config` finding becomes an `ide-agent` only with resource type `coding-agent-config`,
+  and a `framework-usage` finding an `agent` only with resource type `project`. Any other
+  resource type of those kinds stays unmapped, such as the `lockfile-inventory` finding that
+  ShadowScan 0.1.4 reports for a `uv.lock` that lists an AI package, and so does every
+  `secret`, `token`, `infra`, identity, grant and run-time finding. One unmapped entry keeps
+  the default scan, validate and risk gates closed, so a code report with a credential, an
+  infrastructure file or such a lockfile still does not pass. An imported `agent` or
+  `ide-agent` carries a digest-based label and no `ide_type`, `permission_mode`, framework or
+  autonomy, and is not linked to the configuration the local collectors read from the same
+  files. Its ShadowScan rating counts in `risk` as `shadowscan-heuristic`, where it can repeat
+  what the local collectors already rate on those files, and a `critical` rating closes the
+  default risk gate by itself unless `risk.ignore_categories` lists `shadowscan-heuristic`.
+  `trace-diff` treats each imported agent as a declared agent, matched by its label, and lists
+  it as unobserved when no trace names it. The mapping was reviewed against ShadowScan 0.1.4 at
+  commit 2b80f19 only; see
+  [what each ShadowScan kind becomes](shadowscan-integration.md#what-each-shadowscan-kind-becomes).
 - **`verify-discovery --bundle` checks direct imports only.** It accepts only a BOM
   written by `import-shadowscan`. For a merged `scan` BOM, use the signature policy
   with `--project`.
