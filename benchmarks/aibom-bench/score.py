@@ -12,7 +12,8 @@ contents or listing paths does not count as understanding:
 - A component is detected only when its token sits in a short value (at most
   VALUE_LIMIT characters) that names fewer than three of the scenario's components,
   inside a record that carries a word of the item's kind (model, server, skill, ...).
-- Attribute checks are read from the most specific qualifying records.
+- Attribute checks are read from a single qualifying record that names at most
+  AGGREGATE_LIMIT of the scenario's components, never from a union of records.
 - A finding counts only when its own message text (not keys, not evidence) names the
   class of problem, at a word boundary, at a non-informational severity.
 
@@ -522,8 +523,8 @@ def qualifying(r: Rec, match: list[str], tokens: list[str], domain: str) -> int 
     The token must sit in a short single-line value that names fewer than
     AGGREGATE_LIMIT of the scenario's components (a name, a command, a URL; not a file
     dump), and evidence of the item's kind must come from somewhere else in the record:
-    another short value, a key, or the name of the list that holds it. A path alone is
-    not a typed inventory entry.
+    another short value that is not a path, a key, or the name of the list that holds
+    it. A path alone is not a typed inventory entry.
     """
     if r.kind != "component":
         return None
@@ -531,7 +532,10 @@ def qualifying(r: Rec, match: list[str], tokens: list[str], domain: str) -> int 
     for v in r.values:
         if not short(v) or not has(v, match) or sum(t in v for t in tokens) >= AGGREGATE_LIMIT:
             continue
-        others = [x for x in r.values if x is not v and short(x)]
+        # A path says where a file is, not what it is: kind evidence must come from a
+        # type, a key, or the list that holds the record.
+        others = [x for x in r.values if x is not v and short(x) and "/" not in x
+                  and "\\" not in x]  # fmt: skip
         if has_word(" ".join(others) + " " + r.keys, words):
             return sum(t in r.text for t in tokens)
     return None
@@ -546,10 +550,14 @@ def score_component(
     if not scored:
         return 0.0, ev
     earned = float(item["weight"])
+    # A check is read from one record at a time, never from a union of records, and only
+    # from records naming few components, so an aggregate cannot lend its attributes.
     tightest = min(n for n, _ in scored)
-    blob = " ".join(r.text for n, r in scored if n == tightest)
+    candidates = [r for n, r in scored if n <= AGGREGATE_LIMIT] or [
+        r for n, r in scored if n == tightest
+    ]
     for chk in item["checks"]:
-        ok = has(blob, chk["any_of"])
+        ok = any(has(r.text, chk["any_of"]) for r in candidates)
         ev[chk["id"]] = ok
         earned += chk["weight"] if ok else 0
     return earned, ev

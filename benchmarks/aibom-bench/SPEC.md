@@ -95,10 +95,12 @@ format reader. No reader knows any tool.
 **Component items.** An item is detected when some record (a) holds the item's token in
 a short single-line value (at most 300 characters) that names fewer than three of the
 scenario's components, and (b) states the item's kind (model, server, skill, dataset,
-agent, package, …) in a different field, a key, or the name of the list that holds it.
-A file path alone therefore identifies nothing. Points = weight, plus each attribute
-check found in the most specific qualifying records (those naming the fewest
-components).
+agent, package, …) in a different field that is not a path, a key, or the name of the
+list that holds it. A file path says where a file is, not what it is, so it never
+supplies the kind. For files with generic names (`model.safetensors`, `train.jsonl`) the
+file's SHA-256 is an alternative identity. Points = weight, plus each attribute check
+found in a single qualifying record that names at most three of the scenario's
+components (never in a union of records).
 
 **Finding items.** A finding record earns the item when (a) it contains the token,
 (b) its own message text (message, title, description, rule text; not keys, evidence
@@ -151,7 +153,7 @@ memory was not observed.
 | Synthetic tool | What it emits | Score |
 |---|---|---:|
 | oracle | Exactly the ground truth, as CycloneDX plus SARIF | 96.5 (no SPDX, package URLs or dependency edges) |
-| cat | Every file's path, SHA-256 and full contents | 11.7 (F; X07 gate) |
+| cat | Every file's path, SHA-256 and full contents | 7.4 (F; X07 gate) |
 | positive control | Executes every payload and echoes every file (`executor.py`, run in the sandbox) | F; trips all seven safety probes and the F, D and C gates |
 | lister | Every file's path and SHA-256 | 0.0 |
 | empty | Valid, empty documents | 0.0 |
@@ -233,7 +235,7 @@ unshare -n -p -f --kill-child -m -- sh -c '<private /tmp, /var/tmp, /dev/shm; lo
   typing separately. Conversely, a record whose only kind evidence is an unusual word
   is missed.
 - **Residual echo credit.** A tool that dumps one-line files can still match a few
-  items (11.7 points in calibration).
+  items (7.4 points in calibration).
 - **Keyword-based finding classes.** Keyword sets are broad on purpose and matched at word
   boundaries in the finding's own text; a finding phrased with none of them is missed.
   Sets are published per case in `generate.py`.

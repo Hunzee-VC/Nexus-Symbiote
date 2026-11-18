@@ -66,7 +66,7 @@ The corpus contains live hostile payloads, so do not generate it on a workstatio
    python3 calibrate.py --corpus /opt/aibom-bench/corpus --work /tmp/aibom-calibration
    ```
 
-   Expected: oracle 96.5 (A), cat 11.7 (F), lister 0.0 (F), empty 0.0 (F).
+   Expected: oracle 96.5 (A), cat 7.4 (F), lister 0.0 (F), empty 0.0 (F).
 
    The positive control in `tools.json` (`executor.py`) runs through the real sandbox in
    step 4. It executes every payload on purpose, so `score.py` can confirm that each

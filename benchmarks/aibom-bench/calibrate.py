@@ -94,7 +94,7 @@ def main() -> None:
             json.dumps({"version": "synthetic", "corpus_digest": gt["corpus_digest"]})
         )
         for s in gt["scenarios"]:
-            tags = ["", "#2"] if s["id"] in ("s01-models", "s04-mcp") else [""]
+            tags = ["", "#default"] + (["#2"] if s["id"] in ("s01-models", "s04-mcp") else [])
             for tag in tags:
                 d = runs / tool / (s["id"] + tag)
                 d.mkdir(parents=True, exist_ok=True)
