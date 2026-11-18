@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-import time
 from copy import deepcopy
 from typing import Any
 
@@ -25,6 +24,7 @@ from nexus_symbiote.generators.validation import (
     validate_cyclonedx,
 )
 from nexus_symbiote.generators.vex import VEXGenerator
+from tests.support import scaling_ratio
 from tests.test_export_conformance import fixture_bom
 
 JSON = st.recursive(
@@ -60,16 +60,21 @@ def _refuse_pairwise(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_large_exports_never_compare_array_items_pairwise(monkeypatch):
     _refuse_pairwise(monkeypatch)
     risk = RiskAssessment(severity=RiskSeverity.HIGH, category="capability_scope", detail="d")
-    bom = AIBOM(
-        components=[
-            ToolComponent(bom_ref=f"tool:{index}", name=f"t{index}", risks=[risk])
-            for index in range(2000)
-        ]
-    )
-    start = time.perf_counter()
-    document = CycloneDXGenerator().generate(bom)
-    vex = VEXGenerator().generate(bom)
-    assert time.perf_counter() - start < 120
+    boms = {
+        scale: AIBOM(
+            components=[
+                ToolComponent(bom_ref=f"tool:{index}", name=f"t{index}", risks=[risk])
+                for index in range(500 * scale)
+            ]
+        )
+        for scale in (1, 4)
+    }
+
+    def export(scale: int) -> tuple[dict[str, Any], dict[str, Any]]:
+        return CycloneDXGenerator().generate(boms[scale]), VEXGenerator().generate(boms[scale])
+
+    assert scaling_ratio(export) < 10
+    document, vex = export(4)
     assert len(document["components"]) == len(vex["vulnerabilities"]) == 2000
     duplicate = deepcopy(document)
     duplicate["components"].append(deepcopy(duplicate["components"][0]))
@@ -79,12 +84,11 @@ def test_large_exports_never_compare_array_items_pairwise(monkeypatch):
     assert any("non-unique" in error for error in validate_cyclonedx(compositions))
 
 
-def test_spdx_graph_checks_index_relationships_once(monkeypatch):
-    monkeypatch.setattr(validation, "_schema_errors", lambda document, fmt: [])
+def _licensed_packages(count: int) -> list[dict[str, Any]]:
     graph: list[dict[str, Any]] = [
         {"type": "SpdxDocument", "spdxId": "urn:d", "element": [], "rootElement": []}
     ]
-    for index in range(10_000):
+    for index in range(count):
         package = f"urn:p{index}"
         graph.append({"type": "dataset_DatasetPackage", "spdxId": package})
         for kind in ("hasDeclaredLicense", "hasConcludedLicense"):
@@ -97,9 +101,15 @@ def test_spdx_graph_checks_index_relationships_once(monkeypatch):
                     "to": ["expandedlicensing_NoAssertionLicense"],
                 }
             )
-    start = time.perf_counter()
+    return graph
+
+
+def test_spdx_graph_checks_index_relationships_once(monkeypatch):
+    monkeypatch.setattr(validation, "_schema_errors", lambda document, fmt: [])
+    graphs = {scale: _licensed_packages(2_500 * scale) for scale in (1, 4)}
+    assert scaling_ratio(lambda scale: spdx_errors({"@graph": graphs[scale]})) < 10
+    graph = graphs[4]
     assert spdx_errors({"@graph": graph}) == []
-    assert time.perf_counter() - start < 30
     graph.append({**graph[2], "spdxId": "urn:duplicate"})
     assert any("requires exactly one" in error for error in spdx_errors({"@graph": graph}))
 

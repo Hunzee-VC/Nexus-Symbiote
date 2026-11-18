@@ -241,7 +241,7 @@ def test_policy_exclusion_checks_do_not_grow_with_the_number_of_entries(tmp_path
 
 def test_a_walk_records_tens_of_thousands_of_messages_in_linear_time(tmp_path):
     # Checking each new message against the list made 95,000 symlinks a 70 s walk.
-    count = 12_000
+    count = 50_000
     names: dict[int, list[str]] = {}
     roots = {}
     for scale in (1, 4):

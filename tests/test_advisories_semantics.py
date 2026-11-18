@@ -373,6 +373,9 @@ def test_a_reply_near_the_size_limit_is_read_in_linear_time_and_bounded():
     # the work measured is all of it: at the larger size, exactly that limit.
     per_package = advisories.MAX_ADVISORIES_PER_PACKAGE // 4
     assert scaling_ratio(lambda scale: fetch(2, per_package * scale)) < 10
+    # Across 24 packages the report limit keeps 20,000 records at both sizes, so this
+    # measures reading the reply itself: about 1 MB, then 4 MB near the response limit.
+    assert scaling_ratio(lambda scale: fetch(24, per_package * scale)) < 10
     # 240,000 records in one reply of about 4 MB, which the report limit bounds.
     report = fetch(24, advisories.MAX_ADVISORIES_PER_PACKAGE)
     assert len(report.advisories) == advisories.MAX_ADVISORIES
