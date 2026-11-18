@@ -281,7 +281,7 @@ def test_ordinary_names_near_token_formats_are_kept(name, identifier):
 )
 def test_tokens_inside_names_are_found_in_linear_time(unit):
     def run(scale: int) -> None:
-        text = unit * (62_500 // len(unit) * scale)
+        text = unit * (250_000 // len(unit) * scale)
         redact_text(text)
         redact_text(text, identifier=True)
 
