@@ -182,8 +182,10 @@ the high `serialization_format_unknown` finding and no format or model type, not
 `unknown` also gets the high `invalid_safetensors` finding from `risk`, which fails
 the gate at any score. A `.gguf` file that starts with the magic keeps its format and
 model type when its version or metadata cannot be read, and `properties.gguf_metadata`
-says so. No other suffix has a header check, so a file under one of them is recorded
-with the format its name claims and a model type, whatever it holds.
+says so. No other suffix has a check that establishes its format, so a file under one
+of them is recorded with the format its name claims and a model type, whatever it
+holds: the content of a pickle-family name decides its rating only, and a zero-filled
+`embeddings.bin` rated `unknown` is still recorded as `pytorch-legacy`.
 
 ## Files bound to the weights
 

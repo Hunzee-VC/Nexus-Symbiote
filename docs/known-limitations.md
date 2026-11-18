@@ -703,7 +703,8 @@ A way around a limit that its entry does not describe is worth a
   ([model integrity](model-integrity.md#format-and-model-type)). A file under any
   other model suffix, such as text saved as `model.onnx`, `model.tflite` or
   `model.ggml`, is recorded with the format its name claims and a model type, rated
-  `unknown`, and one under a pickle-family name the same, rated
+  `unknown`, and one under a pickle-family name the same, rated by its first 64 KiB:
+  that text saved as `model.pkl` is `unknown`, and a pickle is
   `unsafe-code-execution`. The GGUF check reads the magic only: a file that starts
   with `GGUF` is recorded as `llama.cpp` whatever follows, and
   `properties.gguf_metadata` says when its version or metadata could not be read.

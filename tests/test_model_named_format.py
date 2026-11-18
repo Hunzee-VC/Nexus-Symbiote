@@ -46,6 +46,7 @@ UNKNOWN_FORMAT = ("high", "serialization_format_unknown")
 # Stored for a file named as SafeTensors, so a reader older than the record still fails its gate.
 INVALID_SAFETENSORS = ("high", "invalid_safetensors")
 UNSIGNED = ("high", "signing_status")
+DOCS = Path(__file__).resolve().parents[1] / "docs"
 
 
 def _unknown(named: str) -> list[tuple[str, str]]:
@@ -309,6 +310,60 @@ def test_a_suffix_without_a_header_check_is_recorded_from_the_name(
     assert component.model_type == "foundation"
     assert component.serialization_safety.value == rating
     assert component.properties == {"format_inspection": explanation}
+
+
+def _guide(page: str) -> str:
+    return " ".join((DOCS / page).read_text(encoding="utf-8").split())
+
+
+def test_the_documented_rating_of_a_pickle_family_name_is_the_one_its_content_gets(
+    tmp_path: Path,
+) -> None:
+    # The name still gives the record its format; since #254 it no longer gives the rating.
+    text = _scan(tmp_path / "text", "model.pkl", PLACEHOLDER)
+    zeros = _scan(tmp_path / "zeros", "embeddings.bin", b"\0" * 64)
+    pickled = _scan(tmp_path / "pickle", "model.pkl", INERT_PICKLE)
+    assert [
+        (component.serialization_format, component.serialization_safety.value)
+        for component in (text, zeros, pickled)
+    ] == [
+        ("pickle", "unknown"),
+        ("pytorch-legacy", "unknown"),
+        ("pickle", "unsafe-code-execution"),
+    ]
+    limitations = _guide("known-limitations.md")
+    assert "pickle-family name the same, rated `unsafe-code-execution`" not in limitations
+    assert (
+        "one under a pickle-family name the same, rated by its first 64 KiB: that text saved "
+        "as `model.pkl` is `unknown`, and a pickle is `unsafe-code-execution`"
+    ) in limitations
+    assert (
+        "the content of a pickle-family name decides its rating only, and a zero-filled "
+        "`embeddings.bin` rated `unknown` is still recorded as `pytorch-legacy`"
+    ) in _guide("model-integrity.md")
+
+
+def test_the_documented_unknown_format_names_both_names_the_content_does_not_bear_out(
+    tmp_path: Path,
+) -> None:
+    for name in ("model.pkl", "model.gguf"):
+        component = _scan(tmp_path / name, name, PLACEHOLDER)
+        assert component.serialization_safety is SerializationSafety.UNKNOWN
+        assert UNKNOWN_FORMAT in _findings(component)
+    (row,) = [
+        line
+        for line in (DOCS / "finding-catalog.md").read_text(encoding="utf-8").splitlines()
+        if line.startswith("| `serialization_format_unknown` |")
+    ]
+    assert "a pickle-family name whose inspected prefix shows no pickle evidence" in row
+    assert "a file named as GGUF that is not one" in row
+    classes = _guide("security-model.md")
+    assert "are rated by their inspected content, not by the name alone" in classes
+    assert "on file name alone" not in classes
+    assert (
+        "A record's format and model type come from the file name, except under `.gguf` "
+        "and `.safetensors`"
+    ) in classes
 
 
 def test_the_adapter_type_of_a_directory_is_not_given_to_an_unestablished_file(
