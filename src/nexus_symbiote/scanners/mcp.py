@@ -2289,6 +2289,12 @@ class MCPScanner(Scanner):
         identity_unknown = self._identity_unknown(launch) or next(
             iter([*view.identity, *runner_reasons]), None
         )
+        if launch.script_shell:
+            # npm runs a configured call in place of its script shell.
+            identity_unknown = next(
+                (reason for reason in view.identity if reason.startswith("npm call setting")),
+                identity_unknown,
+            )
         if identity_unknown:
             gaps.append(f"launcher identity unknown ({identity_unknown})")
         if identity.withheld:
