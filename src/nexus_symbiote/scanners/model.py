@@ -195,6 +195,10 @@ PICKLE_NAME_WRAPPED = (
     "Potential code-executing loader format (compressed or archived stream; decompressed "
     "content not inspected)"
 )
+PICKLE_NAME_GGUF = (
+    "Potential code-executing loader format (GGUF content under a pickle-family name; its "
+    "chat templates are not inspected under this name)"
+)
 _UNVALIDATED = "; no bounded structural validator for this format/loader"
 # Compression and archive magic that pandas, joblib and torch unwrap before unpickling.
 _WRAPPER_MAGIC = (
@@ -212,6 +216,8 @@ _WRAPPER_MAGIC = (
 )
 _TAR_MAGIC_OFFSET = 257
 _TAR_MAGIC = b"ustar"
+# llama.cpp opens a model by this magic, not by its name.
+_GGUF_MAGIC = b"GGUF"
 # Content that a bound left unread: a file no model name rates is inventoried for it.
 _CONTENT_UNREAD = frozenset(
     {
@@ -987,7 +993,8 @@ def inspect_model_format(
     keeps the code-executing rating when the content is a recognized pickle, a NumPy
     object-dtype array, a ZIP archive with a pickle member or such an array, content a
     bound left unread, or a compressed or archived stream (by a wrapper suffix or its
-    magic), whose decompressed content is not inspected. A ZIP archive read whole with
+    magic), whose decompressed content is not inspected, or GGUF content, whose chat
+    templates are inspected only under a ``.gguf`` name. A ZIP archive read whole with
     no pickle member keeps that unknown verdict; anything else is unknown with
     ``PICKLE_NAME_UNEVIDENCED`` (``PICKLE_NAME_EMPTY`` for a zero-length file), which
     keeps the high unknown-format finding.
@@ -1056,7 +1063,9 @@ def _pickle_name_rating(
     """Rate a pickle-family name whose inspected content showed no code-bearing container.
 
     Content a bound left unread, and a compressed or archived stream, which its loader
-    unwraps before it unpickles, keep the code-executing rating the name implies.
+    unwraps before it unpickles, keep the code-executing rating the name implies. So
+    does GGUF content: llama.cpp opens a model by its magic, not its name, and its chat
+    templates are inspected only under a ``.gguf`` name.
     """
     if size == 0:
         return SerializationSafety.UNKNOWN, PICKLE_NAME_EMPTY
@@ -1069,6 +1078,8 @@ def _pickle_name_rating(
         or start[_TAR_MAGIC_OFFSET:] == _TAR_MAGIC
     ):
         return SerializationSafety.UNSAFE_CODE_EXECUTION, PICKLE_NAME_WRAPPED
+    if start.startswith(_GGUF_MAGIC):
+        return SerializationSafety.UNSAFE_CODE_EXECUTION, PICKLE_NAME_GGUF
     if container is not None:
         return container
     return SerializationSafety.UNKNOWN, PICKLE_NAME_UNEVIDENCED

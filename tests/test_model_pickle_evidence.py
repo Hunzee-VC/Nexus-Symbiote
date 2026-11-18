@@ -23,6 +23,7 @@ from nexus_symbiote.scanners.model import (
     MAX_PICKLE_INSPECTION_BYTES,
     NUMPY_OBJECT_ARRAY,
     PICKLE_NAME_EMPTY,
+    PICKLE_NAME_GGUF,
     PICKLE_NAME_UNEVIDENCED,
     PICKLE_NAME_UNREADABLE,
     PICKLE_NAME_WRAPPED,
@@ -42,6 +43,8 @@ UNHASHED = "Potential code-executing loader format (artifact could not be hashed
 LOADER = "Potential code-executing loader format ({})"
 # A synthetic pickle that calls builtins.eval on a constant; it is never loaded here.
 EVAL_PICKLE = b"cbuiltins\neval\n(S'1'\ntR."
+HOSTILE_TEMPLATE = "{{ self.__init__.__globals__.__builtins__ }}"
+BENIGN_TEMPLATE = "{{ messages[0].content }}"
 
 
 def _npy_object_array() -> bytes:
@@ -56,6 +59,24 @@ def _torch_zip(member: str = "archive/data.pkl") -> bytes:
         archive.writestr(member, pickle.dumps({"weight": [0.0]}, protocol=2))
         archive.writestr("archive/version", b"3\n")
     return buffer.getvalue()
+
+
+def _gguf(template: str) -> bytes:
+    """A version 3 GGUF file with an architecture key and one chat template."""
+
+    def string(text: str) -> bytes:
+        raw = text.encode()
+        return len(raw).to_bytes(8, "little") + raw
+
+    entries = [
+        ("general.architecture", string("llama")),
+        ("tokenizer.chat_template", string(template)),
+    ]
+    header = b"GGUF" + (3).to_bytes(4, "little") + (0).to_bytes(8, "little")
+    header += len(entries).to_bytes(8, "little")
+    for key, value in entries:
+        header += string(key) + (8).to_bytes(4, "little") + value
+    return header + b"\0" * 32
 
 
 def _tar(member: str, data: bytes) -> bytes:
@@ -281,14 +302,56 @@ def test_a_compressed_or_archived_pickle_family_file_is_critical(
 
 @pytest.mark.parametrize(
     "payload",
-    [b"\0" * 512, b"\x1f" + b"\0" * 511, b"\0" * 257 + b"ustaX" + b"\0" * 250],
-    ids=["zeros", "half-gzip-magic", "near-ustar"],
+    [
+        b"\0" * 512,
+        b"\x1f" + b"\0" * 511,
+        b"\0" * 257 + b"ustaX" + b"\0" * 250,
+        b"GGU" + b"\0" * 509,
+        b"gguf" + b"\0" * 508,
+    ],
+    ids=["zeros", "half-gzip-magic", "near-ustar", "partial-gguf-magic", "lowercase-gguf-magic"],
 )
 def test_bytes_with_no_wrapper_magic_under_a_plain_pickle_name_stay_unknown(
     tmp_path: Path, payload: bytes
 ) -> None:
     (tmp_path / "embeddings.bin").write_bytes(payload)
     assert inspect_model_format(tmp_path / "embeddings.bin") == (UNKNOWN, PICKLE_NAME_UNEVIDENCED)
+
+
+@pytest.mark.parametrize("suffix", [".bin", ".pt", ".pkl"])
+@pytest.mark.parametrize("template", [HOSTILE_TEMPLATE, BENIGN_TEMPLATE], ids=["hostile", "benign"])
+def test_gguf_content_under_a_pickle_family_name_keeps_the_critical_rating(
+    tmp_path: Path, suffix: str, template: str
+) -> None:
+    # llama.cpp opens a model by its magic, so a GGUF file is loadable under any name,
+    # and its chat template is inspected only under a .gguf name: the rating stays what
+    # the name gave it before, critical, instead of dropping to unknown.
+    (tmp_path / "models").mkdir()
+    path = tmp_path / "models" / f"ggml-model-q4_0{suffix}"
+    path.write_bytes(_gguf(template))
+    assert inspect_model_format(path) == (UNSAFE, PICKLE_NAME_GGUF)
+    found, failures = _scan(tmp_path)
+    assert failures == []
+    component = found[f"models/ggml-model-q4_0{suffix}"]
+    assert component.serialization_safety is UNSAFE
+    assert component.properties["format_inspection"] == PICKLE_NAME_GGUF
+    assert ("serialization_format", "critical") in _severities(component)
+    passed, findings = _gate([component])
+    assert ("serialization_format", "critical") in findings
+    assert not passed
+
+
+def test_the_same_gguf_bytes_are_rated_by_their_template_under_their_own_name(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "models").mkdir()
+    (tmp_path / "models" / "escape.gguf").write_bytes(_gguf(HOSTILE_TEMPLATE))
+    (tmp_path / "models" / "plain.gguf").write_bytes(_gguf(BENIGN_TEMPLATE))
+    found, failures = _scan(tmp_path)
+    assert failures == []
+    escape = found["models/escape.gguf"].serialization_safety
+    assert escape is SerializationSafety.UNSAFE_TEMPLATE_INJECTION
+    assert found["models/plain.gguf"].serialization_safety is UNKNOWN
 
 
 def test_an_object_dtype_array_is_critical_under_any_name(tmp_path: Path) -> None:

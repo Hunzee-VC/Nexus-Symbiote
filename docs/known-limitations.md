@@ -686,7 +686,8 @@ A way around a limit that its entry does not describe is worth a
   pickle-family member or such an array, a ZIP archive or NumPy array the bounds
   left unread, or a compressed or archived stream, by a wrapper suffix or by gzip,
   zlib, bzip2, xz, LZMA, Zstandard, LZ4 frame, joblib `ZF` or ustar magic, whose
-  decompressed content is not inspected. A readable file that shows none of that,
+  decompressed content is not inspected, or GGUF content, whose chat templates are
+  inspected only under a `.gguf` name. A readable file that shows none of that,
   such as a zero-filled `embeddings.bin` or firmware, is `unknown`, a high finding.
   A payload that starts past the first 64 KiB of a file, or a pickle behind a
   prefix that is no opcode and none of those magic numbers, such as one compressed
