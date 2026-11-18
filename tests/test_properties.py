@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import pickletools
 import struct
 import tempfile
 from pathlib import Path
@@ -17,7 +18,11 @@ from nexus_symbiote.core.hashing import canonical_json, hash_tool_definition, pa
 from nexus_symbiote.runtime import AuthorizationError, strict_json
 from nexus_symbiote.runtime_validation import ValidationBudgetError, check_json_budget
 from nexus_symbiote.scanners.base import sanitized_origin
-from nexus_symbiote.scanners.model import inspect_model_format
+from nexus_symbiote.scanners.model import (
+    PICKLE_NAME_EMPTY,
+    PICKLE_NAME_UNEVIDENCED,
+    inspect_model_format,
+)
 
 PROPERTY_SETTINGS = settings(
     max_examples=150,
@@ -25,6 +30,7 @@ PROPERTY_SETTINGS = settings(
     suppress_health_check=[HealthCheck.too_slow],
 )
 
+_OPCODE_BYTES = frozenset(opcode.code.encode("latin-1")[0] for opcode in pickletools.opcodes)
 SAFE_INT = st.integers(min_value=-(2**53 - 1), max_value=2**53 - 1)
 FINITE = st.floats(min_value=-(2.0**53) + 1, max_value=2.0**53 - 1, allow_nan=False)
 TEXT = st.text(st.characters(exclude_categories=("Cs",)), max_size=20)
@@ -157,7 +163,14 @@ def test_model_inspection_classifies_arbitrary_bytes_without_raising(payload, su
         safety, reason = inspect_model_format(path)
     assert isinstance(safety, SerializationSafety)
     assert reason
-    if suffix == ".pkl":
-        assert safety is SerializationSafety.UNSAFE_CODE_EXECUTION
-    if suffix == ".bin":
+    if suffix in (".pkl", ".bin"):
         assert safety is not SerializationSafety.SAFE
+        if not payload:
+            assert (safety, reason) == (SerializationSafety.UNKNOWN, PICKLE_NAME_EMPTY)
+        elif (
+            payload[0] not in _OPCODE_BYTES
+            and payload[:4] not in (b"PK\x03\x04", b"PK\x05\x06")
+            and not b"\x93NUMPY".startswith(payload[:6])
+        ):
+            # Bytes that start no pickle, ZIP archive or NumPy array are no evidence.
+            assert (safety, reason) == (SerializationSafety.UNKNOWN, PICKLE_NAME_UNEVIDENCED)

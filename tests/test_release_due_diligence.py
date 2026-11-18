@@ -8,7 +8,6 @@ import hashlib
 import json
 import os
 import sys
-import time
 import warnings
 from pathlib import Path
 
@@ -23,6 +22,7 @@ from nexus_symbiote.scanners.base import parse_python
 from nexus_symbiote.scanners.registry import RegistryScanner
 from nexus_symbiote.utils.crypto import SIGSTORE_MISSING
 from nexus_symbiote.utils.files import OutputRefusedError, write_output_file
+from tests.support import scaling_ratio
 
 FORGED = "x\n::error file=README.md,line=1::forged by inventory\n\x1b[2J\x1b]8;;http://e/\x07"
 
@@ -164,13 +164,16 @@ def test_conflicts_do_not_depend_on_the_packaging_release(monkeypatch, one, othe
 
 
 def test_many_declarations_of_one_package_scan_in_linear_time(tmp_path):
-    lines = ["torch>=2.2"] * 4000 + [f"torch>=0.0.{i}" for i in range(4000)]
-    lines += ["torch==2.3.0"] * 2000
-    lines += [f'torch==2.{i}.0 ; python_version == "3.{i}"' for i in range(2000)]
-    (tmp_path / "requirements.txt").write_text("\n".join(lines) + "\n")
-    started = time.perf_counter()
-    (component,) = RegistryScanner().scan(tmp_path).components
-    assert time.perf_counter() - started < 30
+    roots = {}
+    for scale in (1, 4):
+        lines = ["torch>=2.2"] * (1000 * scale) + [f"torch>=0.0.{i}" for i in range(1000 * scale)]
+        lines += ["torch==2.3.0"] * (500 * scale)
+        lines += [f'torch==2.{i}.0 ; python_version == "3.{i}"' for i in range(500 * scale)]
+        roots[scale] = tmp_path / f"scale-{scale}"
+        roots[scale].mkdir()
+        (roots[scale] / "requirements.txt").write_text("\n".join(lines) + "\n")
+    assert scaling_ratio(lambda scale: RegistryScanner().scan(roots[scale])) < 10
+    (component,) = RegistryScanner().scan(roots[4]).components
     assert CONFLICT.format("torch") not in [r.detail for r in component.risks]
     assert len(component.properties["declarations"]) == 4002 + 2000
 
@@ -286,21 +289,35 @@ def test_no_url_tail_reaches_any_output(tmp_path, files, failures):
         assert not any(s in text for s in ("S3CR1", "S3CR2", "S3CR3", "alice")), fmt
 
 
-@pytest.mark.parametrize(
-    "line",
-    [
-        # One long pin against many clauses, in one declaration.
-        "torch==" + "1." * 30000 + "1" + "".join(f",!=0.{i}" for i in range(20000)),
-        # The same with a local label, whose comparison re-joins the label.
-        "torch==1.0+" + "a." * 30000 + "a" + "".join(f",!=0.{i}" for i in range(20000)),
-    ],
-)
-def test_long_versions_do_not_make_the_comparison_quadratic(tmp_path, line):
-    ranges = "".join(f"torch>=0.{i}\n" for i in range(20000))
-    (tmp_path / "requirements.txt").write_text(line + "\n" + ranges)
-    started = time.perf_counter()
-    (component,) = RegistryScanner().scan(tmp_path).components
-    assert time.perf_counter() - started < 30
+# Each line a quarter of the length this test always used, times ``scale``.
+_LONG_PINS = {
+    # One long pin against many clauses, in one declaration.
+    "long-release": lambda scale: (
+        "torch=="
+        + "1." * (7_500 * scale)
+        + "1"
+        + "".join(f",!=0.{i}" for i in range(5_000 * scale))
+    ),
+    # The same with a local label, whose comparison re-joins the label.
+    "long-local-label": lambda scale: (
+        "torch==1.0+"
+        + "a." * (7_500 * scale)
+        + "a"
+        + "".join(f",!=0.{i}" for i in range(5_000 * scale))
+    ),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_LONG_PINS))
+def test_long_versions_do_not_make_the_comparison_quadratic(tmp_path, shape):
+    roots = {}
+    for scale in (1, 4):
+        ranges = "".join(f"torch>=0.{i}\n" for i in range(5_000 * scale))
+        roots[scale] = tmp_path / f"scale-{scale}"
+        roots[scale].mkdir()
+        (roots[scale] / "requirements.txt").write_text(_LONG_PINS[shape](scale) + "\n" + ranges)
+    assert scaling_ratio(lambda scale: RegistryScanner().scan(roots[scale])) < 10
+    (component,) = RegistryScanner().scan(roots[4]).components
     assert CONFLICT.format("torch") not in [r.detail for r in component.risks]
 
 

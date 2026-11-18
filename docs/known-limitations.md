@@ -1,7 +1,7 @@
 # Known limitations
 
 This page lists what Nexus SymBiote does not collect, compare or verify, by surface,
-and what to do about each limit. For how findings are classified, such as why a
+and what to do about each limit. For how findings are classified, such as when a
 `.bin` file is critical or which characters count as hidden, see
 [known false-positive and false-negative classes](security-model.md#known-false-positive-and-false-negative-classes).
 The list that shipped with 0.1.0 is in
@@ -678,6 +678,21 @@ A way around a limit that its entry does not describe is worth a
   file, by digest pin or signature, is refused with "Policy artifact or bundle is
   unavailable beneath the project root". Such files are still hashed, up to the
   `model-bytes` limit.
+- **A pickle-family name is rated by the first 64 KiB.** `.pkl`, `.pt`, `.bin` and
+  the other [pickle-family names](model-integrity.md#model-files-and-references) are
+  critical only with pickle evidence in the inspected prefix: a pickle opcode stream,
+  recognized or cut short by the 64 KiB, 4,096-opcode or 64-MARK bound before a
+  recognized shape or a call, a NumPy object-dtype array or a ZIP archive with a
+  pickle-family member or such an array, a ZIP archive or NumPy array the bounds
+  left unread, or a compressed or archived stream, by a wrapper suffix or by gzip,
+  zlib, bzip2, xz, LZMA, Zstandard, LZ4 frame, joblib `ZF` or ustar magic, whose
+  decompressed content is not inspected. A readable file that shows none of that,
+  such as a zero-filled `embeddings.bin` or firmware, is `unknown`, a high finding.
+  A payload that starts past the first 64 KiB of a file, or a pickle behind a
+  prefix that is no opcode and none of those magic numbers, such as one compressed
+  by a codec not listed, is not rated critical by its name; a loader given such a
+  file still unpickles it. An unreadable pickle-family file keeps the critical
+  rating.
 - **Some formats are not inspected.** ONNX, GGUF, GGML, Keras, HDF5, SavedModel,
   TFLite, Core ML and ExecuTorch files are rated `unknown`: Keras Lambda layers,
   SavedModel operations and custom operators are not inspected. Each is a high
