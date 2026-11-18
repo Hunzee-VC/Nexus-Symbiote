@@ -24,6 +24,7 @@ from nexus_symbiote.scanners.credential_files import MARKDOWN_SUFFIXES as _MARKU
 from nexus_symbiote.scanners.credential_files import credential_gap as _credential_gap
 from nexus_symbiote.scanners.credential_files import credential_shaped as _credential_shaped
 from nexus_symbiote.scanners.mcp import SOURCE_BINDING_KEY_ENV
+from nexus_symbiote.scanners.skill_scripts import script_risks
 from nexus_symbiote.scanners.source_binding import BindingError, value_binding
 from nexus_symbiote.utils.confined import CollectionError, ConfinedCollection, fold_name
 from nexus_symbiote.utils.markdown import hidden_text, text_outside_code
@@ -659,8 +660,8 @@ SKILL_DIRECTORIES = [
     ".claude/hooks",
     ".cursor/hooks",
 ]
-# No agent reads these as instructions: every file is a resource, checked only for
-# hidden characters.
+# No agent reads these as instructions: every file is a resource, checked for hidden
+# characters and, when it is a shell script, for a download it runs.
 _RESOURCE_DIRECTORIES = frozenset({".claude/hooks", ".cursor/hooks"})
 _SKILL_PARTS = tuple(PurePosixPath(directory).parts for directory in SKILL_DIRECTORIES)
 
@@ -1322,7 +1323,8 @@ class PromptScanner(Scanner):
     def _skill_file(
         path: Path, files: ConfinedCollection, result: ScanResult, *, declaration: bool
     ) -> tuple[str, list[RiskAssessment]] | None:
-        """A bundle file's digest and the hidden-character findings of its text.
+        """A bundle file's digest and the findings of its text: hidden characters, and
+        for a bundled shell script a download it runs (``script_risks``).
 
         A file that ``_credential_gap`` names, by its own name or the name of the in-root
         file a symlink there leads to, is a gap and is not read, so the inventory carries
@@ -1363,10 +1365,14 @@ class PromptScanner(Scanner):
             return hash_bytes(content), [
                 *_hidden_character_risks(stream.counts, stream.tags, relative),
                 *_line_separator_risks(stream.line_separators, relative),
+                # A shell runs the script whatever bytes its comments or strings hold.
+                *script_risks(relative, content.decode("utf-8", "replace")),
             ]
         risks = detect_invisible_characters(text, relative)
         if declaration and path.suffix.lower() in _MARKUP_SUFFIXES:
             risks.extend(detect_hidden_markup(text, relative))
+        if not declaration:
+            risks.extend(script_risks(relative, text))
         return hash_bytes(content), risks
 
     @staticmethod

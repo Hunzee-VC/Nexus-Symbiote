@@ -3252,6 +3252,9 @@ class MCPScanner(Scanner):
         server_ref: str,
         config_path: str,
     ) -> list[ToolComponent]:
+        # Imported here because the checks' own module imports this one.
+        from nexus_symbiote.scanners.tool_descriptions import tool_description_risks
+
         tools_config = config.get("tools", [])
         tool_comps = []
         seen_refs: set[str] = set()
@@ -3326,6 +3329,10 @@ class MCPScanner(Scanner):
                                 recommendation="Verify the tool's effects before relying on its readOnlyHint.",
                             )
                         )
+                    if t_desc:
+                        # The description as declared: redaction can remove what the
+                        # checks read, and their findings quote none of it.
+                        risks.extend(tool_description_risks(t_desc, t_name))
 
                     tool_comps.append(
                         ToolComponent(

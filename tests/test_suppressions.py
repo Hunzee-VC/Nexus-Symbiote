@@ -422,6 +422,14 @@ def test_a_fingerprint_binds_the_component_content_digest():
     assert component_content_digest(tool) == "sha256:" + "2" * 64
     assert component_content_digest(model) == "3" * 64
     assert component_content_digest(ModelComponent(bom_ref="model:b", name="b")) is None
+    # A tool declared in source has no descriptor digest; its file's digest stands in.
+    declared = ToolComponent(
+        bom_ref="tool:b", name="b", properties={"source_sha256": "sha256:" + "4" * 64}
+    )
+    assert component_content_digest(declared) == "sha256:" + "4" * 64
+    assert component_content_digest(declared.model_copy(update={"properties": {}})) is None
+    odd = declared.model_copy(update={"properties": {"source_sha256": ["x"]}})
+    assert component_content_digest(odd) is None
 
 
 def test_a_fingerprint_binds_severity_and_detail_and_unmatched_entries_stay_unused(tmp_path):

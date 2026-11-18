@@ -78,18 +78,18 @@ RULES: dict[str, RuleInfo] = {
     ),
     "invisible_characters": RuleInfo(
         "Invisible characters in instructions",
-        "An instruction file contains invisible Unicode characters that can carry hidden "
-        "instructions.",
+        "An instruction file or a tool description contains invisible Unicode characters "
+        "that can carry hidden instructions.",
     ),
     "bidi_override": RuleInfo(
         "Bidirectional override in instructions",
-        "An instruction file contains bidirectional control characters that can make text "
-        "read differently from how it is processed.",
+        "An instruction file or a tool description contains bidirectional control characters "
+        "that can make text read differently from how it is processed.",
     ),
     "tag_characters": RuleInfo(
         "Unicode tag characters in instructions",
-        "An instruction file contains invisible Unicode tag characters, or unassigned "
-        "default-ignorable code points of plane 14, a known way to hide "
+        "An instruction file or a tool description contains invisible Unicode tag characters, "
+        "or unassigned default-ignorable code points of plane 14, a known way to hide "
         "prompt text.",
     ),
     "prompt_size": RuleInfo(
@@ -160,8 +160,9 @@ RULES: dict[str, RuleInfo] = {
     ),
     "directional_marks": RuleInfo(
         "Directional marks in instructions",
-        "An instruction file contains left-to-right, right-to-left or Arabic letter marks, "
-        "which are ordinary in right-to-left text but can reorder neutral characters.",
+        "An instruction file or a tool description contains left-to-right, right-to-left or "
+        "Arabic letter marks, which are ordinary in right-to-left text but can reorder "
+        "neutral characters.",
     ),
     "endpoint_identity": RuleInfo(
         "Unestablished endpoint identity",
@@ -170,12 +171,13 @@ RULES: dict[str, RuleInfo] = {
     ),
     "hidden_markup": RuleInfo(
         "Comments in instructions",
-        "An instruction file contains HTML or Markdown comments, which rendered views hide "
-        "and agents read.",
+        "An instruction file or a tool description contains HTML or Markdown comments, which "
+        "rendered views hide and agents read.",
     ),
     "line_separators": RuleInfo(
         "Line or paragraph separators",
-        "An instruction file contains U+2028 or U+2029, which can split a line in some renderers.",
+        "An instruction file or a tool description contains U+2028 or U+2029, which can split "
+        "a line in some renderers.",
     ),
     "hook_commands": RuleInfo(
         "Hook commands",
@@ -245,6 +247,18 @@ RULES: dict[str, RuleInfo] = {
     "transport_ambiguity": RuleInfo(
         "Ambiguous MCP transport",
         "An MCP server declares both a launch command and an endpoint or a remote transport type.",
+    ),
+    "tool_description_instructions": RuleInfo(
+        "Instructions in a tool description",
+        "A tool description combines at least two of three marks: an element addressed to "
+        "the model, a directive to keep something from the user and a reference to a "
+        "credential location. A model reads the description as instructions.",
+    ),
+    "script_download_execution": RuleInfo(
+        "Download run by a bundled script",
+        "A shell script bundled with a skill, command or hook runs a network download in a "
+        "shell or interpreter, through a pipe or a substitution, so that what runs is not "
+        "bound by the repository.",
     ),
     "runtime_undeclared": RuleInfo(
         "Runtime component not matched to the inventory",

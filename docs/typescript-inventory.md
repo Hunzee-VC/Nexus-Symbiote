@@ -17,7 +17,10 @@ inventory. Handlers imported from other modules are not covered. The scanner
 does not execute source code, evaluate schemas or callbacks, establish that a
 factory ran, or construct a tool-definition fingerprint. Effective descriptors
 and runtime registration remain unknown; compare observed descriptors separately
-before approving a live call.
+before approving a live call. A description that a registration states as a string
+literal, or as literals joined with `+`, is checked for hidden characters, comments
+and the marks of `tool_description_instructions`
+([finding catalog](finding-catalog.md)); it is not recorded.
 
 ## Files and grammars
 

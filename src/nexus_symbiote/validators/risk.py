@@ -91,7 +91,8 @@ def component_content_digest(component: ComponentBase) -> str | None:
     """The unkeyed digest of the component's reviewed bytes, when a collector recorded one.
 
     Detail texts carry counts, not content, so without this a finding whose payload
-    changed at the same count would keep its fingerprint.
+    changed at the same count would keep its fingerprint. A tool declared in source
+    has no digest of its own and records that of its file as ``source_sha256``.
     """
     for name in _CONTENT_DIGEST_FIELDS:
         value = getattr(component, name, None)
@@ -101,7 +102,8 @@ def component_content_digest(component: ComponentBase) -> str | None:
         # The keyed binding is the only record of the content; see ``content_unbound``.
         binding = component.properties.get("static_value_binding")
         return binding if isinstance(binding, str) and binding else None
-    return component.hashes.get("sha256") or None
+    digest = component.hashes.get("sha256") or component.properties.get("source_sha256")
+    return digest if isinstance(digest, str) and digest else None
 
 
 def content_unbound(component: ComponentBase) -> bool:

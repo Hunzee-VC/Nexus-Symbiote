@@ -301,7 +301,7 @@ _HIDDEN_GOAL = "Such text can redirect the agent's goal without a reviewer notic
 _HIDDEN_REVIEW = (
     "Hiding or disguising instruction text from human review is what this technique describes."
 )
-_UI_MISREPRESENTATION = "The file can display differently from what the agent processes."
+_UI_MISREPRESENTATION = "The text can display differently from what the agent processes."
 _PROMPT_INPUT = "Instruction text reaches the model with characters that are not neutralized."
 _MODEL_SUPPLY = "The model artifact is part of the agent's supply chain."
 
@@ -1008,6 +1008,38 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         _ref(EU_AI_ACT, "Art. 11", _DOCUMENTATION),
         _ref(ISO_42001, "A.4.2", _RESOURCES),
     ),
+    "script_download_execution": (
+        _ref(CWE, "CWE-494", "The script runs code that it downloads without an integrity check."),
+        _ref(CWE, "CWE-829", "What runs comes from an address outside the project's control."),
+        _ref(
+            OWASP_LLM_2025,
+            "LLM03:2025",
+            "Code fetched when a bundled script runs is an unpinned third-party component.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI04",
+            "The download becomes part of the agent's supply chain when the script runs.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI05",
+            "An agent that runs the script executes whatever the address serves.",
+        ),
+        _ref(
+            OWASP_LLM_2026,
+            "LLM04:2026",
+            "Code fetched when a bundled script runs is an unpinned third-party component.",
+        ),
+        _ref(
+            MITRE_ATLAS,
+            "AML.T0109",
+            "What the address serves can change after review without a change to the repository.",
+        ),
+        _ref(NIST_AI_RMF, "MANAGE-3.1", _THIRD_PARTY),
+        _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
+        _ref(ISO_42001, "A.10.3", _SUPPLIER),
+    ),
     "serialization_format": (
         _ref(
             CWE,
@@ -1123,6 +1155,33 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
     ),
     "tag_characters": _HIDDEN_CHARACTERS,
+    "tool_description_instructions": (
+        _ref(
+            OWASP_LLM_2025,
+            "LLM01:2025",
+            "A tool description is part of the model's prompt, and text in it that is written "
+            "as instructions can act as an injected prompt.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI01",
+            "Instructions carried in a tool description can redirect the agent's goal.",
+        ),
+        _ref(
+            OWASP_LLM_2026,
+            "LLM01:2026",
+            "A tool description is part of the model's prompt, and text in it that is written "
+            "as instructions can act as an injected prompt.",
+        ),
+        _ref(
+            MITRE_ATLAS,
+            "AML.T0010.005",
+            "A description that carries instructions for the model is evidence that the tool "
+            "could be a compromised one.",
+        ),
+        _ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),
+        _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
+    ),
     "transport_ambiguity": (_ref(NIST_AI_RMF, "MEASURE-2.7", _EVALUATION),),
     "transport_security": (
         _ref(

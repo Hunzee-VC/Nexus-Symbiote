@@ -134,7 +134,9 @@ An agent's behavior depends on its configuration as much as its code — MCP ser
 | Tool rug pulls | Fingerprints the tools a [live observation](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/offline-and-live-modes.md#detect-drift-on-a-remote-mcp-server) records, so a changed definition is a critical drift alert; a static scan records declared tools by name and file digest |
 | Endpoint repointing, scope widening | Critical or high drift alert when an MCP or A2A endpoint moves host, or an A2A card's OAuth scopes grow |
 | Executable or unsigned model files | Classifies formats without loading them and validates SafeTensors headers; integrity stays `UNKNOWN` until your [signer policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md#operator-signature-policy) verifies the weights |
-| Hidden instructions | Flags bidi and zero-width characters, and text hidden in HTML comments, unused link reference definitions or unreferenced footnotes, in instruction files |
+| Hidden instructions | Flags bidi and zero-width characters, and text hidden in HTML comments, unused link reference definitions or unreferenced footnotes, in instruction files and tool descriptions |
+| Poisoned tool descriptions | Flags a tool description that combines marks of text written to steer the model: an element addressed to it, a directive to keep something from the user, a credential location |
+| Fetch-and-execute skill scripts | Flags a shell script bundled with a skill, command or hook that pipes a network download into a shell or interpreter |
 | Over-broad agent permissions | Flags `bypassPermissions`, blanket grants such as `Bash(*)` and hook commands; a changed setting is a drift alert, and without the binding key a record whose setting values the redaction removes is a medium drift alert that they are unbound |
 | Credential exposure | Flags a literal credential in an MCP server definition or in Claude Code settings `env`, by file, position and type; records variable names, never values; redacts known secret patterns |
 
@@ -170,9 +172,9 @@ Every row has limits: [known limitations](https://github.com/Hunzee-VC/Nexus-Sym
 
 | Surface | Collector | Records |
 | --- | --- | --- |
-| MCP servers and clients | `mcp` | Clients, servers, launchers, package pins, transports, endpoints, tool fingerprints |
+| MCP servers and clients | `mcp` | Clients, servers, launchers, package pins, transports, endpoints, tool fingerprints, findings on tool descriptions |
 | Model weights | `model` | SHA-256 of weight files, serialization safety, SafeTensors structure, signature status |
-| Instructions and rules | `prompt` | Content digests; hidden-character and hidden-comment findings |
+| Instructions, rules and skills | `prompt` | Content digests; hidden-character and hidden-comment findings; bundled shell scripts that run a download |
 | RAG and vector stores | `rag` | Retrieval sources, store/index/embedding identities, URI origins, control states |
 | Packages and images | `registry` | AI packages in the [catalog](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/registry-collector.md#ai-package-catalog), pins, lockfile integrity, image digests, registry redirects |
 | A2A agent cards | `a2a` | Endpoints, security schemes, scopes, card signatures |

@@ -385,6 +385,74 @@
         }
       ],
       "parameters": {}
+    },
+    {
+      "id": "tool-description-instructions",
+      "kind": "tool_description",
+      "task": "detection",
+      "truth": true,
+      "rationale": "A tool description holds an element addressed to the model, a directive to keep a step from the user and a credential path.",
+      "directory": "fixtures/tool-description-instructions",
+      "references": [
+        {
+          "path": "project/server.py",
+          "sha256": "37ecdd307360dad9634674931268315cfac4d0657350faaab3c14b7d8f30189d"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "tool-description-ordinary",
+      "kind": "tool_description",
+      "task": "detection",
+      "truth": false,
+      "rationale": "Ordinary descriptions that say IMPORTANT in prose, name the user, a key path or an example element carry at most one mark each.",
+      "directory": "fixtures/tool-description-ordinary",
+      "references": [
+        {
+          "path": "project/server.py",
+          "sha256": "e91c65c3cb7cc6680708297d43ce5a2f7291d1f18d1ea2ab79b8b0b24fc4d4d6"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "skill-script-piped-download",
+      "kind": "skill_script",
+      "task": "detection",
+      "truth": true,
+      "rationale": "A bundled skill script pipes a network download into a shell.",
+      "directory": "fixtures/skill-script-piped-download",
+      "references": [
+        {
+          "path": "project/.claude/skills/pdf-export/SKILL.md",
+          "sha256": "e711358ccfc444018f354f718d15b99281b32129841f9438fa19e36d0e3804e5"
+        },
+        {
+          "path": "project/.claude/skills/pdf-export/scripts/export.sh",
+          "sha256": "77fb0f86a93834bcf5eb3176ddd255ad48b78b4311acf8d6a466a25d8717fba9"
+        }
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "skill-script-saved-download",
+      "kind": "skill_script",
+      "task": "detection",
+      "truth": false,
+      "rationale": "A bundled skill script saves its download to a file and runs local files; a comment and a usage message only show the piped form.",
+      "directory": "fixtures/skill-script-saved-download",
+      "references": [
+        {
+          "path": "project/.claude/skills/pdf-extract/SKILL.md",
+          "sha256": "38c5ab01fb542207be854b1c8c479e8c49209f6edf526adfb2ad00b8f8b461c1"
+        },
+        {
+          "path": "project/.claude/skills/pdf-extract/scripts/extract.sh",
+          "sha256": "7459dca3eca09138036afc6a5ac0df7fafbab8e69c9aec2e3ed93d48ea63c43e"
+        }
+      ],
+      "parameters": {}
     }
   ]
 }

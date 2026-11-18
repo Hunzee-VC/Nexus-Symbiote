@@ -12,8 +12,14 @@ from typing import NamedTuple
 from urllib.parse import quote
 
 from nexus_symbiote.core.hashing import hash_bytes
-from nexus_symbiote.core.models import ClaimEvidence, MCPServerComponent, ToolComponent
+from nexus_symbiote.core.models import (
+    ClaimEvidence,
+    MCPServerComponent,
+    RiskAssessment,
+    ToolComponent,
+)
 from nexus_symbiote.scanners.base import ScanResult
+from nexus_symbiote.scanners.tool_descriptions import tool_description_risks
 
 PYTHON_TOOL_HINTS = ("mcp", "langchain", "crewai", "function_tool", "smolagents", "pydantic_ai")
 
@@ -348,9 +354,38 @@ _TOOL_OPTIONS = frozenset(
 )
 
 
+# The keywords that state a tool's description: ``description`` for the MCP SDKs,
+# LangChain and PydanticAI, ``description_override`` for the OpenAI Agents SDK.
+_DESCRIPTION_OPTIONS = ("description", "description_override")
+
+
+def _description_risks(
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
+    name: str,
+    options: dict[str | None, ast.expr],
+) -> list[RiskAssessment]:
+    """Findings on the description the source states for a tool.
+
+    The SDKs describe a tool by its description keyword when that is not empty, and
+    otherwise by the function's docstring. A keyword that is not a string literal is not
+    read; the docstring, which the SDK falls back to, is checked in its place.
+    """
+    stated = (options.get(keyword) for keyword in _DESCRIPTION_OPTIONS)
+    literal = next(
+        (
+            value.value
+            for value in stated
+            if isinstance(value, ast.Constant) and isinstance(value.value, str) and value.value
+        ),
+        None,
+    )
+    description = literal or ast.get_docstring(function)
+    return tool_description_risks(description, name) if description else []
+
+
 def _record_decorator(
     deco: ast.Call | ast.Attribute,
-    default_name: str,
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
     server: MCPServerComponent,
     path: Path,
     source_digest: str,
@@ -358,7 +393,7 @@ def _record_decorator(
 ) -> None:
     keywords = deco.keywords if isinstance(deco, ast.Call) else []
     options = {kw.arg: kw.value for kw in keywords}
-    name: object = default_name
+    name: object = function.name
     if "name" in options:
         value = options["name"]
         name = value.value if isinstance(value, ast.Constant) else None
@@ -399,6 +434,7 @@ def _record_decorator(
                 "declaration_line": deco.lineno,
                 "source_sha256": source_digest,
             },
+            risks=_description_risks(function, name, options),
         )
     )
     server.tool_refs.append(ref)
@@ -407,7 +443,7 @@ def _record_decorator(
 
 def _record_sdk_decorator(
     deco: ast.AST,
-    default_name: str,
+    function: ast.FunctionDef | ast.AsyncFunctionDef,
     framework: str,
     path: Path,
     source_digest: str,
@@ -417,7 +453,8 @@ def _record_sdk_decorator(
 ) -> None:
     """Record one decorated tool; ``owner`` names the agent it is registered on."""
     lineno = getattr(deco, "lineno", 1)
-    name: object = default_name
+    name: object = function.name
+    options: dict[str | None, ast.expr] = {}
     if isinstance(deco, ast.Call):
         options = {kw.arg: kw.value for kw in deco.keywords}
         name_keys = [k for k in ("name", "name_or_callable", "name_override") if k in options]
@@ -471,6 +508,7 @@ def _record_sdk_decorator(
                 "declaration_line": lineno,
                 "source_sha256": source_digest,
             },
+            risks=_description_risks(function, name, options),
         )
     )
 
@@ -509,9 +547,7 @@ def _collect_sdk_decorators(
                     unsupported = True
                     continue
                 handled.add(deco)
-                _record_sdk_decorator(
-                    deco, stmt.name, framework, path, source_digest, seen_refs, result
-                )
+                _record_sdk_decorator(deco, stmt, framework, path, source_digest, seen_refs, result)
             elif (
                 isinstance(deco, ast.Call)
                 and isinstance(deco.func, ast.Name)
@@ -522,9 +558,7 @@ def _collect_sdk_decorators(
                     unsupported = True
                     continue
                 handled.add(deco.func)
-                _record_sdk_decorator(
-                    deco, stmt.name, framework, path, source_digest, seen_refs, result
-                )
+                _record_sdk_decorator(deco, stmt, framework, path, source_digest, seen_refs, result)
     load_uses = {
         node
         for node in nodes
@@ -628,7 +662,7 @@ def _collect_agent_decorators(
                     handled.add(deco)
                     _record_sdk_decorator(
                         deco,
-                        stmt.name,
+                        stmt,
                         framework,
                         path,
                         source_digest,
@@ -649,7 +683,7 @@ def _collect_agent_decorators(
                     handled.add(deco.func)
                     _record_sdk_decorator(
                         deco,
-                        stmt.name,
+                        stmt,
                         framework,
                         path,
                         source_digest,
@@ -833,7 +867,7 @@ def _record_decorated_tools(
         attribute = node.func if isinstance(node, ast.Call) else node
         if isinstance(attribute, ast.Attribute):
             handled.update((attribute, attribute.value))
-        _record_decorator(node, stmt.name, servers[receiver], path, source_digest, result)
+        _record_decorator(node, stmt, servers[receiver], path, source_digest, result)
 
 
 class _Helper(NamedTuple):
