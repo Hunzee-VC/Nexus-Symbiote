@@ -61,6 +61,7 @@ _SCHEME_AND_VALUE = re.compile(r"([A-Za-z0-9-]{1,32})(\s++)(\S.*+)", re.DOTALL)
 # A reference names where a credential comes from and holds none. Only the braced and
 # the upper-case forms count: a password may itself begin with "$".
 _REFERENCE = re.compile(r"\$\{[^{}\s]{1,128}\}|\$[A-Z][A-Z0-9_]{1,127}")
+_TEMPLATE = re.compile(r"\{\{[^{}]{1,128}\}\}")
 _AUTH = re.compile(r"(?i)\b(Bearer|Basic|Token|Bot|ApiKey|Api-Key)(\s++)([A-Za-z0-9_+/=.~-]{6,}+)")
 # After an Authorization or Proxy-Authorization header name the scheme's value is a
 # credential whatever its shape; the shape checks only tell prose from credentials.
@@ -221,6 +222,19 @@ def scheme_credentials(value: str) -> list[str]:
 def is_reference(value: str) -> bool:
     """Whether ``value`` only names a variable (``${NAME}``, ``$NAME``) and holds no secret."""
     return _REFERENCE.fullmatch(value) is not None
+
+
+def names_reference(value: str) -> bool:
+    """Whether ``value`` names where a credential comes from and holds none.
+
+    A reference (``${NAME}``, ``$NAME``) or a template (``{{ name }}``), on its own or
+    after an auth scheme word (``Bearer ${TOKEN}``).
+    """
+    stripped = value.strip()
+    parts = _SCHEME_AND_VALUE.fullmatch(stripped)
+    if parts is not None and parts.group(1).lower() in _AUTH_SCHEMES:
+        stripped = parts.group(3).strip()
+    return is_reference(stripped) or _TEMPLATE.fullmatch(stripped) is not None
 
 
 def credential_shaped(value: str) -> bool:

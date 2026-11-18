@@ -147,6 +147,13 @@ RULES: dict[str, RuleInfo] = {
         "An MCP server's tools run without per-call approval: alwaysAllow, autoApprove or "
         "trust is set.",
     ),
+    "credential_exposure": RuleInfo(
+        "Literal credential in an MCP launch",
+        "An MCP server's env value, launch argument or header holds a literal credential, "
+        "which the inventory redacts: a vendor token shape, an authorization scheme "
+        "credential or a generic secret-like value. The finding names the positions, "
+        "never a value.",
+    ),
     "credential_helper": RuleInfo(
         "Credential helper command",
         "Claude Code settings declare a credential helper, a command that runs to obtain "

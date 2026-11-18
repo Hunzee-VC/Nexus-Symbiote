@@ -322,6 +322,22 @@ A way around a limit that its entry does not describe is worth a
   issuer) are not scrubbed. In an inline shell or `cmd` script a credential is found
   by its shape or in a `NAME=value`, `--name=value` or `--name value` word, which
   covers cmd's `set NAME=<scheme> <credential>`.
+- **`credential_exposure` reports MCP launch positions only.** The finding is raised
+  for an MCP server's `env` values, launch arguments and header values, and for an
+  `env` or header name in a known token shape. A credential in the `command` field
+  itself, in an `oauth` or `auth` object, in an endpoint URL (`transport_security`
+  covers that), in a Claude Code settings `env` value, or in an A2A or RAG header is
+  scrubbed or withheld as before but raises no `credential_exposure` finding. In an
+  argument, cmd's `set NAME=<scheme> <credential>` is scrubbed but is reported only
+  when the credential has a known token shape, and a URL counts only for a
+  credential in its user information or query: a plain locator under a credential
+  name is scrubbed whole and is not reported. The finding names positions, never
+  values, so two servers whose credentials differ carry the same finding. Only
+  `${NAME}`, `$NAME` and `{{ name }}` count as references: a cmd or PowerShell
+  reference (`%API_TOKEN%`, `$env:API_TOKEN`), a GitHub Actions expression
+  (`${{ secrets.TOKEN }}`) or a placeholder such as `<your-api-key>` or
+  `YOUR_API_KEY_HERE` of eight or more characters under a credential name is
+  scrubbed as a value and reported as a generic secret-like value.
 - **Resolver settings outside the root are not read.** Settings are read from the
   root `.npmrc`, `bunfig.toml`, `.yarnrc.yml`, `.yarnrc`, `.env.yarn`, `uv.toml`
   and the `[tool.uv]` table of `pyproject.toml`. User and global configuration,

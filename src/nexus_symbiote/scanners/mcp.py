@@ -76,6 +76,7 @@ from nexus_symbiote.utils.secrets import (
     SecretScrubber,
     credential_shaped,
     is_reference,
+    names_reference,
     redact_descriptor,
     redact_text,
     scheme_credentials,
@@ -552,8 +553,8 @@ def _url_secrets(value: str) -> list[str]:
     return found
 
 
-def _header_line_secrets(text: str) -> list[str]:
-    """Credentials in an inline ``Header-Name: value`` string such as ``Authorization: Bearer ...``."""
+def _header_line(text: str) -> tuple[str, str] | None:
+    """The name and value of an inline ``Header-Name: value`` string, or None."""
     candidate = text.strip()
     lowered = candidate.lower()
     for prefix in _HEADER_PREFIXES:
@@ -564,13 +565,22 @@ def _header_line_secrets(text: str) -> list[str]:
         if candidate.startswith("-H") and len(candidate) > 2 and not candidate.startswith("-H="):
             candidate = candidate[2:].strip()
     if ":" not in candidate:
-        return []
+        return None
     hdr_name, _, hdr_val = candidate.partition(":")
     hdr_name = hdr_name.strip(" \"'")
     if hdr_val.startswith("//") or not _HEADER_NAME.fullmatch(hdr_name):
-        return []
+        return None
     hdr_val = hdr_val.strip(" \"'")
-    if not hdr_val or is_reference(hdr_val):
+    return (hdr_name, hdr_val) if hdr_val else None
+
+
+def _header_line_secrets(text: str) -> list[str]:
+    """Credentials in an inline ``Header-Name: value`` string such as ``Authorization: Bearer ...``."""
+    header = _header_line(text)
+    if header is None:
+        return []
+    hdr_name, hdr_val = header
+    if is_reference(hdr_val):
         return []
     found: list[str] = []
     if secret_like(hdr_name, hdr_val):
@@ -670,6 +680,108 @@ def _launch_secrets(launch: Launch, args: Sequence[str] = (), command: str = "")
                 values.append(word)
                 values.extend(scheme_credentials(word))
     return list(dict.fromkeys(values))
+
+
+_SHAPE_CLASS = "a vendor token shape"
+_SCHEME_CLASS = "an authorization scheme credential"
+_NAMED_CLASS = "a generic secret-like value"
+# Strongest first: a token shape stands whatever surrounds it.
+_CREDENTIAL_CLASSES = (_SHAPE_CLASS, _SCHEME_CLASS, _NAMED_CLASS)
+
+
+def _credential_class(name: str, value: str) -> str | None:
+    """The pattern class under which the scrubber takes ``value`` at a position named ``name``.
+
+    A reference or template, bare or after an auth scheme word, names a credential and
+    holds none. A URL counts only for a credential in its user information or query, as
+    the scrubber selects one; a plain locator under a credential name is scrubbed whole
+    but holds no literal credential.
+    """
+    if TOKEN_SHAPE.search(value):
+        return _SHAPE_CLASS
+    if names_reference(value):
+        return None
+    header = _header_line(value)
+    if header is not None:
+        if names_reference(header[1]):
+            return None
+        if kind := _value_class(*header):
+            return kind
+    return _value_class(name, value)
+
+
+def _value_class(name: str, value: str) -> str | None:
+    """The scheme or named class of ``value``, without reading it as a header line."""
+    if scheme_credentials(value):
+        return _SCHEME_CLASS
+    if _url_secrets(value) or ("://" not in value and secret_like(name, value)):
+        return _NAMED_CLASS
+    return None
+
+
+def _argument_credential_class(previous: str | None, argument: str) -> str | None:
+    """The class of a launch argument: its words, their assignments, or a flag's value."""
+    classes = []
+    words = _launch_words([argument])
+    for index, word in enumerate(words):
+        classes.append(_credential_class("", word))
+        if index > 0 and _flag_value(words[index - 1], word):
+            classes.append(_credential_class(words[index - 1], word))
+        name, equals, value = word.partition("=")
+        if equals and not _requirement(name, value):
+            name = name.lstrip("-").strip(" \"'")
+            value = value.strip(" \"'")
+            if name and value and name.lower() not in {"h", "header"}:
+                classes.append(_credential_class(name, value))
+    if previous is not None and _flag_value(previous, argument):
+        classes.append(_credential_class(previous, argument))
+    return next((kind for kind in _CREDENTIAL_CLASSES if kind in classes), None)
+
+
+def _flag_value(flag: str, word: str) -> bool:
+    """Whether ``word`` is the value of a non-header ``flag`` such as ``--token``."""
+    return (
+        _CLI_FLAG.fullmatch(flag) is not None
+        and flag.lower() not in _HEADER_FLAGS
+        and not word.startswith("-")
+    )
+
+
+def _credential_positions(
+    env: dict[str, Any], args: list[Any], header_maps: Sequence[dict[str, Any]]
+) -> list[tuple[str, str]]:
+    """Each launch position holding a literal credential, with its pattern class.
+
+    Positions are named as the inventory exports them: an env or header name that the
+    inventory withholds is not named here either, and no value is. A name in a known
+    token shape is itself a literal credential.
+    """
+    positions: dict[tuple[str, str], None] = {}
+    for name in sorted(env):
+        value = env[name]
+        kind = _credential_class(name, value) if isinstance(value, str) else None
+        if kind is None and TOKEN_SHAPE.search(name):
+            kind = _SHAPE_CLASS
+        if kind is not None:
+            label = f"env {name}" if _exportable_name(name) else "an env key"
+            positions[(label, kind)] = None
+    previous: str | None = None
+    for index, argument in enumerate(args, start=1):
+        if isinstance(argument, str):
+            if kind := _argument_credential_class(previous, argument):
+                positions[(f"argument {index}", kind)] = None
+            previous = argument
+        else:
+            previous = None
+    headers = [item for mapping in header_maps for item in mapping.items()]
+    for name, value in sorted(headers, key=lambda item: item[0]):
+        kind = _credential_class(name, value) if isinstance(value, str) else None
+        if kind is None and TOKEN_SHAPE.search(name):
+            kind = _SHAPE_CLASS
+        if kind is not None:
+            label = f"header {redact_text(name, identifier=True)}"
+            positions[(label if _exportable_name(name) else "a header", kind)] = None
+    return list(positions)
 
 
 def _server_launch(config: dict[str, Any]) -> Launch:
@@ -2358,6 +2470,9 @@ class MCPScanner(Scanner):
         risks = self._server_risks(
             name,
             launch=launch,
+            credentials=_credential_positions(
+                env, args, [config.get("headers", {}), config.get("http_headers", {})]
+            ),
             transport=transport,
             command=command,
             endpoint_url=endpoint_url,
@@ -2899,6 +3014,7 @@ class MCPScanner(Scanner):
         withheld: list[str],
         endpoints: list[str],
         remote_type: bool,
+        credentials: list[tuple[str, str]],
     ) -> list[RiskAssessment]:
         risks: list[RiskAssessment] = []
 
@@ -3060,6 +3176,15 @@ class MCPScanner(Scanner):
                 "auto_approval",
                 f"MCP server '{name}' tools run without per-call approval: {scope}.",
                 "Require human approval for tool calls with side effects.",
+            )
+        if credentials:
+            listed = "; ".join(f"{position} ({kind})" for position, kind in credentials)
+            add(
+                RiskSeverity.HIGH,
+                "credential_exposure",
+                f"MCP server '{name}' records a literal credential in its launch: {listed}.",
+                "Replace each literal with an environment reference such as ${NAME}, and "
+                "rotate the credential: it is committed.",
             )
         if withheld:
             add(
