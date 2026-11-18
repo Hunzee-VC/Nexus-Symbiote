@@ -442,7 +442,7 @@
         "packages",
         "standards"
       ],
-      "mode_note": "v1.10.1 refuses to run without an LLM. The LLM endpoint is pointed at an unreachable port, so the tool reports its deterministic detections, each marked pending_agent_review, and no LLM enrichment; those unconfirmed candidates are graded as detections. Installed with the documented agentic, analysis, security and llm-openai extras and run with --atr-enrichment. Its intended LLM-assisted results may differ; treat its grade as provisional."
+      "mode_note": "v1.10.1 refuses to run without an LLM. The LLM endpoint is pointed at an unreachable port, so the tool reports its deterministic detections, each marked pending_agent_review, and no LLM enrichment; those unconfirmed candidates are graded as detections. Installed with the documented agentic, analysis, security and llm-openai extras and run with --atr-enrichment. Its intended LLM-assisted results may differ; treat its grade as provisional. With the documented `security` extra, `analyze` hands each discovered MCP config to cisco-ai-mcp-scanner, which starts every declared stdio server to enumerate its tools; in the benchmark it ran `sh -c touch \u2026` from s09b's .mcp.json (X02) and `npx -y \u2026` / `docker run \u2026` from s04. A base install without that extra does not start servers (observed in an earlier run of this benchmark)."
     },
     "ai-bom": {
       "display": "Trusera ai-bom",
