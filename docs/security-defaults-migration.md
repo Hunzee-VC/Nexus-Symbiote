@@ -14,6 +14,20 @@ setting. The actual runtime loader argument can differ, so even an explicit
 null, and non-boolean configuration values are unknown. Assess the effective
 runtime setting separately.
 
+The `model` collector applies the same rule to what a model file is. It records
+`serialization_format` and `model_type` for a `.gguf` or `.safetensors` file only
+when the file's header is that format's; otherwise both are absent, which means
+that the format was not established, and `properties.named_format` holds the
+format the name claims ([model integrity](model-integrity.md#format-and-model-type)).
+Releases up to 0.2.0 recorded both from the suffix, so in an inventory they wrote,
+`serialization_format` and `model_type` on a `.gguf` or `.safetensors` record do
+not show that the file is of that format. Collect such an inventory again. For each
+file whose header is not its format's, `diff` reports the changed fields and
+properties as one medium alert, on which it exits 1 unless `--no-fail-on-alert` is
+given, and `validate --project` reports the older record as `Missing or mismatched
+local component`. The `invalid_safetensors` gate is unchanged: `risk` raises it for
+either record.
+
 Consumers must handle unknown values explicitly. In particular, avoid boolean
 coercion (`if not value`) when false and unknown have different consequences.
 Older BOMs may contain security values created by earlier defaults; those values
