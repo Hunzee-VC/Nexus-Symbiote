@@ -762,9 +762,9 @@ def main() -> None:
             results["tools"][name] = entry
             continue
         meta_path = args.runs / name / "_tool.json"
-        entry["version"] = (
-            json.loads(meta_path.read_text())["version"] if meta_path.exists() else "?"
-        )
+        entry["version"] = spec.get("version", "?")
+        if meta_path.exists():
+            entry["version_reported"] = json.loads(meta_path.read_text())["version"]
         run = ToolRun(args.runs, name, scenarios)
         entry.update(score_tool(truth, run, validate, spec.get("declared_scope", [])))
         entry["runtime_seconds"] = round(sum(c["seconds"] for m in run.meta.values()

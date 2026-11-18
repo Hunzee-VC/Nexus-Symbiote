@@ -4,6 +4,7 @@
     "nexus-symbiote": {
       "display": "Nexus SymBiote",
       "source": "https://github.com/aisecnomad/Nexus-Symbiote",
+      "version": "0.2.0 (a13b622)",
       "install": "pip install <checkout> (commit under test)",
       "version_cmd": [
         "{T}/nexus/bin/nexus-symbiote",
@@ -82,6 +83,7 @@
     "cdxgen": {
       "display": "OWASP cdxgen (aibom)",
       "source": "https://github.com/cdxgen/cdxgen",
+      "version": "12.9.2",
       "install": "npm install --ignore-scripts @cyclonedx/cdxgen",
       "version_cmd": [
         "{T}/node/bin/node",
@@ -162,6 +164,7 @@
     "syft": {
       "display": "Anchore Syft",
       "source": "https://github.com/anchore/syft",
+      "version": "1.57.2",
       "install": "go install github.com/anchore/syft/cmd/syft@v1.57.2",
       "version_cmd": [
         "{T}/go/bin/syft",
@@ -203,6 +206,7 @@
     "agent-bom": {
       "display": "agent-bom",
       "source": "https://github.com/koda-ai-studio/agent-bom",
+      "version": "0.115.4",
       "install": "pip install --only-binary=:all: agent-bom==0.115.4",
       "version_cmd": [
         "{T}/agent-bom/bin/agent-bom",
@@ -298,6 +302,7 @@
     "cisco-aibom": {
       "display": "Cisco AI BOM",
       "source": "https://github.com/cisco-ai-defense/aibom",
+      "version": "1.10.1",
       "install": "pip install --only-binary=:all: 'cisco-aibom[agentic,llm-openai]==1.10.1'",
       "version_cmd": [
         "{T}/cisco-aibom/bin/pip",
@@ -429,6 +434,7 @@
     "ai-bom": {
       "display": "Trusera ai-bom",
       "source": "https://github.com/Trusera/ai-bom",
+      "version": "3.6.0",
       "install": "pip install --only-binary=:all: ai-bom==3.6.0",
       "version_cmd": [
         "{T}/ai-bom/bin/pip",
@@ -506,6 +512,7 @@
     "aisbom": {
       "display": "AIsbom",
       "source": "https://github.com/Lab700xOrg/aisbom",
+      "version": "1.7.0",
       "install": "pip install --only-binary=:all: aisbom-cli==1.7.0",
       "version_cmd": [
         "{T}/aisbom/bin/aisbom",
@@ -559,6 +566,7 @@
     "aibom-scanner": {
       "display": "aibom-scanner (saasvista)",
       "source": "https://github.com/saasvista/aibom-scanner",
+      "version": "1.3.5",
       "install": "pip install --only-binary=:all: aibom-scanner==1.3.5",
       "version_cmd": [
         "{T}/aibom-scanner/bin/aibom-scanner",
@@ -611,6 +619,7 @@
     "airom": {
       "display": "AIROM",
       "source": "https://github.com/airomhq/airom",
+      "version": "0.4.7",
       "install": "go install github.com/airomhq/airom/cmd/airom@v0.4.7",
       "version_cmd": [
         "{T}/go/bin/airom",
@@ -656,6 +665,7 @@
     "aibomgen-cli": {
       "display": "AIBoMGen CLI",
       "source": "https://github.com/idlab-discover/aibomgen-cli",
+      "version": "0.3.0",
       "install": "go install github.com/idlab-discover/aibomgen-cli@v0.3.0",
       "version_cmd": [
         "{T}/go/bin/aibomgen-cli",
@@ -696,6 +706,7 @@
     "owasp-aibom-generator": {
       "display": "OWASP AIBOM Generator",
       "source": "https://github.com/GenAI-Security-Project/aibom-generator",
+      "version": "main@2026-10-17",
       "runnable": false,
       "not_run_reason": "Takes a Hugging Face model ID and reads metadata from the live Hugging Face Hub API; it has no mode for scanning a local repository or local model files, and the Hub is unreachable from the benchmark sandbox by design.",
       "declared_scope": [
