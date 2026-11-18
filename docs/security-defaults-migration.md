@@ -26,7 +26,9 @@ file whose header is not its format's, `diff` reports the changed fields and
 properties as one medium alert, on which it exits 1 unless `--no-fail-on-alert` is
 given, and `validate --project` reports the older record as `Missing or mismatched
 local component`. The `invalid_safetensors` gate is unchanged: `risk` raises it for
-either record.
+either record, and the collector stores the finding on a record without
+`serialization_format`, so that a release up to 0.2.0, which derives it from that
+field alone, still fails the gate on an inventory this release wrote.
 
 Consumers must handle unknown values explicitly. In particular, avoid boolean
 coercion (`if not value`) when false and unknown have different consequences.

@@ -32,7 +32,7 @@ from nexus_symbiote.scanners.model import (
     MAX_MODEL_HEADER_BYTES,
     ModelScanner,
 )
-from nexus_symbiote.validators.risk import RiskScorer
+from nexus_symbiote.validators.risk import RiskScorer, _intrinsic_model_risks
 
 # The reported file, byte for byte.
 PLACEHOLDER = b"placeholder used by the upload-validation test\n"
@@ -41,7 +41,15 @@ NO_VALIDATOR = "No bounded structural validator for this format/loader"
 MALFORMED = "Malformed or unsupported SafeTensors structure"
 UNREAD = "Artifact could not be inspected"
 UNKNOWN_FORMAT = ("high", "serialization_format_unknown")
+# Stored for a file named as SafeTensors, so a reader older than the record still fails its gate.
+INVALID_SAFETENSORS = ("high", "invalid_safetensors")
 UNSIGNED = ("high", "signing_status")
+
+
+def _unknown(named: str) -> list[tuple[str, str]]:
+    """The findings of a file whose format was not established and that carries no payload."""
+    stored = [INVALID_SAFETENSORS] if named == "safe-tensors" else []
+    return [*stored, UNKNOWN_FORMAT, UNSIGNED]
 
 
 def _gguf_string(text: bytes) -> bytes:
@@ -167,7 +175,7 @@ def test_a_header_of_another_format_establishes_neither_format_nor_model_type(
     assert component.properties["format_inspection"] == explanation
     assert component.serialization_safety is SerializationSafety.UNKNOWN
     assert component.hashes == {"sha256": "sha256:" + hashlib.sha256(PLACEHOLDER).hexdigest()}
-    assert _findings(component) == [UNKNOWN_FORMAT, UNSIGNED]
+    assert _findings(component) == _unknown(named)
 
 
 @pytest.mark.parametrize(
@@ -193,7 +201,7 @@ def test_a_header_too_short_or_too_long_to_read_stays_an_explicit_unknown(
     _unestablished(component, named)
     assert component.properties["format_inspection"] == explanation
     assert component.serialization_safety is SerializationSafety.UNKNOWN
-    assert _findings(component) == [UNKNOWN_FORMAT, UNSIGNED]
+    assert _findings(component) == _unknown(named)
 
 
 @pytest.mark.parametrize(
@@ -211,7 +219,7 @@ def test_a_file_that_cannot_be_read_stays_an_explicit_unknown(
     assert component.properties["format_inspection"] == UNREAD
     assert component.serialization_safety is SerializationSafety.UNKNOWN
     assert component.hashes == {}
-    assert _findings(component) == [UNKNOWN_FORMAT, UNSIGNED]
+    assert _findings(component) == _unknown(named)
 
 
 @pytest.mark.parametrize(
@@ -242,6 +250,32 @@ def test_a_pickle_under_the_name_keeps_its_rating_and_is_not_recorded_as_the_nam
     assert component.serialization_safety is SerializationSafety.UNSAFE_CODE_EXECUTION
     assert "pickle" in component.properties["format_inspection"]
     assert _findings(component) == [("critical", "serialization_format"), UNSIGNED]
+
+
+def test_the_gguf_magic_before_a_code_executing_pickle_is_not_a_gguf_file(tmp_path: Path) -> None:
+    # The magic also opens a pickle: G reads the next eight bytes as a float, and 0 pops it.
+    disguised = b"GGUF" + (3).to_bytes(4, "little") + b"\0" + b"0" + b"cos\nsystem\n(S'id'\ntR."
+    component = _scan(tmp_path, "model.gguf", disguised)
+    _unestablished(component, "llama.cpp")
+    assert component.serialization_safety is SerializationSafety.UNSAFE_CODE_EXECUTION
+    assert _findings(component) == [("critical", "serialization_format"), UNSIGNED]
+
+
+def test_an_unestablished_safetensors_file_stores_the_finding_older_readers_derive(
+    tmp_path: Path,
+) -> None:
+    # A reader before named_format derives invalid_safetensors from serialization_format,
+    # which this record withholds; the stored finding keeps its gate closed, and the
+    # current reader does not count it twice.
+    component = _scan(tmp_path, "model.safetensors", PLACEHOLDER)
+    stored = [risk for risk in component.risks if risk.category == "invalid_safetensors"]
+    assert [(risk.severity.value, risk.detail) for risk in stored] == [
+        ("high", "The declared SafeTensors artifact has no corroborated structural safety.")
+    ]
+    derived = _intrinsic_model_risks(component)
+    assert [risk.category for risk in derived].count("invalid_safetensors") == 1
+    older = component.model_copy(update={"properties": {}})
+    assert "invalid_safetensors" in [risk.category for risk in older.risks]
 
 
 def test_a_zip_archive_named_as_gguf_is_not_recorded_as_gguf(tmp_path: Path) -> None:

@@ -1203,9 +1203,14 @@ def _complete_observation(
         safety,
         explanation,
         "sha256:" + observed.digest.hexdigest(),
-        # Only a SafeTensors header that validates is rated safe.
+        # Only a SafeTensors header that validates is rated safe. The GGUF magic before
+        # content rated as code that runs on load is a disguise, not a GGUF file.
         header_matched=safety == SerializationSafety.SAFE
-        or (key == "gguf" and observed.prefix.startswith(GGUF_MAGIC)),
+        or (
+            key == "gguf"
+            and safety != SerializationSafety.UNSAFE_CODE_EXECUTION
+            and observed.prefix.startswith(GGUF_MAGIC)
+        ),
         **extra,
     )
 
@@ -2461,7 +2466,13 @@ class ModelScanner(Scanner):
             source_path=name,
             trust_tier=trust_tier,
             risks=self._assess_model_risks(
-                path, fmt_key, safety, status.value, context, embedded=embedded
+                path,
+                fmt_key,
+                safety,
+                status.value,
+                context,
+                embedded=embedded,
+                established=established,
             ),
             claims=(
                 {SIGNING_EVIDENCE_CLAIM: verification.evidence}
@@ -2501,6 +2512,7 @@ class ModelScanner(Scanner):
         context: _DirectoryContext,
         *,
         embedded: bool,
+        established: bool,
     ) -> list[RiskAssessment]:
         risks: list[RiskAssessment] = []
 
@@ -2546,6 +2558,20 @@ class ModelScanner(Scanner):
                         "templates only in a sandboxed Jinja2 environment."
                     ),
                     references=[DOCUMENTATION],
+                )
+            )
+
+        if safety == SerializationSafety.UNKNOWN and fmt_key == "safetensors" and not established:
+            # Stored, in the words risk derives it in: a build before this record's
+            # format derives the finding from serialization_format, which is withheld
+            # here, and would pass the gate that fails on it at any score.
+            risks.append(
+                RiskAssessment(
+                    severity=RiskSeverity.HIGH,
+                    category="invalid_safetensors",
+                    detail=(
+                        "The declared SafeTensors artifact has no corroborated structural safety."
+                    ),
                 )
             )
 

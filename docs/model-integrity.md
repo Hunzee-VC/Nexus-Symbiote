@@ -132,7 +132,8 @@ configuration and the file name, and is `foundation` when neither says otherwise
 Neither field shows that the file was read as that format, except for the two formats
 whose header the collector checks: a `.gguf` or `.safetensors` file is recorded with
 its format (`llama.cpp` or `safe-tensors`) and a model type only when its header is
-that format's, which is the four bytes `GGUF` at the start of a `.gguf` file and a
+that format's, which is the four bytes `GGUF` at the start of a `.gguf` file whose
+content is not rated `unsafe-code-execution` (those bytes also open a pickle), and a
 `.safetensors` header that validates, as the `safe` rating requires. Any other file
 under those two suffixes is still a component, with the rating and the findings its
 content gets, but its record has neither field. Instead `properties.named_format`
