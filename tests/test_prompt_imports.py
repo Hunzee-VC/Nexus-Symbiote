@@ -386,15 +386,23 @@ _PEAKS = """
 import json, sys, tracemalloc
 from pathlib import Path
 from nexus_symbiote.scanners.prompt import PromptScanner
-peaks = {}
+runs = {}
 for root in sys.argv[1:]:
-    tracemalloc.start()
+    tracemalloc.start(8)
     try:
-        PromptScanner().scan(Path(root))
-        peaks[Path(root).name] = tracemalloc.get_traced_memory()[1]
+        result = PromptScanner().scan(Path(root))
+        current, peak = tracemalloc.get_traced_memory()
+        largest = tracemalloc.take_snapshot().statistics("traceback")[:3]
     finally:
         tracemalloc.stop()
-print(json.dumps(peaks))
+    runs[Path(root).name] = {
+        "peak": peak,
+        "current": current,
+        "components": len(result.components),
+        "failures": len(result.scan_failures),
+        "largest": [[stat.size, stat.count, stat.traceback.format()] for stat in largest],
+    }
+print(json.dumps(runs))
 """
 
 
@@ -413,11 +421,14 @@ def test_scan_memory_grows_with_the_files_not_with_the_paths_they_reference(tmp_
         text=True,
         timeout=120,
     ).stdout
-    peaks = {int(name): peak for name, peak in json.loads(measured).items()}
+    runs = {int(name): run for name, run in json.loads(measured).items()}
+    peaks = {files: run["peak"] for files, run in runs.items()}
+    # What the scan still holds afterwards, and where, so a failure says what grew.
+    detail = json.dumps(runs, indent=1)
     # References quadruple at each step and name 3 KB paths: 120 MB of them at 200
     # files before they were bounded.
-    assert peaks[200] < 16 * limits.MIB
-    assert peaks[200] < 2.5 * peaks[100] < 2.5 * 2.5 * peaks[50]
+    assert peaks[200] < 16 * limits.MIB, detail
+    assert peaks[200] < 2.5 * peaks[100] < 2.5 * 2.5 * peaks[50], detail
 
 
 _CAPPED_CLI = """
