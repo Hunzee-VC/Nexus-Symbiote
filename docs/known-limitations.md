@@ -377,11 +377,27 @@ A way around a limit that its entry does not describe is worth a
   clients of other frameworks,
   leave no gap; the collector records some of those only as a code-detected client.
   User-level client settings in your home directory are not read either.
-- **Some client files are only detected.** Zed `context_servers`, opencode `mcp`,
-  `.continue/mcpServers/` and `.junie/mcp/mcp.json` are gaps; their servers are not
-  parsed. A copy at any depth, such as `pkg/opencode.json` or
-  `pkg/.continue/mcpServers/`, is a gap too, and another spelling of one, such as
-  `pkg/.Zed/settings.json`, is a [case-variant failure](#every-collector).
+- **Some client shapes are read with limits.** Zed `context_servers`, opencode `mcp`,
+  Continue `mcpServers` in `.continue/config.yaml` and in the `.yaml` and `.yml`
+  files directly in `.continue/mcpServers/`, and Junie `.junie/mcp/mcp.json` are
+  parsed, at any depth and through a directory symlink, as the other client files
+  are. A Zed server with `"source": "extension"`, or with neither a command nor an
+  endpoint, is started by the editor's extension from code the client file does not
+  hold, so it is inventoried with an unknown launcher, a high `launcher_identity`
+  finding and a gap, and its `settings` values are scrubbed as environment values
+  are. An opencode `remote` server's transport is read from its endpoint, as for a
+  server that declares no type. A `.continue/mcpServers/` file whose top level is a
+  server rather than a block holding a `mcpServers` list, a `.json` file there whose
+  name is not a client file name, and a file in a directory below it are gaps: the
+  collector does not confirm that Continue reads them. A Continue entry that
+  references a hub block with `uses:` is a gap too, since its launch is on the hub and
+  is not resolved offline. A Continue name declared twice refuses every entry of that
+  name, and an `env` value that is not a string, such as YAML `PORT: 8080`, refuses
+  the server as an invalid server configuration; quote the value. Whether Continue reads a `.yml` file there is not confirmed
+  either; one is inventoried. Continue's `config.json` with
+  `experimental.modelContextProtocolServers` is not read. Another spelling of one of
+  these files, such as `pkg/.Zed/settings.json`, is a
+  [case-variant failure](#every-collector).
 - **Gemini CLI's server command is read only as plain words.** Gemini CLI starts
   `mcpServerCommand`, or `mcp.serverCommand` in its current settings layout, as a
   server named `mcp`, in place of an `mcpServers` entry of that name, and so does the
