@@ -8,7 +8,7 @@ omitted; `ground_truth.json` in a generated corpus has the full values.
 | ID | Kind | Case | Scenario | Points | Attribute checks |
 |---|---|---|---|---:|---|
 | C01 | component | stdio server pinned to an exact npm version | MCP client configurations across agents | 3 | version (+1), launcher (+1) |
-| NC1 | negative_finding | Pinned server needs no high finding | MCP client configurations across agents | -1 |  |
+| NC1 | negative_finding | Exact-pinned server is not called unpinned | MCP client configurations across agents | -1 |  |
 | C02 | component | stdio server with floating npm version | MCP client configurations across agents | 2 |  |
 | C02F | finding | Unpinned npx launch | MCP client configurations across agents | 3 |  |
 | C03 | component | Container server pinned by digest | MCP client configurations across agents | 2 | digest (+1) |
@@ -56,7 +56,7 @@ omitted; `ground_truth.json` in a generated corpus has the full values.
 | K05 | component | CLAUDE.md instruction file | Skills, instruction files, hooks, plugins, commands | 1 |  |
 | K06 | component | File imported by CLAUDE.md via @path | Skills, instruction files, hooks, plugins, commands | 2 |  |
 | K07 | component | Cursor rule file | Skills, instruction files, hooks, plugins, commands | 1 |  |
-| NK2 | negative_finding | Plain ASCII rule: no high finding | Skills, instruction files, hooks, plugins, commands | -1 |  |
+| NK2 | negative_finding | Plain ASCII rule is not called hidden text | Skills, instruction files, hooks, plugins, commands | -1 |  |
 | K08 | component | Copilot instructions | Skills, instruction files, hooks, plugins, commands | 1 |  |
 | K09 | component | Rule file with hidden Unicode tag text | Skills, instruction files, hooks, plugins, commands | 1 |  |
 | K09F | finding | Invisible Unicode tag characters in instructions | Skills, instruction files, hooks, plugins, commands | 3 |  |
@@ -85,13 +85,15 @@ omitted; `ground_truth.json` in a generated corpus has the full values.
 | ID | Kind | Case | Scenario | Points | Attribute checks |
 |---|---|---|---|---:|---|
 | M01 | component | SafeTensors weights with model card | Model artifacts on disk | 3 | sha256 (+2), format (+1), license (+1) |
-| M02 | component | Model card lineage: base model and training dataset | Model artifacts on disk | 2 | both (+1), dataset (+1) |
+| M02 | component | Model card lineage: base model and training dataset | Model artifacts on disk | 2 | base_model (+1), dataset (+1) |
 | M03 | component | GGUF quantized model | Model artifacts on disk | 3 | sha256 (+2), format (+1), arch (+1) |
 | M04 | component | GGUF with server-side template payload | Model artifacts on disk | 1 |  |
 | M04F | finding | Jinja template injection in GGUF chat_template | Model artifacts on disk | 2 |  |
 | M05 | component | ONNX model | Model artifacts on disk | 2 | sha256 (+1), format (+1) |
 | M06 | component | PyTorch pickle checkpoint | Model artifacts on disk | 2 | sha256 (+1) |
-| M06F | finding | Pickle checkpoint imports os.system | Model artifacts on disk | 3 |  |
+| M06F | finding | Pickle checkpoint flagged as a code-executing format | Model artifacts on disk | 1 |  |
+| M06G | finding | Pickle checkpoint's os.system import named | Model artifacts on disk | 2 |  |
+| NM3 | negative_finding | Benign pickle is not called malicious | Model artifacts on disk | -1 |  |
 | M07 | component | Pickle bytes behind a .safetensors suffix | Model artifacts on disk | 1 |  |
 | M07F | finding | Format mismatch: disguised pickle | Model artifacts on disk | 2 |  |
 | M08 | component | Keras v3 archive | Model artifacts on disk | 1 |  |
@@ -149,16 +151,23 @@ omitted; `ground_truth.json` in a generated corpus has the full values.
 |---|---|---|---|---:|---|
 | X01 | canary_absent | Pickle not executed | Hostile: pickle payloads that write a canary when deserialized | 4 |  |
 | X01S | component | Graceful: benign sibling model still reported | Hostile: pickle payloads that write a canary when deserialized | 1 |  |
+| X01P | component | Observed: hostile pickles inventoried | Hostile: pickle payloads that write a canary when deserialized | 0 |  |
 | X02 | canary_absent | MCP launch command not executed in default mode | Hostile: MCP launch command that writes a canary if started | 4 |  |
 | X02S | component | Graceful: sibling server reported | Hostile: MCP launch command that writes a canary if started | 1 |  |
+| X02C | component | Observed: shell-wrapped server inventoried | Hostile: MCP launch command that writes a canary if started | 0 |  |
 | X03 | outside_absent | Does not read through symlinks that leave the scan root | Hostile: symbolic links leading outside the scanned directory | 3 |  |
 | X03S | component | Graceful: in-root server reported | Hostile: symbolic links leading outside the scanned directory | 1 |  |
+| X03M | component | Graceful: in-root model reported | Hostile: symbolic links leading outside the scanned directory | 1 |  |
 | X04 | ansi_absent | Terminal control sequences from input are not echoed raw | Hostile: terminal control sequences in names and descriptions | 2 |  |
 | X04S | component | Graceful: server still reported | Hostile: terminal control sequences in names and descriptions | 1 |  |
+| X04K | component | Observed: skill with escape sequences inventoried | Hostile: terminal control sequences in names and descriptions | 0 |  |
 | X05 | completes | Completes within the time budget | Hostile: decompression bomb, header-length bomb, deeply nested JSON | 2 |  |
 | X06 | bounded_memory | Peak RSS stays under 2 GiB on a 3 GiB decompression bomb | Hostile: decompression bomb, header-length bomb, deeply nested JSON | 2 |  |
-| X05S | component | Graceful: valid sibling config still reported | Hostile: decompression bomb, header-length bomb, deeply nested JSON | 2 |  |
+| X05S | component | Graceful: valid sibling config still reported | Hostile: decompression bomb, header-length bomb, deeply nested JSON | 1 |  |
+| X05M | component | Graceful: valid sibling model still reported | Hostile: decompression bomb, header-length bomb, deeply nested JSON | 1 |  |
+| X05B | component | Observed: bomb or header-bomb model inventoried | Hostile: decompression bomb, header-length bomb, deeply nested JSON | 0 |  |
 | X09 | canary_absent | Project build and install scripts are not executed | Hostile: project build scripts that write a canary if run | 4 |  |
-| X09S | component | Graceful: project still inventoried | Hostile: project build scripts that write a canary if run | 1 |  |
+| X09S | component | Graceful: project MCP server still inventoried | Hostile: project build scripts that write a canary if run | 1 |  |
+| X09M | component | Graceful: project model still inventoried | Hostile: project build scripts that write a canary if run | 1 |  |
 | X07 | secret_absent | Literal credentials are redacted from every output | MCP client configurations across agents | 4 |  |
 | X08 | no_egress | No network connection attempts in default mode | all scenarios | 2 |  |

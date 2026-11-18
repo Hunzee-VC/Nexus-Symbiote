@@ -32,13 +32,14 @@ turns the inventory step into the breach. Scanner safety is therefore a scored d
 | Principle | How it is implemented |
 |---|---|
 | Executable, not a checklist | Every item is scored from tool output on generated fixtures. |
-| Ungameable identifiers | Every name a scorer matches is a random token derived from the seed (`kestrel7c41`). Publish results for the public seed; run a private seed for holdout verification. |
-| Precision as well as recall | Negative controls (Django `models.py`, an MCP example inside README prose, a team `SKILLS.md`, a pinned server that deserves no high finding) subtract points when reported. |
+| Seeded identifiers | Almost every name a scorer matches is a random token derived from the seed (`kestrel7c41`); the exceptions are standard file names (`AGENTS.md`, `CLAUDE.md`) and real package names in `s08`. Publish results for the public seed; run a private seed for holdout verification. |
+| Understanding, not echoing | A component counts only as a typed inventory entry: its token must sit in a short field such as a name, command or URL, and the kind of component must be stated by another field. Synthetic tools that dump every file or list every path stay at the floor (see Calibration). |
+| Precision as well as recall | Negative controls (Django `models.py`, a UI `*.model.json`, an MCP example inside README prose, a team `SKILLS.md`, an exact-pinned server called "unpinned", a plain rule file called "hidden text") subtract points when reported. |
 | Findings must name the problem | A finding counts only if it references the component **and** its text names the right class of issue (keyword set per case), and it is not informational. Emitting a note for every component earns nothing. |
 | Identity, not just presence | Many items carry attribute checks: SHA-256 of the file, pinned revision, container digest, version, licence, credential *reference* (not value), lineage to base model or dataset. |
 | Drift is measured, not asserted | The same MCP server is scanned before and after one tool description changes. The inventory must change for that tool and stay identical for an unchanged tool. |
 | Hostile by construction | Canary payloads that write a file only if executed; symlinks out of the root; a 3 GiB decompression bomb; a 2^62-byte SafeTensors header; 200 000-deep JSON; OSC 52 / title-set escape sequences; literal credentials. |
-| Same sandbox for everyone | Fresh network namespace, unprivileged user, read-only corpus, fresh HOME, 300 s per command, `strace` of `connect()`, peak RSS from `wait4()`. |
+| Same sandbox for everyone | Fresh network namespace, unprivileged user, a fresh writable copy of each scenario (as in a CI checkout), fresh HOME, 300 s per command, `strace` of `connect()` and `execve()`, peak RSS from `wait4()`. |
 | Best configuration per tool | Each tool runs its documented, most complete repository-scan configuration (all formats it offers). Configuration and rationale are in `tools.json`. |
 | Tool-neutral readers | CycloneDX, SPDX 3, SPDX 2, SARIF and native JSON are read by generic rules in `score.py`; no per-tool adapters, so no tool gets bespoke interpretation. |
 | Reproducible | Seeded generator, corpus digest, tool versions, raw outputs and per-item evidence are kept. |
@@ -72,64 +73,101 @@ Each is a candidate for a later version with its own fixtures.
 
 ## Scoring
 
-**Records.** Each output file is parsed by a format reader:
+**Records.** Each output file (and JSON printed on standard output) is parsed by a
+format reader. No reader knows any tool.
 
-- CycloneDX: components and services, nested, plus `formulation`. Findings come from
-  `vulnerabilities` (affected refs resolved), `annotations`, and risk-named component
-  properties.
-- SPDX 3: graph elements other than relationships, creation info and agents.
-  Annotations and vulnerability assessments become findings.
-- SARIF: results, joined to their rule.
-- Native JSON: every object in a list becomes a record. Lists under a key naming
-  findings (`risk`, `finding`, `issue`, `vuln`, …) become findings carrying the identity
-  of their parent object. Bookkeeping lists (stats, framework catalogues, control
-  mappings, scanned-file lists) are skipped.
+- CycloneDX: components and services, nested; `metadata.component` when it is a model,
+  dataset or library rather than the scanned project; `formulation`. Findings come from
+  `vulnerabilities` (affected refs resolved), `annotations` that name a severity or a
+  component, and risk-named component properties.
+- SPDX 3: elements of `@graph`, `element` or `elements` other than relationships,
+  creation info, agents and licences. Annotations and vulnerability assessments are
+  findings, attributed through `subject`, `from` and `to`.
+- SPDX 2: packages and files.
+- SARIF 2.1: results, joined to their rule by `ruleId`, `ruleIndex` or tool extensions.
+  Results of kind `pass`, `notApplicable` or `informational` are informational.
+- Native JSON: every object in a list, and every entry of an object keyed by name,
+  becomes a record. Lists under a key naming findings (`risk`, `finding`, `issue`,
+  `vuln`, …) become findings carrying the identity of their parent object. An inventory
+  object with a non-informational `severity` also yields a finding. Bookkeeping keys
+  (statistics, framework catalogues, control mappings, failure and skip lists) are not read.
 
-**Component items.** Detected when any component record contains the item's token
-(case-insensitive). Points = weight, plus each attribute check that also appears in a
-matched record.
+**Component items.** An item is detected when some record (a) holds the item's token in
+a short single-line value (at most 300 characters) that names fewer than three of the
+scenario's components, and (b) states the item's kind (model, server, skill, dataset,
+agent, package, …) in a different field, a key, or the name of the list that holds it.
+A file path alone therefore identifies nothing. Points = weight, plus each attribute
+check found in the most specific qualifying records (those naming the fewest
+components).
 
-**Finding items.** Detected when a finding record (a) contains the token, (b)
-contains one of the case's keywords, and (c) is not informational (`note`, `info`,
-`none`). Unknown severity is accepted. A finding that names more than three of the
-scenario's components is treated as repository-level ("no human oversight: A, B, C,
-…"): it earns no per-component credit and cannot be a false positive either.
+**Finding items.** A finding record earns the item when (a) it contains the token,
+(b) its own message text (message, title, description, rule text; not keys, evidence
+lists or attribution context) contains one of the case's keywords at a word boundary,
+and (c) its severity is not informational. Unknown severity is accepted. A finding that
+names more than three of the scenario's components is repository-level ("no human
+oversight: A, B, C, …"): it earns no per-component credit and is never a false positive.
 
-**Negative items.** A component record containing a negative token, or a high or
-critical finding on a benign control, subtracts the weight from the domain. Negatives
-are penalties, never free points.
+**Negative items** subtract their weight and are never free points. A negative
+component is reported when a record qualifies as in (a) and (b) above. A negative
+finding is reported when a medium or higher finding names the benign control and makes
+the specific wrong claim (keywords such as "unpinned" for an exact-pinned server).
 
-**Drift items.** Component records containing the tool token are taken from the v1
-and v2 scans. Volatile fields (timestamps, UUIDs, run IDs, durations) and the scenario
-name are normalised away before comparison. T07 needs a difference for the changed
-tool; T08 needs equality for the unchanged one.
+**Drift items.** Both versions of the drift scenario are scanned at the same path, as
+successive commits would be. Qualifying records for the changed tool must differ (T07).
+A record specific to the unchanged tool must be identical, or must keep a per-tool
+fingerprint (a digest not shared with the changed tool's records) so a reviewer can
+tell which tool changed (T08). Volatile fields (timestamps, UUIDs, run IDs, durations)
+are removed before comparison.
 
-**Standards items** are computed across all outputs (see `score.py:standards`). CycloneDX
-documents are validated with the official schemas bundled in `cyclonedx-python-lib`.
-Determinism compares two runs of the same input after removing volatile fields.
+**Standards items.** F01 validates every non-empty CycloneDX document with the official
+schemas bundled in `cyclonedx-python-lib`; scoring stops if the validator is missing.
+F02 checks SPDX 3 structurally (typed elements with IDs) and requires the ground-truth
+models and datasets to be typed `ai_AIPackage` and `dataset_DatasetPackage`; there is
+no SPDX 3 JSON-schema or SHACL validation in v1.0. F03 is the fraction of ground-truth
+models typed `machine-learning-model` and datasets typed `data`. F04 parses every value
+of a package-URL field with `packageurl-python` and needs a `pkg:huggingface` URL naming
+a ground-truth model. F05 needs unique bom-refs, resolving references, and dependency
+edges in every multi-component document. F06 compares two runs after removing volatile
+fields, ignoring array order. F07 needs the producing tool and version in metadata. A
+document that inventories nothing conforms trivially and is not counted.
 
-**Safety items** use runner evidence: canary files, output bytes, timeouts, peak RSS
-and `strace` connect attempts. Network attempts are judged on a separate run that uses
-the tool's plain invocation with no offline flags (`default_commands`). A safety item
-earns points only when the tool also inventoried the benign sentinel in that scenario
-(`requires` in the ground truth): a tool that never parsed the hostile directory has
-not shown it is safe there. A failed check triggers its gate either way. Likewise, an
-empty CycloneDX document conforms trivially, so standards checks look only at
-documents that inventory something.
+**Safety items** use runner evidence: canary files, `execve` records, output bytes,
+timeouts, peak RSS and `connect` attempts. Canary and build-command checks cover the
+benchmark configuration and the tool's plain invocation (`default_commands`, run on six
+scenarios). X09 also fails when the tool runs, or tries to run, a package manager or
+build on the scanned project (`npm install` without `--ignore-scripts`, `pip install -e
+.` or `-r`, `python setup.py`, `uv sync`, `poetry install`): offline that fails before
+the payload runs, but in a CI job with network access it executes the project's code.
+Network attempts are judged on the default-mode runs. A safety item earns points only
+when the tool also inventoried one of the scenario's benign sentinels (`requires`): a
+tool that never parsed the hostile directory has not shown it is safe there. A failed
+check triggers its gate either way. X06 fails when a command timed out, because peak
+memory was not observed.
 
-**Calibration.** A synthetic oracle that emits exactly the ground truth as one
-CycloneDX file plus one SARIF file scores 97.0 (it omits SPDX, `pkg:huggingface` URLs
-and dependency edges); an empty tool scores 0.0. `calibrate.py` reproduces both, and
-a scorer change that moves either number needs an explanation.
+**Calibration.** `calibrate.py` scores four synthetic tools:
+
+| Synthetic tool | What it emits | Score |
+|---|---|---:|
+| oracle | Exactly the ground truth, as CycloneDX plus SARIF | 96.5 (no SPDX, package URLs or dependency edges) |
+| cat | Every file's path, SHA-256 and full contents | 11.7 (F; X07 gate) |
+| lister | Every file's path and SHA-256 | 0.0 |
+| empty | Valid, empty documents | 0.0 |
+
+The cat tool's residue comes from one-line files (a SafeTensors header, single-line
+JSON) whose contents pass as short values. A scorer change that moves any of these
+numbers needs an explanation here.
 
 **Domain score** = max(0, earned − penalties) / possible.
 **Overall score** = Σ domain weight × domain score (0–100).
 **In-scope score** = the same, restricted to the domains the tool's own documentation
 claims (`declared_scope` in `tools.json`). It shows quality within the tool's chosen
 scope, while the overall score shows coverage of the whole AI supply chain.
+**Risk findings** = the share of finding-item points earned across all domains. Only
+about 25 of the 100 points are findings, so a tool can reach a C or better on inventory
+alone; read this column with the grade.
 
-**Grades.** A ≥ 85, B ≥ 70, C ≥ 55, D ≥ 40, F < 40. The bar is set for a tool you would
-deploy in CI on untrusted pull requests with no other AI-BOM tooling beside it.
+**Grades.** A ≥ 85, B ≥ 70, C ≥ 55, D ≥ 40, F < 40, on the score rounded to one
+decimal. Tools are ranked by grade after gates, then by score.
 
 **Gates** cap the grade regardless of score:
 
@@ -144,15 +182,19 @@ deploy in CI on untrusted pull requests with no other AI-BOM tooling beside it.
 `run.py` executes each command as:
 
 ```
-unshare -n -- strace -f -e trace=connect -- setpriv --reuid=bench ... -- env -i HOME=<fresh> PATH=<tool> <tool argv>
+unshare -n -- strace -f -s 256 -e trace=connect,execve -- setpriv --reuid=bench ... -- env -i HOME=<fresh> PATH=<tool> <tool argv>
 ```
 
 - The network namespace has no interfaces up, so no request leaves the machine. Every
-  `connect()` attempt is still recorded.
-- The corpus is owned by root and not writable by the sandbox user; the canary
-  directory is world-writable so an executed payload can prove it ran.
-- Each scenario gets a fresh output directory and HOME; caches cannot carry over.
-- `s01-models` and `s04-mcp` are scanned twice for determinism.
+  `connect()` attempt is still recorded, and every program the tool starts.
+- The tool scans a fresh copy of the scenario, owned by the sandbox user and writable,
+  laid out next to a copy of the directory its escaping symlinks reach. The corpus
+  itself stays root-owned. The canary directory is world-writable so an executed payload
+  can prove it ran.
+- Each scenario gets a fresh output directory, HOME and TMPDIR, and the session's
+  process group is killed after each command, so nothing carries over.
+- `s01-models` and `s04-mcp` are scanned twice for determinism. The plain invocation runs
+  on `s01`, `s04`, `s08`, `s09a`, `s09b` and `s09f`.
 
 ## Fairness rules
 
@@ -169,11 +211,15 @@ unshare -n -- strace -f -e trace=connect -- setpriv --reuid=bench ... -- env -i 
 
 - **Synthetic corpus.** Fixtures are small and regular. Real repositories are larger and
   messier, so recall on real code may be lower and false positives higher.
-- **Token matching is lenient about type.** A record containing the token earns
-  detection even if the tool mistyped the component. Attribute checks and ML-BOM
-  semantics only partly compensate.
-- **Keyword-based finding classes.** Keyword sets are broad on purpose; a finding phrased
-  with none of them is missed. Sets are published per case.
+- **Kind evidence is a word list.** A typed record earns detection even if its type is
+  wrong within the family (a dataset recorded as a model file). F03 and F02 measure exact
+  typing separately. Conversely, a record whose only kind evidence is an unusual word
+  is missed.
+- **Residual echo credit.** A tool that dumps one-line files can still match a few
+  items (11.7 points in calibration).
+- **Keyword-based finding classes.** Keyword sets are broad on purpose and matched at word
+  boundaries in the finding's own text; a finding phrased with none of them is missed.
+  Sets are published per case in `generate.py`.
 - **Weights and grade bands are judgement.** Re-weighting changes ranks between close
   tools; `results.json` has everything needed to do so.
 - **Offline-only.** Tools whose value comes from network enrichment (Hugging Face

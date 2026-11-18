@@ -36,9 +36,9 @@ The corpus contains live hostile payloads, so do not generate it on a workstatio
    python3 generate.py --out /opt/aibom-bench/corpus --seed 20261118
    ```
 
-   Expected: `corpus /opt/aibom-bench/corpus seed=20261118 items=115 digest=...`
+   Expected: `corpus /opt/aibom-bench/corpus seed=20261118 items=124 digest=4becb3a23d20a4ff`
 
-4. Run every tool over every scenario in the sandbox (about 45 minutes for all ten):
+4. Run every tool over every scenario in the sandbox (about an hour for all ten):
 
    ```bash
    python3 run.py --corpus /opt/aibom-bench/corpus --tools tools.json --tools-root /opt/aibom-bench/tools --runs /opt/aibom-bench/runs
@@ -55,14 +55,25 @@ The corpus contains live hostile payloads, so do not generate it on a workstatio
    ```
 
    `results/results.json` holds per-item evidence for every tool; `results/scorecard.md`
-   is the summary table. CycloneDX schema validation needs `cyclonedx-python-lib[validation]`
-   importable by the Python that runs `score.py`.
+   is the summary table. The Python that runs `score.py` needs
+   `cyclonedx-python-lib[validation]` and `packageurl-python`; scoring stops if either is
+   missing, rather than silently scoring zero.
+
+6. Check the scorer itself. `calibrate.py` scores four synthetic tools (an oracle, an
+   empty tool, a tool that dumps every file, and one that lists every path):
+
+   ```bash
+   python3 calibrate.py --corpus /opt/aibom-bench/corpus --work /tmp/aibom-calibration
+   ```
+
+   Expected: oracle 96.5 (A), cat 11.7 (F), lister 0.0 (F), empty 0.0 (F).
 
 ## Add a tool
 
 Add an entry to `tools.json` with its documented, most complete repository-scan
-command(s), a `default_commands` entry with the plain invocation (used only to observe
-network attempts), its install command, and the domains its own documentation claims
+command(s), a `default_commands` entry with the plain invocation (used to observe
+network attempts and whether default mode executes hostile content), its install
+command, its pinned version, and the domains its own documentation claims
 (`declared_scope`). Do not add a per-tool parser: if the tool's output is valid
 CycloneDX, SPDX, SARIF or JSON and is read incorrectly, fix the generic reader in
 `score.py` and re-score every tool.

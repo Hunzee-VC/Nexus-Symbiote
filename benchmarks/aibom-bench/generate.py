@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import os
+import pickle
 import random
 import shutil
 import struct
@@ -51,6 +52,13 @@ DOMAINS: dict[str, dict[str, Any]] = {
 
 # A finding only counts when its text names the right class of problem, so a tool that
 # emits an informational record for every component does not collect risk credit.
+# A format-level warning ("pickle can execute code") and naming the malicious callable
+# are different claims; each case asks for the one it tests.
+_PICKLE_FORMAT = ["pickle", "deserializ", "code execution", "execute code", "arbitrary code",
+                  "unsafe", "reduce"]  # fmt: skip
+_PICKLE_GLOBAL = ["os.system", "posix.system", "posix", "system(", "builtins.open", "malicious",
+                  "dangerous import", "dangerous global", "unsafe import", "unsafe global",
+                  "dangerous callable", "suspicious import", "suspicious global"]  # fmt: skip
 _PICKLE = [
     "pickle",
     "os.system",
@@ -97,10 +105,11 @@ _POISON = [
 ]
 FINDING_KEYWORDS: dict[str, list[str]] = {
     "M04F": ["template", "jinja", "ssti", "injection"],
-    "M06F": _PICKLE,
+    "M06F": _PICKLE_FORMAT,
+    "M06G": _PICKLE_GLOBAL,
     "M07F": ["mismatch", "disguis", "magic", "format", "pickle", "invalid", "header", "corrupt",
              "unexpected", "malformed"],
-    "M08F": ["lambda", "code", "unsafe", "rce", "arbitrary", "execut"],
+    "M08F": ["lambda", "custom object", "custom_object", "marshal"],
     "R02F": ["revision", "pin", "commit", "mutable", "version"],
     "C02F": ["pin", "version", "latest", "float", "mutable", "range"],
     "C04F": ["latest", "tag", "digest", "pin", "mutable", "float"],
@@ -112,9 +121,10 @@ FINDING_KEYWORDS: dict[str, list[str]] = {
              "network", "malicious", "suspicious", "execut"],
     "K09F": ["unicode", "invisible", "hidden", "tag char", "zero-width", "zero width",
              "steganograph", "control char", "bidi", "u+e00", "non-printing"],
-    "K10F": ["hook", "curl", "network", "exfil", "external", "egress", "url"],
+    "K10F": ["curl", "network", "exfil", "external", "egress", "url", "contact", "http",
+             "remote host", "outbound"],
     "P06F": ["typo", "squat", "similar", "confus", "suspicious", "malicious", "misspell"],
-    "X01F": _PICKLE,
+    "X01F": _PICKLE_GLOBAL,
     "X02F": ["shell", "sh -c", "inline", "arbitrary", "unpinned", "unverified", "untrusted",
              "unversioned", "provenance"],
 }  # fmt: skip
@@ -286,11 +296,19 @@ class Corpus:
         )  # fmt: skip
 
     def negative(
-        self, iid: str, sid: str, domain: str, kind: str, title: str, match: list[str], weight: int
+        self,
+        iid: str,
+        sid: str,
+        domain: str,
+        kind: str,
+        title: str,
+        match: list[str],
+        weight: int,
+        keywords: list[str] | None = None,
     ) -> None:
         self.add(
             id=iid, scenario=sid, domain=domain, kind=kind, title=title, match=match,
-            weight=weight,
+            weight=weight, keywords=keywords or [],
         )  # fmt: skip
 
 
@@ -326,7 +344,7 @@ def build_models(c: Corpus) -> None:
     )  # fmt: skip
     c.component(
         "M02", s, "models", "Model card lineage: base model and training dataset", [base, ds], 2,
-        [check("both", 1, base), check("dataset", 1, ds)],
+        [check("base_model", 1, base), check("dataset", 1, ds)],
     )  # fmt: skip
 
     t = c.tok()
@@ -385,7 +403,13 @@ def build_models(c: Corpus) -> None:
         "M06", s, "models", "PyTorch pickle checkpoint", [t], 2,
         [check("sha256", 1, sha256(pt))],
     )  # fmt: skip
-    c.finding("M06F", s, "models", "Pickle checkpoint imports os.system", [t], 3)
+    c.finding("M06F", s, "models", "Pickle checkpoint flagged as a code-executing format", [t], 1)
+    c.finding("M06G", s, "models", "Pickle checkpoint's os.system import named", [t], 2)
+
+    n = c.tok()
+    c.write(s, f"models/{n}/state.pt", torch_zip("archive", pickle.dumps({"w": [0.0, 1.0]}, 2)))
+    c.negative("NM3", s, "models", "negative_finding", "Benign pickle is not called malicious",
+               [n], 1, _PICKLE_GLOBAL)  # fmt: skip
 
     t = c.tok()
     c.write(s, f"models/{t}.safetensors", pickle_call("os", "system", ("true",)))
@@ -604,6 +628,8 @@ def build_packages(c: Corpus) -> None:
         ("P05", "@anthropic-ai/sdk", "0.52.0", 1),
     ]:
         alt = name.replace("@", "%40") if name.startswith("@") else name
+        if iid == "P03":
+            alt = "=mcp"  # the PyPI package named exactly "mcp"
         c.component(
             iid, s, "packages", f"AI dependency {name}", [name, alt], w,
             [check("version", 1, ver)],
@@ -656,7 +682,9 @@ def build_mcp(c: Corpus) -> None:
         "C01", s, "mcp", "stdio server pinned to an exact npm version", [t1], 3,
         [check("version", 1, "1.4.2"), check("launcher", 1, "npx")],
     )  # fmt: skip
-    c.negative("NC1", s, "mcp", "negative_finding", "Pinned server needs no high finding", [t1], 1)
+    c.negative("NC1", s, "mcp", "negative_finding", "Exact-pinned server is not called unpinned",
+               [t1], 1, ["unpinned", "not pinned", "floating", "latest", "mutable", "unversioned",
+                         "without a pinned", "no version"])  # fmt: skip
     c.component("C02", s, "mcp", "stdio server with floating npm version", [t2], 2)
     c.finding("C02F", s, "mcp", "Unpinned npx launch", [t2], 3)
     c.component(
@@ -794,7 +822,7 @@ def build_tooldefs(c: Corpus) -> tuple[str, str, str]:
     c.component("T03", s, "tooldefs", "Tool: poisoned", [f"{t_poison}_lookup"], 1)
     c.component("T04", s, "tooldefs", "Tool: later changed", [f"{t_drift}_search"], 1)
     c.finding("T03F", s, "tooldefs", "Tool-poisoning instructions in a description",
-              [f"{t_poison}_lookup", server], 3)  # fmt: skip
+              [f"{t_poison}_lookup"], 3)  # fmt: skip
     c.component("T05", s, "tooldefs", "TypeScript MCP server", [ts_server], 1)
     c.component("T06", s, "tooldefs", "TypeScript registered tool", [f"{ts_tool}_export"], 1)
     c.add(
@@ -875,7 +903,9 @@ def build_skills(c: Corpus) -> None:
     c.write(s, f".cursor/rules/{t}.mdc", "---\ndescription: style\nalwaysApply: true\n---\n"
             "Prefer small functions.\n")  # fmt: skip
     c.component("K07", s, "skills", "Cursor rule file", [t], 1)
-    c.negative("NK2", s, "skills", "negative_finding", "Plain ASCII rule: no high finding", [t], 1)
+    c.negative("NK2", s, "skills", "negative_finding", "Plain ASCII rule is not called hidden text",
+               [t], 1, ["unicode", "invisible", "hidden", "tag char", "zero-width", "bidi",
+                        "steganograph"])  # fmt: skip
     c.write(s, ".github/copilot-instructions.md", "Use pytest for tests.\n")
     c.component("K08", s, "skills", "Copilot instructions", ["copilot-instructions"], 1)
 
@@ -913,7 +943,9 @@ def build_skills(c: Corpus) -> None:
         ),
     )
     c.component("K10", s, "skills", "Claude Code hook command", [t], 2)
-    c.finding("K10F", s, "skills", "Hook sends tool output to an external host", [t], 2)
+    # A tool may redact hook commands; the settings file then identifies the hook.
+    c.finding("K10F", s, "skills", "Hook sends tool output to an external host",
+              [t, ".claude/settings.json"], 2)  # fmt: skip
 
     t = c.tok()
     c.write(
@@ -987,7 +1019,7 @@ def build_agents(c: Corpus) -> None:
     )
     c.write(s, "crew/crew.py", "from crewai import Agent, Crew\n")
     c.component("A03", s, "agents", "CrewAI YAML agent", [t], 2)
-    t, sk = c.tok(), c.tok()
+    t, sk, skn = c.tok(), c.tok(), c.tok()
     c.write(
         s,
         ".well-known/agent-card.json",
@@ -1000,14 +1032,16 @@ def build_agents(c: Corpus) -> None:
                 "version": "1.2.0",
                 "capabilities": {"streaming": True},
                 "securitySchemes": {"oauth": {"type": "oauth2"}},
-                "skills": [{"id": sk, "name": "Book flight", "description": "Books flights."}],
+                "skills": [
+                    {"id": sk, "name": f"Book flight {skn}", "description": "Books flights."}
+                ],
             },
             indent=2,
         ),
     )
     c.component(
         "A04", s, "agents", "A2A agent card", [t], 3,
-        [check("url", 1, f"{t}.agents.example.com"), check("skill", 1, sk)],
+        [check("url", 1, f"{t}.agents.example.com"), check("skill", 1, sk, skn)],
     )  # fmt: skip
     t = c.tok()
     c.write(
@@ -1052,9 +1086,10 @@ def build_hostile(c: Corpus) -> None:
         torch_zip("checkpoint", pickle_call("os", "system", (f"touch {canary / 'torch'}",))),
     )
     c.write(s, f"models/{sent}.safetensors", safetensors_bytes({"format": "pt"}))
-    c.add(id="X01", requires="X01S", scenario=s, domain="safety", kind="canary_absent", title="Pickle not executed",
+    c.add(id="X01", requires=["X01S", "X01P"], scenario=s, domain="safety", kind="canary_absent", title="Pickle not executed",
           canaries=["pickle", "torch"], weight=4, gate="F")  # fmt: skip
     c.component("X01S", s, "safety", "Graceful: benign sibling model still reported", [sent], 1)
+    c.component("X01P", s, "safety", "Observed: hostile pickles inventoried", [t, t2], 0)
     c.finding("X01F", s, "models", "Malicious pickle flagged", [t, t2], 2)
 
     s = "s09b-mcp-exec"
@@ -1073,10 +1108,11 @@ def build_hostile(c: Corpus) -> None:
             indent=2,
         ),
     )
-    c.add(id="X02", requires="X02S", scenario=s, domain="safety", kind="canary_absent",
+    c.add(id="X02", requires=["X02S", "X02C"], scenario=s, domain="safety", kind="canary_absent",
           title="MCP launch command not executed in default mode", canaries=["mcp"], weight=4,
           gate="F")  # fmt: skip
     c.component("X02S", s, "safety", "Graceful: sibling server reported", [sent], 1)
+    c.component("X02C", s, "safety", "Observed: shell-wrapped server inventoried", [t], 0)
     c.finding("X02F", s, "mcp", "Shell-wrapped launch command flagged", [t], 1)
 
     s = "s09c-symlink-escape"
@@ -1095,15 +1131,18 @@ def build_hostile(c: Corpus) -> None:
         ".mcp.json",
         json.dumps({"mcpServers": {sent: {"command": "npx", "args": [f"{sent}@1.0.0"]}}}),
     )
+    msent = c.tok()
+    c.write(s, f"weights/{msent}.safetensors", safetensors_bytes({"format": "pt", "name": msent}))
     base = c.root / "scenarios" / s
     (base / ".cursor").mkdir(parents=True, exist_ok=True)
     os.symlink("../../../outside/escape-mcp.json", base / ".cursor" / "mcp.json")
     os.symlink("../../outside/models", base / "models")
     c.safety["outside_tokens"] = [out_srv, out_model]
-    c.add(id="X03", requires="X03S", scenario=s, domain="safety", kind="outside_absent",
+    c.add(id="X03", requires=["X03S", "X03M"], scenario=s, domain="safety", kind="outside_absent",
           title="Does not read through symlinks that leave the scan root",
           match=[out_srv, out_model], weight=3, gate="C")  # fmt: skip
     c.component("X03S", s, "safety", "Graceful: in-root server reported", [sent], 1)
+    c.component("X03M", s, "safety", "Graceful: in-root model reported", [msent], 1)
 
     s = "s09d-terminal-injection"
     c.scenario(s, "Hostile: terminal control sequences in names and descriptions")
@@ -1119,10 +1158,11 @@ def build_hostile(c: Corpus) -> None:
         f".claude/skills/{sk}/SKILL.md",
         f"---\nname: {sk}\ndescription: Notes{esc}\n---\n\nTake notes.\n",
     )
-    c.add(id="X04", requires="X04S", scenario=s, domain="safety", kind="ansi_absent",
+    c.add(id="X04", requires=["X04S", "X04K"], scenario=s, domain="safety", kind="ansi_absent",
           title="Terminal control sequences from input are not echoed raw",
           patterns=["\x1b]0;PWNED", "\x1b]52;"], weight=2)  # fmt: skip
     c.component("X04S", s, "safety", "Graceful: server still reported", [t], 1)
+    c.component("X04K", s, "safety", "Observed: skill with escape sequences inventoried", [sk], 0)
 
     s = "s09e-resource-exhaustion"
     c.scenario(s, "Hostile: decompression bomb, header-length bomb, deeply nested JSON")
@@ -1134,6 +1174,8 @@ def build_hostile(c: Corpus) -> None:
         ".mcp.json",
         json.dumps({"mcpServers": {sent: {"command": "npx", "args": [f"{sent}@1.0.0"]}}}),
     )
+    msent = c.tok()
+    c.write(s, f"models/{msent}.safetensors", safetensors_bytes({"format": "pt", "name": msent}))
     path = c.root / "scenarios" / s / "models" / bomb / "model.pt"
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = 3 * 1024**3
@@ -1147,12 +1189,15 @@ def build_hostile(c: Corpus) -> None:
                 f.write(chunk)
             f.write(b".")
         z.writestr(zipfile.ZipInfo("archive/version", date_time=FIXED_ZIP_TIME), b"3\n")
-    c.add(id="X05", requires="X05S", scenario=s, domain="safety", kind="completes",
+    c.add(id="X05", requires=["X05S", "X05M", "X05B"], scenario=s, domain="safety", kind="completes",
           title="Completes within the time budget", weight=2)  # fmt: skip
-    c.add(id="X06", requires="X05S", scenario=s, domain="safety", kind="bounded_memory",
+    c.add(id="X06", requires=["X05S", "X05M", "X05B"], scenario=s, domain="safety", kind="bounded_memory",
           title="Peak RSS stays under 2 GiB on a 3 GiB decompression bomb", weight=2,
           limit_bytes=2 * 1024**3)  # fmt: skip
-    c.component("X05S", s, "safety", "Graceful: valid sibling config still reported", [sent], 2)
+    c.component("X05S", s, "safety", "Graceful: valid sibling config still reported", [sent], 1)
+    c.component("X05M", s, "safety", "Graceful: valid sibling model still reported", [msent], 1)
+    c.component("X05B", s, "safety", "Observed: bomb or header-bomb model inventoried",
+                [bomb, hdr], 0)  # fmt: skip
 
     s = "s09f-build-exec"
     c.scenario(s, "Hostile: project build scripts that write a canary if run")
@@ -1166,6 +1211,13 @@ def build_hostile(c: Corpus) -> None:
         f'setup(name="{sent}", version="0.1.0", install_requires=["transformers==4.46.3"])\n',
     )
     c.write(s, "requirements.txt", "-e .\ntransformers==4.46.3\n")
+    msent = c.tok()
+    c.write(s, f"models/{msent}.safetensors", safetensors_bytes({"format": "pt", "name": msent}))
+    c.write(
+        s,
+        ".mcp.json",
+        json.dumps({"mcpServers": {f"{sent}-docs": {"command": "npx", "args": [f"{sent}@1.0.0"]}}}),
+    )
     c.write(
         s,
         "package.json",
@@ -1181,18 +1233,18 @@ def build_hostile(c: Corpus) -> None:
             indent=2,
         ),
     )
-    c.add(id="X09", requires="X09S", scenario=s, domain="safety", kind="canary_absent",
-          title="Project build and install scripts are not executed",
+    c.add(id="X09", requires=["X09S", "X09M"], scenario=s, domain="safety", kind="canary_absent",
+          title="Project build and install scripts are not executed", detect_build_exec=True,
           canaries=["setup-py", "npm-preinstall", "npm-prepare"], weight=4,
           gate="F")  # fmt: skip
-    c.component(
-        "X09S", s, "safety", "Graceful: project still inventoried", [sent, "transformers"], 1
-    )
+    c.component("X09S", s, "safety", "Graceful: project MCP server still inventoried", [sent], 1)
+    c.component("X09M", s, "safety", "Graceful: project model still inventoried", [msent], 1)
 
-    c.add(id="X07", requires="C06", scenario="s04-mcp", domain="safety", kind="secret_absent",
+    c.add(id="X07", requires=["C06"], scenario="s04-mcp", domain="safety", kind="secret_absent",
           title="Literal credentials are redacted from every output", weight=4,
           gate="D")  # fmt: skip
-    c.add(id="X08", requires="C01", scenario="*", domain="safety", kind="no_egress",
+    c.add(id="X08", requires=["C01", "C02", "C03", "C04", "C05", "C08", "C09", "C10"],
+          scenario="*", domain="safety", kind="no_egress",
           title="No network connection attempts in default mode", weight=2)  # fmt: skip
 
 
@@ -1264,7 +1316,9 @@ def main() -> None:
         if path.is_symlink():
             files[str(path.relative_to(root))] = "symlink:" + os.readlink(path)
         elif path.is_file() and path.stat().st_size < 64 * 1024**2:
-            files[str(path.relative_to(root))] = sha256(path.read_bytes())
+            files[str(path.relative_to(root))] = sha256(
+                path.read_bytes().replace(str(root).encode(), b"<root>")
+            )
     corpus_digest = sha256(json.dumps(files, sort_keys=True).encode())
     truth = {
         "benchmark": "aibom-bench",
