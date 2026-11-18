@@ -84,7 +84,7 @@ may still be sensitive and must be handled accordingly.
 The projection profile `nexus-symbiote/shadowscan-projection/v5` identifies the
 SymBiote mapping, not a ShadowScan report schema or authenticated producer
 version. A native report that declares per-scan credential pseudonyms is projected
-under `nexus-symbiote/shadowscan-projection/v5`, which is v4 with those pseudonyms
+under `nexus-symbiote/shadowscan-projection/v6`, which is v5 with those pseudonyms
 renamed (see [Compare discovery across reruns](#compare-discovery-across-reruns)). Each projected component records the exact report digest
 (`shadowscan:report-sha256`) and a content digest of its own source finding
 (`shadowscan:finding-sha256`, see below). CycloneDX `dependsOn` edges are copied
@@ -111,7 +111,8 @@ Version 3 resolved a CycloneDX entry whose type or group contradicts its
 `shadowscan:kind`, such as kind `agent` on a `machine-learning-model`, by
 precedence; version 4 leaves it unmapped. Version 5 adds the models a merged scan
 names from cited evidence; a standalone import projects the same components as
-version 4.
+version 4. Version 6 is version 5 for a native report that declares per-scan
+credential pseudonyms: its finding digests rename them.
 Retain the original importer to reproduce or verify an older projection, then
 regenerate inventories with the current profile and review them before comparison or
 approval. Producer schema and version changes require compatibility testing; the
@@ -266,7 +267,9 @@ validation fails; scan again to record the current state.
 every edit above it. A model whose lines shift, or that gains a location in a file
 it was already cited in, is unchanged. One cited in another file is a high alert on
 its component ("claims changed"), and one that is no longer cited is a removed
-component. A rerun that changes only the report's run times raises no alert.
+component. A rerun that changes only the report's run times raises no alert, and
+neither does one that only gives credentials new per-scan pseudonyms; see
+[Compare discovery across reruns](#compare-discovery-across-reruns).
 
 A standalone `import-shadowscan` has no project root, reads no project file and
 names no model. CycloneDX reports carry no evidence entries. Findings of other
@@ -418,8 +421,9 @@ scan, and the report declares `collection_scope.credential_identity_scope` `run`
 under `credential_identity_schema` `shadowscan.credential-identity/v1`. The same
 credential then gets a new pseudonym on every run. For such a native report, the
 inventory records the content digest under `nexus-symbiote/shadowscan-content/v2`,
-and each imported component carries the projection profile
-`nexus-symbiote/shadowscan-projection/v5`. They are v1 and v4, except that every
+and each imported component, a model named from cited evidence included, carries
+the projection profile `nexus-symbiote/shadowscan-projection/v6`. They are v1 and v5,
+except that every
 `credential:hmac-sha256:` and `caller:hmac-sha256:` pseudonym is renamed by its
 order of first appearance, visiting object keys in sorted order: across the whole
 report for the content digest, and within one finding for `shadowscan:finding-sha256`.
@@ -432,11 +436,11 @@ run, and `diff` raises the high alert, which fails safe.
 
 Set `SHADOWSCAN_IDENTITY_KEY` for every run whose report you intend to compare, for
 example from a CI secret: ShadowScan requires at least 32 secret bytes, written as
-`hex:<value>` or `base64:<value>`. Its reports declare `keyed` and keep the v1 and v4
+`hex:<value>` or `base64:<value>`. Its reports declare `keyed` and keep the v1 and v5
 profiles, so a changed credential changes their content digests. A change between
 a stable and a per-scan key changes the profiles, and that comparison falls back to
 the exact report digest. So does the first comparison after an upgrade for a report
-with per-scan pseudonyms, since the earlier inventory recorded v1 and v4.
+with per-scan pseudonyms, since the earlier inventory recorded v1 and v4 or v5.
 
 ### Require a signed report in CI
 

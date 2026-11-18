@@ -55,9 +55,9 @@ MODEL_REF_PREFIX = "shadowscan:model:"
 CONTENT_PROFILE = "nexus-symbiote/shadowscan-content/v1"
 # For a native report that declares run-scoped credential identities: ShadowScan keyed
 # its credential and caller pseudonyms with a random per-scan key, so they differ on
-# every run over identical input. These profiles are v4 and v1 with each such
+# every run over identical input. These profiles are v5 and v1 with each such
 # pseudonym renamed by its order of first appearance.
-RUN_SCOPED_PROJECTION_PROFILE = "nexus-symbiote/shadowscan-projection/v5"
+RUN_SCOPED_PROJECTION_PROFILE = "nexus-symbiote/shadowscan-projection/v6"
 RUN_SCOPED_CONTENT_PROFILE = "nexus-symbiote/shadowscan-content/v2"
 RUN_SCOPED_IDENTITIES_GAP = (
     "ShadowScan keyed credential pseudonyms to this scan only; diff cannot tell a "
@@ -558,7 +558,7 @@ def _make_component(
 
 
 def _model_component(
-    literal: str, locations: set[tuple[str, int]], signals: set[str]
+    literal: str, locations: set[tuple[str, int]], signals: set[str], projection_profile: str
 ) -> ModelComponent:
     listed = [f"{path}:{line}" for path, line in sorted(locations)[:MAX_EVIDENCE_LOCATIONS]]
     # No source_path: for a model that names the weight file, and the cited file is not one.
@@ -569,7 +569,7 @@ def _model_component(
         assurance_level=AssuranceLevel.DECLARED,
         properties={
             "collection_mode": IMPORTED_MODE,
-            "shadowscan:projection-profile": PROJECTION_PROFILE,
+            "shadowscan:projection-profile": projection_profile,
             "shadowscan:kind": "model",
             "shadowscan:signals": sorted(signals),
             **(
@@ -732,8 +732,15 @@ class ShadowScanImporter(Scanner):
                     else:
                         unconfirmed += 1
         named = sorted(locations)[:MAX_NAMED_MODELS]
+        # One import, one profile: a named model carries the profile of the report's findings.
+        profile = (
+            RUN_SCOPED_PROJECTION_PROFILE
+            if imported.content_profile == RUN_SCOPED_CONTENT_PROFILE
+            else PROJECTION_PROFILE
+        )
         result.components.extend(
-            _model_component(literal, locations[literal], signals[literal]) for literal in named
+            _model_component(literal, locations[literal], signals[literal], profile)
+            for literal in named
         )
         limitations = result.source_projection_limitations
         if unconfirmed and limitations is not None:

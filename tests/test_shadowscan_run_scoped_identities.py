@@ -146,7 +146,7 @@ def test_content_vector_renames_pseudonyms_by_first_appearance():
         "sha256:547f53e0948b65547398fb2681469f5feea3e63512567c7a5e98bd8a702cf4bc"
     )
     assert RUN_SCOPED_CONTENT_PROFILE == "nexus-symbiote/shadowscan-content/v2"
-    assert RUN_SCOPED_PROJECTION_PROFILE == "nexus-symbiote/shadowscan-projection/v5"
+    assert RUN_SCOPED_PROJECTION_PROFILE == "nexus-symbiote/shadowscan-projection/v6"
 
 
 def test_new_run_scoped_pseudonyms_do_not_change_content_digests():
