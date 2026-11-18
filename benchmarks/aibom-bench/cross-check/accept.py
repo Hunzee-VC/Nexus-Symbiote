@@ -36,7 +36,7 @@ def scan(name: str, src: str, corpus: str) -> Path:
     for fmt in FORMATS:
         done = subprocess.run(  # noqa: S603
             [
-                "unshare",
+                UNSHARE,
                 "-rn",
                 PYTHON,
                 "-m",
