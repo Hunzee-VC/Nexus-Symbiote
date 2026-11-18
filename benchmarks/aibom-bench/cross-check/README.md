@@ -101,6 +101,44 @@ Corpus B, 53 components:
   4), `agent` (2, 1), `framework-usage` (1, 2), `infra` (1, 2), `secret` (1, 1) and
   `workflow` (0, 1); the import maps `agent` and `mcp-server` today.
 
+## Acceptance run of the open first-wave pull requests
+
+`accept.py` scans the same two corpora with the source tree of each open pull request
+and compares it with `main`: components matched, decoys, findings by category and
+severity, collection failures, and whether any planted secret reaches an output.
+
+```sh
+python3 -I accept.py /path/to/that/tree/benchmarks/aibom-bench /tmp/pair/work /tmp/accept \
+  /venv/bin/python main=/main/src p254=/tree-of-254/src p255=/tree-of-255/src
+```
+
+The first `name=src` is the baseline. `results/first-wave-acceptance.txt` is the output
+for twelve trees on 18 November 2026: `main` `7ca2235f` and pull requests 254, 255,
+256, 257, 260, 262, 263, 259, 261, 264 and 265 at the heads of that evening.
+
+| Pull request | Effect on corpus A | Effect on corpus B |
+| --- | --- | --- |
+| 254 pickle evidence | The zero-filled `data/raw/embeddings.bin` moves from a critical `serialization_format` finding to a high `serialization_format_unknown`; `intent.pkl` and `intent.pt` stay critical | None |
+| 255 `credential_exposure` | 3 findings: `github` (env), `remote-crm` (header), `postgres` (env) | 2 findings: `supabase` (argument), `notion` (env) |
+| 256 client dialects | None | `mcp.zed-fetch` with pin 2025.4.7 and `mcp.continue-slack` with a high `version_pinning` finding are found |
+| 257 failures once, depth 64 | `mcp.deep-nested` is found; 22 recorded failures become 16; `risk` names the six failed collectors on one line | None |
+| 260 identifier hygiene | 1 high `identifier_characters` finding | None |
+| 262 constructor names | `mcp.own-server` is found | None |
+| 263 prompt files | 3 prompt files found; the 2 left are inline | 2 prompt files found; the 3 left are inline, an Assistants export and `llms.txt` |
+| 259 `literal_credential` | 1 finding, where 255 raises 3 | 2 findings, the same two as 255 |
+| 261 tool descriptions | 1 of the 2 planted descriptions is reported | Neither planted description is reported |
+| 264, 265 | None | None |
+
+No tree writes a planted secret into any export, the `risk` text or standard error.
+
+Two things a re-score would meet:
+
+- The decoy `decoy.zero-bin-as-model` still matches with pull request 254. Its pattern
+  looks for `serializ` near the file name, and the category of the new, weaker finding
+  is `serialization_format_unknown`.
+- The only SSE endpoint in corpus B is in `.cline/mcp_settings.json`, the item that
+  tree's audit removed. No tree inventories it.
+
 ## Limits
 
 - One run on one machine. The corpora and the match rules belong to another author;
