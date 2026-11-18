@@ -503,3 +503,33 @@ def test_an_inventory_collected_before_differs_from_a_new_collection(
     reconcile = ["validate", "--project", str(project)]
     assert mismatch in runner.invoke(main, [*reconcile, str(old)]).output
     assert mismatch not in runner.invoke(main, [*reconcile, str(new)]).output
+
+
+def test_the_changelog_does_not_say_a_pickle_family_record_is_as_before(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    # This change leaves a pickle-family record alone, but #254 changed its evidence in the
+    # same release, so an inventory collected before differs for such a file too.
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "model.pkl").write_bytes(INERT_PICKLE)
+    new, old = tmp_path / "new.json", tmp_path / "old.json"
+    document = _scan_to(runner, project, new)
+    record = _model_record(document)
+    assert record["serialization_format"] == "pickle" and record["model_type"] == "foundation"
+    assert record["properties"] == {"format_inspection": BINARY_PICKLE}
+    # The record that releases up to 0.2.0 wrote for the same file.
+    record["properties"] = {"format_inspection": "Potential code-executing loader format"}
+    old.write_text(json.dumps(document), encoding="utf-8")
+    drift = runner.invoke(main, ["diff", str(old), str(new)])
+    assert drift.exit_code == 1, drift.output
+    assert (
+        "[MEDIUM] Medium change in 'model.pkl': properties.format_inspection changed."
+    ) in drift.output
+    notes = " ".join((DOCS.parent / "CHANGELOG.md").read_text(encoding="utf-8").split())
+    assert "that have no header check are recorded as before" not in notes
+    assert (
+        "a file under a suffix that has no header check keeps the format and model type its "
+        "name claims (the rating and `properties.format_inspection` of a pickle-family name "
+        "change with the entry below)"
+    ) in notes
