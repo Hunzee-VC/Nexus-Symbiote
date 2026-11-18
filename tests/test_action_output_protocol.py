@@ -301,6 +301,29 @@ def test_imported_discovery_never_reaches_sarif(tmp_path, capsys):
     assert exports == [] and published(tmp_path / "refused")["aibom_path"] == ""
 
 
+@pytest.mark.parametrize(
+    ("inputs", "formats"),
+    [({"SYMBIOTE_SARIF": "true"}, ["json", "sarif"]), ({"SYMBIOTE_FORMAT": "sarif"}, ["sarif"])],
+)
+def test_imported_discovery_is_left_out_of_sarif_only_when_asked(tmp_path, capsys, inputs, formats):
+    exports: list[str] = []
+    outputs = tmp_path / "out"
+    config = configuration(tmp_path, SYMBIOTE_SARIF_OMIT_IMPORTED_DISCOVERY="true", **inputs)
+    assert config.sarif_omit_imported
+    result = runner.run(
+        config,
+        command=stub([], native=SHADOWSCAN),
+        export=lambda native, output, fmt: exports.append(fmt),
+        outputs=outputs,
+    )
+    assert result == 0 and exports == formats
+    assert published(outputs)["aibom_path"] != ""
+    assert (published(outputs)["sarif_path"] != "") is ("SYMBIOTE_SARIF" in inputs)
+    assert "::warning title=Nexus SymBiote::SARIF leaves out the imported ShadowScan" in (
+        capsys.readouterr().err
+    )
+
+
 def _baseline(tmp_path: Path) -> Path:
     path = tmp_path / "caller" / "reviewed.json"
     path.parent.mkdir()

@@ -195,6 +195,7 @@ class Config:
     fail_on_severity: str = "high"
     binding_key: str = field(default="", repr=False)
     scratch_parent: Path | None = None
+    sarif_omit_imported: bool = False
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
@@ -299,6 +300,10 @@ class Config:
             severity,
             supplied_key,
             scratch_parent,
+            _boolean(
+                env.get("SYMBIOTE_SARIF_OMIT_IMPORTED_DISCOVERY", "false"),
+                "sarif-omit-imported-discovery",
+            ),
         )
 
 
@@ -613,6 +618,14 @@ def run(
             return finish()
         imported = config.format == "sarif" or config.sarif
         imported = imported and _imports_discovery(native)
+        if imported and config.sarif_omit_imported:
+            _annotate(
+                "warning",
+                "SARIF leaves out the imported ShadowScan components and their findings, as "
+                "sarif-omit-imported-discovery asks; the evidence artifact keeps them",
+            )
+            notes.append("SARIF leaves out imported ShadowScan discovery")
+            imported = False
         if imported and config.format == "sarif":
             record("collection", "failed")
             _say(

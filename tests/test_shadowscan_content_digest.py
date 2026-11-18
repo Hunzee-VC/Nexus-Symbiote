@@ -18,6 +18,7 @@ from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.diff.differ import AIBOMDiffer
 from nexus_symbiote.scanners.shadowscan import (
     CONTENT_PROFILE,
+    RUN_SCOPED_CONTENT_PROFILE,
     ShadowScanImporter,
     report_content_digest,
 )
@@ -267,6 +268,7 @@ def test_project_reconciliation_rejects_an_edited_content_digest(tmp_path):
     [
         ("source_report_content_digest", "sha256:" + "a" * 64, True),
         ("source_report_content_profile", CONTENT_PROFILE, True),
+        ("source_report_content_profile", RUN_SCOPED_CONTENT_PROFILE, True),
         ("source_report_content_digest", "sha256:" + "A" * 64, False),
         ("source_report_content_digest", "a" * 64, False),
         ("source_report_content_profile", "nexus-symbiote/shadowscan-content/v0", False),
@@ -284,7 +286,8 @@ def test_import_records_the_content_digest_and_profile(tmp_path):
     out = tmp_path / "bom.json"
     CliRunner().invoke(main, ["import-shadowscan", str(tmp_path / "report.json"), "-o", str(out)])
     claim = json.loads(out.read_text())["metadata"]["completeness"]
-    assert claim["source_report_content_profile"] == CONTENT_PROFILE
+    # ShadowScan 0.1.4 run without SHADOWSCAN_IDENTITY_KEY declares run-scoped identities.
+    assert claim["source_report_content_profile"] == RUN_SCOPED_CONTENT_PROFILE
     assert claim["source_report_content_digest"] == (
         "sha256:eec0919b1ee517aaf6a267b578145f775a79735796bda48e65615900d44e9532"
     )

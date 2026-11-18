@@ -179,10 +179,11 @@ class SARIFGenerator(Generator):
         by_ref = {component.bom_ref: component for component in bom.components}
         findings: dict[tuple[str, str], dict[str, Any]] = {}
         rules: dict[str, dict[str, Any]] = {}
-        omitted = 0
+        imported = omitted = 0
         for comp in sorted(bom.components, key=lambda c: c.bom_ref):
             comp_risks = effective_component_risks(comp)
             if imported_discovery_component(comp):
+                imported += 1
                 omitted += len(comp_risks)
                 continue
             risks = sorted(
@@ -237,7 +238,9 @@ class SARIFGenerator(Generator):
         index = {rule["id"]: position for position, rule in enumerate(ordered_rules)}
         results = [{**result, "ruleIndex": index[result["ruleId"]]} for result in findings.values()]
         claim = bom.metadata.completeness
-        successful, notifications = _notifications(claim, len(results), self._relative_text)
+        successful, notifications = _notifications(
+            claim, len(results), self._relative_text, imported=(imported, omitted)
+        )
         invocation: dict[str, Any] = {"executionSuccessful": successful}
         if notifications:
             invocation["toolExecutionNotifications"] = notifications
@@ -304,12 +307,22 @@ class SARIFGenerator(Generator):
 
 
 def _notifications(
-    claim: CompletenessClaim | None, result_count: int, relative: Callable[[str], str]
+    claim: CompletenessClaim | None,
+    result_count: int,
+    relative: Callable[[str], str],
+    *,
+    imported: tuple[int, int] = (0, 0),
 ) -> tuple[bool, list[dict[str, Any]]]:
     """Collection failures make the run unsuccessful; gaps and scoping are warnings."""
     errors: list[str] = []
     warnings: list[str] = []
     notes: list[str] = []
+    components, findings = imported
+    if components:
+        warnings.append(
+            f"This run leaves out {components} imported ShadowScan component(s) and their "
+            f"{findings} finding(s); the native inventory and the ShadowScan report keep them."
+        )
     if claim is None:
         notes.append("The inventory carries no completeness claim; collection coverage is unknown.")
     else:

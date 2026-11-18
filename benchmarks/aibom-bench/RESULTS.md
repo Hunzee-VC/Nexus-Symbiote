@@ -255,14 +255,20 @@ Nexus BOM, scored alone, earns 63.3, slightly *below* Nexus SymBiote alone:
   subagent and plugin identities, or package evidence reaches the AgentBOM. Anyone who
   keeps only the AgentBOM cannot answer "where is the GitHub token?" or "which agents
   exist?" from it.
-- **The merged BOM is no longer reproducible.** Nexus's byte-identical output guarantee
-  is lost, for two reasons:
-  - Without `SHADOWSCAN_IDENTITY_KEY`, ShadowScan keys its credential fingerprints per
-    scan. The benchmark sets the key, as ShadowScan's `docs/api/engine.md` documents.
-  - Even with the key, ShadowScan writes wall-clock `started_at`/`finished_at` and does
-    not honour `SOURCE_DATE_EPOCH`. Nexus records the SHA-256 of the raw report bytes
-    (`shadowscan:report-sha256`), so two scans of the same commit produce different
-    BOMs. A `nexus-symbiote diff` between them reports drift that is not there.
+- **The merged BOM is not byte-reproducible.** ShadowScan writes wall-clock
+  `started_at`/`finished_at` and does not honour `SOURCE_DATE_EPOCH`, and Nexus records
+  the SHA-256 of the raw report bytes (`shadowscan:report-sha256`) on purpose: that is
+  the digest `verify-discovery` and Sigstore authenticate. Two scans of the same commit
+  therefore produce different BOM bytes. `nexus-symbiote diff` does not call that drift:
+  it compares a content digest that leaves out run times, and reports "ShadowScan report
+  regenerated; normalized content unchanged" as an informational note. (An earlier
+  version of this page said `diff` reports drift here; that holds only without the key
+  below.)
+- **False drift without `SHADOWSCAN_IDENTITY_KEY`.** Without the key, ShadowScan gives
+  every credential a new keyed pseudonym on each scan, and Nexus SymBiote 0.2.0 reported
+  a high "ShadowScan report content changed" alert between two scans of the same commit
+  (reproduced). The benchmark sets the key, as ShadowScan's `docs/api/engine.md`
+  documents, so this did not affect the grades.
 - **No SARIF.** Nexus refuses SARIF once imported discovery is present, so the pipeline's
   findings never reach a code-scanning dashboard.
 
@@ -271,12 +277,23 @@ Nexus BOM, scored alone, earns 63.3, slightly *below* Nexus SymBiote alone:
    leakage is the concern: credential findings, agent and coding-agent-config identities,
    skills, subagents, plugins and package evidence. Today the AgentBOM is a subset of what
    the operator must keep anyway.
-2. Make merged BOMs reproducible. Have ShadowScan honour `SOURCE_DATE_EPOCH`, or have
-   Nexus bind a canonical digest of the report that excludes run timing, keeping the
-   raw-bytes digest for `verify-discovery`. Add `SHADOWSCAN_IDENTITY_KEY` (as a CI secret)
-   to the integration guide's commands.
+2. Make merged BOMs byte-reproducible: have ShadowScan honour `SOURCE_DATE_EPOCH`. Nexus
+   already compares a content digest that excludes run timing and keeps the raw-bytes
+   digest for `verify-discovery`.
 3. Emit SARIF for merged scans, carrying the imported coverage as a run-level note rather
    than refusing.
+
+Fixed on this branch after grading, not reflected in the grades above (they stay pinned to
+Nexus SymBiote 0.2.0):
+- Run-scoped pseudonyms no longer read as drift. A report that declares
+  `credential_identity_scope: run` gets content profile `nexus-symbiote/shadowscan-content/v2`,
+  which renames each pseudonym by order of first appearance, and the integration guide now
+  tells operators to set `SHADOWSCAN_IDENTITY_KEY`.
+- Item 3, as an explicit opt-in: `scan --sarif-omit-imported-discovery` and the Action input
+  `sarif-omit-imported-discovery` write SARIF without the imported components, with a
+  warning notification that counts what was left out. The default still refuses.
+- Item 1 is open. It reverses a documented leakage decision (the AgentBOM carries digests,
+  not ShadowScan's names, locations or evidence), so it needs an owner's decision first.
 4. Close the shared gaps that neither half covers: datasets and RAG stores, poisoned tool
    descriptions, skill scripts, typosquats, unpinned model revisions (list below).
 

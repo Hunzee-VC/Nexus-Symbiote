@@ -259,3 +259,48 @@ def test_scan_still_refuses_sarif_for_imported_discovery(tmp_path):
     args = ["scan", str(project), "--no-project-policy", "-f", "sarif", "-o", str(tmp_path / "s")]
     result = CliRunner().invoke(main, args)
     assert result.exit_code == 1 and "SARIF cannot preserve" in result.output
+    assert not (tmp_path / "s").exists()
+
+
+def test_scan_writes_sarif_without_imported_discovery_only_when_asked(tmp_path):
+    native = AIBOM.load(_merged(tmp_path))
+    imported = [c for c in native.components if c.bom_ref.startswith("shadowscan:")]
+    findings = sum(len(c.risks) for c in imported)
+    assert imported and findings
+    output = tmp_path / "bom.sarif"
+    args = [
+        "scan",
+        str(tmp_path / "project"),
+        "--no-project-policy",
+        "--report-only",
+        "-f",
+        "sarif",
+        "--sarif-omit-imported-discovery",
+        "-o",
+        str(output),
+    ]
+    result = CliRunner().invoke(main, args)
+    assert result.exit_code == 0, result.output
+    run = json.loads(output.read_text())["runs"][0]
+    assert run["results"], "local findings are still exported"
+    assert not any(
+        r["properties"]["component_ref"].startswith("shadowscan:") for r in run["results"]
+    )
+    assert run["properties"]["nexus-symbiote:omittedImportedFindings"] == findings
+    warnings = [
+        n["message"]["text"]
+        for n in run["invocations"][0]["toolExecutionNotifications"]
+        if n["level"] == "warning"
+    ]
+    assert (
+        f"This run leaves out {len(imported)} imported ShadowScan component(s) and their "
+        f"{findings} finding(s); the native inventory and the ShadowScan report keep them."
+    ) in warnings
+
+
+@pytest.mark.parametrize("extra", [["-f", "json"], ["--check"], []])
+def test_sarif_omission_requires_sarif_output(tmp_path, extra):
+    args = ["scan", str(tmp_path), "--no-project-policy", "--sarif-omit-imported-discovery"]
+    result = CliRunner().invoke(main, [*args, *extra])
+    assert result.exit_code == 2
+    assert "--sarif-omit-imported-discovery requires SARIF output" in result.output
