@@ -11,7 +11,6 @@ import string
 import subprocess
 import sys
 import time
-import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -383,21 +382,62 @@ def test_what_is_listed_past_the_bound_does_not_depend_on_hash_order(tmp_path):
     assert "imported_by_count" in only
 
 
+_PEAKS = """
+import json, sys, tracemalloc
+from pathlib import Path
+from nexus_symbiote.scanners.prompt import PromptScanner
+roots = [Path(arg) for arg in sys.argv[1:]]
+held = {sys.intern(part) for root in roots for path in root.rglob("*") for part in path.parts}
+interned = getattr(sys, "getunicodeinternedsize", lambda: None)
+runs = {}
+for root in roots:
+    before = interned()
+    tracemalloc.start(8)
+    try:
+        result = PromptScanner().scan(root)
+        current, peak = tracemalloc.get_traced_memory()
+        after = interned()
+        largest = tracemalloc.take_snapshot().statistics("traceback")[:3]
+    finally:
+        tracemalloc.stop()
+    runs[root.name] = {
+        "peak": peak,
+        "current": current,
+        "components": len(result.components),
+        "failures": len(result.scan_failures),
+        "newly_interned": None if before is None else after - before,
+        "largest": [[stat.size, stat.count, stat.traceback.format()] for stat in largest],
+    }
+print(json.dumps(runs))
+"""
+
+
 def test_scan_memory_grows_with_the_files_not_with_the_paths_they_reference(tmp_path):
-    peaks = {}
+    roots = []
     for files in (50, 100, 200):
-        root = tmp_path / str(files)
-        _deep(root, files)
-        tracemalloc.start()
-        try:
-            PromptScanner().scan(root)
-            peaks[files] = tracemalloc.get_traced_memory()[1]
-        finally:
-            tracemalloc.stop()
+        roots.append(tmp_path / str(files))
+        _deep(roots[-1], files)
+    # pathlib interns every path component it parses, and the interpreter's table of
+    # interned strings grows in steps that allocate room for every string the process has
+    # interned: 0.96 MB at 2^16 slots and 3.8 MB at 2^18 on CPython 3.11 and 3.12. Which
+    # scan crosses a step depends on the interpreter and on what it imported, not on the
+    # scan, so the measuring interpreter interns and holds the fixture's components first.
+    measured = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", _PEAKS, *map(str, roots)],
+        cwd=tmp_path,
+        capture_output=True,
+        check=True,
+        text=True,
+        timeout=120,
+    ).stdout
+    runs = {int(name): run for name, run in json.loads(measured).items()}
+    peaks = {files: run["peak"] for files, run in runs.items()}
+    # What the scan still holds afterwards, and where, so a failure says what grew.
+    detail = json.dumps(runs, indent=1)
     # References quadruple at each step and name 3 KB paths: 120 MB of them at 200
     # files before they were bounded.
-    assert peaks[200] < 16 * limits.MIB
-    assert peaks[200] < 2.5 * peaks[100] < 2.5 * 2.5 * peaks[50]
+    assert peaks[200] < 16 * limits.MIB, detail
+    assert peaks[200] < 2.5 * peaks[100] < 2.5 * 2.5 * peaks[50], detail
 
 
 _CAPPED_CLI = """

@@ -761,6 +761,15 @@ every rule.
 | `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
 | `cwe` | CWE-502 Deserialization of Untrusted Data | all | The model may use a format that runs code when deserialized. |
 
+### `settings_environment`
+
+| Framework | Entry | Severities | Rationale |
+| --- | --- | --- | --- |
+| `owasp-asi-2026` | ASI03 Identity & Privilege Abuse | high | Settings can send the agent's credential to an endpoint or proxy they choose. |
+| `owasp-asi-2026` | ASI05 Unexpected Code Execution (RCE) | medium | Settings can load code into the session and every command it starts. |
+| `nist-ai-rmf-1.0` | MEASURE-2.7 Security and resilience are evaluated | all | Records a security-relevant property of the configuration, an input to evaluating its security. |
+| `eu-ai-act-2024` | Art. 15 Robustness and cybersecurity, including resistance to manipulation | all | Records a property of the system that bears on its robustness and cybersecurity. |
+
 ### `shadowscan-heuristic`
 
 No reference: no entry was defensible for this category.
