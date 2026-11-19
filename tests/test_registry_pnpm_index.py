@@ -9,9 +9,8 @@ from __future__ import annotations
 import base64
 import json
 import re
-import time
 import tracemalloc
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +21,7 @@ from hypothesis import strategies as st
 from nexus_symbiote import policy
 from nexus_symbiote.scanners.base import ScanResult
 from nexus_symbiote.scanners.registry import RegistryScanner
+from tests.support import scaling_ratio
 
 SHA512 = "sha512-" + base64.b64encode(b"p" * 64).decode()
 # The names one key can be the record of: a name without "@" or "/", or a scope and a
@@ -281,22 +281,37 @@ def test_a_long_separator_dense_explicit_key_is_the_record_of_one_name(tmp_path)
     assert all("package_resolution" not in c.claims for c in result.components)
 
 
-def _timed_scan(root: Path, dependencies: dict[str, str], keys: list[str]) -> ScanResult:
-    lock = "lockfileVersion: '5.4'\npackages:\n" + "".join(f"  '{key}': {{}}\n" for key in keys)
-    started = time.process_time()
-    result = _scan(root, dependencies, lock)
-    assert time.process_time() - started < 20
-    return result
+def _scan_in_linear_time(
+    root: Path,
+    dependencies: Callable[[int], dict[str, str]],
+    keys: Callable[[int], list[str]],
+) -> ScanResult:
+    """The scan at scale 4, once scans at scales 1 and 4 have grown no faster than linearly."""
+    roots = {}
+    for scale in (1, 4):
+        roots[scale] = root / f"scale-{scale}"
+        roots[scale].mkdir()
+        (roots[scale] / "package.json").write_text(
+            json.dumps({"dependencies": dependencies(scale)})
+        )
+        (roots[scale] / "pnpm-lock.yaml").write_text(
+            "lockfileVersion: '5.4'\npackages:\n"
+            + "".join(f"  '{key}': {{}}\n" for key in keys(scale))
+        )
+    assert scaling_ratio(lambda scale: RegistryScanner().scan(roots[scale])) < 10
+    return RegistryScanner().scan(roots[4])
 
 
-# The bound tells the linear index from the product of components and keys, which took
-# minutes at this size. Coverage tracing triples the time, so the coverage job runs these
-# tests untraced.
+# The ratio tells the linear index from the product of components and keys, which took
+# minutes at the larger size. Coverage tracing triples the time, so the coverage job runs
+# these tests untraced.
 @pytest.mark.no_cover
 def test_twenty_thousand_components_and_keys_are_resolved_in_linear_time(tmp_path):
-    dependencies = {f"mcp-p{index}": "^1.0.0" for index in range(20_000)}
-    keys = [f"q{index}@1.0.0" for index in range(20_000)]
-    result = _timed_scan(tmp_path, dependencies, keys + ["mcp-p7@1.0.7"])
+    result = _scan_in_linear_time(
+        tmp_path,
+        lambda scale: {f"mcp-p{index}": "^1.0.0" for index in range(5_000 * scale)},
+        lambda scale: [f"q{index}@1.0.0" for index in range(5_000 * scale)] + ["mcp-p7@1.0.7"],
+    )
     assert len(result.components) == 20_000
     # Only mcp-p7's record is selected, and as a record found by key it binds nothing.
     assert result.scan_failures == [STALE]
@@ -305,9 +320,11 @@ def test_twenty_thousand_components_and_keys_are_resolved_in_linear_time(tmp_pat
 
 @pytest.mark.no_cover
 def test_twenty_thousand_names_that_redact_alike_are_resolved_in_linear_time(tmp_path):
-    dependencies = {f"mcp-token={index}": "^1.0.0" for index in range(20_000)}
-    keys = [f"mcp-token=***@1.0.{index}" for index in range(20_000)]
-    result = _timed_scan(tmp_path, dependencies, keys)
+    result = _scan_in_linear_time(
+        tmp_path,
+        lambda scale: {f"mcp-token={index}": "^1.0.0" for index in range(5_000 * scale)},
+        lambda scale: [f"mcp-token=***@1.0.{index}" for index in range(5_000 * scale)],
+    )
     # Every one of the 20,000 is the same gap; the bounded gap list keeps the first ones
     # and counts the rest on its last line.
     gap = "pnpm-lock.yaml: multiple package resolutions for mcp-token=*** are ambiguous"
