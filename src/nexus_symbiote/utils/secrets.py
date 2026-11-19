@@ -237,6 +237,33 @@ def names_reference(value: str) -> bool:
     return is_reference(stripped) or _TEMPLATE.fullmatch(stripped) is not None
 
 
+def scheme_parts(value: str) -> tuple[str, str] | None:
+    """The auth scheme word of ``value`` and the rest after it, or None without one."""
+    parts = _SCHEME_AND_VALUE.fullmatch(value.strip())
+    if parts is None or parts.group(1).lower() not in _AUTH_SCHEMES:
+        return None
+    return parts.group(1), parts.group(3).strip()
+
+
+def scheme_credential_like(token: str, scheme: str) -> bool:
+    """Whether ``token`` after ``scheme`` reads as a credential, as the scheme rule decides.
+
+    Basic decodes to ``user:password``; any other scheme's value has 16 or more
+    characters, or a digit, credential punctuation or mixed case.
+    """
+    return _credential_like(token, scheme)
+
+
+def authorization_header(name: str) -> bool:
+    """Whether ``name`` is the Authorization or Proxy-Authorization header."""
+    return _AUTHORIZATION_KEY.fullmatch(name.strip()) is not None
+
+
+def private_key_block(value: str) -> bool:
+    """Whether ``value`` holds a PEM private key block, terminated or not."""
+    return next(iter(_private_key_spans(value)), None) is not None
+
+
 def credential_shaped(value: str) -> bool:
     """Whether a bare word reads as a credential, by the shape rule for scheme values.
 

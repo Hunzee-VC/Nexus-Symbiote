@@ -149,10 +149,10 @@ RULES: dict[str, RuleInfo] = {
     ),
     "credential_exposure": RuleInfo(
         "Literal credential in an MCP launch",
-        "An MCP server's env value, launch argument or header holds a literal credential, "
-        "which the inventory redacts: a vendor token shape, an authorization scheme "
-        "credential or a generic secret-like value. The finding names the positions, "
-        "never a value.",
+        "An MCP server's env value, launch argument, header or endpoint URL query holds a "
+        "literal credential, which the inventory redacts: a vendor token shape, an "
+        "authorization scheme credential or a generic secret-like value. The finding names "
+        "the positions, never a value.",
     ),
     "credential_helper": RuleInfo(
         "Credential helper command",

@@ -293,6 +293,21 @@
       "parameters": {}
     },
     {
+      "id": "mcp-credential-benign-names",
+      "kind": "credential_exposure",
+      "task": "detection",
+      "truth": false,
+      "rationale": "Paths, a person's name, a tokenizer name, a number and prose under names that contain credential words are not literal credentials.",
+      "directory": "fixtures/mcp-credential-benign-names",
+      "references": [
+        {
+          "path": "project/.mcp.json",
+          "sha256": "d1831f13372291576af6a408f730979a8e7755abc4858738ccd628947ca511dc"
+        }
+      ],
+      "parameters": {}
+    },
+    {
       "id": "tool-description-change",
       "kind": "tool_drift",
       "task": "detection",

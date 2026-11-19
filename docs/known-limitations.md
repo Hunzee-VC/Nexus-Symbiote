@@ -280,8 +280,10 @@ A way around a limit that its entry does not describe is worth a
   unknown. Other locations and the runner's own namespace (`UV_*`, `PIP_*`,
   `YARN_*`, `BUN_*`, `DOCKER_*` and similar) are a medium `package_source`
   finding, and the package URL is withheld. Configuration names that look like
-  tokens or hold one after a prefix (`AWS_AKIA...`) are exported as `[redacted]`,
-  and a launcher package whose name or specifier looks like a token is withheld
+  tokens or hold one after a prefix (`AWS_AKIA...`), and `env` and header names
+  that repeat any credential value found in the same configuration file, are
+  exported as `[redacted]` (`[redacted-N]` in the `env` map), and a launcher
+  package whose name or specifier looks like a token is withheld
   (`[withheld]`, no package URL) with a medium `completeness` finding.
 - **Changed values need the binding key.** Launch arguments, environment and header
   values are exported only as redacted positions and names, and endpoint and
@@ -322,22 +324,53 @@ A way around a limit that its entry does not describe is worth a
   issuer) are not scrubbed. In an inline shell or `cmd` script a credential is found
   by its shape or in a `NAME=value`, `--name=value` or `--name value` word, which
   covers cmd's `set NAME=<scheme> <credential>`.
-- **`credential_exposure` reports MCP launch positions only.** The finding is raised
-  for an MCP server's `env` values, launch arguments and header values, and for an
-  `env` or header name in a known token shape. A credential in the `command` field
-  itself, in an `oauth` or `auth` object, in an endpoint URL (`transport_security`
-  covers that), in a Claude Code settings `env` value, or in an A2A or RAG header is
-  scrubbed or withheld as before but raises no `credential_exposure` finding. In an
-  argument, cmd's `set NAME=<scheme> <credential>` is scrubbed but is reported only
-  when the credential has a known token shape, and a URL counts only for a
-  credential in its user information or query: a plain locator under a credential
-  name is scrubbed whole and is not reported. The finding names positions, never
-  values, so two servers whose credentials differ carry the same finding. Only
-  `${NAME}`, `$NAME` and `{{ name }}` count as references: a cmd or PowerShell
-  reference (`%API_TOKEN%`, `$env:API_TOKEN`), a GitHub Actions expression
-  (`${{ secrets.TOKEN }}`) or a placeholder such as `<your-api-key>` or
-  `YOUR_API_KEY_HERE` of eight or more characters under a credential name is
-  scrubbed as a value and reported as a generic secret-like value.
+- **`credential_exposure` reports a precise subset of what is scrubbed.** The scrubber
+  redacts broadly on purpose; the finding is raised only for an MCP server's `env`
+  values, launch arguments, header values and endpoint URL query, and for an `env` or
+  header name in a known token shape. A credential in the `command` field itself, in
+  an `oauth` or `auth` object, in a Claude Code settings `env` value, or in an A2A or
+  RAG header is scrubbed or withheld as before but raises no `credential_exposure`
+  finding. A password in an endpoint URL's user information stays with
+  `transport_security`; a token in a URL path
+  (`https://hooks.slack.test/services/T0/B0/<token>`), a URL fragment or a
+  `;name=value` path parameter is not reported, and neither is a literal at a position
+  with no credential name, such as a value after `-t`, a positional argument or
+  `echo <token> | docker login --password-stdin`. Names are read as words: `TOTP_SEED`
+  and `PIN` do not name a credential, and `VAULT_SECRET_ID` ends in the descriptor
+  `id`, so it is not reported although an AppRole secret ID is a credential. Values
+  are read for what they most likely are, so a real credential that looks like a
+  reference, a placeholder or a label is missed: a value that holds `${` or `$(`
+  anywhere (the default or alternate text of a shell expansion, `${TOKEN:-<value>}`,
+  `:=`, `-`, `=`, `:+` or `+`, is read on its own and counts when it is a literal;
+  `${TOKEN:?message}` carries no value), `$` and two or more upper-case letters, digits or underscores up to
+  punctuation or its end (`S3cure!Pa$$W0RD` and `$PR0D_KEY` read as `$NAME`;
+  `$PR0D_Kx9...` does count), or a name in braces set off from letters and digits
+  (`pw-{prod}`), or, under a name that is not a password's, a lower-case shell
+  variable such as `$api_token_2`; one that holds a placeholder word such as `test`, `dev`, `my` or
+  `example` (a host such as `db.dev.internal:5432:<password>` included), a value of
+  fewer than eight characters, a single word of letters under 16 characters
+  (`letmeinplease`, `Sunshinesummer`) even under a password name, since what remains
+  must be credential-shaped, a phrase of short words (`MixedCaseLettersOnlyValue`)
+  under a token, key or secret name, a cookie value under 16 characters outside a
+  session cookie, a passphrase that holds a sentence's small word such as `the`, `by`
+  or `in`, and, under any name but a passphrase's, a value with white space
+  (`correct horse battery staple 1`) that is not a scheme credential, a header line, a
+  cookie, a connection string, a JSON object, an assignment or a `password <value>`
+  pair. An argument longer than 64 KiB is split into words at white space only,
+  without shell quoting. The other way, weak and documented values still count where they read as
+  literals: `admin123` or `passw0rd` under a password name, `Basic dXNlcjpwYXNz` under
+  `Authorization`, `correct horse battery staple` under a passphrase name, a repeated
+  pattern such as `deadbeefdeadbeef...` or `ab12ab12ab12`, a UUID under `--key`, the
+  jwt.io example token, and a value under a name whose word `pass` is a stage not
+  listed (`LINT_PASS`; `FIRST_PASS` and `PASS_THROUGH` are not read as passwords). The
+  detail lists at most 12 positions and then `and N more positions`. Collection stops
+  at 64 positions for one server, after which the detail says
+  `and at least 52 more positions` however many more the server holds; the finding
+  names positions, never values, so a suppression binds to the positions and classes
+  the detail lists. Below the bound a new position changes the detail and retires the
+  suppression; past it, a reference at an existing position replaced by a literal
+  leaves the detail, and so the suppression, unchanged, as does replacing a literal
+  with another of the same class at any count.
 - **Resolver settings outside the root are not read.** Settings are read from the
   root `.npmrc`, `bunfig.toml`, `.yarnrc.yml`, `.yarnrc`, `.env.yarn`, `uv.toml`
   and the `[tool.uv]` table of `pyproject.toml`. User and global configuration,

@@ -21,7 +21,7 @@ import os
 import posixpath
 import re
 import shlex
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -57,6 +57,17 @@ from nexus_symbiote.scanners.base import (
     sanitized_origin,
     source_collection_bytes,
 )
+from nexus_symbiote.scanners.mcp_credentials import (
+    NAMED_CLASS,
+    SHAPE_CLASS,
+    Hit,
+    assignment_hits,
+    credential_name,
+    endpoint_hits,
+    literal_value,
+    strongest,
+    value_hits,
+)
 from nexus_symbiote.scanners.mcp_launch import (
     NPM_CONFIG_FLAGS,
     NPM_CONFIG_VALUES,
@@ -76,7 +87,6 @@ from nexus_symbiote.utils.secrets import (
     SecretScrubber,
     credential_shaped,
     is_reference,
-    names_reference,
     redact_descriptor,
     redact_text,
     scheme_credentials,
@@ -682,60 +692,65 @@ def _launch_secrets(launch: Launch, args: Sequence[str] = (), command: str = "")
     return list(dict.fromkeys(values))
 
 
-_SHAPE_CLASS = "a vendor token shape"
-_SCHEME_CLASS = "an authorization scheme credential"
-_NAMED_CLASS = "a generic secret-like value"
-# Strongest first: a token shape stands whatever surrounds it.
-_CREDENTIAL_CLASSES = (_SHAPE_CLASS, _SCHEME_CLASS, _NAMED_CLASS)
+# One finding lists this many positions and counts the rest; collection for one server
+# stops at the larger bound, so the finding stays small however many values a file holds.
+LISTED_CREDENTIAL_POSITIONS = 12
+MAX_CREDENTIAL_POSITIONS = 64
+_ENDPOINT_QUERY_POSITION = "endpoint URL query"
+_ASSIGNMENT_FLAGS = frozenset({"env", "e", "build-arg"})
+# The scheme words _AUTH reads, after which cmd's `set NAME=<scheme> <credential>` splits.
+_ASSIGNMENT_SCHEMES = frozenset({"bearer", "basic", "token", "bot", "apikey", "api-key"})
+# curl's `-u user:password`, also in a cluster of short flags (`-su`).
+_USER_FLAG = re.compile(r"--user|-[A-Za-z]{0,4}u")
+# Past this length an argument's words are split at white space only: shell quoting is
+# read one character at a time, and its cost grows faster than the argument.
+_SHELL_SPLIT_LIMIT = 65536
 
 
-def _credential_class(name: str, value: str) -> str | None:
-    """The pattern class under which the scrubber takes ``value`` at a position named ``name``.
+def _header_line_hits(text: str, *, explicit: bool) -> list[Hit]:
+    """The hits of ``text`` read as an inline ``Header-Name: value`` line.
 
-    A reference or template, bare or after an auth scheme word, names a credential and
-    holds none. A URL counts only for a credential in its user information or query, as
-    the scrubber selects one; a plain locator under a credential name is scrubbed whole
-    but holds no literal credential.
+    Prose such as ``Authentication: handled by the gateway`` reads like one, so a
+    text is a header line only after ``-H`` or ``--header`` or when the header name
+    itself names a credential (Authorization, Cookie, X-Api-Key).
     """
-    if TOKEN_SHAPE.search(value):
-        return _SHAPE_CLASS
-    if names_reference(value):
-        return None
-    header = _header_line(value)
-    if header is not None:
-        if names_reference(header[1]):
-            return None
-        if kind := _value_class(*header):
-            return kind
-    return _value_class(name, value)
+    header = _header_line(text)
+    if header is None or not (explicit or credential_name(header[0])):
+        return []
+    return value_hits(*header, header=True)
 
 
-def _value_class(name: str, value: str) -> str | None:
-    """The scheme or named class of ``value``, without reading it as a header line."""
-    if scheme_credentials(value):
-        return _SCHEME_CLASS
-    if _url_secrets(value) or ("://" not in value and secret_like(name, value)):
-        return _NAMED_CLASS
-    return None
+def _explicit_header(previous: str | None, word: str) -> bool:
+    """Whether ``word`` is a header by its flag: after ``-H``, or ``--header=`` or ``-H``."""
+    stripped = word.strip()
+    return (
+        (previous is not None and previous.lower() in _HEADER_FLAGS)
+        or stripped.lower().startswith(_HEADER_PREFIXES)
+        or (stripped.startswith("-H") and len(stripped) > 2)
+    )
 
 
-def _argument_credential_class(previous: str | None, argument: str) -> str | None:
-    """The class of a launch argument: its words, their assignments, or a flag's value."""
-    classes = []
-    words = _launch_words([argument])
-    for index, word in enumerate(words):
-        classes.append(_credential_class("", word))
-        if index > 0 and _flag_value(words[index - 1], word):
-            classes.append(_credential_class(words[index - 1], word))
-        name, equals, value = word.partition("=")
-        if equals and not _requirement(name, value):
-            name = name.lstrip("-").strip(" \"'")
-            value = value.strip(" \"'")
-            if name and value and name.lower() not in {"h", "header"}:
-                classes.append(_credential_class(name, value))
-    if previous is not None and _flag_value(previous, argument):
-        classes.append(_credential_class(previous, argument))
-    return next((kind for kind in _CREDENTIAL_CLASSES if kind in classes), None)
+def _assignment_word_hits(word: str, following: str | None) -> list[Hit]:
+    """The hits of a ``NAME=value`` word, ``--name=value`` and ``--env=NAME=value`` included.
+
+    cmd's ``set API_TOKEN=Bearer <token>`` leaves the credential in the next word.
+    """
+    name, equals, value = word.partition("=")
+    if not equals or _requirement(name, value):
+        return []
+    name = name.lstrip("-").strip(" \"'")
+    if name.lower() in _ASSIGNMENT_FLAGS and "=" in value:
+        name, _, value = value.strip(" \"'").partition("=")
+        name = name.strip(" \"'")
+        if _requirement(name, value):
+            return []
+    value = value.strip(" \"'")
+    if not name or not value or name.lower() in {"h", "header"}:
+        return []
+    hits = value_hits(name, value)
+    if following is not None and value.lower() in _ASSIGNMENT_SCHEMES:
+        hits.extend(value_hits(name, f"{value} {following}"))
+    return hits
 
 
 def _flag_value(flag: str, word: str) -> bool:
@@ -747,41 +762,168 @@ def _flag_value(flag: str, word: str) -> bool:
     )
 
 
-def _credential_positions(
-    env: dict[str, Any], args: list[Any], header_maps: Sequence[dict[str, Any]]
-) -> list[tuple[str, str]]:
-    """Each launch position holding a literal credential, with its pattern class.
+def _user_hits(previous: str | None, word: str) -> list[Hit]:
+    """The password of ``-u user:password``."""
+    if previous is None or _USER_FLAG.fullmatch(previous) is None:
+        return []
+    user, colon, password = word.partition(":")
+    if not (user and colon and literal_value(password, password=True)):
+        return []
+    return [(NAMED_CLASS, password)]
 
-    Positions are named as the inventory exports them: an env or header name that the
-    inventory withholds is not named here either, and no value is. A name in a known
-    token shape is itself a literal credential.
+
+def _word_hits(previous: str | None, word: str, following: str | None) -> list[Hit]:
+    """The hits of one argument or shell word, given the words around it."""
+    hits = value_hits("", word)
+    hits.extend(_header_line_hits(word, explicit=_explicit_header(previous, word)))
+    hits.extend(_assignment_word_hits(word, following))
+    hits.extend(assignment_hits(word))
+    hits.extend(_user_hits(previous, word))
+    if previous is not None and _flag_value(previous, word):
+        hits.extend(value_hits(previous, word))
+    return hits
+
+
+def _argument_hits(previous: str | None, argument: str) -> list[Hit]:
+    """The hits of a launch argument.
+
+    An argument without white space is one word, read with the argument before it as
+    its flag. One with white space (a command line, an inline script) is read whole
+    for what holds whatever names it, as a header line, for credential-named
+    assignments and as its flag's value; its shell words are then read one by one,
+    so ``-c "API_TOKEN=${API_TOKEN} exec ..."`` is never a ``NAME=value`` or a literal.
     """
-    positions: dict[tuple[str, str], None] = {}
+    if not any(char.isspace() for char in argument):
+        return _word_hits(previous, argument, None)
+    hits = value_hits("", argument)
+    hits.extend(_header_line_hits(argument, explicit=_explicit_header(previous, argument)))
+    hits.extend(assignment_hits(argument))
+    if previous is not None and _flag_value(previous, argument):
+        hits.extend(value_hits(previous, argument))
+    if len(argument) > _SHELL_SPLIT_LIMIT:
+        words = argument.split()
+    else:
+        words = _launch_words([argument])[1:]
+    for index, word in enumerate(words):
+        hits.extend(
+            _word_hits(
+                words[index - 1] if index else None,
+                word,
+                words[index + 1] if index + 1 < len(words) else None,
+            )
+        )
+    return hits
+
+
+def _name_hits(name: str) -> list[Hit]:
+    return [(SHAPE_CLASS, match.group()) for match in TOKEN_SHAPE.finditer(name)]
+
+
+def _credential_hits(
+    env: dict[str, Any],
+    args: list[Any],
+    header_maps: Sequence[dict[str, Any]],
+    endpoints: Sequence[Any],
+) -> Iterator[tuple[str, str, list[Hit]]]:
+    """Each launch position, as its kind and name, with the literal credentials it holds."""
     for name in sorted(env):
         value = env[name]
-        kind = _credential_class(name, value) if isinstance(value, str) else None
-        if kind is None and TOKEN_SHAPE.search(name):
-            kind = _SHAPE_CLASS
-        if kind is not None:
-            label = f"env {name}" if _exportable_name(name) else "an env key"
-            positions[(label, kind)] = None
+        hits = _name_hits(name)
+        if isinstance(value, str):
+            hits.extend(value_hits(name, value))
+            hits.extend(_header_line_hits(value, explicit=False))
+        yield ("env", name, hits)
     previous: str | None = None
     for index, argument in enumerate(args, start=1):
         if isinstance(argument, str):
-            if kind := _argument_credential_class(previous, argument):
-                positions[(f"argument {index}", kind)] = None
+            yield ("argument", str(index), _argument_hits(previous, argument))
             previous = argument
         else:
             previous = None
     headers = [item for mapping in header_maps for item in mapping.items()]
     for name, value in sorted(headers, key=lambda item: item[0]):
-        kind = _credential_class(name, value) if isinstance(value, str) else None
-        if kind is None and TOKEN_SHAPE.search(name):
-            kind = _SHAPE_CLASS
-        if kind is not None:
-            label = f"header {redact_text(name, identifier=True)}"
-            positions[(label if _exportable_name(name) else "a header", kind)] = None
+        hits = _name_hits(name)
+        if isinstance(value, str):
+            hits.extend(value_hits(name, value, header=True))
+            hits.extend(_header_line_hits(value, explicit=False))
+        yield ("header", name, hits)
+    for endpoint in endpoints:
+        if isinstance(endpoint, str):
+            yield ("endpoint", "", endpoint_hits(endpoint))
+
+
+PositionHits = list[tuple[str, str, list[Hit]]]
+
+
+def _literals(positions: PositionHits) -> list[str]:
+    """Every literal credential the launch positions hold, as the finding reads them."""
+    return [literal for _, _, hits in positions for _, literal in hits if literal]
+
+
+def _credential_positions(
+    env: dict[str, Any],
+    args: list[Any],
+    header_maps: Sequence[dict[str, Any]],
+    scrubber: SecretScrubber | None = None,
+    endpoints: Sequence[Any] = (),
+    hits: PositionHits | None = None,
+) -> list[tuple[str, str]]:
+    """Each launch position holding a literal credential, with its pattern class.
+
+    Positions are named as the inventory exports them: an env or header name that the
+    inventory withholds, or that repeats a credential value found in the same file,
+    is not named here either, and no value is. A name in a known token shape is
+    itself a literal credential. A credential-named query parameter of an endpoint
+    URL is the position "endpoint URL query"; its user information stays with
+    transport_security. At most MAX_CREDENTIAL_POSITIONS are collected. ``hits`` are
+    the positions _server_hits already read, so a file is read once.
+    """
+    if hits is None:
+        hits = list(_credential_hits(env, args, header_maps, endpoints))
+    positions: dict[tuple[str, str], None] = {}
+    for kind, name, found_hits in hits:
+        found = strongest(found_hits)
+        if found is None:
+            continue
+        if kind == "env":
+            label = f"env {name}" if _shown_name(name, scrubber) else "an env key"
+        elif kind == "header":
+            shown = f"header {redact_text(name, identifier=True)}"
+            label = shown if _shown_name(name, scrubber) else "a header"
+        elif kind == "argument":
+            label = f"argument {name}"
+        else:
+            label = _ENDPOINT_QUERY_POSITION
+        positions[(label, found)] = None
+        if len(positions) >= MAX_CREDENTIAL_POSITIONS:
+            break
     return list(positions)
+
+
+def _server_hits(config: dict[str, Any]) -> PositionHits:
+    """Each launch position of one server with the literal credentials it holds."""
+    endpoints = [config[field] for field in _ENDPOINT_FIELDS if config.get(field)]
+    return list(
+        _credential_hits(
+            config.get("env", {}),
+            config.get("args", []),
+            [config.get("headers", {}), config.get("http_headers", {})],
+            endpoints,
+        )
+    )
+
+
+def _declared_literals(config: dict[str, Any]) -> list[str]:
+    """The literals of a refused server's env and header maps, read as a parsed one's are."""
+    env = config.get("env")
+    maps = [config.get(field) for field in ("headers", "http_headers")]
+    hits = _credential_hits(
+        env if isinstance(env, dict) else {},
+        [],
+        [mapping for mapping in maps if isinstance(mapping, dict)],
+        (),
+    )
+    return _literals(list(hits))
 
 
 def _server_launch(config: dict[str, Any]) -> Launch:
@@ -790,8 +932,14 @@ def _server_launch(config: dict[str, Any]) -> Launch:
     return analyze(command, config.get("args", [])) if command else Launch()
 
 
-def _server_secrets(config: dict[str, Any], launch: Launch) -> list[str]:
-    """Credential values one server declares: env, headers, auth, endpoints and launcher."""
+def _server_secrets(
+    config: dict[str, Any], launch: Launch, hits: PositionHits | None = None
+) -> list[str]:
+    """Credential values one server declares: env, headers, auth, endpoints and launcher.
+
+    Every literal credential the finding reads counts too, so a server name, a tool's
+    text or a name that repeats one is scrubbed or withheld as a scrubbed value is.
+    """
     values: list[str] = []
     for field in ("env", "headers", "http_headers"):
         mapping = config.get(field)
@@ -817,6 +965,7 @@ def _server_secrets(config: dict[str, Any], launch: Launch) -> list[str]:
             command if isinstance(command, str) else "",
         )
     )
+    values.extend(_literals(_server_hits(config) if hits is None else hits))
     return list(dict.fromkeys(values))
 
 
@@ -1131,20 +1280,32 @@ def _exportable_name(name: str) -> bool:
     )
 
 
-def _exported_names(names: Iterable[str]) -> list[str]:
+def _shown_name(name: str, scrubber: SecretScrubber | None = None) -> bool:
+    """Whether a name may be exported: exportable, and holding none of the known values.
+
+    A name can repeat a secret value (a password written as an env name), one the
+    scrubber would change: the scrubber holds every literal credential the finding
+    reads in the same file. Such a name is withheld whole.
+    """
+    return _exportable_name(name) and not (scrubber is not None and scrubber.contains(name))
+
+
+def _exported_names(names: Iterable[str], scrubber: SecretScrubber | None = None) -> list[str]:
     """Sorted names with every withheld one as "[redacted]", one marker per name."""
     return sorted(
-        redact_text(name, identifier=True) if _exportable_name(name) else "[redacted]"
+        redact_text(name, identifier=True) if _shown_name(name, scrubber) else "[redacted]"
         for name in names
     )
 
 
-def _exported_environment(env: dict[str, Any]) -> dict[str, str]:
+def _exported_environment(
+    env: dict[str, Any], scrubber: SecretScrubber | None = None
+) -> dict[str, str]:
     """The environment's names with masked values; withheld names get numbered markers."""
     shown: dict[str, str] = {}
     withheld = 0
     for name in sorted(env):
-        if _exportable_name(name):
+        if _shown_name(name, scrubber):
             shown[name] = "***"
         else:
             withheld += 1
@@ -2082,7 +2243,8 @@ class MCPScanner(Scanner):
                 result.scan_failures.append(f"{dialect.path}: {key_error}")
                 continue
             # Prepared once per file and reused for every server and diagnostic.
-            file_secrets = SecretScrubber(self._file_secrets(entries))
+            server_hits: dict[int, PositionHits] = {}
+            file_secrets = SecretScrubber(self._file_secrets(entries, server_hits))
             if len(file_secrets) > MAX_SECRETS_PER_FILE:
                 result.scan_failures.append(
                     f"{dialect.path}: more than {MAX_SECRETS_PER_FILE} credential values in one "
@@ -2101,7 +2263,13 @@ class MCPScanner(Scanner):
                     continue
                 try:
                     mcp_comp, tool_comps = self._parse_server(
-                        server_name, server_config, dialect, key, result, file_secrets
+                        server_name,
+                        server_config,
+                        dialect,
+                        key,
+                        result,
+                        file_secrets,
+                        server_hits.get(id(server_config)),
                     )
                 except SourceBindingKeyError as exc:
                     result.scan_failures.append(f"{dialect.path}: {exc}")
@@ -2139,7 +2307,11 @@ class MCPScanner(Scanner):
         return found_any
 
     @classmethod
-    def _file_secrets(cls, entries: list[tuple[str, Any]]) -> list[str]:
+    def _file_secrets(
+        cls,
+        entries: list[tuple[str, Any]],
+        server_hits: dict[int, PositionHits] | None = None,
+    ) -> list[str]:
         """Credential values of every server in a file, inline launcher values included.
 
         One server's tool text or name may repeat a value that another server's
@@ -2147,7 +2319,8 @@ class MCPScanner(Scanner):
         from each. A server that _server_problem refuses is never parsed, but its
         `env`, `headers` and `http_headers` still count, as they did before launcher
         values were added: refusing it must not publish what its siblings repeat. Only
-        its launcher is not analysed.
+        its launcher is not analysed. Each parsed server's launch positions are read
+        once, into ``server_hits`` by the server's identity, for its finding.
         """
         values: list[str] = []
         for _, config in entries:
@@ -2158,14 +2331,18 @@ class MCPScanner(Scanner):
                     mapping = config.get(field)
                     if isinstance(mapping, dict):
                         values.extend(secret_values(mapping))
+                values.extend(_declared_literals(config))
                 continue
             try:
                 launch = _server_launch(config)
             except (TypeError, ValueError, RecursionError):
                 # The server's normal parsing path reports this failure.
                 launch = Launch()
-            values.extend(_server_secrets(config, launch))
-        return values
+            hits = _server_hits(config)
+            if server_hits is not None:
+                server_hits[id(config)] = hits
+            values.extend(_server_secrets(config, launch, hits))
+        return list(dict.fromkeys(values))
 
     @staticmethod
     def _diagnostic_server_name(
@@ -2344,6 +2521,7 @@ class MCPScanner(Scanner):
         key: bytes | None,
         result: ScanResult,
         file_secrets: SecretScrubber | None = None,
+        credential_hits: PositionHits | None = None,
     ) -> tuple[MCPServerComponent, list[ToolComponent]]:
         config_scope = dialect.path
         command = config.get("command", "")
@@ -2364,9 +2542,11 @@ class MCPScanner(Scanner):
         # values included: this server's free text may repeat a value one of them holds.
         # Without a file context, _server_secrets collects them as _file_secrets does,
         # shadowed inline assignments included.
+        if credential_hits is None:
+            credential_hits = _server_hits(config)
         scrubber = file_secrets
         if scrubber is None:
-            scrubber = SecretScrubber(_server_secrets(config, launch))
+            scrubber = SecretScrubber(_server_secrets(config, launch, credential_hits))
         cwd = config.get("cwd")
         nested = _launch_directory(dialect.path) != ""
         # Clients do not trim a cwd: " ." is a directory the checkout can create.
@@ -2471,7 +2651,12 @@ class MCPScanner(Scanner):
             name,
             launch=launch,
             credentials=_credential_positions(
-                env, args, [config.get("headers", {}), config.get("http_headers", {})]
+                env,
+                args,
+                [config.get("headers", {}), config.get("http_headers", {})],
+                scrubber,
+                endpoints,
+                credential_hits,
             ),
             transport=transport,
             command=command,
@@ -2529,7 +2714,7 @@ class MCPScanner(Scanner):
         if context:
             launcher_properties["launch_context"] = context
         if header_names:
-            launcher_properties["header_names"] = _exported_names(header_names)
+            launcher_properties["header_names"] = _exported_names(header_names, scrubber)
         if settings:
             launcher_properties["client_settings"] = settings
         source_config_hash = hash_canonical(
@@ -2548,7 +2733,7 @@ class MCPScanner(Scanner):
                     "transport": transport,
                     "endpoint": identity.endpoint,
                     "argument_count": len(args),
-                    "environment_names": _exported_names(env),
+                    "environment_names": _exported_names(env, scrubber),
                     "header_names": launcher_properties.get("header_names", []),
                     "client_settings": settings,
                     "tool_names": tool_names,
@@ -2566,7 +2751,7 @@ class MCPScanner(Scanner):
             package_url=package_url,
             command=identity.command,
             args=[REDACTED for _ in args],
-            env=_exported_environment(env),
+            env=_exported_environment(env, scrubber),
             endpoint_url=identity.endpoint,
             version_pinned=version_pinned,
             source_path=config_scope,
@@ -3178,7 +3363,14 @@ class MCPScanner(Scanner):
                 "Require human approval for tool calls with side effects.",
             )
         if credentials:
-            listed = "; ".join(f"{position} ({kind})" for position, kind in credentials)
+            listed = "; ".join(
+                f"{position} ({kind})"
+                for position, kind in credentials[:LISTED_CREDENTIAL_POSITIONS]
+            )
+            if (more := len(credentials) - LISTED_CREDENTIAL_POSITIONS) > 0:
+                # Collection stops at the bound, so past it the count is a floor.
+                least = "at least " if len(credentials) >= MAX_CREDENTIAL_POSITIONS else ""
+                listed += f"; and {least}{more} more position{'s' if more > 1 else ''}"
             add(
                 RiskSeverity.HIGH,
                 "credential_exposure",
