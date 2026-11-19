@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import gc
 import importlib.util
+import os
+import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 
@@ -80,6 +84,74 @@ def scaling_ratio(run: Callable[[int], object], factor: int = 4, repeats: int = 
     if ratio > 1.5 * factor:
         ratio = min(ratio, best(factor) / best(1))
     return ratio
+
+
+CAPPED_CLI = """
+import resource, runpy, sys
+for name, value in (("RLIMIT_CPU", 300), ("RLIMIT_AS", 2_500_000_000)):
+    limit = getattr(resource, name)
+    hard = resource.getrlimit(limit)[1]
+    try:
+        resource.setrlimit(
+            limit, (value if hard == resource.RLIM_INFINITY else min(value, hard), hard)
+        )
+    except (ValueError, OSError):
+        pass
+sys.argv[0] = "nexus-symbiote"
+runpy.run_module("nexus_symbiote", run_name="__main__")
+"""
+
+
+@dataclass(frozen=True)
+class CappedRun:
+    """How one capped CLI process ended and what it used."""
+
+    returncode: int
+    cpu_seconds: float
+    peak_rss_kib: int
+
+
+def capped_cli(
+    *arguments: str,
+    prelude: str = "",
+    cwd: Path | None = None,
+    env: Mapping[str, str] | None = None,
+    stdout: Path | None = None,
+    stderr: Path | None = None,
+    deadline: float = 120.0,
+) -> CappedRun:
+    """Run the CLI in an isolated interpreter under 300 s of CPU and 2.5 GB of address space.
+
+    ``prelude`` runs first in that interpreter. Standard output and error go to the files
+    given, else nowhere; they are complete once this returns. A negative ``returncode``
+    names the signal that ended the process.
+    """
+    with contextlib.ExitStack() as files:
+        streams = [
+            files.enter_context(path.open("wb")) if path is not None else subprocess.DEVNULL
+            for path in (stdout, stderr)
+        ]
+        process = subprocess.Popen(  # noqa: S603
+            [sys.executable, "-I", "-c", prelude + CAPPED_CLI, *arguments],
+            cwd=cwd,
+            env=None if env is None else dict(env),
+            stdin=subprocess.DEVNULL,
+            stdout=streams[0],
+            stderr=streams[1],
+        )
+    ends = time.monotonic() + deadline
+    while True:
+        pid, status, usage = os.wait4(process.pid, os.WNOHANG)
+        if pid != 0:
+            break
+        if time.monotonic() >= ends:
+            process.kill()
+            os.wait4(process.pid, 0)
+            raise TimeoutError("CLI subprocess timed out")
+        time.sleep(0.01)
+    process.returncode = os.waitstatus_to_exitcode(status)
+    peak = usage.ru_maxrss // 1024 if sys.platform == "darwin" else usage.ru_maxrss
+    return CappedRun(process.returncode, usage.ru_utime + usage.ru_stime, peak)
 
 
 def otlp_attribute(key: str, value: object) -> dict[str, object]:

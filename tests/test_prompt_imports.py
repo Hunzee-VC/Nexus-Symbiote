@@ -10,7 +10,6 @@ import re
 import string
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -25,7 +24,7 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.scanners import prompt
 from nexus_symbiote.scanners.prompt import PromptScanner
-from tests.support import scaling_ratio
+from tests.support import capped_cli, scaling_ratio
 
 RLO = "\u202e"
 OUTSIDE = "imports a file outside the project root, which is not inventoried"
@@ -444,42 +443,10 @@ def test_scan_memory_grows_with_the_files_not_with_the_paths_they_reference(tmp_
     assert peaks[200] < 2.5 * peaks[100] < 2.5 * 2.5 * peaks[50], detail
 
 
-_CAPPED_CLI = """
-import resource, runpy, sys
-for name, value in (("RLIMIT_CPU", 300), ("RLIMIT_AS", 2_500_000_000)):
-    limit = getattr(resource, name)
-    hard = resource.getrlimit(limit)[1]
-    try:
-        resource.setrlimit(
-            limit, (value if hard == resource.RLIM_INFINITY else min(value, hard), hard)
-        )
-    except (ValueError, OSError):
-        pass
-sys.argv[0] = "nexus-symbiote"
-runpy.run_module("nexus_symbiote", run_name="__main__")
-"""
-
-
 def _cli_usage(*arguments: str) -> tuple[int, float, int]:
     """Exit status, CPU seconds and peak resident KiB of one CLI run under a memory cap."""
-    process = subprocess.Popen(  # noqa: S603
-        [sys.executable, "-I", "-c", _CAPPED_CLI, *arguments],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    deadline = time.monotonic() + 120.0
-    while True:
-        pid, status, usage = os.wait4(process.pid, os.WNOHANG)
-        if pid != 0:
-            break
-        if time.monotonic() >= deadline:
-            process.kill()
-            os.wait4(process.pid, 0)
-            raise TimeoutError("CLI subprocess timed out")
-        time.sleep(0.01)
-    process.returncode = os.waitstatus_to_exitcode(status)
-    peak = usage.ru_maxrss // 1024 if sys.platform == "darwin" else usage.ru_maxrss
-    return process.returncode, usage.ru_utime + usage.ru_stime, peak
+    run = capped_cli(*arguments)
+    return run.returncode, run.cpu_seconds, run.peak_rss_kib
 
 
 @pytest.mark.parametrize(

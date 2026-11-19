@@ -84,6 +84,7 @@ Reference material: exact behavior, fields and limits.
 | [Contributing](../CONTRIBUTING.md) | Set up the locked environment and meet the review contract |
 | [Repository controls](repository-controls.md) | Apply branch protection, require `Verified CI`, and run the publication preflight |
 | [Releasing](releasing.md) | Build, attest, rehearse on TestPyPI and publish a release |
+| [Hostile corpus suite](../benchmarks/README.md#hostile-corpus-suite) | Check that no collector executes, connects, escapes the scan root, leaks a credential or a terminal escape, or exceeds its bounds on the seeded hostile corpus, and add a row for a new parser |
 | [Support](../SUPPORT.md) | Troubleshoot collection, import and validation outcomes |
 
 ## Project records

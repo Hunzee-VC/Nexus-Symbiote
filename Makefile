@@ -80,6 +80,10 @@ coverage: ## Run tests with coverage reporting
 security-regressions: ## Run the committed security regression contracts
 	PYTHONPATH=src python scripts/check_security_regressions.py --out security-regressions.json
 
+.PHONY: hostile-regressions
+hostile-regressions: ## Run the hostile-corpus safety suite
+	python -m pytest tests/test_hostile_corpus.py --strict-skips
+
 .PHONY: check
 check: quality coverage security-regressions ## Run the offline subset of the required CI checks
 	$(MAKE) clean-dist
