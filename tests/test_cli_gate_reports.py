@@ -31,7 +31,7 @@ def _agent(root: Path, *, pickle: bool = False) -> Path:
     (root / "agent.yaml").write_text("name: Demo\ninstructions: [CLAUDE.md]\n")
     (root / "CLAUDE.md").write_text("Use the configured tools.\n")
     if pickle:
-        (root / "classifier.pkl").write_bytes(b"unsafe-format-fixture")
+        (root / "classifier.pkl").write_bytes(b"\x80\x04N.")
     return root
 
 
@@ -642,7 +642,7 @@ def test_sarif_locations_are_relative_to_the_scanned_project(tmp_path, monkeypat
     (project / ".mcp.json").write_text(
         json.dumps({"mcpServers": {"docs": {"command": "npx", "args": ["-y", "docs-mcp"]}}})
     )
-    (project / "models" / "classifier.pkl").write_bytes(b"unsafe-format-fixture")
+    (project / "models" / "classifier.pkl").write_bytes(b"\x80\x04N.")
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
