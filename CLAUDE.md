@@ -24,6 +24,7 @@ src/nexus_symbiote/
   otlp.py, trace_evidence.py, trace_cli.py — Bounded OTLP/JSON trace reading, reported evidence; `trace-diff`
   crosswalk.py, crosswalk_cli.py       — Framework crosswalk that SARIF tags come from; `crosswalk`
   minimum_elements.py, minimum_elements_cli.py — G7 AI SBOM minimum-element coverage; `minimum-elements`
+  descriptor_registry.py, descriptor_registry_cli.py — Read-set input binding, MCP 2026-07-28 descriptor registry, signed gateway decisions, and evidence packages (`approve-descriptors`, `bundle-evidence-pack`)
   inventory_export.py, inventory_export_cli.py — ShadowScan simple-list export; `export-inventory`
   advisories.py                        — Explicit, bounded OSV queries for exact package identities
   modes.py                             — Offline by default; live mode is opt-in

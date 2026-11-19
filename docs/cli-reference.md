@@ -61,6 +61,8 @@ change them. See [collection limits](collection-limits.md).
 | [`vex`](#vex) | offline | Export findings as a VEX document with status `in_triage` |
 | [`crosswalk`](#crosswalk) | offline | Map findings to OWASP, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE entries |
 | [`minimum-elements`](#minimum-elements) | offline | Report which G7 AI SBOM minimum elements an AgentBOM's CycloneDX export carries, and how to supply the missing ones |
+| [`approve-descriptors`](#approve-descriptors) | offline | Sign an approved MCP descriptor registry or verify current descriptors against it |
+| [`bundle-evidence-pack`](#bundle-evidence-pack) | offline | Bundle read-set input binding, complete crosswalk, data residency, runtime telemetry, and OCI verdict attestation |
 | [`verify-artifact`](#verify-artifact) | offline | Check a file's SHA-256, and optionally its Sigstore bundle |
 | [`verify-discovery`](#verify-discovery) | offline | Check that a ShadowScan report's bytes match the digest a BOM records; with `--projection` or `--bundle`, also compare the BOM's imported components with the report |
 | [`export-inventory`](#export-inventory) | offline | Write the reviewed repository agent as an approved inventory that ShadowScan's `--inventory` accepts |
@@ -1068,3 +1070,35 @@ nexus-symbiote vex [OPTIONS] AIBOM_PATH
 | Option | Description |
 |---|---|
 | `-o`, `--output` `PATH` | Write the VEX document to this file instead of standard output. |
+
+### `approve-descriptors`
+
+Sign an approved MCP descriptor registry or verify current descriptors against it.
+
+```text
+nexus-symbiote approve-descriptors [OPTIONS] DESCRIPTORS_FILE
+```
+
+| Option | Description |
+|---|---|
+| `-o`, `--output` `PATH` | Write the signed DSSE descriptor registry JSON to a file path. |
+| `--verify-against` `PATH` | Optional current MCP server descriptors JSON file to verify against the signed registry. |
+| `--json-output` | Emit JSON output to standard output. |
+
+### `bundle-evidence-pack`
+
+Bundle read-set binding, complete crosswalk, data residency, runtime telemetry, and OCI verdict attestation.
+
+```text
+nexus-symbiote bundle-evidence-pack [OPTIONS] [PROJECT_PATH]
+```
+
+| Option | Description |
+|---|---|
+| `--otlp-spans` `PATH` | Optional OTLP/JSON spans file for runtime model-resolution and sampling/elicitation reconciliation. |
+| `--k8s-mlbom` `PATH` | Optional k8s-aibom ML-BOM JSON file for cluster image/model reconciliation. |
+| `--image-digest` `TEXT` | Optional container image SHA-256 subject digest for the OCI referrer gate-verdict attestation. |
+| `-o`, `--output` `PATH` | Write the bundled evidence package JSON to a file path. |
+| `--json-output` | Emit JSON evidence package to standard output. |
+| `--fail-on-verdict` | Exit 1 when the evidence package gate verdict is `failed`. |
+
