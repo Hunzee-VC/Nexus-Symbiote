@@ -105,6 +105,18 @@ TOKEN_SHAPE = re.compile(
 )
 # Names matched against other evidence keep sk-... forms; a distinct token is redacted.
 _NAMED_TOKEN = re.compile(rf"(?<![\w-]){_JWT}|(?<![A-Za-z0-9])(?:{_DISTINCT_SHAPES})")
+# The same shapes with no boundary before them: a credential glued to a prefix, as in
+# "prod-sk-ant-...", "1ghp_..." or "xAKIA...". The sk- form also needs two digits, so a
+# plain name such as disk-management-service-v2 does not read as one.
+_EMBEDDED_TOKEN = re.compile(
+    rf"{_JWT}|sk-(?=(?:[\w-]*?\d){{2}})[\w-]{{20,}}+|(?:AKIA|ASIA)[A-Z0-9]{{16}}"
+    rf"|(?:{_DISTINCT_SHAPES})"
+)
+
+
+def holds_token_shape(text: str) -> bool:
+    """Whether a credential shape occurs anywhere in ``text``, also glued to other text."""
+    return _EMBEDDED_TOKEN.search(text) is not None
 # A header value with no scheme is redacted when it looks like a credential; after
 # Negotiate or NTLM, which the scheme rule above does not know, whatever its shape.
 _RAW_AUTH_HEADER = re.compile(

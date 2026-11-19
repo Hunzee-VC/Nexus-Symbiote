@@ -23,7 +23,7 @@ from nexus_symbiote.core.models import (
 )
 from nexus_symbiote.limits import Bound
 from nexus_symbiote.utils.confined import BoundedRecords, ConfinedCollection
-from nexus_symbiote.utils.secrets import redact_text
+from nexus_symbiote.utils.secrets import holds_token_shape, redact_text
 
 MAX_CONFIG_BYTES = 4 * 1024 * 1024
 MAX_MODEL_BYTES = 1024 * 1024 * 1024
@@ -152,8 +152,9 @@ def declared_server_name(literal: object, known: KnownValues | None = None) -> s
         return None
     if known is not None and known.held_by(literal):
         return None
-    # Every shape the identifier reading of redact_text finds, the plain one finds too.
-    if redact_text(literal) != literal:
+    # Every shape the identifier reading of redact_text finds, the plain one finds too; a
+    # shape glued to a prefix, which redaction leaves alone, keeps the binding as well.
+    if redact_text(literal) != literal or holds_token_shape(literal):
         return None
     return literal
 

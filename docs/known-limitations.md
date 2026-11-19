@@ -651,7 +651,11 @@ A way around a limit that its entry does not describe is worth a
   comments or cannot be read, every TypeScript, JavaScript and Python server in the
   project is named by its variable, without a gap of its own. An `env`, header or
   query parameter value shorter than 8 characters whose name does not mark a
-  credential, such as `DEBUG=1`, is not compared, so a declared name can repeat it.
+  credential, such as `DEBUG=1`, is not compared, so a declared name can repeat it. A
+  credential shape glued to other text in the literal, such as `prod-sk-ant-...` or
+  `1ghp_...`, keeps the variable; a value with no shape the scrubber knows, such as a
+  32-character hexadecimal string, is kept as the name unless the scan read it from a
+  configuration file.
 - **Some directories are skipped.** Server source under directories named `build`,
   `dist`, `test`, `tests`, `docs`, `benchmarks` or `examples`, and `__tests__` for
   TypeScript and JavaScript, is skipped without a gap, and so are TypeScript

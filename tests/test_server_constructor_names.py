@@ -35,6 +35,7 @@ PY_TOOL = "@mcp.tool()\ndef read_note() -> str:\n    return ''\n"
 LONG = "n" * (MAX_SERVER_NAME_CHARS + 1)
 TOKEN = "ghp_" + "SYNTHETICSENTINEL" + "0" * 19
 KEY = "sk-ant-api03-" + "A" * 95
+GLUED = ("server-" + KEY, "prod-" + KEY, "x_" + KEY, "v1" + KEY, "1" + TOKEN, "xAKIASYNTHETICSENTINE")
 
 
 def _scan(root: Path, files: dict[str, str | bytes]):
@@ -159,6 +160,7 @@ def test_every_spelling_of_a_literal_typescript_name_is_read(tmp_path, options):
         "{ name: 'oct\\101al' }",
         f"{{ name: '{TOKEN}' }}",
         f"{{ name: '{KEY}' }}",
+        *(f"{{ name: '{glued}' }}" for glued in GLUED),
     ],
     ids=[
         "template-substitution",
@@ -201,6 +203,7 @@ def test_every_spelling_of_a_literal_typescript_name_is_read(tmp_path, options):
         "legacy-octal-escape",
         "token-shaped",
         "key-shaped",
+        *(f"glued-{index}" for index in range(6)),
     ],
 )
 def test_a_typescript_name_computed_or_outside_the_form_keeps_the_binding(tmp_path, options):
@@ -320,6 +323,7 @@ def test_a_python_server_is_named_by_its_literal_name(tmp_path, constructor):
         "FastMCP('bidi\\u202eevil')",
         f"FastMCP('{TOKEN}')",
         f"FastMCP('{KEY}')",
+        *(f"FastMCP('{glued}')" for glued in GLUED),
     ],
     ids=[
         "f-string",
@@ -338,6 +342,7 @@ def test_a_python_server_is_named_by_its_literal_name(tmp_path, constructor):
         "bidi-override",
         "token-shaped",
         "key-shaped",
+        *(f"glued-{index}" for index in range(6)),
     ],
 )
 def test_a_python_name_computed_or_outside_the_form_keeps_the_binding(tmp_path, constructor):
@@ -386,6 +391,8 @@ def test_two_python_servers_with_one_literal_name_keep_distinct_references(tmp_p
         ("notes%2Fmcp", None),
         (TOKEN, None),
         (KEY, None),
+        *((glued, None) for glued in GLUED),
+        ("disk-management-service-v2", "disk-management-service-v2"),
         (b"bytes", None),
         (None, None),
         (7, None),
@@ -690,11 +697,13 @@ NAME_SHAPES = [
 @pytest.mark.parametrize("shape", NAME_SHAPES)
 @pytest.mark.parametrize("form", ["{}", "notes-{}", "{}.mcp", "notes {} v1"])
 def test_the_identifier_reading_finds_no_shape_the_plain_one_misses(shape, form):
-    """Why ``declared_server_name`` reads a literal with the plain rules alone."""
+    """Why ``declared_server_name`` reads a literal with the plain rules, plus the glued
+    shapes redaction leaves alone: a shape behind a prefix keeps the binding too."""
     name = form.format(shape)
     if redact_text(name, identifier=True) != name:
         assert redact_text(name) != name
-    assert (declared_server_name(name) is None) == (redact_text(name) != name)
+    assert declared_server_name(name) is None
+    assert (redact_text(name) != name) or form == "notes-{}"
 
 
 @pytest.mark.parametrize(
