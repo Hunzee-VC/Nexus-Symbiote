@@ -478,6 +478,23 @@ def test_coverage_without_a_claim_is_unknown():
     assert coverage.gaps == ("AIBOM has no completeness claim — cannot assess coverage.",)
 
 
+def test_a_clipped_gap_keeps_the_record_count_of_a_grouped_failure():
+    failure = "x" * (DETAIL_CHARS + 500)
+    bom = AIBOM(components=[])
+    bom.metadata.completeness = CompletenessClaim(
+        scope="repository", scan_failures=[failure] * 6, surfaces_scanned=["."]
+    )
+    gaps = view_of(bom).coverage.gaps
+    (gap,) = [gap for gap in gaps if gap.endswith(" (recorded 6 times)")]
+    assert len(gap) == DETAIL_CHARS and "…" in gap and gap.startswith("x" * 100)
+    single = AIBOM(components=[])
+    single.metadata.completeness = CompletenessClaim(
+        scope="repository", scan_failures=[failure], surfaces_scanned=["."]
+    )
+    (short,) = [gap for gap in view_of(single).coverage.gaps if gap.startswith("x")]
+    assert len(short) == DETAIL_CHARS and short.endswith("…")
+
+
 def test_scan_failures_make_coverage_incomplete_and_gaps_are_bounded():
     claim = CompletenessClaim(
         scope="repository",
