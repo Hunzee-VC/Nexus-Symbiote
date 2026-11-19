@@ -1,0 +1,28 @@
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/config/secrets-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/models/escape.gguf -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping large file (>10MB): /aibom-run/work/trusera-ai-bom/corpus/data/raw/embeddings.bin (33554432 bytes)
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/loop
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/config/secrets-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/models/escape.gguf -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping large file (>10MB): /aibom-run/work/trusera-ai-bom/corpus/data/raw/embeddings.bin (33554432 bytes)
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/loop
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/config/secrets-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/models/escape.gguf -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping large file (>10MB): /aibom-run/work/trusera-ai-bom/corpus/data/raw/embeddings.bin (33554432 bytes)
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/loop
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/config/secrets-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/models/escape.gguf -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping large file (>10MB): /aibom-run/work/trusera-ai-bom/corpus/data/raw/embeddings.bin (33554432 bytes)
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/loop
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/config/secrets-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/models/escape.gguf -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping large file (>10MB): /aibom-run/work/trusera-ai-bom/corpus/data/raw/embeddings.bin (33554432 bytes)
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/loop
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/config/secrets-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/models/escape.gguf -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping large file (>10MB): /aibom-run/work/trusera-ai-bom/corpus/data/raw/embeddings.bin (33554432 bytes)
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/loop
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/config/secrets-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/models/escape.gguf -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping large file (>10MB): /aibom-run/work/trusera-ai-bom/corpus/data/raw/embeddings.bin (33554432 bytes)
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/loop

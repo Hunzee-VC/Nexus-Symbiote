@@ -1,0 +1,1 @@
+/aibom-run/tools/cdxgen/node_modules/.bin/aibom --no-install-deps --json-pretty -o /aibom-run/resultsB/cdxgen/aibom-cli/bom.json /aibom-run/work/cdxgen/corpus 

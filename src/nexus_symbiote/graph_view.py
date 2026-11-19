@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import heapq
 import html
+import re
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -234,6 +235,17 @@ class GraphView:
 
 def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+_RECORDED = re.compile(r" \(recorded \d+ times\)$")
+
+
+def _clip_gap(gap: str) -> str:
+    """Clip a gap to DETAIL_CHARS, keeping the record count a grouped failure ends with."""
+    suffix = _RECORDED.search(gap)
+    if suffix is None or len(gap) <= DETAIL_CHARS:
+        return _clip(gap, DETAIL_CHARS)
+    return _clip(gap[: suffix.start()], DETAIL_CHARS - len(suffix[0])) + suffix[0]
 
 
 def build_view(bom: AIBOM, *, max_nodes: int, focus: str | None = None) -> GraphView:
@@ -468,7 +480,7 @@ def _coverage(claim: CompletenessClaim | None) -> Coverage:
         collection=assessment.status.value,
         scan_failures=len(claim.scan_failures) if claim is not None else 0,
         surfaces_excluded=len(claim.surfaces_excluded) if claim is not None else 0,
-        gaps=tuple(_clip(gap, DETAIL_CHARS) for gap in gaps[:MAX_GAPS]),
+        gaps=tuple(_clip_gap(gap) for gap in gaps[:MAX_GAPS]),
         gaps_omitted=max(0, len(gaps) - MAX_GAPS),
     )
 

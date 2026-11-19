@@ -1,0 +1,384 @@
+{
+  "@context": "https://spdx.github.io/spdx-spec/v3.0.1/rdf/spdx-context.jsonld",
+  "@graph": [
+    {
+      "type": "SpdxDocument",
+      "spdxId": "urn:spdx:document-3dc9a7ffaf9a",
+      "creationInfo": {
+        "created": "2026-11-18T10:13:54Z",
+        "createdBy": [
+          "urn:spdx:tool-ai-finder-0.5.0"
+        ],
+        "specVersion": "3.0.1"
+      },
+      "rootElement": [
+        "urn:spdx:dataset-huggingface-dataset",
+        "urn:spdx:package-huggingface-embeddings",
+        "urn:spdx:package-langgraph-agent",
+        "urn:spdx:package-lookup_customer",
+        "urn:spdx:package-issue_refund",
+        "urn:spdx:package-search_kb",
+        "urn:spdx:package-chroma",
+        "urn:spdx:package-pinecone",
+        "urn:spdx:package-qdrant",
+        "urn:spdx:package-acme-support-mcp",
+        "urn:spdx:package-anthropic",
+        "urn:spdx:package-openai",
+        "urn:spdx:package-langchain-0.3.27",
+        "urn:spdx:package-langchain-anthropic",
+        "urn:spdx:package-langchain-core",
+        "urn:spdx:package-langgraph",
+        "urn:spdx:package-mcp-1.16.0",
+        "urn:spdx:package-transformers",
+        "urn:spdx:package-torch-2.8.0",
+        "urn:spdx:package-sentence-transformers",
+        "urn:spdx:package-chromadb",
+        "urn:spdx:package-datasets",
+        "urn:spdx:package-pinecone-pypi",
+        "urn:spdx:package-safetensors-0.6.2",
+        "urn:spdx:package-modelcontextprotocol-sdk",
+        "urn:spdx:package-anthropic-ai-sdk-0.65.0",
+        "urn:spdx:package-modelcontextprotocol-server-filesystem-2025.8.21",
+        "urn:spdx:package-ghcr.io-github-github-mcp-server-sha256:7c7f6ab9bb4a4",
+        "urn:spdx:package-mcp-server-postgres",
+        "urn:spdx:package-remote-crm",
+        "urn:spdx:package-playwright-mcp",
+        "urn:spdx:package-deep-mcp-1.0.0",
+        "urn:spdx:ai-package-models-llm-acme-intent-tiny.Q8_0.gguf",
+        "urn:spdx:ai-package-models-classifier-model.safetensors",
+        "urn:spdx:ai-package-models-legacy-intent.pt"
+      ]
+    },
+    {
+      "type": "agent_Tool",
+      "spdxId": "urn:spdx:tool-ai-finder-0.5.0",
+      "name": "ai-finder-0.5.0",
+      "description": "AI Finder Scanner version 0.5.0"
+    },
+    {
+      "type": "dataset_DatasetPackage",
+      "spdxId": "urn:spdx:dataset-huggingface-dataset",
+      "name": "huggingface-dataset",
+      "dataset_datasetType": "text"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-huggingface-embeddings",
+      "name": "huggingface-embeddings",
+      "software_downloadLocation": "NOASSERTION",
+      "software_sourceInfo": "found at: src/agent/llm.py:11"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-langgraph-agent",
+      "name": "langgraph-agent",
+      "software_downloadLocation": "NOASSERTION",
+      "software_sourceInfo": "found at: src/agent/graph.py:5"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-lookup_customer",
+      "name": "lookup_customer",
+      "software_downloadLocation": "NOASSERTION",
+      "software_sourceInfo": "found at: src/agent/tools.py:10"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-issue_refund",
+      "name": "issue_refund",
+      "software_downloadLocation": "NOASSERTION",
+      "software_sourceInfo": "found at: src/agent/tools.py:16"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-search_kb",
+      "name": "search_kb",
+      "software_downloadLocation": "NOASSERTION",
+      "software_sourceInfo": "found at: src/agent/tools.py:22"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-chroma",
+      "name": "chroma",
+      "software_downloadLocation": "NOASSERTION",
+      "software_sourceInfo": "found at: src/agent/retrieval.py:7"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-pinecone",
+      "name": "pinecone",
+      "software_downloadLocation": "NOASSERTION",
+      "software_sourceInfo": "found at: src/agent/retrieval.py:9"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-qdrant",
+      "name": "qdrant",
+      "software_downloadLocation": "NOASSERTION",
+      "software_sourceInfo": "found at: src/agent/retrieval.py:19"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-acme-support-mcp",
+      "name": "acme-support-mcp",
+      "software_downloadLocation": "NOASSERTION",
+      "summary": "Model Context Protocol (MCP) server",
+      "comment": "ai-finder:mcp:role=server ai-finder:mcp:source=code",
+      "software_sourceInfo": "found at: mcp-server/src/index.ts:5 (new McpServer(...))"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-anthropic",
+      "name": "anthropic",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageUrl": "pkg:pypi/anthropic",
+      "software_sourceInfo": "found at: src/agent/llm.py:7 (import anthropic); requirements.txt:1",
+      "software_packageVersion": "==0.69.0"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-openai",
+      "name": "openai",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageUrl": "pkg:pypi/openai",
+      "software_sourceInfo": "found at: src/agent/llm.py:10 (from openai import AzureOpenAI, OpenAI); src/agent/retrieval.py:8 (from openai import OpenAI); requirements.txt:2",
+      "software_packageVersion": "==1.109.1"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-langchain-0.3.27",
+      "name": "langchain",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageVersion": "==0.3.27",
+      "software_sourceInfo": "found at: requirements.txt:3"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-langchain-anthropic",
+      "name": "langchain-anthropic",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageUrl": "pkg:pypi/langchain-anthropic",
+      "software_sourceInfo": "found at: src/agent/llm.py:9 (from langchain_anthropic import ChatAnthropic); requirements.txt:4",
+      "software_packageVersion": "==0.3.19"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-langchain-core",
+      "name": "langchain-core",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageUrl": "pkg:pypi/langchain-core",
+      "software_sourceInfo": "found at: src/agent/tools.py:5 (from langchain_core.tools import tool); requirements.txt:5",
+      "software_packageVersion": "==0.3.76"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-langgraph",
+      "name": "langgraph",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageUrl": "pkg:pypi/langgraph",
+      "software_sourceInfo": "found at: src/agent/graph.py:5 (from langgraph.graph import END, StateGraph); requirements.txt:6",
+      "software_packageVersion": "==0.6.7"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-mcp-1.16.0",
+      "name": "mcp",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageVersion": "==1.16.0",
+      "software_sourceInfo": "found at: requirements.txt:7"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-transformers",
+      "name": "transformers",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageUrl": "pkg:pypi/transformers",
+      "software_sourceInfo": "found at: src/training/finetune.py:6 (from transformers import AutoModelForSequenceClassification, Trainer, TrainingArguments); src/agent/llm.py:12 (from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline); src/agent/guardrails.py:5 (from transformers import pipeline); .claude/skills/triage-ticket/scripts/classify.py:2 (from transformers import pipeline); requirements.txt:8",
+      "software_packageVersion": "==4.57.0"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-torch-2.8.0",
+      "name": "torch",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageVersion": "==2.8.0",
+      "software_sourceInfo": "found at: requirements.txt:9"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-sentence-transformers",
+      "name": "sentence-transformers",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageUrl": "pkg:pypi/sentence-transformers",
+      "software_sourceInfo": "found at: src/agent/llm.py:11 (from sentence_transformers import SentenceTransformer); requirements.txt:10",
+      "software_packageVersion": "==5.1.1"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-chromadb",
+      "name": "chromadb",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageUrl": "pkg:pypi/chromadb",
+      "software_sourceInfo": "found at: src/agent/retrieval.py:7 (import chromadb); requirements.txt:11",
+      "software_packageVersion": "==1.1.0"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-datasets",
+      "name": "datasets",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageUrl": "pkg:pypi/datasets",
+      "software_sourceInfo": "found at: src/training/finetune.py:5 (from datasets import load_dataset); requirements.txt:12",
+      "software_packageVersion": "==4.1.1"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-pinecone-pypi",
+      "name": "pinecone",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageUrl": "pkg:pypi/pinecone",
+      "software_sourceInfo": "found at: src/agent/retrieval.py:9 (from pinecone import Pinecone); requirements.txt:14",
+      "software_packageVersion": "==7.3.0"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-safetensors-0.6.2",
+      "name": "safetensors",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageVersion": "==0.6.2",
+      "software_sourceInfo": "found at: requirements.txt:15"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-modelcontextprotocol-sdk",
+      "name": "@modelcontextprotocol/sdk",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageUrl": "pkg:npm/@modelcontextprotocol/sdk",
+      "software_sourceInfo": "found at: mcp-server/src/index.ts:1 (import { McpServer } from \"@modelcontextprotocol/sdk/server/mcp.js\"); mcp-server/package.json",
+      "software_packageVersion": "^1.18.0"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-anthropic-ai-sdk-0.65.0",
+      "name": "@anthropic-ai/sdk",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageVersion": "^0.65.0",
+      "software_sourceInfo": "found at: mcp-server/package.json"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-modelcontextprotocol-server-filesystem-2025.8.21",
+      "name": "@modelcontextprotocol/server-filesystem",
+      "software_downloadLocation": "NOASSERTION",
+      "summary": "Model Context Protocol (MCP) server",
+      "comment": "ai-finder:mcp:role=server ai-finder:mcp:source=config ai-finder:mcp:transport=stdio",
+      "software_packageUrl": "pkg:npm/%40modelcontextprotocol/server-filesystem@2025.8.21",
+      "software_packageVersion": "2025.8.21",
+      "software_sourceInfo": "found at: .mcp.json:3 (npx @modelcontextprotocol/server-filesystem@2025.8.21)"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-ghcr.io-github-github-mcp-server-sha256:7c7f6ab9bb4a4",
+      "name": "ghcr.io/github/github-mcp-server",
+      "software_downloadLocation": "NOASSERTION",
+      "summary": "Model Context Protocol (MCP) server",
+      "comment": "ai-finder:mcp:role=server ai-finder:mcp:source=config ai-finder:mcp:transport=stdio",
+      "software_packageUrl": "pkg:docker/github/github-mcp-server@sha256:7c7f6ab9bb4a4e4e4a1d0a0c5f2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d?repository_url=ghcr.io",
+      "software_packageVersion": "sha256:7c7f6ab9bb4a4e4e4a1d0a0c5f2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d",
+      "software_sourceInfo": "found at: .mcp.json:11 (docker ghcr.io/github/github-mcp-server@sha256:7c7f6ab9bb4a4e4e4a1d0a0c5f2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d)"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-mcp-server-postgres",
+      "name": "mcp-server-postgres",
+      "software_downloadLocation": "NOASSERTION",
+      "summary": "Model Context Protocol (MCP) server",
+      "comment": "ai-finder:mcp:role=server ai-finder:mcp:source=config ai-finder:mcp:transport=stdio",
+      "software_packageUrl": "pkg:pypi/mcp-server-postgres",
+      "software_sourceInfo": "found at: .mcp.json:25 (uvx mcp-server-postgres)"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-remote-crm",
+      "name": "remote-crm",
+      "software_downloadLocation": "NOASSERTION",
+      "summary": "Model Context Protocol (MCP) server",
+      "comment": "ai-finder:mcp:role=server ai-finder:mcp:source=config ai-finder:mcp:transport=http",
+      "software_sourceInfo": "found at: .mcp.json:34 (https://mcp.crm.example.com/mcp)"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-playwright-mcp",
+      "name": "@playwright/mcp",
+      "software_downloadLocation": "NOASSERTION",
+      "summary": "Model Context Protocol (MCP) server",
+      "comment": "ai-finder:mcp:role=server ai-finder:mcp:source=config ai-finder:mcp:transport=stdio",
+      "software_packageUrl": "pkg:npm/%40playwright/mcp",
+      "software_sourceInfo": "found at: .cursor/mcp.json (npx @playwright/mcp)"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-deep-mcp-1.0.0",
+      "name": "deep-mcp",
+      "software_downloadLocation": "NOASSERTION",
+      "summary": "Model Context Protocol (MCP) server",
+      "comment": "ai-finder:mcp:role=server ai-finder:mcp:source=config ai-finder:mcp:transport=stdio",
+      "software_packageUrl": "pkg:npm/deep-mcp@1.0.0",
+      "software_packageVersion": "1.0.0",
+      "software_sourceInfo": "found at: deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json:3 (npx deep-mcp@1.0.0)"
+    },
+    {
+      "type": "ai_AIPackage",
+      "spdxId": "urn:spdx:ai-package-models-llm-acme-intent-tiny.Q8_0.gguf",
+      "name": "models/llm/acme-intent-tiny.Q8_0.gguf",
+      "ai_autonomyType": "assistive",
+      "ai_domain": "NOASSERTION",
+      "ai_hyperparameter": [
+        {
+          "name": "quantization",
+          "value": "Q8_0"
+        }
+      ],
+      "verifiedUsing": [
+        {
+          "type": "Hash",
+          "algorithm": "sha256",
+          "hashValue": "46cac5ddd076c4f843546daacd3586af7beaa78211b614c9c778868979a30c50"
+        }
+      ]
+    },
+    {
+      "type": "ai_AIPackage",
+      "spdxId": "urn:spdx:ai-package-models-classifier-model.safetensors",
+      "name": "models/classifier/model.safetensors",
+      "ai_autonomyType": "assistive",
+      "ai_domain": "NOASSERTION",
+      "verifiedUsing": [
+        {
+          "type": "Hash",
+          "algorithm": "sha256",
+          "hashValue": "5bdeef2029fa7ebfc5507027c5060f6557fd4187cad5cf02cded1eecd1a977f7"
+        }
+      ],
+      "software_packageUrl": "pkg:huggingface/Otakadelic/mergekit-model_stock-prczfmj-Q4_K_M-GGUF",
+      "software_downloadLocation": "https://huggingface.co/Otakadelic/mergekit-model_stock-prczfmj-Q4_K_M-GGUF"
+    },
+    {
+      "type": "ai_AIPackage",
+      "spdxId": "urn:spdx:ai-package-models-legacy-intent.pt",
+      "name": "models/legacy/intent.pt",
+      "ai_autonomyType": "assistive",
+      "ai_domain": "NOASSERTION",
+      "verifiedUsing": [
+        {
+          "type": "Hash",
+          "algorithm": "sha256",
+          "hashValue": "90d72e0bfe091224a075ec8d66d9ab989d874bbeca15431794c8eb9894ad3734"
+        }
+      ],
+      "software_packageUrl": "pkg:huggingface/AndriLawrence/Qwen-3B-Intent-Microplan-v2",
+      "software_declaredLicense": "other",
+      "software_downloadLocation": "https://huggingface.co/AndriLawrence/Qwen-3B-Intent-Microplan-v2"
+    }
+  ]
+}
