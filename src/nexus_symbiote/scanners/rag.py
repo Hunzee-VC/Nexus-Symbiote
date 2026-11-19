@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import hash_canonical
+from nexus_symbiote.core.identifiers import reference_text
 from nexus_symbiote.core.models import RAGSourceComponent, RiskAssessment
 from nexus_symbiote.policy import read_sexagesimal_integers_as_text
 from nexus_symbiote.scanners.base import (
@@ -626,7 +627,8 @@ class RAGScanner(Scanner):
             # components; a declared name must not take their place, or the genuine
             # evidence component would be dropped as a conflicting duplicate.
             reserved = name.startswith(("import-", "env-"))
-            bom_ref = f"rag:declared-{name}" if reserved else f"rag:{name}"
+            reference = reference_text(name)
+            bom_ref = f"rag:declared-{reference}" if reserved else f"rag:{reference}"
         shown = neutralize(name)
         corpus_type = _identifier(source.get("type"), "type")
         store_type = _identifier(source.get("store_type"), "store_type")

@@ -117,24 +117,62 @@ A way around a limit that its entry does not describe is worth a
   `client_settings` have control, format and CI log-command characters replaced,
   and an [`identifier_characters`](finding-catalog.md#categories) finding records
   them; the details of its findings and the text of `surfaces_excluded` and
-  `scan_failures` are replaced the same way without a finding. Kept as collected: a
-  tool's `description_text`, which its definition digest binds, so a control
-  character in it reaches the native export and the native document embedded in
-  CycloneDX and SPDX as an escape such as `\u001b`; values derived from a path,
-  such as a prompt import's `bom_ref`, `source_path`, evidence locators and
-  `surfaces_scanned`, which validation opens the file at again; other fields, such
-  as an agent manifest's `version` and `framework` and a model's
-  `requested_alias`; and every field of a [live mode](#live-mode) inventory, which
-  is built from what a server serves rather than collected. A consumer that decodes
-  these strings and prints them must neutralize them itself.
-- **Mixed scripts are judged by Unicode character names.** A letter's script is
-  the first script word of its Unicode name, such as `LATIN` or `CYRILLIC`, so a
-  modifier or mathematical letter belongs to no script and does not make a mix. A
+  `scan_failures` are replaced the same way without a finding. A tab or line break
+  in a description or supplier becomes a space without a finding. References
+  derived from an A2A card, A2A client or RAG source name percent-encode those
+  characters instead. Kept as collected: a tool's `description_text`, which its
+  definition digest binds, so a control character in it reaches the native export
+  and the native document embedded in CycloneDX and SPDX as an escape such as
+  `\u001b`; values derived from a path, such as a prompt import's `bom_ref`,
+  `source_path`, evidence locators and `surfaces_scanned`, which validation opens
+  the file at again; other fields, such as an agent manifest's `version` and
+  `framework`, a model's `requested_alias` and an A2A card's declared skill names;
+  and every field of a [live mode](#live-mode) inventory, which is built from what a
+  server serves rather than collected. A consumer that decodes these strings and
+  prints them must neutralize them itself.
+- **Selectors and joiners are judged by context.** A variation selector U+FE0E or
+  U+FE0F directly after an emoji (any symbol of category So, or one of the few emoji
+  that are punctuation, letters or math symbols, such as `‼`, `ℹ` and `⤴`), or between
+  a keycap's `#`, `*` or digit and U+20E3, is kept and not reported. So is a
+  zero-width joiner between two emoji (after a selector or skin tone), and a joiner
+  where IDNA's CONTEXTJ rules (RFC 5892) allow it: either joiner after a virama on a
+  letter of the virama's own script, and U+200C between a letter that joins forward
+  and one that joins backward, such as Persian's `می` U+200C `خواهم`, by the joining
+  types of Unicode 16.0, with marks between them skipped. A zero-width joiner between
+  a letter and a virama of its script, as in Bengali's ra with ya-phala, is kept too.
+  Elsewhere they are replaced and reported: a selector after a dash, dot or digit; a
+  joiner between Latin letters or between Hebrew letters; a zero-width joiner between
+  Arabic letters, where CONTEXTJ allows only U+200C; U+200C after a letter that does
+  not join forward, such as an alef or the `ر` that Persian typing often follows with
+  U+200C before the plural `ها`, where the name reads the same without it; a joiner
+  between Indic letters without a virama, or after a virama placed on a letter of
+  another script; and a subdivision flag, which is written with tag characters. An
+  emoji is judged by its general category, so a selector after a symbol of category So
+  that has no emoji presentation is kept too.
+- **Neutralization never lengthens an export, but the finding adds to it.** A tab,
+  line break, form feed, backspace or delete, and the second `#` of a CI log-command
+  introducer, become a space because JSON writes each in fewer bytes than U+FFFD, so
+  a native inventory that fitted the 16 MiB limit before neutralization still fits.
+  The finding and the recorded digests add up to a few hundred bytes per affected
+  component, which an inventory within that margin of the limit may not have room for.
+- **Scripts are judged by the interpreter's Unicode tables.** A letter's script is the
+  first script word of its Unicode name, such as `LATIN` or `CYRILLIC`, and a virama
+  is read from the canonical combining classes of the Python that runs the command, so
+  a newer Unicode version can change what is a mix or an ordinary joiner, and so a
+  finding and the inventory's content digest, for letters added in that version. A
+  modifier or mathematical letter belongs to no script and does not make a mix.
+  Scripts mix only within a word, a run of letters, marks, digits and joiners: a
+  Cyrillic or Greek word beside a Latin one, as in `MCP сервер`, is ordinary, and
+  Latin and Cyrillic letters in one word are reported. So is a Cyrillic, Greek or
+  Armenian word beside Latin text whose every letter is in a short table of letters
+  that read as Latin ones, after UTS #39's confusables, such as `ехес` in `shell_ехес`
+  or `сом` in `github.сом`; a word with one letter outside that table, such as
+  `сервер`, is ordinary, and a lookalike the table does not hold is not reported. A
   name written wholly in one script that looks like another, such as an all-Cyrillic
-  `раура`, is not reported. Han with kana, with bopomofo or with hangul counts as
-  one writing system, and Latin beside one of them is not a mix, as in Unicode
-  UTS #39's Highly Restrictive level; only MCP server and tool names are checked for
-  a mix.
+  `раура` with no Latin text beside it, is not reported. Han with kana, with bopomofo
+  or with hangul counts as one writing system, and Latin beside one of them is not a
+  mix, as in Unicode UTS #39's Highly Restrictive level; only MCP server and tool
+  names are checked for a mix.
 
 ## MCP servers and tools
 

@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 from nexus_symbiote import limits
 from nexus_symbiote.core.aibom import DependencyEdge
+from nexus_symbiote.core.identifiers import neutral_text
 from nexus_symbiote.core.models import (
     AnyComponent,
     DiscoveryVerification,
@@ -22,7 +23,6 @@ from nexus_symbiote.core.models import (
 )
 from nexus_symbiote.limits import Bound
 from nexus_symbiote.utils.confined import BoundedRecords, ConfinedCollection
-from nexus_symbiote.utils.terminal import neutralize
 
 MAX_CONFIG_BYTES = 4 * 1024 * 1024
 MAX_MODEL_BYTES = 1024 * 1024 * 1024
@@ -164,7 +164,7 @@ class ScanResult:
         self.surfaces_scanned[:] = [relative(record) for record in self.surfaces_scanned]
         # Coverage reasons quote checkout text, such as a server name, and are exported.
         for records in (self.surfaces_excluded, self.scan_failures):
-            records[:] = [neutralize(relative(record)) for record in records]
+            records[:] = [neutral_text(relative(record)) for record in records]
 
 
 class SourceBudget:

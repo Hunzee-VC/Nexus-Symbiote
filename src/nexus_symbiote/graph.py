@@ -389,6 +389,10 @@ def assemble_repository_agent(
     if declared:
         for field in _DISPLAYED_FIELDS:
             value = getattr(declared, field)
+            if field == "name" and value.endswith("\n") and value.strip():
+                # ``name: >`` or ``name: |`` ends the name with the line break YAML's clip
+                # chomping keeps; it is not part of the name.
+                value = value[:-1]
             if value is not None:
                 # Names keep the token formats ordinary names take, such as
                 # ``sk-research-assistant``; the free-text purpose does not.

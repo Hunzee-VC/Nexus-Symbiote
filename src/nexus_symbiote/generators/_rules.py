@@ -181,8 +181,9 @@ RULES: dict[str, RuleInfo] = {
         "Control, format or mixed-script characters in an identifier",
         "A component's name, description, supplier or nested tool name was collected with "
         "terminal control, bidirectional or invisible format characters, which the inventory "
-        "replaces with U+FFFD, or an MCP server or tool name mixes letters of more than one "
-        "script, which can disguise one name as another.",
+        "replaces, or an MCP server or tool name mixes letters of more than one script within "
+        "a word or beside Latin text has a word whose every letter reads as Latin, which can "
+        "disguise one name as another.",
     ),
     "hook_commands": RuleInfo(
         "Hook commands",
