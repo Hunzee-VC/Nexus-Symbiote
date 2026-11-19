@@ -16,7 +16,7 @@ license-files = [
 ]
 requires-python = ">=3.11"
 authors = [
-    { name = "Emmanuel Dahunsi", email = "immanueldahunsi@gmail.com" },
+    { name = "Emmanuel Dahunsi" },
 ]
 keywords = [
     "aibom",

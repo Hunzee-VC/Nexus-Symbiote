@@ -166,6 +166,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Changed
 
+- The package metadata no longer publishes a personal e-mail address: `authors` in `pyproject.toml` names the author only. Releases already on PyPI keep the metadata they were built with.
 - The pre-commit hook description states that `language: python` installs from `pyproject.toml` ranges without the hash lock, and how to run the command from a lock-installed environment with `language: system`.
 - **Breaking:** a policy file accepts only the documented `validate` key, and an unlistable root is an error. `verify-artifact` and `verify-discovery` reject `--trust-root` or `--trust-root-sha256` without `--bundle`.
 - `risk` prints an unscored run as unscored, labels a failed discovery-producer check as such rather than as a failed project reconciliation, and, like `summary`, orders severity breakdowns from critical to info. `vex` and `advisories` print why an inventory could not be read.
