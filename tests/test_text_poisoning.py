@@ -49,6 +49,19 @@ def test_normalize_strips_invisible_format_chars_and_tracks_byte_offsets() -> No
     assert normalize_for_lexical_scan("") == ("", [])
 
 
+def test_a_lone_surrogate_from_json_is_scanned_not_a_crash(tmp_path: Path) -> None:
+    normalized, offsets = normalize_for_lexical_scan("a\ud800b")
+    assert normalized == "a\ud800b"
+    assert offsets == [0, 1, 4]
+    project = tmp_path / "project"
+    (project / ".well-known").mkdir(parents=True)
+    (project / ".well-known" / "agent.json").write_text('{"name": "\\ud800", "skills": []}')
+    result = CliRunner().invoke(
+        main, ["scan", str(project), "-o", str(tmp_path / "out.json"), "--no-project-policy"]
+    )
+    assert "internal error" not in result.output, result.output
+
+
 @pytest.mark.parametrize(
     ("text", "is_tool", "expected_rule", "expected_category"),
     [
