@@ -374,7 +374,13 @@ class IntegrityValidator:
                     )
             before_file_hashes = report.hashes_verified
             self._check_file_hash(comp, project_root, report)
-            if isinstance(comp, MCPServerComponent) and report.hashes_verified > before_file_hashes:
+            if isinstance(comp, MCPServerComponent) and (
+                report.hashes_verified > before_file_hashes
+                or (
+                    project_root is not None
+                    and isinstance(comp.properties.get("static_value_binding"), str)
+                )
+            ):
                 verified_mcp_servers.add(comp.bom_ref)
             if comp.bom_ref in bound_imports and is_imported(comp):
                 for issue in report.issues[first_issue:]:

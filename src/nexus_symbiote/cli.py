@@ -1957,8 +1957,6 @@ def risk(
         gate_reasons.append(attestation_failure_reason)
     gate = {
         **report.gate,
-        "passed": passed,
-        "reasons": gate_reasons,
         **_gate_sources(policy, policy_source, threshold_from_cli, fail_on_severity),
     }
     if no_score_threshold:

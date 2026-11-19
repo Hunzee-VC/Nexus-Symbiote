@@ -196,7 +196,7 @@ class Config:
     binding_key: str = field(default="", repr=False)
     scratch_parent: Path | None = None
     baseline_attestation: bytes | None = field(default=None, repr=False)
-    trusted_keys: tuple[bytes, ...] = field(default=(), repr=False)
+    trusted_verifiers: tuple[bytes, ...] = field(default=(), repr=False)
     attest: bool = False
 
     @classmethod
@@ -249,20 +249,20 @@ class Config:
             else None
         )
         raw_attestation = env.get("SYMBIOTE_REVIEWED_BASELINE_ATTESTATION", "")
-        raw_keys_input = env.get("SYMBIOTE_TRUSTED_KEYS", "")
-        if "\x00" in raw_keys_input:
+        raw_verifiers_input = env.get("SYMBIOTE_TRUSTED_KEYS", "")
+        if "\x00" in raw_verifiers_input:
             raise InputError("trusted-keys must not contain NUL")
-        raw_keys = tuple(
-            k for part in raw_keys_input.replace("\n", ",").split(",") if (k := part.strip())
+        raw_verifiers = tuple(
+            v for part in raw_verifiers_input.replace("\n", ",").split(",") if (v := part.strip())
         )
         if raw_attestation and baseline is None:
             raise InputError("reviewed-baseline-attestation requires reviewed-baseline")
-        if raw_keys and not raw_attestation:
+        if raw_verifiers and not raw_attestation:
             raise InputError("trusted-keys requires reviewed-baseline-attestation")
-        if raw_attestation and not raw_keys:
+        if raw_attestation and not raw_verifiers:
             raise InputError("reviewed-baseline-attestation requires trusted-keys")
         baseline_attestation: bytes | None = None
-        trusted_keys: tuple[bytes, ...] = ()
+        trusted_verifiers: tuple[bytes, ...] = ()
         if raw_attestation:
             from nexus_symbiote.attestation import MAX_ENVELOPE_BYTES
             from nexus_symbiote.runtime_cli import MAX_KEY_BYTES
@@ -273,9 +273,9 @@ class Config:
                 "reviewed-baseline-attestation",
                 MAX_ENVELOPE_BYTES,
             )
-            trusted_keys = tuple(
-                _caller_owned(workspace, key_path, "trusted-keys", MAX_KEY_BYTES)
-                for key_path in raw_keys
+            trusted_verifiers = tuple(
+                _caller_owned(workspace, verifier_rel, "trusted-keys", MAX_KEY_BYTES)
+                for verifier_rel in raw_verifiers
             )
         from nexus_symbiote.scanners.mcp import (
             _MIN_SOURCE_BINDING_KEY_LENGTH,
@@ -333,7 +333,7 @@ class Config:
             supplied_key,
             scratch_parent,
             baseline_attestation,
-            trusted_keys,
+            trusted_verifiers,
             attest,
         )
 
@@ -791,12 +791,12 @@ def run(
             if config.baseline_attestation is not None:
                 envelope = scratch / "reviewed-baseline.att.json"
                 envelope.write_bytes(config.baseline_attestation)
-                key_args: list[str] = []
-                for idx, key_bytes in enumerate(config.trusted_keys):
-                    key_path = scratch / f"trusted-key-{idx}.pub"
-                    key_path.write_bytes(key_bytes)
-                    key_path.chmod(0o600)
-                    key_args.extend(["--trusted-key", str(key_path)])
+                verifier_args: list[str] = []
+                for idx, verifier_bytes in enumerate(config.trusted_verifiers):
+                    verifier_path = scratch / f"trusted-verifier-{idx}.pub"
+                    verifier_path.write_bytes(verifier_bytes)
+                    verifier_path.chmod(0o600)
+                    verifier_args.extend(["--trusted-key", str(verifier_path)])
                 verified_att = command(
                     [
                         "verify-attestation",
@@ -805,7 +805,7 @@ def run(
                         "--purpose",
                         "reviewed",
                         "--json-output",
-                        *key_args,
+                        *verifier_args,
                     ]
                 )
                 _relay(
