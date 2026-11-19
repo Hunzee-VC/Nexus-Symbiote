@@ -48,7 +48,8 @@ A way around a limit that its entry does not describe is worth a
   `scan` and for a later `validate --project` or `risk --project`, which collect
   the project again.
 - **Source search is bounded.** The mcp, a2a and rag collectors each read at most
-  `source-scan-bytes` (64 MiB by default) of source text. Past that, one failure
+  `source-scan-bytes` (64 MiB by default) of source text, and the shadowscan collector
+  reads at most that much of the files a report cites. Past that, one failure
   names the first file not read in full, and nothing after it is searched. Raise
   the limit for such a project.
 - **Exclusions are gaps.** A path you exclude with `scan.exclude_paths` is recorded
@@ -1314,7 +1315,17 @@ A way around a limit that its entry does not describe is worth a
   not named, including identifiers that ShadowScan reports by a matched prefix or on a
   neighbouring line. A bill of materials or scan report in the tree confirms nothing, but
   that rule knows only JSON formats: a Markdown or HTML report kept in the tree can still
-  confirm an identifier. The kind is the report's: the scan checks that the identifier
+  confirm an identifier; so can a JSON report behind a leading comment line or nested one
+  level deeper. A value written below a credential key is withheld when it is the one value
+  on its line and the line that opens it, a key and its mark with at most a block indicator,
+  a bracket or a comment after them, is within the eight lines above. A line of several
+  words in a block below such a key, a value further down, and a value below a typed
+  declaration such as `const credentials: string[] = [` are read alone and can be named.
+  The redactor decides which keys name a credential and reads names broadly, so a list of
+  model identifiers below `requires_token:`, `cache_key = (` or `modelsRequiringApiKey = [`
+  is withheld; plural names such as `api_keys:` and `tokens:` are not credential names to
+  it. The kind is
+  the report's: the scan checks that the identifier
   stands at the cited line, not that it names a model, except that an Amazon Bedrock
   resource name of another kind, such as a guardrail, is not named. The same model written
   two ways, such as `anthropic/<model>` and `<model>`, is two components. Findings of other kinds, container images, infrastructure

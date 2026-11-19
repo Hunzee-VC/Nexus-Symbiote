@@ -83,9 +83,10 @@ may still be sensitive and must be handled accordingly.
 
 The projection profile `nexus-symbiote/shadowscan-projection/v6` identifies the
 SymBiote mapping, not a ShadowScan report schema or authenticated producer
-version. Each projected component records the exact report digest
+version. Each component projected from a finding records the exact report digest
 (`shadowscan:report-sha256`) and a content digest of its own source finding
-(`shadowscan:finding-sha256`, see below). CycloneDX `dependsOn` edges are copied
+(`shadowscan:finding-sha256`, see below); a model named from cited evidence records
+neither. CycloneDX `dependsOn` edges are copied
 only when both endpoints map to components. They remain declared, source-reported
 relationships, with the dependency-array index recorded on the edge; the BOM
 metadata binds them to the report digest. Unmapped endpoint
@@ -279,10 +280,15 @@ All of these must hold.
 - **The cited file is not itself a scan result.** A JSON file whose top-level object
   has a `bomFormat`, `spdxVersion`, `@graph`, `runs`, `findings` or `components` key
   is a bill of materials or a scan report: CycloneDX, SPDX, SARIF, a ShadowScan
-  report, a native inventory or a risk report. It repeats the identifiers a scan
-  found, so it confirms none. The report cannot confirm its own citations, and an
-  inventory kept in the tree, such as a drift baseline, cannot keep a model named
-  after its source line is deleted.
+  report, a native inventory or a risk report. So is a top-level array that holds an
+  object with `bomFormat`, `spdxVersion` or `@graph`; the other three names are
+  ordinary words in a list of rows and do not count there. Text that starts as JSON
+  and is not one JSON value, for example with a duplicate key, a trailing comma, a
+  comment or a second document after the first, is read for the same keys in the same
+  places, so it is neither let through as a report nor refused for a key nested
+  deeper. Such a file repeats the identifiers a scan found, so it confirms none. The
+  report cannot confirm its own citations, and an inventory kept in the tree, such as
+  a drift baseline, cannot keep a model named after its source line is deleted.
 - **The cited line holds the identifier as a whole identifier.** The line is at most
   4,096 characters. Text may not continue the identifier: `gpt-4o` is not named from
   `gpt-4o-mini`, `qwen2.5-coder` from `qwen2.5-coder:7b`, or `cohere` from
@@ -301,8 +307,20 @@ All of these must hold.
 - **Nothing reads as a credential.** The identifier and the signal label must pass
   the scan's own redactor unchanged, and the identifier must still stand on the cited
   line after that line is redacted, so one assigned to a name such as `API_TOKEN` is
-  withheld. A line that holds nothing but the identifier is redacted together with
-  the line before it, because a value can follow its key on the next line.
+  withheld. A value can also follow its key on a later line. A line that holds one
+  value and no key of its own is therefore read together with the line before it, as
+  a value follows `Authorization: Bearer`, and as the value of each key that opens it
+  within the eight lines above. A line opens a value when it is a key and its mark
+  with nothing after them but a YAML block indicator, an opening bracket or a comment:
+  `password:`, `password: >-`, `"credentials": [`, `export const credentials = [`,
+  `token =  # rotated`. Blank lines, comment lines and other single values, such as
+  list entries, may lie in between. The redactor decides which keys name a credential,
+  and it reads names broadly: a list below `requires_token:` or `cache_key = (` is
+  withheld as a value on the same line as that key always was. What the lines hold
+  decides all of this, not which identifier a report cites there, so the order of a
+  report's citations does not change what is withheld. A line with a key and a value
+  of its own, such as `model: gpt-4o-mini` below `credentials:`, is read alone, and so
+  is a line of several words.
 
 The scan records only an identifier that the report states and the repository
 holds at the cited line. It never extends the cited text, so a report cannot make a
@@ -313,12 +331,15 @@ scan copy other text from a file into the inventory.
 One component is recorded for each identifier as written; the same model written as
 `anthropic/claude-sonnet-4-5-20250929` and as `claude-sonnet-4-5-20250929` is two
 components. The claim's `locator` is the first location in path and line order and
-its `evidence_refs` list up to 16 locations.
+its `evidence_refs` list up to 16 locations, fewer when their paths hold characters
+that the inventory writes as escapes: the listed locations take at most 4,256 bytes
+as written, which one location always fits.
 
 | Property | Value |
 | --- | --- |
-| `shadowscan:signals` | The report's `model:` labels for the identifier, such as `model:provider.openai`: at most four parts of 24 lowercase letters and digits, a source-reported label |
-| `shadowscan:evidence-unlisted` | The number of confirmed locations past the 16 listed; absent when all are listed |
+| `shadowscan:signals` | The report's `model:` labels for the identifier, such as `model:provider.openai`: at most four parts of 24 lowercase letters and digits, a source-reported label. The first 16 in order are listed |
+| `shadowscan:signals-unlisted` | The number of labels past the 16 listed; absent when all are listed |
+| `shadowscan:evidence-unlisted` | The number of confirmed locations that are not listed; absent when all are listed |
 | `shadowscan:kind`, `shadowscan:projection-profile`, `collection_mode` | `model`, the projection profile and `imported-unverified-report`, as on every imported component |
 
 `minimum-elements` counts the identifier as the model's name, on an imported basis. An
@@ -334,7 +355,11 @@ as "confirmed model identifiers past the bound of 500 are not named". These coun
 alone do not close the default gate. Two conditions are scan failures: cited files
 that do not fit the `source-scan-bytes` limit, which names the limit, and cited
 lines past the 1 MiB of text that the scan checks for credentials, "ShadowScan cited
-lines exceed the text checked for credentials; the rest were not confirmed".
+lines exceed the text checked for credentials; the rest were not confirmed". At most
+10,000 `model:` evidence entries have their identifier and label read by the
+redactor, whether or not they are then kept; the entries after that are counted as
+unconfirmed. An entry without a usable location or identifier is counted as
+unconfirmed too and does not use up that number.
 
 ### Validation and drift
 
@@ -388,15 +413,17 @@ dropped.
 | Model evidence entries examined in a merged scan | 10,000 |
 | Cited path length | 256 characters |
 | Cited line length | 4,096 characters |
-| Locations listed for one model | 16 |
+| Locations listed for one model | 16, and 4,256 bytes as the inventory writes them |
+| Signal labels listed for one model | 16 |
 | Models named for one report | 500 |
-| Text of cited lines checked for credentials | 1 MiB |
+| Lines above a cited value searched for the key that opens it | 8 |
+| Text the redactor reads for cited lines: each line, the line before a single value, and the key that opens it | 1 MiB |
 
 A report within these limits can still yield an inventory larger than the 16 MiB
 that `validate`, `risk`, `diff` and the other commands read. A merged `scan` reaches
 it at roughly 8,000 to 9,000 findings that each carry a risk level, fewer when they
 are also flagged as shadow or when the report also cites many models, whose
-components stay under 3 MiB; a standalone import of 10,000 such findings stays below
+components stay under 6 MiB; a standalone import of 10,000 such findings stays below
 it. Individual connector counts can
 precede filtering or deduplication and can legitimately differ from the final
 array.
