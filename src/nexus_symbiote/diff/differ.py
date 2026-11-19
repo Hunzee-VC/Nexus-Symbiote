@@ -30,6 +30,7 @@ from nexus_symbiote.utils.crypto import (
     SigningStatus,
     component_evidence_refs,
 )
+from nexus_symbiote.utils.terminal import neutralize
 
 SEVERITIES = ("info", "low", "medium", "high", "critical")
 
@@ -1485,59 +1486,191 @@ class AIBOMDiffer:
         report: DiffReport,
     ) -> None:
         for ref in sorted(retained):
-            old_props = getattr(old_map[ref], "properties", None) or {}
-            new_props = getattr(new_map[ref], "properties", None) or {}
-            comp_name = _clip(getattr(new_map[ref], "name", ref))
-            removed_deny = sorted(
-                set(old_props.get("deny_rules") or []) - set(new_props.get("deny_rules") or [])
-            )
-            if removed_deny:
+            raw_old = getattr(old_map[ref], "properties", None)
+            raw_new = getattr(new_map[ref], "properties", None)
+            old_props = raw_old if isinstance(raw_old, dict) else {}
+            new_props = raw_new if isinstance(raw_new, dict) else {}
+            comp_name = neutralize(_clip(getattr(new_map[ref], "name", ref)))
+
+            def record_malformed(
+                field_name: str, *, _ref: str = ref, _comp: str = comp_name
+            ) -> None:
                 report.security_alerts.append(
                     {
                         "severity": "high",
-                        "component": ref,
-                        "alert_type": "deny_rule_removed",
-                        "alert": (
-                            f"deny_rule_removed: {', '.join(_clip(r) for r in removed_deny)} "
-                            f"removed from '{comp_name}'."
+                        "component": _ref,
+                        "alert_type": "malformed_settings_metadata",
+                        "alert": neutralize(
+                            f"malformed_settings_metadata: invalid '{field_name}' metadata in "
+                            f"'{_comp}'; settings drift cannot be verified."
                         ),
                     }
                 )
-            added_domains = sorted(
-                set(new_props.get("sandbox_allowed_domains") or [])
-                - set(old_props.get("sandbox_allowed_domains") or [])
-            )
-            if added_domains:
-                report.security_alerts.append(
-                    {
-                        "severity": "high",
-                        "component": ref,
-                        "alert_type": "sandbox_egress_widened",
-                        "alert": (
-                            f"sandbox_egress_widened: allowedDomains added "
-                            f"{', '.join(_clip(d) for d in added_domains)} in '{comp_name}'."
-                        ),
-                    }
+
+            old_deny, old_deny_ok = _string_set_prop(old_props, "deny_rules")
+            new_deny, new_deny_ok = _string_set_prop(new_props, "deny_rules")
+            if not old_deny_ok or not new_deny_ok:
+                record_malformed("deny_rules")
+            else:
+                removed_deny = sorted(old_deny - new_deny)
+                if removed_deny:
+                    report.security_alerts.append(
+                        {
+                            "severity": "high",
+                            "component": ref,
+                            "alert_type": "deny_rule_removed",
+                            "alert": neutralize(
+                                f"deny_rule_removed: {_bounded_items_text(removed_deny)} "
+                                f"removed from '{comp_name}'."
+                            ),
+                        }
+                    )
+                elif _truncated_tail_changed(
+                    old_props, new_props, "deny_rules", detect_removal=True
+                ):
+                    report.security_alerts.append(
+                        {
+                            "severity": "high",
+                            "component": ref,
+                            "alert_type": "deny_rule_removed",
+                            "alert": neutralize(
+                                f"deny_rule_removed: truncated deny_rules changed or shrank in "
+                                f"'{comp_name}'."
+                            ),
+                        }
+                    )
+
+            old_domains, old_dom_ok = _string_set_prop(old_props, "sandbox_allowed_domains")
+            new_domains, new_dom_ok = _string_set_prop(new_props, "sandbox_allowed_domains")
+            if not old_dom_ok or not new_dom_ok:
+                record_malformed("sandbox_allowed_domains")
+            else:
+                added_domains = sorted(new_domains - old_domains)
+                if added_domains:
+                    report.security_alerts.append(
+                        {
+                            "severity": "high",
+                            "component": ref,
+                            "alert_type": "sandbox_egress_widened",
+                            "alert": neutralize(
+                                f"sandbox_egress_widened: allowedDomains added "
+                                f"{_bounded_items_text(added_domains)} in '{comp_name}'."
+                            ),
+                        }
+                    )
+                elif _truncated_tail_changed(
+                    old_props, new_props, "sandbox_allowed_domains", detect_removal=False
+                ):
+                    report.security_alerts.append(
+                        {
+                            "severity": "high",
+                            "component": ref,
+                            "alert_type": "sandbox_egress_widened",
+                            "alert": neutralize(
+                                f"sandbox_egress_widened: truncated allowedDomains expanded in "
+                                f"'{comp_name}'."
+                            ),
+                        }
+                    )
+
+            old_act = old_props.get("activation")
+            new_act = new_props.get("activation")
+            if (old_act is not None and not isinstance(old_act, dict)) or (
+                new_act is not None and not isinstance(new_act, dict)
+            ):
+                record_malformed("activation")
+                continue
+            if not isinstance(old_act, dict) or not isinstance(new_act, dict):
+                continue
+            for path, new_scope in sorted(new_act.items(), key=lambda kv: str(kv[0])):
+                old_scope = old_act.get(path)
+                if old_scope is None:
+                    continue
+                if (
+                    not isinstance(path, str)
+                    or not isinstance(old_scope, dict)
+                    or not isinstance(new_scope, dict)
+                ):
+                    record_malformed("activation")
+                    continue
+                old_always = old_scope.get("always_apply")
+                new_always = new_scope.get("always_apply")
+                old_globs, old_gok = _string_set_prop(old_scope, "globs")
+                new_globs, new_gok = _string_set_prop(new_scope, "globs")
+                if (
+                    (old_always is not None and not isinstance(old_always, bool))
+                    or (new_always is not None and not isinstance(new_always, bool))
+                    or not old_gok
+                    or not new_gok
+                ):
+                    record_malformed("activation")
+                    continue
+                widened = (
+                    (not old_always and bool(new_always))
+                    or bool(new_globs - old_globs)
+                    or _truncated_tail_changed(old_scope, new_scope, "globs", detect_removal=False)
                 )
-            old_act = old_props.get("activation") or {}
-            new_act = new_props.get("activation") or {}
-            if isinstance(old_act, dict) and isinstance(new_act, dict):
-                for path, new_scope in sorted(new_act.items()):
-                    old_scope = old_act.get(path)
-                    if not isinstance(old_scope, dict) or not isinstance(new_scope, dict):
-                        continue
-                    widened = (
-                        not old_scope.get("always_apply") and new_scope.get("always_apply")
-                    ) or bool(set(new_scope.get("globs") or []) - set(old_scope.get("globs") or []))
-                    if widened:
-                        report.security_alerts.append(
-                            {
-                                "severity": "high",
-                                "component": ref,
-                                "alert_type": "scope_widened",
-                                "alert": (
-                                    f"scope_widened: activation scope widened for '{_clip(path)}' "
-                                    f"in '{comp_name}'."
-                                ),
-                            }
-                        )
+                if widened:
+                    report.security_alerts.append(
+                        {
+                            "severity": "high",
+                            "component": ref,
+                            "alert_type": "scope_widened",
+                            "alert": neutralize(
+                                f"scope_widened: activation scope widened for '{_clip(path)}' "
+                                f"in '{comp_name}'."
+                            ),
+                        }
+                    )
+
+
+def _string_set_prop(props: dict[str, Any], key: str) -> tuple[set[str], bool]:
+    raw = props.get(key)
+    if raw is None:
+        return set(), True
+    if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
+        return set(), False
+    return set(raw), True
+
+
+def _nonneg_int_prop(props: dict[str, Any], key: str) -> int | None:
+    val = props.get(key)
+    return val if type(val) is int and val >= 0 else None
+
+
+def _bounded_items_text(items: list[str], limit: int = 5) -> str:
+    shown = ", ".join(neutralize(_clip(item)) for item in items[:limit])
+    return shown + (f" (and {len(items) - limit} more)" if len(items) > limit else "")
+
+
+def _truncated_tail_changed(
+    old_props: dict[str, Any],
+    new_props: dict[str, Any],
+    prefix: str,
+    *,
+    detect_removal: bool,
+) -> bool:
+    old_trunc = old_props.get(f"{prefix}_truncated") is True
+    new_trunc = new_props.get(f"{prefix}_truncated") is True
+    old_total = _nonneg_int_prop(old_props, f"{prefix}_total")
+    new_total = _nonneg_int_prop(new_props, f"{prefix}_total")
+    old_digest = old_props.get(f"{prefix}_digest")
+    new_digest = new_props.get(f"{prefix}_digest")
+    digests_differ = (
+        isinstance(old_digest, str) and isinstance(new_digest, str) and old_digest != new_digest
+    )
+    if detect_removal:
+        if not old_trunc:
+            return False
+        if not new_trunc:
+            return True
+        if old_total is not None and new_total is not None:
+            return new_total < old_total or (new_total == old_total and digests_differ)
+        return digests_differ
+    if not new_trunc:
+        return False
+    if not old_trunc:
+        return True
+    if old_total is not None and new_total is not None:
+        return new_total > old_total or (new_total == old_total and digests_differ)
+    return digests_differ
