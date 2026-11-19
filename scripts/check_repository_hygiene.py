@@ -63,8 +63,8 @@ STABLE_IDENTIFIERS = ((Path("src/nexus_symbiote/attestation.py"), "PREDICATE_TYP
 # v0.1.0 was published while the Hunzee-VC organization owned the repository, and its
 # attestation certificate names that repository and workflow. The README's verified
 # install of that release must pass the same identity, or verification cannot succeed.
-# A fenced block may name it only where its verify command names that release's wheel,
-# so a later release verified under the old identity is reported as stale.
+# Only the fenced verify command that names that release's wheel may carry it, so a
+# later release verified under the old identity is reported as stale.
 SIGNED_RELEASE_IDENTITIES = {
     Path("README.md"): (
         "nexus_symbiote-0.1.0-py3-none-any.whl",
@@ -250,12 +250,30 @@ def stable_identifiers(root: Path) -> list[str]:
 
 
 def without_signed_release_identities(text: str, wheel: str, identities: tuple[str, ...]) -> str:
-    """Blank ``identities`` inside fenced blocks whose ``gh attestation verify`` names ``wheel``.
+    """Blank ``identities`` on the lines of a fenced ``gh attestation verify`` command
+    that names ``wheel``, its backslash continuations included.
 
-    Outside such a block, and in a block that verifies any other artifact, the
-    identities stay in the text and the owner check reports them as stale.
+    Outside a fence or in one that never closes, on another command in the same block,
+    in a comment that names the wheel, or in a block that verifies any other artifact,
+    the identities stay in the text and the owner check reports them as stale.
     """
-    verifies = re.compile(r"gh attestation verify\s+(?:\S*/)?" + re.escape(wheel) + r"(?!\S)")
+    verifies = re.compile(
+        r"^[ \t]*gh attestation verify[ \t]+(?:\S*/)?" + re.escape(wheel) + r"(?!\S)"
+    )
+
+    def blanked(lines: list[str]) -> list[str]:
+        command = False
+        kept = []
+        for line in lines:
+            if not command:
+                command = verifies.match(line) is not None
+            if command:
+                for identity in identities:
+                    line = line.replace(identity, " ")
+                command = line.rstrip().endswith("\\")
+            kept.append(line)
+        return kept
+
     output: list[str] = []
     block: list[str] = []
     fence = ""
@@ -264,11 +282,7 @@ def without_signed_release_identities(text: str, wheel: str, identities: tuple[s
         if stripped.startswith(("```", "~~~")):
             marker = stripped[:3]
             if fence == marker:
-                body = "".join(block)
-                if verifies.search(body) is not None:
-                    for identity in identities:
-                        body = body.replace(identity, " ")
-                output.append(body)
+                output.extend(blanked(block))
                 block = []
                 fence = ""
             elif not fence:

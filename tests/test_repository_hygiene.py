@@ -329,6 +329,10 @@ def test_the_signed_release_identity_is_accepted_only_in_the_readme(tmp_path):
         block + "git clone https://github.com/Hunzee-VC/Nexus-Symbiote.git\n"
     )
     assert len(hygiene.owner_issues(tmp_path, [Path("README.md")])) == 1
+    tmp_path.joinpath("README.md").write_text(
+        "~~~\n" + _verify_block("nexus_symbiote-0.1.0-py3-none-any.whl") + "~~~\n"
+    )
+    assert hygiene.owner_issues(tmp_path, [Path("README.md")]) == []
 
 
 @pytest.mark.parametrize(
@@ -340,8 +344,26 @@ def test_the_signed_release_identity_is_accepted_only_in_the_readme(tmp_path):
         "```bash\necho nexus_symbiote-0.1.0-py3-none-any.whl\n```\n"
         "```bash\ngh attestation verify w.whl --repo Hunzee-VC/Nexus-Symbiote\n```\n",
         _verify_block("nexus_symbiote-0.1.0-py3-none-any.whl").rsplit("```", 1)[0],
+        _verify_block("nexus_symbiote-0.1.0-py3-none-any.whl")
+        .replace("```\n", "", 1)
+        .rsplit("```", 1)[0]
+        + _verify_block("nexus_symbiote-0.2.0-py3-none-any.whl").replace("```bash\n", ""),
+        "```bash\n# verifies nexus_symbiote-0.1.0-py3-none-any.whl\n"
+        + _verify_block("nexus_symbiote-0.2.0-py3-none-any.whl").replace("```bash\n", ""),
+        "~~~\n"
+        + _verify_block("nexus_symbiote-0.1.0-py3-none-any.whl")
+        + "gh attestation verify w.whl --repo Hunzee-VC/Nexus-Symbiote\n~~~\n",
     ],
-    ids=["later-release", "other-artifact", "outside-a-fence", "other-block", "unterminated"],
+    ids=[
+        "later-release",
+        "other-artifact",
+        "outside-a-fence",
+        "other-block",
+        "unterminated",
+        "second-command-in-the-block",
+        "comment-names-the-wheel",
+        "nested-fence",
+    ],
 )
 def test_the_signed_release_identity_is_stale_outside_the_release_verify_block(tmp_path, text):
     _project(tmp_path, homepage="https://github.com/aisecnomad/Nexus-Symbiote")
