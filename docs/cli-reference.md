@@ -64,6 +64,8 @@ change them. See [collection limits](collection-limits.md).
 | [`verify-artifact`](#verify-artifact) | offline | Check a file's SHA-256, and optionally its Sigstore bundle |
 | [`verify-discovery`](#verify-discovery) | offline | Check that a ShadowScan report's bytes match the digest a BOM records; with `--projection` or `--bundle`, also compare the BOM's imported components with the report |
 | [`export-inventory`](#export-inventory) | offline | Write the reviewed repository agent as an approved inventory that ShadowScan's `--inventory` accepts |
+| [`import-sbom`](#import-sbom) | offline | Import a foreign CycloneDX or SPDX SBOM as DECLARED evidence without picking silent winners |
+| [`evidence-profile`](#evidence-profile) | offline | Report concrete evidence attributes per component without a scalar TrustScore |
 | [`init`](#init) | offline | Create a `.nexus-symbiote.yaml` policy file |
 | [`runtime keygen`](#runtime-keygen) | offline | Create an Ed25519 key pair for runtime contracts |
 | [`runtime sign`](#runtime-sign) | offline | Sign a runtime contract |
@@ -510,6 +512,19 @@ nexus-symbiote discover-mcp [OPTIONS] ENDPOINT
 | `--user-agent` `TEXT` | `User-Agent` header to send; none is sent by default. |
 | `--raw-descriptors` `PATH` | Also write the unredacted server info, capabilities, instructions, tool descriptors, prompts and resource templates to this new file (mode 0600) for review; only the bearer token is masked, and a server whose declarations repeat its own session ID (of eight or more characters) ends the observation. |
 
+### `evidence-profile`
+
+Report concrete evidence attributes per component without a scalar TrustScore.
+
+```text
+nexus-symbiote evidence-profile [OPTIONS] AIBOM_PATH
+```
+
+| Option | Description |
+|---|---|
+| `-o`, `--output` `PATH` | Write the evidence profile report to this file instead of standard output. |
+| `--json-output` | Emit the per-component evidence profile as JSON. |
+
 ### `export-inventory`
 
 Offline: write the reviewed repository agent as a ShadowScan approved inventory.
@@ -559,6 +574,24 @@ Content-Security-Policy hash, and shows inventory text only escaped. A graph lar
 than `--max-nodes` fails with exit status 1 instead of being cut. The output may not
 be the inventory itself. [Graph view](graph-view.md) gives the risk-class rules, the
 ranking and the JSON document.
+
+### `import-sbom`
+
+Import a foreign CycloneDX or SPDX SBOM as DECLARED evidence without picking silent winners.
+
+```text
+nexus-symbiote import-sbom [OPTIONS] FOREIGN_BOM_PATH
+```
+
+| Option | Description |
+|---|---|
+| `-o`, `--output` `PATH` | Write the resulting native AgentBOM JSON to this file. |
+| `--into` `PATH` | Existing native AgentBOM to merge imported SBOM claims into. |
+| `--project` `PATH` | Trusted project root for SHA-256 local file binding, nested manifests, and shape census. |
+| `--reveal-names` | Retain plain component names from the foreign SBOM instead of sha256-hashed names. |
+| `--walk-manifests` | Walk nested manifests below --project and record manifest-only vs locked pinning state. |
+| `--census` | Count unread non-control-plane artifact shapes (*.ipynb, n8n/*.json, *.tf, Chart.yaml). |
+| `--json-output` | Print a structured JSON summary of imported, bound, and conflicting entries. |
 
 ### `import-shadowscan`
 
