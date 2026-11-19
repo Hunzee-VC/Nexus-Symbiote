@@ -32,6 +32,15 @@ from nexus_symbiote.utils.secrets import (
     scheme_parts,
 )
 
+
+def _words(text: str) -> frozenset[str]:
+    return frozenset(text.split())
+
+
+def _word_tuple(text: str) -> tuple[str, ...]:
+    return tuple(text.split())
+
+
 SHAPE_CLASS = "a vendor token shape"
 SCHEME_CLASS = "an authorization scheme credential"
 NAMED_CLASS = "a generic secret-like value"
@@ -46,51 +55,14 @@ _NAME_PARTS = re.compile(
     r"[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
     r"|(?<=[A-Za-z])(?=[0-9])|(?<=[0-9])(?=[A-Za-z])"
 )
-_CREDENTIAL_WORDS = frozenset(
-    {
-        "token",
-        "password",
-        "passwd",
-        "passphrase",
-        "pass",
-        "pwd",
-        "secret",
-        "credential",
-        "credentials",
-        "apikey",
-        "auth",
-        "authorization",
-        "bearer",
-        "jwt",
-        "sig",
-        "signature",
-        "dsn",
-        "pat",
-        "cookie",
-    }
+_CREDENTIAL_WORDS = _words(
+    "token password passwd passphrase pass pwd secret credential credentials apikey auth "
+    "authorization bearer jwt sig signature dsn pat cookie"
 )
 # PGPASSWORD, ACCESSTOKEN, CLIENTSECRET: a compound written without separators.
-_COMPOUND_ENDINGS = (
-    "password",
-    "passwd",
-    "passphrase",
-    "token",
-    "secret",
-    "credential",
-    "credentials",
-)
-_COMPOUND_KEYS = frozenset(
-    {
-        "secretkey",
-        "privatekey",
-        "apikey",
-        "accesskey",
-        "apitoken",
-        "sessionkey",
-        "signingkey",
-        "sshkey",
-        "licensekey",
-    }
+_COMPOUND_ENDINGS = _word_tuple("password passwd passphrase token secret credential credentials")
+_COMPOUND_KEYS = _words(
+    "secretkey privatekey apikey accesskey apitoken sessionkey signingkey sshkey licensekey"
 )
 _CREDENTIAL_PAIRS = frozenset(
     {
@@ -115,114 +87,20 @@ _CREDENTIAL_PAIRS = frozenset(
     }
 )
 # A key that holds no secret: CACHE_KEY, SORT_KEY, IDEMPOTENCY_KEY.
-_PLAIN_KEY_QUALIFIERS = frozenset(
-    {
-        "cache",
-        "sort",
-        "partition",
-        "primary",
-        "foreign",
-        "index",
-        "row",
-        "hash",
-        "range",
-        "shard",
-        "lookup",
-        "search",
-        "order",
-        "group",
-        "composite",
-        "candidate",
-        "super",
-        "natural",
-        "surrogate",
-        "unique",
-        "idempotency",
-        "dedup",
-        "correlation",
-        "routing",
-        "aggregate",
-        "shortcut",
-    }
+_PLAIN_KEY_QUALIFIERS = _words(
+    "cache sort partition primary foreign index row hash range shard lookup search order "
+    "group composite candidate super natural surrogate unique idempotency dedup correlation "
+    "routing aggregate shortcut"
 )
 # The last word describes a property of a credential, not the credential: API_KEY_ID,
 # SECRET_NAME, TOKEN_PATH, PASSWORD_POLICY, --token-env.
-_DESCRIPTORS = frozenset(
-    {
-        "name",
-        "id",
-        "fingerprint",
-        "audience",
-        "issuer",
-        "provider",
-        "strategy",
-        "method",
-        "backend",
-        "algorithm",
-        "alg",
-        "scope",
-        "scopes",
-        "policy",
-        "endpoint",
-        "url",
-        "uri",
-        "path",
-        "file",
-        "filename",
-        "dir",
-        "home",
-        "root",
-        "type",
-        "mode",
-        "format",
-        "version",
-        "count",
-        "limit",
-        "size",
-        "length",
-        "ttl",
-        "timeout",
-        "expiry",
-        "expires",
-        "expiration",
-        "interval",
-        "env",
-        "var",
-        "variable",
-        "header",
-        "prefix",
-        "suffix",
-        "label",
-        "description",
-        "help",
-        "hint",
-        "usage",
-        "source",
-        "store",
-        "manager",
-        "service",
-        "region",
-        "bucket",
-        "arn",
-        "role",
-        "user",
-        "username",
-        "realm",
-        "domain",
-        "host",
-        "port",
-        "flag",
-        "enabled",
-        "required",
-        "optional",
-        "field",
-        "column",
-        "attribute",
-        "hasher",
-        "hashers",
-        "complexity",
-        "rules",
-    }
+_DESCRIPTORS = _words(
+    "name id fingerprint audience issuer provider strategy method backend algorithm alg "
+    "scope scopes policy endpoint url uri path file filename dir home root type mode format "
+    "version count limit size length ttl timeout expiry expires expiration interval env var "
+    "variable header prefix suffix label description help hint usage source store manager "
+    "service region bucket arn role user username realm domain host port flag enabled "
+    "required optional field column attribute hasher hashers complexity rules"
 )
 # A pass that is a stage, not a password: FIRST_PASS, COMPILER_PASS, PASS_THROUGH.
 _PLAIN_PASS_WORDS = frozenset(
@@ -281,48 +159,11 @@ _CALL = re.compile(
     r"[A-Za-z_][\w.]{0,63}\([^()]{0,256}\)(?:\.[A-Za-z_]\w{0,63}(?:\([^()]{0,256}\))?){0,8}"
 )
 _OPEN_CALL = re.compile(r"[A-Za-z_]\w{0,63}(?:\.[A-Za-z_]\w{0,63}){1,8}\([^()]{0,256}")
-_STORE_SCHEMES = frozenset(
-    {
-        "vault",
-        "op",
-        "arn",
-        "sm",
-        "secretsmanager",
-        "secret",
-        "secrets",
-        "secretref",
-        "secretkeyref",
-        "keyvault",
-        "azurekeyvault",
-        "akv",
-        "gcpsm",
-        "gsm",
-        "awssm",
-        "ssm",
-        "parameterstore",
-        "env",
-        "file",
-        "k8s",
-        "kubernetes",
-        "doppler",
-        "infisical",
-        "bitwarden",
-        "bw",
-        "credstash",
-        "chamber",
-        "sops",
-        "keyring",
-        "keychain",
-        "gopass",
-        "pass",
-        "berglas",
-        "hcp",
-        "conjur",
-        "cyberark",
-        "akeyless",
-        "1password",
-        "projects",
-    }
+_STORE_SCHEMES = _words(
+    "vault op arn sm secretsmanager secret secrets secretref secretkeyref keyvault "
+    "azurekeyvault akv gcpsm gsm awssm ssm parameterstore env file k8s kubernetes doppler "
+    "infisical bitwarden bw credstash chamber sops keyring keychain gopass pass berglas hcp "
+    "conjur cyberark akeyless 1password projects"
 )
 _STORE_REFERENCE = re.compile(r"([A-Za-z0-9][A-Za-z0-9-]{0,31})(?::|/)")
 _STORE_PREFIXES = ("@microsoft.keyvault(",)
@@ -344,28 +185,9 @@ _ASCII_DIGITS = frozenset(string.digits)
 _KEY_FILE = re.compile(
     r"(?i)id_(?:rsa|ed25519|ecdsa|dsa)(?:_sk)?(?:\.pub)?|known_hosts|authorized_keys"
 )
-_PATH_WORDS = frozenset(
-    {
-        "keys",
-        "key",
-        "certs",
-        "cert",
-        "ssl",
-        "tls",
-        "secrets",
-        "credentials",
-        "config",
-        ".ssh",
-        ".config",
-        ".aws",
-        ".gnupg",
-        "etc",
-        "home",
-        "var",
-        "opt",
-        "usr",
-        "tmp",
-    }
+_PATH_WORDS = _words(
+    "keys key certs cert ssl tls secrets credentials config .ssh .config .aws .gnupg etc "
+    "home var opt usr tmp"
 )
 _NUMBER = re.compile(r"(?i)[+-]?\d+(?:[.,_]\d+)*(?:ms|s|m|h|d|k|kb|mb|gb)?")
 _VERSION = re.compile(r"(?i)v?\d++(?:\.\d++)++(?:[-+][0-9a-z.-]++)?+|v\d++")
@@ -401,88 +223,19 @@ _PORT_OR_PATH = re.compile(r"[^:/]*[:/]")
 _OPTION_LIST = re.compile(r"[A-Za-z][\w.-]{0,63}=[^=]")
 
 _PLACEHOLDER_MARK = re.compile(r"<[^<>]{0,256}>|\[[^\[\]]{0,256}\]|\.\.\.|…")
-_PLACEHOLDER_WORDS = frozenset(
-    {
-        "your",
-        "here",
-        "paste",
-        "enter",
-        "insert",
-        "replace",
-        "changeme",
-        "change",
-        "placeholder",
-        "example",
-        "sample",
-        "dummy",
-        "todo",
-        "tbd",
-        "fixme",
-        "goes",
-        "from",
-        "dashboard",
-        "settings",
-        "console",
-        "portal",
-        "my",
-        "test",
-        "dev",
-        "local",
-        "development",
-        "only",
-        "fake",
-        "mock",
-        "stub",
-        "demo",
-        "foo",
-        "bar",
-        "baz",
-        "dein",
-        "hier",
-        "einfuegen",
-        "schluessel",
-        "ejemplo",
-        "exemple",
-    }
+_PLACEHOLDER_WORDS = _words(
+    "your here paste enter insert replace changeme change placeholder example sample dummy "
+    "todo tbd fixme goes from dashboard settings console portal my test dev local "
+    "development only fake mock stub demo foo bar baz dein hier einfuegen schluessel "
+    "ejemplo exemple"
 )
 # Long enough that a random value holds one only by design, so they count inside a
 # word: AKIAIOSFODNN7EXAMPLE, ghp_REPLACEWITHYOURTOKEN.
 _PLACEHOLDER_INFIXES = ("example", "replace", "placeholder", "changeme")
-_DEFAULT_VALUES = frozenset(
-    {
-        "none",
-        "null",
-        "nil",
-        "undefined",
-        "unused",
-        "notneeded",
-        "notrequired",
-        "notset",
-        "disabled",
-        "optional",
-        "na",
-        "empty",
-        "default",
-        "test",
-        "dummy",
-        "sample",
-        "example",
-        "placeholder",
-        "changeme",
-        "password",
-        "postgres",
-        "admin",
-        "secret",
-        "token",
-        "string",
-        "value",
-        "redacted",
-        "hidden",
-        "omitted",
-        "xxx",
-        "todo",
-        "tbd",
-    }
+_DEFAULT_VALUES = _words(
+    "none null nil undefined unused notneeded notrequired notset disabled optional na empty "
+    "default test dummy sample example placeholder changeme password postgres admin secret "
+    "token string value redacted hidden omitted xxx todo tbd"
 )
 _VALUE_WORDS = re.compile(r"[^\W_]+", re.UNICODE)
 _NUMBERED_WORD = re.compile(r"([^\W\d_]+)\d+")
@@ -507,35 +260,8 @@ _RUN_LENGTH = 6
 _PASSPHRASE_WORDS = 3
 _PASSPHRASE_LENGTH = 16
 # A sentence holds these; a passphrase of random words seldom does.
-_PROSE_WORDS = frozenset(
-    {
-        "a",
-        "an",
-        "the",
-        "by",
-        "in",
-        "on",
-        "of",
-        "to",
-        "for",
-        "from",
-        "with",
-        "via",
-        "and",
-        "or",
-        "is",
-        "are",
-        "be",
-        "it",
-        "as",
-        "at",
-        "if",
-        "this",
-        "that",
-        "use",
-        "set",
-        "see",
-    }
+_PROSE_WORDS = _words(
+    "a an the by in on of to for from with via and or is are be it as at if this that use set see"
 )
 _COOKIE_PAIR = re.compile(r"([A-Za-z0-9_.-]{1,64})=([^\s;,\"']{1,8192})")
 _COOKIE_ATTRIBUTES = frozenset(
