@@ -14,17 +14,29 @@ A server is named by the string literal its constructor declares as `name` in th
 object literal it is given first, as in
 `new McpServer({ name: "analytics-mcp", version: "1.0.0" })`: that is the name
 clients see, and the component reference
-(`mcp-source:<path>:<name>:<line>:<offset>`) carries it too. The `binding` and
+(`mcp-source:<path>:<name>:<line>:<offset>`) carries it too, percent-encoded, so
+`Notes Server 2.0` is `Notes%20Server%202.0` there. The `binding` and
 `declaration_line` properties record the variable the server is bound to and the
-line of its declaration. A name the analysis would have to compute keeps the
-variable as the name and in the reference: a template literal with a substitution,
-a variable, a concatenation, a getter, or a `name` entry that a later spread,
-computed key or `name` entry can replace. So does a literal of more than 128
-characters, one with characters other than ASCII letters, digits, `_`, `.`, `-` and
-single spaces between words, one without a letter or digit, or one that
-redaction would change. A template
-literal without a substitution is a literal. Each constructor is its own
-component, so two servers in one file are two, even with the same name.
+line of its declaration. A later literal `name` entry replaces an earlier one, as
+it does in JavaScript. A name the analysis would have to compute keeps the variable
+as the name and in the reference: a template literal with a substitution, a
+variable, a concatenation, or a `name` entry that a later spread can replace. So
+does an options object with a method, getter, setter, or computed key that is not
+a string literal anywhere in it, under any key, or with an entry keyed `toJSON` or
+`__proto__` in any spelling, because a client that serializes the object calls
+`toJSON`, which such a computed key or a prototype can supply, in place of reading
+the `name` entry. A computed key that is a string literal is that key:
+`{ ['name']: "analytics-mcp" }` is named `analytics-mcp`, and
+`{ name: "analytics-mcp", ['version']: "1" }` too. So does a literal of more than
+128 characters, one with characters other than ASCII letters, digits, `_`, `.`, `-`
+and single spaces between words, one without a letter or digit, one that redaction
+would change, or one that holds a value the scan read from a configuration file and
+does not publish, such as an `env` value
+([MCP servers declared in source](collectors.md#mcp-servers-declared-in-source)).
+A template literal without a substitution is a literal. A store to the name after construction, such as
+`server.name = ...` or `Object.assign(server, ...)`, is not followed; see
+[known limitations](known-limitations.md#mcp-servers-and-tools). Each constructor
+is its own component, so two servers in one file are two, even with the same name.
 
 Each tool record has declared assurance, a digest of its registration call
 (`registration_source_sha256`) and a digest of the whole declaring file

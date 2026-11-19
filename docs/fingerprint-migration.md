@@ -147,6 +147,26 @@ and `name changed`. A server whose name is computed keeps its name and reference
 and `diff` reports it as modified once, with a medium alert for
 `properties.binding added`. Recollect and review the baseline once after upgrading.
 
+Every source server gains the `binding` property, so an inventory written before
+this change no longer matches a fresh collection of its project, whether its source
+servers declare a literal or a computed name, in TypeScript, JavaScript or Python.
+Recollect it before checking it against the project: `validate <inventory> --project .`
+exits 1 with `Validation: FAILED` and an error such as
+`Missing or mismatched local component from MCP inventory: mcp-source:src%2Fserver.ts:analytics-mcp:2:84`,
+and `risk <inventory> --project .` exits 1 with
+`Risk unknown. Project reconciliation failed.` followed by the same mismatch.
+A server with a literal name is also listed as
+`Supplied component has no matching local evidence` under its earlier reference.
+
+One alert is lower than before. Renaming the variable of a TypeScript server with a
+literal name and no tools, without moving its constructor, removed one server and
+added another, with a high alert for the removal and a high
+`repository: tool_refs changed` alert; the reference now keeps the name, so `diff`
+reports a medium `properties.binding changed` alert instead. A new variable of
+another length moves the constructor, and its offset in the reference, so that
+rename still raises both high alerts. A server with tools still raises a high
+alert, for the changed registration digests of its tools.
+
 ## SARIF rule identifiers
 
 0.1.0 keyed SARIF rules by category (`nexus_symbiote/<category>`) and raised a

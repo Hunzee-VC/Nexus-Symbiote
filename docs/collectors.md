@@ -30,8 +30,16 @@ run time, such as an f-string, a template literal with a substitution, a variabl
 or a concatenation, keeps the variable the server is bound to as its name, as does
 a literal of more than 128 characters, one with characters other than ASCII
 letters, digits, `_`, `.`, `-` and single spaces between words, one without a
-letter or digit, or one that redaction would change. Every source server records that variable in its `binding`
-property and the line of its declaration in `declaration_line`. A TypeScript
+letter or digit, one that redaction would change, or one that holds a value the
+scan read and does not publish. Those are the values of the MCP configuration
+files and of Claude Code and Cursor settings, whose `env` reaches every server the
+host starts: a credential in any field, such as an `env` value with no token shape,
+a server's `apiKey` or Codex's `experimental_bearer_token`, URL user information,
+and every `env`, header or query parameter value of at least 8 characters. While
+one of those files cannot be read whole, every source server keeps its variable
+([known limitations](known-limitations.md#mcp-servers-and-tools)). Every source
+server records that variable in its `binding` property and the line of its
+declaration in `declaration_line`. A TypeScript
 server's reference (`mcp-source:<path>:<name>:<line>:<offset>`) carries the name
 it is given. A Python server's reference stays `mcp-python:<path>:<variable>`,
 because a file binds each variable once while two servers in it can declare the same

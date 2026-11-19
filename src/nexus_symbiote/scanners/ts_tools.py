@@ -43,7 +43,7 @@ from nexus_symbiote import limits
 from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import ClaimEvidence, MCPServerComponent, ToolComponent
 from nexus_symbiote.limits import Bound
-from nexus_symbiote.scanners.base import ScanResult, declared_server_name
+from nexus_symbiote.scanners.base import KnownValues, ScanResult, declared_server_name
 
 _SDK = "@modelcontextprotocol/"
 _MODULES = {"@modelcontextprotocol/server", "@modelcontextprotocol/sdk/server/mcp.js"}
@@ -831,6 +831,11 @@ def _sdk_uses(index: _Index, root: Node, found: _Declarations, resolver: _Resolv
                 found.gaps.append((node, reason))
 
 
+# Keys a serializer reads in place of the entries: JSON.stringify calls toJSON, which
+# a prototype set by __proto__ can also provide.
+_SERIALIZED_KEYS = frozenset({"toJSON", "__proto__"})
+
+
 def _literal_key(node: Node | None) -> str | None:
     """A property key as JavaScript reads it, or None when it is computed."""
     if node is None:
@@ -843,11 +848,15 @@ def _literal_key(node: Node | None) -> str | None:
     return _string_value(node) if node.type in {"string", "template_string"} else _value(node)
 
 
-def _declared_name(constructor: Node) -> str | None:
+def _declared_name(constructor: Node, known: KnownValues | None) -> str | None:
     """The literal ``name`` of a constructor's first argument, an object literal, else None.
 
-    A later ``name`` entry replaces an earlier one, and a spread or a computed key
-    after it can, so only a literal that nothing after it can replace counts.
+    A later ``name`` entry replaces an earlier one, and a spread after it can, so
+    only a literal that nothing after it can replace counts. A client that
+    serializes the object calls its ``toJSON``, which a computed key that is not a
+    string literal or ``__proto__`` can supply and which a method, getter or setter
+    can stand for, so any such entry, wherever it is, leaves the name computed. A
+    computed key that is a string literal, ``['name']``, is that key.
     """
     arguments = constructor.child_by_field_name("arguments")
     listed = arguments is not None and arguments.type == "arguments"
@@ -855,25 +864,26 @@ def _declared_name(constructor: Node) -> str | None:
     options = _operand(values[0], _REFERENCE_WRAPPERS) if values else None
     if options is None or options.type != "object":
         return None
-    name: str | None = None
+    literal: Node | None = None
     for entry in _parts(options):
-        literal = None
         if entry.type == "pair":
             key = _literal_key(entry.child_by_field_name("key"))
-            literal = _string_value(
-                _operand(entry.child_by_field_name("value"), _REFERENCE_WRAPPERS)
-            )
-        elif entry.type == "method_definition":
-            key = _literal_key(entry.child_by_field_name("name"))
+            if key is None or key in _SERIALIZED_KEYS:
+                return None
+            if key == "name":
+                literal = entry.child_by_field_name("value")
         elif entry.type == "shorthand_property_identifier":
             key = _literal_key(entry)
+            if key in _SERIALIZED_KEYS:
+                return None
+            if key == "name":
+                literal = None
+        elif entry.type == "spread_element":
+            literal = None
         else:
-            key = None
-        if key is None:
-            name = None
-        elif key == "name":
-            name = declared_server_name(literal)
-    return name
+            return None
+    # Only the entry that wins is read, so repeated entries cost no more than one.
+    return declared_server_name(_string_value(_operand(literal, _REFERENCE_WRAPPERS)), known)
 
 
 def _sdk_constructor(callee: Node | None, resolver: _Resolver) -> bool:
@@ -886,11 +896,16 @@ def _sdk_constructor(callee: Node | None, resolver: _Resolver) -> bool:
     return resolver.lookup(callee) == "sdk"
 
 
-def collect_typescript_source(path: Path, content: bytes, result: ScanResult) -> None:
-    """Collect one candidate server file; every refusal is a scan failure naming why."""
+def collect_typescript_source(
+    path: Path, content: bytes, result: ScanResult, known: KnownValues | None = None
+) -> None:
+    """Collect one candidate server file; every refusal is a scan failure naming why.
+
+    A declared server name holding one of the ``known`` values is not recorded.
+    """
     location = path.as_posix()
     try:
-        _collect_source(content, path, result)
+        _collect_source(content, path, result, known)
     except ImportError:
         result.scan_failures.append(
             f"{location}: TypeScript MCP parser dependency unavailable or incompatible"
@@ -921,7 +936,9 @@ def _parser(seconds: float, jsx: bool) -> Parser:
         raise ImportError("incompatible TypeScript parser binding") from exc
 
 
-def _collect_source(content: bytes, path: Path, result: ScanResult) -> None:
+def _collect_source(
+    content: bytes, path: Path, result: ScanResult, known: KnownValues | None
+) -> None:
     text = source_text(content)
     # The parser reads UTF-8; the file digest stays that of the bytes as stored.
     source = content if content[:2] not in UTF16_BYTE_ORDER_MARKS else text.encode("utf-8")
@@ -1002,7 +1019,7 @@ def _collect_source(content: bytes, path: Path, result: ScanResult) -> None:
             )
             continue
         line = declaration.start_point.row + 1
-        literal = _declared_name(node)
+        literal = _declared_name(node, known)
         identity = receiver if literal is None else quote(literal, safe="")
         ref = f"mcp-source:{quote(location, safe='')}:{identity}:{line}:{node.start_byte}"
         server = MCPServerComponent(

@@ -31,6 +31,7 @@ MAX_MODEL_BYTES = 1024 * 1024 * 1024
 MAX_SOURCE_BYTES = limits.DEFAULTS.source_scan_bytes
 MAX_SERVER_NAME_CHARS = 128
 _SERVER_NAME = re.compile(r"(?=.*[A-Za-z0-9])[A-Za-z0-9_.-]+(?: [A-Za-z0-9_.-]+)*")
+_NAME_CHARACTERS = re.compile(r"[A-Za-z0-9_. -]+")
 
 
 def read_regular_text(path: Path, *, max_bytes: int = MAX_CONFIG_BYTES) -> str:
@@ -95,17 +96,64 @@ def parse_python(source: str) -> ast.Module:
             raise ValueError("Python source too complex to parse") from None
 
 
-def declared_server_name(literal: object) -> str | None:
+class KnownValues:
+    """Values the scan read from configuration that a server name declared in source
+    must not hold, such as a credential with no token shape.
+
+    Only a value of name characters, at most ``MAX_SERVER_NAME_CHARS`` long, can be
+    part of a declared name, so no other is kept. A name is tested against the values
+    of each length by the cheaper of two reads, every value of that length or every
+    part of the name that long, so a test costs at most the square of the name's
+    length however many values a project's files hold. After ``refuse``, which stands
+    for a file whose values could not all be read, every name holds one.
+    """
+
+    __slots__ = ("_by_length", "_refused")
+
+    def __init__(self, values: Iterable[str] = ()) -> None:
+        self._by_length: dict[int, set[str]] = {}
+        self._refused = False
+        self.add(values)
+
+    def add(self, values: Iterable[str]) -> None:
+        for value in values:
+            if len(value) <= MAX_SERVER_NAME_CHARS and _NAME_CHARACTERS.fullmatch(value):
+                self._by_length.setdefault(len(value), set()).add(value)
+
+    def refuse(self) -> None:
+        self._refused = True
+
+    def held_by(self, name: str) -> bool:
+        if self._refused:
+            return True
+        size = len(name)
+        for length, values in self._by_length.items():
+            starts = size - length + 1
+            if starts < 1:
+                continue
+            if len(values) <= starts:
+                if any(value in name for value in values):
+                    return True
+            elif any(name[start : start + length] in values for start in range(starts)):
+                return True
+        return False
+
+
+def declared_server_name(literal: object, known: KnownValues | None = None) -> str | None:
     """The name a server constructor declares as a literal, when it is in the supported form.
 
     A source collector names a server by this literal, the name clients see, and by
-    its binding otherwise, as it does when redaction would change the literal.
+    its binding otherwise, as it does when redaction would change the literal or the
+    literal holds one of the ``known`` values.
     """
     if not isinstance(literal, str) or len(literal) > MAX_SERVER_NAME_CHARS:
         return None
     if _SERVER_NAME.fullmatch(literal) is None:
         return None
-    if redact_text(literal) != literal or redact_text(literal, identifier=True) != literal:
+    if known is not None and known.held_by(literal):
+        return None
+    # Every shape the identifier reading of redact_text finds, the plain one finds too.
+    if redact_text(literal) != literal:
         return None
     return literal
 

@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import ClaimEvidence, MCPServerComponent, ToolComponent
-from nexus_symbiote.scanners.base import ScanResult, declared_server_name
+from nexus_symbiote.scanners.base import KnownValues, ScanResult, declared_server_name
 
 PYTHON_TOOL_HINTS = ("mcp", "langchain", "crewai", "function_tool", "smolagents", "pydantic_ai")
 
@@ -765,6 +765,7 @@ def _server_from_assignment(
     changed_receivers: set[str],
     path: Path,
     source_digest: str,
+    known: KnownValues | None,
 ) -> tuple[ast.Call, MCPServerComponent] | None:
     target = stmt.targets[0]
     call = stmt.value
@@ -793,7 +794,7 @@ def _server_from_assignment(
     # it is not a new server.
     server = MCPServerComponent(
         bom_ref=f"mcp-python:{quote(path.as_posix(), safe='')}:{target.id}",
-        name=_declared_python_name(call) or target.id,
+        name=_declared_python_name(call, known) or target.id,
         source_path=path.as_posix(),
         properties={
             "binding": target.id,
@@ -807,12 +808,12 @@ def _server_from_assignment(
     return call, server
 
 
-def _declared_python_name(call: ast.Call) -> str | None:
+def _declared_python_name(call: ast.Call, known: KnownValues | None) -> str | None:
     """The name a constructor declares as a string literal, first or as ``name=``."""
     given = [*call.args[:1], *(kw.value for kw in call.keywords if kw.arg == "name")]
     if len(given) != 1 or not isinstance(given[0], ast.Constant):
         return None
-    return declared_server_name(given[0].value)
+    return declared_server_name(given[0].value, known)
 
 
 def _tool_decorator(deco: ast.expr) -> tuple[str, ast.Call | ast.Attribute] | None:
@@ -1814,12 +1815,18 @@ def _report_unused_factories(
 
 
 def collect_python_tools(
-    tree: ast.Module, nodes: list[ast.AST], source: str, path: Path, result: ScanResult
+    tree: ast.Module,
+    nodes: list[ast.AST],
+    source: str,
+    path: Path,
+    result: ScanResult,
+    known: KnownValues | None = None,
 ) -> None:
     """Support direct SDK imports, module constructors and top-level decorators.
 
     ``nodes`` holds every node of ``tree``; the caller holds their number to the
-    ``python-nodes`` limit, and the work here is linear in it.
+    ``python-nodes`` limit, and the work here is linear in it. A declared server name
+    holding one of the ``known`` values is not recorded.
     """
     if not any(hint in source for hint in PYTHON_TOOL_HINTS):
         return
@@ -1915,6 +1922,7 @@ def collect_python_tools(
                 changed_receivers,
                 path,
                 source_digest,
+                known,
             )
             target = stmt.targets[0]
             if found is None or not isinstance(target, ast.Name):
