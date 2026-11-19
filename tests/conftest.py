@@ -6,7 +6,8 @@ the default collection limits, and must leave no operating mode enforced and no 
 Python-level connects, datagrams and name resolution to anywhere but loopback fail the test
 (subprocesses and native code are not covered). A
 test that runs longer than ``test_timeout`` seconds fails with its traceback. Every skip is listed with its reason; with ``--strict-skips`` (CI) a skip
-for any reason other than the host's file system, or, outside CI, a missing pip, fails the run.
+for any reason other than the host's file system, a Linux interface on another host, or, outside
+CI, a missing pip, fails the run.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import os
 import re
 import signal
 import socket
+import sys
 import tempfile
 import threading
 from collections.abc import Callable, Iterator
@@ -85,6 +87,12 @@ EXPECTED_SKIP_REASONS = (
 LOCAL_SKIP_REASONS = (
     re.compile(r"\Apip is not importable here; CI, which installs with pip, runs this test\Z"),
 )
+# Expected only off Linux: these tests drive /proc, prctl or clone(CLONE_PARENT), which
+# macOS lacks. A Linux run that skips one fails.
+NON_LINUX_SKIP_REASONS = (
+    re.compile(r"\A(?:the subreaper wrapper|clone\(CLONE_PARENT\)) is Linux-only\Z"),
+    re.compile(r"\Ano (?:/proc/self/cwd|/dev/fd link into /proc)\Z"),
+)
 DEFAULT_TIMEOUT_SECONDS = 300
 
 
@@ -127,8 +135,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--strict-skips",
         action="store_true",
         help=(
-            "fail the run when a test is skipped for a reason other than the host file system "
-            "(or, outside CI, a missing pip)"
+            "fail the run when a test is skipped for a reason other than the host file system, "
+            "a Linux interface on another host, or, outside CI, a missing pip"
         ),
     )
 
@@ -170,6 +178,8 @@ class SkipAccounting:
 
     def unexpected(self) -> list[tuple[str, str]]:
         expected = EXPECTED_SKIP_REASONS + (() if os.environ.get("CI") else LOCAL_SKIP_REASONS)
+        if not sys.platform.startswith("linux"):
+            expected += NON_LINUX_SKIP_REASONS
         return [
             (nodeid, reason)
             for nodeid, reason in self.skips

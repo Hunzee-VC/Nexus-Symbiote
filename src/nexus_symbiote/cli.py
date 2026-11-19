@@ -462,6 +462,20 @@ _HELP_ERRORS = tuple(
 )
 
 
+def supported_platform() -> bool:
+    """Whether this host has the no-follow, descriptor-relative opens confinement needs.
+
+    Windows has neither, and every command refuses to run there rather than reading,
+    hashing or writing with checks that cannot hold (SECURITY.md, "Platforms").
+    """
+    return (
+        os.name == "posix"
+        and hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "O_DIRECTORY")
+        and os.open in os.supports_dir_fd
+    )
+
+
 def _neutralized(exc: click.ClickException) -> click.ClickException:
     """The same error with neutralized text: it can quote checkout or inventory text."""
     message = neutralize(exc.format_message())
@@ -602,6 +616,11 @@ def main(
     never change a limit.
     """
     ctx.meta[DEBUG_KEY] = debug_flag
+    if not supported_platform():
+        raise click.ClickException(
+            "unsupported platform: confined file access needs POSIX O_NOFOLLOW, O_DIRECTORY "
+            "and descriptor-relative opens, which this host lacks; Windows is not supported"
+        )
     try:
         requested = modes.resolve(offline=offline_flag, live=live_flag, environ=os.environ)
         collection_limits = limits.resolve(limit_settings, os.environ)

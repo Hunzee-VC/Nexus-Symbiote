@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import re
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -103,6 +104,36 @@ def test_only_host_file_system_skips_pass_a_strict_run(suite, reason, strict, st
     result = suite.runpytest("-p", "no:cacheprovider", *(["--strict-skips"] if strict else []))
     assert result.ret == status
     result.stdout.fnmatch_lines(["*skip accounting*", f"*test_skips: {reason}*"])
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "the subreaper wrapper is Linux-only",
+        "clone(CLONE_PARENT) is Linux-only",
+        "no /proc/self/cwd",
+        "no /dev/fd link into /proc",
+    ],
+)
+@pytest.mark.parametrize(
+    ("platform", "status"),
+    [("linux", pytest.ExitCode.TESTS_FAILED), ("darwin", pytest.ExitCode.OK)],
+)
+def test_a_linux_interface_may_skip_a_strict_run_only_off_linux(
+    suite, monkeypatch, reason, platform, status
+):
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setattr(sys, "platform", platform)
+    suite.makepyfile(
+        f"""
+        import pytest
+
+        def test_skips():
+            pytest.skip({reason!r})
+        """
+    )
+    result = suite.runpytest("-p", "no:cacheprovider", "--strict-skips")
+    assert result.ret == status
 
 
 def test_temporary_files_go_to_the_tests_private_directory(suite, monkeypatch, tmp_path):
@@ -224,7 +255,7 @@ def test_locked_only_tests_are_registered_and_left_out_only_at_the_floors(suite)
 
     assert pytest_runs("floor") and all('-m "not locked_only"' in r for r in pytest_runs("floor"))
     selects = re.compile(r"\s-[mk]\s+[\"']|locked_only")
-    for job in ("test", "coverage"):
+    for job in ("test", "macos", "coverage"):
         assert pytest_runs(job) and not any(selects.search(run) for run in pytest_runs(job))
 
 
