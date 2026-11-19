@@ -772,8 +772,17 @@ A way around a limit that its entry does not describe is worth a
   `Prompts`. Under `prompts`, only the text suffixes the
   [collector reference lists](collectors.md#what-each-collector-reads) and names
   without a suffix are read: code such as `prompts/__init__.py`, images and dotfiles
-  such as `.DS_Store` are not, and a text-named file there that is not UTF-8 is a gap,
-  not a failure. `llms.txt`, a prompt stored under another name, such as
+  such as `.DS_Store` are not, and a text-named file there that is not UTF-8 is a
+  failure, as in a rule directory. A directory symlink under which a file would be a
+  prompt template, such as `app/prompts -> ../data` or `agent -> examples/agent` with
+  `examples/agent/prompts/a.md`, is a gap when no walk inventories that file: the walk
+  reads the directory a symlink leads to once, under that directory's own name, and a
+  file there that is a prompt template, or another kind, under that name is recorded
+  under it. A file under `prompts` that a memory file imports, also through a
+  directory symlink, is recorded once, as that import, with the
+  `imported-instruction` identity it had before prompt templates were read, and
+  another spelling of a nested name there, such as `pkg/prompts/claude.md`, is the
+  failure described below, not a prompt template. `llms.txt`, a prompt stored under another name, such as
   `app/system.yaml`, and a prompt held in code or a database are not read either. A
   file under a `prompts` directory that is not Markdown and not named `*.prompt.*`,
   such as `prompts/settings.yaml`, is inventoried without a content hash, as the next
@@ -895,6 +904,24 @@ A way around a limit that its entry does not describe is worth a
   zero-width or bidirectional characters each separated by another byte, plane-14
   characters spread so that no 4,096 characters hold 16 of them, and a UTF-16 or
   UTF-32 file without a byte-order mark.
+- **Escapes are decoded only in prompt templates.** A JSON, YAML or TOML prompt
+  template, under a `prompts` directory or named `*.prompt.yaml` or `*.prompt.yml`,
+  and the YAML front matter of a Markdown one, is checked in what it decodes to as
+  well as in its raw text, also when a memory file imports it, so a hidden character
+  written as an escape, such as `\udb40\udc49` in JSON or `"\U000E0049"` in YAML or
+  TOML, is the same finding as one written raw. YAML of at most 20,000 parser events
+  and TOML 1.0 within the dotted-key bound, each up to 65,536 characters, give the
+  strings they parse to. JSON, which hosts read leniently, with comments, duplicate
+  keys, large numbers or lone surrogates, and YAML or TOML that does not parse or is
+  longer, have each escape that an odd run of backslashes starts decoded by pattern:
+  `\x`, `\u` and `\U` with their hexadecimal digits, YAML's `\L`, `\P`, `\N` and
+  `\_`, and `\e`. The pattern also decodes such an escape in a YAML or TOML literal
+  string or comment, which a host keeps as text, so it can only add findings. A
+  character the file holds raw in a comment and also spells in a parsed string is
+  counted once. The same file in a rule, prompt, subagent, skill or command
+  directory, or imported with `@path` from outside a `prompts` directory, is checked
+  as raw text only, as are a Markdown body and templates in other formats, such as
+  Jinja's `{{ "\u202e" }}`, which only rendering decodes.
 - **Hidden-character detection is character-based.** Lookalike letters are not
   detected, and neither are control characters such as ESC, spaces other than
   U+0020, such as U+00A0 and U+3000, or private-use characters.

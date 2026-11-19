@@ -12,6 +12,7 @@ from click.testing import CliRunner
 from nexus_symbiote import limits
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.models import PromptComponent
+from nexus_symbiote.scanners import prompt as prompt_module
 from nexus_symbiote.scanners.prompt import (
     PROMPT_SEARCH_SKIPPED,
     PromptScanner,
@@ -221,10 +222,12 @@ def test_invalid_utf8_and_credential_named_prompt_files(tmp_path):
     (tmp_path / "prompts/notes.txt").symlink_to(Path("..") / ".env")
     _write(tmp_path, "prompts/good.md", "Fine.")
     result = PromptScanner().scan(tmp_path)
-    assert result.scan_failures == ["bad.prompt.md: invalid UTF-8 instruction"]
+    assert sorted(result.scan_failures) == [
+        "bad.prompt.md: invalid UTF-8 instruction",
+        "prompts/bad.md: invalid UTF-8 instruction",
+    ]
     assert sorted(result.surfaces_excluded) == [
         "prompts/api_key.txt: its name says it holds credentials; not read or inventoried",
-        "prompts/bad.md: not UTF-8 text in a prompts directory; not inventoried",
         "prompts/notes.txt: a symlink leads to .env, whose name says it holds credentials; "
         "not read or inventoried",
     ]
@@ -289,19 +292,32 @@ def test_a_skill_or_command_directory_linked_to_prompts_keeps_its_kind(tmp_path,
     assert result.surfaces_scanned == ["prompts/review.md"]
 
 
-def test_a_memory_file_import_of_a_prompt_file_is_listed_on_both(tmp_path):
+def test_an_imported_prompt_file_keeps_the_identity_of_an_import(tmp_path):
     _write(tmp_path, "CLAUDE.md", "Use @prompts/system.md for the tone.")
     _write(tmp_path, "prompts/system.md", "Also read @extra.txt.")
     _write(tmp_path, "prompts/extra.txt", "Extra.")
+    _write(tmp_path, "prompts/other.md", "Not imported.")
     result = PromptScanner().scan(tmp_path)
     assert not result.scan_failures
+    assert not result.surfaces_excluded
     components = _components(result)
+    assert {ref: component.prompt_type for ref, component in components.items()} == {
+        "prompt:CLAUDE.md": "system-prompt",
+        "prompt:import:prompts/system.md": "imported-instruction",
+        "prompt:import:prompts/extra.txt": "imported-instruction",
+        "prompt:prompts/other.md": "prompt-template",
+    }
     assert components["prompt:CLAUDE.md"].properties["imports"] == ["prompts/system.md"]
-    system = components["prompt:prompts/system.md"]
-    assert system.prompt_type == "prompt-template"
+    system = components["prompt:import:prompts/system.md"]
     assert system.properties["imported_by"] == ["CLAUDE.md"]
     assert system.properties["imports"] == ["prompts/extra.txt"]
-    assert components["prompt:prompts/extra.txt"].properties["imported_by"] == ["prompts/system.md"]
+    extra = components["prompt:import:prompts/extra.txt"]
+    assert extra.properties["imported_by"] == ["prompts/system.md"]
+    assert [path for path in result.surfaces_scanned if path.startswith("prompts/")] == [
+        "prompts/system.md",
+        "prompts/extra.txt",
+        "prompts/other.md",
+    ]
 
 
 def test_two_runs_are_byte_identical_and_portable(tmp_path):
@@ -321,3 +337,290 @@ def test_two_runs_are_byte_identical_and_portable(tmp_path):
         assert run.exit_code == 0, run.output
     assert outputs[0].read_bytes() == outputs[1].read_bytes()
     assert b"prompts/a.md" in outputs[0].read_bytes()
+
+
+ESCAPED_TAGS = "\\udb40\\udc49\\udb40\\udc47"
+
+
+@pytest.mark.parametrize(
+    ("relative", "escaped", "raw"),
+    [
+        (
+            "prompts/a.json",
+            '{"system": "Hi ' + ESCAPED_TAGS + '"}',
+            '{"system": "Hi ' + TAG * 2 + '"}',
+        ),
+        ("prompts/a.json", '["\\u202eHi"]', f'["{RLO}Hi"]'),
+        ("prompts/a.yaml", 'system: "Hi \\U000E0041\\U000E0041"\n', f"system: Hi {TAG * 2}\n"),
+        ("prompts/a.yml", '- "Hi \\udb40\\udc41"\n', f"- Hi {TAG}\n"),
+        (
+            "app/x.prompt.yml",
+            'messages:\n  - content: "\\u202e"\n',
+            f"messages:\n  - content: {RLO}\n",
+        ),
+        ("prompts/a.toml", 'system = "Hi \\U000E0041"\n', f'system = "Hi {TAG}"\n'),
+    ],
+)
+def test_escaped_hidden_characters_are_the_same_finding_as_raw_ones(
+    tmp_path, relative, escaped, raw
+):
+    findings = []
+    for name, text in (("escaped", escaped), ("raw", raw)):
+        _write(tmp_path / name, relative, text)
+        result = PromptScanner().scan(tmp_path / name)
+        assert not result.scan_failures
+        assert not result.surfaces_excluded
+        (component,) = result.components
+        findings.append([risk for risk in component.risks if risk.category != "completeness"])
+    assert findings[0] == findings[1]
+    assert {risk.severity.value for risk in findings[0]} == {"critical"}
+
+
+def test_a_character_written_raw_in_a_string_counts_once(tmp_path):
+    _write(tmp_path, "prompts/a.json", '{"system": "Hi ' + TAG + '", "user": "\\n"}')
+    result = PromptScanner().scan(tmp_path)
+    (component,) = result.components
+    (risk,) = [risk for risk in component.risks if risk.category == "tag_characters"]
+    assert "contains 1 deprecated Unicode tag characters" in risk.detail
+
+
+@pytest.mark.parametrize(
+    ("relative", "text"),
+    [
+        ("prompts/a.json", '{"system": "Caf\\u00e9\\n\\t\\"quoted\\""}'),
+        ("prompts/a.yaml", 'system: "Caf\\u00e9\\n"\nother: [1, 2]\n'),
+        ("prompts/a.toml", 'system = "Caf\\u00e9\\n"\n'),
+        ("prompts/a.md", "Escapes such as \\u202e are text in Markdown.\n"),
+        ("prompts/a.json", '{"system": "{{ user | default(\'x\') }}", }'),
+    ],
+)
+def test_escaped_ordinary_text_and_unparsed_files_without_escapes_are_clean(
+    tmp_path, relative, text
+):
+    _write(tmp_path, relative, text)
+    result = PromptScanner().scan(tmp_path)
+    assert not result.scan_failures
+    assert not result.surfaces_excluded
+    (component,) = result.components
+    assert [risk.category for risk in component.risks if risk.category != "completeness"] == []
+
+
+@pytest.mark.parametrize(
+    ("relative", "text"),
+    [
+        ("prompts/a.json", '{"s": "x", "s": "a\\u202eb"}'),
+        ("prompts/a.json", '{"id": 123456789012345678901234567890, "s": "a\\u202eb"}'),
+        ("prompts/a.json", '{"t": "\\ud800", "s": "a\\u202eb"}'),
+        ("prompts/a.json", '{"t": NaN, "s": "a\\u202eb"}'),
+        ("prompts/a.json", '// a comment\n{"s": "a\\u202eb", }'),
+        ("prompts/a.yaml", 's: "a\\u202eb\nother: ['),
+        ("prompts/a.toml", 's = "x"\ns = "a\\u202eb"\n'),
+        ("prompts/a.toml", 's = "a\\xadb"\n'),
+    ],
+)
+def test_a_file_a_strict_reader_refuses_still_has_its_escapes_decoded(tmp_path, relative, text):
+    _write(tmp_path, relative, text)
+    result = PromptScanner().scan(tmp_path)
+    assert not result.scan_failures
+    assert not result.surfaces_excluded
+    (component,) = result.components
+    assert component.prompt_type == "prompt-template"
+    assert {"bidi_override", "invisible_characters"} & {risk.category for risk in component.risks}
+
+
+@pytest.mark.parametrize("bound", ["_MAX_YAML_EVENTS", "_MAX_PARSED_CHARACTERS"])
+def test_yaml_past_the_parse_bounds_is_decoded_by_pattern(tmp_path, monkeypatch, bound):
+    padding = "".join(f"k{i}: 1\n" for i in range(20))
+    _write(tmp_path / "escaped", "prompts/a.yaml", padding + 'z: "a\\u202eb"\n')
+    # A pattern also decodes an escape in a single-quoted scalar, which YAML keeps as text.
+    _write(tmp_path / "literal", "prompts/a.yaml", "z: 'a\\u202eb'\n")
+    before = {
+        name: PromptScanner().scan(tmp_path / name).components[0] for name in ("escaped", "literal")
+    }
+    monkeypatch.setattr(prompt_module, bound, 4)
+    after = {
+        name: PromptScanner().scan(tmp_path / name).components[0] for name in ("escaped", "literal")
+    }
+    assert "bidi_override" in {risk.category for risk in before["escaped"].risks}
+    assert "bidi_override" not in {risk.category for risk in before["literal"].risks}
+    for component in after.values():
+        assert "bidi_override" in {risk.category for risk in component.risks}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '{"id": 12345678901234567890, "s": "line\\nnext"}',
+        '// a comment\n{"s": "line\\nnext"}',
+        '["\\ud83d\\udc68\\u200d\\ud83d\\udc69"]',
+        '["\\\\u202e \\\\d+"]',
+        '\ufeff{"s": "line\\nnext"}',
+    ],
+)
+def test_ordinary_json_a_strict_reader_refuses_is_clean(tmp_path, text):
+    _write(tmp_path, "prompts/a.json", text)
+    result = PromptScanner().scan(tmp_path)
+    assert not result.scan_failures
+    assert not result.surfaces_excluded
+    (component,) = result.components
+    assert [risk.category for risk in component.risks if risk.category != "completeness"] == []
+
+
+@pytest.mark.parametrize(
+    ("relative", "text"),
+    [
+        ("prompts/a.json", '{"\\udb40\\udc49": 1}'),
+        ("prompts/a.toml", '"\\U000E0049" = 1\n'),
+        ("prompts/a.json", '\ufeff{"s": "\\udb40\\udc49"}'),
+        ("app/x.prompt.md", '---\ndescription: "\\U000E0049"\n---\nBody.\n'),
+        ("prompts/a.md", '---\ndescription: "\\U000E0049\n---\nBody.\n'),
+    ],
+)
+def test_escapes_in_keys_after_a_bom_and_in_front_matter_are_decoded(tmp_path, relative, text):
+    _write(tmp_path, relative, text)
+    result = PromptScanner().scan(tmp_path)
+    assert not result.surfaces_excluded
+    (component,) = result.components
+    assert ("tag_characters", "critical") in _findings(component)
+    assert "invisible_characters" not in {risk.category for risk in component.risks}
+
+
+def test_escapes_in_a_markdown_body_are_text(tmp_path):
+    _write(tmp_path, "app/x.prompt.md", '---\ndescription: "plain"\n---\nWrite "\\u202e".\n')
+    result = PromptScanner().scan(tmp_path)
+    (component,) = result.components
+    assert _findings(component) == []
+
+
+def test_an_escaped_line_separator_is_the_finding_a_raw_one_is(tmp_path):
+    findings = []
+    for name, text in (("escaped", '["x\\u2028y"]'), ("raw", '["x\u2028y"]')):
+        _write(tmp_path / name, "prompts/a.json", text)
+        (component,) = PromptScanner().scan(tmp_path / name).components
+        findings.append([risk for risk in component.risks if risk.category != "completeness"])
+    assert findings[0] == findings[1]
+    assert [(risk.category, risk.severity.value) for risk in findings[0]] == [
+        ("line_separators", "low")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("link", "target", "alias", "directory"),
+    [
+        ("app/prompts", "../data", "app/prompts/system.md", "data"),
+        ("prompts/shared", "../data", "prompts/shared/system.md", "data"),
+        ("agent", "examples/agent", "agent/prompts/system.md", "examples/agent"),
+        ("agent", "tests/agent", "agent/prompts/system.md", "tests/agent"),
+    ],
+)
+def test_a_directory_symlink_to_files_no_walk_inventories_is_a_gap(
+    tmp_path, link, target, alias, directory
+):
+    held = alias.removeprefix(link).lstrip("/")
+    _write(tmp_path, f"{directory}/{held}", f"Hello.{TAG}")
+    _write(tmp_path, "prompts/clean.md", "Clean.")
+    (tmp_path / link).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / link).symlink_to(target)
+    result = PromptScanner().scan(tmp_path)
+    assert not result.scan_failures
+    assert result.surfaces_excluded == [
+        f"{link}: directory symlink to {directory}; prompt templates under it, such as "
+        f"{alias}, are not inventoried, because the walk reads their files only under "
+        f"{directory}, where they are not prompt templates"
+    ]
+    assert set(_components(result)) == {"prompt:prompts/clean.md"}
+
+
+@pytest.mark.parametrize(
+    ("link", "target", "directory", "inventoried"),
+    [
+        ("app/data", "../data", "data", set()),
+        ("docs/prompts", "../data", "data", set()),
+        (".github/prompts", "../data", "data", {"prompt:data/system.md"}),
+        ("svc/prompts", "../prompts", "prompts", {"prompt:prompts/system.md"}),
+        ("app/prompts", "../other/prompts", "other/prompts", {"prompt:other/prompts/system.md"}),
+        ("prompts/rules", "../.claude/rules", ".claude/rules", {"prompt:.claude/rules/system.md"}),
+    ],
+)
+def test_other_directory_symlinks_are_not_prompt_gaps(
+    tmp_path, link, target, directory, inventoried
+):
+    _write(tmp_path, f"{directory}/system.md", "Hello.")
+    (tmp_path / link).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / link).symlink_to(target)
+    result = PromptScanner().scan(tmp_path)
+    assert not result.scan_failures
+    assert not any("prompt templates" in gap for gap in result.surfaces_excluded)
+    assert set(_components(result)) == inventoried
+
+
+@pytest.mark.parametrize("relative", ["prompts/a.md", ".claude/rules/a.md", "x.prompt.md"])
+def test_invalid_utf8_under_prompts_is_the_failure_it_is_in_a_rule_directory(tmp_path, relative):
+    (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / relative).write_bytes(b"Hello \xff\xfe")
+    _write(tmp_path / "twin", relative, "Hello \u00e9")
+    result = PromptScanner().scan(tmp_path)
+    assert result.scan_failures == [f"{relative}: invalid UTF-8 instruction"]
+    assert not result.surfaces_excluded
+    twin = PromptScanner().scan(tmp_path / "twin")
+    assert not twin.scan_failures
+    assert [component.source_path for component in twin.components] == [relative]
+
+
+@pytest.mark.parametrize(
+    ("relative", "named"),
+    [
+        ("pkg/prompts/claude.md", "pkg/prompts/CLAUDE.md"),
+        ("prompts/Agents.md", "prompts/AGENTS.md"),
+    ],
+)
+def test_a_case_variant_of_an_instruction_name_under_prompts_stays_a_failure(
+    tmp_path, relative, named
+):
+    _write(tmp_path, relative, "Hello.")
+    _write(tmp_path, "pkg/prompts/system.md", "Hello.")
+    result = PromptScanner().scan(tmp_path)
+    assert result.scan_failures == [
+        f"{relative}: case variant of {named} is the active file on case-insensitive file "
+        "systems and is not inventoried"
+    ]
+    assert set(_components(result)) == {"prompt:pkg/prompts/system.md"}
+
+
+def test_a_character_written_raw_in_a_string_counts_once_for_each_kind(tmp_path):
+    _write(tmp_path, "prompts/a.json", '{"a": "' + "\u200b" * 3 + '\\n"}')
+    (component,) = PromptScanner().scan(tmp_path).components
+    (risk,) = [risk for risk in component.risks if risk.category == "invisible_characters"]
+    assert "ZERO WIDTH SPACE (U+200B) x3" in risk.detail
+
+
+def test_an_import_through_a_directory_symlink_is_one_component(tmp_path):
+    _write(tmp_path, "CLAUDE.md", "Use @alias/a.md.")
+    _write(tmp_path, "prompts/a.md", "Hello.")
+    (tmp_path / "alias").symlink_to("prompts")
+    result = PromptScanner().scan(tmp_path)
+    assert not result.scan_failures
+    assert set(_components(result)) == {"prompt:CLAUDE.md", "prompt:import:alias/a.md"}
+
+
+def test_an_import_that_is_not_utf8_is_one_failure(tmp_path):
+    _write(tmp_path, "CLAUDE.md", "Use @prompts/a.md.")
+    (tmp_path / "prompts").mkdir()
+    (tmp_path / "prompts/a.md").write_bytes(b"Hello \xff\xfe")
+    result = PromptScanner().scan(tmp_path)
+    assert result.scan_failures == ["prompts/a.md: invalid UTF-8 instruction"]
+
+
+@pytest.mark.parametrize(
+    ("memory", "links"),
+    [("@app/prompts/x.json", []), ("@alias/x.json", [("alias", "app/prompts")])],
+)
+def test_an_imported_prompt_template_keeps_its_escape_check(tmp_path, memory, links):
+    _write(tmp_path, "CLAUDE.md", memory)
+    _write(tmp_path, "app/prompts/x.json", '{"a": "\\udb40\\udc49"}')
+    for link, target in links:
+        (tmp_path / link).symlink_to(target)
+    result = PromptScanner().scan(tmp_path)
+    assert not result.scan_failures
+    (imported,) = [c for c in result.components if c.prompt_type == "imported-instruction"]
+    assert ("tag_characters", "critical") in _findings(imported)
