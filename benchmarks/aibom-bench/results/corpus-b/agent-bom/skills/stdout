@@ -1,0 +1,15 @@
+
+agent-bom skills scan
+
+  3 file(s) · 0 package ref(s) · 0 server ref(s) · 0 credential var(s)
+
+                              Instruction Surface                               
+Skill / file            Status     Verdict    Action    Prov.         Find. Refs
+────────────────────────────────────────────────────────────────────────────────
+.clinerules             pending    benign     review    unsigned          0    0
+.windsurfrules          pending    benign     review    unsigned          0    0
+system.prompt.md        pending    benign     review    unsigned          0    0
+Action: handling · Prov.: provenance · Find.: findings · Refs: packages, servers
+  pending: no findings in the content, but a reviewer should confirm: provenance
+is not verified
+
