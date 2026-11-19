@@ -30,6 +30,7 @@ from nexus_symbiote.inventory_export_cli import register_inventory_export_comman
 from nexus_symbiote.live_cli import register_live_commands
 from nexus_symbiote.minimum_elements_cli import register_minimum_elements_commands
 from nexus_symbiote.policy import Policy
+from nexus_symbiote.provenance_cli import register_provenance_commands
 from nexus_symbiote.reporting import (
     ReportLine,
     diff_report_lines,
@@ -1970,6 +1971,7 @@ register_crosswalk_commands(main)
 register_trace_commands(main)
 register_inventory_export_commands(main)
 register_minimum_elements_commands(main)
+register_provenance_commands(main)
 
 if __name__ == "__main__":
     main()

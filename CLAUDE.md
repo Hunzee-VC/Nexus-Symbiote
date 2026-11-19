@@ -25,6 +25,7 @@ src/nexus_symbiote/
   crosswalk.py, crosswalk_cli.py       — Framework crosswalk that SARIF tags come from; `crosswalk`
   minimum_elements.py, minimum_elements_cli.py — G7 AI SBOM minimum-element coverage; `minimum-elements`
   inventory_export.py, inventory_export_cli.py — ShadowScan simple-list export; `export-inventory`
+  provenance_surfaces.py, provenance_cli.py — Pickle/GGUF forensics allow-lists, alias routing, guardrails, memory stores, training lineage; `inspect-provenance`
   advisories.py                        — Explicit, bounded OSV queries for exact package identities
   modes.py                             — Offline by default; live mode is opt-in
   reporting.py                         — Neutralized text and JSON gate reporting

@@ -74,6 +74,7 @@ change them. See [collection limits](collection-limits.md).
 | [`attest`](#attest) | offline | Sign a file's exact bytes, usually an inventory or a baseline, for a stated purpose |
 | [`verify-attestation`](#verify-attestation) | offline | Check that trusted keys attested a file's bytes or inventory content for a purpose |
 | [`trace-diff`](#trace-diff) | offline | Compare the runtime use that OpenTelemetry traces report with an AgentBOM |
+| [`inspect-provenance`](#inspect-provenance) | offline | Inspect pickle/GGUF forensics, alias routing, guardrails, memory stores, and training lineage |
 | [`discover-mcp`](#discover-mcp) | **live** | List the tools an HTTPS MCP server serves, without calling them |
 | [`advisories`](#advisories) | **live** | Query OSV for advisories affecting exact PyPI and npm package versions |
 | [`verify-live`](#verify-live) | **live** | Compare an AgentBOM with the tools that operator-pinned stdio servers serve |
@@ -1068,3 +1069,23 @@ nexus-symbiote vex [OPTIONS] AIBOM_PATH
 | Option | Description |
 |---|---|
 | `-o`, `--output` `PATH` | Write the VEX document to this file instead of standard output. |
+
+### `inspect-provenance`
+
+Inspect pickle safe-global allow-lists and GGUF `general.*` metadata without loading, model alias indirection (`routes-to`) and floating registry references, declared guardrail policies (`guard.config`, `eval.promptfoo`), memory stores, data classifications, and training-lineage attestations and `.dvc` digests.
+
+```text
+nexus-symbiote inspect-provenance [OPTIONS]
+```
+
+| Option | Description |
+|---|---|
+| `--inventory` `PATH` | Existing native AgentBOM file to enrich and check. |
+| `--project` `PATH` | Project root to inspect through confined reads. |
+| `--claims` `PATH` | Imported ShadowScan claim JSON file(s) (`CR-2`, `CR-4`, `CR-9`, `CR-10`). Repeatable. |
+| `--attestation` `PATH` | Training or dataset in-toto/SLSA attestation JSON file(s). Repeatable. |
+| `-o`, `--output` `PATH` | Write the provenance inspection JSON document to this file. |
+| `--bom-output` `PATH` | Write the enriched native AgentBOM JSON to this file. |
+| `--json-output` | Print the provenance inspection document as JSON on standard output. |
+| `--fail-on` `critical\|high\|medium\|low\|info\|none` | Exit 1 when any provenance finding reaches or exceeds this severity, or on collection failure (default: `high`). |
+
