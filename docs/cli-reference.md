@@ -17,6 +17,8 @@ nexus-symbiote [--offline | --live] [--debug] [--limit NAME=VALUE]... [--version
 | `--live` | Allow the network and process steps of `discover-mcp`, `advisories` and `verify-live`. Every other command stays offline. |
 | `--debug` | Print where a collector or internal error was raised on standard error: its class and the files, lines and functions of its traceback, without its message, which can quote project or inventory text. Without it, an unexpected error ends the command with `Error: internal error (<error class>)` and exit status 1, and a collector error is recorded by its diagnostic code only. |
 | `--limit` `NAME=VALUE` | Set one [collection limit](collection-limits.md) for this command, such as `entries=200000`, `model-bytes=128GiB` or `import-lookups=20000`. Repeatable; overrides `NEXUS_SYMBIOTE_LIMITS` for that name. |
+| `--detailed-exit-codes` | Use distinct exit codes for `scan`, `validate`, `risk`, and `diff`: `0` passed, `2` usage error, `3` gate or verification failed, `4` collection/input/internal failure. |
+| `--legacy-exit-codes` | Use legacy exit codes (`0` passed, `1` gate or input failure, `2` usage error; default). |
 | `--version` | Print the version and exit. |
 | `--help` | Print help and exit. |
 
@@ -445,7 +447,12 @@ nexus-symbiote diff [OPTIONS] OLD_PATH NEW_PATH
 | Option | Description |
 |---|---|
 | `--json-output` | Output as JSON |
+| `--report-format` `text\|json\|markdown\|junit` | Gate report format (cannot disagree with `--json-output`; default: `text`). |
+| `--step-summary` `PATH` | Append a sanitized Markdown gate summary to this file (for example, `GITHUB_STEP_SUMMARY`). |
+| `--expect-upgrade` `FROM_VERSION` | Attribute documented profile/schema transitions from `FROM_VERSION` (`0.1.0` or `0.2.0`) into `tool_upgrade_changes` when `metadata.tool_version` matches; configuration/hash drift still alerts. |
 | `--fail-on-alert` / `--no-fail-on-alert` | Exit with status 1 if the diff reports a security alert (default: fail). |
+| `--detailed-exit-codes` | Use distinct exit codes (`0` passed, `2` usage, `3` gate failed, `4` input/internal failure). |
+| `--legacy-exit-codes` | Use legacy exit codes (`0` passed, `1` gate/input failed, `2` usage). |
 
 The report lists security alerts, notes (`[INFO]` metadata changes, and `[NOTE]` lines
 about the comparison itself, also after `No changes detected.`), and added, removed and
@@ -633,6 +640,15 @@ nexus-symbiote risk [OPTIONS] AIBOM_PATH
 | `--require-discovery-signature` | Require the operator signature policy to verify any ShadowScan report the inventory records or the project contains, whatever the project policy says; requires --project. JSON output reports the result as `discovery_producer` |
 | `--fail-on-unsigned-discovery` | Exit with status 1 when the BOM's ShadowScan evidence is unverified |
 | `--allow-unsigned-discovery` | Accept unverified discovery evidence explicitly (still warns); required in CI |
+| `--report-format` `text\|json\|markdown\|junit` | Gate report format (cannot disagree with `--json-output`; default: `text`). |
+| `--step-summary` `PATH` | Append a sanitized Markdown gate summary to this file. |
+| `--operator-policy` `FILE` | Operator policy YAML outside the scanned checkout; checkout policy may only narrow it. |
+| `--operator-policy-attestation` `FILE` | DSSE attestation envelope (`purpose: policy`) over `--operator-policy`. |
+| `--operator-policy-key` `FILE` | Trusted Ed25519 public key for `--operator-policy-attestation` (repeatable). |
+| `--require-operator-policy-attestation` | Fail closed unless `--operator-policy` is verified by `--operator-policy-attestation` and `--operator-policy-key`. |
+| `--operator-policy-max-age-days` `INT` | Maximum attestation age in days when `--operator-policy-attestation` is verified (default: `90`; `0` disables). |
+| `--detailed-exit-codes` | Use distinct exit codes (`0` passed, `2` usage, `3` gate failed, `4` collection/input failure). |
+| `--legacy-exit-codes` | Use legacy exit codes (`0` passed, `1` gate/input failed, `2` usage). |
 
 The report gives the score, the assessment basis, coverage, the severity counts and
 the top 15 findings, each followed by its `fingerprint:` line (`--json-output` lists all). Under `Gate: PASSED` or
@@ -781,6 +797,13 @@ nexus-symbiote scan [OPTIONS] [PROJECT_PATH]
 | `--accept-project-policy` | In CI, accept a project policy that weakens the built-in gates explicitly; without it such a policy fails the command there (exit 1). Interactive runs only warn. |
 | `--fail-on-unsigned-discovery` | With `--check`, exit with status 1 when ShadowScan discovery evidence is unverified. |
 | `--allow-unsigned-discovery` | With `--check`, accept unverified ShadowScan discovery evidence explicitly (still warns); required in CI when no `--signature-policy` verifies the report. |
+| `--operator-policy` `FILE` | Operator policy YAML outside the scanned checkout; checkout policy may only narrow it. |
+| `--operator-policy-attestation` `FILE` | DSSE attestation envelope (`purpose: policy`) over `--operator-policy`. |
+| `--operator-policy-key` `FILE` | Trusted Ed25519 public key for `--operator-policy-attestation` (repeatable). |
+| `--require-operator-policy-attestation` | Fail closed unless `--operator-policy` is verified by `--operator-policy-attestation` and `--operator-policy-key`. |
+| `--operator-policy-max-age-days` `INT` | Maximum attestation age in days when `--operator-policy-attestation` is verified (default: `90`; `0` disables). |
+| `--detailed-exit-codes` | Use distinct exit codes (`0` passed, `2` usage, `3` gate failed, `4` collection/input failure). |
+| `--legacy-exit-codes` | Use legacy exit codes (`0` passed, `1` gate/input failed, `2` usage). |
 
 `PROJECT_PATH` is resolved before collection, because the collectors refuse a root
 reached through a symbolic link. When it resolves through a link, `scan` names the
@@ -876,6 +899,15 @@ nexus-symbiote validate [OPTIONS] AIBOM_PATH
 | `--require-discovery-signature` | Require the operator signature policy to verify any ShadowScan report the inventory records or the project contains, whatever the project policy says; requires --project |
 | `--fail-on-unsigned-discovery` | Exit with status 1 when the BOM's ShadowScan evidence is unverified |
 | `--allow-unsigned-discovery` | Accept unverified discovery evidence explicitly (still warns); required in CI |
+| `--report-format` `text\|json\|markdown\|junit` | Gate report format (cannot disagree with `--json-output`; default: `text`). |
+| `--step-summary` `PATH` | Append a sanitized Markdown gate summary to this file. |
+| `--operator-policy` `FILE` | Operator policy YAML outside the scanned checkout; checkout policy may only narrow it. |
+| `--operator-policy-attestation` `FILE` | DSSE attestation envelope (`purpose: policy`) over `--operator-policy`. |
+| `--operator-policy-key` `FILE` | Trusted Ed25519 public key for `--operator-policy-attestation` (repeatable). |
+| `--require-operator-policy-attestation` | Fail closed unless `--operator-policy` is verified by `--operator-policy-attestation` and `--operator-policy-key`. |
+| `--operator-policy-max-age-days` `INT` | Maximum attestation age in days when `--operator-policy-attestation` is verified (default: `90`; `0` disables). |
+| `--detailed-exit-codes` | Use distinct exit codes (`0` passed, `2` usage, `3` gate failed, `4` collection/input failure). |
+| `--legacy-exit-codes` | Use legacy exit codes (`0` passed, `1` gate/input failed, `2` usage). |
 
 Every report states its assessment basis. Without `--project` it is `supplied-bom`:
 only the inventory's own claims were checked, its coverage claim and its internal

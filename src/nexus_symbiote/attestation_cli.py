@@ -39,8 +39,19 @@ _REVISION = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 T = TypeVar("T")
 
 
+class _AttestationGateError(click.ClickException):
+    exit_code = 3
+
+
 def _failure(operation: str, reason: str, detail: str) -> click.ClickException:
-    return click.ClickException(f"attestation {operation} failed: {detail} ({reason})")
+    message = f"attestation {operation} failed: {detail} ({reason})"
+    if operation == "verification" and reason not in {
+        "key-invalid",
+        "input-too-large",
+        "input-unreadable",
+    }:
+        return _AttestationGateError(message)
+    return click.ClickException(message)
 
 
 def _load(operation: str, role: str, load: Callable[[], T]) -> T:

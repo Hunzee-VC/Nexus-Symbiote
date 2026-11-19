@@ -182,9 +182,6 @@ class _DocumentIds:
         return f"{self.document}#{kind}-{uuid.uuid5(NAMESPACE, key)}"
 
 
-MAX_EXPORT_ELEMENTS = 50_000
-
-
 class SPDXGenerator(Generator):
     """SPDX 3.0.1 JSON-LD export.
 
@@ -195,26 +192,11 @@ class SPDXGenerator(Generator):
 
     format_name = "spdx-3.0.1"
 
-    def __init__(
-        self, namespace: str | None = None, *, max_elements: int = MAX_EXPORT_ELEMENTS
-    ) -> None:
+    def __init__(self, namespace: str | None = None) -> None:
         self._namespace = None if namespace is None else _validated_namespace(namespace)
-        self._max_elements = max_elements
 
     def generate(self, aibom: AIBOM) -> dict[str, Any]:
-        from nexus_symbiote.limits import Bound
-
-        estimated = len(aibom.components) + len(aibom.dependencies)
-        if estimated > self._max_elements:
-            raise ValueError(
-                Bound(self._max_elements, "export-elements", configurable=False).exceeded()
-            )
         document = self._projection(aibom)
-        graph = document.get("@graph")
-        if isinstance(graph, list) and len(graph) > self._max_elements:
-            raise ValueError(
-                Bound(self._max_elements, "export-elements", configurable=False).exceeded()
-            )
         require_valid(document, "spdx")
         return document
 

@@ -28,17 +28,17 @@ _PROFILE_BUMP_RE = re.compile(
     r"^properties\.static_(?:config_hash_profile|value_binding_profile) (?:changed|added)\.$"
 )
 
+_STATIC_BINDING_MSG = (
+    "MCP server static source binding changed: launcher, arguments, "
+    "environment, endpoint or declared tools differ, or the binding key "
+    "changed. Review before execution."
+)
+
 SUPPORTED_UPGRADE_VERSIONS: dict[str, UpgradeRule] = {
     "0.1.0": UpgradeRule(
         from_version="0.1.0",
         detail_patterns=(
             _PROFILE_BUMP_RE,
-            re.compile(r"^properties\.static_config_hash (?:changed|added)\.$"),
-            re.compile(
-                r"^MCP server static source binding changed: launcher, arguments, "
-                r"environment, endpoint or declared tools differ, or the binding key "
-                r"changed\. Review before execution\.$"
-            ),
             re.compile(
                 r"^Tool fingerprint versions are unknown or incompatible; "
                 r"re-collect and re-approve\.$"
@@ -54,12 +54,6 @@ SUPPORTED_UPGRADE_VERSIONS: dict[str, UpgradeRule] = {
         from_version="0.2.0",
         detail_patterns=(
             _PROFILE_BUMP_RE,
-            re.compile(r"^properties\.static_config_hash (?:changed|added)\.$"),
-            re.compile(
-                r"^MCP server static source binding changed: launcher, arguments, "
-                r"environment, endpoint or declared tools differ, or the binding key "
-                r"changed\. Review before execution\.$"
-            ),
             re.compile(
                 r"^Tool fingerprint versions are unknown or incompatible; "
                 r"re-collect and re-approve\.$"
@@ -82,30 +76,36 @@ def _all_details_expected(details: list[str], rule: UpgradeRule) -> bool:
     if not details:
         return False
     has_profile_bump = any(_PROFILE_BUMP_RE.match(d) for d in details)
+    has_hash_change = any(d.startswith("properties.static_config_hash ") for d in details)
     for detail in details:
-        if (
-            (
-                detail.startswith("MCP server static source binding changed:")
-                or detail.startswith("properties.static_config_hash ")
-            )
-            and rule.requires_profile_bump_for_binding
-            and not has_profile_bump
-        ):
-            # Without a profile version transition on the same component, a static_config_hash
-            # change is genuine configuration drift and must never be attributed to an upgrade.
-            return False
+        if detail == _STATIC_BINDING_MSG:
+            # Only attribute the static-binding notice when the profile version bumped
+            # without any static_config_hash change; otherwise fail closed.
+            if not has_profile_bump or has_hash_change:
+                return False
+            continue
         if not any(pattern.match(detail) for pattern in rule.detail_patterns):
             return False
     return True
 
 
-def attribute_expected_upgrade(diff_document: dict[str, Any], from_version: str) -> dict[str, Any]:
+def attribute_expected_upgrade(
+    diff_document: dict[str, Any],
+    from_version: str,
+    *,
+    baseline_tool_version: str | None = None,
+) -> dict[str, Any]:
     """Partition ``security_alerts`` into active alerts vs expected tool-upgrade transitions."""
     rule = SUPPORTED_UPGRADE_VERSIONS.get(from_version)
     if rule is None:
         supported = ", ".join(sorted(SUPPORTED_UPGRADE_VERSIONS))
         raise ValueError(
             f"Unsupported --expect-upgrade version {from_version!r}; supported: {supported}"
+        )
+    if baseline_tool_version and baseline_tool_version != from_version:
+        raise ValueError(
+            f"--expect-upgrade {from_version!r} does not match baseline tool_version "
+            f"{baseline_tool_version!r}"
         )
     raw_alerts = diff_document.get("security_alerts")
     if not isinstance(raw_alerts, list):

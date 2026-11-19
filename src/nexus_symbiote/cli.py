@@ -133,13 +133,16 @@ def _resolve_operator_policy(
     *,
     attestation_path: Path | None = None,
     trusted_keys: tuple[Path, ...] = (),
+    require_attestation: bool = False,
+    max_age_days: int = 90,
 ) -> tuple[Any | None, str | None, tuple[str, ...]]:
     from nexus_symbiote.operator_policy import OperatorPolicyError, load_operator_policy
 
     if operator_policy is None:
-        if attestation_path is not None or trusted_keys:
+        if attestation_path is not None or trusted_keys or require_attestation:
             raise click.UsageError(
-                "--operator-policy-attestation and --operator-policy-key require --operator-policy"
+                "--operator-policy-attestation, --operator-policy-key, and "
+                "--require-operator-policy-attestation require --operator-policy"
             )
         return None, None, ()
     try:
@@ -148,6 +151,8 @@ def _resolve_operator_policy(
             root,
             envelope_path=attestation_path,
             trusted_keys=trusted_keys,
+            require_attestation=require_attestation,
+            max_age_days=max_age_days,
         )
     except OperatorPolicyError as exc:
         raise _failure(exc) from exc
@@ -543,12 +548,20 @@ class _CollectionClickException(click.ClickException):
     exit_code = 4
 
 
+class _GateClickException(click.ClickException):
+    """Gate or verification failure under Decision 4 (--detailed-exit-codes -> 3)."""
+
+    exit_code = 3
+
+
 def _neutralized(exc: click.ClickException, *, detailed: bool = False) -> click.ClickException:
     """The same error with neutralized text: it can quote checkout or inventory text."""
     message = neutralize(exc.format_message())
     if isinstance(exc, click.UsageError):
         return click.UsageError(message, ctx=exc.ctx)
     if detailed:
+        if isinstance(exc, _GateClickException) or exc.exit_code == 3:
+            return _GateClickException(message)
         return _CollectionClickException(message)
     return click.ClickException(message)
 
@@ -595,10 +608,26 @@ def _emit_gate_report(
     step_summary: Path | None = None,
     operator_source: str | None = None,
 ) -> None:
-    from nexus_symbiote.operator_policy import render_gate_junit, render_gate_markdown
+    from nexus_symbiote.core.hashing import open_regular_file
+    from nexus_symbiote.operator_policy import (
+        MAX_OPERATOR_POLICY_BYTES,
+        render_gate_junit,
+        render_gate_markdown,
+    )
 
     if step_summary is not None:
-        write_cli_output(step_summary, render_gate_markdown(gate_name, document), overwrite=True)
+        rendered = render_gate_markdown(gate_name, document)
+        prefix = ""
+        if step_summary.exists():
+            try:
+                with open_regular_file(step_summary) as stream:
+                    existing = stream.read(MAX_OPERATOR_POLICY_BYTES)
+                prefix = existing.decode("utf-8", errors="replace")
+                if prefix and not prefix.endswith("\n"):
+                    prefix += "\n"
+            except OSError:
+                prefix = ""
+        write_cli_output(step_summary, prefix + rendered, overwrite=True)
     if report_format == "json":
         click.echo(json_text(json.dumps(document, indent=2)))
     elif report_format == "markdown":
@@ -654,6 +683,18 @@ def _operator_policy_options(func: _F) -> _F:
             type=click.Path(exists=True, dir_okay=False, path_type=Path),
             multiple=True,
             help="Trusted Ed25519 public key for --operator-policy-attestation (repeatable).",
+        ),
+        click.option(
+            "--require-operator-policy-attestation",
+            is_flag=True,
+            help="Fail closed unless --operator-policy is verified by --operator-policy-attestation and --operator-policy-key.",
+        ),
+        click.option(
+            "--operator-policy-max-age-days",
+            type=click.IntRange(min=0),
+            default=90,
+            show_default=True,
+            help="Maximum attestation age in days when --operator-policy-attestation is verified (0 disables).",
         ),
     )
 
@@ -969,6 +1010,8 @@ def scan(
     operator_policy: Path | None = None,
     operator_policy_attestation: Path | None = None,
     operator_policy_key: tuple[Path, ...] = (),
+    require_operator_policy_attestation: bool = False,
+    operator_policy_max_age_days: int = 90,
     no_project_policy: bool = False,
     accept_project_policy: bool = False,
     check_only: bool = False,
@@ -1003,6 +1046,8 @@ def scan(
         root,
         attestation_path=operator_policy_attestation,
         trusted_keys=operator_policy_key,
+        require_attestation=require_operator_policy_attestation,
+        max_age_days=operator_policy_max_age_days,
     )
     policy, policy_source, policy_weakened = _policy_with_source(
         root,
@@ -1733,6 +1778,8 @@ def validate(
     operator_policy: Path | None = None,
     operator_policy_attestation: Path | None = None,
     operator_policy_key: tuple[Path, ...] = (),
+    require_operator_policy_attestation: bool = False,
+    operator_policy_max_age_days: int = 90,
     no_project_policy: bool = False,
     accept_project_policy: bool = False,
     skip_integrity: bool = False,
@@ -1779,6 +1826,8 @@ def validate(
         root,
         attestation_path=operator_policy_attestation,
         trusted_keys=operator_policy_key,
+        require_attestation=require_operator_policy_attestation,
+        max_age_days=operator_policy_max_age_days,
     )
     policy, policy_source, policy_weakened = _inventory_policy(
         root,
@@ -1962,6 +2011,8 @@ def risk(
     operator_policy: Path | None = None,
     operator_policy_attestation: Path | None = None,
     operator_policy_key: tuple[Path, ...] = (),
+    require_operator_policy_attestation: bool = False,
+    operator_policy_max_age_days: int = 90,
     no_project_policy: bool = False,
     accept_project_policy: bool = False,
     fail_on_unsigned_discovery: bool = False,
@@ -1998,6 +2049,8 @@ def risk(
         root,
         attestation_path=operator_policy_attestation,
         trusted_keys=operator_policy_key,
+        require_attestation=require_operator_policy_attestation,
+        max_age_days=operator_policy_max_age_days,
     )
     policy, policy_source, policy_weakened = _inventory_policy(
         root,
@@ -2198,7 +2251,14 @@ def diff(
     result = AIBOMDiffer().diff(old_bom, new_bom)
     document = result.to_dict()
     if expect_upgrade is not None:
-        document = attribute_expected_upgrade(document, expect_upgrade)
+        try:
+            document = attribute_expected_upgrade(
+                document,
+                expect_upgrade,
+                baseline_tool_version=old_bom.metadata.tool_version,
+            )
+        except ValueError as exc:
+            raise click.UsageError(str(exc)) from None
     document_with_verdict = {**document, "passed": not bool(document.get("security_alerts"))}
     _emit_gate_report(
         "diff",

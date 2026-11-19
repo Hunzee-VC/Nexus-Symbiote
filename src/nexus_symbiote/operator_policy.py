@@ -116,7 +116,9 @@ def _verify_policy_attestation(
     trusted_keys: tuple[Path, ...],
     *,
     threshold: int = 1,
+    max_age_days: int | None = 90,
 ) -> tuple[str, ...]:
+    from datetime import timedelta
     from typing import cast
 
     import click
@@ -134,6 +136,8 @@ def _verify_policy_attestation(
         raise OperatorPolicyError(
             "--operator-policy-attestation requires at least one --operator-policy-key"
         )
+    if max_age_days is not None and max_age_days < 0:
+        raise OperatorPolicyError("--operator-policy-max-age-days must be >= 0")
     raw_envelope, _ = _read_confined_operator_policy(envelope_path, root)
     try:
         _check_key_placement(
@@ -153,6 +157,7 @@ def _verify_policy_attestation(
             purpose="policy",
             threshold=threshold,
             match="bytes",
+            max_age=timedelta(days=max_age_days) if max_age_days else None,
         )
     except (
         AttestationError,
@@ -176,17 +181,30 @@ def load_operator_policy(
     envelope_path: Path | None = None,
     trusted_keys: tuple[Path, ...] = (),
     threshold: int = 1,
+    require_attestation: bool = False,
+    max_age_days: int | None = 90,
 ) -> LoadedOperatorPolicy:
     """Load and optionally verify a signed operator policy outside the target checkout."""
     from pydantic import ValidationError
 
     if trusted_keys and envelope_path is None:
         raise OperatorPolicyError("--operator-policy-key requires --operator-policy-attestation")
+    if require_attestation and (envelope_path is None or not trusted_keys):
+        raise OperatorPolicyError(
+            "--require-operator-policy-attestation requires --operator-policy-attestation "
+            "and at least one --operator-policy-key"
+        )
     raw, policy_digest = _read_confined_operator_policy(policy_path, root)
     signers: tuple[str, ...] = ()
     if envelope_path is not None:
         signers = _verify_policy_attestation(
-            raw, policy_path, root, envelope_path, trusted_keys, threshold=threshold
+            raw,
+            policy_path,
+            root,
+            envelope_path,
+            trusted_keys,
+            threshold=threshold,
+            max_age_days=max_age_days,
         )
     try:
         mapping = parse_yaml_mapping(raw.decode("utf-8"), max_nodes=MAX_POLICY_YAML_NODES)
@@ -324,6 +342,36 @@ def inert_markdown_cell(value: object) -> str:
     return _MARKDOWN_PUNCTUATION.sub(r"\\\1", cleaned)
 
 
+def _gate_reasons(document: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    for key in ("gate_reasons", "assurance_errors", "graph_issues", "clamped_project_settings"):
+        items = document.get(key)
+        if isinstance(items, list):
+            reasons.extend(str(item) for item in items)
+    for section_name in ("completeness", "integrity"):
+        section = document.get(section_name)
+        if isinstance(section, dict) and section.get("status") in ("fail", "unknown"):
+            issues = section.get("issues")
+            if isinstance(issues, list) and issues:
+                for issue in issues[:10]:
+                    if isinstance(issue, dict):
+                        detail = issue.get("detail") or issue.get("message") or str(issue)
+                        reasons.append(f"{section_name}: {detail}")
+                    else:
+                        reasons.append(f"{section_name}: {issue}")
+            else:
+                reasons.append(f"{section_name}: {section.get('status')}")
+    if document.get("unsigned_discovery"):
+        reasons.append(str(document["unsigned_discovery"]))
+    alerts = document.get("security_alerts")
+    if isinstance(alerts, list):
+        for alert in alerts[:25]:
+            if isinstance(alert, dict):
+                msg = alert.get("alert") or alert.get("message", "")
+                reasons.append(f"{alert.get('severity', 'alert')}: {msg}")
+    return reasons
+
+
 def render_gate_markdown(gate_name: str, document: dict[str, Any]) -> str:
     """Render a deterministic, injection-safe Markdown summary suitable for GITHUB_STEP_SUMMARY."""
     passed = bool(document.get("passed", not document.get("security_alerts")))
@@ -346,17 +394,7 @@ def render_gate_markdown(gate_name: str, document: dict[str, Any]) -> str:
         lines.append(f"| Operator policy signers | {inert_markdown_cell(signers)} |")
     if "overall_score" in document and document["overall_score"] is not None:
         lines.append(f"| Risk score | {inert_markdown_cell(document['overall_score'])} |")
-    reasons: list[str] = []
-    for key in ("gate_reasons", "assurance_errors", "graph_issues", "clamped_project_settings"):
-        items = document.get(key)
-        if isinstance(items, list):
-            reasons.extend(str(item) for item in items)
-    alerts = document.get("security_alerts")
-    if isinstance(alerts, list):
-        for alert in alerts[:25]:
-            if isinstance(alert, dict):
-                msg = alert.get("alert") or alert.get("message", "")
-                reasons.append(f"{alert.get('severity', 'alert')}: {msg}")
+    reasons = _gate_reasons(document)
     if reasons:
         lines.append("")
         lines.append("#### Reasons")
@@ -369,23 +407,13 @@ def render_gate_junit(gate_name: str, document: dict[str, Any]) -> str:
     """Render a deterministic, XML-escaped JUnit report for CI test-summary consumers."""
     passed = bool(document.get("passed", not document.get("security_alerts")))
     safe_gate = xml_escape(neutralize(gate_name), {'"': "&quot;", "'": "&apos;"})
-    reasons: list[str] = []
-    for key in ("gate_reasons", "assurance_errors", "graph_issues"):
-        items = document.get(key)
-        if isinstance(items, list):
-            reasons.extend(neutralize(item) for item in items)
-    alerts = document.get("security_alerts")
-    if isinstance(alerts, list):
-        for alert in alerts[:25]:
-            if isinstance(alert, dict):
-                msg = alert.get("alert") or alert.get("message", "")
-                reasons.append(neutralize(f"{alert.get('severity', 'alert')}: {msg}"))
+    reasons = [neutralize(r) for r in _gate_reasons(document)]
     if not passed and not reasons:
         reasons.append(f"{neutralize(gate_name)} gate failed")
     failures = 0 if passed else 1
     body = ""
     if not passed:
-        joined = xml_escape("; ".join(reasons), {'"': "&quot;", "'": "&apos;"})
+        joined = xml_escape("; ".join(reasons[:25]), {'"': "&quot;", "'": "&apos;"})
         body = f'<failure message="{joined}">{joined}</failure>'
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n'

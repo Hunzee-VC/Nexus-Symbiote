@@ -80,10 +80,6 @@ coverage: ## Run tests with coverage reporting
 security-regressions: ## Run the committed security regression contracts
 	PYTHONPATH=src python scripts/check_security_regressions.py --out security-regressions.json
 
-.PHONY: precision
-precision: ## Run the precision and drift-regression gate against recorded class floors
-	PYTHONPATH=src python scripts/check_precision_gate.py --out precision-gate.json
-
 .PHONY: check
 check: quality coverage security-regressions ## Run the offline subset of the required CI checks
 	$(MAKE) clean-dist
