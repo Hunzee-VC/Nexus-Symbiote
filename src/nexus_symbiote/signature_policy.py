@@ -118,9 +118,9 @@ def _pin(record: dict[str, Any]) -> str | None:
 
 
 def _rekor_root_hash(record: dict[str, Any]) -> str | None:
-    value = record.get("rekor_root_hash")
-    if value is None:
+    if "rekor_root_hash" not in record:
         return None
+    value = record["rekor_root_hash"]
     try:
         if not isinstance(value, str):
             raise ValueError
@@ -133,9 +133,9 @@ def _rekor_root_hash(record: dict[str, Any]) -> str | None:
 
 
 def _minimum_rekor_tree_size(record: dict[str, Any]) -> int | None:
-    value = record.get("minimum_rekor_tree_size")
-    if value is None:
+    if "minimum_rekor_tree_size" not in record:
         return None
+    value = record["minimum_rekor_tree_size"]
     if type(value) is not int or value < 1:
         raise SignaturePolicyError(
             "Signature policy minimum_rekor_tree_size must be a positive integer"

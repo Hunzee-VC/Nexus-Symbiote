@@ -287,17 +287,11 @@ def register_crosswalk_commands(main: click.Group) -> None:
         type=click.Path(path_type=Path),
         help="Write the report to this file instead of standard output.",
     )
-    @click.option(
-        "--include-evidence-pack",
-        is_flag=True,
-        help="Attach cryptographic inventory digests, verified models, pinned MCP servers, and fingerprinted tools.",
-    )
     def crosswalk(
         aibom_path: Path,
         frameworks: tuple[str, ...],
         output_format: str,
         output: Path | None,
-        include_evidence_pack: bool = False,
     ) -> None:
         """Map findings to OWASP, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE.
 
@@ -315,8 +309,6 @@ def register_crosswalk_commands(main: click.Group) -> None:
         report = RiskScorer.from_policy(default_policy().risk).score(bom)
         selected = [key for key in FRAMEWORK_KEYS if not frameworks or key in frameworks]
         document = build_report(report, selected)
-        if include_evidence_pack:
-            document["evidence_pack"] = _build_evidence_pack(aibom_path, bom)
         if output_format == "markdown":
             text = render_markdown(document)
             if output:
@@ -329,45 +321,3 @@ def register_crosswalk_commands(main: click.Group) -> None:
             write_cli_output(output, text)
         else:
             click.echo(json_text(text))
-
-
-def _build_evidence_pack(aibom_path: Path, bom: AIBOM) -> dict[str, Any]:
-    from nexus_symbiote.core.aibom import read_native_bytes
-    from nexus_symbiote.core.inventory_digests import inventory_digests
-    from nexus_symbiote.core.models import MCPServerComponent, ModelComponent, ToolComponent
-    from nexus_symbiote.utils.crypto import VERIFIED_SIGNING_STATUSES
-
-    digests = inventory_digests(read_native_bytes(aibom_path))
-    return {
-        "inventory_digests": {
-            "file_sha256": digests.file_sha256,
-            "canonical_digest": digests.canonical_digest,
-            "content_digest": digests.content_digest,
-        },
-        "component_counts": bom.summary()["component_types"],
-        "verified_models": [
-            {
-                "bom_ref": c.bom_ref,
-                "name": c.name,
-                "sha256": c.hashes.get("sha256"),
-                "signing_status": c.signing_status,
-            }
-            for c in sorted(bom.components, key=lambda x: x.bom_ref)
-            if isinstance(c, ModelComponent) and c.signing_status in VERIFIED_SIGNING_STATUSES
-        ],
-        "pinned_mcp_servers": [
-            {
-                "bom_ref": c.bom_ref,
-                "name": c.name,
-                "transport": c.transport,
-                "launcher_package": c.launcher_package,
-            }
-            for c in sorted(bom.components, key=lambda x: x.bom_ref)
-            if isinstance(c, MCPServerComponent) and c.version_pinned is True
-        ],
-        "fingerprinted_tools": [
-            {"bom_ref": c.bom_ref, "name": c.name, "definition_hash": c.definition_hash}
-            for c in sorted(bom.components, key=lambda x: x.bom_ref)
-            if isinstance(c, ToolComponent) and c.definition_hash
-        ],
-    }

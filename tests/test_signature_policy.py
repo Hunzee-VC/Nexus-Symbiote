@@ -227,8 +227,10 @@ def test_version_2_supports_openssf_model_signing_dsse_and_rekor_witnesses(polic
 
     for bad_field, bad_val, match in [
         ("rekor_root_hash", "not-a-digest", "rekor_root_hash must be a SHA-256 digest"),
+        ("rekor_root_hash", None, "rekor_root_hash must be a SHA-256 digest"),
         ("minimum_rekor_tree_size", 0, "minimum_rekor_tree_size must be a positive integer"),
         ("minimum_rekor_tree_size", True, "minimum_rekor_tree_size must be a positive integer"),
+        ("minimum_rekor_tree_size", None, "minimum_rekor_tree_size must be a positive integer"),
     ]:
         policy.write_text(
             json.dumps({"version": 2, "artifacts": [{**v2_record, bad_field: bad_val}]})

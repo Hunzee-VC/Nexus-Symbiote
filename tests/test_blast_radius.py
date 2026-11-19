@@ -222,32 +222,3 @@ def test_assembly_does_not_search_the_inventory_per_tool(monkeypatch):
     assemble_repository_agent(bom, Path("/nonexistent-root-for-test"), failures=[])
     assert calls == 0
     assert sum(e.relationship == "provides-tool" for e in bom.dependencies) == 200 * 50
-
-
-def test_shared_credential_surfaces_and_mcp_gateways_in_blast_radius():
-    bom = AIBOM(
-        components=[
-            AgentComponent(bom_ref="agent:main", name="main", tool_refs=["server:gw"]),
-            MCPServerComponent(
-                bom_ref="server:gw",
-                name="gateway",
-                env={"SHARED_API_TOKEN": "[redacted]"},
-                properties={
-                    "mcp_role": "gateway",
-                    "upstream_server_refs": ["server:upstream"],
-                },
-            ),
-            MCPServerComponent(
-                bom_ref="server:upstream",
-                name="upstream",
-                env={"SHARED_API_TOKEN": "[redacted]"},
-            ),
-        ]
-    )
-    result = blast_radius(bom, "server:upstream")
-    assert result["affected_agents"] == ["agent:main"]
-    assert "server:gw" in result["dependent_components"]
-    assert result["mcp_gateways"] == ["server:gw"]
-    assert result["shared_credential_surfaces"] == {
-        "SHARED_API_TOKEN": ["server:gw", "server:upstream"]
-    }

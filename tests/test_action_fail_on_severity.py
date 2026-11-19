@@ -41,27 +41,10 @@ def _workspace(tmp_path: Path) -> tuple[Path, dict[str, str]]:
         json.dumps(
             {
                 "mcpServers": {
-                    "helper": {
-                        "command": "npx",
-                        "args": ["-y", "example-unpinned-mcp"],
-                        "tools": [
-                            {
-                                "name": "helper_tool",
-                                "description": "Helper tool",
-                                "inputSchema": {"type": "object"},
-                            }
-                        ],
-                    },
+                    "helper": {"command": "npx", "args": ["-y", "example-unpinned-mcp"]},
                     "fs": {
                         "command": "npx",
                         "args": ["-y", "@modelcontextprotocol/server-filesystem", "/"],
-                        "tools": [
-                            {
-                                "name": "read_file",
-                                "description": "Read a file",
-                                "inputSchema": {"type": "object"},
-                            }
-                        ],
                     },
                 }
             }

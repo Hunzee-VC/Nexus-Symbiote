@@ -8,6 +8,7 @@ import math
 import os
 import re
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -259,11 +260,11 @@ def _failure(exc: Exception) -> click.ClickException:
     return click.ClickException(neutralize(exc))
 
 
-def _load_bom(path: str | Path) -> AIBOM:
+def _load_bom_with_bytes(path: str | Path) -> tuple[AIBOM, bytes]:
     # Parser and validation messages can quote attacker-controlled input; name only the
     # class of the problem. A NativeFormatError names it without quoting the document.
     try:
-        return AIBOM.load(Path(path))
+        return AIBOM.load_with_bytes(Path(path))
     except NativeFormatError as exc:
         raise click.ClickException(
             f"{neutralize(path)} is not a valid native AIBOM file. {neutralize(exc)}"
@@ -272,6 +273,10 @@ def _load_bom(path: str | Path) -> AIBOM:
         raise click.ClickException(
             f"{neutralize(path)} is not a valid native AIBOM file. Reason: {_input_problem(exc)}."
         ) from exc
+
+
+def _load_bom(path: str | Path) -> AIBOM:
+    return _load_bom_with_bytes(path)[0]
 
 
 def _project_root(value: str | Path, *, label: str) -> Path:
@@ -1271,6 +1276,7 @@ def verify_artifact(
                 "allow_oms_dsse": oms_dsse,
                 "rekor_root_hash": rekor_root_hash,
                 "minimum_rekor_tree_size": minimum_rekor_tree_size,
+                **({"artifact_name": artifact_path} if oms_dsse else {}),
             }
         verified = verify_sigstore_digest(
             digest,
@@ -1468,23 +1474,20 @@ def _attestation_gate_options(command: Any) -> Any:
             click.option(
                 "--attestation-purpose",
                 type=click.Choice(["generated", "reviewed"]),
-                default="reviewed",
-                show_default=True,
-                help="Purpose the attestation must have been signed for.",
+                default=None,
+                help="Purpose the attestation must have been signed for (default: reviewed).",
             ),
             click.option(
                 "--attestation-threshold",
                 type=click.IntRange(min=1, max=32),
-                default=1,
-                show_default=True,
-                help="Minimum number of distinct trusted keys that must have signed.",
+                default=None,
+                help="Minimum number of distinct trusted keys that must have signed (default: 1).",
             ),
             click.option(
                 "--attestation-match",
                 type=click.Choice(["bytes", "content"]),
-                default="bytes",
-                show_default=True,
-                help="bytes: AIBOM_PATH is the attested file; content: same inventory content digest.",
+                default=None,
+                help="bytes (default): AIBOM_PATH is the attested file; content: same inventory content digest.",
             ),
             click.option(
                 "--attestation-max-age-days",
@@ -1496,6 +1499,42 @@ def _attestation_gate_options(command: Any) -> Any:
     ):
         command = option(command)
     return command
+
+
+def _resolve_attestation_gate_options(
+    attestation_envelope: Path | None,
+    trusted_keys: tuple[Path, ...],
+    attestation_purpose: str | None,
+    attestation_threshold: int | None,
+    attestation_match: str | None,
+    attestation_max_age_days: int | None,
+) -> tuple[str, int, str, int | None]:
+    if attestation_envelope is None:
+        for flag, supplied in (
+            ("--trusted-key", bool(trusted_keys)),
+            ("--attestation-purpose", attestation_purpose is not None),
+            ("--attestation-threshold", attestation_threshold is not None),
+            ("--attestation-match", attestation_match is not None),
+            ("--attestation-max-age-days", attestation_max_age_days is not None),
+        ):
+            if supplied:
+                raise click.UsageError(f"{flag} requires --require-attestation")
+    return (
+        "reviewed" if attestation_purpose is None else attestation_purpose,
+        1 if attestation_threshold is None else attestation_threshold,
+        "bytes" if attestation_match is None else attestation_match,
+        attestation_max_age_days,
+    )
+
+
+def _raise_on_misplaced_attestation_key(attestation_report: Mapping[str, object]) -> None:
+    if attestation_report.get("verified"):
+        return
+    detail = str(attestation_report.get("detail", ""))
+    if attestation_report.get("reason") == "key-invalid" and (
+        "must lie outside" in detail or "hard links" in detail or "cannot be inspected" in detail
+    ):
+        raise click.UsageError(detail)
 
 
 @main.command()
@@ -1564,9 +1603,9 @@ def validate(
     allow_unsigned_discovery: bool = False,
     attestation_envelope: Path | None = None,
     trusted_keys: tuple[Path, ...] = (),
-    attestation_purpose: str = "reviewed",
-    attestation_threshold: int = 1,
-    attestation_match: str = "bytes",
+    attestation_purpose: str | None = None,
+    attestation_threshold: int | None = None,
+    attestation_match: str | None = None,
     attestation_max_age_days: int | None = None,
 ) -> None:
     """Validate an AIBOM for completeness and integrity.
@@ -1576,9 +1615,17 @@ def validate(
     local collection of that project, unless the policy skips the completeness check.
     """
     _unsigned_discovery_flags(fail_on_unsigned_discovery, allow_unsigned_discovery)
-    if trusted_keys and attestation_envelope is None:
-        raise click.UsageError("--trusted-key requires --require-attestation")
-    bom = _load_bom(aibom_path)
+    resolved_purpose, resolved_threshold, resolved_match, resolved_max_age = (
+        _resolve_attestation_gate_options(
+            attestation_envelope,
+            trusted_keys,
+            attestation_purpose,
+            attestation_threshold,
+            attestation_match,
+            attestation_max_age_days,
+        )
+    )
+    bom, raw_bom_bytes = _load_bom_with_bytes(aibom_path)
 
     from nexus_symbiote.attestation_cli import verify_gate_attestation
     from nexus_symbiote.validators.completeness import (
@@ -1650,12 +1697,14 @@ def validate(
             Path(aibom_path),
             attestation_envelope,
             trusted_keys=trusted_keys,
-            purpose=attestation_purpose,
-            threshold=attestation_threshold,
-            match=attestation_match,
-            max_age_days=attestation_max_age_days,
+            purpose=resolved_purpose,
+            threshold=resolved_threshold,
+            match=resolved_match,
+            max_age_days=resolved_max_age,
             project=root,
+            subject_bytes=raw_bom_bytes,
         )
+        _raise_on_misplaced_attestation_key(attestation_report)
         passed = passed and bool(attestation_report["verified"])
     discovery: dict[str, Any] | None = None
     if root is not None and discovery_signature_required(
@@ -1788,16 +1837,24 @@ def risk(
     require_discovery_signature: bool = False,
     attestation_envelope: Path | None = None,
     trusted_keys: tuple[Path, ...] = (),
-    attestation_purpose: str = "reviewed",
-    attestation_threshold: int = 1,
-    attestation_match: str = "bytes",
+    attestation_purpose: str | None = None,
+    attestation_threshold: int | None = None,
+    attestation_match: str | None = None,
     attestation_max_age_days: int | None = None,
 ) -> None:
     """Score supply-chain risks in an AIBOM."""
     _unsigned_discovery_flags(fail_on_unsigned_discovery, allow_unsigned_discovery)
-    if trusted_keys and attestation_envelope is None:
-        raise click.UsageError("--trusted-key requires --require-attestation")
-    bom = _load_bom(aibom_path)
+    resolved_purpose, resolved_threshold, resolved_match, resolved_max_age = (
+        _resolve_attestation_gate_options(
+            attestation_envelope,
+            trusted_keys,
+            attestation_purpose,
+            attestation_threshold,
+            attestation_match,
+            attestation_max_age_days,
+        )
+    )
+    bom, raw_bom_bytes = _load_bom_with_bytes(aibom_path)
 
     from nexus_symbiote.attestation_cli import verify_gate_attestation
     from nexus_symbiote.validators.completeness import carries_discovery_evidence
@@ -1820,12 +1877,14 @@ def risk(
             Path(aibom_path),
             attestation_envelope,
             trusted_keys=trusted_keys,
-            purpose=attestation_purpose,
-            threshold=attestation_threshold,
-            match=attestation_match,
-            max_age_days=attestation_max_age_days,
+            purpose=resolved_purpose,
+            threshold=resolved_threshold,
+            match=resolved_match,
+            max_age_days=resolved_max_age,
             project=root,
+            subject_bytes=raw_bom_bytes,
         )
+        _raise_on_misplaced_attestation_key(attestation_report)
         if not attestation_report["verified"]:
             attestation_failure_reason = (
                 f"attestation verification failed: {attestation_report['detail']} "

@@ -266,17 +266,7 @@ SKIP_BOTH = SKIP_COMPLETENESS + "  require_integrity: false\n"
 
 def _mcp_project(root: Path, policy: str | None = None) -> Path:
     root.mkdir(parents=True)
-    server = {
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem@1.0.0"],
-        "tools": [
-            {
-                "name": "read_file",
-                "description": "Read a file",
-                "inputSchema": {"type": "object"},
-            }
-        ],
-    }
+    server = {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem@1.0.0"]}
     (root / ".mcp.json").write_text(json.dumps({"mcpServers": {"filesystem": server}}))
     (root / "CLAUDE.md").write_text("Be helpful.\n")
     if policy is not None:
@@ -297,7 +287,7 @@ def _without_mcp(inventory: Path, output: Path) -> Path:
     dropped = {
         component["bom_ref"]
         for component in document["components"]
-        if component["component_type"] in {"mcp-server", "mcp-client", "tool"}
+        if component["component_type"] in {"mcp-server", "mcp-client"}
     }
     assert dropped
     document["components"] = [c for c in document["components"] if c["bom_ref"] not in dropped]

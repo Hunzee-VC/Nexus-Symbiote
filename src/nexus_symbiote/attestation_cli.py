@@ -39,8 +39,15 @@ _REVISION = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 T = TypeVar("T")
 
 
-def _failure(operation: str, reason: str, detail: str) -> click.ClickException:
-    return click.ClickException(f"attestation {operation} failed: {detail} ({reason})")
+class _AttestationFailure(click.ClickException):
+    def __init__(self, operation: str, reason: str, detail: str) -> None:
+        super().__init__(f"attestation {operation} failed: {detail} ({reason})")
+        self.reason = reason
+        self.detail = detail
+
+
+def _failure(operation: str, reason: str, detail: str) -> _AttestationFailure:
+    return _AttestationFailure(operation, reason, detail)
 
 
 def _load(operation: str, role: str, load: Callable[[], T]) -> T:
@@ -210,6 +217,86 @@ def _load_trusted_public(path: Path) -> object:
     return public
 
 
+def _subject_bytes(subject: Path, preloaded: bytes | None) -> bytes:
+    if preloaded is None:
+        return _read(subject, MAX_SUBJECT_BYTES)
+    if len(preloaded) > MAX_SUBJECT_BYTES:
+        raise _InputTooLargeError
+    return preloaded
+
+
+def _verify_core(
+    subject: Path,
+    envelope: Path,
+    *,
+    trusted_keys: tuple[Path, ...],
+    purpose: str,
+    threshold: int,
+    match: str,
+    max_age_days: int | None,
+    subject_bytes: bytes | None = None,
+) -> tuple[object, dict[str, object]]:
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    from nexus_symbiote import attestation
+    from nexus_symbiote.runtime import key_id
+
+    ring: dict[str, Ed25519PublicKey] = {}
+    for path in trusted_keys:
+        public = cast(
+            Ed25519PublicKey,
+            _load(
+                "verification", "trusted key file", functools.partial(_load_trusted_public, path)
+            ),
+        )
+        ring[key_id(public)] = public
+    if threshold > len(ring):
+        raise click.BadParameter(
+            f"must be at most the number of distinct trusted keys ({len(ring)})",
+            param_hint="'--threshold'",
+        )
+    raw = _load(
+        "verification",
+        "envelope file",
+        functools.partial(_read, envelope, attestation.MAX_ENVELOPE_BYTES),
+    )
+    data = _load(
+        "verification",
+        "subject file",
+        functools.partial(_subject_bytes, subject, subject_bytes),
+    )
+    try:
+        verified = attestation.verify_attestation(
+            attestation.parse_envelope(raw),
+            data,
+            trusted_keys=ring,
+            purpose=cast(attestation.Purpose, purpose),
+            threshold=threshold,
+            match=cast(attestation.Match, match),
+            max_age=None if max_age_days is None else timedelta(days=max_age_days),
+        )
+    except attestation.AttestationError as exc:
+        raise _failure("verification", exc.reason, str(exc)) from None
+    predicate = verified.predicate
+    facts: dict[str, object] = {
+        "attestation_verified": True,
+        "purpose": predicate.purpose,
+        "signers": list(verified.signers),
+        "match": verified.match,
+        "subject_sha256": verified.subject_sha256,
+        "attested_sha256": verified.attested_sha256,
+        "subject_format": predicate.subject_format,
+        **predicate.model_dump(
+            mode="json",
+            include={"spec_version", "content_digest", "content_profile"},
+            exclude_none=True,
+        ),
+        "signed_at": predicate.model_dump(mode="json")["signed_at"],
+        **predicate.model_dump(mode="json", include={"source_revision"}, exclude_none=True),
+    }
+    return verified, facts
+
+
 @click.command("verify-attestation")
 @click.argument("subject", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.argument("envelope", type=click.Path(exists=True, dir_okay=False, path_type=Path))
@@ -268,63 +355,20 @@ def verify_attestation(
     purpose and when, by the signer's clock. It does not establish that SUBJECT is
     accurate, complete or safe, or that it is the newest file the signers attested.
     """
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-
     from nexus_symbiote import attestation
-    from nexus_symbiote.runtime import key_id
 
     _check_trust_anchors(trusted_keys, (subject, envelope))
-    ring: dict[str, Ed25519PublicKey] = {}
-    for path in trusted_keys:
-        public = cast(
-            Ed25519PublicKey,
-            _load(
-                "verification", "trusted key file", functools.partial(_load_trusted_public, path)
-            ),
-        )
-        ring[key_id(public)] = public
-    if threshold > len(ring):
-        raise click.BadParameter(
-            f"must be at most the number of distinct trusted keys ({len(ring)})",
-            param_hint="'--threshold'",
-        )
-    raw = _load(
-        "verification",
-        "envelope file",
-        functools.partial(_read, envelope, attestation.MAX_ENVELOPE_BYTES),
+    raw_verified, facts = _verify_core(
+        subject,
+        envelope,
+        trusted_keys=trusted_keys,
+        purpose=purpose,
+        threshold=threshold,
+        match=match,
+        max_age_days=max_age_days,
     )
-    data = _load(
-        "verification", "subject file", functools.partial(_read, subject, MAX_SUBJECT_BYTES)
-    )
-    try:
-        verified = attestation.verify_attestation(
-            attestation.parse_envelope(raw),
-            data,
-            trusted_keys=ring,
-            purpose=cast(attestation.Purpose, purpose),
-            threshold=threshold,
-            match=cast(attestation.Match, match),
-            max_age=None if max_age_days is None else timedelta(days=max_age_days),
-        )
-    except attestation.AttestationError as exc:
-        raise _failure("verification", exc.reason, str(exc)) from None
+    verified = cast(attestation.VerifiedAttestation, raw_verified)
     predicate = verified.predicate
-    facts: dict[str, object] = {
-        "attestation_verified": True,
-        "purpose": predicate.purpose,
-        "signers": list(verified.signers),
-        "match": verified.match,
-        "subject_sha256": verified.subject_sha256,
-        "attested_sha256": verified.attested_sha256,
-        "subject_format": predicate.subject_format,
-        **predicate.model_dump(
-            mode="json",
-            include={"spec_version", "content_digest", "content_profile"},
-            exclude_none=True,
-        ),
-        "signed_at": predicate.model_dump(mode="json")["signed_at"],
-        **predicate.model_dump(mode="json", include={"source_revision"}, exclude_none=True),
-    }
     if json_output:
         click.echo(json_text(json.dumps(facts, indent=2)))
         return
@@ -363,26 +407,39 @@ def verify_gate_attestation(
     match: str = "bytes",
     max_age_days: int | None = None,
     project: Path | None = None,
+    subject_bytes: bytes | None = None,
 ) -> dict[str, object]:
     """Verify an attestation for a gate command and return structured verification facts."""
-    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-
-    from nexus_symbiote import attestation
-    from nexus_symbiote.runtime import key_id
-
-    if not trusted_keys:
+    inputs = (subject, envelope) if project is None else (subject, envelope, project)
+    holders = "SUBJECT, ENVELOPE" if project is None else "SUBJECT, ENVELOPE or --project"
+    try:
+        _check_key_placement(trusted_keys, inputs, option="--trusted-key", holders=holders)
+        _, facts = _verify_core(
+            subject,
+            envelope,
+            trusted_keys=trusted_keys,
+            purpose=purpose,
+            threshold=threshold,
+            match=match,
+            max_age_days=max_age_days,
+            subject_bytes=subject_bytes,
+        )
+    except _AttestationFailure as exc:
+        return {
+            "verified": False,
+            "status": "fail",
+            "reason": exc.reason,
+            "detail": exc.detail,
+            "signers": [],
+        }
+    except click.BadParameter as exc:
         return {
             "verified": False,
             "status": "fail",
             "reason": "configuration-invalid",
-            "detail": "--require-attestation requires at least one --trusted-key",
+            "detail": exc.message,
             "signers": [],
         }
-    inputs = (subject, envelope) if project is None else (subject, envelope, project)
-    try:
-        _check_key_placement(
-            trusted_keys, inputs, option="--trusted-key", holders="SUBJECT, ENVELOPE"
-        )
     except click.ClickException as exc:
         return {
             "verified": False,
@@ -391,104 +448,10 @@ def verify_gate_attestation(
             "detail": exc.format_message(),
             "signers": [],
         }
-    ring: dict[str, Ed25519PublicKey] = {}
-    for path in trusted_keys:
-        try:
-            public = cast(Ed25519PublicKey, _load_trusted_public(path))
-        except _KeyFileError as exc:
-            return {
-                "verified": False,
-                "status": "fail",
-                "reason": "key-invalid",
-                "detail": str(exc),
-                "signers": [],
-            }
-        except _InputTooLargeError:
-            return {
-                "verified": False,
-                "status": "fail",
-                "reason": "input-too-large",
-                "detail": "the trusted key file exceeds its size limit",
-                "signers": [],
-            }
-        except OSError:
-            return {
-                "verified": False,
-                "status": "fail",
-                "reason": "input-unreadable",
-                "detail": "the trusted key file is not a readable regular file reached without symbolic links",
-                "signers": [],
-            }
-        ring[key_id(public)] = public
-    if threshold > len(ring):
-        return {
-            "verified": False,
-            "status": "fail",
-            "reason": "configuration-invalid",
-            "detail": f"threshold ({threshold}) exceeds the number of distinct trusted keys ({len(ring)})",
-            "signers": [],
-        }
-    for role, target, limit in (
-        ("envelope file", envelope, attestation.MAX_ENVELOPE_BYTES),
-        ("subject file", subject, MAX_SUBJECT_BYTES),
-    ):
-        try:
-            content = _read(target, limit)
-        except _InputTooLargeError:
-            return {
-                "verified": False,
-                "status": "fail",
-                "reason": "input-too-large",
-                "detail": f"the {role} exceeds its size limit",
-                "signers": [],
-            }
-        except OSError:
-            return {
-                "verified": False,
-                "status": "fail",
-                "reason": "input-unreadable",
-                "detail": f"the {role} is not a readable regular file reached without symbolic links",
-                "signers": [],
-            }
-        if role == "envelope file":
-            raw = content
-        else:
-            data = content
-    try:
-        verified = attestation.verify_attestation(
-            attestation.parse_envelope(raw),
-            data,
-            trusted_keys=ring,
-            purpose=cast(attestation.Purpose, purpose),
-            threshold=threshold,
-            match=cast(attestation.Match, match),
-            max_age=None if max_age_days is None else timedelta(days=max_age_days),
-        )
-    except attestation.AttestationError as exc:
-        return {
-            "verified": False,
-            "status": "fail",
-            "reason": exc.reason,
-            "detail": str(exc),
-            "signers": [],
-        }
-    predicate = verified.predicate
     return {
         "verified": True,
         "status": "pass",
-        "purpose": predicate.purpose,
-        "signers": list(verified.signers),
-        "match": verified.match,
-        "subject_sha256": verified.subject_sha256,
-        "attested_sha256": verified.attested_sha256,
-        "subject_format": predicate.subject_format,
-        **predicate.model_dump(
-            mode="json",
-            include={"spec_version", "content_digest", "content_profile"},
-            exclude_none=True,
-        ),
-        "signed_at": predicate.model_dump(mode="json")["signed_at"],
-        **predicate.model_dump(mode="json", include={"source_revision"}, exclude_none=True),
+        **{k: v for k, v in facts.items() if k != "attestation_verified"},
     }
 
 

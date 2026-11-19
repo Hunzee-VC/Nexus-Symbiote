@@ -64,7 +64,6 @@ change them. See [collection limits](collection-limits.md).
 | [`verify-artifact`](#verify-artifact) | offline | Check a file's SHA-256, and optionally its Sigstore bundle |
 | [`verify-discovery`](#verify-discovery) | offline | Check that a ShadowScan report's bytes match the digest a BOM records; with `--projection` or `--bundle`, also compare the BOM's imported components with the report |
 | [`export-inventory`](#export-inventory) | offline | Write the reviewed repository agent as an approved inventory that ShadowScan's `--inventory` accepts |
-| [`export-policy`](#export-policy) | offline | Export a default-deny Cedar, Rego, or JSON runtime allowlist from an inventory |
 | [`init`](#init) | offline | Create a `.nexus-symbiote.yaml` policy file |
 | [`runtime keygen`](#runtime-keygen) | offline | Create an Ed25519 key pair for runtime contracts |
 | [`runtime sign`](#runtime-sign) | offline | Sign a runtime contract |
@@ -269,8 +268,8 @@ directory above the policy are owned by root or by you.
 
 | Command | Document |
 |---|---|
-| `validate --json-output` | `passed`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `project-not-reconciled` when the project policy skips the completeness check); `verification_mode` (`offline` or `attestation-verified` when `--require-attestation` succeeds); `policy_source` and `policy_weakened`; `completeness` and `integrity`, each with a `status` (`pass`, `fail`, `unknown` for integrity, or `skipped` with `skipped_by`) and the validator's report (its own `assessment_basis`, issues, `issues_omitted`; for completeness `supplier_claims` and `supplier_claims_omitted`; for integrity `bytes_charged`); `discovery_producer` (`null` without discovery evidence or a producer check, otherwise a `status` of `verified`, `failed`, `not-applicable` or `not-verified`, with `problems`); `unsigned_discovery` (`null`, or why unverified discovery evidence failed the run); `minimum_assurance_level`, `assurance_errors` and `graph_issues`. |
-| `risk --json-output` | `passed`; `overall_score` (`null` when the run is not scored: `--project` reconciliation or the discovery producer check failed, or unverified discovery evidence was gated); `risk_level`; `coverage_status` and `coverage_gaps`; `gate_reasons`; `gate` (the effective thresholds, cutoff, ignored categories and suppression count, each with a `*_source` of `cli`, `project policy` or `built-in`); `findings`, each with its `fingerprint`; `severity_counts`; `category_scores`; `ignored_findings`; `suppressed_findings`, `suppressions_expired`, `suppressions_unused` and `suppressions_stale`; `total_components` and `components_with_risks`; `warning_threshold_exceeded`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `unsigned-discovery-evidence` when unverified discovery evidence fails the run); `verification_mode` (`offline` or `attestation-verified` when `--require-attestation` succeeds); `supplier_claims` and `supplier_claims_omitted`; `discovery_producer` (`verified`, `failed`, `not-verified` or `not-applicable`); `score_threshold` (`null` with `--no-score-threshold`); `fail_on_severity`; `policy_source` and `policy_weakened`. A failed reconciliation has the same keys, with empty findings. |
+| `validate --json-output` | `passed`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `project-not-reconciled` when the project policy skips the completeness check); `verification_mode` (`static-offline`); `policy_source` and `policy_weakened`; `completeness` and `integrity`, each with a `status` (`pass`, `fail`, `unknown` for integrity, or `skipped` with `skipped_by`) and the validator's report (its own `assessment_basis`, issues, `issues_omitted`; for completeness `supplier_claims` and `supplier_claims_omitted`; for integrity `bytes_charged`); optional `attestation` when `--require-attestation` is given; `discovery_producer` (`null` without discovery evidence or a producer check, otherwise a `status` of `verified`, `failed`, `not-applicable` or `not-verified`, with `problems`); `unsigned_discovery` (`null`, or why unverified discovery evidence failed the run); `minimum_assurance_level`, `assurance_errors` and `graph_issues`. |
+| `risk --json-output` | `passed`; `overall_score` (`null` when the run is not scored: `--project` reconciliation or the discovery producer check failed, or unverified discovery evidence was gated); `risk_level`; `coverage_status` and `coverage_gaps`; `gate_reasons`; `gate` (the effective thresholds, cutoff, ignored categories and suppression count, each with a `*_source` of `cli`, `project policy` or `built-in`); `findings`, each with its `fingerprint`; `severity_counts`; `category_scores`; `ignored_findings`; `suppressed_findings`, `suppressions_expired`, `suppressions_unused` and `suppressions_stale`; `total_components` and `components_with_risks`; `warning_threshold_exceeded`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `unsigned-discovery-evidence` when unverified discovery evidence fails the run); `verification_mode` (`static-offline`); optional `attestation` when `--require-attestation` is given; `supplier_claims` and `supplier_claims_omitted`; `discovery_producer` (`verified`, `failed`, `not-verified` or `not-applicable`); `score_threshold` (`null` with `--no-score-threshold`); `fail_on_severity`; `policy_source` and `policy_weakened`. A failed reconciliation has the same keys, with empty findings. |
 | `diff --json-output` | `has_changes`, `total_changes`, `components_added`, `components_removed`, `components_modified`, `dependencies_added`, `dependencies_removed` (each with its `severity` and `conditions`), `security_alerts`, `metadata_changes` and `notes`. |
 | `summary --json-output` | `total_components`, `component_types`, `total_dependencies`, `total_risks`, `risk_breakdown` and the inventory's `completeness` claim. |
 | `minimum-elements --format json` | `format` (`nexus-symbiote/minimum-elements/v1`), `edition`, `guidance`, `statement`, `evaluated` (the standard, the projection and the tool version), `subjects`, `coverage` (`present`, `assessable` and `percent`), `counts` per status, `gate` (`null` without `--fail-under`), `clusters` and `elements`; see [G7 AI SBOM minimum elements](minimum-elements.md#running-the-command). |
@@ -423,7 +422,6 @@ nexus-symbiote crosswalk [OPTIONS] AIBOM_PATH
 | `--framework` `NAME` | Report only this framework edition: `owasp-llm-2025`, `owasp-llm-2026`, `owasp-asi-2026`, `mitre-atlas-2026.10`, `nist-ai-rmf-1.0`, `eu-ai-act-2024`, `iso-iec-42001-2023` or `cwe`. Repeatable; default: every edition. |
 | `--format` `json\|markdown` | Report format (default: `json`). |
 | `-o`, `--output` `PATH` | Write the report to this file instead of standard output. A path that names the inventory is a usage error. |
-| `--include-evidence-pack` | Attach cryptographic inventory digests, verified models, pinned MCP servers, and fingerprinted tools to the report. |
 
 The findings are those that `risk` scores under the built-in policy; no project policy
 is read. For each framework edition the report lists every entry that a finding
@@ -536,20 +534,6 @@ inventory is invalid, holds no repository agent or more than one, or its agent
 has no declared identity and `--include-unnamed` is absent; see
 [Approve agents for ShadowScan reconciliation](shadowscan-inventory-export.md).
 
-### `export-policy`
-
-Offline: export a default-deny Cedar, Rego, or JSON runtime allowlist from an inventory.
-
-```text
-nexus-symbiote export-policy [OPTIONS] INVENTORY
-```
-
-| Option | Description |
-|---|---|
-| `--format` `cedar\|rego\|json` | Target authorization policy language (default: `cedar`). |
-| `--verified-only` / `--include-declared` | Allowlist only observed/verified components with pinned digests, or include declared entries (default: `--verified-only`). |
-| `-o`, `--output` `PATH` | Write the policy to this file instead of standard output. |
-
 ### `graph`
 
 Write a view of an inventory's associations, risk classes and exposure paths.
@@ -649,12 +633,12 @@ nexus-symbiote risk [OPTIONS] AIBOM_PATH
 | `--require-discovery-signature` | Require the operator signature policy to verify any ShadowScan report the inventory records or the project contains, whatever the project policy says; requires --project. JSON output reports the result as `discovery_producer` |
 | `--fail-on-unsigned-discovery` | Exit with status 1 when the BOM's ShadowScan evidence is unverified |
 | `--allow-unsigned-discovery` | Accept unverified discovery evidence explicitly (still warns); required in CI |
-| `--require-attestation` `ENVELOPE` | Require a valid DSSE inventory attestation envelope before passing the gate; fails closed on missing, altered, wrongly purposed, or untrusted envelopes. |
-| `--trusted-key` `FILE` | Operator Ed25519 public key file (`.pub`, PEM, or raw hex) for `--require-attestation` (repeatable). |
-| `--attestation-purpose` `generated\|reviewed` | Required attestation purpose when `--require-attestation` is set (default: `reviewed`). |
-| `--attestation-threshold` `INT` | Minimum distinct trusted key signatures required on `--require-attestation` (default: `1`). |
-| `--attestation-match` `document-sha256\|inventory-jcs-sha256` | Digest binding mode for `--require-attestation` (default: `document-sha256`). |
-| `--attestation-max-age-days` `INT` | Maximum age in days for `--require-attestation` (default: `90`; `0` disables age check). |
+| `--require-attestation` `ENVELOPE` | Require a verified DSSE inventory attestation envelope for `AIBOM_PATH`; requires at least one `--trusted-key`. |
+| `--trusted-key` `FILE` | Trusted Ed25519 public key PEM for `--require-attestation`; must lie outside every git working tree holding `AIBOM_PATH`, the envelope, `--project` or the current directory (repeatable). |
+| `--attestation-purpose` `generated\|reviewed` | Purpose the attestation must have been signed for (default: `reviewed`). |
+| `--attestation-threshold` `INTEGER RANGE` | Minimum number of distinct trusted keys that must have signed, 1 to 32 (default: `1`). |
+| `--attestation-match` `bytes\|content` | `bytes` (default): `AIBOM_PATH` is the attested file; `content`: same inventory content digest. |
+| `--attestation-max-age-days` `INTEGER RANGE` | Refuse an attestation signed more than this many days ago (1 to 36500). |
 
 The report gives the score, the assessment basis, coverage, the severity counts and
 the top 15 findings, each followed by its `fingerprint:` line (`--json-output` lists all). Under `Gate: PASSED` or
@@ -898,12 +882,12 @@ nexus-symbiote validate [OPTIONS] AIBOM_PATH
 | `--require-discovery-signature` | Require the operator signature policy to verify any ShadowScan report the inventory records or the project contains, whatever the project policy says; requires --project |
 | `--fail-on-unsigned-discovery` | Exit with status 1 when the BOM's ShadowScan evidence is unverified |
 | `--allow-unsigned-discovery` | Accept unverified discovery evidence explicitly (still warns); required in CI |
-| `--require-attestation` `ENVELOPE` | Require a valid DSSE inventory attestation envelope before passing the gate; fails closed on missing, altered, wrongly purposed, or untrusted envelopes. |
-| `--trusted-key` `FILE` | Operator Ed25519 public key file (`.pub`, PEM, or raw hex) for `--require-attestation` (repeatable). |
-| `--attestation-purpose` `generated\|reviewed` | Required attestation purpose when `--require-attestation` is set (default: `reviewed`). |
-| `--attestation-threshold` `INT` | Minimum distinct trusted key signatures required on `--require-attestation` (default: `1`). |
-| `--attestation-match` `document-sha256\|inventory-jcs-sha256` | Digest binding mode for `--require-attestation` (default: `document-sha256`). |
-| `--attestation-max-age-days` `INT` | Maximum age in days for `--require-attestation` (default: `90`; `0` disables age check). |
+| `--require-attestation` `ENVELOPE` | Require a verified DSSE inventory attestation envelope for `AIBOM_PATH`; requires at least one `--trusted-key`. |
+| `--trusted-key` `FILE` | Trusted Ed25519 public key PEM for `--require-attestation`; must lie outside every git working tree holding `AIBOM_PATH`, the envelope, `--project` or the current directory (repeatable). |
+| `--attestation-purpose` `generated\|reviewed` | Purpose the attestation must have been signed for (default: `reviewed`). |
+| `--attestation-threshold` `INTEGER RANGE` | Minimum number of distinct trusted keys that must have signed, 1 to 32 (default: `1`). |
+| `--attestation-match` `bytes\|content` | `bytes` (default): `AIBOM_PATH` is the attested file; `content`: same inventory content digest. |
+| `--attestation-max-age-days` `INTEGER RANGE` | Refuse an attestation signed more than this many days ago (1 to 36500). |
 
 Every report states its assessment basis. Without `--project` it is `supplied-bom`:
 only the inventory's own claims were checked, its coverage claim and its internal
@@ -1012,8 +996,6 @@ nexus-symbiote verify-live [OPTIONS] AIBOM_PATH
 | `--json-output` | Output the verification report as JSON. |
 | `--record` | Print an unsigned candidate BOM with the observed descriptors instead of a report; exits 1 when served tools, declarations or the server identity drifted, unless `--accept-drift`. |
 | `--accept-drift` | With `--record`, exit 0 although changed or new tools, declarations or server identity were recorded. |
-| `--transport-evidence` `FILE` | Recorded `discover-mcp --record` inventory providing live observation evidence for remote MCP servers (repeatable). |
-| `--require-transport-evidence` | Fail closed when any remote MCP server in the inventory lacks verified `--transport-evidence` instead of skipping it as not verifiable here. |
 | `--no-isolation` | Explicitly allow execution without a PID namespace; printed as a warning. On Linux the launcher runs in its own process group under a wrapper that stays its parent as a child subreaper and ignores the signals it can, and cleanup kills the wrapper's whole tree, including a `clone(CLONE_PARENT)` child that has called `setsid` and what a launcher that already exited left behind. A launcher that kills its wrapper with SIGKILL can escape, except from a cgroup v2 child where one can be created, which cleanup also kills; the server then fails with `isolation-teardown-failed`, unless the launcher runs as root or holds `CAP_SYS_PTRACE` or `CAP_SYS_ADMIN`, which can hide the escape. Never opt out as root; doing so prints a second warning. Elsewhere cleanup is best effort. This is not a namespace or sandbox. |
 
 By default the launcher must run as pid 1 of a new user and PID namespace

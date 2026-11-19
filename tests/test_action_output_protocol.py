@@ -709,3 +709,36 @@ def test_validate_and_risk_require_attestation_gate(tmp_path):
         assert bad_doc["passed"] is False
         assert bad_doc["attestation"]["verified"] is False
         assert bad_doc["attestation"]["reason"] == "purpose-mismatch"
+
+        orphan = cli_runner.invoke(main, [cmd, str(bom), "--attestation-purpose", "reviewed"])
+        assert orphan.exit_code == 2
+        assert "--attestation-purpose requires --require-attestation" in orphan.output
+
+        planted_key = project / "planted.pub"
+        planted_key.write_bytes(pub_path.read_bytes())
+        planted_key.chmod(0o600)
+        misplaced = cli_runner.invoke(
+            main,
+            [
+                cmd,
+                str(bom),
+                "--project",
+                str(project),
+                "--require-attestation",
+                str(env_path),
+                "--trusted-key",
+                str(planted_key),
+            ],
+            env={"NEXUS_SYMBIOTE_SOURCE_BINDING_KEY": "k" * 32},
+        )
+        assert misplaced.exit_code == 2
+        assert "must lie outside" in misplaced.output
+
+    action_doc = yaml.safe_load((ROOT / "action.yml").read_text(encoding="utf-8"))
+    attest_step = next(
+        s
+        for s in action_doc["runs"]["steps"]
+        if s.get("name") == "Attest exported AIBOM provenance"
+    )
+    assert "success()" in attest_step["if"]
+    assert "always()" not in attest_step["if"]

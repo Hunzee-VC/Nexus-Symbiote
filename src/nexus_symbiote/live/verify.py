@@ -203,21 +203,9 @@ class LiveVerifyReport:
             )
         )
 
-    @property
-    def all_servers_verified(self) -> bool:
-        return self.complete and self.servers_skipped == 0
-
-    @property
-    def verification_scope(self) -> str:
-        if not self.complete:
-            return "incomplete"
-        return "all-servers" if self.servers_skipped == 0 else "partial-stdio-only"
-
     def to_dict(self) -> dict[str, Any]:
         return {
             "complete": self.complete,
-            "all_servers_verified": self.all_servers_verified,
-            "verification_scope": self.verification_scope,
             "servers_checked": self.servers_checked,
             "servers_reachable": self.servers_reachable,
             "servers_skipped": self.servers_skipped,
@@ -317,127 +305,11 @@ def _declaration(observation: PinnedObservation) -> _Declaration:
     return declaration
 
 
-def _verify_remote_evidence(
-    bom: AIBOM,
-    server: MCPServerComponent,
-    observed_bom: AIBOM,
-    observed_server: MCPServerComponent,
-    result: ServerVerifyResult,
-) -> bool:
-    """Compare an approved remote server against a recorded discover-mcp observation."""
-    approved = [
-        t
-        for t in bom.components
-        if isinstance(t, ToolComponent) and t.mcp_server_ref == server.bom_ref
-    ]
-    by_name = {t.name: t for t in approved}
-    if len(by_name) != len(approved):
-        result.reason = "ambiguous-approved-tools"
-        result.error = REASONS["ambiguous-approved-tools"]
-        return False
-    observed_tools = [
-        t
-        for t in observed_bom.components
-        if isinstance(t, ToolComponent) and t.mcp_server_ref == observed_server.bom_ref
-    ]
-    obs_by_name = {t.name: t for t in observed_tools}
-    if len(obs_by_name) != len(observed_tools):
-        result.reason = "invalid-descriptor"
-        result.error = REASONS["invalid-descriptor"]
-        return False
-    decl_hash = observed_server.properties.get("observed_declaration_hash")
-    ident_hash = observed_server.properties.get("observed_identity_hash")
-    if not isinstance(decl_hash, str) or not isinstance(ident_hash, str):
-        result.reason = "invalid-descriptor"
-        result.error = REASONS["invalid-descriptor"]
-        return False
-    result.reachable, result.status = True, "verified"
-    proto = observed_server.properties.get("observed_protocol_version")
-    result.protocol_version = proto if isinstance(proto, str) else None
-    result.declaration_hash = decl_hash
-    recorded = server.properties.get("observed_declaration_hash")
-    if recorded is not None:
-        result.declaration_status = "match" if recorded == decl_hash else "changed"
-    elif any(
-        observed_server.properties.get(f"observed_{key}")
-        for key in ("instructions", "prompts", "resource_templates")
-    ) or any(t.properties.get("descriptor_fields_outside_profile") for t in observed_tools):
-        result.declaration_status = "new"
-    else:
-        result.declaration_status = "match"
-    result.identity_hash = ident_hash
-    recorded_identity = server.properties.get("observed_identity_hash")
-    if recorded_identity is None:
-        result.identity_status = "unrecorded"
-    else:
-        result.identity_status = "match" if recorded_identity == ident_hash else "changed"
-    fingerprints: dict[str, str] = {}
-    for name, obs_tool in sorted(obs_by_name.items()):
-        if (
-            obs_tool.definition_hash_version != TOOL_DEFINITION_HASH_VERSION
-            or not obs_tool.definition_hash
-        ):
-            result.reason = "invalid-descriptor"
-            result.error = REASONS["invalid-descriptor"]
-            result.reachable, result.status = False, "failed"
-            result.tool_findings.clear()
-            return False
-        try:
-            alg, digest = normalize_digest(obs_tool.definition_hash, "sha256")
-            fp = f"{alg}:{digest}"
-        except ValueError:
-            result.reason = "invalid-descriptor"
-            result.error = REASONS["invalid-descriptor"]
-            result.reachable, result.status = False, "failed"
-            result.tool_findings.clear()
-            return False
-        fingerprints[name] = fp
-        old = by_name.get(name)
-        previous = None
-        if old is None:
-            status = "new"
-        elif old.definition_hash_version != TOOL_DEFINITION_HASH_VERSION or not old.definition_hash:
-            status = "unverifiable"
-        else:
-            try:
-                old_alg, old_digest = normalize_digest(old.definition_hash, "sha256")
-                previous = f"{old_alg}:{old_digest}"
-                status = "match" if previous == fp else "changed"
-            except ValueError:
-                status = "unverifiable"
-        unprofiled = obs_tool.properties.get("descriptor_fields_outside_profile") or ()
-        result.tool_findings.append(
-            LiveToolFinding(
-                name,
-                fp,
-                status,
-                previous_hash=previous if status == "changed" else None,
-                display_differs=bool(obs_tool.properties.get("displayed_descriptor_differs")),
-                observed_hash=obs_tool.properties.get("observed_descriptor_hash"),
-                unprofiled_fields=tuple(str(x) for x in unprofiled)
-                if isinstance(unprofiled, list | tuple)
-                else (),
-            )
-        )
-    for old in approved:
-        if old.name not in obs_by_name:
-            result.tool_findings.append(LiveToolFinding(old.name, old.definition_hash, "missing"))
-    result.live_schema_hash = hash_canonical(
-        {
-            "profile": TOOL_DEFINITION_HASH_VERSION,
-            "tools": dict(sorted(fingerprints.items())),
-        }
-    )
-    return True
-
-
 def verify_mcp_servers(
     bom: AIBOM,
     config_lookup: dict[str, dict[str, Any]] | None = None,
     *,
     trusted_launchers: dict[str, dict[str, str]] | None = None,
-    transport_evidence: list[AIBOM] | tuple[AIBOM, ...] = (),
-    require_transport_evidence: bool = False,
 ) -> LiveVerifyReport:
     """Bind collection to the exact server reference in an independent launch policy."""
     report = LiveVerifyReport()
@@ -451,13 +323,6 @@ def verify_mcp_servers(
         )
         return report
     launchers = trusted_launchers or {}
-    evidence_by_ref: dict[str, tuple[AIBOM, MCPServerComponent]] = {}
-    for evidence_bom in transport_evidence:
-        if validate_graph(evidence_bom):
-            continue
-        for comp in evidence_bom.components:
-            if isinstance(comp, MCPServerComponent):
-                evidence_by_ref[comp.bom_ref] = (evidence_bom, comp)
     for server in bom.components:
         if not isinstance(server, MCPServerComponent):
             continue
@@ -469,17 +334,6 @@ def verify_mcp_servers(
         # The label comes from the checkout; the operator's pin and a recorded command do not.
         pinned = server.bom_ref in launchers
         if remote and not server.command and not pinned:
-            if server.bom_ref in evidence_by_ref:
-                report.servers_checked += 1
-                obs_bom, obs_server = evidence_by_ref[server.bom_ref]
-                if _verify_remote_evidence(bom, server, obs_bom, obs_server, result):
-                    report.servers_reachable += 1
-                continue
-            if require_transport_evidence:
-                report.servers_checked += 1
-                result.status, result.reason = "failed", "remote-transport"
-                result.error = REASONS["remote-transport"]
-                continue
             result.status, result.reason = "not-verifiable", "remote-transport"
             result.error = REASONS["remote-transport"]
             report.servers_skipped += 1
