@@ -15,10 +15,10 @@ def _record_preparation(monkeypatch):
     prepared = []
 
     class RecordingScrubber(SecretScrubber):
-        def __init__(self, values=(), literals=()):
+        def __init__(self, values=()):
             values = tuple(values)
             prepared.append(values)
-            super().__init__(values, literals)
+            super().__init__(values)
 
     monkeypatch.setattr(mcp, "SecretScrubber", RecordingScrubber)
     return prepared

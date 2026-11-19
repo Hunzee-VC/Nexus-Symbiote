@@ -19,6 +19,7 @@ from nexus_symbiote.scanners.mcp import (
     MAX_CREDENTIAL_POSITIONS,
     MCPScanner,
     _credential_positions,
+    _server_hits,
     _server_launch,
     _server_secrets,
 )
@@ -386,7 +387,7 @@ def test_non_string_env_values_never_crash_or_leak(tmp_path, env):
     assert _servers(result) == {}
     text = _dump(result) + json.dumps(result.scan_failures) + json.dumps(result.surfaces_excluded)
     assert ENV_SENTINEL not in text
-    assert _credential_positions(env, [], [env]) == []
+    assert _positions({"env": env, "headers": env}) == []
 
 
 @pytest.mark.parametrize(
@@ -456,7 +457,7 @@ def test_the_finding_fires_exactly_where_the_scrubber_redacts_a_literal(field, v
         config["args"] = ["x@1.0.0", value]
     else:
         config[field] = {"API_TOKEN": value}
-    positions = _credential_positions(config["env"], config["args"], [config["headers"]])
+    positions = _positions(config)
     secrets = _server_secrets(config, _server_launch(config))
     assert bool(positions) is literal
     if positions:
@@ -564,13 +565,7 @@ def test_two_scans_of_a_literal_credential_are_byte_identical(tmp_path):
 
 
 def _positions(server: dict) -> list[tuple[str, str]]:
-    return _credential_positions(
-        server.get("env", {}),
-        server.get("args", []),
-        [server.get("headers", {})],
-        endpoints=[server[field] for field in ("url",) if field in server],
-        command=server.get("command", ""),
-    )
+    return _credential_positions(_server_hits(server))
 
 
 def test_the_review_benign_servers_raise_nothing_in_any_export(tmp_path):
@@ -1840,14 +1835,14 @@ H1_HEADER = {
         # A header's bearer value reused inside another server's env name.
         (
             {
-                "srv": H1_HEADER,
+                "srv": {**H1_HEADER, "headers": {"Authorization": "Bearer letmeinplease42"}},
                 "loc": {
                     "command": "npx",
                     "args": ["x@1.0.0"],
-                    "env": {"X_letmeinplease": VENDOR_TOKEN},
+                    "env": {"X_LETMEINPLEASE42": VENDOR_TOKEN},
                 },
             },
-            "letmeinplease",
+            "letmeinplease42",
             "loc",
             ["[redacted-1]"],
         ),
@@ -1880,6 +1875,11 @@ def test_a_name_holding_a_literal_the_file_reads_is_withheld_everywhere(
         assert list(found[server].env) == env
     else:
         assert "[redacted]" in found[server].properties["header_names"]
+    assert not any(secret in text for text in _cli_outputs(tmp_path, project))
+
+
+def _cli_outputs(tmp_path: Path, project: Path) -> list[str]:
+    """Scan JSON and SARIF, the risk text and VEX, each with what its command printed."""
     runner = CliRunner()
     outputs = []
     for fmt in ("json", "sarif"):
@@ -1894,7 +1894,189 @@ def test_a_name_holding_a_literal_the_file_reads_is_withheld_everywhere(
     assert runner.invoke(main, ["vex", "-o", str(vex), inventory]).exit_code == 0
     outputs += [risk.output, vex.read_text(encoding="utf-8")]
     assert CATEGORY in outputs[1] and CATEGORY in risk.output
-    assert not any(secret in text for text in outputs)
+    return outputs
+
+
+SESAME = "Open-Sesame-Pass"  # noqa: S105 - synthetic sentinel
+PARTIAL = "Kq7m-Zw9x-4Lp8-ZtQ2-vN5r"  # noqa: S105 - synthetic sentinel
+GH_SERVER = {"command": "npx", "args": ["-y", "some-mcp@1.0.0"]}
+
+
+def _holder(name: str, *, header: bool = False) -> dict:
+    if header:
+        return {"url": "https://example.invalid/mcp", "headers": {name: f"Bearer {VENDOR_TOKEN}"}}
+    return {**GH_SERVER, "env": {name: VENDOR_TOKEN}}
+
+
+@pytest.mark.parametrize(
+    "files,name",
+    [
+        # The password of a server the scanner refuses.
+        (
+            {
+                ".mcp.json": {
+                    "db": {**GH_SERVER, "disabled": "no", "env": {"DB_PASSWORD": SESAME}},
+                    "gh": _holder(SESAME),
+                }
+            },
+            SESAME,
+        ),
+        # A password of another client file.
+        (
+            {
+                ".mcp.json": {"db": {**GH_SERVER, "env": {"DB_PASSWORD": SESAME}}},
+                ".cursor/mcp.json": {"gh": _holder(SESAME)},
+            },
+            SESAME,
+        ),
+        # Another case, or "_" for "-".
+        (
+            {
+                ".mcp.json": {
+                    "db": {**GH_SERVER, "env": {"DB_PASSWORD": SESAME}},
+                    "gh": _holder("OPEN_SESAME_PASS"),
+                }
+            },
+            "OPEN_SESAME_PASS",
+        ),
+        (
+            {
+                ".mcp.json": {
+                    "db": {**GH_SERVER, "env": {"DB_PASSWORD": SESAME}},
+                    "gh": _holder("open-sesame-pass"),
+                }
+            },
+            "open-sesame-pass",
+        ),
+        (
+            {
+                ".mcp.json": {
+                    "db": {**GH_SERVER, "env": {"DB_PASSWORD": PARTIAL}},
+                    "gh": _holder(PARTIAL.replace("-", "_")),
+                }
+            },
+            PARTIAL.replace("-", "_"),
+        ),
+        # Twenty of a literal's 24 characters in a header name.
+        (
+            {
+                ".mcp.json": {
+                    "db": {**GH_SERVER, "env": {"DB_PASSWORD": PARTIAL}},
+                    "gh": _holder("X-" + PARTIAL[:20], header=True),
+                }
+            },
+            PARTIAL[:20],
+        ),
+        # An auth object's secret and the password of an endpoint URL.
+        (
+            {
+                ".mcp.json": {
+                    "db": {
+                        "url": "https://example.invalid/mcp",
+                        "auth": {"client_secret": SESAME},
+                    },
+                    "gh": _holder(SESAME),
+                }
+            },
+            SESAME,
+        ),
+        (
+            {
+                ".mcp.json": {
+                    "db": {"url": f"https://bot:{SESAME}@example.invalid/mcp"},
+                    "gh": _holder(SESAME),
+                }
+            },
+            SESAME,
+        ),
+    ],
+)
+def test_a_name_holding_any_literal_of_the_scan_is_withheld_from_every_output(
+    tmp_path, files, name
+):
+    project = tmp_path / "project"
+    for path, servers in files.items():
+        (project / path).parent.mkdir(parents=True, exist_ok=True)
+        (project / path).write_text(json.dumps({"mcpServers": servers}), encoding="utf-8")
+    gh = _servers(MCPScanner().scan(project))["gh"]
+    (finding,) = _findings(gh)
+    header = "url" in files[".cursor/mcp.json" if ".cursor/mcp.json" in files else ".mcp.json"].get(
+        "gh", {}
+    )
+    assert ("a header" if header else "an env key") in finding.detail
+    if not header:
+        assert list(gh.env) == ["[redacted-1]"]
+    outputs = _cli_outputs(tmp_path, project)
+    assert not any(name in text or SESAME in text for text in outputs)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "NEO4J_API_KEY",
+        "S3_SECRET_KEY",
+        "GH_TOKEN_2",
+        "GPT4_API_KEY",
+        "X-Api-Key-V2",
+        "spring.datasource.password",
+    ],
+)
+def test_a_credential_variable_name_with_digits_or_dots_stays_shown(tmp_path, name):
+    servers = {
+        "a": {**GH_SERVER, "args": ["-y", "some-mcp@1.0.0", "--api-key-env", name]},
+        "b": {**GH_SERVER, "env": {name: "${KEY}"}},
+        "c": {"url": "https://example.invalid/mcp", "headers": {name: "${KEY}"}},
+    }
+    found = _servers(_scan(tmp_path, servers))
+    assert list(found["b"].env) == [name]
+    assert found["c"].properties["header_names"] == [name]
+
+
+def test_a_word_authorization_value_leaves_other_servers_names_and_hashes(tmp_path):
+    def hash_of_b(value: str) -> tuple[list[str], str]:
+        servers = {
+            "a": {"url": "https://example.invalid/mcp", "headers": {"Authorization": value}},
+            "b": {**GH_SERVER, "env": {"production_db_host": "db.invalid", "X_letmeinplease": "1"}},
+        }
+        b = _servers(_scan(tmp_path, servers))["b"]
+        return list(b.env), b.properties["static_config_hash"]
+
+    reference = hash_of_b("Bearer ${TOKEN}")
+    assert reference[0] == ["X_letmeinplease", "production_db_host"]
+    assert hash_of_b("Bearer production") == reference
+    assert hash_of_b("Bearer letmeinplease") == reference
+    holder = {**GH_SERVER, "env": {"X_letmeinplease": VENDOR_TOKEN}}
+    servers = {"a": {**holder, "headers": {"Authorization": "Bearer letmeinplease"}}, "b": holder}
+    found = _servers(_scan(tmp_path, servers))
+    assert list(found["a"].env) == ["[redacted-1]"]
+    assert list(found["b"].env) == ["X_letmeinplease"]
+    (finding,) = _findings(found["b"])
+    assert "letmeinplease" not in finding.detail and "an env key" in finding.detail
+
+
+def test_a_declared_field_holding_a_literal_is_withheld(tmp_path):
+    servers = {"db": {**GH_SERVER, "env": {"DB_PASSWORD": PARTIAL}, PARTIAL: "x"}}
+    found = _servers(_scan(tmp_path, servers))
+    assert found["db"].properties["declared_fields"] == ["[redacted]", "args", "command", "env"]
+    assert PARTIAL not in _dump(_scan(tmp_path, servers))
+
+
+def test_names_are_checked_in_time_linear_in_the_servers(tmp_path):
+    def run(scale: int) -> object:
+        servers = {
+            f"s{index}": {
+                **GH_SERVER,
+                "env": {
+                    **{f"S{index}_SETTING_{item}_HOST": "db.invalid" for item in range(20)},
+                    f"S{index}_DB_PASSWORD": f"Kq7m{index:06d}Zw9xLp8",
+                },
+                "headers": {"Authorization": f"Bearer Tq{index:06d}Rv4Np7Xw"},
+            }
+            for index in range(150 * scale)
+        }
+        return _scan(tmp_path / f"scale{scale}", servers)
+
+    assert scaling_ratio(run, factor=4) < 7
 
 
 @pytest.mark.parametrize(

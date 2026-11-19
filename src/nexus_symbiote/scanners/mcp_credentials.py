@@ -1,13 +1,8 @@
 """Whether an MCP launch value is a literal credential, judged by its name and its value.
 
-This module reads one name and one value at a time: a launch position (an env value,
-a header, an argument word, an endpoint URL query) is chosen by the MCP collector. A
-value counts when it holds a known token shape or a private key under any name, an
-authorization scheme credential, a credential in URL user information or a
-credential-named query parameter, a credential pair of a connection string, a cookie
-or a JSON leaf, or, under a name that marks a credential, a value that reads as a
-literal: not a reference, a placeholder, a path, a locator, a number, prose or a
-setting. Every hit carries its literal, so a name that repeats one can be withheld.
+The MCP collector chooses each position (an env value, a header, an argument word, an
+endpoint URL query); this module reads its name and value. Every hit carries its
+literal, so a name that repeats one can be withheld.
 """
 
 from __future__ import annotations
@@ -67,28 +62,12 @@ _COMPOUND_KEYS = _words(
     "secretkey privatekey apikey accesskey apitoken sessionkey signingkey sshkey licensekey"
 )
 _CREDENTIAL_PAIRS = frozenset(
-    {
-        ("api", "key"),
-        ("access", "key"),
-        ("secret", "key"),
-        ("private", "key"),
-        ("account", "key"),
-        ("signing", "key"),
-        ("ssh", "key"),
-        ("connection", "string"),
-        ("conn", "str"),
-        ("session", "token"),
-        ("session", "key"),
-        ("session", "secret"),
-        ("client", "secret"),
-        ("refresh", "token"),
-        ("access", "token"),
-        ("id", "token"),
-        ("auth", "token"),
-        ("bearer", "token"),
-        ("seed", "phrase"),
-        ("recovery", "phrase"),
-    }
+    tuple(pair.split("_"))
+    for pair in _words(
+        "api_key access_key secret_key private_key account_key signing_key ssh_key "
+        "connection_string conn_str session_token session_key session_secret client_secret "
+        "refresh_token access_token id_token auth_token bearer_token seed_phrase recovery_phrase"
+    )
 )
 # A key that holds no secret: CACHE_KEY, SORT_KEY, IDEMPOTENCY_KEY.
 _PLAIN_KEY_QUALIFIERS = _words(
@@ -109,9 +88,7 @@ _DESCRIPTORS = _words(
     "optional field column attribute hasher hashers complexity rules"
 )
 # A pass that is a stage, not a password: FIRST_PASS, COMPILER_PASS, PASS_THROUGH.
-_PLAIN_PASS_WORDS = frozenset(
-    {"first", "second", "third", "last", "final", "next", "compiler", "render", "multi", "single"}
-)
+_PLAIN_PASS_WORDS = _words("first second third last final next compiler render multi single")
 _PASS_CONTINUATIONS = frozenset({"through", "thru"})
 _PUBLIC_WORDS = _words("publishable public pub verify verification")
 _JWT_PUBLIC_WORDS = _words("anon anonymous public publishable pk")
@@ -124,9 +101,7 @@ _PASSWORD_ENDINGS = _word_tuple("password passwd passphrase pw pswd")
 _MNEMONIC = re.compile(r"[a-z]{3,8}(?: [a-z]{3,8}){11}(?:(?: [a-z]{3,8}){3}){0,4}")
 _MNEMONIC_WORDS = _words("mnemonic seedphrase phrase")
 # Query parameters that carry paging or protocol state, never a credential.
-_STATE_WORDS = frozenset(
-    {"page", "next", "continuation", "pagination", "cursor", "csrf", "nonce", "state", "challenge"}
-)
+_STATE_WORDS = _words("page next continuation pagination cursor csrf nonce state challenge")
 
 # Public keys and certificates are published; a private key block among them is not.
 _PUBLIC_PREFIXES = (
@@ -205,9 +180,7 @@ _PATH_WORDS = _words(
 )
 _NUMBER = re.compile(r"(?i)[+-]?\d+(?:[.,_]\d+)*(?:ms|s|m|h|d|k|kb|mb|gb)?")
 _VERSION = re.compile(r"(?i)v?\d++(?:\.\d++)++(?:[-+][0-9a-z.-]++)?+|v\d++")
-_WORD_VALUES = frozenset(
-    {"true", "false", "yes", "no", "on", "off", "null", "none", "nil", "undefined"}
-)
+_WORD_VALUES = _words("true false yes no on off null none nil undefined")
 _EMAIL = re.compile(r"[A-Za-z0-9._%+-]{1,64}@(?:[A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,63}")
 _MAILBOX = re.compile(r"[A-Za-z0-9._%+-]{2,64}@(?:[A-Za-z-]{1,63}\.)+[A-Za-z]{2,63}")
 _IMAGE = re.compile(
@@ -305,22 +278,16 @@ _PROSE_WORDS = _words(
     "a an the by in on of to for from with via and or is are be it as at if this that use set see"
 )
 _COOKIE_PAIR = re.compile(r"([A-Za-z0-9_.-]{1,64})=([^\s;,\"']{1,8192})")
-_COOKIE_ATTRIBUTES = frozenset(
-    {"path", "domain", "samesite", "max-age", "expires", "priority", "version"}
-)
+_COOKIE_ATTRIBUTES = _words("path domain samesite max-age expires priority version")
 _COOKIE_HEADERS = frozenset({"cookie", "set-cookie"})
 # A short cookie value counts only under a session or credential name; analytics and
 # preference cookies (_ga, _gid, theme, tz) hold none.
 _COOKIE_LENGTH = 16
-_SESSION_COOKIE_WORDS = frozenset(
-    {"sid", "session", "sess", "auth", "token", "jwt", "remember", "login", "connect"}
-)
+_SESSION_COOKIE_WORDS = _words("sid session sess auth token jwt remember login connect")
 _ANALYTICS_COOKIES = ("_ga", "_gid", "_gat", "_gcl", "_fbp", "_fbc", "_hj", "_uet", "ajs_", "_pk")
 _CHALLENGE = re.compile(r"(?i)(?:realm|charset|scope|error)=")
 _CONNECTION_PAIR = re.compile(r"\s*([A-Za-z][A-Za-z0-9 _.-]{0,40}?)\s*=(.*)", re.DOTALL)
-_CONNECTION_KEYS = frozenset(
-    {"password", "pwd", "secret", "token", "apikey", "accesskey", "sharedaccesskey", "accountkey"}
-)
+_CONNECTION_KEYS = _words("password pwd secret token apikey accesskey sharedaccesskey accountkey")
 _CONNECTION_PASSWORDS = frozenset({"password", "pwd"})
 # libpq's keyword form: host=db user=app password=x dbname=app.
 _KEYWORD_PAIR = re.compile(r"([A-Za-z_][A-Za-z0-9_]{0,40})=(\S{1,8192})")
@@ -412,18 +379,11 @@ def public_material(value: str) -> bool:
 
 def reference(value: str) -> bool:
     """Whether ``value`` names where a credential comes from, in part or whole."""
-    if _REFERENCE.search(value) is not None or "<%=" in value:
+    if _REFERENCE.search(value) or "<%=" in value or _CODE_READ.match(value):
         return True
-    if _VARIABLE_NAME.fullmatch(value) is not None:
+    if any(form.fullmatch(value) for form in (_VARIABLE_NAME, _CALL, _OPEN_CALL, _DOTTED_PATH)):
         return True
-    if _CODE_READ.match(value) is not None or _CALL.fullmatch(value) is not None:
-        return True
-    if _OPEN_CALL.fullmatch(value) is not None:
-        return True
-    if _DOTTED_PATH.fullmatch(value) is not None:
-        return True
-    lowered = value.lower()
-    if lowered.startswith(_STORE_PREFIXES):
+    if value.lower().startswith(_STORE_PREFIXES):
         return True
     store = _STORE_REFERENCE.match(value)
     if store is not None and store.group(1).lower() in _STORE_SCHEMES:
@@ -509,11 +469,7 @@ def placeholder(value: str) -> bool:
 def _path(value: str) -> bool:
     if not value or _spaced(value):
         return False
-    if _PATH_START.match(value) is not None:
-        return True
-    if _FILE_SUFFIX.search(value) is not None:
-        return True
-    if _KEY_FILE.fullmatch(value) is not None:
+    if _PATH_START.match(value) or _FILE_SUFFIX.search(value) or _KEY_FILE.fullmatch(value):
         return True
     segments = _PATH_SEPARATOR.split(value)
     # Base64 holds "/" too: a segment of random letters and digits is not a directory.
@@ -552,13 +508,11 @@ def _locator_or_value(value: str, *, password: bool = False) -> bool:
     if _path(value):
         return True
     lowered = value.lower()
-    if lowered in _WORD_VALUES or _NUMBER.fullmatch(value) or _VERSION.fullmatch(value):
-        return True
-    if _DURATION.fullmatch(value) or _URN.fullmatch(value):
+    if lowered in _WORD_VALUES or any(
+        form.fullmatch(value) for form in (_NUMBER, _VERSION, _DURATION, _URN, _IMAGE, _PACKAGE)
+    ):
         return True
     if _EMAIL.fullmatch(value) and not (password and _MAILBOX.fullmatch(value) is None):
-        return True
-    if _IMAGE.fullmatch(value) or _PACKAGE.fullmatch(value):
         return True
     image = _NAMESPACED_IMAGE.fullmatch(value)
     if image is not None and not _random_segment(image.group(1)):
@@ -587,11 +541,7 @@ def _word_phrase(value: str) -> bool:
         else:
             tokens.append(part)
     numbers = sum(1 for token in tokens if _PHRASE_NUMBER.fullmatch(token))
-    words = sum(
-        1
-        for token in tokens
-        if not _PHRASE_NUMBER.fullmatch(token) and _PHRASE_WORD.fullmatch(token)
-    )
+    words = sum(1 for t in tokens if not _PHRASE_NUMBER.fullmatch(t) and _PHRASE_WORD.fullmatch(t))
     return words >= 2 and numbers <= 1 and words + numbers == len(tokens)
 
 
@@ -632,9 +582,8 @@ def literal_value(value: str, *, password: bool = False) -> bool:
     A reference, placeholder, public key, path, locator, number or option list holds
     none; nor does prose, except a passphrase of three or more words and 16 or more
     characters, without a sentence's small words (by, the, in), under a passphrase or
-    password name. Under any other credential name a
-    word phrase, a short setting or a phrase in a non-Latin script is a label, not a
-    literal. What remains must be credential-shaped: 16 or more characters, or a digit,
+    password name. Under any other credential name a word phrase, a short setting or a
+    phrase in a non-Latin script is a label, not a literal. What remains must be credential-shaped: 16 or more characters, or a digit,
     credential punctuation or an upper-case letter after the first.
     """
     value = _strip(value)

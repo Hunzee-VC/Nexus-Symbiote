@@ -280,8 +280,8 @@ A way around a limit that its entry does not describe is worth a
   unknown. Other locations and the runner's own namespace (`UV_*`, `PIP_*`,
   `YARN_*`, `BUN_*`, `DOCKER_*` and similar) are a medium `package_source`
   finding, and the package URL is withheld. Configuration names that look like
-  tokens or hold one after a prefix (`AWS_AKIA...`), and `env` and header names
-  that repeat a value the scrubber holds for the same file (not `X-Api-Key`), are
+  tokens or hold one after a prefix (`AWS_AKIA...`), and names that hold a literal
+  credential of the scan or repeat a value the scrubber holds (not `X-Api-Key`), are
   exported as `[redacted]` (`[redacted-N]` in the `env` map), and a launcher
   package whose name or specifier looks like a token is withheld
   (`[withheld]`, no package URL) with a medium `completeness` finding.

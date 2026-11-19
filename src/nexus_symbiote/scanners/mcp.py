@@ -13,6 +13,7 @@ cannot be classified, are coverage gaps rather than silence.
 
 from __future__ import annotations
 
+import copy
 import hmac
 import ipaddress
 import json
@@ -701,12 +702,15 @@ _ASSIGNMENT_FLAGS = frozenset({"env", "e", "build-arg"})
 # The scheme words _AUTH reads, after which cmd's `set NAME=<scheme> <credential>` splits.
 _ASSIGNMENT_SCHEMES = frozenset({"bearer", "basic", "token", "bot", "apikey", "api-key"})
 # curl's `-u user:password`, also in a cluster of short flags (`-su`), and httpie's `-a`
-# (`--auth`), which counts only under a fetcher.
-# Under another command (docker -u www-data:www-data) the part after the colon counts
-# only when it reads as a literal under a name that is not a password's.
+# (`--auth`) only under a fetcher. Under another command (docker -u www-data:www-data) the
+# part after the colon counts only when it reads as a literal under a non-password name.
 _USER_FLAG = re.compile(r"--user|--auth|-a|-[A-Za-z]{0,4}u")
 _FETCHERS = frozenset({"curl", "wget", "http", "https", "httpie"})
-_NAME_FORM = re.compile(r"[A-Za-z]+(?:[_-][A-Za-z]+)*")
+# Words of letters, or capitals and digits in a name with a capital: GH_TOKEN_2, not oauth2-x.
+_NAME_FORM = re.compile(
+    r"(?=.*[A-Z]|\D*\Z)(?:[A-Za-z]+|[A-Z][A-Z0-9]*)"
+    r"(?:[._-](?:[A-Za-z]+|[A-Z0-9]+))*"
+)
 _PLAIN_ASSIGNMENT = re.compile(r"-{0,2}[A-Za-z_][\w.-]{0,63}=[^,;\"'&|:]*")
 # Past this length an argument's words are split at white space only: shell quoting is
 # read one character at a time, and its cost grows faster than the argument.
@@ -810,20 +814,12 @@ def _argument_hits(previous: str | None, argument: str, fetcher: bool = False) -
     hits = value_hits(previous if flagged and previous else "", argument)
     hits.extend(_header_line_hits(argument, explicit=_explicit_header(previous, argument)))
     hits.extend(assignment_hits(argument, spaced=True))
-    if len(argument) > _SHELL_SPLIT_LIMIT:
-        words = argument.split()
-    else:
-        words = _launch_words([argument])[1:]
+    long = len(argument) > _SHELL_SPLIT_LIMIT
+    words = argument.split() if long else _launch_words([argument])[1:]
     fetcher = fetcher or not _FETCHERS.isdisjoint(map(posixpath.basename, words))
-    for index, word in enumerate(words):
-        hits.extend(
-            _word_hits(
-                words[index - 1] if index else None,
-                word,
-                words[index + 1] if index + 1 < len(words) else None,
-                fetcher,
-            )
-        )
+    around: list[str | None] = [None, *words, None]
+    for index, word in enumerate(words, start=1):
+        hits.extend(_word_hits(around[index - 1], word, around[index + 1], fetcher))
     return hits
 
 
@@ -843,10 +839,8 @@ def _credential_hits(
     A header value with a line break injects a header line after it: each following
     line is read as one, at the position of the header that carries it.
     """
-    words = [command, *args]
-    fetcher = not _FETCHERS.isdisjoint(
-        posixpath.basename(word) for word in words if isinstance(word, str)
-    )
+    words = [word for word in (command, *args) if isinstance(word, str)]
+    fetcher = not _FETCHERS.isdisjoint(map(posixpath.basename, words))
     for name in sorted(env):
         value = env[name]
         hits = _name_hits(name)
@@ -882,35 +876,26 @@ def _literals(positions: PositionHits) -> list[str]:
     return [literal for _, _, hits in positions for _, literal in hits if literal]
 
 
-def _credential_positions(
-    env: dict[str, Any],
-    args: list[Any],
-    header_maps: Sequence[dict[str, Any]],
-    scrubber: SecretScrubber | None = None,
-    endpoints: Sequence[Any] = (),
-    hits: PositionHits | None = None,
-    command: Any = "",
-) -> list[tuple[str, str]]:
+def _credential_positions(hits: PositionHits, names: _Names | None = None) -> list[tuple[str, str]]:
     """Each launch position holding a literal credential, with its pattern class.
 
     Positions are named as the inventory exports them: a name it withholds, such as one holding
     a literal of the same file, is not named here, and no value is. A name in a known token shape
     is itself a literal credential. A credential-named query parameter of an endpoint URL is the
     position "endpoint URL query"; its user information stays with transport_security. At most
-    MAX_CREDENTIAL_POSITIONS are collected. ``hits`` are the positions _server_hits already read.
+    MAX_CREDENTIAL_POSITIONS are collected from ``hits``, the positions _server_hits read.
     """
-    if hits is None:
-        hits = list(_credential_hits(env, args, header_maps, endpoints, command))
+    names = names or _Names(_literals(hits)).scoped()
     positions: dict[tuple[str, str], None] = {}
     for kind, name, found_hits in hits:
         found = strongest(found_hits)
         if found is None:
             continue
         if kind == "env":
-            label = f"env {name}" if _shown_name(name, scrubber) else "an env key"
+            label = f"env {name}" if names.shown(name, finding=True) else "an env key"
         elif kind == "header":
             shown = f"header {redact_text(name, identifier=True)}"
-            label = shown if _shown_name(name, scrubber) else "a header"
+            label = shown if names.shown(name, finding=True) else "a header"
         elif kind == "argument":
             label = f"argument {name}"
         else:
@@ -935,17 +920,23 @@ def _server_hits(config: dict[str, Any]) -> PositionHits:
     )
 
 
-def _declared_literals(config: dict[str, Any]) -> list[str]:
-    """The literals of a refused server's env and header maps, read as a parsed one's are."""
+def _declared_hits(config: dict[str, Any]) -> PositionHits:
+    """The hits of a refused server's env and header maps, read as a parsed one's are."""
     env = config.get("env")
-    maps = [config.get(field) for field in ("headers", "http_headers")]
-    hits = _credential_hits(
-        env if isinstance(env, dict) else {},
-        [],
-        [mapping for mapping in maps if isinstance(mapping, dict)],
-        (),
-    )
-    return _literals(list(hits))
+    maps = [m for m in (config.get("headers"), config.get("http_headers")) if isinstance(m, dict)]
+    return list(_credential_hits(env if isinstance(env, dict) else {}, [], maps, ()))
+
+
+def _server_literals(config: dict[str, Any], hits: PositionHits) -> list[str]:
+    """What no name may hold: the finding's literals, an auth object's and a URL password."""
+    found = _literals(hits)
+    for field in ("oauth", "auth"):
+        if isinstance(settings := config.get(field), dict):
+            found.extend(_auth_object_secrets(settings))
+    for field in _ENDPOINT_FIELDS:
+        if isinstance(endpoint := config.get(field), str):
+            found.extend(_url_secrets(endpoint))
+    return found
 
 
 def _server_launch(config: dict[str, Any]) -> Launch:
@@ -1302,37 +1293,86 @@ def _exportable_name(name: str) -> bool:
     )
 
 
-def _shown_name(name: str, scrubber: SecretScrubber | None = None) -> bool:
-    """Whether a name may be exported: exportable, and holding no literal the file's hits read.
+def _folded(text: str) -> str:
+    return text.casefold().replace("-", "_")
 
-    Another scrubbed value withholds it whole, or as a credential-shaped part, unless it is a
-    credential's name of letters: OPENAI_API_KEY, read elsewhere, stays in AZURE_OPENAI_API_KEY.
+
+class _Parts:
+    """Strings found in a name by its windows: whole if ``exact``, else folded, and one of 16 or
+    more characters by any 16 in a row (any 23 past 4,096), so each name costs its length."""
+
+    def __init__(self, texts: Iterable[str], *, exact: bool = False) -> None:
+        self.exact = exact
+        self.parts: set[str] = set()
+        for text in texts if exact else map(_folded, texts):
+            size = len(text) if exact else min(len(text), 16)
+            step = 1 if len(text) <= 4096 else 8
+            self.parts.update(text[i : i + size] for i in range(0, len(text) - size + 1, step))
+        self.sizes = sorted({len(part) for part in self.parts})
+
+    def find(self, name: str) -> Iterator[tuple[int, int]]:
+        text = name if self.exact else _folded(name)
+        for size in self.sizes:
+            for start in range(len(text) - size + 1):
+                if text[start : start + size] in self.parts:
+                    yield start, start + size
+
+
+class _Names:
+    """Which env, header and field names may be shown, each name's verdict reached once a file.
+
+    A name holding a literal is withheld: whole, or by 16 characters in a row, in any case and
+    with "-" for "_". In the inventory only a credential-shaped literal of the scan counts, or
+    any of the server's own; the finding never names one holding any literal of the scan.
+    Another value the file's scrubber holds withholds it whole, or as a credential-shaped part,
+    unless that is a credential's name (OPENAI_API_KEY, also in AZURE_OPENAI_API_KEY).
     """
-    literals = scrubber.literals if scrubber is not None else ()
-    if not _exportable_name(name) or any(literal in name for literal in literals):
-        return False
-    spans = scrubber.spans(name) if scrubber is not None else []
-    whole = spans == [(0, len(name))]
-    held = [name[a:b] for a, b in spans if whole or credential_shaped(name[a:b])]
-    return all(_NAME_FORM.fullmatch(part) and credential_name(part) for part in held)
+
+    def __init__(self, literals: Iterable[str]) -> None:
+        found = {literal for literal in literals if literal}
+        self.every, self.shaped = _Parts(found), _Parts(filter(credential_shaped, found))
+        self.values = self.own = _Parts((), exact=True)
+        self.verdicts: dict[str, tuple[bool, bool]] = {}
+
+    def scoped(self, values: Iterable[str] | None = None, own: Iterable[str] = ()) -> _Names:
+        """These names in a file whose scrubber holds ``values``, or in a server that reads ``own``."""
+        names = copy.copy(self)
+        if values is not None:
+            names.values, names.verdicts = _Parts(values, exact=True), {}
+        names.own = _Parts(own)
+        return names
+
+    def shown(self, name: str, *, finding: bool = False) -> bool:
+        if name not in self.verdicts:
+            plain = _exportable_name(name) and not any(self.shaped.find(name))
+            self.verdicts[name] = (plain and self._named(name), not any(self.every.find(name)))
+        plain, clear = self.verdicts[name]
+        return plain and (clear if finding else not any(self.own.find(name)))
+
+    def _named(self, name: str) -> bool:
+        covered = bytearray(len(name))
+        for start, end in self.values.find(name):
+            covered[start:end] = b"\x01" * (end - start)
+        spans = [run.span() for run in re.finditer(rb"\x01+", covered)]
+        whole = spans == [(0, len(name))]
+        held = [name[a:b] for a, b in spans if whole or credential_shaped(name[a:b])]
+        return all(_NAME_FORM.fullmatch(part) and credential_name(part) for part in held)
 
 
-def _exported_names(names: Iterable[str], scrubber: SecretScrubber | None = None) -> list[str]:
+def _exported_names(names: Iterable[str], shown: _Names | None = None) -> list[str]:
     """Sorted names with every withheld one as "[redacted]", one marker per name."""
     return sorted(
-        redact_text(name, identifier=True) if _shown_name(name, scrubber) else "[redacted]"
+        redact_text(name, identifier=True) if (shown or _Names(())).shown(name) else "[redacted]"
         for name in names
     )
 
 
-def _exported_environment(
-    env: dict[str, Any], scrubber: SecretScrubber | None = None
-) -> dict[str, str]:
+def _exported_environment(env: dict[str, Any], names: _Names | None = None) -> dict[str, str]:
     """The environment's names with masked values; withheld names get numbered markers."""
     shown: dict[str, str] = {}
     withheld = 0
     for name in sorted(env):
-        if _shown_name(name, scrubber):
+        if (names or _Names(())).shown(name):
             shown[name] = "***"
         else:
             withheld += 1
@@ -1340,8 +1380,8 @@ def _exported_environment(
     return shown
 
 
-def _field_names(config: dict[str, Any]) -> list[str]:
-    return _exported_names(config)
+def _field_names(config: dict[str, Any], names: _Names | None = None) -> list[str]:
+    return _exported_names(config, names)
 
 
 def _json_shape(value: Any, budget: int) -> tuple[int, int]:
@@ -2253,6 +2293,8 @@ class MCPScanner(Scanner):
         # Server references per host, sorted once at the end: sorting the union after
         # every file would cost the square of the number of nested client files.
         pending_refs: dict[str, set[str]] = {}
+        read: list[tuple[McpDialect, dict[str, Any], list[Any], SecretScrubber, dict[int, Any]]]
+        read, literals = [], []
         for path in paths:
             dialect = _dialect(path)
             data = self._read_dialect(files, dialect, result)
@@ -2271,15 +2313,21 @@ class MCPScanner(Scanner):
                 continue
             # Prepared once per file and reused for every server and diagnostic.
             server_hits: dict[int, PositionHits] = {}
-            values = self._file_secrets(entries, server_hits)
-            literals = [value for hits in server_hits.values() for value in _literals(hits)]
-            file_secrets = SecretScrubber(values, literals)
+            file_secrets = SecretScrubber(self._file_secrets(entries, server_hits))
+            configs = {id(config): config for _, config in entries}
+            for server, hits in server_hits.items():
+                literals.extend(_server_literals(configs[server], hits))
             if len(file_secrets) > MAX_SECRETS_PER_FILE:
                 result.scan_failures.append(
                     f"{dialect.path}: more than {MAX_SECRETS_PER_FILE} credential values in one "
                     "file; not collected"
                 )
                 continue
+            read.append((dialect, data, entries, file_secrets, server_hits))
+        # A name may repeat a literal of any client file, so every file is read first.
+        names = _Names(literals)
+        for dialect, data, entries, file_secrets, server_hits in read:
+            file_names = names.scoped(file_secrets.values)
             server_refs: list[str] = []
             for server_name, server_config in entries:
                 problem = (
@@ -2299,6 +2347,7 @@ class MCPScanner(Scanner):
                         result,
                         file_secrets,
                         server_hits.get(id(server_config)),
+                        file_names,
                     )
                 except SourceBindingKeyError as exc:
                     result.scan_failures.append(f"{dialect.path}: {exc}")
@@ -2360,7 +2409,10 @@ class MCPScanner(Scanner):
                     mapping = config.get(field)
                     if isinstance(mapping, dict):
                         values.extend(secret_values(mapping))
-                values.extend(_declared_literals(config))
+                hits = _declared_hits(config)
+                values.extend(_literals(hits))
+                if server_hits is not None:
+                    server_hits[id(config)] = hits
                 continue
             try:
                 launch = _server_launch(config)
@@ -2551,6 +2603,7 @@ class MCPScanner(Scanner):
         result: ScanResult,
         file_secrets: SecretScrubber | None = None,
         credential_hits: PositionHits | None = None,
+        names: _Names | None = None,
     ) -> tuple[MCPServerComponent, list[ToolComponent]]:
         config_scope = dialect.path
         command = config.get("command", "")
@@ -2575,8 +2628,9 @@ class MCPScanner(Scanner):
             credential_hits = _server_hits(config)
         scrubber = file_secrets
         if scrubber is None:
-            own = _server_secrets(config, launch, credential_hits)
-            scrubber = SecretScrubber(own, _literals(credential_hits))
+            scrubber = SecretScrubber(_server_secrets(config, launch, credential_hits))
+        own = _server_literals(config, credential_hits)
+        names = (names or _Names(own).scoped(scrubber.values)).scoped(own=own)
         cwd = config.get("cwd")
         nested = _launch_directory(dialect.path) != ""
         # Clients do not trim a cwd: " ." is a directory the checkout can create.
@@ -2680,14 +2734,7 @@ class MCPScanner(Scanner):
         risks = self._server_risks(
             name,
             launch=launch,
-            credentials=_credential_positions(
-                env,
-                args,
-                [config.get("headers", {}), config.get("http_headers", {})],
-                scrubber,
-                endpoints,
-                credential_hits,
-            ),
+            credentials=_credential_positions(credential_hits, names),
             transport=transport,
             command=command,
             endpoint_url=endpoint_url,
@@ -2725,7 +2772,7 @@ class MCPScanner(Scanner):
                     ),
                 )
             )
-        fields = _field_names(config)
+        fields = _field_names(config, names)
         launcher_properties: dict[str, Any] = {}
         if launch.launcher:
             launcher_properties["launcher"] = launch.launcher
@@ -2744,7 +2791,7 @@ class MCPScanner(Scanner):
         if context:
             launcher_properties["launch_context"] = context
         if header_names:
-            launcher_properties["header_names"] = _exported_names(header_names, scrubber)
+            launcher_properties["header_names"] = _exported_names(header_names, names)
         if settings:
             launcher_properties["client_settings"] = settings
         source_config_hash = hash_canonical(
@@ -2763,7 +2810,7 @@ class MCPScanner(Scanner):
                     "transport": transport,
                     "endpoint": identity.endpoint,
                     "argument_count": len(args),
-                    "environment_names": _exported_names(env, scrubber),
+                    "environment_names": _exported_names(env, names),
                     "header_names": launcher_properties.get("header_names", []),
                     "client_settings": settings,
                     "tool_names": tool_names,
@@ -2781,7 +2828,7 @@ class MCPScanner(Scanner):
             package_url=package_url,
             command=identity.command,
             args=[REDACTED for _ in args],
-            env=_exported_environment(env, scrubber),
+            env=_exported_environment(env, names),
             endpoint_url=identity.endpoint,
             version_pinned=version_pinned,
             source_path=config_scope,
