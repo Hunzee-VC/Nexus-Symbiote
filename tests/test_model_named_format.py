@@ -443,3 +443,29 @@ def test_an_inventory_collected_before_differs_from_a_new_collection(
     reconcile = ["validate", "--project", str(project)]
     assert mismatch in runner.invoke(main, [*reconcile, str(old)]).output
     assert mismatch not in runner.invoke(main, [*reconcile, str(new)]).output
+
+
+def test_a_file_named_as_safetensors_that_does_not_validate_is_a_high_alert_after_the_upgrade(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "weights.safetensors").write_bytes(PLACEHOLDER)
+    new, old = tmp_path / "new.json", tmp_path / "old.json"
+    document = _scan_to(runner, project, new)
+    record = _model_record(document)
+    assert INVALID_SAFETENSORS in [(risk["severity"], risk["category"]) for risk in record["risks"]]
+    # The record that releases up to 0.2.0 wrote for the same file: the format from the
+    # name, and no stored finding, because `risk` derived it from the format.
+    record |= {"serialization_format": "safe-tensors", "model_type": "foundation"}
+    record["properties"] = {"format_inspection": MALFORMED}
+    record["risks"] = [r for r in record["risks"] if r["category"] != "invalid_safetensors"]
+    old.write_text(json.dumps(document), encoding="utf-8")
+    drift = runner.invoke(main, ["diff", str(old), str(new)])
+    assert drift.exit_code == 1, drift.output
+    assert (
+        "[HIGH] High change in 'weights.safetensors': Risk findings added: 1 high "
+        "(invalid_safetensors).; properties.named_format added.; model_type changed.; "
+        "serialization_format changed."
+    ) in drift.output
+    assert "[MEDIUM]" not in drift.output
