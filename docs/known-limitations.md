@@ -685,17 +685,23 @@ A way around a limit that its entry does not describe is worth a
   recognized or cut short by the 64 KiB, 4,096-opcode or 64-MARK bound before a
   recognized shape or a call, a NumPy object-dtype array or a ZIP archive with a
   pickle-family member or such an array, a ZIP archive or NumPy array the bounds
-  left unread, or a compressed or archived stream, by a wrapper suffix or by gzip,
-  zlib, bzip2, xz, LZMA, Zstandard, LZ4 frame, joblib `ZF` or ustar magic, whose
-  decompressed content is not inspected, or a file that starts with the GGUF magic,
+  left unread, or a compressed or archived stream, by a wrapper suffix, by gzip,
+  zlib, bzip2, xz, Zstandard, LZ4 frame, joblib `ZF` or ustar magic, by an
+  LZMA-alone header after joblib's `5d 00` or by a tar header that `tarfile` reads
+  without the ustar magic, whose decompressed content is not inspected, or a file that starts with the GGUF magic,
   whatever follows, whose chat templates are inspected only under a `.gguf` name. A
   readable file that shows none of that,
   such as a zero-filled `embeddings.bin` or firmware, is `unknown`, a high finding.
   A payload that starts past the first 64 KiB of a file, or a pickle behind a
   prefix that is no opcode and none of those magic numbers, such as one compressed
   by a codec not listed, is not rated critical by its name; a loader given such a
-  file still unpickles it. An unreadable pickle-family file keeps the critical
-  rating.
+  file still unpickles it. An LZMA-alone header that joblib does not detect, one
+  that does not start with `5d 00`, its properties byte and the low byte of a
+  dictionary size, is not a wrapper either, though Python's `lzma` can open such a
+  stream when a loader asks for LZMA itself. The header checks read structure, not a
+  decoded stream, so a raw array whose first bytes form a header, such as a
+  `labels.bin` of little-endian 32-bit integers 93 to 156 or, rarely, a float32
+  array upcast from bfloat16, is critical. An unreadable pickle-family file keeps the critical rating.
 - **Some formats are not inspected.** ONNX, GGUF, GGML, Keras, HDF5, SavedModel,
   TFLite, Core ML and ExecuTorch files are rated `unknown`: Keras Lambda layers,
   SavedModel operations and custom operators are not inspected. Each is a high

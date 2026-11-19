@@ -80,14 +80,66 @@ def _gguf(template: str) -> bytes:
     return header + b"\0" * 32
 
 
-def _tar(member: str, data: bytes) -> bytes:
+def _tar(member: str, data: bytes, *more: str, form: int = tarfile.USTAR_FORMAT) -> bytes:
     buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w", format=tarfile.USTAR_FORMAT) as archive:
-        info = tarfile.TarInfo(member)
-        info.size = len(data)
-        info.mtime = 0
-        archive.addfile(info, io.BytesIO(data))
+    with tarfile.open(fileobj=buffer, mode="w", format=form) as archive:
+        for name in (member, *more):
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            info.mtime = 0
+            archive.addfile(info, io.BytesIO(data))
     return buffer.getvalue()
+
+
+def _checksummed(block: bytearray, offset: int = 0) -> None:
+    header = block[offset : offset + 512]
+    header[148:156] = b" " * 8
+    block[offset + 148 : offset + 156] = b"%06o\0 " % sum(header)
+
+
+def _v7(archive: bytes, name: bytes | None = None, typeflag: bytes | None = None) -> bytes:
+    """``archive`` as a pre-POSIX tar: no ustar magic, each header's checksum recomputed."""
+    data = bytearray(archive)
+    offset = 0
+    while any(data[offset : offset + 512]):
+        size = int(data[offset + 124 : offset + 136].split(b"\0")[0] or b"0", 8)
+        data[offset + 257 : offset + 263] = bytes(6)
+        if offset == 0 and name is not None:
+            data[0:100] = name.ljust(100, b"\0")
+        if offset == 0 and typeflag is not None:
+            data[156:157] = typeflag
+        _checksummed(data, offset)
+        offset += 512 + -(-size // 512) * 512
+    return bytes(data)
+
+
+def _base256_checksum(archive: bytes) -> bytes:
+    """``archive`` with its first header's checksum in a positive base-256 field."""
+    data = bytearray(archive)
+    data[148:156] = b"\x80" + (256 + sum(data[:148]) + sum(data[156:512])).to_bytes(7, "big")
+    return bytes(data)
+
+
+def _space_checksum(archive: bytes) -> bytes:
+    """``archive`` with an all-space checksum field, which tarfile reads as 0.
+
+    High bytes in the owner names, which no loader reads, bring the signed checksum to 0.
+    """
+    data = bytearray(archive)
+    data[148:156] = b" " * 8
+    excess = 256 + sum(data[:148]) + sum(data[156:512])
+    high = b"\x80" * (excess // 128) + bytes([256 - excess % 128] if excess % 128 else [])
+    data[265 : 265 + len(high)] = high
+    return bytes(data)
+
+
+def _lzma_alone(dictionary: int, header: dict[int, bytes] | None = None) -> bytes:
+    """``EVAL_PICKLE`` in an LZMA-alone stream, with header bytes patched at their offsets."""
+    filters = [{"id": lzma.FILTER_LZMA1, "dict_size": dictionary}]
+    data = bytearray(lzma.compress(EVAL_PICKLE, format=lzma.FORMAT_ALONE, filters=filters))
+    for offset, value in (header or {}).items():
+        data[offset : offset + len(value)] = value
+    return bytes(data)
 
 
 def _oversized_directory_zip() -> bytes:
@@ -317,6 +369,156 @@ def test_bytes_with_no_wrapper_magic_under_a_plain_pickle_name_stay_unknown(
 ) -> None:
     (tmp_path / "embeddings.bin").write_bytes(payload)
     assert inspect_model_format(tmp_path / "embeddings.bin") == (UNKNOWN, PICKLE_NAME_UNEVIDENCED)
+
+
+LZMA_LOADED = {
+    "lzma-4k-joblib": ("m.joblib", _lzma_alone(4096)),
+    "lzma-32k-joblib": ("m.joblib", _lzma_alone(32768)),
+    "lzma-4k-pkl": ("m.pkl", _lzma_alone(4096)),
+    "lzma-32k-pkl": ("m.pkl", _lzma_alone(32768)),
+    "lzma-48k-bin": ("m.bin", _lzma_alone(49152)),
+    "lzma-64k-joblib": ("m.joblib", _lzma_alone(65536)),
+    "lzma-8m-pkl": ("m.pkl", _lzma_alone(8 << 20)),
+    "lzma-256-byte-dictionary-joblib": ("m.joblib", _lzma_alone(4096, {1: b"\x00\x01\x00\x00"})),
+    "lzma-zero-dictionary-joblib": ("m.joblib", _lzma_alone(4096, {1: bytes(4)})),
+    "lzma-known-size-pkl": (
+        "m.pkl",
+        _lzma_alone(4096, {5: len(EVAL_PICKLE).to_bytes(8, "little")}),
+    ),
+}
+TAR_LOADED = {
+    "v7-storages-pt": ("legacy.pt", _v7(_tar("storages", EVAL_PICKLE, "pickle"))),
+    "v7-pickle-ckpt": ("legacy.ckpt", _v7(_tar("pickle", EVAL_PICKLE))),
+    "ustar-storages-pt": ("legacy.pt", _tar("storages", EVAL_PICKLE, "pickle")),
+    "gnu-storages-pt": ("legacy.pt", _tar("storages", EVAL_PICKLE, form=tarfile.GNU_FORMAT)),
+    "pax-pickle-ckpt": ("legacy.ckpt", _tar("pickle", EVAL_PICKLE, form=tarfile.PAX_FORMAT)),
+    "v7-empty-first-name-pt": ("legacy.pt", _v7(_tar("x", EVAL_PICKLE, "pickle"), name=b"")),
+    "v7-unknown-first-type-pt": ("legacy.pt", _v7(_tar("x", EVAL_PICKLE, "pickle"), typeflag=b"Z")),
+    "v7-base-256-checksum-pt": ("legacy.pt", _base256_checksum(_v7(_tar("storages", EVAL_PICKLE)))),
+    "v7-space-checksum-pt": ("legacy.pt", _space_checksum(_v7(_tar("storages", EVAL_PICKLE)))),
+}
+
+
+@pytest.mark.parametrize(
+    ("name", "payload"),
+    [*LZMA_LOADED.values(), *TAR_LOADED.values()],
+    ids=[*LZMA_LOADED, *TAR_LOADED],
+)
+def test_an_lzma_alone_or_tar_stream_without_its_usual_magic_is_critical(
+    tmp_path: Path, name: str, payload: bytes
+) -> None:
+    # joblib opens any LZMA-alone stream that starts 5d 00, whatever its dictionary, and
+    # torch.load's legacy path opens any tar archive tarfile reads, ustar or V7.
+    if payload.startswith(b"\x5d\x00"):
+        with lzma.LZMAFile(io.BytesIO(payload)) as stream:
+            assert stream.read() == EVAL_PICKLE
+    else:
+        with tarfile.open(fileobj=io.BytesIO(payload), mode="r:") as archive:
+            assert {"storages", "pickle"} & set(archive.getnames())
+    (tmp_path / name).write_bytes(payload)
+    assert inspect_model_format(tmp_path / name) == (UNSAFE, PICKLE_NAME_WRAPPED)
+    found, failures = _scan(tmp_path)
+    assert failures == []
+    assert found[name].properties["format_inspection"] == PICKLE_NAME_WRAPPED
+    passed, findings = _gate([found[name]])
+    assert ("serialization_format", "critical") in findings
+    assert not passed
+
+
+def _wrong_checksum() -> bytes:
+    data = bytearray(_v7(_tar("storages", EVAL_PICKLE)))
+    data[148:154] = b"%06o" % (int(data[148:154], 8) + 1)
+    return bytes(data)
+
+
+def _empty_name_block() -> bytes:
+    block = bytearray(512)
+    block[156:157] = b"0"
+    _checksummed(block)
+    return bytes(block)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        _lzma_alone(4096, {0: b"\x00"}),
+        _lzma_alone(4096, {0: b"\x5e"}),
+        _lzma_alone(4096, {1: b"\x10\x00\x00\x00"}),
+        _lzma_alone(4096, {5: (1 << 63).to_bytes(8, "little")}),
+        _lzma_alone(4096, {5: bytes(7) + b"\xff"}),
+        _lzma_alone(4096, {13: b"\x01"}),
+        _lzma_alone(4096)[:13],
+        b"\0" * 512,
+        _wrong_checksum(),
+        _wrong_checksum()[:511],
+    ],
+    ids=[
+        "lzma-properties-zero",
+        "lzma-properties-other-than-joblibs",
+        "lzma-dictionary-not-a-multiple-of-256",
+        "lzma-size-neither-unknown-nor-below-2-63",
+        "lzma-size-with-only-its-top-byte-all-ones",
+        "lzma-range-coder-first-byte-not-zero",
+        "lzma-header-cut-before-the-range-coder",
+        "zeros",
+        "tar-wrong-checksum",
+        "tar-short-of-a-block",
+    ],
+)
+def test_near_lzma_alone_and_tar_headers_under_a_pickle_name_stay_unknown(
+    tmp_path: Path, payload: bytes
+) -> None:
+    (tmp_path / "m.pkl").write_bytes(payload)
+    assert inspect_model_format(tmp_path / "m.pkl") == (UNKNOWN, PICKLE_NAME_UNEVIDENCED)
+
+
+def test_a_tar_block_with_a_valid_checksum_and_no_name_is_read_as_a_header(
+    tmp_path: Path,
+) -> None:
+    # tarfile reads a block with a matching checksum and number fields as a header whatever
+    # its name, and lists the members after an unnamed one, so the name is no evidence.
+    payload = _empty_name_block() + _tar("pickle", EVAL_PICKLE)
+    with tarfile.open(fileobj=io.BytesIO(payload), mode="r:") as archive:
+        assert archive.getnames() == ["", "pickle"]
+    (tmp_path / "legacy.pt").write_bytes(payload)
+    assert inspect_model_format(tmp_path / "legacy.pt") == (UNSAFE, PICKLE_NAME_WRAPPED)
+
+
+TAR_NUMBER_FIELDS = {
+    "mode": slice(100, 108),
+    "uid": slice(108, 116),
+    "gid": slice(116, 124),
+    "size": slice(124, 136),
+    "mtime": slice(136, 148),
+    "devmajor": slice(329, 337),
+    "devminor": slice(337, 345),
+}
+
+
+@pytest.mark.parametrize("field", TAR_NUMBER_FIELDS.values(), ids=list(TAR_NUMBER_FIELDS))
+def test_a_checksummed_block_whose_number_field_tarfile_rejects_is_no_tar_header(
+    tmp_path: Path, field: slice
+) -> None:
+    # A raw array of small integers can sum to its own checksum field; tarfile still
+    # rejects the block when a number field is not octal or base-256.
+    data = bytearray(_v7(_tar("storages", EVAL_PICKLE)))
+    data[field.start : field.start + 2] = b"9\0"
+    _checksummed(data)
+    with pytest.raises(tarfile.ReadError), tarfile.open(fileobj=io.BytesIO(bytes(data))):
+        pass
+    (tmp_path / "legacy.pt").write_bytes(bytes(data))
+    assert inspect_model_format(tmp_path / "legacy.pt") == (UNKNOWN, PICKLE_NAME_UNEVIDENCED)
+
+
+def test_the_ustar_magic_keeps_the_wrapped_rating_with_a_wrong_checksum(tmp_path: Path) -> None:
+    # tarfile rejects this block, but the ustar magic was a wrapper before the checksum
+    # check existed, and the rating stays at least that wide.
+    data = bytearray(_tar("storages", EVAL_PICKLE))
+    data[148:154] = b"%06o" % (int(data[148:154], 8) + 1)
+    with pytest.raises(tarfile.ReadError), tarfile.open(fileobj=io.BytesIO(bytes(data))):
+        pass
+    (tmp_path / "legacy.pt").write_bytes(bytes(data))
+    assert inspect_model_format(tmp_path / "legacy.pt") == (UNSAFE, PICKLE_NAME_WRAPPED)
 
 
 @pytest.mark.parametrize("suffix", [".bin", ".pt", ".pkl"])

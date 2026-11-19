@@ -116,11 +116,21 @@ not checked, and a NumPy array whose header is past the inspection limits are
 `unsafe-code-execution` with the evidence `Potential code-executing loader format
 (...)` around that verdict, as `torch.load` and `np.load` still read past the bound;
 so is a compressed or archived stream, named with a wrapper suffix (`.tar`, `.gz`,
-`.bz2`, `.xz`, `.lzma`, `.zst`) or starting with gzip, zlib, bzip2, xz, LZMA,
-Zstandard, LZ4 frame or joblib `ZF` magic, or with a ustar header at offset 257,
+`.bz2`, `.xz`, `.lzma`, `.zst`) or starting with gzip, zlib, bzip2, xz, Zstandard,
+LZ4 frame or joblib `ZF` magic, an LZMA-alone header after joblib's `5d 00`, the
+ustar magic at offset 257, or a tar header that `tarfile` reads without that magic,
 which pandas, joblib and `torch.load` unwrap before they unpickle, with the evidence
 `Potential code-executing loader format (compressed or archived stream; decompressed
-content not inspected)`. A file that starts with the GGUF magic, whatever follows,
+content not inspected)`. An LZMA-alone header is read from the first 14 bytes:
+joblib's `5d 00`, which it detects whatever dictionary size follows, an uncompressed
+size that is unknown or below 2^63, and a zero byte after it, where the range coder
+starts. A tar header is a first 512-byte block whose checksum `tarfile` accepts and
+whose mode, owner, size, time and device numbers it parses, whatever its name and
+type. A raw array whose first bytes happen to form such a header is rated critical
+by it: a little-endian integer array whose first value is 93, such as a `labels.bin`
+of 32-bit integers 93 to 156, opens with an LZMA-alone header, and, rarely, a float32
+array, such as one upcast from bfloat16, opens with a tar header that `tarfile`
+reads. A file that starts with the GGUF magic, whatever follows,
 as with the wrapper magics, is `unsafe-code-execution` too under a pickle-family
 name, with the evidence `Potential code-executing loader format
 (GGUF content under a pickle-family name; its chat templates are not inspected under
