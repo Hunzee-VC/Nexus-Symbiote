@@ -1813,3 +1813,126 @@ def test_a_name_that_repeats_a_reported_literal_is_withheld_even_in_upper_case(t
     result = _scan(tmp_path, servers)
     assert list(_servers(result)["b"].env) == ["N", "[redacted-1]"]
     assert literal not in _dump(result)
+
+
+H1_HEADER = {
+    "url": "https://example.invalid/mcp",
+    "headers": {"Authorization": "Bearer letmeinplease"},
+}
+
+
+@pytest.mark.parametrize(
+    "servers,secret,server,env",
+    [
+        # A password written as a sibling env name, the whole name being the literal.
+        (
+            {
+                "srv": {
+                    "command": "npx",
+                    "args": ["-y", "some-mcp@1.0.0"],
+                    "env": {"Open-Sesame-Pass": VENDOR_TOKEN, "DB_PASSWORD": "Open-Sesame-Pass"},
+                }
+            },
+            "Open-Sesame-Pass",
+            "srv",
+            ["DB_PASSWORD", "[redacted-1]"],
+        ),
+        # A header's bearer value reused inside another server's env name.
+        (
+            {
+                "srv": H1_HEADER,
+                "loc": {
+                    "command": "npx",
+                    "args": ["x@1.0.0"],
+                    "env": {"X_letmeinplease": VENDOR_TOKEN},
+                },
+            },
+            "letmeinplease",
+            "loc",
+            ["[redacted-1]"],
+        ),
+        # A header name repeating another header's bearer value.
+        (
+            {
+                "srv": {
+                    "url": "https://example.invalid/mcp",
+                    "headers": {
+                        "Authorization": "Bearer letmeinplease",
+                        "X-letmeinplease-Token": f"Bearer {RANDOM}",
+                    },
+                }
+            },
+            "letmeinplease",
+            "srv",
+            None,
+        ),
+    ],
+)
+def test_a_name_holding_a_literal_the_file_reads_is_withheld_everywhere(
+    tmp_path, servers, secret, server, env
+):
+    project = _project(tmp_path / "project", servers)
+    found = _servers(_scan(project, servers))
+    (finding,) = _findings(found[server])
+    assert secret not in finding.detail
+    assert ("an env key" if env else "a header") in finding.detail
+    if env:
+        assert list(found[server].env) == env
+    else:
+        assert "[redacted]" in found[server].properties["header_names"]
+    runner = CliRunner()
+    outputs = []
+    for fmt in ("json", "sarif"):
+        path = tmp_path / f"scan.{fmt}"
+        arguments = ["scan", "--no-project-policy", "--report-only", "-f", fmt, "-o", str(path)]
+        result = runner.invoke(main, [*arguments, str(project)])
+        assert result.exit_code == 0, result.output
+        outputs += [result.output, path.read_text(encoding="utf-8")]
+    inventory = str(tmp_path / "scan.json")
+    risk = runner.invoke(main, ["risk", "--no-project-policy", inventory])
+    vex = tmp_path / "findings.vex.json"
+    assert runner.invoke(main, ["vex", "-o", str(vex), inventory]).exit_code == 0
+    outputs += [risk.output, vex.read_text(encoding="utf-8")]
+    assert CATEGORY in outputs[1] and CATEGORY in risk.output
+    assert not any(secret in text for text in outputs)
+
+
+@pytest.mark.parametrize(
+    "flag,value,name",
+    [
+        ("--api-key-env", "OPENAI_API_KEY", "AZURE_OPENAI_API_KEY"),
+        ("--api-key-env", "OPENAI_API_KEY", "OPENAI_API_KEY_ORG"),
+        ("--token-env", "GITHUB_PERSONAL_ACCESS_TOKEN", "GITHUB_PERSONAL_ACCESS_TOKEN_SCOPES"),
+        ("--auth-header", "x-api-key", "x-api-key"),
+        ("--token-env", "github_token", "github_token"),
+        ("--token-env", "GitHubToken", "GitHubToken"),
+    ],
+)
+def test_a_credential_variable_name_scrubbed_elsewhere_stays_shown(tmp_path, flag, value, name):
+    servers = {
+        "a": {"command": "npx", "args": ["-y", "some-mcp@1.0.0", flag, value]},
+        "b": {"command": "npx", "args": ["x@1.0.0"], "env": {name: "${" + name.upper() + "}"}},
+        "c": {"url": "https://example.invalid/mcp", "headers": {name: "${KEY}"}},
+    }
+    found = _servers(_scan(tmp_path, servers))
+    assert all(_findings(server) == [] for server in found.values())
+    assert list(found["b"].env) == [name]
+    assert found["c"].properties["header_names"] == [name]
+
+
+def test_a_credential_variable_name_that_is_also_a_literal_stays_withheld(tmp_path):
+    servers = {
+        "a": {"command": "npx", "args": ["-y", "some-mcp@1.0.0", "--token-env", "GitHubToken"]},
+        "b": {"command": "npx", "args": ["x@1.0.0"], "env": {"GitHubToken": "1"}},
+        "c": {
+            "command": "npx",
+            "args": ["x@1.0.0"],
+            "env": {"DB_PASSWORD": "Open-Sesame-Pass", "Open-Sesame-Pass": "1"},
+        },
+    }
+    found = _servers(_scan(tmp_path, servers))
+    assert list(found["b"].env) == ["GitHubToken"]
+    assert list(found["c"].env) == ["DB_PASSWORD", "[redacted-1]"]
+    servers["b"]["env"]["DB_PASSWORD"] = "GitHubToken"  # noqa: S105 - synthetic sentinel
+    found = _servers(_scan(tmp_path, servers))
+    assert list(found["b"].env) == ["DB_PASSWORD", "[redacted-1]"]

@@ -337,9 +337,10 @@ class SecretScrubber:
     the shortest value are skipped.
     """
 
-    __slots__ = ("_periods", "_shortest", "_values")
+    __slots__ = ("_periods", "_shortest", "_values", "literals")
 
-    def __init__(self, values: Iterable[str] = ()) -> None:
+    def __init__(self, values: Iterable[str] = (), literals: Iterable[str] = ()) -> None:
+        self.literals = tuple(dict.fromkeys(literal for literal in literals if literal))
         unique = {value for value in values if value}
         self._values = tuple(sorted(unique, key=_longest_first))
         self._periods = {value: _smallest_period(value) for value in self._values}
@@ -369,6 +370,7 @@ class SecretScrubber:
         if not extra:
             return self
         merged = SecretScrubber()
+        merged.literals = self.literals
         merged._values = tuple(heapq.merge(self._values, extra, key=_longest_first))
         merged._periods = {**known, **{value: _smallest_period(value) for value in extra}}
         merged._shortest = len(merged._values[-1])

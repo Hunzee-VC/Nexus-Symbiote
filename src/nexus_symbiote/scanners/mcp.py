@@ -706,7 +706,7 @@ _ASSIGNMENT_SCHEMES = frozenset({"bearer", "basic", "token", "bot", "apikey", "a
 # only when it reads as a literal under a name that is not a password's.
 _USER_FLAG = re.compile(r"--user|--auth|-a|-[A-Za-z]{0,4}u")
 _FETCHERS = frozenset({"curl", "wget", "http", "https", "httpie"})
-_NAME_FORM = re.compile(r"[A-Z]+(?:_[A-Z]+)+|[A-Z][a-z]*(?:-[A-Z][a-z]*)+")
+_NAME_FORM = re.compile(r"[A-Za-z]+(?:[_-][A-Za-z]+)*")
 _PLAIN_ASSIGNMENT = re.compile(r"-{0,2}[A-Za-z_][\w.-]{0,63}=[^,;\"'&|:]*")
 # Past this length an argument's words are split at white space only: shell quoting is
 # read one character at a time, and its cost grows faster than the argument.
@@ -893,13 +893,11 @@ def _credential_positions(
 ) -> list[tuple[str, str]]:
     """Each launch position holding a literal credential, with its pattern class.
 
-    Positions are named as the inventory exports them: an env or header name that the
-    inventory withholds, or that repeats a credential value found in the same file,
-    is not named here either, and no value is. A name in a known token shape is
-    itself a literal credential. A credential-named query parameter of an endpoint
-    URL is the position "endpoint URL query"; its user information stays with
-    transport_security. At most MAX_CREDENTIAL_POSITIONS are collected. ``hits`` are
-    the positions _server_hits already read, so a file is read once.
+    Positions are named as the inventory exports them: a name it withholds, such as one holding
+    a literal of the same file, is not named here, and no value is. A name in a known token shape
+    is itself a literal credential. A credential-named query parameter of an endpoint URL is the
+    position "endpoint URL query"; its user information stays with transport_security. At most
+    MAX_CREDENTIAL_POSITIONS are collected. ``hits`` are the positions _server_hits already read.
     """
     if hits is None:
         hits = list(_credential_hits(env, args, header_maps, endpoints, command))
@@ -1305,18 +1303,18 @@ def _exportable_name(name: str) -> bool:
 
 
 def _shown_name(name: str, scrubber: SecretScrubber | None = None) -> bool:
-    """Whether a name may be exported: exportable, and holding none of the known values.
+    """Whether a name may be exported: exportable, and holding no literal the file's hits read.
 
-    A name can repeat a secret value (a password written as an env name), one the
-    scrubber holds for the same file: such a name is withheld whole. A value that is
-    itself a credential's name of letters in upper snake or header case (X-Api-Key) is
-    never a literal, and a word only part of a name (production in production_DB_HOST)
-    is not a credential-shaped part of it: both stay shown.
+    Another scrubbed value withholds it whole, or as a credential-shaped part, unless it is a
+    credential's name of letters: OPENAI_API_KEY, read elsewhere, stays in AZURE_OPENAI_API_KEY.
     """
-    spans = scrubber.spans(name) if scrubber is not None and _exportable_name(name) else []
-    if spans == [(0, len(name))]:
-        return _NAME_FORM.fullmatch(name) is not None and credential_name(name)
-    return _exportable_name(name) and not any(credential_shaped(name[a:b]) for a, b in spans)
+    literals = scrubber.literals if scrubber is not None else ()
+    if not _exportable_name(name) or any(literal in name for literal in literals):
+        return False
+    spans = scrubber.spans(name) if scrubber is not None else []
+    whole = spans == [(0, len(name))]
+    held = [name[a:b] for a, b in spans if whole or credential_shaped(name[a:b])]
+    return all(_NAME_FORM.fullmatch(part) and credential_name(part) for part in held)
 
 
 def _exported_names(names: Iterable[str], scrubber: SecretScrubber | None = None) -> list[str]:
@@ -2273,7 +2271,9 @@ class MCPScanner(Scanner):
                 continue
             # Prepared once per file and reused for every server and diagnostic.
             server_hits: dict[int, PositionHits] = {}
-            file_secrets = SecretScrubber(self._file_secrets(entries, server_hits))
+            values = self._file_secrets(entries, server_hits)
+            literals = [value for hits in server_hits.values() for value in _literals(hits)]
+            file_secrets = SecretScrubber(values, literals)
             if len(file_secrets) > MAX_SECRETS_PER_FILE:
                 result.scan_failures.append(
                     f"{dialect.path}: more than {MAX_SECRETS_PER_FILE} credential values in one "
@@ -2575,7 +2575,8 @@ class MCPScanner(Scanner):
             credential_hits = _server_hits(config)
         scrubber = file_secrets
         if scrubber is None:
-            scrubber = SecretScrubber(_server_secrets(config, launch, credential_hits))
+            own = _server_secrets(config, launch, credential_hits)
+            scrubber = SecretScrubber(own, _literals(credential_hits))
         cwd = config.get("cwd")
         nested = _launch_directory(dialect.path) != ""
         # Clients do not trim a cwd: " ." is a directory the checkout can create.
