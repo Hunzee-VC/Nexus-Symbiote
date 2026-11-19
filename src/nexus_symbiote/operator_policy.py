@@ -37,7 +37,11 @@ _WORKFLOW_COMMAND = re.compile(r"(?:::|##\[)")
 
 
 class OperatorPolicyError(PolicyError):
-    """The selected operator policy failed placement, integrity, attestation, or schema checks."""
+    """The selected operator policy failed placement, integrity, or schema checks."""
+
+
+class OperatorPolicyAttestationError(OperatorPolicyError):
+    """Cryptographic verification of the operator policy envelope failed."""
 
 
 @dataclass(frozen=True)
@@ -150,17 +154,12 @@ def _verify_policy_attestation(
         for key_path in trusted_keys:
             pub = cast("Ed25519PublicKey", _load_trusted_public(key_path))
             ring[key_id(pub)] = pub
-        verified = verify_attestation(
-            parse_envelope(raw_envelope),
-            raw_policy,
-            trusted_keys=ring,
-            purpose="policy",
-            threshold=threshold,
-            match="bytes",
-            max_age=timedelta(days=max_age_days) if max_age_days else None,
-        )
+        parsed_env = parse_envelope(raw_envelope)
+    except AttestationError as exc:
+        raise OperatorPolicyAttestationError(
+            f"Operator policy attestation verification failed: {neutralize(exc)}"
+        ) from exc
     except (
-        AttestationError,
         OperatorPolicyError,
         click.ClickException,
         _KeyFileError,
@@ -169,6 +168,21 @@ def _verify_policy_attestation(
         ValueError,
     ) as exc:
         raise OperatorPolicyError(
+            f"Operator policy key or envelope cannot be loaded: {neutralize(exc)}"
+        ) from exc
+
+    try:
+        verified = verify_attestation(
+            parsed_env,
+            raw_policy,
+            trusted_keys=ring,
+            purpose="policy",
+            threshold=threshold,
+            match="bytes",
+            max_age=timedelta(days=max_age_days) if max_age_days else None,
+        )
+    except AttestationError as exc:
+        raise OperatorPolicyAttestationError(
             f"Operator policy attestation verification failed: {neutralize(exc)}"
         ) from exc
     return verified.signers
@@ -181,20 +195,29 @@ def load_operator_policy(
     envelope_path: Path | None = None,
     trusted_keys: tuple[Path, ...] = (),
     threshold: int = 1,
-    require_attestation: bool = False,
+    allow_unsigned: bool = False,
     max_age_days: int | None = 90,
 ) -> LoadedOperatorPolicy:
-    """Load and optionally verify a signed operator policy outside the target checkout."""
+    """Load and verify a signed operator policy outside the target checkout."""
     from pydantic import ValidationError
 
     if trusted_keys and envelope_path is None:
         raise OperatorPolicyError("--operator-policy-key requires --operator-policy-attestation")
-    if require_attestation and (envelope_path is None or not trusted_keys):
+    if envelope_path is not None and not trusted_keys:
         raise OperatorPolicyError(
-            "--require-operator-policy-attestation requires --operator-policy-attestation "
-            "and at least one --operator-policy-key"
+            "--operator-policy-attestation requires at least one --operator-policy-key"
+        )
+    if allow_unsigned and (envelope_path is not None or trusted_keys):
+        raise OperatorPolicyError(
+            "--allow-unsigned-operator-policy cannot be combined with "
+            "--operator-policy-attestation or --operator-policy-key"
         )
     raw, policy_digest = _read_confined_operator_policy(policy_path, root)
+    if envelope_path is None and not allow_unsigned:
+        raise OperatorPolicyAttestationError(
+            "--operator-policy requires --operator-policy-attestation and "
+            "--operator-policy-key (or pass --allow-unsigned-operator-policy explicitly)"
+        )
     signers: tuple[str, ...] = ()
     if envelope_path is not None:
         signers = _verify_policy_attestation(
@@ -212,6 +235,43 @@ def load_operator_policy(
     except (UnicodeError, PolicyError, ValidationError) as exc:
         raise OperatorPolicyError("Selected operator policy is invalid YAML or schema") from exc
     return LoadedOperatorPolicy(policy=parsed, digest=policy_digest, signers=signers)
+
+
+def append_step_summary(path: Path, rendered: str) -> None:
+    """Append Markdown to an explicitly selected regular file without following symlinks."""
+    import errno as _errno
+
+    from nexus_symbiote.utils.files import OutputRefusedError, _parent, _relative
+    from nexus_symbiote.utils.terminal import output_failure, refuse_dash_output
+
+    refuse_dash_output(path)
+    target = path.absolute()
+    root = Path(target.anchor)
+    try:
+        relative = _relative(root, target, allow_parent=True)
+        if os.name != "posix" or not hasattr(os, "O_NOFOLLOW"):
+            raise OSError("Secure output requires descriptor-relative no-symlink file operations")
+        flags = os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        with _parent(root, relative, create_parents=False) as parent:
+            fd = os.open(relative.name, flags, 0o600, dir_fd=parent)
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode):
+                    raise OutputRefusedError(_errno.EINVAL, "output must be a regular file")
+                prefix = b""
+                if info.st_size > 0:
+                    last_byte = os.pread(fd, 1, info.st_size - 1)
+                    if last_byte != b"\n":
+                        prefix = b"\n"
+                payload = prefix + rendered.encode("utf-8")
+                view = memoryview(payload)
+                written = 0
+                while written < len(view):
+                    written += os.write(fd, view[written:])
+            finally:
+                os.close(fd)
+    except (OSError, ValueError) as exc:
+        raise output_failure(exc) from exc
 
 
 def narrow_policy(operator: Policy, project: Policy | None) -> tuple[Policy, list[str]]:

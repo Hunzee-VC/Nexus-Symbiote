@@ -102,7 +102,7 @@ def attribute_expected_upgrade(
         raise ValueError(
             f"Unsupported --expect-upgrade version {from_version!r}; supported: {supported}"
         )
-    if baseline_tool_version and baseline_tool_version != from_version:
+    if baseline_tool_version is not None and baseline_tool_version != from_version:
         raise ValueError(
             f"--expect-upgrade {from_version!r} does not match baseline tool_version "
             f"{baseline_tool_version!r}"

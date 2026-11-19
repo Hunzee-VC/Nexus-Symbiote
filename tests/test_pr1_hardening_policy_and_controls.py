@@ -569,7 +569,7 @@ def test_markdown_step_summary_and_junit_reports_neutralize_injection_payloads(t
     bad_yaml = bad_op_dir / "invalid.yaml"
     bad_yaml.write_text("version: [unterminated\n", encoding="utf-8")
     with pytest.raises(OperatorPolicyError, match="invalid YAML"):
-        load_operator_policy(bad_yaml, None)
+        load_operator_policy(bad_yaml, None, allow_unsigned=True)
     meta_upg = attribute_expected_upgrade(
         {
             "security_alerts": [
@@ -642,19 +642,19 @@ def test_every_rule_catalog_category_scores_positive_finding_and_zero_when_absen
         assert sarif["runs"][0]["results"][0]["ruleId"] == f"nexus_symbiote/{category}/high"
 
 
-def test_require_operator_policy_attestation_step_summary_append_and_verify_exit_3(tmp_path):
+def test_default_signed_operator_policy_empty_tool_version_step_summary_and_exit_3(tmp_path):
     runner = CliRunner()
     op_dir = tmp_path / "ops"
     op_dir.mkdir()
     op_policy = op_dir / "policy.yaml"
-    op_policy.write_text("version: '1.0'\nrisk:\n  fail_threshold: 10.0\n", encoding="utf-8")
+    op_policy.write_text("version: '1.0'\nrisk:\n  fail_threshold: 9999.0\n", encoding="utf-8")
     proj = tmp_path / "proj"
     proj.mkdir()
     (proj / "CLAUDE.md").write_text("# ok\n", encoding="utf-8")
     bom_path = tmp_path / "bom.json"
     assert runner.invoke(main, ["scan", str(proj), "-o", str(bom_path)]).exit_code == 0
 
-    # --require-operator-policy-attestation without attestation/key fails closed (exit 2/1).
+    # D7: --operator-policy without attestation/key fails closed by default (exit 3 under detailed).
     req_res = runner.invoke(
         main,
         [
@@ -662,24 +662,59 @@ def test_require_operator_policy_attestation_step_summary_append_and_verify_exit
             str(bom_path),
             "--operator-policy",
             str(op_policy),
-            "--require-operator-policy-attestation",
+            "--detailed-exit-codes",
         ],
     )
-    assert req_res.exit_code != 0
+    assert req_res.exit_code == EXIT_GATE_FAILED, req_res.output
 
-    # --step-summary appends rather than overwriting prior gate summaries.
+    # Explicit --allow-unsigned-operator-policy opts in; combining with attestation is a usage error (2).
+    allow_res = runner.invoke(
+        main,
+        [
+            "risk",
+            str(bom_path),
+            "--operator-policy",
+            str(op_policy),
+            "--allow-unsigned-operator-policy",
+            "--detailed-exit-codes",
+        ],
+    )
+    assert allow_res.exit_code == EXIT_PASSED, allow_res.output
+
+    # D8: baseline with empty tool_version ("") is rejected by diff --expect-upgrade with exit 2.
+    empty_ver_bom = json.loads(bom_path.read_text(encoding="utf-8"))
+    empty_ver_bom["metadata"]["tool_version"] = ""
+    empty_ver_path = tmp_path / "empty_ver.json"
+    empty_ver_path.write_text(json.dumps(empty_ver_bom), encoding="utf-8")
+    empty_upg = runner.invoke(
+        main,
+        [
+            "diff",
+            str(empty_ver_path),
+            str(bom_path),
+            "--expect-upgrade",
+            "0.1.0",
+            "--detailed-exit-codes",
+        ],
+    )
+    assert empty_upg.exit_code == EXIT_USAGE_ERROR, empty_upg.output
+
+    # --step-summary appends in place: preserves existing mode (0644) and existing content > 1 MiB.
     summary_file = tmp_path / "summary.md"
-    summary_file.write_text("## Existing\n", encoding="utf-8")
+    large_prefix = "## Existing\n" + ("x" * (1024 * 1024 + 4096)) + "\n"
+    summary_file.write_text(large_prefix, encoding="utf-8")
+    summary_file.chmod(0o644)
     runner.invoke(
         main,
         ["validate", str(bom_path), "--step-summary", str(summary_file), "--detailed-exit-codes"],
     )
+    assert (summary_file.stat().st_mode & 0o777) == 0o644
     summary_text = summary_file.read_text(encoding="utf-8")
-    assert "## Existing" in summary_text
+    assert summary_text.startswith(large_prefix)
     assert "### Nexus SymBiote validate: failed" in summary_text
     assert inert_markdown_cell("integrity:") in summary_text
 
-    # verify-attestation --detailed-exit-codes with wrong key exits 3 (gate failed), not 4.
+    # Wrong key on --operator-policy-key AND verify-attestation exits 3 (gate failed), whereas corrupt key exits 4.
     priv_a, pub_a = op_dir / "a.key", op_dir / "a.pub"
     priv_b, pub_b = op_dir / "b.key", op_dir / "b.pub"
     assert (
@@ -694,6 +729,58 @@ def test_require_operator_policy_attestation_step_summary_append_and_verify_exit
         ).exit_code
         == 0
     )
+    pol_att = op_dir / "policy.att.json"
+    assert (
+        runner.invoke(
+            main,
+            [
+                "attest",
+                str(op_policy),
+                "--purpose",
+                "policy",
+                "--key",
+                str(priv_a),
+                "--out",
+                str(pol_att),
+            ],
+        ).exit_code
+        == 0
+    )
+    wrong_pol_key = runner.invoke(
+        main,
+        [
+            "risk",
+            str(bom_path),
+            "--operator-policy",
+            str(op_policy),
+            "--operator-policy-attestation",
+            str(pol_att),
+            "--operator-policy-key",
+            str(pub_b),
+            "--detailed-exit-codes",
+        ],
+    )
+    assert wrong_pol_key.exit_code == EXIT_GATE_FAILED, wrong_pol_key.output
+
+    corrupt_key = op_dir / "corrupt.pub"
+    corrupt_key.write_text("not-a-pem-key\n", encoding="utf-8")
+    corrupt_key.chmod(0o600)
+    bad_key_res = runner.invoke(
+        main,
+        [
+            "risk",
+            str(bom_path),
+            "--operator-policy",
+            str(op_policy),
+            "--operator-policy-attestation",
+            str(pol_att),
+            "--operator-policy-key",
+            str(corrupt_key),
+            "--detailed-exit-codes",
+        ],
+    )
+    assert bad_key_res.exit_code == EXIT_COLLECTION_FAILED, bad_key_res.output
+
     env_path = op_dir / "bom.att.json"
     assert (
         runner.invoke(
@@ -725,4 +812,3 @@ def test_require_operator_policy_attestation_step_summary_append_and_verify_exit
         ],
     )
     assert bad_att.exit_code == EXIT_GATE_FAILED, bad_att.output
-    assert pub_a.exists()

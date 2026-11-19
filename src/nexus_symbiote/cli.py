@@ -133,27 +133,38 @@ def _resolve_operator_policy(
     *,
     attestation_path: Path | None = None,
     trusted_keys: tuple[Path, ...] = (),
-    require_attestation: bool = False,
+    allow_unsigned: bool = False,
     max_age_days: int = 90,
 ) -> tuple[Any | None, str | None, tuple[str, ...]]:
-    from nexus_symbiote.operator_policy import OperatorPolicyError, load_operator_policy
+    from nexus_symbiote.operator_policy import (
+        OperatorPolicyAttestationError,
+        OperatorPolicyError,
+        load_operator_policy,
+    )
 
     if operator_policy is None:
-        if attestation_path is not None or trusted_keys or require_attestation:
+        if attestation_path is not None or trusted_keys or allow_unsigned:
             raise click.UsageError(
                 "--operator-policy-attestation, --operator-policy-key, and "
-                "--require-operator-policy-attestation require --operator-policy"
+                "--allow-unsigned-operator-policy require --operator-policy"
             )
         return None, None, ()
+    if allow_unsigned and (attestation_path is not None or trusted_keys):
+        raise click.UsageError(
+            "--allow-unsigned-operator-policy cannot be combined with "
+            "--operator-policy-attestation or --operator-policy-key"
+        )
     try:
         loaded = load_operator_policy(
             operator_policy,
             root,
             envelope_path=attestation_path,
             trusted_keys=trusted_keys,
-            require_attestation=require_attestation,
+            allow_unsigned=allow_unsigned,
             max_age_days=max_age_days,
         )
+    except OperatorPolicyAttestationError as exc:
+        raise _GateClickException(neutralize(exc)) from exc
     except OperatorPolicyError as exc:
         raise _failure(exc) from exc
     return loaded.policy, loaded.digest, loaded.signers
@@ -608,26 +619,14 @@ def _emit_gate_report(
     step_summary: Path | None = None,
     operator_source: str | None = None,
 ) -> None:
-    from nexus_symbiote.core.hashing import open_regular_file
     from nexus_symbiote.operator_policy import (
-        MAX_OPERATOR_POLICY_BYTES,
+        append_step_summary,
         render_gate_junit,
         render_gate_markdown,
     )
 
     if step_summary is not None:
-        rendered = render_gate_markdown(gate_name, document)
-        prefix = ""
-        if step_summary.exists():
-            try:
-                with open_regular_file(step_summary) as stream:
-                    existing = stream.read(MAX_OPERATOR_POLICY_BYTES)
-                prefix = existing.decode("utf-8", errors="replace")
-                if prefix and not prefix.endswith("\n"):
-                    prefix += "\n"
-            except OSError:
-                prefix = ""
-        write_cli_output(step_summary, prefix + rendered, overwrite=True)
+        append_step_summary(step_summary, render_gate_markdown(gate_name, document))
     if report_format == "json":
         click.echo(json_text(json.dumps(document, indent=2)))
     elif report_format == "markdown":
@@ -671,7 +670,7 @@ def _operator_policy_options(func: _F) -> _F:
         click.option(
             "--operator-policy",
             type=click.Path(exists=True, dir_okay=False, path_type=Path),
-            help="Operator policy YAML outside the scanned checkout; checkout policy may only narrow it.",
+            help="Signed operator policy YAML outside the scanned checkout; checkout policy may only narrow it.",
         ),
         click.option(
             "--operator-policy-attestation",
@@ -685,9 +684,9 @@ def _operator_policy_options(func: _F) -> _F:
             help="Trusted Ed25519 public key for --operator-policy-attestation (repeatable).",
         ),
         click.option(
-            "--require-operator-policy-attestation",
+            "--allow-unsigned-operator-policy",
             is_flag=True,
-            help="Fail closed unless --operator-policy is verified by --operator-policy-attestation and --operator-policy-key.",
+            help="Accept --operator-policy without a verified DSSE signature envelope.",
         ),
         click.option(
             "--operator-policy-max-age-days",
@@ -1010,7 +1009,7 @@ def scan(
     operator_policy: Path | None = None,
     operator_policy_attestation: Path | None = None,
     operator_policy_key: tuple[Path, ...] = (),
-    require_operator_policy_attestation: bool = False,
+    allow_unsigned_operator_policy: bool = False,
     operator_policy_max_age_days: int = 90,
     no_project_policy: bool = False,
     accept_project_policy: bool = False,
@@ -1046,7 +1045,7 @@ def scan(
         root,
         attestation_path=operator_policy_attestation,
         trusted_keys=operator_policy_key,
-        require_attestation=require_operator_policy_attestation,
+        allow_unsigned=allow_unsigned_operator_policy,
         max_age_days=operator_policy_max_age_days,
     )
     policy, policy_source, policy_weakened = _policy_with_source(
@@ -1778,7 +1777,7 @@ def validate(
     operator_policy: Path | None = None,
     operator_policy_attestation: Path | None = None,
     operator_policy_key: tuple[Path, ...] = (),
-    require_operator_policy_attestation: bool = False,
+    allow_unsigned_operator_policy: bool = False,
     operator_policy_max_age_days: int = 90,
     no_project_policy: bool = False,
     accept_project_policy: bool = False,
@@ -1826,7 +1825,7 @@ def validate(
         root,
         attestation_path=operator_policy_attestation,
         trusted_keys=operator_policy_key,
-        require_attestation=require_operator_policy_attestation,
+        allow_unsigned=allow_unsigned_operator_policy,
         max_age_days=operator_policy_max_age_days,
     )
     policy, policy_source, policy_weakened = _inventory_policy(
@@ -2011,7 +2010,7 @@ def risk(
     operator_policy: Path | None = None,
     operator_policy_attestation: Path | None = None,
     operator_policy_key: tuple[Path, ...] = (),
-    require_operator_policy_attestation: bool = False,
+    allow_unsigned_operator_policy: bool = False,
     operator_policy_max_age_days: int = 90,
     no_project_policy: bool = False,
     accept_project_policy: bool = False,
@@ -2049,7 +2048,7 @@ def risk(
         root,
         attestation_path=operator_policy_attestation,
         trusted_keys=operator_policy_key,
-        require_attestation=require_operator_policy_attestation,
+        allow_unsigned=allow_unsigned_operator_policy,
         max_age_days=operator_policy_max_age_days,
     )
     policy, policy_source, policy_weakened = _inventory_policy(

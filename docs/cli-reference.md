@@ -642,10 +642,10 @@ nexus-symbiote risk [OPTIONS] AIBOM_PATH
 | `--allow-unsigned-discovery` | Accept unverified discovery evidence explicitly (still warns); required in CI |
 | `--report-format` `text\|json\|markdown\|junit` | Gate report format (cannot disagree with `--json-output`; default: `text`). |
 | `--step-summary` `PATH` | Append a sanitized Markdown gate summary to this file. |
-| `--operator-policy` `FILE` | Operator policy YAML outside the scanned checkout; checkout policy may only narrow it. |
+| `--operator-policy` `FILE` | Signed operator policy YAML outside the scanned checkout; checkout policy may only narrow it. |
 | `--operator-policy-attestation` `FILE` | DSSE attestation envelope (`purpose: policy`) over `--operator-policy`. |
 | `--operator-policy-key` `FILE` | Trusted Ed25519 public key for `--operator-policy-attestation` (repeatable). |
-| `--require-operator-policy-attestation` | Fail closed unless `--operator-policy` is verified by `--operator-policy-attestation` and `--operator-policy-key`. |
+| `--allow-unsigned-operator-policy` | Accept `--operator-policy` without a verified DSSE signature envelope. |
 | `--operator-policy-max-age-days` `INT` | Maximum attestation age in days when `--operator-policy-attestation` is verified (default: `90`; `0` disables). |
 | `--detailed-exit-codes` | Use distinct exit codes (`0` passed, `2` usage, `3` gate failed, `4` collection/input failure). |
 | `--legacy-exit-codes` | Use legacy exit codes (`0` passed, `1` gate/input failed, `2` usage). |
@@ -797,10 +797,10 @@ nexus-symbiote scan [OPTIONS] [PROJECT_PATH]
 | `--accept-project-policy` | In CI, accept a project policy that weakens the built-in gates explicitly; without it such a policy fails the command there (exit 1). Interactive runs only warn. |
 | `--fail-on-unsigned-discovery` | With `--check`, exit with status 1 when ShadowScan discovery evidence is unverified. |
 | `--allow-unsigned-discovery` | With `--check`, accept unverified ShadowScan discovery evidence explicitly (still warns); required in CI when no `--signature-policy` verifies the report. |
-| `--operator-policy` `FILE` | Operator policy YAML outside the scanned checkout; checkout policy may only narrow it. |
+| `--operator-policy` `FILE` | Signed operator policy YAML outside the scanned checkout; checkout policy may only narrow it. |
 | `--operator-policy-attestation` `FILE` | DSSE attestation envelope (`purpose: policy`) over `--operator-policy`. |
 | `--operator-policy-key` `FILE` | Trusted Ed25519 public key for `--operator-policy-attestation` (repeatable). |
-| `--require-operator-policy-attestation` | Fail closed unless `--operator-policy` is verified by `--operator-policy-attestation` and `--operator-policy-key`. |
+| `--allow-unsigned-operator-policy` | Accept `--operator-policy` without a verified DSSE signature envelope. |
 | `--operator-policy-max-age-days` `INT` | Maximum attestation age in days when `--operator-policy-attestation` is verified (default: `90`; `0` disables). |
 | `--detailed-exit-codes` | Use distinct exit codes (`0` passed, `2` usage, `3` gate failed, `4` collection/input failure). |
 | `--legacy-exit-codes` | Use legacy exit codes (`0` passed, `1` gate/input failed, `2` usage). |
@@ -901,10 +901,10 @@ nexus-symbiote validate [OPTIONS] AIBOM_PATH
 | `--allow-unsigned-discovery` | Accept unverified discovery evidence explicitly (still warns); required in CI |
 | `--report-format` `text\|json\|markdown\|junit` | Gate report format (cannot disagree with `--json-output`; default: `text`). |
 | `--step-summary` `PATH` | Append a sanitized Markdown gate summary to this file. |
-| `--operator-policy` `FILE` | Operator policy YAML outside the scanned checkout; checkout policy may only narrow it. |
+| `--operator-policy` `FILE` | Signed operator policy YAML outside the scanned checkout; checkout policy may only narrow it. |
 | `--operator-policy-attestation` `FILE` | DSSE attestation envelope (`purpose: policy`) over `--operator-policy`. |
 | `--operator-policy-key` `FILE` | Trusted Ed25519 public key for `--operator-policy-attestation` (repeatable). |
-| `--require-operator-policy-attestation` | Fail closed unless `--operator-policy` is verified by `--operator-policy-attestation` and `--operator-policy-key`. |
+| `--allow-unsigned-operator-policy` | Accept `--operator-policy` without a verified DSSE signature envelope. |
 | `--operator-policy-max-age-days` `INT` | Maximum attestation age in days when `--operator-policy-attestation` is verified (default: `90`; `0` disables). |
 | `--detailed-exit-codes` | Use distinct exit codes (`0` passed, `2` usage, `3` gate failed, `4` collection/input failure). |
 | `--legacy-exit-codes` | Use legacy exit codes (`0` passed, `1` gate/input failed, `2` usage). |

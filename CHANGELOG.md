@@ -6,7 +6,7 @@ Notable changes to Nexus SymBiote, newest release first. Within a release, secur
 
 ### Security
 
-- Added `--operator-policy` (with `--operator-policy-attestation`, `--operator-policy-key`, `--require-operator-policy-attestation`, and `--operator-policy-max-age-days`) on `scan`, `validate`, and `risk`, plus `attest --purpose policy`: operator policies must live outside the scanned checkout and enclosing repositories, project policies may only monotonically narrow them, and `operator:<digest>` provenance is recorded in native JSON, gate reports, and SARIF.
+- Added `--operator-policy` (requiring `--operator-policy-attestation` and `--operator-policy-key` by default, with `--allow-unsigned-operator-policy` to opt out explicitly and `--operator-policy-max-age-days` defaulting to 90 days) on `scan`, `validate`, and `risk`, plus `attest --purpose policy`: operator policies must live outside the scanned checkout and enclosing repositories, project policies may only monotonically narrow them, and `operator:<digest>` provenance is recorded in native JSON, gate reports, and SARIF.
 - Added `diff --expect-upgrade FROM_VERSION` (`0.1.0` or `0.2.0`) to partition documented profile/schema transitions into `tool_upgrade_changes` when `metadata.tool_version` matches, while keeping configuration, source-binding, and hash drift in `security_alerts`.
 - Added `--report-format` (`text`, `json`, `markdown`, `junit`) and `--step-summary` (injection-safe Markdown summary append) on `validate`, `risk`, and `diff`, plus `--detailed-exit-codes` (`0` passed, `2` usage, `3` gate/verification failed, `4` collection/input/internal failure) and `--legacy-exit-codes`.
 - Added `sk-ant-` Anthropic token redaction to `utils/secrets.py`.
