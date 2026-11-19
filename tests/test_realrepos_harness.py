@@ -9,6 +9,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -93,6 +94,8 @@ def _write_scan(
     *,
     gates: dict[str, str] | None = None,
     seconds: dict[str, float] | None = None,
+    rss: dict[str, int] | None = None,
+    exit_codes: dict[str, int] | None = None,
 ) -> None:
     out.mkdir(parents=True, exist_ok=True)
     records = []
@@ -106,9 +109,9 @@ def _write_scan(
                 "id": repo_id,
                 "commit": "0" * 40,
                 "scan": {
-                    "exit_code": 0,
+                    "exit_code": (exit_codes or {}).get(repo_id, 0),
                     "seconds": (seconds or {}).get(repo_id, 1.0),
-                    "max_rss_kib": 70000,
+                    "max_rss_kib": (rss or {}).get(repo_id, 70000),
                     "timed_out": False,
                 },
                 "gate": (gates or {}).get(repo_id, "passed"),
@@ -276,6 +279,7 @@ def test_fetch_uses_the_hardened_git_command_lines(
         "protocol.allow=never",
         "protocol.https.allow=always",
         "transfer.fsckObjects=true",
+        "core.fsmonitor=false",
     ):
         assert fetch_argv[fetch_argv.index(flag) - 1] == "-c"
     tail = fetch_argv[fetch_argv.index("fetch") :]
@@ -318,6 +322,30 @@ def test_fetch_reports_a_tree_or_commit_mismatch_and_a_foreign_checkout(tmp_path
     assert problems == [f"alpha: {tmp_path / 'alpha'} exists at another commit"]
 
 
+def test_fetch_checks_the_tree_hash_of_a_present_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = _harness()
+    (tmp_path / "trees" / "alpha" / ".git").mkdir(parents=True)
+    (tmp_path / "trees" / "alpha" / ".git" / "HEAD").write_text(COMMIT_A)
+    calls: list[list[str]] = []
+
+    def runner(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout=COMMIT_B + "\n", stderr="")
+
+    monkeypatch.chdir(tmp_path)
+    present = {**_repo("alpha", COMMIT_A), "tree": COMMIT_B}
+    assert harness.fetch([present], Path("trees"), runner=runner) == []
+    assert calls[-1][:3] == ["git", "-C", str(tmp_path / "trees" / "alpha")]
+    assert "core.hooksPath=/dev/null" in calls[-1] and calls[-1][-1] == "HEAD^{tree}"
+    assert not [argv for argv in calls if "fetch" in argv or "checkout" in argv]
+    swapped = {**present, "tree": COMMIT_C}
+    assert harness.fetch([swapped], Path("trees"), runner=runner) == [
+        "alpha: tree hash differs from the manifest"
+    ]
+
+
 def test_read_head_reads_refs_and_packed_refs_without_git(tmp_path: Path) -> None:
     harness = _harness()
     git = tmp_path / ".git"
@@ -328,6 +356,8 @@ def test_read_head_reads_refs_and_packed_refs_without_git(tmp_path: Path) -> Non
     (git / "refs" / "heads").mkdir(parents=True)
     (git / "refs" / "heads" / "main").write_text(COMMIT_A + "\n")
     assert harness.read_head(tmp_path) == COMMIT_A
+    (tmp_path / "outside").write_text(COMMIT_C + "\n")
+    assert (git / "refs" / ".." / ".." / "outside").read_text().strip() == COMMIT_C
     (git / "HEAD").write_text("ref: refs/../../outside\n")
     assert harness.read_head(tmp_path) is None
     assert harness.read_head(tmp_path / "missing") is None
@@ -378,6 +408,75 @@ def test_scan_runs_offline_in_an_isolated_interpreter_with_a_fresh_home(
         assert env["SOURCE_DATE_EPOCH"] == "0"
         assert Path(env["HOME"]) == cwd and not cwd.is_relative_to(trees)
         assert "beta" not in " ".join(argv)
+
+
+def test_scan_resolves_relative_trees_and_output_before_changing_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = _harness()
+    (tmp_path / "trees" / "alpha" / ".git").mkdir(parents=True)
+    (tmp_path / "trees" / "alpha" / ".git" / "HEAD").write_text(COMMIT_A)
+    scans: list[tuple[list[str], Path]] = []
+
+    def measure(argv: list[str], *, env: dict[str, str], stdout: Path, stderr: Path, **kw: Any):
+        if "scan" in argv:
+            scans.append((argv, kw["cwd"]))
+            Path(argv[argv.index("-o") + 1]).write_text(json.dumps(_inventory([])))
+        stdout.touch()
+        stderr.touch()
+        return harness.Measured(0, 1.0, 1, False)
+
+    monkeypatch.chdir(tmp_path)
+    run = harness.scan([_repo("alpha", COMMIT_A)], Path("trees"), Path("scan"), measure=measure)
+    [(argv, cwd)] = scans
+    assert cwd != tmp_path
+    assert argv[argv.index("scan") + 1] == str(tmp_path / "trees" / "alpha")
+    assert argv[argv.index("-o") + 1] == str(tmp_path / "scan" / "alpha.json")
+    assert (tmp_path / "scan" / "alpha.json").is_file()
+    assert harness.scan_succeeded(run["repositories"][0])
+
+
+@pytest.mark.parametrize(
+    ("record", "succeeded"),
+    [
+        ({"scan": {"exit_code": 0, "timed_out": False}}, True),
+        ({"scan": {"exit_code": 2, "timed_out": False}}, False),
+        ({"scan": {"exit_code": -9, "timed_out": True}}, False),
+        ({"error": "tree missing or not at the pinned commit"}, False),
+    ],
+)
+def test_main_scan_fails_on_a_failed_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, record: dict[str, Any], succeeded: bool
+) -> None:
+    harness = _harness()
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(_manifest(_repo("alpha", COMMIT_A))))
+    run = {"repositories": [{"id": "alpha", **record}]}
+    monkeypatch.setattr(harness, "scan", lambda *args, **kwargs: run)
+    argv = ["--manifest", str(manifest), "scan", "--trees", "t", "--out", "o"]
+    assert harness.main(argv) == (0 if succeeded else 1)
+
+
+def test_run_measured_kills_the_process_group_on_timeout(tmp_path: Path) -> None:
+    harness = _harness()
+    marker = tmp_path / "survived"
+    child = f"import time; time.sleep(1.5); open({str(marker)!r}, 'w').close()"
+    script = (
+        "import subprocess, sys, time; "
+        f"subprocess.Popen([sys.executable, '-I', '-c', {child!r}]); time.sleep(30)"
+    )
+    measured = harness.run_measured(
+        [sys.executable, "-I", "-c", script],
+        env={},
+        stdout=tmp_path / "out.txt",
+        stderr=tmp_path / "err.txt",
+        cwd=tmp_path,
+        timeout=0.3,
+    )
+    assert measured.timed_out and measured.exit_code < 0
+    assert measured.seconds < 10
+    time.sleep(3)
+    assert not marker.exists()
 
 
 def test_run_measured_records_exit_time_and_peak_rss(tmp_path: Path) -> None:
@@ -568,6 +667,55 @@ def test_labels_are_validated(entry: dict[str, Any], match: str) -> None:
         _harness().parse_labels(document)
 
 
+def test_public_labels_refuse_credential_context_and_unlabelled_credential_entries(
+    tmp_path: Path,
+) -> None:
+    harness = _harness()
+    entry = {**_label("0123456789abcdef", None), "context": {"category": "credential_exposure"}}
+    document = {"schema_version": 1, "repository": "a", "commit": COMMIT_A, "labels": [entry]}
+    with pytest.raises(harness.HarnessError, match="private-labels"):
+        harness.parse_labels(document)
+    assert harness.parse_labels(document, private=True) is document
+
+    out, results = tmp_path / "out", tmp_path / "results"
+    _write_scan(out, _base_inventories())
+    found = harness.collect_observations("alpha", _base_inventories()["alpha"])
+    secret = _observation(found, category="credential_exposure")["id"]
+    _labels(tmp_path / "labels", "alpha", COMMIT_A, [_label(secret, None)])
+    with pytest.raises(harness.HarnessError, match="private-labels"):
+        harness.report(_fixture_manifest(), out, results, labels=[tmp_path / "labels"])
+
+
+def test_report_refuses_labels_for_another_commit_or_repository(tmp_path: Path) -> None:
+    harness = _harness()
+    out, results = tmp_path / "out", tmp_path / "results"
+    _write_scan(out, _base_inventories())
+    _labels(tmp_path / "stale", "alpha", COMMIT_B, [])
+    with pytest.raises(harness.HarnessError, match="manifest commit"):
+        harness.report(_fixture_manifest(), out, results, labels=[tmp_path / "stale"])
+    _labels(tmp_path / "private", "gamma", COMMIT_A, [])
+    with pytest.raises(harness.HarnessError, match="manifest commit"):
+        harness.report(_fixture_manifest(), out, results, private_labels=[tmp_path / "private"])
+
+
+def test_an_observation_cannot_be_labelled_publicly_and_privately(tmp_path: Path) -> None:
+    harness = _harness()
+    out, results = tmp_path / "out", tmp_path / "results"
+    _write_scan(out, _base_inventories())
+    found = harness.collect_observations("alpha", _base_inventories()["alpha"])
+    pinning = _observation(found, category="version_pinning")["id"]
+    _labels(tmp_path / "public", "alpha", COMMIT_A, [_label(pinning, "true-positive")])
+    _labels(tmp_path / "private", "alpha", COMMIT_A, [_label(pinning, "false-positive")])
+    with pytest.raises(harness.HarnessError, match="both publicly and privately"):
+        harness.report(
+            _fixture_manifest(),
+            out,
+            results,
+            labels=[tmp_path / "public"],
+            private_labels=[tmp_path / "private"],
+        )
+
+
 def test_labels_refuse_duplicates_and_a_file_for_another_repository(tmp_path: Path) -> None:
     harness = _harness()
     entry = _label("0123456789abcdef", "true-positive")
@@ -597,6 +745,22 @@ def test_label_template_adds_only_missing_entries(tmp_path: Path) -> None:
     assert harness.load_labels([labels]).keys() == {public[0]["id"]}
     with pytest.raises(harness.HarnessError, match="unknown repository"):
         harness.label_template(_fixture_manifest(), [{**public[0], "repository": "z"}], labels)
+
+
+def test_label_template_writes_credential_observations_only_privately(tmp_path: Path) -> None:
+    harness = _harness()
+    found = harness.collect_observations("alpha", _base_inventories()["alpha"])
+    labels = tmp_path / "labels"
+    with pytest.raises(harness.HarnessError, match="--private"):
+        harness.label_template(_fixture_manifest(), found, labels)
+    assert not labels.exists()
+    with pytest.raises(harness.HarnessError, match="outside the repository"):
+        harness.label_template(_fixture_manifest(), found, BENCH / "labels", private=True)
+    assert harness.label_template(_fixture_manifest(), found, labels, private=True) == len(found)
+    assert SENTINEL_DETAIL in (labels / "alpha.json").read_text()
+    assert harness.load_labels([labels], private=True) == {}
+    with pytest.raises(harness.HarnessError, match="private-labels"):
+        harness.load_labels([labels])
 
 
 def test_delta_against_a_baseline_reports_flips_new_observations_and_budgets(
@@ -637,6 +801,71 @@ def test_delta_against_a_baseline_reports_flips_new_observations_and_budgets(
     ids = json.loads((out / "private" / "delta-ids.json").read_text())
     assert len(ids["new"]) == 2 and len(ids["removed"]) == 1
     assert "another" not in "".join(path.read_text() for path in results.iterdir())
+
+
+def test_a_new_credential_finding_on_a_negative_repository_fails_with_a_baseline(
+    tmp_path: Path,
+) -> None:
+    harness = _harness()
+    manifest = _fixture_manifest()
+    base_out, base_results = tmp_path / "base-out", tmp_path / "baseline"
+    _write_scan(base_out, _base_inventories())
+    harness.report(manifest, base_out, base_results, budgets=_budgets())
+
+    changed = _base_inventories()
+    changed["neg"]["components"][0]["risks"] = [
+        {"category": "credential_exposure", "severity": "critical", "detail": "sk-live-neg"}
+    ]
+    out, results = tmp_path / "out", tmp_path / "results"
+    _write_scan(out, changed)
+    summary = harness.report(manifest, out, results, baseline=base_results, budgets=_budgets())
+    negative = _budget(summary["budgets"], "negative repositories: new observations")
+    assert negative["actual"] == 1 and negative["passed"] is False
+    assert summary["delta"]["repositories"]["neg"]["new_observations"] == 0
+    published = "".join(path.read_text() for path in results.iterdir())
+    assert "sk-live-neg" not in published and "new_private" not in published
+
+    private = out / "private" / "credential-observations.json"
+    summary = harness.report(
+        manifest,
+        out,
+        tmp_path / "again",
+        baseline=base_results,
+        baseline_private=private,
+        budgets=_budgets(),
+    )
+    negative = _budget(summary["budgets"], "negative repositories: new observations")
+    assert negative["actual"] == 0 and negative["passed"] is True
+
+
+def test_scan_exit_code_and_cost_budgets_fail(tmp_path: Path) -> None:
+    harness = _harness()
+    manifest = _fixture_manifest()
+    base_out, base_results = tmp_path / "base-out", tmp_path / "baseline"
+    _write_scan(base_out, _base_inventories(), seconds={"alpha": 2.0, "beta": 6.0})
+    harness.report(manifest, base_out, base_results, budgets=_budgets())
+
+    out, results = tmp_path / "out", tmp_path / "results"
+    _write_scan(
+        out,
+        {key: value for key, value in _base_inventories().items() if key != "neg"},
+        seconds={"alpha": 4.5, "beta": 13.0},
+        rss={"alpha": 140001},
+        exit_codes={"beta": 1},
+    )
+    summary = harness.report(manifest, out, results, baseline=base_results, budgets=_budgets())
+    budgets = summary["budgets"]
+    exits = _budget(budgets, "scan exit codes")
+    assert exits["actual"] == ["beta", "neg"] and exits["passed"] is False
+    assert _budget(budgets, "cost: wall time")["actual"] == ["beta"]
+    rss = _budget(budgets, "cost: peak RSS")
+    assert rss["actual"] == ["alpha"] and rss["passed"] is False
+
+    _write_scan(out, _base_inventories(), seconds={"alpha": 4.5, "beta": 12.0}, rss={"alpha": 1})
+    summary = harness.report(manifest, out, results, baseline=base_results, budgets=_budgets())
+    assert _budget(summary["budgets"], "scan exit codes")["passed"] is True
+    assert _budget(summary["budgets"], "cost: wall time")["passed"] is True
+    assert _budget(summary["budgets"], "cost: peak RSS")["passed"] is True
 
 
 def test_main_enforces_budgets_only_when_asked(tmp_path: Path) -> None:
@@ -709,6 +938,23 @@ def test_committed_baseline_is_consistent_with_the_manifest_labels_and_budgets()
     assert not [item for item in published if harness.is_private(item)]
     for row in summary["repositories"]:
         assert not [name for name in row["findings"] if harness.is_credential_category(name)]
+    findings: dict[str, dict[str, int]] = {}
+    for category, severities in observations["credential_counts"].items():
+        findings[category] = dict(severities)
+    for item in published:
+        if item["kind"] == "finding":
+            row = findings.setdefault(item["category"], {})
+            row[item["severity"]] = row.get(item["severity"], 0) + 1
+    assert findings == summary["finding_totals"]
+    components: dict[str, int] = {}
+    for item in published:
+        if item["kind"] == "component":
+            components[item["component_type"]] = components.get(item["component_type"], 0) + 1
+    assert components == summary["component_totals"]
+    for row in summary["repositories"]:
+        mine = [item for item in published if item["repository"] == row["id"]]
+        assert sum(item["kind"] == "gap" for item in mine) == row["gaps"]
+        assert sum(item["kind"] == "component" for item in mine) == sum(row["components"].values())
     ids = {item["id"] for item in published}
     commits = {repo["id"]: repo["commit"] for repo in manifest}
     for path in sorted((BENCH / "labels").glob("*.json")):

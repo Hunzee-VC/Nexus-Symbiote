@@ -25,7 +25,7 @@ python benchmarks/realrepos/harness.py report --out ../realrepos/scan --results 
     --baseline benchmarks/realrepos/results/baseline
 ```
 
-`--only ID` limits `fetch` or `scan` to one repository and may be repeated. `report --enforce-budgets` exits 1 when a budget fails; without it the report only lists the failures. To refresh the committed baseline, write the report to `benchmarks/realrepos/results/baseline` without `--baseline`.
+`--only ID` limits `fetch` or `scan` to one repository and may be repeated. Relative paths are resolved against the current directory before anything runs. `scan` exits 1 when a tree is missing or at another commit, or when a scan exits non-zero or times out. `report --enforce-budgets` exits 1 when a budget fails; without it the report only lists the failures. `report --baseline-private FILE` names the baseline scan's `private/credential-observations.json`, so that a credential observation already in the baseline is not counted as new; without it every credential observation on a negative repository counts as new. To refresh the committed baseline, write the report to `benchmarks/realrepos/results/baseline` without `--baseline`.
 
 The committed baseline was produced this way from trees fetched by the harness's precursor, which cloned each default branch and recorded the commit the manifest now pins; `scan` reads `.git/HEAD` and refuses a tree at any other commit.
 
@@ -33,7 +33,7 @@ The committed baseline was produced this way from trees fetched by the harness's
 
 The repositories are third-party code and are treated as hostile input.
 
-- **Fetch** runs `git init`, then `git fetch --depth 1 --no-tags --no-recurse-submodules <url> <commit>` and `git checkout --detach FETCH_HEAD`, with `core.hooksPath=/dev/null`, `protocol.allow=never` except HTTPS, `transfer.fsckObjects=true`, `core.fsmonitor=false`, `GIT_LFS_SKIP_SMUDGE=1`, `GIT_TERMINAL_PROMPT=0`, no system or global Git configuration, and a 900 s timeout per command. It then checks that `HEAD` is the pinned commit and that the tree hash matches the manifest. It refuses a target directory that already exists at another commit.
+- **Fetch** runs `git init`, then `git fetch --depth 1 --no-tags --no-recurse-submodules <url> <commit>` and `git checkout --detach FETCH_HEAD`, with `core.hooksPath=/dev/null`, `protocol.allow=never` except HTTPS, `transfer.fsckObjects=true`, `core.fsmonitor=false`, `GIT_LFS_SKIP_SMUDGE=1`, `GIT_TERMINAL_PROMPT=0`, no system or global Git configuration, and a 900 s timeout per command. It then checks that `HEAD` is the pinned commit and that the tree hash matches the manifest. A target directory that already exists is accepted only when its `HEAD` is the pinned commit and its tree hash, read with the same hardened `git rev-parse`, matches the manifest.
 - **Scan** runs `python -I -m nexus_symbiote scan <tree> --no-project-policy --report-only -f json -o <out>/<id>.json` for each tree, then `risk --json-output` on that inventory for the score. A fetched repository's `.nexus-symbiote.yaml` is never read. Each repository gets a fresh `HOME`, `SOURCE_DATE_EPOCH=0` and no `NEXUS_SYMBIOTE_*`, `PYTHON*` or `XDG_*` variables, so the scan is offline by default. The harness records the exit code, wall time and peak resident set (`os.wait4`), and kills a scan after 1,800 s. `--sarif` also writes SARIF. Nothing from a tree is executed or imported, and the harness resolves a tree's `HEAD` by reading files, not by running Git in it.
 
 ## What the report contains
@@ -48,11 +48,11 @@ Each observation has a stable identifier, the first 16 hexadecimal digits of a S
 
 `summary.json` holds, for each repository, the exit code, the scan gate verdict and its main reasons, the score, the components by type, the findings by category and severity, the gap count, whether coverage was complete, the wall time and the peak resident set; then the totals, the label metrics per finding category and per component type, the budget results and, with `--baseline`, the delta. `RESULTS.md` is rendered from `summary.json` alone, and the tests check that the committed pair agrees. `observations.json` lists every observation that may be published.
 
-The delta lists new and removed observations by kind and category, gate flips with their reasons, and per repository the score delta and the time and resident-set ratios. The identifiers of the new and removed observations are written to `<out>/private/delta-ids.json`, beside the scan output.
+The delta lists new and removed observations by kind and category, gate flips with their reasons, and per repository the score delta and the time and resident-set ratios. The identifiers of the new and removed observations, and of the new credential observations, are written to `<out>/private/delta-ids.json`, beside the scan output.
 
 ### Credential categories: counts only
 
-A finding whose category names a credential or a secret (`credential_exposure`, `credential_exfiltration`, `credential_helper` and any later one) is published as a count by category and severity only, across all repositories: no repository, component, path or detail, and no per-repository count. Its observations are written to `<out>/private/credential-observations.json`, which is never committed. Label them in a directory outside the repository and pass it as `report --private-labels DIR`; `report` refuses a label in a `--labels` directory that names a credential observation. A true positive in a third-party repository is reported to its maintainers privately by the project owner.
+A finding whose category names a credential or a secret (`credential_exposure`, `credential_exfiltration`, `credential_helper` and any later one) is published as a count by category and severity only, across all repositories: no repository, component, path or detail, and no per-repository count. Its observations are written to `<out>/private/credential-observations.json`, which is never committed. Label them in a directory outside the repository (`label-template --private` refuses a directory inside it, and without `--private` refuses credential observations) and pass it as `report --private-labels DIR`. `report` refuses an entry in a `--labels` directory that names a credential observation or carries a credential category in its context, whether or not it has a verdict. A true positive in a third-party repository is reported to its maintainers privately by the project owner.
 
 ## Labels
 
@@ -77,7 +77,7 @@ A finding whose category names a credential or a secret (`credential_exposure`, 
 }
 ```
 
-`verdict` is `true-positive`, `false-positive`, `out-of-scope` or `null` (not yet labelled). `status` is `proposed` until the maintainer reviews the entry and sets `confirmed`; a session that writes labels writes them as `proposed`. `context` is optional and only helps the reviewer. An observation may be labelled once across all label directories.
+`commit` must be the manifest commit of `repository`; `report` refuses a label file for another commit. `verdict` is `true-positive`, `false-positive`, `out-of-scope` or `null` (not yet labelled). `status` is `proposed` until the maintainer reviews the entry and sets `confirmed`; a session that writes labels writes them as `proposed`. `context` is optional and only helps the reviewer. An observation may be labelled once across all label directories.
 
 `label-template --observations FILE --labels DIR` adds an unlabelled entry, with its context, for every observation in FILE that DIR does not yet label, and keeps the existing entries.
 
@@ -96,7 +96,7 @@ For each category, the report gives the observations, how many are labelled, tru
 | `script_download_execution` false positives | at most 2 |
 | Component precision, per type with any labels | at least 95% |
 | Scan exit codes | 0 for every repository under `--report-only` |
-| Negative repositories (`pallets/flask`, `psf/requests`) | 0 new observations against the baseline, or 0 findings without one |
+| Negative repositories (`pallets/flask`, `psf/requests`) | 0 new observations, credential observations included, against the baseline, or 0 findings without one; only the total is published |
 | Coverage | 0 new gaps on repositories whose baseline coverage was complete |
 | Cost | no repository slower than 2× its baseline wall time (when above 5 s) or above 2× its baseline peak resident set |
 

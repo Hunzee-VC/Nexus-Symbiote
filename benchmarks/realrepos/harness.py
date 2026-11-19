@@ -223,32 +223,47 @@ def read_head(tree: Path) -> str | None:
     return None
 
 
+def _tree_hash(target: Path, env: Mapping[str, str], runner: Runner) -> str:
+    completed = runner(
+        ["git", "-C", str(target), *GIT_HARDENING, "rev-parse", "HEAD^{tree}"],
+        env=env,
+        check=True,
+        timeout=60,
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+    )
+    return str(completed.stdout).strip()
+
+
 def fetch(
     manifest: list[dict[str, str]], dest: Path, *, runner: Runner = subprocess.run
 ) -> list[str]:
     env = git_environment()
     problems: list[str] = []
+    dest = dest.resolve()
     dest.mkdir(parents=True, exist_ok=True)
     for repo in manifest:
         target = dest / repo["id"]
         if target.exists():
-            if read_head(target) == repo["commit"]:
-                print(f"present {repo['id']}")
+            if read_head(target) != repo["commit"]:
+                problems.append(f"{repo['id']}: {target} exists at another commit")
                 continue
-            problems.append(f"{repo['id']}: {target} exists at another commit")
+            if repo["tree"]:
+                try:
+                    tree = _tree_hash(target, env, runner)
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
+                    problems.append(f"{repo['id']}: tree check failed ({exc.__class__.__name__})")
+                    continue
+                if tree != repo["tree"]:
+                    problems.append(f"{repo['id']}: tree hash differs from the manifest")
+                    continue
+            print(f"present {repo['id']}")
             continue
         try:
             for argv in fetch_commands(repo, target):
                 runner(argv, env=env, check=True, timeout=FETCH_TIMEOUT, stdin=subprocess.DEVNULL)
-            tree = runner(
-                ["git", "-C", str(target), *GIT_HARDENING, "rev-parse", "HEAD^{tree}"],
-                env=env,
-                check=True,
-                timeout=60,
-                capture_output=True,
-                text=True,
-                stdin=subprocess.DEVNULL,
-            ).stdout.strip()
+            tree = _tree_hash(target, env, runner)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as exc:
             problems.append(f"{repo['id']}: fetch failed ({exc.__class__.__name__})")
             continue
@@ -408,6 +423,7 @@ def scan(
     sarif: bool = False,
     measure: Callable[..., Measured] = run_measured,
 ) -> dict[str, Any]:
+    trees, out = trees.resolve(), out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     records: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory(prefix="realrepos-") as scratch:
@@ -498,6 +514,17 @@ def scan(
     return run
 
 
+def scan_succeeded(record: Mapping[str, Any]) -> bool:
+    """A repository was scanned at its pinned commit, exited 0 and did not time out."""
+    result = record.get("scan")
+    return (
+        "error" not in record
+        and isinstance(result, Mapping)
+        and result.get("exit_code") == 0
+        and not result.get("timed_out")
+    )
+
+
 # Report
 
 
@@ -578,7 +605,9 @@ def _severity_table(observations: Iterable[Mapping[str, Any]]) -> dict[str, dict
     return {category: dict(sorted(table[category].items())) for category in sorted(table)}
 
 
-def parse_labels(document: Any, expected_repository: str | None = None) -> dict[str, Any]:
+def parse_labels(
+    document: Any, expected_repository: str | None = None, *, private: bool = False
+) -> dict[str, Any]:
     if not isinstance(document, dict) or document.get("schema_version") != SCHEMA_VERSION:
         raise HarnessError("labels: schema_version must be 1")
     repository = document.get("repository")
@@ -610,29 +639,57 @@ def parse_labels(document: Any, expected_repository: str | None = None) -> dict[
                 raise HarnessError(f"labels {repository}: {key} must be a string")
         if entry.get("status") == "confirmed" and entry.get("verdict") is None:
             raise HarnessError(f"labels {repository}: confirmed entry without a verdict")
+        context = entry.get("context")
+        if not private and isinstance(context, dict):
+            if is_credential_category(str(context.get("category", ""))):
+                raise HarnessError(
+                    f"labels {repository}: credential observations must be labelled "
+                    "under --private-labels"
+                )
     return document
 
 
-def load_labels(directories: Sequence[Path]) -> dict[str, dict[str, Any]]:
-    """Map each labelled observation id to its entry plus the repository and commit."""
-    merged: dict[str, dict[str, Any]] = {}
+def load_label_documents(
+    directories: Sequence[Path],
+    *,
+    private: bool = False,
+    commits: Mapping[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Every label file in the directories; with `commits`, each must name a manifest commit."""
+    documents: list[dict[str, Any]] = []
     for directory in directories:
         if not directory.is_dir():
             continue
         for path in sorted(directory.glob("*.json")):
-            document = parse_labels(_read_json(path), path.stem)
-            for entry in document["labels"]:
-                if entry.get("verdict") is None:
-                    continue
-                key = entry["observation"]
-                if key in merged:
-                    raise HarnessError(f"labels: observation {key} is labelled twice")
-                merged[key] = {
-                    **entry,
-                    "repository": document["repository"],
-                    "commit": document["commit"],
-                }
+            document = parse_labels(_read_json(path), path.stem, private=private)
+            if commits is not None and commits.get(document["repository"]) != document["commit"]:
+                raise HarnessError(
+                    f"labels {document['repository']}: commit is not the manifest commit"
+                )
+            documents.append(document)
+    return documents
+
+
+def merge_labels(documents: Iterable[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Map each labelled observation id to its entry plus the repository and commit."""
+    merged: dict[str, dict[str, Any]] = {}
+    for document in documents:
+        for entry in document["labels"]:
+            if entry.get("verdict") is None:
+                continue
+            key = entry["observation"]
+            if key in merged:
+                raise HarnessError(f"labels: observation {key} is labelled twice")
+            merged[key] = {
+                **entry,
+                "repository": document["repository"],
+                "commit": document["commit"],
+            }
     return merged
+
+
+def load_labels(directories: Sequence[Path], *, private: bool = False) -> dict[str, dict[str, Any]]:
+    return merge_labels(load_label_documents(directories, private=private))
 
 
 def _rate(numerator: int, denominator: int) -> float | None:
@@ -752,13 +809,20 @@ def compare(
     observations: Sequence[Mapping[str, Any]],
     credential_counts: Mapping[str, Mapping[str, int]],
     baseline_dir: Path,
+    baseline_private_ids: Iterable[str] = (),
 ) -> dict[str, Any]:
+    """The delta against a baseline. `baseline_private_ids` are the baseline scan's credential
+    observation ids, which are never published; without them every current credential
+    observation counts as new in `new_private_by_repository`."""
     base_summary = _read_json(baseline_dir / "summary.json")
     base_observations = _read_json(baseline_dir / "observations.json")
     base_public = {item["id"]: item for item in base_observations.get("observations") or []}
     current_public = {item["id"]: item for item in observations if not is_private(item)}
     new = sorted(set(current_public) - set(base_public))
     removed = sorted(set(base_public) - set(current_public))
+    known_private = set(baseline_private_ids)
+    new_private = sorted({item["id"] for item in observations if is_private(item)} - known_private)
+    repository_of = {item["id"]: item["repository"] for item in observations}
 
     def tally(ids: Iterable[str], source: Mapping[str, Mapping[str, Any]]) -> dict[str, int]:
         counter: Counter[str] = Counter()
@@ -816,6 +880,10 @@ def compare(
             for severity in sorted(severities)
         }
     return {
+        "new_private_by_repository": dict(
+            sorted(Counter(repository_of[key] for key in new_private).items())
+        ),
+        "new_private_ids": new_private,
         "baseline_tool_version": base_summary.get("tool_version"),
         "baseline_source": base_summary.get("source"),
         "new_observations": tally(new, current_public),
@@ -905,7 +973,9 @@ def check_budgets(
     limit = budgets.get("negative_max_new_observations", 0)
     if delta is not None:
         actual = sum(
-            delta["repositories"].get(repo, {}).get("new_observations", 0) for repo in negatives
+            delta["repositories"].get(repo, {}).get("new_observations", 0)
+            + delta["new_private_by_repository"].get(repo, 0)
+            for repo in negatives
         )
     else:
         actual = sum(
@@ -1115,14 +1185,21 @@ def report(
     labels: Sequence[Path] = (),
     private_labels: Sequence[Path] = (),
     baseline: Path | None = None,
+    baseline_private: Path | None = None,
     budgets: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     summary, observations = build_summary(manifest, out)
-    public_labels = load_labels(labels)
-    secret_labels = load_labels(private_labels)
+    commits = {repo["id"]: repo["commit"] for repo in manifest}
+    public_documents = load_label_documents(labels, commits=commits)
+    public_labels = merge_labels(public_documents)
+    secret_labels = merge_labels(
+        load_label_documents(private_labels, private=True, commits=commits)
+    )
     private_ids = {item["id"] for item in observations if is_private(item)}
-    leaked = sorted(set(public_labels) & private_ids)
-    if leaked:
+    public_ids = {
+        entry["observation"] for document in public_documents for entry in document["labels"]
+    }
+    if public_ids & private_ids:
         raise HarnessError(
             "labels: credential observations must be labelled under --private-labels"
         )
@@ -1143,7 +1220,13 @@ def report(
     )
     delta = None
     if baseline is not None:
-        delta = compare(summary, observations, credential_counts, baseline)
+        baseline_private_ids: list[str] = []
+        if baseline_private is not None:
+            document = _read_json(baseline_private)
+            if not isinstance(document, dict) or document.get("schema_version") != SCHEMA_VERSION:
+                raise HarnessError("baseline private observations: schema_version must be 1")
+            baseline_private_ids = [str(item["id"]) for item in document.get("observations") or []]
+        delta = compare(summary, observations, credential_counts, baseline, baseline_private_ids)
     budget_results = check_budgets(budgets or {}, summary, observations, all_labels, delta)
     summary_out = {
         **summary,
@@ -1157,7 +1240,13 @@ def report(
         else {
             key: value
             for key, value in delta.items()
-            if key not in {"new_observation_ids", "removed_observation_ids"}
+            if key
+            not in {
+                "new_observation_ids",
+                "removed_observation_ids",
+                "new_private_ids",
+                "new_private_by_repository",
+            }
         },
     }
     _write_json(results / "summary.json", summary_out)
@@ -1180,6 +1269,7 @@ def report(
             {
                 "new": delta["new_observation_ids"],
                 "removed": delta["removed_observation_ids"],
+                "new_private": delta["new_private_ids"],
             },
         )
     return summary_out
@@ -1189,8 +1279,21 @@ def label_template(
     manifest: list[dict[str, str]],
     observations: Sequence[Mapping[str, Any]],
     labels_dir: Path,
+    *,
+    private: bool = False,
 ) -> int:
-    """Add an unlabeled entry for every observation that has none; returns how many it added."""
+    """Add an unlabeled entry for every observation that has none; returns how many it added.
+
+    Credential observations are refused unless `private` is set, and a private directory must
+    lie outside this repository."""
+    if private:
+        if labels_dir.resolve().is_relative_to(HERE.parent.parent):
+            raise HarnessError("private labels must be written outside the repository")
+    elif any(is_private(item) for item in observations):
+        raise HarnessError(
+            "credential observations must be labelled with --private in a directory outside "
+            "the repository"
+        )
     commits = {repo["id"]: repo["commit"] for repo in manifest}
     grouped: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
     for item in observations:
@@ -1202,7 +1305,7 @@ def label_template(
             raise HarnessError(f"observations name an unknown repository {repo_id}")
         path = labels_dir / f"{repo_id}.json"
         if path.exists():
-            document = parse_labels(_read_json(path), repo_id)
+            document = parse_labels(_read_json(path), repo_id, private=private)
         else:
             document = {
                 "schema_version": SCHEMA_VERSION,
@@ -1258,6 +1361,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     report_parser.add_argument("--labels", type=Path, action="append")
     report_parser.add_argument("--private-labels", type=Path, action="append", default=[])
     report_parser.add_argument("--baseline", type=Path)
+    report_parser.add_argument(
+        "--baseline-private",
+        type=Path,
+        help="the baseline scan's private/credential-observations.json",
+    )
     report_parser.add_argument("--budgets", type=Path, default=HERE / "budgets.json")
     report_parser.add_argument(
         "--enforce-budgets", action="store_true", help="exit 1 when a budget fails"
@@ -1266,6 +1374,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     template_parser = commands.add_parser("label-template", help="add unlabeled label entries")
     template_parser.add_argument("--observations", type=Path, required=True)
     template_parser.add_argument("--labels", type=Path, required=True)
+    template_parser.add_argument(
+        "--private",
+        action="store_true",
+        help="label credential observations in a directory outside the repository",
+    )
 
     args = parser.parse_args(argv)
     try:
@@ -1284,7 +1397,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 timeout=args.timeout,
                 sarif=args.sarif,
             )
-            return 1 if any("error" in record for record in run["repositories"]) else 0
+            return 0 if all(scan_succeeded(record) for record in run["repositories"]) else 1
         if args.command == "report":
             labels = args.labels if args.labels is not None else [HERE / "labels"]
             budgets = parse_budgets(_read_json(args.budgets)) if args.budgets else None
@@ -1295,6 +1408,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 labels=labels,
                 private_labels=args.private_labels,
                 baseline=args.baseline,
+                baseline_private=args.baseline_private,
                 budgets=budgets,
             )
             failed = [item["budget"] for item in document["budgets"] if item["passed"] is False]
@@ -1302,7 +1416,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"budget failed: {name}", file=sys.stderr)
             return 1 if failed and args.enforce_budgets else 0
         observations = _read_json(args.observations).get("observations") or []
-        added = label_template(manifest, observations, args.labels)
+        added = label_template(manifest, observations, args.labels, private=args.private)
         print(f"added {added} unlabeled entries")
         return 0
     except HarnessError as exc:
