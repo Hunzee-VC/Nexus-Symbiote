@@ -26,6 +26,7 @@ from nexus_symbiote.crosswalk_cli import register_crosswalk_commands
 from nexus_symbiote.digest_cli import register_digest_commands, source_date_epoch
 from nexus_symbiote.graph import validate_graph
 from nexus_symbiote.graph_cli import register_graph_commands
+from nexus_symbiote.instruction_diff import register_instruction_diff_commands
 from nexus_symbiote.inventory_export_cli import register_inventory_export_commands
 from nexus_symbiote.live_cli import register_live_commands
 from nexus_symbiote.minimum_elements_cli import register_minimum_elements_commands
@@ -1970,6 +1971,7 @@ register_crosswalk_commands(main)
 register_trace_commands(main)
 register_inventory_export_commands(main)
 register_minimum_elements_commands(main)
+register_instruction_diff_commands(main)
 
 if __name__ == "__main__":
     main()

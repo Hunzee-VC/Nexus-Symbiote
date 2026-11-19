@@ -53,6 +53,7 @@ change them. See [collection limits](collection-limits.md).
 | [`validate`](#validate) | offline | Check an AgentBOM's completeness and integrity, optionally against the project |
 | [`risk`](#risk) | offline | Score findings and apply the risk gate |
 | [`diff`](#diff) | offline | Compare two AgentBOMs and report security-relevant drift |
+| [`diff-instructions`](#diff-instructions) | offline | Compare instruction files between two trees for security-relevant CommonMark changes |
 | [`summary`](#summary) | offline | Print component and risk counts |
 | [`digest`](#digest) | offline | Print the digest of an AgentBOM's bytes, its canonical digest and its run-independent content digest |
 | [`blast-radius`](#blast-radius) | offline | List agents and components associated with one component |
@@ -451,6 +452,20 @@ The report lists security alerts, notes (`[INFO]` metadata changes, and `[NOTE]`
 about the comparison itself, also after `No changes detected.`), and added, removed and
 modified components, and added and removed relationships, each with its severity and
 conditions.
+
+### `diff-instructions`
+
+Compare instruction files between `BASE_TREE` and `HEAD_TREE` through confined, no-symlink reads and report security-relevant CommonMark and front-matter changes (`tool_grant_changed`, `import_added`, `url_or_path_added`, `hidden_markup_added`, `scope_widened`).
+
+```text
+nexus-symbiote diff-instructions [OPTIONS] BASE_TREE HEAD_TREE
+```
+
+| Option | Description |
+|---|---|
+| `--show-text` | Include redacted, terminal-neutralized changed block text (withheld by default). |
+| `--json-output` | Print the instruction diff as JSON. |
+| `--fail-on-change` | Exit with status 1 if any security-relevant instruction change is detected. |
 
 ### `digest`
 
