@@ -148,6 +148,7 @@ What exit status 1 means for each gate:
 | `validate` | Completeness, integrity (including integrity that is only unknown), the discovery producer check, the minimum assurance level or the dependency graph failed, or unverified discovery evidence was gated (see below). |
 | `risk` | The risk gate failed, `--project` reconciliation failed, or unverified discovery evidence was gated (see below). |
 | `diff` | The diff reports a security alert; `--no-fail-on-alert` turns this gate off. |
+| `diff-instructions` | Any instruction surface or front-matter parse fails collection, or `--fail-on-change` is set and a security-relevant change or new excluded coverage gap is detected. |
 | `digest` | The file is a valid native inventory, but its canonical or content digest is undefined: the other values are printed, and the missing one as `unavailable` (`null` with `--json-output`). |
 | `graph` | The inventory's graph is invalid, `--focus` names no component, or the view would hold more components than `--max-nodes`. |
 | `minimum-elements` | `--fail-under` was given and fewer than that percentage of the assessable elements are present, or the inventory's CycloneDX export fails its checks. |
@@ -272,6 +273,7 @@ directory above the policy are owned by root or by you.
 | `validate --json-output` | `passed`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `project-not-reconciled` when the project policy skips the completeness check); `policy_source` and `policy_weakened`; `completeness` and `integrity`, each with a `status` (`pass`, `fail`, `unknown` for integrity, or `skipped` with `skipped_by`) and the validator's report (its own `assessment_basis`, issues, `issues_omitted`; for completeness `supplier_claims` and `supplier_claims_omitted`; for integrity `bytes_charged`); `discovery_producer` (`null` without discovery evidence or a producer check, otherwise a `status` of `verified`, `failed`, `not-applicable` or `not-verified`, with `problems`); `unsigned_discovery` (`null`, or why unverified discovery evidence failed the run); `minimum_assurance_level`, `assurance_errors` and `graph_issues`. |
 | `risk --json-output` | `passed`; `overall_score` (`null` when the run is not scored: `--project` reconciliation or the discovery producer check failed, or unverified discovery evidence was gated); `risk_level`; `coverage_status` and `coverage_gaps`; `gate_reasons`; `gate` (the effective thresholds, cutoff, ignored categories and suppression count, each with a `*_source` of `cli`, `project policy` or `built-in`); `findings`, each with its `fingerprint`; `severity_counts`; `category_scores`; `ignored_findings`; `suppressed_findings`, `suppressions_expired`, `suppressions_unused` and `suppressions_stale`; `total_components` and `components_with_risks`; `warning_threshold_exceeded`; `assessment_basis` (`supplied-bom`, `project-reconciled`, `project-reconciled-with-supplier-claims`, `project-reconciliation-failed`, or `unsigned-discovery-evidence` when unverified discovery evidence fails the run); `supplier_claims` and `supplier_claims_omitted`; `discovery_producer` (`verified`, `failed`, `not-verified` or `not-applicable`); `score_threshold` (`null` with `--no-score-threshold`); `fail_on_severity`; `policy_source` and `policy_weakened`. A failed reconciliation has the same keys, with empty findings. |
 | `diff --json-output` | `has_changes`, `total_changes`, `components_added`, `components_removed`, `components_modified`, `dependencies_added`, `dependencies_removed` (each with its `severity` and `conditions`), `security_alerts`, `metadata_changes` and `notes`. |
+| `diff-instructions --json-output` | `format` (`nexus-symbiote/instruction-diff/v1`), `base_tree`, `head_tree`, `files_scanned`, `failures` (`base`, `head`), `excluded` (`base`, `head`), `changes` (each with `class`, `file`, `block_index`, `summary` and optional redacted `text`), and `summary` (`total_changes`, `total_failures`, `total_excluded`, `by_class`). |
 | `summary --json-output` | `total_components`, `component_types`, `total_dependencies`, `total_risks`, `risk_breakdown` and the inventory's `completeness` claim. |
 | `minimum-elements --format json` | `format` (`nexus-symbiote/minimum-elements/v1`), `edition`, `guidance`, `statement`, `evaluated` (the standard, the projection and the tool version), `subjects`, `coverage` (`present`, `assessable` and `percent`), `counts` per status, `gate` (`null` without `--fail-under`), `clusters` and `elements`; see [G7 AI SBOM minimum elements](minimum-elements.md#running-the-command). |
 | `blast-radius --json-output` | `subject`, `affected_agents`, `dependent_components`, `reachable_components`, `declared_principals`, `scope`, `effective_authority`, `linked` and `limitations`. |
@@ -455,7 +457,7 @@ conditions.
 
 ### `diff-instructions`
 
-Compare instruction files between `BASE_TREE` and `HEAD_TREE` through confined, no-symlink reads and report security-relevant CommonMark and front-matter changes (`tool_grant_changed`, `import_added`, `url_or_path_added`, `hidden_markup_added`, `scope_widened`).
+Compare instruction files between `BASE_TREE` and `HEAD_TREE` across the same instruction, rule, prompt, steering, subagent, and skill declaration surfaces (plus recursive `@path` imports) that the `prompt` collector scans, through confined descriptor-relative reads, and report security-relevant CommonMark and front-matter changes (`tool_grant_changed`, `import_added`, `url_or_path_added`, `hidden_markup_added`, `scope_widened`).
 
 ```text
 nexus-symbiote diff-instructions [OPTIONS] BASE_TREE HEAD_TREE
@@ -465,7 +467,9 @@ nexus-symbiote diff-instructions [OPTIONS] BASE_TREE HEAD_TREE
 |---|---|
 | `--show-text` | Include redacted, terminal-neutralized changed block text (withheld by default). |
 | `--json-output` | Print the instruction diff as JSON. |
-| `--fail-on-change` | Exit with status 1 if any security-relevant instruction change is detected. |
+| `--fail-on-change` | Exit with status 1 if any security-relevant instruction change or new excluded agent-directory gap is detected. |
+
+Escaped, broken, credential-targeted, oversized, invalid UTF-8, or case-variant instruction surfaces, and malformed YAML front matter, are recorded under `failures` and exit 1 (fail closed) rather than silently reporting 0 changes; in-root symlinks to non-credential targets are read through their confined target and diffed. Changed text under `--show-text` masks multi-line PEM private keys and secrets across the whole block before terminal neutralization.
 
 ### `digest`
 

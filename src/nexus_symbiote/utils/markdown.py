@@ -488,6 +488,8 @@ class _Reader:
             self.parts.append(content)
             tip.lines.append(content)
             self.code_text = tip.kind == "indented" and bool(content.strip(" \t"))
+        elif self.include_fence and tip.kind == "fence":
+            tip.lines.append(content)
 
     def _add_child(self, kind: str) -> _Block:
         while not _can_contain(self.stack[-1].kind, kind):

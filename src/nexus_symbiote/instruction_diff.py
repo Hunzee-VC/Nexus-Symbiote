@@ -1,7 +1,8 @@
 """Confined CommonMark instruction-tree diff (`R1.1-10`).
 
-Compares two directory trees (``BASE_TREE`` and ``HEAD_TREE``) through confined,
-no-symlink regular-file reads and classifies security-relevant instruction changes into
+Compares two directory trees (``BASE_TREE`` and ``HEAD_TREE``) through
+:class:`ConfinedCollection` no-symlink/single-in-root-symlink reads matching the
+``prompt`` collector's surface set and classifies security-relevant instruction changes into
 five classes:
 
 - ``tool_grant_changed``
@@ -10,54 +11,115 @@ five classes:
 - ``hidden_markup_added``
 - ``scope_widened``
 
-Prose rewording that introduces none of these five classes raises nothing. By default,
-instruction text is withheld; when ``--show-text`` is passed, every line is redacted
-and terminal-neutralized before output.
+Unreadable, escaped, oversized, malformed-frontmatter, or limit-exceeded instruction
+surfaces are recorded as failures and fail closed rather than silently yielding 0 changes.
+By default, instruction text is withheld; when ``--show-text`` is passed, every changed
+block is redacted whole-block (including multi-line PEM private keys) and
+terminal-neutralized before output.
 """
 
 from __future__ import annotations
 
-import difflib
 import json
-import os
 import re
+from bisect import bisect_right
+from collections import Counter, deque
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from enum import StrEnum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import click
 import yaml
 
-from nexus_symbiote.core.hashing import open_regular_file
-from nexus_symbiote.scanners.prompt import INSTRUCTION_FILES, NESTED_INSTRUCTION_NAMES
+from nexus_symbiote import limits
+from nexus_symbiote.policy import PolicyError, parse_yaml_mapping
+from nexus_symbiote.scanners.credential_files import (
+    MARKDOWN_SUFFIXES,
+    credential_gap,
+    credential_shaped,
+)
+from nexus_symbiote.scanners.prompt import (
+    _CODEX_SPELLINGS,
+    _DECLARATION_SUFFIXES,
+    _FOLDED_NESTED_NAMES,
+    _IMPORTING_NAMES,
+    _MAX_IMPORT_DEPTH,
+    _MAX_IMPORTS,
+    _RESOURCE_DIRECTORIES,
+    _TRAILING,
+    INSTRUCTION_DIRECTORIES,
+    INSTRUCTION_FILES,
+    NESTED_INSTRUCTION_NAMES,
+    SKILL_DIRECTORIES,
+    _hidden_counts,
+    _import_tokens,
+    _line_separator_counts,
+    _resolve_import,
+)
+from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
 from nexus_symbiote.utils.markdown import commonmark_blocks, hidden_text
-from nexus_symbiote.utils.secrets import redact_text
+from nexus_symbiote.utils.secrets import redact_metadata, redact_text
 from nexus_symbiote.utils.terminal import echo_line, json_text, neutralize
 
 FORMAT = "nexus-symbiote/instruction-diff/v1"
 MAX_FILES = 2000
-MAX_DEPTH = 32
-MAX_FILE_BYTES = 1024 * 1024
+MAX_FRONTMATTER_NODES = 4096
+MAX_SHOW_TEXT_CHARS = 4096
 
-_SKIP_DIRS = frozenset({".git", "node_modules", ".venv", "venv", "__pycache__", ".tox"})
-_FRONTMATTER_RE = re.compile(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|\Z)", re.DOTALL)
+_FRONTMATTER_RE = re.compile(
+    r"\A---[ \t]*\r?\n(?:(.*?)\r?\n)?---[ \t]*(?:\r?\n|\Z)",
+    re.DOTALL,
+)
 _URL_RE = re.compile(r"(?:https?|wss?|ftp|file)://[^\s<>\"'`\)\]]+", re.IGNORECASE)
 _PATH_RE = re.compile(
-    r"(?<![A-Za-z0-9_])(?:~/|/etc/|/var/|/usr/|/root/|/home/|\.\./)[^\s<>\"'`\)\],;]+"
+    r"(?<![A-Za-z0-9_/:])"
+    r"(?:~/|\.\./|/(?:etc|var|usr|opt|tmp|root|home|Users|srv|mnt|private)/|[A-Za-z]:\\)"
+    r"[^\s<>\"'`\)\],;]+"
 )
-_IMPORT_RE = re.compile(r"(?:^|(?<=\s))@((?:~/|\./|\.\./|[A-Za-z0-9_.-]+/)[A-Za-z0-9_./~-]+)")
 _INCLUDE_RE = re.compile(r"<!--\s*include\s*:\s*([^\s>]+)\s*-->", re.IGNORECASE)
+
+_PARAM_TOOLS = (
+    "Bash|Shell|Read|Write|Edit|MultiEdit|NotebookEdit|NotebookRead|"
+    "Glob|Grep|LS|Task|Agent|WebFetch|WebSearch|TodoWrite|TodoRead|Skill"
+)
+_UNAMBIGUOUS_BARE_TOOLS = (
+    "Bash|Glob|Grep|MultiEdit|NotebookEdit|NotebookRead|WebFetch|WebSearch|TodoWrite|TodoRead"
+)
+_CONTEXT_BARE_TOOLS = "Read|Write|Edit|Shell|Task|Agent|LS|Skill"
+_GRANT_VERB_PREFIX = (
+    r"(?:allow|allows|allowed|grant|grants|enable|enables|use|call|tools?|permissions?|[:,\[])\s+"
+)
 _TOOL_GRANT_RE = re.compile(
-    r"\b(?:Bash|WebFetch|WebSearch|Write|Edit|MultiEdit|NotebookEdit|Task)\([^)]*\)"
-    r"|\bmcp__[A-Za-z0-9_.-]+\b"
-    r"|^\s*allowed[-_]tools\s*:\s*(.+)$",
+    rf"\b(?:{_PARAM_TOOLS})\([^)]*\)"
+    r"|\bmcp__[A-Za-z0-9_.-]+(?:\([^)]*\))?\b"
+    r"|^\s*allowed[-_]tools\s*:\s*(.+)$"
+    rf"|(?<![A-Za-z0-9_])(?:{_UNAMBIGUOUS_BARE_TOOLS})(?![A-Za-z0-9_(])"
+    rf"|`({_CONTEXT_BARE_TOOLS})`"
+    rf"|(?i:{_GRANT_VERB_PREFIX})({_CONTEXT_BARE_TOOLS})\b"
+    rf"|\b({_CONTEXT_BARE_TOOLS})\s+(?i:tools?|permissions?)\b",
     re.MULTILINE,
 )
-_HIDDEN_UNICODE_RE = re.compile(
-    "[\u00ad\u034f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f"
-    "\ufeff\U000e0000-\U000e007f\U000e0100-\U000e01ef]"
+
+_TRAILING_REF_PUNCT = ".,;:!?\"'"
+_TOOL_FRONTMATTER_KEYS = (
+    "allowed-tools",
+    "allowed_tools",
+    "tools",
+    "disallowedTools",
 )
+_POLICY_FRONTMATTER_KEYS = (
+    "permissionMode",
+    "permission_mode",
+    "hooks",
+    "mcpServers",
+    "mcp_servers",
+)
+_PEM_BEGIN_RE = re.compile(r"-----BEGIN [A-Z0-9 _-]*PRIVATE KEY-----")
+_PEM_END_RE = re.compile(r"-----END [A-Z0-9 _-]*PRIVATE KEY-----")
+_NL_RE = re.compile(r"\r?\n")
 
 
 class InstructionChangeClass(StrEnum):
@@ -91,33 +153,66 @@ class InstructionChange:
 @dataclass(frozen=True)
 class _ParsedInstruction:
     rel_path: str
+    content: str
     globs: frozenset[str]
     always_apply: bool
-    tool_grants: frozenset[str]
+    frontmatter_grants: frozenset[str]
     blocks: tuple[tuple[str, str], ...]
-    hidden_signatures: tuple[str, ...]
-    hidden_unicode_count: int
+    hidden_signatures: Counter[str]
+    hidden_unicode: Mapping[str, int]
+    inline_tools: tuple[frozenset[str], dict[str, list[tuple[int, int]]]]
+    imports: tuple[frozenset[str], dict[str, list[tuple[int, int]]]]
+    refs: tuple[frozenset[str], dict[str, list[tuple[int, int]]]]
 
 
-def _is_instruction_file(rel_posix: str, name: str) -> bool:
-    if rel_posix in INSTRUCTION_FILES or name in NESTED_INSTRUCTION_NAMES:
-        return True
-    parts = Path(rel_posix).parts
-    if len(parts) >= 3 and parts[0] == ".cursor" and parts[1] == "rules":
-        return name.endswith((".mdc", ".md"))
-    if len(parts) >= 3 and parts[0] == ".github" and parts[1] == "instructions":
-        return name.endswith(".md")
-    if len(parts) >= 3 and parts[0] == ".claude" and parts[1] in {"commands", "agents", "rules"}:
-        return name.endswith(".md")
-    return bool(name == "SKILL.md" and "skills" in parts)
+def _mask_multiline_pem_spans(content: str, *, start_in_pem: bool = False) -> tuple[str, bool]:
+    """Replace any spanning BEGIN..END PRIVATE KEY lines even across blank paragraphs."""
+    if not start_in_pem and ("-----BEGIN" not in content or "PRIVATE KEY" not in content):
+        return content, False
+    out_lines: list[str] = []
+    in_pem = start_in_pem
+    for line in content.splitlines():
+        if _PEM_BEGIN_RE.search(line):
+            in_pem = True
+            if _PEM_END_RE.search(line):
+                in_pem = False
+            out_lines.append("***")
+            continue
+        if in_pem:
+            if _PEM_END_RE.search(line):
+                in_pem = False
+            out_lines.append("***")
+            continue
+        out_lines.append(line)
+    return "\n".join(out_lines), in_pem
 
 
-def _sanitize_text(raw: str) -> str:
-    return "\n".join(neutralize(redact_text(line)) for line in raw.splitlines())
+def _file_pem_masked_blocks(blocks: tuple[tuple[str, str], ...]) -> dict[int, str]:
+    """Carry PEM private-key masking state linearly across all blocks of a file."""
+    masked: dict[int, str] = {}
+    in_pem = False
+    for idx, (_kind, content) in enumerate(blocks):
+        if in_pem or ("-----BEGIN" in content and "PRIVATE KEY" in content):
+            cleaned, in_pem = _mask_multiline_pem_spans(content, start_in_pem=in_pem)
+            masked[idx] = cleaned
+    return masked
+
+
+def _truncate_cached_text(
+    cached_full: str,
+    cached_lines: list[str],
+    line_hint: int | None,
+) -> str:
+    """Return an O(1) bounded snippet from an already sanitized/redacted block."""
+    if len(cached_full) <= MAX_SHOW_TEXT_CHARS:
+        return cached_full
+    if line_hint is not None and 0 <= line_hint < len(cached_lines):
+        return cached_lines[line_hint][:MAX_SHOW_TEXT_CHARS] + "\n... [truncated]"
+    return cached_full[:MAX_SHOW_TEXT_CHARS] + "\n... [truncated]"
 
 
 def _normalize_glob(pattern: str) -> str:
-    cleaned = pattern.strip()
+    cleaned = pattern.strip().strip("\"'")
     if cleaned.startswith("./"):
         cleaned = cleaned[2:]
     return cleaned
@@ -135,36 +230,221 @@ def _glob_list(value: Any) -> frozenset[str]:
 
 def _tool_list(value: Any) -> frozenset[str]:
     if isinstance(value, str):
-        return frozenset(part.strip() for part in re.split(r"[,\s]+", value) if part.strip())
+        return frozenset(
+            neutralize(redact_text(part.strip()))
+            for part in re.split(r"[,\s]+", value)
+            if part.strip()
+        )
     if isinstance(value, list):
-        return frozenset(str(item).strip() for item in value if str(item).strip())
+        return frozenset(
+            neutralize(redact_text(str(item).strip())) for item in value if str(item).strip()
+        )
     return frozenset()
 
 
-def _parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
+def _fallback_frontmatter_fields(raw_yaml: str) -> dict[str, Any]:
+    """Best-effort line parser used ONLY after strict YAML failure so unquoted Cursor globs
+    (e.g. ``globs: **/*``) and adjacent fields still surface signals alongside the failure."""
+    meta: dict[str, Any] = {}
+    current_list_key: str | None = None
+    for line in raw_yaml.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("- ") and current_list_key is not None:
+            val = stripped[2:].strip().strip("\"'")
+            existing = meta.get(current_list_key)
+            if isinstance(existing, list):
+                existing.append(val)
+            continue
+        if ":" in stripped:
+            key_part, _, val_part = stripped.partition(":")
+            key = key_part.strip()
+            val = val_part.strip()
+            current_list_key = None
+            if not val:
+                if key in {
+                    "globs",
+                    "applyTo",
+                    "paths",
+                    "tools",
+                    "allowed-tools",
+                    "allowed_tools",
+                    "disallowedTools",
+                }:
+                    current_list_key = key
+                    meta[key] = []
+                elif key in {"hooks", "mcpServers", "mcp_servers"}:
+                    meta[key] = {"<unparsed>": True}
+            elif val.lower() == "true" and key == "alwaysApply":
+                meta[key] = True
+            elif val.startswith("[") and val.endswith("]"):
+                inner = val[1:-1]
+                meta[key] = [p.strip().strip("\"'") for p in inner.split(",") if p.strip()]
+            else:
+                meta[key] = val.strip("\"'")
+    return meta
+
+
+def _uses_frontmatter(rel_path: str) -> bool:
+    posix = PurePosixPath(rel_path)
+    suffix = posix.suffix.lower()
+    return (
+        suffix in MARKDOWN_SUFFIXES
+        or not posix.suffix
+        or rel_path in INSTRUCTION_FILES
+        or posix.name in NESTED_INSTRUCTION_NAMES
+    )
+
+
+def _parse_frontmatter(
+    rel_path: str, content: str, failures: list[str]
+) -> tuple[dict[str, Any], str]:
+    if not _uses_frontmatter(rel_path):
+        return {}, content
     match = _FRONTMATTER_RE.match(content)
     if match is None:
         return {}, content
-    raw_yaml = match.group(1)
+    raw_yaml = match.group(1) or ""
     body = content[match.end() :]
+    if not raw_yaml.strip():
+        return {}, body
     try:
-        parsed = yaml.safe_load(raw_yaml)
-    except yaml.YAMLError:
-        return {}, body
-    if not isinstance(parsed, dict):
-        return {}, body
+        parsed = parse_yaml_mapping(raw_yaml, max_nodes=MAX_FRONTMATTER_NODES)
+    except (PolicyError, yaml.YAMLError, RecursionError):
+        failures.append(f"{rel_path}: invalid YAML front matter")
+        return _fallback_frontmatter_fields(raw_yaml), body
     return parsed, body
 
 
-def _parse_instruction(rel_path: str, content: str) -> _ParsedInstruction:
-    meta, body = _parse_frontmatter(content)
+def _frontmatter_grants(meta: Mapping[str, Any]) -> frozenset[str]:
+    grants: set[str] = set()
+    for key in _TOOL_FRONTMATTER_KEYS:
+        prefix = "disallowed" if key == "disallowedTools" else "tool"
+        for item in _tool_list(meta.get(key)):
+            grants.add(f"{prefix}:{item}")
+    for key in _POLICY_FRONTMATTER_KEYS:
+        val = meta.get(key)
+        if val is None or val == {} or val == []:
+            continue
+        safe_val = redact_metadata(val)
+        serialized = neutralize(json.dumps(safe_val, sort_keys=True, ensure_ascii=True))
+        canonical_key = {
+            "permission_mode": "permissionMode",
+            "mcp_servers": "mcpServers",
+        }.get(key, key)
+        grants.add(f"{canonical_key}:{serialized}")
+    return frozenset(grants)
+
+
+def _extract_block_signals(
+    blocks: tuple[tuple[str, str], ...],
+) -> tuple[
+    tuple[frozenset[str], dict[str, list[tuple[int, int]]]],
+    tuple[frozenset[str], dict[str, list[tuple[int, int]]]],
+    tuple[frozenset[str], dict[str, list[tuple[int, int]]]],
+]:
+    """Extract inline tool grants, @/# imports, and URLs/paths in a single pass over blocks."""
+    tools: set[str] = set()
+    tool_locs: dict[str, list[tuple[int, int]]] = {}
+    imports: set[str] = set()
+    import_locs: dict[str, list[tuple[int, int]]] = {}
+    refs: set[str] = set()
+    ref_locs: dict[str, list[tuple[int, int]]] = {}
+
+    for idx, (kind, block_text) in enumerate(blocks):
+        line_starts = [0]
+        if "\n" in block_text:
+            for nl in _NL_RE.finditer(block_text):
+                line_starts.append(nl.end())
+
+        def _line_of(pos: int, _starts: list[int] = line_starts) -> int:
+            return bisect_right(_starts, pos) - 1
+
+        for match in _TOOL_GRANT_RE.finditer(block_text):
+            loc = (idx, _line_of(match.start()))
+            if match.group(1) is not None:
+                for tok in _tool_list(match.group(1)):
+                    tools.add(tok)
+                    tool_locs.setdefault(tok, []).append(loc)
+            elif match.group(2) is not None:
+                tok = match.group(2)
+                tools.add(tok)
+                tool_locs.setdefault(tok, []).append(loc)
+            elif match.group(3) is not None:
+                tok = match.group(3)
+                tools.add(tok)
+                tool_locs.setdefault(tok, []).append(loc)
+            elif match.group(4) is not None:
+                tok = match.group(4)
+                tools.add(tok)
+                tool_locs.setdefault(tok, []).append(loc)
+            else:
+                tok = match.group(0).strip()
+                tools.add(tok)
+                tool_locs.setdefault(tok, []).append(loc)
+
+        if kind not in {"fence", "indented"}:
+            at_tokens = _import_tokens(block_text)
+            token_line_map: dict[str, int] = {}
+            if at_tokens and len(block_text) > MAX_SHOW_TEXT_CHARS:
+                wanted = {tok.rstrip(_TRAILING) for tok in at_tokens}
+                for l_no, l_text in enumerate(block_text.splitlines()):
+                    if "@" not in l_text:
+                        continue
+                    for cand in _import_tokens(l_text):
+                        c = cand.rstrip(_TRAILING)
+                        if c in wanted and c not in token_line_map:
+                            token_line_map[c] = l_no
+            for tok in at_tokens:
+                cleaned = tok.rstrip(_TRAILING)
+                if cleaned:
+                    imports.add(cleaned)
+                    import_locs.setdefault(cleaned, []).append(
+                        (idx, token_line_map.get(cleaned, 0))
+                    )
+            for inc_match in _INCLUDE_RE.finditer(block_text):
+                cleaned = inc_match.group(1).strip()
+                if cleaned:
+                    imports.add(cleaned)
+                    import_locs.setdefault(cleaned, []).append((idx, _line_of(inc_match.start())))
+
+        for match in _URL_RE.finditer(block_text):
+            cleaned = match.group(0).rstrip(_TRAILING_REF_PUNCT)
+            if cleaned:
+                refs.add(cleaned)
+                ref_locs.setdefault(cleaned, []).append((idx, _line_of(match.start())))
+        for match in _PATH_RE.finditer(block_text):
+            cleaned = match.group(0).rstrip(_TRAILING_REF_PUNCT)
+            if cleaned:
+                refs.add(cleaned)
+                ref_locs.setdefault(cleaned, []).append((idx, _line_of(match.start())))
+
+    return (
+        (frozenset(tools), tool_locs),
+        (frozenset(imports), import_locs),
+        (frozenset(refs), ref_locs),
+    )
+
+
+def _hidden_unicode_map(content: str) -> dict[str, int]:
+    """Per-character hidden-Unicode map using ``scanners.prompt`` (covers Cf, tags, fillers)."""
+    counts, tags = _hidden_counts(content, at_start=True)
+    result = dict(counts)
+    if tags:
+        result["__TAG__"] = tags
+    for sep, sep_count in _line_separator_counts(content).items():
+        result[sep] = sep_count
+    return result
+
+
+def _parse_instruction(rel_path: str, content: str, failures: list[str]) -> _ParsedInstruction:
+    meta, body = _parse_frontmatter(rel_path, content, failures)
     globs: set[str] = set()
     for key in ("globs", "applyTo", "paths"):
         globs.update(_glob_list(meta.get(key)))
     always_apply = bool(meta.get("alwaysApply") is True)
-    tool_grants: set[str] = set()
-    for key in ("allowed-tools", "allowed_tools", "tools", "disallowedTools"):
-        tool_grants.update(_tool_list(meta.get(key)))
+    fm_grants = _frontmatter_grants(meta)
 
     blocks = tuple(commonmark_blocks(body))
     hidden = hidden_text(body)
@@ -175,57 +455,284 @@ def _parse_instruction(rel_path: str, content: str) -> _ParsedInstruction:
         stop = len(body) if end == -1 else end + 3
         comments.append(body[start:stop])
         pos = stop
-    hidden_signatures = tuple(sorted([*comments, *hidden.definitions, *hidden.html]))
-    hidden_unicode_count = len(_HIDDEN_UNICODE_RE.findall(content))
+    hidden_sigs = Counter([*comments, *hidden.definitions, *hidden.html])
+    inline_tools, imports, refs = _extract_block_signals(blocks)
     return _ParsedInstruction(
         rel_path=rel_path,
+        content=content,
         globs=frozenset(globs),
         always_apply=always_apply,
-        tool_grants=frozenset(tool_grants),
+        frontmatter_grants=fm_grants,
         blocks=blocks,
-        hidden_signatures=hidden_signatures,
-        hidden_unicode_count=hidden_unicode_count,
+        hidden_signatures=hidden_sigs,
+        hidden_unicode=_hidden_unicode_map(content),
+        inline_tools=inline_tools,
+        imports=imports,
+        refs=refs,
     )
 
 
-def _read_confined_tree(root: Path) -> dict[str, _ParsedInstruction]:
+def _read_confined_file(
+    path: str,
+    files: ConfinedCollection,
+    failures: list[str],
+    excluded: list[str],
+    *,
+    context: str = "",
+    missing_ok: bool = False,
+    variants_read: Collection[str] = (),
+    fail_on_credential: bool = False,
+) -> str | None:
+    linked = None if credential_shaped(path) else files.in_root_target(path)
+    reason = credential_gap(path, None if linked is None else linked.as_posix())
+    if reason is not None:
+        if fail_on_credential:
+            failures.append(f"{path}: {context}{reason}; not read")
+        else:
+            excluded.append(f"{path}: {context}{reason}; not read or inventoried")
+        return None
+    raw = files.read_bytes(path, missing_ok=missing_ok, variants_read=variants_read)
+    followed = files.link_target(path)
+    if raw is None:
+        return None
+    if followed is not None and credential_shaped(followed):
+        failures.append(f"{path}: file changed during collection")
+        return None
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        failures.append(f"{path}: invalid UTF-8 instruction")
+        return None
+
+
+def _read_confined_tree(root: Path) -> tuple[dict[str, _ParsedInstruction], list[str], list[str]]:
     if root.is_symlink() or not root.is_dir():
         raise click.ClickException(
             f"instruction tree '{neutralize(str(root))}' must be a non-symlink directory"
         )
+    failures: list[str] = []
+    excluded: list[str] = []
     records: dict[str, _ParsedInstruction] = {}
-    file_count = 0
-    root_depth = len(root.parts)
-    for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
-        current = Path(dirpath)
-        if len(current.parts) - root_depth >= MAX_DEPTH:
-            dirnames[:] = []
-            continue
-        dirnames[:] = sorted(
-            d for d in dirnames if d not in _SKIP_DIRS and not (current / d).is_symlink()
-        )
-        for filename in sorted(filenames):
-            candidate = current / filename
-            if candidate.is_symlink():
-                continue
-            rel = candidate.relative_to(root).as_posix()
-            if not _is_instruction_file(rel, filename):
-                continue
-            file_count += 1
-            if file_count > MAX_FILES:
-                raise click.ClickException(
-                    f"instruction tree exceeds maximum file limit ({MAX_FILES})"
+    texts: dict[str, str] = {}
+    importers: list[str] = []
+    variants: list[tuple[Path, Path]] = []
+    reported_skipped: set[Path] = set()
+
+    def _add_record(rel_path: str, text: str) -> None:
+        if len(records) >= MAX_FILES:
+            raise click.ClickException(f"instruction tree exceeds maximum file limit ({MAX_FILES})")
+        records[rel_path] = _parse_instruction(rel_path, text, failures)
+        texts[rel_path] = text
+
+    def _note_skipped(skipped: list[Path]) -> None:
+        for skipped_path in skipped:
+            if skipped_path not in reported_skipped:
+                reported_skipped.add(skipped_path)
+                excluded.append(
+                    f"{skipped_path.as_posix()}: default-excluded name inside an agent "
+                    "configuration directory; not collected"
                 )
-            try:
-                with open_regular_file(candidate) as stream:
-                    raw_bytes = stream.read(MAX_FILE_BYTES + 1)
-            except OSError:
+
+    with ConfinedCollection(root, failures) as files:
+        # 1. Fixed root instruction files
+        for rel_path in INSTRUCTION_FILES:
+            if rel_path in INSTRUCTION_DIRECTORIES and files.is_directory(rel_path):
                 continue
-            if len(raw_bytes) > MAX_FILE_BYTES:
+            spellings = _CODEX_SPELLINGS if rel_path in _CODEX_SPELLINGS else ()
+            text = _read_confined_file(
+                rel_path,
+                files,
+                failures,
+                excluded,
+                missing_ok=True,
+                variants_read=spellings,
+                fail_on_credential=True,
+            )
+            if text is None:
                 continue
-            text = raw_bytes.decode("utf-8", errors="replace")
-            records[rel] = _parse_instruction(rel, text)
-    return records
+            variants.extend(
+                (variant, Path(rel_path))
+                for variant in files.case_variants(rel_path)
+                if variant.as_posix() not in spellings and not files.excluded(variant)
+            )
+            _add_record(rel_path, text)
+            if PurePosixPath(rel_path).name in _IMPORTING_NAMES:
+                importers.append(rel_path)
+
+        # 2. Nested instruction files anywhere in the tree
+        for path in sorted(files.iter_files()):
+            relative = path.as_posix()
+            nested = path.name in NESTED_INSTRUCTION_NAMES
+            if not nested and len(path.parts) > 1:
+                canonical = _FOLDED_NESTED_NAMES.get(fold_name(path.name))
+                if canonical is not None:
+                    variants.append((path, path.with_name(canonical)))
+            if (
+                not nested
+                or len(path.parts) < 2
+                or relative in INSTRUCTION_FILES
+                or relative in records
+            ):
+                continue
+            text = _read_confined_file(relative, files, failures, excluded, fail_on_credential=True)
+            if text is None:
+                continue
+            _add_record(relative, text)
+            if path.name in _IMPORTING_NAMES:
+                importers.append(relative)
+
+        # 3. Rule, prompt, steering, output-style, and subagent directories
+        for directory in INSTRUCTION_DIRECTORIES:
+            if directory in INSTRUCTION_FILES and not files.is_directory(directory):
+                continue
+            skipped: list[Path] = []
+            for path in sorted(files.iter_files(directory, skipped=skipped)):
+                relative = path.as_posix()
+                if relative in records:
+                    continue
+                text = _read_confined_file(
+                    relative, files, failures, excluded, fail_on_credential=True
+                )
+                if text is not None:
+                    _add_record(relative, text)
+            _note_skipped(skipped)
+
+        # 4. Skill and command declaration files
+        for skill_dir in SKILL_DIRECTORIES:
+            if skill_dir in _RESOURCE_DIRECTORIES:
+                continue
+            skipped = []
+            for path in sorted(files.iter_files(skill_dir, skipped=skipped)):
+                relative = path.as_posix()
+                if relative in records or path.suffix.lower() not in _DECLARATION_SUFFIXES:
+                    continue
+                text = _read_confined_file(
+                    relative, files, failures, excluded, fail_on_credential=True
+                )
+                if text is not None:
+                    _add_record(relative, text)
+            _note_skipped(skipped)
+
+        # 5. Any canonical-name case variant spelling of importing files
+        for var_path, canon_path in variants:
+            rel_var = var_path.as_posix()
+            if (
+                canon_path.name in _IMPORTING_NAMES
+                and rel_var in texts
+                and rel_var not in importers
+            ):
+                importers.append(rel_var)
+
+        # 6. Recursive @path and <!-- include: --> imports (up to _MAX_IMPORT_DEPTH hops)
+        pending = deque((path, 0) for path in importers)
+        followed_imports = set(importers)
+        looked_up: set[str] = set()
+        lookups = limits.bound("import-lookups")
+        spent = 0
+
+        def _spend(importer: str) -> bool:
+            nonlocal spent
+            if spent >= lookups.value:
+                failures.append(
+                    f"{importer}: @path imports past this file are not inventoried; "
+                    + lookups.exceeded()
+                )
+                return False
+            spent += 1
+            return True
+
+        while pending:
+            importer, depth = pending.popleft()
+            include_tokens = [
+                inc.strip()
+                for inc in _INCLUDE_RE.findall(texts[importer])
+                if inc.strip() and "://" not in inc
+            ]
+            tokens = [*_import_tokens(texts[importer]), *include_tokens]
+            if not tokens:
+                continue
+            if len(set(tokens)) > _MAX_IMPORTS:
+                failures.append(f"{importer}: too many @path imports to inspect")
+                continue
+            if importer not in looked_up and not _spend(importer):
+                break
+            targets: list[str] = []
+            outside = too_long = exhausted = False
+            importer_dir = PurePosixPath(importer).parent.parts
+            for token in dict.fromkeys(tok.rstrip(_TRAILING) for tok in tokens):
+                resolved_named, leaves, long = _resolve_import(importer_dir, token)
+                targets.extend(resolved_named)
+                outside |= leaves
+                too_long |= long
+            for target in dict.fromkeys(targets):
+                if target in records:
+                    if target not in followed_imports and depth + 1 <= _MAX_IMPORT_DEPTH:
+                        followed_imports.add(target)
+                        pending.append((target, depth + 1))
+                    continue
+                if target in looked_up:
+                    continue
+                if not _spend(importer):
+                    exhausted = True
+                    break
+                looked_up.add(target)
+                if len(PurePosixPath(target).parts) > files.max_depth + 1:
+                    excluded.append(
+                        f"{target}: imported by {importer} below the collection depth limit "
+                        "and not inventoried"
+                    )
+                    continue
+                if files.excluded(target):
+                    excluded.append(
+                        f"{target}: imported by {importer} but excluded from collection"
+                    )
+                    continue
+                if files.is_directory(target):
+                    continue
+                if credential_shaped(target):
+                    excluded.append(
+                        f"{target}: imported by {importer} but its name says it holds "
+                        "credentials; not read or inventoried"
+                    )
+                    continue
+                text = _read_confined_file(
+                    target,
+                    files,
+                    failures,
+                    excluded,
+                    context=f"imported by {importer} but ",
+                    missing_ok=True,
+                )
+                if text is None:
+                    continue
+                if depth + 1 > _MAX_IMPORT_DEPTH:
+                    excluded.append(
+                        f"{target}: imported more than {_MAX_IMPORT_DEPTH} hops from a memory "
+                        "file and not inventoried"
+                    )
+                    continue
+                _add_record(target, text)
+                followed_imports.add(target)
+                pending.append((target, depth + 1))
+            if exhausted:
+                break
+            if outside:
+                excluded.append(
+                    f"{importer}: imports a file outside the project root, which is not inventoried"
+                )
+            if too_long:
+                excluded.append(
+                    f"{importer}: imports a path exceeding safe name/path bounds, not inventoried"
+                )
+
+        # Report active case variants that were not inventoried
+        for var_entry, canon_entry in variants:
+            if var_entry.as_posix() not in records:
+                files.report_case_variant(var_entry, canon_entry)
+
+    safe_failures = [neutralize(redact_text(msg)) for msg in failures]
+    safe_excluded = [neutralize(redact_text(msg)) for msg in excluded]
+    return records, safe_failures, safe_excluded
 
 
 def _glob_covered_by(candidate: str, existing: frozenset[str]) -> bool:
@@ -248,61 +755,50 @@ def _glob_covered_by(candidate: str, existing: frozenset[str]) -> bool:
     return False
 
 
-def _extract_urls_and_paths(blocks: tuple[tuple[str, str], ...]) -> set[str]:
-    found: set[str] = set()
-    for _, content in blocks:
-        found.update(_URL_RE.findall(content))
-        found.update(_PATH_RE.findall(content))
-    return found
-
-
-def _extract_imports(blocks: tuple[tuple[str, str], ...]) -> set[str]:
-    found: set[str] = set()
-    for kind, content in blocks:
-        if kind in {"fence", "indented"}:
-            continue
-        found.update(_IMPORT_RE.findall(content))
-        found.update(_INCLUDE_RE.findall(content))
-    return found
-
-
-def _extract_inline_tool_grants(blocks: tuple[tuple[str, str], ...]) -> set[str]:
-    found: set[str] = set()
-    for _, content in blocks:
-        for match in _TOOL_GRANT_RE.finditer(content):
-            if match.group(1) is not None:
-                found.update(_tool_list(match.group(1)))
-            else:
-                found.add(match.group(0).strip())
-    return found
-
-
 def _changed_block_indices(
     base_blocks: tuple[tuple[str, str], ...],
     head_blocks: tuple[tuple[str, str], ...],
 ) -> list[int]:
+    if base_blocks == head_blocks:
+        return []
     base_norm = [re.sub(r"\s+", " ", content).strip() for _, content in base_blocks]
     head_norm = [re.sub(r"\s+", " ", content).strip() for _, content in head_blocks]
-    matcher = difflib.SequenceMatcher(None, base_norm, head_norm)
+    # Trim matching prefix and suffix in O(N) before SequenceMatcher.
+    prefix = 0
+    limit = min(len(base_norm), len(head_norm))
+    while prefix < limit and base_norm[prefix] == head_norm[prefix]:
+        prefix += 1
+    suffix = 0
+    while (
+        suffix < (limit - prefix)
+        and base_norm[len(base_norm) - 1 - suffix] == head_norm[len(head_norm) - 1 - suffix]
+    ):
+        suffix += 1
+    b_mid = base_norm[prefix : len(base_norm) - suffix]
+    h_mid = head_norm[prefix : len(head_norm) - suffix]
+    if not b_mid:
+        return list(range(prefix, len(head_norm) - suffix))
+    matcher = SequenceMatcher(None, b_mid, h_mid, autojunk=False)
     indices: list[int] = []
     for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
         if tag in {"replace", "insert"}:
-            indices.extend(range(j1, j2))
+            indices.extend(range(prefix + j1, prefix + j2))
     return indices
 
 
-def _first_matching_block(
-    blocks: tuple[tuple[str, str], ...],
-    candidate_indices: list[int],
+def _pick_loc(
+    occurrences: dict[str, list[tuple[int, int]]],
+    changed_indices: list[int],
+    changed_set: set[int],
     needle: str,
-) -> int | None:
-    for idx in candidate_indices:
-        if needle in blocks[idx][1]:
-            return idx
-    for idx, (_, content) in enumerate(blocks):
-        if needle in content:
-            return idx
-    return candidate_indices[0] if candidate_indices else None
+) -> tuple[int | None, int | None]:
+    locs = occurrences.get(needle)
+    if locs:
+        for blk_idx, line_idx in locs:
+            if blk_idx in changed_set:
+                return blk_idx, line_idx
+        return locs[0]
+    return (changed_indices[0], None) if changed_indices else (None, None)
 
 
 def diff_instruction_trees(
@@ -312,8 +808,8 @@ def diff_instruction_trees(
     show_text: bool = False,
 ) -> dict[str, Any]:
     """Compare instruction files across ``base_tree`` and ``head_tree``."""
-    base_records = _read_confined_tree(base_tree)
-    head_records = _read_confined_tree(head_tree)
+    base_records, base_failures, base_excluded = _read_confined_tree(base_tree)
+    head_records, head_failures, head_excluded = _read_confined_tree(head_tree)
     changes: list[InstructionChange] = []
 
     for rel_path in sorted(head_records):
@@ -322,6 +818,35 @@ def diff_instruction_trees(
         safe_path = neutralize(rel_path)
         base_blocks = base.blocks if base is not None else ()
         changed_indices = _changed_block_indices(base_blocks, head.blocks)
+        changed_set = set(changed_indices)
+        sanitized_cache: dict[int, tuple[str, list[str]]] = {}
+        pem_masked: dict[int, str] | None = None
+
+        def _get_text(
+            blk: int | None,
+            line_hint: int | None = None,
+            *,
+            _head: _ParsedInstruction = head,
+            _cache: dict[int, tuple[str, list[str]]] = sanitized_cache,
+        ) -> str | None:
+            nonlocal pem_masked
+            if not show_text or blk is None:
+                return None
+            entry = _cache.get(blk)
+            if entry is None:
+                if pem_masked is None and "PRIVATE KEY" in _head.content:
+                    pem_masked = _file_pem_masked_blocks(_head.blocks)
+                raw_block = (
+                    pem_masked[blk]
+                    if pem_masked is not None and blk in pem_masked
+                    else _head.blocks[blk][1]
+                )
+                redacted = redact_text(raw_block)
+                cached_lines = [neutralize(ln) for ln in redacted.splitlines()]
+                cached_full = "\n".join(cached_lines)
+                entry = (cached_full, cached_lines)
+                _cache[blk] = entry
+            return _truncate_cached_text(entry[0], entry[1], line_hint)
 
         # 1. scope_widened
         if base is None:
@@ -358,9 +883,9 @@ def diff_instruction_trees(
                     )
                 )
 
-        # 2. tool_grant_changed
-        base_fm_tools = base.tool_grants if base is not None else frozenset()
-        if base_fm_tools != head.tool_grants:
+        # 2. tool_grant_changed (frontmatter + inline)
+        base_fm = base.frontmatter_grants if base is not None else frozenset()
+        if base_fm != head.frontmatter_grants:
             changes.append(
                 InstructionChange(
                     change_class=InstructionChangeClass.TOOL_GRANT_CHANGED,
@@ -369,16 +894,12 @@ def diff_instruction_trees(
                     summary=f"'{safe_path}' front-matter tool grants changed",
                 )
             )
-        base_inline_tools = _extract_inline_tool_grants(base_blocks)
-        head_inline_tools = _extract_inline_tool_grants(head.blocks)
+        base_inline_tools = base.inline_tools[0] if base is not None else frozenset()
+        head_inline_tools, head_tool_locs = head.inline_tools
         if base_inline_tools != head_inline_tools:
             diff_tools = sorted(base_inline_tools ^ head_inline_tools)
-            blk = (
-                _first_matching_block(head.blocks, changed_indices, diff_tools[0])
-                if diff_tools
-                else None
-            )
-            txt = _sanitize_text(head.blocks[blk][1]) if (show_text and blk is not None) else None
+            blk, line_no = _pick_loc(head_tool_locs, changed_indices, changed_set, diff_tools[0])
+            txt = _get_text(blk, line_no)
             changes.append(
                 InstructionChange(
                     change_class=InstructionChangeClass.TOOL_GRANT_CHANGED,
@@ -390,11 +911,11 @@ def diff_instruction_trees(
             )
 
         # 3. import_added
-        base_imports = _extract_imports(base_blocks)
-        head_imports = _extract_imports(head.blocks)
+        base_imports = base.imports[0] if base is not None else frozenset()
+        head_imports, head_import_locs = head.imports
         for imp in sorted(head_imports - base_imports):
-            blk = _first_matching_block(head.blocks, changed_indices, imp)
-            txt = _sanitize_text(head.blocks[blk][1]) if (show_text and blk is not None) else None
+            blk, line_no = _pick_loc(head_import_locs, changed_indices, changed_set, imp)
+            txt = _get_text(blk, line_no)
             changes.append(
                 InstructionChange(
                     change_class=InstructionChangeClass.IMPORT_ADDED,
@@ -406,11 +927,11 @@ def diff_instruction_trees(
             )
 
         # 4. url_or_path_added
-        base_refs = _extract_urls_and_paths(base_blocks)
-        head_refs = _extract_urls_and_paths(head.blocks)
+        base_refs = base.refs[0] if base is not None else frozenset()
+        head_refs, head_ref_locs = head.refs
         for ref in sorted(head_refs - base_refs):
-            blk = _first_matching_block(head.blocks, changed_indices, ref)
-            txt = _sanitize_text(head.blocks[blk][1]) if (show_text and blk is not None) else None
+            blk, line_no = _pick_loc(head_ref_locs, changed_indices, changed_set, ref)
+            txt = _get_text(blk, line_no)
             changes.append(
                 InstructionChange(
                     change_class=InstructionChangeClass.URL_OR_PATH_ADDED,
@@ -421,16 +942,16 @@ def diff_instruction_trees(
                 )
             )
 
-        # 5. hidden_markup_added
-        base_hidden = list(base.hidden_signatures) if base is not None else []
-        head_hidden = list(head.hidden_signatures)
-        base_uni = base.hidden_unicode_count if base is not None else 0
-        new_hidden_markup = len(head_hidden) > len(base_hidden) or any(
-            item not in base_hidden for item in head_hidden
+        # 5. hidden_markup_added (per-codepoint/category comparison avoids ZWSP->tag swaps)
+        base_hidden = base.hidden_signatures if base is not None else Counter()
+        base_uni = base.hidden_unicode if base is not None else {}
+        new_markup = any(
+            cnt > base_hidden.get(sig, 0) for sig, cnt in head.hidden_signatures.items()
         )
-        if new_hidden_markup or head.hidden_unicode_count > base_uni:
+        new_unicode = any(cnt > base_uni.get(ch, 0) for ch, cnt in head.hidden_unicode.items())
+        if new_markup or new_unicode:
             blk = changed_indices[0] if changed_indices else None
-            txt = _sanitize_text(head.blocks[blk][1]) if (show_text and blk is not None) else None
+            txt = _get_text(blk)
             changes.append(
                 InstructionChange(
                     change_class=InstructionChangeClass.HIDDEN_MARKUP_ADDED,
@@ -444,14 +965,23 @@ def diff_instruction_trees(
     by_class: dict[str, int] = {}
     for item in changes:
         by_class[item.change_class.value] = by_class.get(item.change_class.value, 0) + 1
+    total_failures = len(base_failures) + len(head_failures)
+    total_excluded = len(base_excluded) + len(head_excluded)
 
     return {
         "format": FORMAT,
         "base_tree": neutralize(base_tree.name or str(base_tree)),
         "head_tree": neutralize(head_tree.name or str(head_tree)),
         "files_scanned": {"base": len(base_records), "head": len(head_records)},
+        "failures": {"base": base_failures, "head": head_failures},
+        "excluded": {"base": base_excluded, "head": head_excluded},
         "changes": [c.to_dict(show_text=show_text) for c in changes],
-        "summary": {"total_changes": len(changes), "by_class": by_class},
+        "summary": {
+            "total_changes": len(changes),
+            "total_failures": total_failures,
+            "total_excluded": total_excluded,
+            "by_class": by_class,
+        },
     }
 
 
@@ -488,17 +1018,28 @@ def diff_instructions(
         click.echo(json_text(json.dumps(report, indent=2)))
     else:
         total = report["summary"]["total_changes"]
+        total_failures = report["summary"]["total_failures"]
         echo_line(
             "Instruction diff: ",
-            f"{total} change(s) across {report['files_scanned']['head']} head file(s).",
+            f"{total} change(s), {total_failures} failure(s) across "
+            f"{report['files_scanned']['head']} head file(s).",
         )
+        for side in ("base", "head"):
+            for failure in report["failures"][side]:
+                echo_line(f"  [failure:{side}] ", failure)
+            for excluded in report["excluded"][side]:
+                echo_line(f"  [excluded:{side}] ", excluded)
         for item in report["changes"]:
             loc = f" [block {item['block_index']}]" if item["block_index"] is not None else ""
             echo_line(f"  [{item['class']}]{loc} ", item["summary"])
             if show_text and item.get("text"):
                 for line in str(item["text"]).splitlines():
                     echo_line("    | ", line)
-    if fail_on_change and report["summary"]["total_changes"] > 0:
+    base_excluded_set = set(report["excluded"]["base"])
+    new_head_excluded = [e for e in report["excluded"]["head"] if e not in base_excluded_set]
+    if report["summary"]["total_failures"] > 0 or (
+        fail_on_change and (report["summary"]["total_changes"] > 0 or bool(new_head_excluded))
+    ):
         raise click.exceptions.Exit(1)
 
 
