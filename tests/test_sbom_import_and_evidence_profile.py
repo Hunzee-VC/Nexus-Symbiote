@@ -1181,3 +1181,240 @@ def test_sbom_import_and_cli_edge_branches(tmp_path: Path) -> None:
         "reg:p": "pinned-version",
         "reg:m": "manifest-only",
     }
+
+
+def test_re_review_regressions_n1_to_n5_and_ecosystem_ranges(tmp_path: Path) -> None:
+    from nexus_symbiote.utils.crypto import SignaturePolicySet
+
+    # Finding 5: major-only and .x wildcards are NOT exact versions.
+    assert not is_exact_version("4")
+    assert not is_exact_version("1.x")
+    assert not is_exact_version("1.2.x")
+
+    # N1: 1,200 broken/missing models + 1 unsigned model + 1 digest-pinned model -> ONLY the 1 pinned model is signed_under_policy!
+    proj = tmp_path / "n1_proj"
+    (proj / "models").mkdir(parents=True)
+    good_bytes = b"\x02\x00\x00\x00\x00\x00\x00\x00{}"
+    good_sha = "sha256:" + hashlib.sha256(good_bytes).hexdigest()
+    (proj / "models" / "good.safetensors").write_bytes(good_bytes)
+    (proj / "models" / "unsigned.safetensors").write_bytes(good_bytes)
+
+    pol_dir = tmp_path / "n1_pol"
+    pol_dir.mkdir(mode=0o700)
+    pol_file = pol_dir / "pol.json"
+    pol_file.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "artifacts": [
+                    {
+                        "kind": "digest-pin",
+                        "artifact_path": "models/good.safetensors",
+                        "expected_sha256": good_sha,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    os.chmod(pol_file, 0o600)
+    pol = load_signature_policies(pol_file, proj)
+
+    many_models: list[ModelComponent] = [
+        ModelComponent(
+            bom_ref="model:good",
+            name="good",
+            source_path="models/good.safetensors",
+            serialization_format="safetensors",
+            hashes={"sha256": good_sha},
+            assurance_level=AssuranceLevel.OBSERVED,
+        ),
+        ModelComponent(
+            bom_ref="model:unsigned",
+            name="unsigned",
+            source_path="models/unsigned.safetensors",
+            serialization_format="safetensors",
+            hashes={"sha256": good_sha},
+            assurance_level=AssuranceLevel.OBSERVED,
+        ),
+    ]
+    for i in range(1200):
+        many_models.append(
+            ModelComponent(
+                bom_ref=f"model:missing-{i}",
+                name=f"missing-{i}",
+                source_path=f"models/missing_{i}.safetensors",
+                hashes={"sha256": good_sha},
+                assurance_level=AssuranceLevel.OBSERVED,
+            )
+        )
+    ep = build_evidence_profile(
+        AIBOM(components=many_models), project_root=proj, signature_policies=pol
+    )
+    signed_refs = {c["bom_ref"] for c in ep["components"] if c["evidence"]["signed_under_policy"]}
+    assert signed_refs == {"model:good"}
+    empty_ep = build_evidence_profile(
+        AIBOM(components=many_models[:2]),
+        project_root=proj,
+        signature_policies=SignaturePolicySet(),
+    )
+    assert empty_ep["policy_verified"] is False
+
+    # N2: symlinks, .docker/config.json, .kube/config, .aws/config, .htpasswd, terraform.tfstate,
+    # config/prod.yaml, and empty pkg/__init__.py MUST NEVER match; matched models stay digest_bound=False.
+    p2 = tmp_path / "n2_proj"
+    for rel, content in [
+        (".env", b"SECRET_ENV_VALUE=1234567890\n"),
+        (".docker/config.json", b'{"auths":{"x":{"auth":"dGVzdA=="}}}'),
+        (".kube/config", b"apiVersion: v1\nclusters: []\n"),
+        (".aws/config", b"[default]\nregion = us-east-1\n"),
+        (".htpasswd", b"admin:$apr1$xyz$1234567890\n"),
+        ("terraform.tfstate", b'{"version":4,"outputs":{"pw":"x"}}'),
+        ("config/prod.yaml", b"db_password: secret_value\n"),
+        ("pkg/__init__.py", b""),
+        ("models/real.bin", b"real-model-weights-payload"),
+    ]:
+        f = p2 / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(content)
+    (p2 / "link_env.bin").symlink_to(".env")
+
+    probes = [
+        {
+            "type": "machine-learning-model",
+            "name": f"probe-{idx}",
+            "version": "1.0.0",
+            "hashes": [
+                {"alg": "SHA-256", "content": hashlib.sha256((p2 / rel).read_bytes()).hexdigest()}
+            ],
+        }
+        for idx, rel in enumerate(
+            [
+                ".env",
+                ".docker/config.json",
+                ".kube/config",
+                ".aws/config",
+                ".htpasswd",
+                "terraform.tfstate",
+                "config/prod.yaml",
+                "pkg/__init__.py",
+                "models/real.bin",
+            ]
+        )
+    ]
+    n2_sbom = tmp_path / "n2.cdx.json"
+    n2_sbom.write_text(
+        json.dumps({"bomFormat": "CycloneDX", "specVersion": "1.6", "components": probes}),
+        encoding="utf-8",
+    )
+    n2_res = import_foreign_sbom(n2_sbom, project_root=p2, reveal_names=True)
+    assert n2_res.bound_local_count == 1
+    matched_comp = next(
+        c for c in n2_res.aibom.components if "declared_digest_local_match" in c.properties
+    )
+    assert matched_comp.properties["declared_digest_local_match"] == "models/real.bin"
+    assert matched_comp.properties["pinning_state"] == "pinned-version"
+    n2_ep = build_evidence_profile(n2_res.aibom)
+    assert all(not c["evidence"]["digest_bound"] for c in n2_ep["components"])
+
+    # N3: unnamed {} entries exceeding 10,000 fail closed.
+    unnamed_sbom = tmp_path / "unnamed.cdx.json"
+    unnamed_sbom.write_text(
+        json.dumps(
+            {
+                "bomFormat": "CycloneDX",
+                "specVersion": "1.6",
+                "components": [{} for _ in range(MAX_FOREIGN_COMPONENTS + 5)],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="maximum component count"):
+        import_foreign_sbom(unnamed_sbom)
+
+    # N5 + Finding 6: @anthropic-ai/sdk & @langchain/core in nested package.json; npm ^/~/*, ==1.2.*, and pypi vs npm.
+    n5_proj = tmp_path / "n5_proj"
+    (n5_proj / "web").mkdir(parents=True)
+    (n5_proj / "web" / "package.json").write_text(
+        json.dumps(
+            {
+                "dependencies": {
+                    "@anthropic-ai/sdk": "^0.30.0",
+                    "@langchain/core": "~0.3.0",
+                    "openai": "4",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    nested_n5, fails_n5 = walk_nested_manifests(n5_proj)
+    assert not fails_n5
+    n5_map = {c.name: c.properties["pinning_state"] for c in nested_n5}
+    assert n5_map == {
+        "@anthropic-ai/sdk": "manifest-only",
+        "@langchain/core": "manifest-only",
+        "openai": "manifest-only",
+    }
+
+    eco_base = AIBOM(
+        components=[
+            RegistryEntryComponent(
+                bom_ref="pkg:pypi-openai", name="openai", version="==1.2.*", registry_type="pypi"
+            ),
+            RegistryEntryComponent(
+                bom_ref="pkg:npm-sdk",
+                name="@anthropic-ai/sdk",
+                version="^0.30.0",
+                registry_type="npm",
+            ),
+            RegistryEntryComponent(
+                bom_ref="pkg:npm-lc", name="@langchain/core", version="~0.3.0", registry_type="npm"
+            ),
+            RegistryEntryComponent(
+                bom_ref="pkg:npm-any", name="ai", version="*", registry_type="npm"
+            ),
+        ]
+    )
+    eco_sbom = tmp_path / "eco.cdx.json"
+    eco_sbom.write_text(
+        json.dumps(
+            {
+                "bomFormat": "CycloneDX",
+                "specVersion": "1.6",
+                "components": [
+                    {
+                        "type": "library",
+                        "name": "openai",
+                        "version": "1.2.5",
+                        "purl": "pkg:pypi/openai@1.2.5",
+                    },
+                    {
+                        "type": "library",
+                        "name": "openai",
+                        "version": "4.2.0",
+                        "purl": "pkg:npm/openai@4.2.0",
+                    },
+                    {
+                        "type": "library",
+                        "name": "@anthropic-ai/sdk",
+                        "version": "0.30.1",
+                        "purl": "pkg:npm/%40anthropic-ai/sdk@0.30.1",
+                    },
+                    {
+                        "type": "library",
+                        "name": "@langchain/core",
+                        "version": "0.3.5",
+                        "purl": "pkg:npm/%40langchain/core@0.3.5",
+                    },
+                    {
+                        "type": "library",
+                        "name": "ai",
+                        "version": "3.4.0",
+                        "purl": "pkg:npm/ai@3.4.0",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert import_foreign_sbom(eco_sbom, target_aibom=eco_base).conflict_count == 0

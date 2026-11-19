@@ -514,7 +514,7 @@ nexus-symbiote discover-mcp [OPTIONS] ENDPOINT
 
 ### `evidence-profile`
 
-Report concrete evidence attributes per component without a scalar TrustScore.
+Report concrete evidence attributes per component without a scalar TrustScore (`signed_under_policy` is `true` only when `--project` and `--signature-policy` corroborate the artifact; inventory `signing_status` assertions appear separately under `declared_signing_status`).
 
 ```text
 nexus-symbiote evidence-profile [OPTIONS] AIBOM_PATH
@@ -526,8 +526,6 @@ nexus-symbiote evidence-profile [OPTIONS] AIBOM_PATH
 | `--project` `DIRECTORY` | Project root for corroborating artifact signatures and digest pins under `--signature-policy`. |
 | `--signature-policy` `FILE` | Explicit operator signer policy JSON outside the project; requires `--project`. |
 | `--json-output` | Emit the per-component evidence profile as JSON. |
-
-`signed_under_policy` is `true` only when `--project` and `--signature-policy` are supplied and verification under that operator policy succeeds; inventory-declared `signing_status` assertions are reported separately under `declared_signing_status` and never trusted on their own.
 
 ### `export-inventory`
 
@@ -581,7 +579,7 @@ ranking and the JSON document.
 
 ### `import-sbom`
 
-Import a foreign CycloneDX or SPDX SBOM as DECLARED evidence without picking silent winners.
+Import a foreign CycloneDX or SPDX SBOM as DECLARED evidence without picking silent winners. By default component names are hashed (`imported-<16hex>`): keyed HMAC-SHA256 (`hmac-sha256`) when `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` has at least 32 characters, or unsalted SHA-256 (`unsalted-sha256`) otherwise. Local digest matching (`declared_digest_local_match`) checks only non-empty, non-symlink, non-credential artifact files of matching type beneath `--project` and never sets `digest_bound`.
 
 ```text
 nexus-symbiote import-sbom [OPTIONS] FOREIGN_BOM_PATH
@@ -596,8 +594,6 @@ nexus-symbiote import-sbom [OPTIONS] FOREIGN_BOM_PATH
 | `--walk-manifests` | Walk nested manifests below `--project` and record manifest-only vs locked pinning state. |
 | `--census` | Count unread non-control-plane artifact shapes (`*.ipynb`, `n8n/*.json`, `*.tf`, `Chart.yaml`). |
 | `--json-output` | Print a structured JSON summary of imported, bound, and conflicting entries. |
-
-By default component names are hashed (`imported-<16hex>`). When `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` is set (at least 16 characters), names and raw entry digests use keyed HMAC-SHA256 (`name_hash_mode: "hmac-sha256"`); otherwise `import-sbom` falls back to unsalted SHA-256 (`name_hash_mode: "unsalted-sha256"`), which prevents plain-text echo in downstream prompts or logs but can be guessed for known public package names. Local digest binding (`local_digest_binding`) runs only against non-credential regular files beneath `--project`.
 
 ### `import-shadowscan`
 

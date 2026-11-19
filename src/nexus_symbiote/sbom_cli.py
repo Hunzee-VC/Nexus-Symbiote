@@ -9,6 +9,7 @@ from typing import Any
 
 import click
 
+from nexus_symbiote import limits
 from nexus_symbiote import sbom_import as _imp
 from nexus_symbiote.core import aibom as _aibom
 from nexus_symbiote.evidence_profile import build_evidence_profile
@@ -20,6 +21,12 @@ from nexus_symbiote.utils import terminal as _term
 _PATH_FILE = click.Path(exists=True, dir_okay=False, path_type=Path)
 _PATH_DIR = click.Path(exists=True, file_okay=False, path_type=Path)
 _PATH_OUT = click.Path(path_type=Path)
+_ERR_MAP: tuple[tuple[type[BaseException], str], ...] = (
+    (json.JSONDecodeError, "invalid JSON syntax"),
+    (OSError, "cannot open regular file (symlinks and special files are refused)"),
+    (UnicodeError, "input is not valid UTF-8"),
+    (RecursionError, "input exceeds maximum nesting depth"),
+)
 
 
 def _refuse_source_overwrite(output: Path | None, source: Path) -> None:
@@ -75,18 +82,6 @@ def _load_native(path: Path) -> _aibom.AIBOM:
         ) from exc
 
 
-def _import_error_detail(exc: BaseException) -> str:
-    if isinstance(exc, json.JSONDecodeError):
-        return "invalid JSON syntax"
-    if isinstance(exc, OSError):
-        return "cannot open regular file (symlinks and special files are refused)"
-    if isinstance(exc, UnicodeError):
-        return "input is not valid UTF-8"
-    if isinstance(exc, RecursionError):
-        return "input exceeds maximum nesting depth"
-    return _term.neutralize(str(exc)) or type(exc).__name__
-
-
 def _handle_walk_failures(bom: _aibom.AIBOM, failures: list[str]) -> None:
     limit_failures: list[str] = []
     scan_fails = bom.metadata.completeness.scan_failures if bom.metadata.completeness else None
@@ -94,20 +89,12 @@ def _handle_walk_failures(bom: _aibom.AIBOM, failures: list[str]) -> None:
         _term.echo_line("Warning: ", fail, err=True)
         if scan_fails is not None and fail not in scan_fails:
             scan_fails.append(fail)
-        low = fail.lower()
-        if "--limit" in fail or "configured limit" in low or "limit exceeded" in low:
+        if limits.OPTION in fail or "entries limit" in fail or "bytes limit" in fail:
             limit_failures.append(fail)
     if limit_failures:
         raise click.ClickException(
             f"Collection limit exceeded under --project: {_term.neutralize(limit_failures[0])}"
         )
-
-
-def _emit_output(output: Path | None, text: str) -> None:
-    if output is not None:
-        _term.write_cli_output(output, text)
-    else:
-        click.echo(text, nl=False)
 
 
 @click.command("import-sbom")
@@ -141,15 +128,16 @@ def import_sbom_cmd(
     _validate_io(output, root, foreign_bom_path, into_bom)
     base_bom = _load_native(into_bom) if into_bom is not None else None
     pre_refs = {c.bom_ref for c in base_bom.components} if base_bom is not None else None
-
     try:
         summary = _imp.import_foreign_sbom(
             foreign_bom_path, target_aibom=base_bom, project_root=root, reveal_names=reveal_names
         )
     except (OSError, ValueError, UnicodeError, RecursionError, PolicyError) as exc:
-        raise click.ClickException(
-            f"Cannot safely import foreign SBOM: {_import_error_detail(exc)}"
-        ) from exc
+        detail = next(
+            (msg for cls, msg in _ERR_MAP if isinstance(exc, cls)),
+            _term.neutralize(str(exc)) or type(exc).__name__,
+        )
+        raise click.ClickException(f"Cannot safely import foreign SBOM: {detail}") from exc
 
     bom, all_failures, nested_count = summary.aibom, list(summary.scan_failures), 0
     if walk_manifests and root is not None:
@@ -177,7 +165,6 @@ def import_sbom_cmd(
         _handle_walk_failures(bom, all_failures)
     only_refs = ({c.bom_ref for c in bom.components} - pre_refs) if pre_refs is not None else None
     _imp.classify_pinning_state(bom, only_refs=only_refs)
-
     try:
         _aibom.prepare(bom)
         serialized = bom.to_native_json()
@@ -233,9 +220,10 @@ def evidence_profile_cmd(
     )
     if json_output:
         payload = json.dumps(profile, indent=2) + "\n"
-        _emit_output(output, payload if output is not None else _term.json_text(payload))
+        _term.write_cli_output(output, payload) if output is not None else click.echo(
+            _term.json_text(payload), nl=False
+        )
         return
-
     lines = [
         _term.safe_line("Evidence profile schema: ", profile["schema"]),
         _term.safe_line("Policy verified: ", "yes" if profile["policy_verified"] else "no"),
@@ -246,15 +234,14 @@ def evidence_profile_cmd(
         missing = ", ".join(e["missing_evidence"]) or "none"
         sev = f" (highest={e['highest_finding_severity']})" if e["highest_finding_severity"] else ""
         hdr = f"{e['bom_ref']} ({e['component_type']}, assurance={e['assurance_level']})"
-        lines.extend(
-            (
-                _term.safe_line("  component: ", hdr),
-                _term.safe_line("    present: ", present),
-                _term.safe_line("    missing: ", missing),
-                _term.safe_line("    findings: ", str(e["finding_count"]), sev),
-            )
-        )
-    _emit_output(output, "\n".join(lines) + "\n")
+        lines += [
+            _term.safe_line("  component: ", hdr),
+            _term.safe_line("    present: ", present),
+            _term.safe_line("    missing: ", missing),
+            _term.safe_line("    findings: ", str(e["finding_count"]), sev),
+        ]
+    out_txt = "\n".join(lines) + "\n"
+    _term.write_cli_output(output, out_txt) if output is not None else click.echo(out_txt, nl=False)
 
 
 def register_sbom_commands(main: click.Group) -> None:
