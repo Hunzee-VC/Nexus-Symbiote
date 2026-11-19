@@ -87,7 +87,7 @@ read through the GitHub API.
 | #203 | Merged: batch 2. It carries #151, #153, #156, #161, #164, #167, #168, #172, #173, #182, #187, #188, #191, #193 and #197 |
 | #226 | Merged: the backlog, with batches 3 and 4 (#208, #218) and the review fixes. It carries #152, #171, #174–#176, #179–#181, #183–#185, #189, #190, #192, #194, #195, #204–#207, #221–#223 and #225. #154's commits are in its history, so GitHub shows #154 merged, but #226 reverted it (`dd87257`); #154 landed through #227 |
 | #236 | Merged. It carries #232; #234 and #235 are listed below |
-| #246, #247 | Merged: audit 2026-11-16 batches A and B1. They carry #237, #238, #240 and #244, then #241 and #243 |
+| #246, #247 | Merged: audit 2026-11-16 batches A and B1. They carry #237, #238, #240 and #244 and an earlier head of #239, then #241 and #243. #239's final head followed in #250 |
 | #250, #251 | Merged: batches B2a and B2b. They carry #239 and #242 at their final heads |
 | #160 | Closed. Superseded by #198, which landed in #202 |
 | #170 | Closed. Superseded by #177, which refuses every weakening project-policy setting in CI and landed in #202 |
