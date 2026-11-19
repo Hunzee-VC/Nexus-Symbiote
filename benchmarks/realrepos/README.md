@@ -25,7 +25,7 @@ python benchmarks/realrepos/harness.py report --out ../realrepos/scan --results 
     --baseline benchmarks/realrepos/results/baseline
 ```
 
-`--only ID` limits `fetch` or `scan` to one repository and may be repeated. Relative paths are resolved against the current directory before anything runs. `scan` exits 1 when a tree is missing or at another commit, or when a scan exits non-zero or times out. `report --enforce-budgets` exits 1 when a budget fails; without it the report only lists the failures. `report --baseline-private FILE` names the baseline scan's `private/credential-observations.json`, so that a credential observation already in the baseline is not counted as new; without it every credential observation on a negative repository counts as new. To refresh the committed baseline, write the report to `benchmarks/realrepos/results/baseline` without `--baseline`.
+`--only ID` limits `fetch` or `scan` to one repository and may be repeated. Relative paths are resolved against the current directory before anything runs. The scan directory (`scan --out`, `report --out`) must lie outside this repository, since it holds full findings and the private credential observations; both commands refuse one inside it. `scan` exits 1 when a tree is missing or at another commit, when a scan exits non-zero or times out, or when it writes no inventory or a gate verdict the harness does not recognise. `report --enforce-budgets` exits 1 when a budget fails; without it the report only lists the failures. `report --baseline-private FILE` names the baseline scan's `private/credential-observations.json`, so that a credential observation already in the baseline is not counted as new; without it every credential observation on a negative repository counts as new. To refresh the committed baseline, write the report to `benchmarks/realrepos/results/baseline` without `--baseline`.
 
 The committed baseline was produced this way from trees fetched by the harness's precursor, which cloned each default branch and recorded the commit the manifest now pins; `scan` reads `.git/HEAD` and refuses a tree at any other commit.
 
@@ -46,7 +46,7 @@ Each observation has a stable identifier, the first 16 hexadecimal digits of a S
 | `component` | `{repo, bom_ref, component_type}` |
 | `gap` | `{repo, gap}`, where a gap is a collection failure, an excluded surface or a collector that did not complete |
 
-`summary.json` holds, for each repository, the exit code, the scan gate verdict and its main reasons, the score, the components by type, the findings by category and severity, the gap count, whether coverage was complete, the wall time and the peak resident set; then the totals, the label metrics per finding category and per component type, the budget results and, with `--baseline`, the delta. `RESULTS.md` is rendered from `summary.json` alone, and the tests check that the committed pair agrees. `observations.json` lists every observation that may be published.
+`summary.json` holds, for each repository, the exit code, whether the inventory was written, the scan gate verdict and its main reasons (a reason that names a credential category is dropped), the score, the components by type, the findings by category and severity, the gap count, whether coverage was complete, the wall time and the peak resident set; then the totals, the label metrics per finding category and per component type, the stale labels, the budget results and, with `--baseline`, the delta. `RESULTS.md` is rendered from `summary.json` alone, and the tests check that the committed pair agrees. `observations.json` lists every observation that may be published.
 
 The delta lists new and removed observations by kind and category, gate flips with their reasons, and per repository the score delta and the time and resident-set ratios. The identifiers of the new and removed observations, and of the new credential observations, are written to `<out>/private/delta-ids.json`, beside the scan output.
 
@@ -96,11 +96,13 @@ For each category, the report gives the observations, how many are labelled, tru
 | `script_download_execution` false positives | at most 2 |
 | Component precision, per type with any labels | at least 95% |
 | Scan exit codes | 0 for every repository under `--report-only` |
+| Scan outputs | every repository wrote its inventory and a gate verdict of passed or failed |
+| Stale labels | 0 label entries whose observation the scan no longer produces |
 | Negative repositories (`pallets/flask`, `psf/requests`) | 0 new observations, credential observations included, against the baseline, or 0 findings without one; only the total is published |
 | Coverage | 0 new gaps on repositories whose baseline coverage was complete |
 | Cost | no repository slower than 2× its baseline wall time (when above 5 s) or above 2× its baseline peak resident set |
 
-A false-positive budget counts labelled false positives only, so an unlabelled finding never fails it; the report's unlabelled column shows what is still to be judged. The coverage and cost budgets need `--baseline`.
+A false-positive budget counts labelled false positives only, so an unlabelled finding never fails it; the report's unlabelled column shows what is still to be judged. An observation identifier covers a finding's detail, so a detector change that only rewords a message gives the finding a new identifier and leaves its label behind. The stale-label budget fails until such labels are mapped to the new identifiers; `summary.json` and `RESULTS.md` list the stale entries per repository and verdict (private ones as a count only), and `report` prints their number. The coverage and cost budgets need `--baseline`.
 
 The categories budgeted here that the current tree does not yet produce are placeholders for the detectors that will add them. Per the maintainer's decision of 19 November, Nexus SymBiote does not add native discovery of datasets, model references in code or configuration, SDK agents, stores named only in code, A2A clients in code or typosquats, so the harness has no budget for them.
 

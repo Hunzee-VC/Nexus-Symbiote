@@ -19,9 +19,10 @@ python -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lo
 python -m pip install --no-deps --no-build-isolation -e .
 python -m pip check
 python -m pytest --strict-skips
-ruff check src tests scripts
-ruff format --check src tests scripts
+ruff check src tests scripts benchmarks/realrepos
+ruff format --check src tests scripts benchmarks/realrepos
 mypy src/nexus_symbiote scripts
+mypy benchmarks/realrepos/harness.py
 python scripts/check_workflows.py
 python scripts/check_repository_hygiene.py
 python scripts/check_locks.py

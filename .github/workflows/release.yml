@@ -108,8 +108,9 @@ jobs:
             evidence/dependency-advisories.json
           if-no-files-found: warn
           retention-days: 90
-      - run: ruff check src tests scripts && ruff format --check src tests scripts
+      - run: ruff check src tests scripts benchmarks/realrepos && ruff format --check src tests scripts benchmarks/realrepos
       - run: mypy src/nexus_symbiote scripts
+      - run: mypy benchmarks/realrepos/harness.py
       - run: python scripts/check_workflows.py
       - name: Run security acceptance against the exact built wheel
         run: |

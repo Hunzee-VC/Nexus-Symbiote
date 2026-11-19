@@ -39,10 +39,16 @@ FETCH_TIMEOUT = 900
 SCAN_TIMEOUT = 1800
 CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 DROPPED_GATE_PREFIXES = ("finding:", "excluded:", "collection:", "score:", "not collected:")
+GATE_VERDICTS = ("passed", "failed")
 
 
 class HarnessError(Exception):
     """A manifest, label, budget or output that the harness refuses."""
+
+
+def _refuse_inside_repository(path: Path, what: str) -> None:
+    if path.resolve().is_relative_to(HERE.parent.parent):
+        raise HarnessError(f"{what} must be outside the repository")
 
 
 def is_credential_category(category: str) -> bool:
@@ -380,7 +386,8 @@ def parse_gate(text: str) -> tuple[str, list[str]]:
             reason = line[4:]
             if reason.startswith(DROPPED_GATE_PREFIXES):
                 continue
-            reasons.append("[credential finding]" if is_credential_category(reason) else reason)
+            if not is_credential_category(reason):
+                reasons.append(reason)
         else:
             in_gate = False
     return verdict, reasons
@@ -423,6 +430,7 @@ def scan(
     sarif: bool = False,
     measure: Callable[..., Measured] = run_measured,
 ) -> dict[str, Any]:
+    _refuse_inside_repository(out, "the scan directory")
     trees, out = trees.resolve(), out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     records: list[dict[str, Any]] = []
@@ -477,6 +485,7 @@ def scan(
             }
             record["gate"] = verdict
             record["gate_reasons"] = reasons
+            record["inventory"] = inventory.exists()
             if inventory.exists():
                 risk = measure(
                     risk_command(python, inventory),
@@ -515,13 +524,16 @@ def scan(
 
 
 def scan_succeeded(record: Mapping[str, Any]) -> bool:
-    """A repository was scanned at its pinned commit, exited 0 and did not time out."""
+    """A repository was scanned at its pinned commit, exited 0, did not time out, wrote its
+    inventory and reported a gate verdict the harness recognises."""
     result = record.get("scan")
     return (
         "error" not in record
         and isinstance(result, Mapping)
         and result.get("exit_code") == 0
         and not result.get("timed_out")
+        and record.get("inventory") is True
+        and record.get("gate") in GATE_VERDICTS
     )
 
 
@@ -696,6 +708,24 @@ def _rate(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator, 4) if denominator else None
 
 
+def stale_label_counts(
+    documents: Iterable[Mapping[str, Any]],
+    observations: Iterable[Mapping[str, Any]],
+    scanned: Iterable[str],
+) -> dict[str, dict[str, int]]:
+    """Per scanned repository and verdict, the label entries whose observation is absent."""
+    present = {item["id"] for item in observations}
+    repositories = set(scanned)
+    stale: dict[str, Counter[str]] = defaultdict(Counter)
+    for document in documents:
+        if document["repository"] not in repositories:
+            continue
+        for entry in document["labels"]:
+            if entry["observation"] not in present:
+                stale[document["repository"]][entry.get("verdict") or "unlabeled"] += 1
+    return {repo: dict(sorted(stale[repo].items())) for repo in sorted(stale)}
+
+
 def label_metrics(
     observations: Sequence[Mapping[str, Any]],
     labels: Mapping[str, Mapping[str, Any]],
@@ -768,6 +798,7 @@ def build_summary(
                 "timed_out": record["scan"]["timed_out"],
                 "seconds": record["scan"]["seconds"],
                 "max_rss_kib": record["scan"]["max_rss_kib"],
+                "inventory": inventory_path.exists(),
                 "gate": record.get("gate", "unknown"),
                 "gate_reasons": record.get("gate_reasons", []),
                 "score": risk.get("overall_score"),
@@ -804,6 +835,45 @@ def _gate_counts(repositories: Sequence[Mapping[str, Any]]) -> dict[str, int]:
     return dict(sorted(Counter(str(row.get("gate", "error")) for row in repositories).items()))
 
 
+def _read_baseline(baseline_dir: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The baseline's summary.json and observations.json, refused unless shaped as `report`
+    writes them."""
+    base_summary = _read_json(baseline_dir / "summary.json")
+    base_observations = _read_json(baseline_dir / "observations.json")
+    if not isinstance(base_summary, dict) or not isinstance(base_observations, dict):
+        raise HarnessError("baseline: summary.json and observations.json must be objects")
+    rows = base_summary.setdefault("repositories", [])
+    if not isinstance(rows, list) or not all(
+        isinstance(row, dict)
+        and isinstance(row.get("id"), str)
+        and (
+            "error" in row
+            or (
+                isinstance(row.get("seconds"), (int, float))
+                and isinstance(row.get("max_rss_kib"), int)
+            )
+        )
+        for row in rows
+    ):
+        raise HarnessError("baseline: summary.json repositories are malformed")
+    items = base_observations.setdefault("observations", [])
+    if not isinstance(items, list) or not all(
+        isinstance(item, dict)
+        and isinstance(item.get("id"), str)
+        and isinstance(item.get("kind"), str)
+        and isinstance(item.get("repository"), str)
+        for item in items
+    ):
+        raise HarnessError("baseline: observations.json observations are malformed")
+    counts = base_observations.setdefault("credential_counts", {})
+    if not isinstance(counts, dict) or not all(
+        isinstance(row, dict) and all(type(value) is int for value in row.values())
+        for row in counts.values()
+    ):
+        raise HarnessError("baseline: observations.json credential_counts are malformed")
+    return base_summary, base_observations
+
+
 def compare(
     summary: Mapping[str, Any],
     observations: Sequence[Mapping[str, Any]],
@@ -814,9 +884,8 @@ def compare(
     """The delta against a baseline. `baseline_private_ids` are the baseline scan's credential
     observation ids, which are never published; without them every current credential
     observation counts as new in `new_private_by_repository`."""
-    base_summary = _read_json(baseline_dir / "summary.json")
-    base_observations = _read_json(baseline_dir / "observations.json")
-    base_public = {item["id"]: item for item in base_observations.get("observations") or []}
+    base_summary, base_observations = _read_baseline(baseline_dir)
+    base_public = {item["id"]: item for item in base_observations["observations"]}
     current_public = {item["id"]: item for item in observations if not is_private(item)}
     new = sorted(set(current_public) - set(base_public))
     removed = sorted(set(base_public) - set(current_public))
@@ -832,7 +901,7 @@ def compare(
             counter[f"{item['kind']}:{label}" if label else item["kind"]] += 1
         return dict(sorted(counter.items()))
 
-    base_rows = {row["id"]: row for row in base_summary.get("repositories") or []}
+    base_rows = {row["id"]: row for row in base_summary["repositories"]}
     flips: list[dict[str, Any]] = []
     repositories: dict[str, dict[str, Any]] = {}
     for row in summary["repositories"]:
@@ -868,7 +937,7 @@ def compare(
             ),
             "complete_coverage_before": bool(before.get("complete_coverage")),
         }
-    base_credentials = base_observations.get("credential_counts") or {}
+    base_credentials = base_observations["credential_counts"]
     credential_delta: dict[str, dict[str, int]] = {}
     for category in sorted(set(base_credentials) | set(credential_counts)):
         severities = set(base_credentials.get(category, {})) | set(
@@ -907,11 +976,10 @@ def parse_budgets(document: Any) -> dict[str, Any]:
         raise HarnessError("budgets: categories must be an object")
     for name, rule in categories.items():
         limit = rule.get("max_false_positives") if isinstance(rule, dict) else None
-        if isinstance(limit, int) and limit >= 0:
+        if type(limit) is int and limit >= 0:
             continue
         if isinstance(limit, dict) and all(
-            key in SEVERITIES and isinstance(value, int) and value >= 0
-            for key, value in limit.items()
+            key in SEVERITIES and type(value) is int and value >= 0 for key, value in limit.items()
         ):
             continue
         raise HarnessError(f"budgets: {name}: max_false_positives must be a count or by severity")
@@ -927,8 +995,13 @@ def check_budgets(
     observations: Sequence[Mapping[str, Any]],
     labels: Mapping[str, Mapping[str, Any]],
     delta: Mapping[str, Any] | None,
+    *,
+    stale_labels: int = 0,
 ) -> list[dict[str, Any]]:
-    """One result per budget: name, limit, actual, passed (None when it cannot be measured)."""
+    """One result per budget: name, limit, actual, passed (None when it cannot be measured).
+
+    A label whose observation the scan no longer produces fails `labels: stale entries`, so a
+    reworded finding cannot carry its false positives out of the false-positive budgets."""
     results: list[dict[str, Any]] = []
 
     def add(name: str, limit: Any, actual: Any, passed: bool | None) -> None:
@@ -968,6 +1041,13 @@ def check_budgets(
         row["id"] for row in rows if "error" in row or row["exit_code"] not in allowed_exits
     )
     add("scan exit codes", allowed_exits, bad or "all allowed", not bad)
+    unreadable = sorted(
+        row["id"]
+        for row in rows
+        if "error" in row or row.get("inventory") is not True or row["gate"] not in GATE_VERDICTS
+    )
+    add("scan outputs", "inventory and gate verdict", unreadable or "all present", not unreadable)
+    add("labels: stale entries", 0, stale_labels, stale_labels == 0)
     negative_groups = set(budgets.get("negative_groups", ["negative"]))
     negatives = [row["id"] for row in rows if row["group"] in negative_groups]
     limit = budgets.get("negative_max_new_observations", 0)
@@ -1139,6 +1219,21 @@ def render_results(summary: Mapping[str, Any]) -> str:
             for name, row in report["component_metrics"].items()
         ),
     )
+    lines += ["", "## Stale labels", ""]
+    stale = report.get("stale_labels") or {}
+    lines.append(
+        "Label entries whose observation this scan did not produce; re-map them before "
+        f"trusting the false-positive budgets. Private (count only): {_cell(stale.get('private'))}."
+    )
+    lines.append("")
+    lines += _table(
+        ("Repository", "Verdict", "Entries"),
+        (
+            (repo, verdict, count)
+            for repo, row in (stale.get("repositories") or {}).items()
+            for verdict, count in row.items()
+        ),
+    )
     lines += ["", "## Delta against the baseline", ""]
     if delta is None:
         lines.append("No baseline was given.")
@@ -1188,13 +1283,13 @@ def report(
     baseline_private: Path | None = None,
     budgets: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    _refuse_inside_repository(out, "the scan directory")
     summary, observations = build_summary(manifest, out)
     commits = {repo["id"]: repo["commit"] for repo in manifest}
     public_documents = load_label_documents(labels, commits=commits)
     public_labels = merge_labels(public_documents)
-    secret_labels = merge_labels(
-        load_label_documents(private_labels, private=True, commits=commits)
-    )
+    private_documents = load_label_documents(private_labels, private=True, commits=commits)
+    secret_labels = merge_labels(private_documents)
     private_ids = {item["id"] for item in observations if is_private(item)}
     public_ids = {
         entry["observation"] for document in public_documents for entry in document["labels"]
@@ -1207,7 +1302,15 @@ def report(
     if overlap:
         raise HarnessError("labels: an observation is labelled both publicly and privately")
     all_labels = {**public_labels, **secret_labels}
-    repository_count = sum("error" not in row for row in summary["repositories"])
+    scanned = [row["id"] for row in summary["repositories"] if "error" not in row]
+    stale_public = stale_label_counts(public_documents, observations, scanned)
+    stale_private = sum(
+        sum(row.values())
+        for row in stale_label_counts(private_documents, observations, scanned).values()
+    )
+    stale_total = sum(sum(row.values()) for row in stale_public.values()) + stale_private
+    summary["stale_labels"] = {"repositories": stale_public, "private": stale_private}
+    repository_count = len(scanned)
     findings = [item for item in observations if item["kind"] == "finding"]
     components = [item for item in observations if item["kind"] == "component"]
     public = [item for item in observations if not is_private(item)]
@@ -1227,7 +1330,9 @@ def report(
                 raise HarnessError("baseline private observations: schema_version must be 1")
             baseline_private_ids = [str(item["id"]) for item in document.get("observations") or []]
         delta = compare(summary, observations, credential_counts, baseline, baseline_private_ids)
-    budget_results = check_budgets(budgets or {}, summary, observations, all_labels, delta)
+    budget_results = check_budgets(
+        budgets or {}, summary, observations, all_labels, delta, stale_labels=stale_total
+    )
     summary_out = {
         **summary,
         "finding_metrics": label_metrics(findings, all_labels, "category", repository_count),
@@ -1412,6 +1517,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 budgets=budgets,
             )
             failed = [item["budget"] for item in document["budgets"] if item["passed"] is False]
+            stale = document["stale_labels"]
+            stale_total = stale["private"] + sum(
+                sum(row.values()) for row in stale["repositories"].values()
+            )
+            if stale_total:
+                print(f"stale labels: {stale_total}", file=sys.stderr)
             for name in failed:
                 print(f"budget failed: {name}", file=sys.stderr)
             return 1 if failed and args.enforce_budgets else 0

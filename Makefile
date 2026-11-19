@@ -30,15 +30,16 @@ lock-check: ## Check the locks against pyproject.toml and each other, offline
 
 .PHONY: lint
 lint: ## Run ruff linter
-	ruff check src tests scripts
+	ruff check src tests scripts benchmarks/realrepos
 
 .PHONY: format-check
 format-check: ## Check code formatting with ruff
-	ruff format --check src tests scripts
+	ruff format --check src tests scripts benchmarks/realrepos
 
 .PHONY: typecheck
 typecheck: ## Run mypy strict type checking
 	mypy src/nexus_symbiote scripts
+	mypy benchmarks/realrepos/harness.py
 
 .PHONY: quality
 quality: lint format-check typecheck workflow-check hygiene lock-check ## Run all quality checks

@@ -7,6 +7,7 @@ import functools
 import hashlib
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -96,13 +97,19 @@ def _write_scan(
     seconds: dict[str, float] | None = None,
     rss: dict[str, int] | None = None,
     exit_codes: dict[str, int] | None = None,
+    scores: dict[str, float] | None = None,
+    missing: tuple[str, ...] = (),
 ) -> None:
     out.mkdir(parents=True, exist_ok=True)
     records = []
     for repo_id, inventory in inventories.items():
-        (out / f"{repo_id}.json").write_text(json.dumps(inventory), encoding="utf-8")
+        if repo_id not in missing:
+            (out / f"{repo_id}.json").write_text(json.dumps(inventory), encoding="utf-8")
         (out / f"{repo_id}.risk.json").write_text(
-            json.dumps({"overall_score": 12.0, "risk_level": "medium"}), encoding="utf-8"
+            json.dumps(
+                {"overall_score": (scores or {}).get(repo_id, 12.0), "risk_level": "medium"}
+            ),
+            encoding="utf-8",
         )
         records.append(
             {
@@ -422,6 +429,7 @@ def test_scan_resolves_relative_trees_and_output_before_changing_directory(
         if "scan" in argv:
             scans.append((argv, kw["cwd"]))
             Path(argv[argv.index("-o") + 1]).write_text(json.dumps(_inventory([])))
+            stderr.write_text("Scan gate passed\n")
         stdout.touch()
         stderr.touch()
         return harness.Measured(0, 1.0, 1, False)
@@ -439,8 +447,20 @@ def test_scan_resolves_relative_trees_and_output_before_changing_directory(
 @pytest.mark.parametrize(
     ("record", "succeeded"),
     [
-        ({"scan": {"exit_code": 0, "timed_out": False}}, True),
-        ({"scan": {"exit_code": 2, "timed_out": False}}, False),
+        ({"scan": {"exit_code": 0, "timed_out": False}, "inventory": True, "gate": "failed"}, True),
+        ({"scan": {"exit_code": 0, "timed_out": False}, "inventory": True, "gate": "passed"}, True),
+        (
+            {"scan": {"exit_code": 0, "timed_out": False}, "inventory": False, "gate": "passed"},
+            False,
+        ),
+        (
+            {"scan": {"exit_code": 0, "timed_out": False}, "inventory": True, "gate": "unknown"},
+            False,
+        ),
+        (
+            {"scan": {"exit_code": 2, "timed_out": False}, "inventory": True, "gate": "failed"},
+            False,
+        ),
         ({"scan": {"exit_code": -9, "timed_out": True}}, False),
         ({"error": "tree missing or not at the pinned commit"}, False),
     ],
@@ -494,7 +514,7 @@ def test_run_measured_records_exit_time_and_peak_rss(tmp_path: Path) -> None:
     assert (tmp_path / "out.txt").read_text().strip() == "ok"
 
 
-def test_parse_gate_keeps_main_reasons_and_hides_credential_and_path_lines() -> None:
+def test_parse_gate_keeps_main_reasons_and_drops_credential_and_path_lines() -> None:
     text = "\n".join(
         [
             "Scanning /tmp/x",
@@ -511,11 +531,8 @@ def test_parse_gate_keeps_main_reasons_and_hides_credential_and_path_lines() -> 
     )
     verdict, reasons = _harness().parse_gate(text)
     assert verdict == "failed"
-    assert reasons == [
-        "collection coverage is unknown or incomplete",
-        "[credential finding]",
-        "bad ?[31mescape",
-    ]
+    assert reasons == ["collection coverage is unknown or incomplete", "bad ?[31mescape"]
+    assert not [reason for reason in reasons if "credential" in reason]
     assert _harness().parse_gate("Scan gate passed\n") == ("passed", [])
     assert _harness().parse_gate("Traceback") == ("unknown", [])
 
@@ -782,7 +799,13 @@ def test_delta_against_a_baseline_reports_flips_new_observations_and_budgets(
     changed["alpha"]["metadata"]["completeness"]["surfaces_excluded"] = ["new.py: dynamic"]
     changed["beta"]["components"] = []
     out, results = tmp_path / "out", tmp_path / "results"
-    _write_scan(out, changed, gates={"neg": "failed"}, seconds={"alpha": 9.0, "beta": 9.0})
+    _write_scan(
+        out,
+        changed,
+        gates={"neg": "failed"},
+        seconds={"alpha": 9.0, "beta": 9.0},
+        scores={"alpha": 30.5, "beta": 4.25},
+    )
     summary = harness.report(manifest, out, results, baseline=base_results, budgets=_budgets())
     delta = summary["delta"]
     assert delta["new_observations"] == {"finding:rag_discovery": 1, "gap": 1}
@@ -792,6 +815,9 @@ def test_delta_against_a_baseline_reports_flips_new_observations_and_budgets(
         ("neg", "passed", "failed")
     ]
     assert delta["repositories"]["alpha"]["time_ratio"] == 9.0
+    assert delta["repositories"]["alpha"]["score_delta"] == 18.5
+    assert delta["repositories"]["beta"]["score_delta"] == -7.75
+    assert delta["repositories"]["neg"]["score_delta"] == 0
     budgets = summary["budgets"]
     assert _budget(budgets, "negative repositories: new observations")["actual"] == 1
     coverage = _budget(budgets, "coverage: new gaps on complete-coverage repositories")
@@ -914,11 +940,183 @@ def test_main_enforces_budgets_only_when_asked(tmp_path: Path) -> None:
         {"schema_version": 1, "categories": {"x": {"max_false_positives": -1}}},
         {"schema_version": 1, "categories": {"x": {"max_false_positives": {"severe": 1}}}},
         {"schema_version": 1, "component_min_precision": 1.5},
+        {"schema_version": 1, "categories": {"x": {"max_false_positives": True}}},
+        {"schema_version": 1, "categories": {"x": {"max_false_positives": {"high": False}}}},
     ],
 )
 def test_budgets_are_validated(budgets: dict[str, Any]) -> None:
     with pytest.raises(_harness().HarnessError, match="budgets"):
         _harness().parse_budgets(budgets)
+
+
+def _write_manifest(path: Path) -> Path:
+    path.write_text(
+        json.dumps(
+            _manifest(
+                _repo("alpha", COMMIT_A),
+                _repo("beta", COMMIT_B, "mcp-servers"),
+                _repo("neg", COMMIT_C, "negative"),
+            )
+        )
+    )
+    return path
+
+
+def test_a_reworded_labelled_finding_fails_the_stale_label_budget(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    harness = _harness()
+    out, results = tmp_path / "out", tmp_path / "results"
+    public, private = tmp_path / "labels", tmp_path / "private-labels"
+    inventories = _base_inventories()
+    _write_scan(out, inventories)
+    found = harness.collect_observations("alpha", inventories["alpha"])
+    pinning = _observation(found, category="version_pinning")["id"]
+    secret = _observation(found, category="credential_exposure")["id"]
+    _labels(public, "alpha", COMMIT_A, [_label(pinning, "false-positive", "confirmed")])
+    _labels(private, "alpha", COMMIT_A, [_label(secret, "false-positive")])
+    summary = harness.report(
+        _fixture_manifest(),
+        out,
+        results,
+        labels=[public],
+        private_labels=[private],
+        budgets=_budgets(),
+    )
+    assert _budget(summary["budgets"], "false positives: version_pinning high")["actual"] == 1
+    assert _budget(summary["budgets"], "labels: stale entries")["passed"] is True
+    assert summary["stale_labels"] == {"repositories": {}, "private": 0}
+
+    inventories["alpha"]["components"][0]["risks"][0]["detail"] = "unpinned, reworded"
+    inventories["alpha"]["components"][1]["risks"][0]["detail"] = "reworded credential"
+    _write_scan(out, inventories)
+    budgets = tmp_path / "budgets.json"
+    budgets.write_text(json.dumps(_budgets()))
+    argv = [
+        "--manifest",
+        str(_write_manifest(tmp_path / "manifest.json")),
+        "report",
+        "--out",
+        str(out),
+        "--results",
+        str(results),
+        "--labels",
+        str(public),
+        "--private-labels",
+        str(private),
+        "--budgets",
+        str(budgets),
+        "--enforce-budgets",
+    ]
+    assert harness.main(argv) == 1
+    stderr = capsys.readouterr().err
+    assert "stale labels: 2" in stderr and "budget failed: labels: stale entries" in stderr
+    summary = json.loads((results / "summary.json").read_text())
+    fp = _budget(summary["budgets"], "false positives: version_pinning high")
+    assert fp["actual"] == 0 and fp["passed"] is True
+    stale = _budget(summary["budgets"], "labels: stale entries")
+    assert stale["actual"] == 2 and stale["passed"] is False
+    assert summary["stale_labels"] == {
+        "repositories": {"alpha": {"false-positive": 1}},
+        "private": 1,
+    }
+    rendered = (results / "RESULTS.md").read_text()
+    assert "| alpha | false-positive | 1 |" in rendered
+    assert "Private (count only): 1." in rendered
+
+
+def test_a_missing_inventory_or_unknown_gate_fails_the_scan_outputs_budget(
+    tmp_path: Path,
+) -> None:
+    harness = _harness()
+    out, results = tmp_path / "out", tmp_path / "results"
+    _write_scan(out, _base_inventories(), gates={"beta": "unknown"}, missing=("alpha",))
+    summary = harness.report(_fixture_manifest(), out, results, budgets=_budgets())
+    assert _budget(summary["budgets"], "scan exit codes")["passed"] is True
+    outputs = _budget(summary["budgets"], "scan outputs")
+    assert outputs["actual"] == ["alpha", "beta"] and outputs["passed"] is False
+    _write_scan(out, _base_inventories(), gates={"beta": "failed"})
+    summary = harness.report(_fixture_manifest(), out, results, budgets=_budgets())
+    assert _budget(summary["budgets"], "scan outputs")["passed"] is True
+
+
+@pytest.mark.timeout(300)
+def test_scan_and_report_read_the_real_cli_output_of_a_committed_fixture(tmp_path: Path) -> None:
+    harness = _harness()
+    tree = tmp_path / "trees" / "demo"
+    shutil.copytree(ROOT / "examples" / "demo-agent", tree)
+    (tree / ".git").mkdir()
+    (tree / ".git" / "HEAD").write_text(COMMIT_A + "\n")
+    manifest = harness.parse_manifest(_manifest(_repo("demo", COMMIT_A)))
+    run = harness.scan(manifest, tmp_path / "trees", tmp_path / "scan", timeout=240)
+    [record] = run["repositories"]
+    assert record["scan"]["exit_code"] == 0, (tmp_path / "scan" / "demo.log").read_text()
+    assert record["gate"] in {"passed", "failed"} and record["inventory"] is True
+    assert harness.scan_succeeded(record)
+    assert record["risk_exit_code"] == 0
+    assert run["tool_version"].startswith("nexus-symbiote")
+    summary = harness.report(manifest, tmp_path / "scan", tmp_path / "results", budgets=_budgets())
+    [row] = summary["repositories"]
+    assert sum(row["components"].values()) >= 1
+    assert isinstance(row["score"], (int, float)) and row["spec_version"]
+    assert _budget(summary["budgets"], "scan outputs")["passed"] is True
+    assert _budget(summary["budgets"], "scan exit codes")["passed"] is True
+    observations = json.loads((tmp_path / "results" / "observations.json").read_text())
+    assert {item["kind"] for item in observations["observations"]} >= {"component"}
+    assert str(tree) not in json.dumps(observations)
+
+
+def test_scan_and_report_refuse_a_scan_directory_inside_the_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = _harness()
+
+    def measure(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("nothing may run")
+
+    monkeypatch.chdir(BENCH)
+    for inside in (BENCH / "scan-refused", Path("scan-refused")):
+        with pytest.raises(harness.HarnessError, match="outside the repository"):
+            harness.report(_fixture_manifest(), inside, tmp_path / "results")
+        with pytest.raises(harness.HarnessError, match="outside the repository"):
+            harness.scan(_fixture_manifest(), tmp_path, inside, measure=measure)
+    assert not (BENCH / "scan-refused").exists() and not (tmp_path / "results").exists()
+
+
+@pytest.mark.parametrize(
+    ("name", "document"),
+    [
+        ("observations.json", []),
+        ("observations.json", {"observations": [{"kind": "finding", "repository": "alpha"}]}),
+        ("observations.json", {"observations": [], "credential_counts": {"x": {"high": "1"}}}),
+        ("summary.json", "summary"),
+        ("summary.json", {"repositories": [{"id": "alpha", "gate": "passed"}]}),
+        ("summary.json", {"repositories": "alpha"}),
+    ],
+)
+def test_a_malformed_baseline_is_refused(tmp_path: Path, name: str, document: Any) -> None:
+    harness = _harness()
+    manifest = _fixture_manifest()
+    base_out, base_results = tmp_path / "base-out", tmp_path / "baseline"
+    _write_scan(base_out, _base_inventories())
+    harness.report(manifest, base_out, base_results, budgets=_budgets())
+    (base_results / name).write_text(json.dumps(document))
+    out = tmp_path / "out"
+    _write_scan(out, _base_inventories())
+    with pytest.raises(harness.HarnessError, match="baseline"):
+        harness.report(manifest, out, tmp_path / "results", baseline=base_results)
+    argv = [
+        "--manifest",
+        str(_write_manifest(tmp_path / "manifest.json")),
+        "report",
+        "--out",
+        str(out),
+        "--results",
+        str(tmp_path / "results"),
+        "--baseline",
+        str(base_results),
+    ]
+    assert harness.main(argv) == 2
 
 
 # Committed baseline

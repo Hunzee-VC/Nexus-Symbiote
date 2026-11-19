@@ -148,9 +148,10 @@ jobs:
           python -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock
           python -m pip install --no-deps --no-build-isolation -e .
           python -m pip check
-      - run: ruff check src tests scripts
-      - run: ruff format --check src tests scripts
+      - run: ruff check src tests scripts benchmarks/realrepos
+      - run: ruff format --check src tests scripts benchmarks/realrepos
       - run: mypy src/nexus_symbiote scripts
+      - run: mypy benchmarks/realrepos/harness.py
       - run: python scripts/check_workflows.py
       - run: python scripts/check_repository_hygiene.py
       - name: Cap pull request size outside tests
