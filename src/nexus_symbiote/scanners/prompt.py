@@ -209,6 +209,43 @@ def detect_invisible_characters(content: str, source_name: str) -> list[RiskAsse
     ]
 
 
+def definition_text_risks(definition: object, source_name: str) -> list[RiskAssessment]:
+    """Rate the hidden characters in a tool definition as in an instruction file.
+
+    A host puts a tool's description and schema text in front of the model as it does an
+    instruction file, so the same characters hide the same text. Every string and key
+    of the definition is read except the tool's own name, which is reported as an
+    identifier. A byte-order mark is never ordinary here: no string of a definition
+    starts a file.
+    """
+    counts: dict[str, int] = {}
+    separators: dict[str, int] = {}
+    tags = 0
+    pending = (
+        [value for key, value in definition.items() if key != "name"]
+        if isinstance(definition, dict)
+        else [definition]
+    )
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            pending.extend(value)
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+        elif isinstance(value, str) and not value.isascii():
+            found, found_tags = _hidden_counts(value, at_start=False)
+            tags += found_tags
+            for char, count in found.items():
+                counts[char] = counts.get(char, 0) + count
+            for char, count in _line_separator_counts(value).items():
+                separators[char] = separators.get(char, 0) + count
+    return [
+        *_hidden_character_risks(counts, tags, source_name),
+        *_line_separator_risks(separators, source_name),
+    ]
+
+
 def _hidden_counts(content: str, *, at_start: bool) -> tuple[dict[str, int], int]:
     """Count the hidden characters of ``content``, and its tag characters outside a flag.
 

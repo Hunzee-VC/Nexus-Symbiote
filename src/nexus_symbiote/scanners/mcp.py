@@ -3152,6 +3152,9 @@ class MCPScanner(Scanner):
         server_ref: str,
         config_path: str,
     ) -> list[ToolComponent]:
+        # Deferred: the prompt collector imports this module for the binding key's name.
+        from nexus_symbiote.scanners.prompt import definition_text_risks
+
         tools_config = config.get("tools", [])
         tool_comps = []
         seen_refs: set[str] = set()
@@ -3204,7 +3207,9 @@ class MCPScanner(Scanner):
                         t_name, safe["description"], safe["inputSchema"], safe["annotations"]
                     )
 
-                    risks: list[RiskAssessment] = []
+                    # Read before redaction: text shaped like a credential is withheld from
+                    # the record, and a host still shows the model what it hid.
+                    risks = definition_text_risks(tool_def, f"{config_path}: tool {t_name}")
                     if side_effect in (
                         SideEffectProfile.DESTRUCTIVE,
                         SideEffectProfile.FINANCIAL_TRANSACTION,
