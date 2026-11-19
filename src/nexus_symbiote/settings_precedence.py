@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from bisect import bisect_right
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -30,14 +31,15 @@ MAX_RECORDED_DENY_RULES = 512
 MAX_RECORDED_DOMAINS = 512
 MAX_RECORDED_TOOL_STATES = 512
 MAX_OVERSIGHT_GAP_FINDINGS = 64
+MAX_INDEXED_PERMISSION_RULES = 65536
 MAX_FRONTMATTER_YAML_NODES = 4096
 MAX_ACTIVATION_GLOBS = 256
 MAX_INLINE_MCP_SERVER_NAMES = 64
 
 _DESTRUCTIVE_VERBS_RE = re.compile(
-    r"(?:^|[_:/\s-])(?:delete|destroy|drop|rm|rmdir|remove|purge|truncate|wipe|reset|"
+    r"(?:^|[_:/\s*-])(?:delete|destroy|drop|rm|rmdir|remove|purge|truncate|wipe|reset|"
     r"shred|mkfs|force[_-]?push|exec|shell|bash|run[_-]?command|kill|pkill|killall|"
-    r"shutdown|reboot|terminate)(?:$|[_:/\s-])",
+    r"shutdown|reboot|terminate)(?:$|[_:/\s*-])",
     re.IGNORECASE,
 )
 _EXACT_DESTRUCTIVE_TOOLS = frozenset({"bash", "shell", "exec", "sh", "zsh", "powershell", "cmd"})
@@ -95,8 +97,8 @@ _COMMAND_RUNNERS = frozenset(
 _VERSIONED_INTERPRETER = re.compile(r"(?:python|pypy|ruby|php|perl|node)[0-9.]*|py")
 _SHELL_META_RE = re.compile(r"(?:&&|\|\||[;|`]|\$\()")
 _FORCE_FLAG_RE = re.compile(r"(?:^|\s)--force(?:\s|$|=)|(?:^|\s)-rf(?:\s|$)", re.IGNORECASE)
-
-_BLANKET_WILDCARD_SPEC_RE = re.compile(r"[\s*:./~]+")
+_SHELL_OPERATORS_RE = re.compile(r"([;|&$`(){}<>\n]+)")
+_SCHEME_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+.-")
 
 _AUTO_POLICIES = frozenset({"never", "auto", "bypasspermissions"})
 _CONDITIONAL_POLICIES = frozenset({"on-failure"})
@@ -108,6 +110,35 @@ _STATE_PRIORITY = {
     HumanInTheLoop.REQUIRED.value: 2,
     "unknown": 3,
 }
+
+
+def _url_scheme_pieces(text: str) -> list[str]:
+    """Split ``text`` before each URL scheme so adjacent option names cannot mask secrets."""
+    cuts: list[int] = []
+    floor = 0
+    idx = text.find("://")
+    while idx != -1:
+        start = idx
+        while start > floor and text[start - 1] in _SCHEME_CHARS:
+            start -= 1
+        while start < idx and not ("a" <= text[start].lower() <= "z"):
+            start += 1
+        if start < idx:
+            cuts.append(start)
+        floor = idx + 3
+        idx = text.find("://", floor)
+    bounds = [0, *cuts, len(text)]
+    parts = [text[b:e] for b, e in zip(bounds, bounds[1:], strict=False) if b < e]
+    return parts or [text]
+
+
+def _safe_settings_text(value: str) -> str:
+    """Redact and neutralize a settings string with scheme-boundary splitting."""
+    pieces = _SHELL_OPERATORS_RE.split(value)
+    for idx in range(0, len(pieces), 2):
+        parts = _url_scheme_pieces(pieces[idx])
+        pieces[idx] = " ".join(redact_text(part) for part in parts)
+    return neutralize("".join(pieces))
 
 
 def _normalize_patterns(raw: Any) -> tuple[str, ...]:
@@ -124,11 +155,9 @@ def _normalize_patterns(raw: Any) -> tuple[str, ...]:
 
 
 def _is_blanket_specifier(base: str, spec: str) -> bool:
-    """Return True when a parenthesis specifier imposes no meaningful narrowing."""
+    """Return True only when a parenthesis specifier imposes zero path or command narrowing."""
     compact = "".join(spec.split())
     if compact in {"", "*", ":*", "**", "*:*"}:
-        return True
-    if "*" in spec and _BLANKET_WILDCARD_SPEC_RE.fullmatch(spec) is not None:
         return True
     return base.lower() == "webfetch" and compact.lower() in {"domain:*", "domain:"}
 
@@ -152,35 +181,40 @@ def _parse_rule(pattern: str) -> tuple[str, str | None, bool] | None:
     return (pat, None, True)
 
 
-class _PrefixTrie:
-    """Linear-time prefix matcher supporting O(|query|) lookup regardless of rule count."""
+class _SortedPrefixes:
+    """Compact prefix matcher using a sorted minimal prefix-free stem list and binary search."""
+
+    __slots__ = ("_dirty", "_raw", "_stems")
 
     def __init__(self) -> None:
-        self._children: dict[str, _PrefixTrie] = {}
-        self._terminal = False
+        self._raw: list[str] = []
+        self._stems: list[str] = []
+        self._dirty = False
 
     def insert(self, prefix: str) -> None:
-        node = self
-        for ch in prefix:
-            child = node._children.get(ch)
-            if child is None:
-                child = _PrefixTrie()
-                node._children[ch] = child
-            node = child
-        node._terminal = True
+        self._raw.append(prefix)
+        self._dirty = True
+
+    def _compile(self) -> None:
+        kept: list[str] = []
+        for candidate in sorted(self._raw):
+            if kept and candidate.startswith(kept[-1]):
+                continue
+            kept.append(candidate)
+        self._stems = kept
+        self._raw.clear()
+        self._dirty = False
 
     def matches_any_prefix_of(self, text: str) -> bool:
-        node = self
-        if node._terminal:
+        if self._dirty:
+            self._compile()
+        stems = self._stems
+        if not stems:
+            return False
+        if stems[0] == "":
             return True
-        for ch in text:
-            child = node._children.get(ch)
-            if child is None:
-                return False
-            node = child
-            if node._terminal:
-                return True
-        return False
+        idx = bisect_right(stems, text)
+        return idx > 0 and text.startswith(stems[idx - 1])
 
 
 def _narrow_spec_prefix(spec: str) -> str | None:
@@ -190,16 +224,16 @@ def _narrow_spec_prefix(spec: str) -> str | None:
     return None
 
 
-@dataclass
+@dataclass(slots=True)
 class _RuleBucket:
     has_star: bool = False
     blanket_exact: set[str] = field(default_factory=set)
-    blanket_prefixes: _PrefixTrie = field(default_factory=_PrefixTrie)
+    blanket_prefixes: _SortedPrefixes = field(default_factory=_SortedPrefixes)
     narrow_by_base: dict[str, set[str]] = field(default_factory=dict)
-    narrow_spec_prefixes_by_base: dict[str, _PrefixTrie] = field(default_factory=dict)
+    narrow_spec_prefixes_by_base: dict[str, _SortedPrefixes] = field(default_factory=dict)
     narrow_star_specs: set[str] = field(default_factory=set)
-    narrow_star_spec_prefixes: _PrefixTrie = field(default_factory=_PrefixTrie)
-    narrow_prefix_specs: dict[str, _PrefixTrie] = field(default_factory=dict)
+    narrow_star_spec_prefixes: _SortedPrefixes = field(default_factory=_SortedPrefixes)
+    narrow_prefix_specs: dict[str, _SortedPrefixes] = field(default_factory=dict)
 
     def add(self, pattern: str) -> tuple[str, str | None, bool] | None:
         parsed = _parse_rule(pattern)
@@ -215,23 +249,31 @@ class _RuleBucket:
                 self.blanket_exact.add(base)
         elif spec is not None:
             stem = _narrow_spec_prefix(spec)
+            trailing_glob = (
+                spec[:-1] if stem is None and spec.endswith("*") and len(spec) > 1 else None
+            )
             if base == "*":
                 self.narrow_star_specs.add(spec)
                 if stem is not None:
                     self.narrow_star_specs.add(stem)
                     self.narrow_star_spec_prefixes.insert(stem + " ")
                     self.narrow_star_spec_prefixes.insert(stem + ":")
+                elif trailing_glob is not None:
+                    self.narrow_star_spec_prefixes.insert(trailing_glob)
             elif base.endswith("*"):
-                trie = self.narrow_prefix_specs.setdefault(spec, _PrefixTrie())
+                trie = self.narrow_prefix_specs.setdefault(spec, _SortedPrefixes())
                 trie.insert(base[:-1])
             else:
                 specs = self.narrow_by_base.setdefault(base, set())
                 specs.add(spec)
                 if stem is not None:
                     specs.add(stem)
-                    strie = self.narrow_spec_prefixes_by_base.setdefault(base, _PrefixTrie())
+                    strie = self.narrow_spec_prefixes_by_base.setdefault(base, _SortedPrefixes())
                     strie.insert(stem + " ")
                     strie.insert(stem + ":")
+                elif trailing_glob is not None:
+                    strie = self.narrow_spec_prefixes_by_base.setdefault(base, _SortedPrefixes())
+                    strie.insert(trailing_glob)
         return parsed
 
     def matches_blanket(self, base: str) -> bool:
@@ -268,7 +310,10 @@ def _spec_runs_arbitrary_command(spec: str) -> bool:
     if not words:
         return False
     program = words[0].rsplit("/", 1)[-1].lower()
-    return program in _COMMAND_RUNNERS or _VERSIONED_INTERPRETER.fullmatch(program) is not None
+    if program.startswith("*"):
+        return True
+    stripped = program.rstrip("*")
+    return stripped in _COMMAND_RUNNERS or _VERSIONED_INTERPRETER.fullmatch(stripped) is not None
 
 
 def _narrow_spec_is_destructive(base: str, spec: str) -> bool:
@@ -278,11 +323,26 @@ def _narrow_spec_is_destructive(base: str, spec: str) -> bool:
     if _FORCE_FLAG_RE.search(spec):
         return True
     lowered = spec.strip().lower()
-    return lowered in _EXACT_DESTRUCTIVE_TOOLS or bool(_DESTRUCTIVE_VERBS_RE.search(lowered))
+    return lowered.rstrip("*") in _EXACT_DESTRUCTIVE_TOOLS or bool(
+        _DESTRUCTIVE_VERBS_RE.search(lowered)
+    )
 
 
 class _RuleIndex:
-    """Compiled precedence index supporting O(|tool_name|) per-tool resolution."""
+    """Compiled precedence index supporting O(log R) per-tool resolution with flat memory."""
+
+    __slots__ = (
+        "_seen_candidates",
+        "_seen_narrow_allows",
+        "allow",
+        "approval_policy",
+        "ask",
+        "candidate_narrow_allows",
+        "candidates",
+        "deny",
+        "host_modelled",
+        "rules_truncated",
+    )
 
     def __init__(
         self,
@@ -292,6 +352,7 @@ class _RuleIndex:
         frontmatter_tools: Mapping[str, Any] | None = None,
         approval_policy: str | None = None,
         host_modelled: bool = True,
+        max_indexed_rules: int = MAX_INDEXED_PERMISSION_RULES,
     ) -> None:
         self.deny = _RuleBucket()
         self.ask = _RuleBucket()
@@ -302,9 +363,11 @@ class _RuleIndex:
         self._seen_candidates: set[str] = set()
         self.candidate_narrow_allows: dict[str, list[str]] = {}
         self._seen_narrow_allows: dict[str, set[str]] = {}
+        self.rules_truncated = False
 
         perms = permissions if isinstance(permissions, Mapping) else {}
         fm = frontmatter_tools if isinstance(frontmatter_tools, Mapping) else {}
+        indexed = 0
 
         for bucket, raw_groups in (
             (
@@ -323,9 +386,13 @@ class _RuleIndex:
         ):
             for group in raw_groups:
                 for pat in group:
+                    if indexed >= max_indexed_rules:
+                        self.rules_truncated = True
+                        break
                     parsed = bucket.add(pat)
                     if parsed is None:
                         continue
+                    indexed += 1
                     base, spec, is_blanket = parsed
                     if base not in self._seen_candidates:
                         self._seen_candidates.add(base)
@@ -335,6 +402,10 @@ class _RuleIndex:
                         if spec not in seen_specs:
                             seen_specs.add(spec)
                             self.candidate_narrow_allows.setdefault(base, []).append(spec)
+                if self.rules_truncated:
+                    break
+            if self.rules_truncated:
+                break
 
     def _policy_resolution(self, base: str) -> HumanInTheLoop | None:
         if self.approval_policy is None:
@@ -415,7 +486,7 @@ def _tool_pattern_matches(pattern: str, tool_name: str) -> bool:
     parsed_query = _parse_rule(tool_name)
     if parsed_pat is None or parsed_query is None:
         return False
-    p_base, p_spec, p_blanket = parsed_pat
+    _, _, p_blanket = parsed_pat
     q_base, q_spec, q_blanket = parsed_query
     bucket = _RuleBucket()
     bucket.add(pattern)
@@ -480,6 +551,7 @@ def oversight_gap_assessments(
     approval_policy: str | None = None,
     host_modelled: bool = True,
     source_name: str = "settings",
+    text_formatter: Callable[[str], str] | None = None,
 ) -> tuple[dict[str, str], list[RiskAssessment]]:
     """Compute bounded per-tool ``human_in_the_loop`` map and ``oversight_gap`` findings."""
     tool_states, assessments, _, _ = evaluate_tool_oversight(
@@ -489,6 +561,7 @@ def oversight_gap_assessments(
         approval_policy=approval_policy,
         host_modelled=host_modelled,
         source_name=source_name,
+        text_formatter=text_formatter,
     )
     return tool_states, assessments
 
@@ -501,6 +574,8 @@ def evaluate_tool_oversight(
     approval_policy: str | None = None,
     host_modelled: bool = True,
     source_name: str = "settings",
+    text_formatter: Callable[[str], str] | None = None,
+    max_indexed_rules: int = MAX_INDEXED_PERMISSION_RULES,
 ) -> tuple[dict[str, str], list[RiskAssessment], int, bool]:
     """Compute bounded per-tool ``human_in_the_loop`` map, findings, total tool count, and truncation flag."""
     index = _RuleIndex(
@@ -509,7 +584,9 @@ def evaluate_tool_oversight(
         frontmatter_tools=frontmatter_tools,
         approval_policy=approval_policy,
         host_modelled=host_modelled,
+        max_indexed_rules=max_indexed_rules,
     )
+    fmt = text_formatter or _safe_settings_text
     raw_states: dict[str, str] = {}
     gap_tools: list[str] = []
     seen_gap_tools: set[str] = set()
@@ -518,7 +595,7 @@ def evaluate_tool_oversight(
     for tool_name in index.candidates:
         resolved = index.resolve(tool_name)
         state = resolved.value if resolved is not None else "unknown"
-        safe_tool = neutralize(redact_text(tool_name))
+        safe_tool = neutralize(fmt(tool_name))
         prev = raw_states.get(safe_tool)
         if prev is None or _STATE_PRIORITY[state] < _STATE_PRIORITY[prev]:
             raw_states[safe_tool] = state
@@ -531,8 +608,8 @@ def evaluate_tool_oversight(
             gap_tools.append(safe_tool)
 
     total_tools = len(raw_states)
-    truncated = total_tools > MAX_RECORDED_TOOL_STATES
-    if truncated:
+    truncated = total_tools > MAX_RECORDED_TOOL_STATES or index.rules_truncated
+    if total_tools > MAX_RECORDED_TOOL_STATES:
         ordered = sorted(raw_states.items(), key=lambda kv: (_STATE_PRIORITY.get(kv[1], 3), kv[0]))
         tool_states = dict(ordered[:MAX_RECORDED_TOOL_STATES])
     else:
@@ -571,14 +648,14 @@ def _default_rule_redactor(rule: str) -> str:
     """Safely scrub standalone rule specifiers so unredacted arguments never persist."""
     parsed = _parse_rule(rule)
     if parsed is None:
-        return neutralize(redact_text(rule))
+        return _safe_settings_text(rule)
     base, spec, is_blanket = parsed
-    safe_base = neutralize(redact_text(base))
+    safe_base = _safe_settings_text(base)
     if is_blanket:
         if "(" in rule:
             _, _, rest = rule.partition("(")
             inner = rest[:-1].strip() if rest.endswith(")") else rest.strip()
-            return f"{safe_base}({neutralize(redact_text(inner))})"
+            return f"{safe_base}({_safe_settings_text(inner)})"
         return safe_base
     if spec is None:
         return safe_base
@@ -590,7 +667,7 @@ def _default_rule_redactor(rule: str) -> str:
         or any(op in first_word for op in (";", "&", "|", "`", "$", "(", ")", "'", '"'))
     ):
         return f"{safe_base}({REDACTED})"
-    return f"{safe_base}({neutralize(redact_text(first_word))})"
+    return f"{safe_base}({_safe_settings_text(first_word)})"
 
 
 def extract_deny_rules(
@@ -624,9 +701,15 @@ def extract_bounded_deny_rules(
     return formatted[:max_rules], total, digest, True
 
 
-def extract_sandbox_allowed_domains(merged_settings: Mapping[str, Any]) -> list[str]:
+def extract_sandbox_allowed_domains(
+    merged_settings: Mapping[str, Any],
+    *,
+    text_formatter: Callable[[str], str] | None = None,
+) -> list[str]:
     """Return sorted ``sandbox.network.allowedDomains`` entries from merged settings."""
-    domains, _, _, _ = extract_bounded_sandbox_domains(merged_settings)
+    domains, _, _, _ = extract_bounded_sandbox_domains(
+        merged_settings, text_formatter=text_formatter
+    )
     return domains
 
 
@@ -634,6 +717,7 @@ def extract_bounded_sandbox_domains(
     merged_settings: Mapping[str, Any],
     *,
     max_domains: int = MAX_RECORDED_DOMAINS,
+    text_formatter: Callable[[str], str] | None = None,
 ) -> tuple[list[str], int, str | None, bool]:
     """Return ``(recorded_domains, total_count, full_digest, truncated)`` for allowed domains."""
     sandbox = merged_settings.get("sandbox")
@@ -642,8 +726,9 @@ def extract_bounded_sandbox_domains(
     network = sandbox.get("network")
     if not isinstance(network, Mapping):
         return [], 0, None, False
+    fmt = text_formatter or _safe_settings_text
     domains = sorted(
-        {neutralize(redact_text(d)) for d in _normalize_patterns(network.get("allowedDomains"))}
+        {neutralize(fmt(d)) for d in _normalize_patterns(network.get("allowedDomains"))}
     )
     total = len(domains)
     if total <= max_domains:
@@ -657,7 +742,7 @@ def extract_activation_scope(frontmatter: Mapping[str, Any]) -> dict[str, Any] |
     globs: set[str] = set()
     for key in ("globs", "applyTo", "paths"):
         for item in _normalize_patterns(frontmatter.get(key)):
-            globs.add(neutralize(redact_text(item)))
+            globs.add(_safe_settings_text(item))
     always_apply = frontmatter.get("alwaysApply") is True
     if not globs and not always_apply:
         return None
@@ -684,13 +769,13 @@ def extract_subagent_inline_mcp_servers(
         return []
     server_names: list[str] = []
     if isinstance(raw, Mapping):
-        server_names = sorted(neutralize(redact_text(str(k))) for k in raw)
+        server_names = sorted(_safe_settings_text(str(k)) for k in raw)
     elif isinstance(raw, list):
         for item in raw:
             if isinstance(item, str) and item.strip():
-                server_names.append(neutralize(redact_text(item.strip())))
+                server_names.append(_safe_settings_text(item.strip()))
             elif isinstance(item, Mapping) and item.get("name"):
-                server_names.append(neutralize(redact_text(str(item["name"]))))
+                server_names.append(_safe_settings_text(str(item["name"])))
     if not server_names and not isinstance(raw, (Mapping, list)):
         return []
     safe_source = neutralize(source_name)

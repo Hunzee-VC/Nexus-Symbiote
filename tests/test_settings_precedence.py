@@ -105,7 +105,7 @@ def test_subagent_inline_mcp_server_and_codex_model(tmp_path: Path) -> None:
     res = IDEAgentScanner().scan(proj)
     claude = next(c for c in res.components if c.bom_ref == "ide-agent:claude-code")
     assert any(r.category == "subagent_inline_mcp_server" for r in claude.risks)
-    model = next(c for c in res.components if c.bom_ref == "model.codex-o4-mini")
+    model = next(c for c in res.components if c.bom_ref == "model:codex-o4-mini")
     assert model.name == "codex-o4-mini"
 
 
@@ -535,8 +535,39 @@ def test_differ_survives_hostile_inventories_and_tracks_truncated_tails(tmp_path
     types1 = {a.get("alert_type") for a in rep1.security_alerts}
     assert {"deny_rule_removed", "sandbox_egress_widened"} <= types1
 
-    # Pure addition to deny past 512 (600 -> 605) must NOT alert deny_rule_removed;
-    # removal of domain past 512 (600 -> 599) must NOT alert sandbox_egress_widened.
+    # Unchanged truncated tail (identical digest) must NOT alert;
+    # tail replacement (-1 + 2 on deny: 600 -> 601 with changed digest, or -2 + 1 on domains:
+    # 600 -> 599 with changed digest) MUST fail closed and raise the specific alert (N4).
+    rep2_same = AIBOMDiffer().diff(
+        _agent_bom(
+            {
+                "deny_rules": base_rules,
+                "deny_rules_truncated": True,
+                "deny_rules_total": 600,
+                "deny_rules_digest": "sha256:a",
+                "sandbox_allowed_domains": base_doms,
+                "sandbox_allowed_domains_truncated": True,
+                "sandbox_allowed_domains_total": 600,
+                "sandbox_allowed_domains_digest": "sha256:a",
+            }
+        ),
+        _agent_bom(
+            {
+                "deny_rules": base_rules,
+                "deny_rules_truncated": True,
+                "deny_rules_total": 600,
+                "deny_rules_digest": "sha256:a",
+                "sandbox_allowed_domains": base_doms,
+                "sandbox_allowed_domains_truncated": True,
+                "sandbox_allowed_domains_total": 600,
+                "sandbox_allowed_domains_digest": "sha256:a",
+            }
+        ),
+    )
+    types2_same = {a.get("alert_type") for a in rep2_same.security_alerts}
+    assert "deny_rule_removed" not in types2_same
+    assert "sandbox_egress_widened" not in types2_same
+
     rep2 = AIBOMDiffer().diff(
         _agent_bom(
             {
@@ -554,7 +585,7 @@ def test_differ_survives_hostile_inventories_and_tracks_truncated_tails(tmp_path
             {
                 "deny_rules": base_rules,
                 "deny_rules_truncated": True,
-                "deny_rules_total": 605,
+                "deny_rules_total": 601,
                 "deny_rules_digest": "sha256:b",
                 "sandbox_allowed_domains": base_doms,
                 "sandbox_allowed_domains_truncated": True,
@@ -564,8 +595,7 @@ def test_differ_survives_hostile_inventories_and_tracks_truncated_tails(tmp_path
         ),
     )
     types2 = {a.get("alert_type") for a in rep2.security_alerts}
-    assert "deny_rule_removed" not in types2
-    assert "sandbox_egress_widened" not in types2
+    assert {"deny_rule_removed", "sandbox_egress_widened"} <= types2
 
     # Transition across truncation threshold + digest-only truncated tail without total + activation cases.
     rep3 = AIBOMDiffer().diff(
@@ -698,11 +728,11 @@ def test_narrow_query_resolution_wildcard_narrow_specs_and_toctou(tmp_path: Path
         orig_link_target = files.link_target
         flipped = {"done": False}
 
-        def fake_link_target(rel: str) -> str | None:
-            if rel.endswith("agent.md") and not flipped["done"]:
+        def fake_link_target(path: str | Path) -> str | None:
+            if str(path).endswith("agent.md") and not flipped["done"]:
                 flipped["done"] = True
                 return ".env"
-            return orig_link_target(rel)
+            return orig_link_target(path)
 
         files.link_target = fake_link_target  # type: ignore[method-assign]
         scan_subagent_and_rule_frontmatter(
@@ -720,3 +750,120 @@ def test_narrow_query_resolution_wildcard_narrow_specs_and_toctou(tmp_path: Path
         props_noop: dict[str, object] = {}
         scan_subagent_and_rule_frontmatter(files, "", [], props_noop, ide_type="codex")
         assert props_noop == {}
+
+
+def test_path_wildcard_deny_never_masks_blanket_allow_or_bypass_and_rm_glob_raises_gap(
+    tmp_path: Path,
+) -> None:
+    # N1: Bash(./*), Bash(/*), and Bash(~/*) are narrow, never blanket.
+    for path_deny in ("Bash(./*)", "Bash(/*)", "Bash(~/*)"):
+        perms = {"allow": ["Bash"], "deny": [path_deny]}
+        assert resolve_tool_approval("Bash", permissions=perms) == HumanInTheLoop.NONE
+        states, risks = oversight_gap_assessments(perms)
+        assert states["Bash"] == "none"
+        assert any(r.category == "oversight_gap" and "Bash" in r.detail for r in risks)
+
+        # defaultMode: bypassPermissions + narrow path deny without explicit allow still flags Bash.
+        b_states, b_risks = oversight_gap_assessments(
+            {"deny": [path_deny]}, approval_policy="bypassPermissions"
+        )
+        assert b_states["Bash"] == "none"
+        assert any(r.category == "oversight_gap" and "Bash" in r.detail for r in b_risks)
+
+        # Conversely, allowing Bash(./*) / Bash(/*) / Bash(~/*) runs arbitrary executables -> gap!
+        a_states, a_risks = oversight_gap_assessments({"allow": [path_deny]})
+        assert a_states["Bash"] == "conditional"
+        assert any(r.category == "oversight_gap" for r in a_risks)
+
+    # Specific path query still matches narrow path deny while unrelated command stays allowed.
+    assert (
+        resolve_tool_approval(
+            "Bash(./deploy.sh)", permissions={"allow": ["Bash"], "deny": ["Bash(./*)"]}
+        )
+        == HumanInTheLoop.REQUIRED
+    )
+    assert (
+        resolve_tool_approval(
+            "Bash(curl https://evil.example)",
+            permissions={"allow": ["Bash"], "deny": ["Bash(./*)"]},
+        )
+        == HumanInTheLoop.NONE
+    )
+
+    # N6: Bash(rm*) without space/colon before '*' still raises oversight_gap.
+    rm_states, rm_risks = oversight_gap_assessments({"allow": ["Bash(rm*)"]})
+    assert rm_states["Bash"] == "conditional"
+    assert any(r.category == "oversight_gap" for r in rm_risks)
+
+    # N5: alwaysAllow in .claude/settings.json is evaluated by IDEAgentScanner.
+    proj = tmp_path / "always_allow_proj"
+    (proj / ".claude").mkdir(parents=True)
+    (proj / ".claude" / "settings.json").write_text(
+        json.dumps({"alwaysAllow": ["Bash"], "permissions": {"deny": ["Bash(./*)"]}}),
+        encoding="utf-8",
+    )
+    res = IDEAgentScanner().scan(proj)
+    claude = next(c for c in res.components if c.bom_ref == "ide-agent:claude-code")
+    assert claude.properties["tool_human_in_the_loop"]["Bash"] == "none"
+    assert any(r.category == "oversight_gap" for r in claude.risks)
+
+
+def test_long_specifier_memory_footprint_and_index_truncation() -> None:
+    import tracemalloc
+
+    padding = "x" * 220
+    perms = {
+        "allow": [f"Bash(cmd_allow_{i:05d}_{padding}:*)" for i in range(8000)],
+        "deny": [f"Bash(cmd_deny_{i:05d}_{padding}:*)" for i in range(8000)],
+    }
+    tracemalloc.start()
+    start = time.perf_counter()
+    try:
+        states, risks, _, _ = evaluate_tool_oversight(perms)
+        _, peak_bytes = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    elapsed = time.perf_counter() - start
+
+    assert states["Bash"] == "conditional"
+    assert not risks
+    assert elapsed < 3.0
+    assert peak_bytes < 45 * 1024 * 1024, f"Peak memory too high: {peak_bytes} bytes"
+
+    # Rule-index cap sets truncated=True when max_indexed_rules is exceeded.
+    _, _, _, idx_trunc = evaluate_tool_oversight(
+        {"allow": ["Read", "Write", "Bash"]}, max_indexed_rules=2
+    )
+    assert idx_trunc is True
+
+
+def test_projected_text_parity_leaves_no_adjacent_scheme_pin_in_inventory(tmp_path: Path) -> None:
+    # N3: '--password ssh://--password 482913' must never publish '482913' in tool states,
+    # oversight_gap findings, sandbox_allowed_domains, or Codex model.
+    sneaky = "--password ssh://--password 482913"
+    ambiguous = "http:///ambiguous?pin=482913"
+    proj = tmp_path / "proj_n3"
+    (proj / ".claude").mkdir(parents=True)
+    (proj / ".codex").mkdir(parents=True)
+    (proj / ".claude" / "settings.json").write_text(
+        json.dumps(
+            {
+                "permissions": {"allow": [sneaky, f"rm_{sneaky}", ambiguous]},
+                "sandbox": {"network": {"allowedDomains": [sneaky, ambiguous]}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (proj / ".codex" / "config.toml").write_text(f'model = "{sneaky}"\n', encoding="utf-8")
+
+    res = IDEAgentScanner().scan(proj)
+    dumped = json.dumps([c.model_dump(mode="json") for c in res.components])
+    assert "482913" not in dumped
+
+    # Direct settings_precedence helpers also strip the PIN cleanly.
+    direct_states, direct_risks = oversight_gap_assessments({"allow": [sneaky, f"rm_{sneaky}"]})
+    assert "482913" not in json.dumps(direct_states)
+    assert "482913" not in json.dumps([r.model_dump(mode="json") for r in direct_risks])
+    assert "482913" not in json.dumps(
+        extract_sandbox_allowed_domains({"sandbox": {"network": {"allowedDomains": [sneaky]}}})
+    )

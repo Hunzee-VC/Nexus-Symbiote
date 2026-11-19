@@ -1656,21 +1656,19 @@ def _truncated_tail_changed(
     new_total = _nonneg_int_prop(new_props, f"{prefix}_total")
     old_digest = old_props.get(f"{prefix}_digest")
     new_digest = new_props.get(f"{prefix}_digest")
-    digests_differ = (
-        isinstance(old_digest, str) and isinstance(new_digest, str) and old_digest != new_digest
-    )
+    has_digests = isinstance(old_digest, str) and isinstance(new_digest, str)
     if detect_removal:
         if not old_trunc:
             return False
         if not new_trunc:
             return True
-        if old_total is not None and new_total is not None:
-            return new_total < old_total or (new_total == old_total and digests_differ)
-        return digests_differ
+        if has_digests:
+            return old_digest != new_digest
+        return old_total is not None and new_total is not None and new_total < old_total
     if not new_trunc:
         return False
     if not old_trunc:
         return True
-    if old_total is not None and new_total is not None:
-        return new_total > old_total or (new_total == old_total and digests_differ)
-    return digests_differ
+    if has_digests:
+        return old_digest != new_digest
+    return old_total is not None and new_total is not None and new_total > old_total

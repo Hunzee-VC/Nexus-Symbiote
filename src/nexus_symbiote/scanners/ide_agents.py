@@ -604,6 +604,14 @@ def _safe_rule_shape(rule: str) -> str:
         return f"{safe_base}({REDACTED})" if sep else safe_base
 
 
+def _safe_projected_text(value: str) -> str:
+    """Format a settings string by its unkeyed projection for inventory properties."""
+    try:
+        return neutralize(_projected_text(value, unkeyed=True))
+    except AmbiguousURLError:
+        return REDACTED
+
+
 def _command_projection(value: Any, depth: int, *, unkeyed: bool, program: bool) -> Any:
     if depth > _MAX_SETTINGS_DEPTH:
         raise ValueError("settings nested too deeply")
@@ -2819,7 +2827,9 @@ class IDEAgentScanner(Scanner):
             properties["deny_rules_total"] = deny_total
             properties["deny_rules_truncated"] = True
             properties["deny_rules_digest"] = deny_digest
-        sandbox_domains, dom_total, dom_digest, dom_trunc = extract_bounded_sandbox_domains(merged)
+        sandbox_domains, dom_total, dom_digest, dom_trunc = extract_bounded_sandbox_domains(
+            merged, text_formatter=_safe_projected_text
+        )
         if sandbox_domains:
             properties["sandbox_allowed_domains"] = sandbox_domains
         if dom_trunc:
@@ -2829,10 +2839,14 @@ class IDEAgentScanner(Scanner):
         default_mode = (
             rules.get("defaultMode") if isinstance(rules.get("defaultMode"), str) else None
         )
+        raw_always = merged.get("alwaysAllow") or rules.get("alwaysAllow")
+        always_allow: Iterable[str] = raw_always if isinstance(raw_always, (str, list)) else ()
         tool_states, oversight_risks, tool_total, tool_trunc = evaluate_tool_oversight(
             rules,
+            always_allow=always_allow,
             approval_policy=default_mode,
             source_name=f"{base}/.claude/settings.json" if base else ".claude/settings.json",
+            text_formatter=_safe_projected_text,
         )
         if tool_states:
             properties["tool_human_in_the_loop"] = tool_states
@@ -3043,10 +3057,10 @@ class IDEAgentScanner(Scanner):
         properties["sandbox_mode"] = sandbox
         codex_model = config.get("model")
         if isinstance(codex_model, str) and codex_model.strip():
-            clean_model = neutralize(redact_text(codex_model.strip()))[:512].strip()
+            clean_model = _safe_projected_text(codex_model.strip())[:512].strip()
             if clean_model:
                 properties["model"] = clean_model
-                model_ref = f"model.{clean_model}"
+                model_ref = f"model:{clean_model}"
                 if not any(comp.bom_ref == model_ref for comp in result.components):
                     result.components.append(
                         ModelComponent(
