@@ -15,6 +15,7 @@ endpoints that cannot be classified, are coverage gaps rather than silence.
 
 from __future__ import annotations
 
+import bisect
 import hmac
 import ipaddress
 import json
@@ -636,6 +637,9 @@ def _opencode_substitution_outside_values(text: str) -> bool:
     Such a substitution can join, split or add the strings the per-value reading sees.
     """
     openings = [match.start() for match in _OPENCODE_OPENING.finditer(text)]
+    # opencode reads the raw text, so an escape such as a JSON unicode escape for the
+    # closing brace names a different variable from the decoded value we read.
+    escapes = [match.start() for match in re.finditer(r"\\", text)]
     index = 0
     close = -1
     for token in _JSONC_TOKEN.finditer(text):
@@ -653,6 +657,9 @@ def _opencode_substitution_outside_values(text: str) -> bool:
             if close < openings[index]:
                 close = text.find("}", openings[index])
             if not openings[index] < close < end - 1:
+                return True
+            escape = bisect.bisect_left(escapes, openings[index])
+            if escape < len(escapes) and escapes[escape] < close:
                 return True
             index += 1
     return index < len(openings)

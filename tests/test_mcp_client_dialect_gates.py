@@ -712,6 +712,9 @@ OUTSIDE_VALUES = [
     '{"mcp":{"x":{"command":[/* {env:X} */ "npx","-y","x@1.0.0"]}}}',
     '{"mcp":{"{env:X}":{"command":["npx","-y","x@1.0.0"]}}}',
     '{"{env:K}":{"x":{"command":["npx","-y","x@1.0.0"]}}}',
+    # An escape inside the braces: opencode names the raw text, we read the decoded value.
+    '{"mcp":{"x":{"type":"local","command":["{env:\\u007d}npx","-y","evil-pkg"]}}}',
+    '{"mcp":{"x":{"type":"local","command":["npx"],"environment":{"T":"{env:A\\"}"}}}}',
 ]
 
 
@@ -729,7 +732,7 @@ def test_both_gates_fail_on_an_opencode_substitution_outside_one_string_value(tm
 
 
 @pytest.mark.parametrize(
-    "word", ["{env:A}", "pre-{env:A}-{file:./k}", "{env:A{B}", "{env:}", '{env:A\\"}', "{team}"]
+    "word", ["{env:A}", "pre-{env:A}-{file:./k}", "{env:A{B}", "{env:}", "{team}"]
 )
 def test_an_opencode_substitution_inside_one_value_is_still_read(tmp_path, word):
     config = {"mcp": {"x": {"command": ["npx", "-y", "x@1.0.0"], "environment": {"T": word}}}}
