@@ -1,0 +1,10 @@
+{
+  "notes": "Reviewer overrides applied by score.py after textual matching. Each entry names the tool, the ground-truth id, the verdict and why. A false override marks a textual match as incidental; a true override credits a detection the matcher missed.",
+  "overrides": [
+    {"tool": "ai-finder", "id": "skill.triage-ticket", "detected": false, "why": "match came from the path of the skill's helper script recorded as an SDK import (classify.py); no skill component exists"},
+    {"tool": "trusera-ai-bom", "id": "skill.triage-ticket", "detected": false, "why": "match came from the file path of classify.py inside a provider property; no skill component exists"},
+    {"tool": "ai-agentbom", "id": "rag.pinecone", "detected": false, "why": "match came from a redacted-secret finding for PINECONE_API_KEY in .env, not from a retrieval component"},
+    {"tool": "agent-bom", "id": "rag.qdrant", "detected": true, "why": "qdrant appears as a compose service in an IaC finding (COMPOSE-011); kept as detected because the service is identified by name and file"},
+    {"tool": "nexus-symbiote", "id": "rag.pinecone", "detected": true, "why": "rag:import-pinecone and rag:env-pinecone components exist; the first textual match happened to be a duplicate-conflict failure record"}
+  ]
+}
