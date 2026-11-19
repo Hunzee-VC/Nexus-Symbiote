@@ -63,7 +63,8 @@ SPECS: dict[str, LimitSpec] = {
             "bytes",
             64 * GIB,
             "Bytes one collector reads in total, except model weights; the mcp, a2a and "
-            "rag collectors, which also search source, may read source-scan-bytes more.",
+            "rag collectors, which also search source, may read source-scan-bytes more, "
+            "which alone bounds the files a ShadowScan report cites.",
         ),
         LimitSpec(
             "entries",
@@ -96,7 +97,8 @@ SPECS: dict[str, LimitSpec] = {
             64 * GIB,
             "Bytes of Python, TypeScript and JavaScript source one collector reads while "
             "it looks for references: the mcp collector's SDK and tool references, the "
-            "a2a collector's SDK references and the rag collector's vector-store imports.",
+            "a2a collector's SDK references and the rag collector's vector-store imports; "
+            "also the files of any type that a ShadowScan report cites.",
         ),
         LimitSpec(
             "syntax-bytes",

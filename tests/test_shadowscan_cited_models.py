@@ -222,6 +222,10 @@ def _line_of(text, row):
     return next(n for n, line in enumerate(text.split("\n"), 1) if line.strip() == row)
 
 
+def _line_holding(text, part):
+    return next(n for n, line in enumerate(text.split("\n"), 1) if part in line)
+
+
 def test_the_report_does_not_confirm_its_own_citations(tmp_path):
     # A pretty-printed report holds each cited identifier on a line of its own.
     report = _report(_evidence("shadowscan.json:1", MODEL))
@@ -277,10 +281,119 @@ def test_a_bill_of_materials_or_scan_report_confirms_nothing(tmp_path, document)
     assert result.source_projection_limitations[-1] == UNNAMED
 
 
+def _unparseable(text):
+    """The same document in forms that are not one JSON value, or not strict JSON."""
+    name = f'"name": "{MODEL}"'
+    return {
+        "duplicate-key": text.replace(name, f'"name": "x",\n {name}'),
+        "trailing-comma": text.replace(name, name + ","),
+        "two-documents": text + "\n" + text,
+        "second-document-is-the-report": '{"note": "first"}\n' + text,
+        "comment-inside": text.replace(name, f"// kept\n {name}"),
+        "space-before-the-colon": text.replace(name, name + ",").replace('": ', '" : '),
+    }
+
+
+@pytest.mark.parametrize("document", RESTATED, ids=lambda d: sorted(d)[0])
+@pytest.mark.parametrize("form", sorted(_unparseable("")))
+def test_a_report_that_is_not_one_strict_json_object_confirms_nothing(tmp_path, document, form):
+    written = _unparseable(json.dumps(document, indent=1))[form]
+    name = f'"name": "{MODEL}"'
+    name = name.replace('": ', '" : ') if form == "space-before-the-colon" else name
+    with pytest.raises(ValueError):
+        shadowscan.parse_json_strict(written)
+    line = _line_holding(written, name)
+    report = _report(_evidence(f"out/earlier.json:{line}", MODEL))
+    result = _scan(tmp_path, report, {"out/earlier.json": written})
+    assert not _models(result)
+    assert result.source_projection_limitations is not None
+    assert result.source_projection_limitations[-1] == UNNAMED
+
+
+@pytest.mark.parametrize("document", RESTATED, ids=lambda d: sorted(d)[0])
+def test_in_a_top_level_array_only_a_bill_of_materials_confirms_nothing(tmp_path, document):
+    # A row of a benchmark matrix has `runs` and a list of screens has `components`, so in
+    # an array only the three names that no ordinary file uses make a member a report.
+    written = json.dumps([{"note": "wrapped"}, document], indent=1)
+    line = _line_holding(written, f'"name": "{MODEL}"')
+    report = _report(_evidence(f"out/earlier.json:{line}", MODEL))
+    result = _scan(tmp_path, report, {"out/earlier.json": written})
+    restated = not set(document).isdisjoint({"bomFormat", "spdxVersion", "@graph"})
+    assert [model.name for model in _models(result)] == ([] if restated else [MODEL])
+
+
 def test_an_ordinary_json_file_confirms_an_identifier(tmp_path):
     text = json.dumps({"name": "lead-enrichment", "nodes": [{"model": MODEL}]}, indent=1)
     line = _line_of(text, f'"model": "{MODEL}"')
     result = _scan(tmp_path, _report(_evidence(f"flow.json:{line}", MODEL)), {"flow.json": text})
+    assert [model.name for model in _models(result)] == [MODEL]
+
+
+NESTED = '"layout": {"components": ["a"], "runs": 2, "findings": []}'
+ORDINARY = {
+    "strict-json-with-a-nested-key": f'{{\n {NESTED},\n "model": "{MODEL}"\n}}\n',
+    "array-of-rows": f'[\n {{"model": "{MODEL}"}},\n {{"model": "other"}}\n]\n',
+    "array-of-rows-with-a-generic-key": (
+        f'[\n {{\n  "model": "{MODEL}",\n  "runs": 5,\n  "components": 2\n }}\n]\n'
+    ),
+    "trailing-comma-and-a-nested-key": f'{{\n {NESTED},\n "model": "{MODEL}",\n}}\n',
+    "comment-and-a-nested-key": f'{{\n // editor settings\n {NESTED},\n "model": "{MODEL}"\n}}\n',
+    "integer-past-2-to-the-53": f'{{\n "id": 9007199254740993,\n {NESTED},\n "model": "{MODEL}"\n}}\n',
+    "json-lines-with-a-nested-key": f'{{"model": "{MODEL}"}}\n{{"row": {{"runs": 3}}}}\n',
+    "readme-that-opens-with-a-link": (
+        f"[![build](https://ci.example/badge.svg)](https://ci.example)\n\n"
+        f'We call "model": "{MODEL}" and return {{"findings": []}}.\n'
+    ),
+    "template-that-opens-with-a-brace": (
+        f'{{% set reply = {{"findings": []}} %}}\nUse "model": "{MODEL}" here.\n'
+    ),
+    "log-that-opens-with-a-bracket": f'[2026-11-19] "runs": 4 "model": "{MODEL}"\n',
+}
+
+
+@pytest.mark.parametrize("name", sorted(ORDINARY))
+def test_text_that_starts_like_json_and_is_no_report_still_confirms(tmp_path, name):
+    text = ORDINARY[name]
+    line = _line_holding(text, f'"model": "{MODEL}"')
+    result = _scan(tmp_path, _report(_evidence(f"cfg.json:{line}", MODEL)), {"cfg.json": text})
+    assert [model.name for model in _models(result)] == [MODEL]
+
+
+def test_the_two_readers_of_the_report_rule_agree_on_json(tmp_path):
+    documents = [
+        *RESTATED,
+        [{"note": 1}, RESTATED[0]],
+        [{"note": 1}, RESTATED[4]],
+        {"a": {"components": 1}},
+        [[{"findings": []}]],
+        [1, "findings", {"x": {"runs": []}}],
+        {"text": 'a "findings": b', "list": [{"components": 2}]},
+        {},
+        [],
+    ]
+    for document in documents:
+        raw = json.dumps(document, indent=1).encode()
+        whole = shadowscan._restates_a_scan(raw)
+        assert shadowscan._restated_in_tokens(raw) is whole, document
+    assert [shadowscan._restates_a_scan(json.dumps(d).encode()) for d in documents] == (
+        [True] * 7 + [False] * 7
+    )
+
+
+def test_a_cited_json_file_is_not_canonicalised_to_be_read(tmp_path, monkeypatch):
+    def refuse(*args, **kwargs):
+        raise AssertionError("a cited file went through the strict parser")
+
+    real = shadowscan.parse_json_strict
+    text = json.dumps([{"model": MODEL}, {"model": "other"}], indent=1)
+    project = _project(tmp_path, _report(_evidence("rows.json:3", MODEL)), {"rows.json": text})
+    report = (project / "shadowscan.json").read_text()
+    monkeypatch.setattr(
+        shadowscan,
+        "parse_json_strict",
+        lambda text, **kwargs: real(text, **kwargs) if text == report else refuse(),
+    )
+    result = ShadowScanImporter().scan(project)
     assert [model.name for model in _models(result)] == [MODEL]
 
 
@@ -372,6 +485,171 @@ def test_a_value_on_the_line_after_a_credential_key_is_withheld(tmp_path):
         assert not _models(withheld), cited
     named = _scan(tmp_path / "b", _report(_evidence("b.yaml:2", literal)), files)
     assert [model.name for model in _models(named)] == [literal]
+
+
+def test_what_is_withheld_does_not_depend_on_which_identifier_is_cited_first(tmp_path):
+    whole, part = "abc/def123456789", "def123456789"
+    files = {"c.yaml": f"password:\n{whole}\n", "m.yaml": f"models:\n{whole}\n"}
+    orders = ([part, whole], [whole, part], [part], [whole])
+    for number, cited in enumerate(orders):
+        for name, expected in (("c.yaml", []), ("m.yaml", sorted(cited))):
+            report = _report(*(_evidence(f"{name}:2", literal) for literal in cited))
+            result = _scan(tmp_path / f"{number}-{name[0]}", report, files)
+            assert sorted(model.name for model in _models(result)) == expected, (cited, name)
+
+
+VALUE = f"{MODEL}-0123456789"
+BELOW_A_KEY = {
+    "folded-block": "{key}: >-\n  {value}\n",
+    "literal-block": "{key}: |\n  {value}\n",
+    "block-that-keeps-line-breaks": "{key}: |+\n  {value}\n",
+    "block-with-indent-and-chomp": "{key}: |2-\n  {value}\n",
+    "block-and-a-comment": "{key}: >- # folded\n  {value}\n",
+    "blank-line-between": "{key}:\n\n  {value}\n",
+    "block-then-blank-line": "{key}: >-\n\n  {value}\n",
+    "comment-after-the-key": "{key}:  # rotated monthly\n  {value}\n",
+    "comment-that-ends-in-a-colon": "{key}:  # example:\n  {value}\n",
+    "slash-comment-after-the-key": "{key} = // see the vault\n  '{value}'\n",
+    "comment-line-between": "{key}:\n  # rotated monthly\n  {value}\n",
+    "json-value-two-lines-down": '{{\n "{key}":\n\n  "{value}"\n}}\n',
+    "json-array": '{{\n "{key}": [\n  "first-entry",\n  "{value}"\n ]\n}}\n',
+    "yaml-list": "{key}:\n  - first-entry\n  - {value}\n",
+    "equals-and-parenthesis": "{key} = (\n  '{value}',\n)\n",
+    "equals-and-brace": '{key} = {{\n  "{value}",\n}}\n',
+    "declared-constant": "export const {key} = [\n  '{value}',\n];\n",
+    "two-values-on-the-line": '{key} = [\n  "first","{value}"\n]\n',
+    "comma-inside-the-value": "{key}:\n  first,{value}\n",
+    "namespace-before-the-value": "{key}:\n  openai:{value}\n",
+    "spaces-inside-the-quotes": '{key}:\n  " {value} "\n',
+    "single-quotes": "{key}:\n  ' {value} '\n",
+    "comma-after-a-space": '{key}:\n  "{value}" ,\n',
+    "brackets-around-it": '{key}:\n  [ "{value}" ]\n',
+    "tab-before-the-comma": '{key}:\n  "{value}"\t,\n',
+    "padded-entry-above": "{key}:\n  - Zmlyc3QtZW50cnktMDAwMQ==\n  - {value}\n",
+    "empty-assignment-entry-above": "[auth]\n{key}=\n    first-entry\n    {value}\n",
+}
+
+
+@pytest.mark.parametrize("form", sorted(BELOW_A_KEY))
+def test_a_value_written_below_a_credential_key_is_withheld(tmp_path, form):
+    for key, expected in (("credentials", []), ("chat_models", [VALUE])):
+        text = BELOW_A_KEY[form].format(key=key, value=VALUE)
+        report = _report(_evidence(f"cfg.yaml:{_line_holding(text, VALUE)}", VALUE))
+        result = _scan(tmp_path / key, report, {"cfg.yaml": text})
+        assert [model.name for model in _models(result)] == expected, key
+
+
+@pytest.mark.parametrize("padding", ["=", "=="])
+@pytest.mark.parametrize("form", ["folded-block", "json-array", "yaml-list", "blank-line-between"])
+def test_a_value_that_ends_in_padding_is_still_a_value(tmp_path, form, padding):
+    # Base64 padding after the cited text reads like `NAME=` with nothing assigned.
+    for key, expected in (("credentials", []), ("chat_models", [VALUE])):
+        text = BELOW_A_KEY[form].format(key=key, value=VALUE + padding)
+        report = _report(_evidence(f"cfg.yaml:{_line_holding(text, VALUE)}", VALUE))
+        result = _scan(tmp_path / key, report, {"cfg.yaml": text})
+        assert [model.name for model in _models(result)] == expected, key
+
+
+def test_every_key_that_may_open_a_value_is_read(tmp_path):
+    # `credentials=` may be an empty assignment or a padded value, so the search goes on
+    # above it and both keys are tried. A long single value in between does not end it.
+    blob = "A" * (shadowscan.MAX_CITED_LINE_CHARS + 100)
+    files = {
+        "near.ini": f"chat_models:\n  credentials=\n  first\n  {VALUE}\n",
+        "far.ini": f"credentials:\n  chat_models=\n  first\n  {VALUE}\n",
+        "blob.yaml": f"credentials:\n  - {blob}\n  - {VALUE}\n",
+        "call.py": f"credentials = (\n    decode(\n        '{VALUE}',\n    ),\n)\n",
+        "plain.ini": f"chat_models:\n  other_models=\n  first\n  {VALUE}\n",
+    }
+    for name, expected in (
+        ("near.ini", []),
+        ("far.ini", []),
+        ("blob.yaml", []),
+        ("call.py", []),
+        ("plain.ini", [VALUE]),
+    ):
+        line = _line_holding(files[name], VALUE)
+        result = _scan(tmp_path / name, _report(_evidence(f"{name}:{line}", VALUE)), files)
+        assert [model.name for model in _models(result)] == expected, name
+
+
+def test_a_scheme_word_alone_on_the_line_above_withholds_the_value(tmp_path):
+    files = {"cfg.yaml": f"auth:\n  Bearer\n  {VALUE}\n", "ok.yaml": f"auth:\n  first\n  {VALUE}\n"}
+    withheld = _scan(tmp_path / "a", _report(_evidence("cfg.yaml:3", VALUE)), files)
+    named = _scan(tmp_path / "b", _report(_evidence("ok.yaml:3", VALUE)), files)
+    assert (_models(withheld), [model.name for model in _models(named)]) == ([], [VALUE])
+
+
+NOT_THE_KEYS_VALUE = {
+    "a-key-of-its-own": "credentials:\n  model: {value}\n  region: eu\n",
+    "a-quoted-key-of-its-own": 'credentials:\n  "model":"{value}"\n',
+    "a-key-of-its-own-in-a-list": "credentials:\n  - MODEL={value}\n",
+    "a-key-of-its-own-with-another-mark": "OPENAI_API_KEY:=\nMODEL:={value}\n",
+    "the-value-is-itself-a-key": "credentials:\n  {value}:\n    region: eu\n",
+    "several-words-on-the-line": "Password:\n We call {value} in this service\n",
+    "a-key-with-its-value-above": "db_password: abc\n  {value}\n",
+    "a-nearer-key-opens-it": "db_password:\n  example.com/models:\n    {value}\n",
+    "a-typed-declaration-above": "const credentials: string[] = [\n  '{value}',\n];\n",
+    "a-condition-above-a-list": (
+        "if settings.openai_api_key:\n    models.extend([\n        '{value}',\n    ])\n"
+    ),
+    "a-condition-above-a-return": "if not api_key:\n    return [\n        '{value}',\n    ]\n",
+    "a-sentence-above-a-list": "To use these models you need an access token:\n\n- {value}\n",
+    "a-sentence-and-a-blank-line-above": "The CLI then asks for the passphrase:\n\n    {value}\n",
+    "a-comment-above-a-list": "# gated on the Hub, export HF_TOKEN:\nMODELS = [\n  '{value}',\n]\n",
+    "an-empty-credential-above-an-assignment": "OPENAI_API_KEY=\nOPENAI_MODEL={value}\n",
+}
+
+
+@pytest.mark.parametrize("form", sorted(NOT_THE_KEYS_VALUE))
+def test_a_line_that_is_not_the_value_of_a_credential_key_is_named(tmp_path, form):
+    text = NOT_THE_KEYS_VALUE[form].format(value=VALUE)
+    report = _report(_evidence(f"cfg.txt:{_line_holding(text, VALUE)}", VALUE))
+    result = _scan(tmp_path, report, {"cfg.txt": text})
+    assert [model.name for model in _models(result)] == [VALUE]
+
+
+def test_the_key_that_opens_a_value_is_looked_for_a_bounded_number_of_lines_up(tmp_path):
+    def named(entries_between, filler="  - entry-{n}\n"):
+        items = "".join(filler.format(n=n) for n in range(entries_between))
+        files = {"cfg.yaml": f"credentials:\n{items}  - {VALUE}\n"}
+        report = _report(_evidence(f"cfg.yaml:{entries_between + 2}", VALUE))
+        result = _scan(tmp_path / f"{entries_between}{len(filler)}", report, files)
+        return [model.name for model in _models(result)]
+
+    assert named(shadowscan.MAX_KEY_LOOKBACK - 1) == []
+    assert named(shadowscan.MAX_KEY_LOOKBACK) == [VALUE]
+    # Blank lines and comment lines count toward the same bound.
+    assert named(shadowscan.MAX_KEY_LOOKBACK - 1, "\n") == []
+    assert named(shadowscan.MAX_KEY_LOOKBACK, "\n") == [VALUE]
+    assert named(shadowscan.MAX_KEY_LOOKBACK - 1, "  # note\n") == []
+
+
+def test_only_the_text_the_redactor_reads_counts_toward_the_credential_check_bound(
+    tmp_path, monkeypatch
+):
+    entries = [f"id-{n:04d}-{MODEL}" for n in range(shadowscan.MAX_MODEL_CITATIONS)]
+    text = "chat_models:\n" + "".join(f"  - {entry}\n" for entry in entries)
+    report = _report(*(_evidence(f"cfg.yaml:{n + 2}", entry) for n, entry in enumerate(entries)))
+    read = []
+    real = shadowscan.redact_text
+    monkeypatch.setattr(shadowscan, "redact_text", lambda text: read.append(text) or real(text))
+    result = _scan(tmp_path, report, {"cfg.yaml": text})
+    # A long list in which every entry is cited: each line is checked with the one line
+    # above it, and with the key while that is within reach, never with all eight.
+    assert len(_models(result)) == shadowscan.MAX_NAMED_MODELS and not result.scan_failures
+    assert not any("not confirmed" in line for line in result.source_projection_limitations)
+    lines = [text for text in read if "\n" in text]
+    assert sum(map(len, lines)) < shadowscan.MAX_REDACTED_CHARS
+    assert max(text.count("\n") for text in lines) == 1
+
+
+def test_a_long_line_above_a_value_is_read_from_its_end(tmp_path):
+    long = "x" * (shadowscan.MAX_CITED_LINE_CHARS + 50)
+    files = {"a.yaml": f"{long} password:\n  {VALUE}\n", "b.yaml": f"password: {long}\n  {VALUE}\n"}
+    withheld = _scan(tmp_path / "a", _report(_evidence("a.yaml:2", VALUE)), files)
+    named = _scan(tmp_path / "b", _report(_evidence("b.yaml:2", VALUE)), files)
+    assert (_models(withheld), [model.name for model in _models(named)]) == ([], [VALUE])
 
 
 def test_a_line_with_its_own_key_is_read_alone(tmp_path):
@@ -571,6 +849,105 @@ def test_listed_locations_are_bounded_and_the_total_is_kept(tmp_path, monkeypatc
     (model,) = _models(_scan(tmp_path, report, files))
     assert model.claims[EVIDENCE_CLAIM].evidence_refs == ["app.py:1", "app.py:2"]
     assert model.properties["shadowscan:evidence-unlisted"] == 3
+
+
+def test_listed_signals_are_bounded_and_the_rest_are_counted(tmp_path):
+    labels = [f"model:provider.p{n:02d}" for n in range(shadowscan.MAX_EVIDENCE_SIGNALS + 4)]
+    report = _report(*(_evidence("app.py:3", MODEL, signal=label) for label in reversed(labels)))
+    (model,) = _models(_scan(tmp_path, report))
+    assert model.properties["shadowscan:signals"] == labels[: shadowscan.MAX_EVIDENCE_SIGNALS]
+    assert model.properties["shadowscan:signals-unlisted"] == 4
+    exact = _report(*(_evidence("app.py:3", MODEL, signal=label) for label in labels[:16]))
+    (model,) = _models(_scan(tmp_path / "exact", exact))
+    assert "shadowscan:signals-unlisted" not in model.properties
+
+
+def test_listed_locations_are_bounded_as_the_inventory_writes_them(tmp_path):
+    def listed(paths):
+        model = shadowscan._model_component(MODEL, {(path, 7) for path in paths}, {"model:x"})
+        return model.claims[EVIDENCE_CLAIM].evidence_refs, model.properties
+
+    plain = [f"d{n:02d}/".ljust(253, "p") + ".py" for n in range(20)]
+    refs, properties = listed(plain)
+    assert len(refs) == shadowscan.MAX_EVIDENCE_LOCATIONS == 16
+    assert properties["shadowscan:evidence-unlisted"] == 4
+    # A path the writer escapes takes up to twelve bytes a character: fewer are listed
+    # and every one is counted. One location always fits.
+    assert shadowscan.MAX_LISTED_LOCATION_BYTES >= 12 * shadowscan.MAX_CITED_PATH_CHARS + 10
+    wide = ["\U0001f9ea" * 252 + f"/{n:02d}" for n in range(16)]
+    refs, properties = listed(wide)
+    assert refs == [f"{wide[0]}:7"] and properties["shadowscan:evidence-unlisted"] == 15
+    refs, properties = listed([wide[0], *("\U0001f9eb" + path[1:] for path in plain[:6])])
+    assert len(refs) == 5 and properties["shadowscan:evidence-unlisted"] == 2
+    assert sum(len(json.dumps(ref)) for ref in refs) <= shadowscan.MAX_LISTED_LOCATION_BYTES
+
+
+def test_the_largest_named_models_stay_under_the_documented_size():
+    # The most a report can make the inventory hold for its cited models: 500 identifiers
+    # of 128 characters, each with more labels than are listed, and locations whose paths
+    # are written at twelve bytes a character.
+    labels = {
+        f"model:{n:02d}{'z' * 22}." + "-".join(["a" * 24, "b" * 24, "c" * 24]) for n in range(20)
+    }
+    wide = "\U0001f9ea" * 256
+    others = ["\U0001f9eb" + "p" * 255 for _ in range(1)] + [
+        "\U0001f9eb" + f"{n:02d}".ljust(255, "p") for n in range(15)
+    ]
+    locations = {(path, 9_999_999) for path in (wide, *others)}
+    models = [
+        shadowscan._model_component(f"m{n:03d}".ljust(128, "x"), locations, labels)
+        for n in range(shadowscan.MAX_NAMED_MODELS)
+    ]
+    assert all(len(m.properties["shadowscan:signals"]) == 16 for m in models)
+    assert all(m.properties["shadowscan:signals-unlisted"] == 4 for m in models)
+    size = len(AIBOM(components=models).to_json().encode())
+    assert 4.5 * 1024 * 1024 < size < 6 * 1024 * 1024
+
+
+def test_a_report_of_many_cited_models_is_read_within_the_bounds(tmp_path):
+    names = [f"m{n:03d}".ljust(128, "x") for n in range(shadowscan.MAX_NAMED_MODELS)]
+    paths = [f"d{n:02d}/".ljust(256 - 3, "p") + ".py" for n in range(16)]
+    source = "".join(f"m={name}\n" for name in names)
+    evidence = [
+        _evidence(f"{path}:{line + 1}", name, signal=f"model:provider.p{number:02d}")
+        for number, path in enumerate(paths)
+        for line, name in enumerate(names)
+    ]
+    assert len(evidence) <= shadowscan.MAX_MODEL_CITATIONS
+    assert len(source) * len(paths) <= shadowscan.MAX_REDACTED_CHARS
+    result = _scan(tmp_path, _report(*evidence), dict.fromkeys(paths, source))
+    models = _models(result)
+    assert len(models) == shadowscan.MAX_NAMED_MODELS and not result.scan_failures
+    assert all(len(m.claims[EVIDENCE_CLAIM].evidence_refs) == 16 for m in models)
+
+
+def test_an_entry_the_scan_refuses_counts_toward_the_citation_bound(tmp_path, monkeypatch):
+    monkeypatch.setattr(shadowscan, "MAX_MODEL_CITATIONS", 3)
+    calls = []
+    real = shadowscan.redact_text
+    monkeypatch.setattr(shadowscan, "redact_text", lambda text: calls.append(text) or real(text))
+    refused = [_evidence("app.py:3", CREDENTIALS[0]) for _ in range(40)]
+    result = _scan(tmp_path, _report(*refused, _evidence("app.py:3", MODEL)))
+    assert not _models(result)
+    assert len(calls) <= 2 * shadowscan.MAX_MODEL_CITATIONS
+    assert result.source_projection_limitations is not None
+    assert result.source_projection_limitations[-1] == UNNAMED.replace("1 model", "41 model")
+
+
+def test_an_entry_the_redactor_never_reads_does_not_use_up_the_citation_bound(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(shadowscan, "MAX_MODEL_CITATIONS", 3)
+    unusable = [
+        _evidence("app.py", MODEL),
+        _evidence("app.py:0", MODEL),
+        _evidence("app.py:3", "x" * 200),
+        {"signal": "model:provider.openai", "location": "app.py:3"},
+    ] * 10
+    result = _scan(tmp_path, _report(*unusable, _evidence("app.py:3", MODEL)))
+    assert [model.name for model in _models(result)] == [MODEL]
+    assert result.source_projection_limitations is not None
+    assert result.source_projection_limitations[-1] == UNNAMED.replace("1 model", "40 model")
 
 
 def test_evidence_past_the_citation_bound_is_counted_not_dropped(tmp_path, monkeypatch):
@@ -1117,9 +1494,12 @@ def test_the_documented_bounds_and_names():
         shadowscan.MAX_CITED_PATH_CHARS,
         shadowscan.MAX_CITED_LINE_CHARS,
         shadowscan.MAX_EVIDENCE_LOCATIONS,
+        shadowscan.MAX_EVIDENCE_SIGNALS,
         shadowscan.MAX_NAMED_MODELS,
         shadowscan.MAX_REDACTED_CHARS,
-    ) == (10_000, 256, 4_096, 16, 500, 1024 * 1024)
+        shadowscan.MAX_KEY_LOOKBACK,
+        shadowscan.MAX_LISTED_LOCATION_BYTES,
+    ) == (10_000, 256, 4_096, 16, 16, 500, 1024 * 1024, 8, 4_256)
     assert PROJECTION_PROFILE == "nexus-symbiote/shadowscan-projection/v5"
     assert (EVIDENCE_CLAIM, MODEL_REF_PREFIX) == ("cited_evidence", "shadowscan:model:")
     assert shadowscan.CITED_LINES_GAP == (
