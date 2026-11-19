@@ -74,6 +74,8 @@ change them. See [collection limits](collection-limits.md).
 | [`attest`](#attest) | offline | Sign a file's exact bytes, usually an inventory or a baseline, for a stated purpose |
 | [`verify-attestation`](#verify-attestation) | offline | Check that trusted keys attested a file's bytes or inventory content for a purpose |
 | [`trace-diff`](#trace-diff) | offline | Compare the runtime use that OpenTelemetry traces report with an AgentBOM |
+| [`mcp-lock`](#mcp-lock) | offline | Create or verify deterministic MCP contract lockfiles for MCP 2026-07-28, 2025-11-25 and 2025-06-18 |
+| [`mcp-proxy`](#mcp-proxy) | offline | Opt-in JSON-RPC 2.0 contract-pinning proxy filter with Ed25519-signed decision records |
 | [`discover-mcp`](#discover-mcp) | **live** | List the tools an HTTPS MCP server serves, without calling them |
 | [`advisories`](#advisories) | **live** | Query OSV for advisories affecting exact PyPI and npm package versions |
 | [`verify-live`](#verify-live) | **live** | Compare an AgentBOM with the tools that operator-pinned stdio servers serve |
@@ -1056,6 +1058,46 @@ and `stdio`, such as the `websocket` that the `mcp` collector records for a `ws:
 `wss://` endpoint, fails with reason `unsupported-transport`. The
 [launch policy](#launch-policy) section gives the policy's format and where it may be
 kept.
+
+### `mcp-lock`
+
+Create or verify deterministic MCP contract lockfiles offline for MCP `2026-07-28`, `2025-11-25`, and `2025-06-18`.
+
+```text
+nexus-symbiote mcp-lock [OPTIONS]
+```
+
+| Option | Description |
+|---|---|
+| `--aibom` `PATH` | Native AgentBOM JSON to pin or verify against a lockfile. |
+| `--snapshot` `PATH` | MCP server/tools snapshot JSON to pin or verify against a lockfile. |
+| `--verify` `PATH` | Verify candidate contracts against this operator-owned lockfile outside the project; exits 1 on any one-character description/title change, added/removed tool, schema/`_meta`/annotation drift, or protocol drift. |
+| `--project-root` `PATH` | Scanned project root used to refuse lockfiles or keys stored inside the checkout. |
+| `--protocol-version` `2026-07-28\|2025-11-25\|2025-06-18` | Default MCP protocol revision when pinning from an AgentBOM. |
+| `--lockfile-attestation` `PATH` | Ed25519 DSSE attestation envelope (`purpose=reviewed`) verifying `--verify` lockfile (required by default). |
+| `--trusted-key` `PATH` | Trusted Ed25519 public key PEM outside the project (repeatable; used with `--lockfile-attestation`). |
+| `--allow-unsigned-lockfile` | Explicitly allow an unattested `--verify` lockfile instead of requiring DSSE verification. |
+| `-o`, `--output` `PATH` | Write the lockfile or verification report JSON to this file instead of standard output. |
+
+### `mcp-proxy`
+
+Opt-in offline JSON-RPC 2.0 contract-pinning proxy filter with Ed25519-signed decision records.
+
+```text
+nexus-symbiote mcp-proxy [OPTIONS]
+```
+
+| Option | Description |
+|---|---|
+| `--lockfile` `PATH` | Operator-owned MCP contract lockfile outside the scanned project (required). |
+| `--server` `TEXT` | Exact `server_ref` inside `--lockfile` to enforce (required). |
+| `--signing-key` `PATH` | Owner-only Ed25519 private key PEM (mode `0600`) outside the project used to sign decision records (required). |
+| `--project-root` `PATH` | Scanned project root used to refuse lockfiles or keys stored inside the checkout. |
+| `--lockfile-attestation` `PATH` | Ed25519 DSSE attestation envelope (`purpose=reviewed`) verifying `--lockfile` (required by default). |
+| `--trusted-key` `PATH` | Trusted Ed25519 public key PEM outside the project (repeatable; used with `--lockfile-attestation`). |
+| `--allow-unsigned-lockfile` | Explicitly allow an unattested `--lockfile` instead of requiring DSSE verification. |
+| `--input` `PATH` | Read NDJSON JSON-RPC 2.0 messages from this file instead of standard input. |
+| `--decision-log` `PATH` | Write Ed25519-signed NDJSON decision records to this file. |
 
 ### `vex`
 
