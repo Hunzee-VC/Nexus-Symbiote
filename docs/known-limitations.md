@@ -397,7 +397,9 @@ A way around a limit that its entry does not describe is worth a
   too (an unparsed package reference), not only an unpinned one, each with a high
   `launcher_identity` finding and a gap, and an endpoint that holds one is
   unresolved. One in an object nested inside such a value, such as an object inside
-  `oauth`, stays literal text.
+  `oauth`, stays literal text. An opening `{env:` or `{file:` whose closing brace is
+  not in the same string value, or one in a comment or a key, can change the strings
+  opencode reads, so the file is a collection failure.
   Zed's `env` may be `null`, as Zed reads it as optional, so a Zed server with
   `"env": null` is inventoried where the same server in `.mcp.json` is refused; a
   `null` `args` is refused. A Zed entry with no source and no launch is read as one

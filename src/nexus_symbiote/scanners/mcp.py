@@ -623,6 +623,41 @@ def _opencode_text(value: Any) -> Any:
     return _OPENCODE_SUBSTITUTION.sub(r"${\1}", value[:end]) + value[end:]
 
 
+_OPENCODE_OPENING = re.compile(r"\{(?:env|file):")
+_JSONC_TOKEN = re.compile(r'"[^"\\]*(?:\\.[^"\\]*)*"|//[^\n]*|/\*.*?\*/', re.S)
+_JSONC_SPACE = re.compile(r"(?:\s+|//[^\n]*|/\*.*?\*/)*", re.S)
+
+
+def _opencode_substitution_outside_values(text: str) -> bool:
+    """Whether opencode, which substitutes in the raw text of a parsed JSONC file, may
+    replace text that is not inside one string value: an opening ``{env:`` or ``{file:``
+    in a comment or a key, or one whose closing brace is not in the same string.
+
+    Such a substitution can join, split or add the strings the per-value reading sees.
+    """
+    openings = [match.start() for match in _OPENCODE_OPENING.finditer(text)]
+    index = 0
+    close = -1
+    for token in _JSONC_TOKEN.finditer(text):
+        if index == len(openings):
+            return False
+        start, end = token.span()
+        if openings[index] < start:
+            return True
+        if openings[index] >= end:
+            continue
+        gap = _JSONC_SPACE.match(text, end)
+        if text[start] != '"' or (gap is not None and text.startswith(":", gap.end())):
+            return True
+        while index < len(openings) and openings[index] < end:
+            if close < openings[index]:
+                close = text.find("}", openings[index])
+            if not openings[index] < close < end - 1:
+                return True
+            index += 1
+    return index < len(openings)
+
+
 def _opencode_server(config: dict[str, Any]) -> _Normalized:
     """opencode's ``mcp`` entry in the common form.
 
@@ -2277,9 +2312,10 @@ class MCPScanner(Scanner):
         # Server references per host, sorted once at the end: sorting the union after
         # every file would cost the square of the number of nested client files.
         pending_refs: dict[str, set[str]] = {}
+        parsed: dict[str, tuple[Any, list[str]]] = {}
         for path in paths:
             dialect = _dialect(path)
-            data = self._read_dialect(files, dialect, result)
+            data = self._read_dialect(files, dialect, result, parsed)
             if data is None:
                 continue
             found_any = True
@@ -2421,7 +2457,11 @@ class MCPScanner(Scanner):
         return neutralize(redact_text(name, scrubber)[:256])
 
     def _read_dialect(
-        self, files: ConfinedCollection, dialect: McpDialect, result: ScanResult
+        self,
+        files: ConfinedCollection,
+        dialect: McpDialect,
+        result: ScanResult,
+        parsed: dict[str, tuple[Any, list[str]]],
     ) -> Any:
         if dialect.syntax == "json":
             return files.read_json(dialect.path, missing_ok=True)
@@ -2431,18 +2471,35 @@ class MCPScanner(Scanner):
         if dialect.syntax == "yaml":
             # The bounded reader: an empty document holds no servers; anchors, aliases,
             # tags and a non-mapping are failures where a server could be declared.
+            # A file read through several directory links is parsed once.
             names = (*dialect.maps, *(_SERVER_FIELDS if dialect.members else ()))
-            return self._parse_yaml_mapping(
-                Path(dialect.path), text, result, inert_without=frozenset(names)
-            )
+            cache_key = f"{names!r}\0{text}"
+            if cache_key not in parsed:
+                scratch = ScanResult(self.name)
+                data = self._parse_yaml_mapping(
+                    Path(dialect.path), text, scratch, inert_without=frozenset(names)
+                )
+                prefix = f"{Path(dialect.path).as_posix()}: "
+                reasons = [failure.removeprefix(prefix) for failure in scratch.scan_failures]
+                parsed[cache_key] = (data, reasons)
+            data, reasons = parsed[cache_key]
+            result.scan_failures.extend(f"{dialect.path}: {reason}" for reason in reasons)
+            return data
         try:
             if dialect.syntax == "toml":
                 return load_toml(text, parse_float=_finite_float)
-            return _load_jsonc(text)
+            data = _load_jsonc(text)
         except (ValueError, RecursionError, MemoryError):
             syntax = "TOML" if dialect.syntax == "toml" else "JSON or duplicate keys"
             result.scan_failures.append(f"{dialect.path}: invalid {syntax}")
             return None
+        if dialect.shape == "opencode" and _opencode_substitution_outside_values(text):
+            result.scan_failures.append(
+                f"{dialect.path}: opencode substitution outside one string value; the "
+                "configuration depends on the environment and is not inventoried"
+            )
+            return None
+        return data
 
     @staticmethod
     def _server_entries(

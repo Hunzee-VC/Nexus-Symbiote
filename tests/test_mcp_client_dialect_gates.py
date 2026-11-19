@@ -521,7 +521,9 @@ def test_an_opencode_substitution_in_a_header_is_a_reference_not_a_credential(tm
             "named-{env:OC_KEY}": {"command": ["npx", "-y", "oc-mcp@2.0.0"]},
         }
     }
-    result = scan(tmp_path, {"opencode.json": json.dumps(config)})
+    # opencode substitutes in the raw text, so only an escaped brace keeps a key literal.
+    content = json.dumps(config).replace('"named-{', '"named-\\u007b')
+    result = scan(tmp_path, {"opencode.json": content})
     assert "named-{env:OC_KEY}" in servers(result)
 
 
@@ -697,3 +699,59 @@ def test_an_unclosed_opencode_substitution_run_is_read_in_linear_time(tmp_path, 
         MCPScanner().scan(project)
 
     assert scaling_ratio(run) < 10
+
+
+OUTSIDE_VALUES = [
+    '{"mcp":{"x":{"type":"local","command":["{env:","}npx","-y","evil-pkg"]}}}',
+    '{"mcp":{"x":{"type":"local","command":["{env:X","}npx","-y","evil-pkg"]}}}',
+    '{"mcp":{"x":{"type":"local","command":["npx{env:","}","-y","evil-pkg"]}}}',
+    '{"mcp":{"x":{"type":"local","command":["{file:","}npx","-y","evil-pkg"]}}}',
+    '{"mcp":{"x":{"type":"local","command":["{env:X","--stdio"]}}}',
+    json.dumps({"mcp": {"x": {"type": "local", "command": ["{env:" * 50]}}}),
+    '{"mcp":{"x":{"command":["npx","-y","x@1.0.0"]}}} // {env:X}\n',
+    '{"mcp":{"x":{"command":[/* {env:X} */ "npx","-y","x@1.0.0"]}}}',
+    '{"mcp":{"{env:X}":{"command":["npx","-y","x@1.0.0"]}}}',
+    '{"{env:K}":{"x":{"command":["npx","-y","x@1.0.0"]}}}',
+]
+
+
+@pytest.mark.parametrize("content", OUTSIDE_VALUES)
+def test_both_gates_fail_on_an_opencode_substitution_outside_one_string_value(tmp_path, content):
+    # opencode substitutes in the raw text, so one that crosses a quote, is unclosed or
+    # lies in a comment or key can join, split or add the words the parsed values hold.
+    assert gates(tmp_path, {"opencode.json": content}) == (1, 1)
+    result = scan(tmp_path / "direct", {"opencode.json": content})
+    assert not servers(result)
+    assert result.scan_failures == [
+        "opencode.json: opencode substitution outside one string value; the configuration "
+        "depends on the environment and is not inventoried"
+    ]
+
+
+@pytest.mark.parametrize(
+    "word", ["{env:A}", "pre-{env:A}-{file:./k}", "{env:A{B}", "{env:}", '{env:A\\"}', "{team}"]
+)
+def test_an_opencode_substitution_inside_one_value_is_still_read(tmp_path, word):
+    config = {"mcp": {"x": {"command": ["npx", "-y", "x@1.0.0"], "environment": {"T": word}}}}
+    result = scan(tmp_path, {"opencode.json": json.dumps(config)})
+    assert not result.scan_failures and servers(result)["x"].version_pinned is True
+
+
+def test_a_continue_file_behind_several_directory_links_is_parsed_once(tmp_path, monkeypatch):
+    root = write(tmp_path / "root", {"shared/servers/x.yaml": "x: [[[\n"})
+    for index in range(4):
+        (root / f"p{index}" / ".continue").mkdir(parents=True)
+        os.symlink("../../shared/servers", root / f"p{index}" / ".continue" / "mcpServers")
+    parses: list[str] = []
+    original = MCPScanner._parse_yaml_mapping
+
+    def counted(path, text, result, **kwargs):
+        parses.append(path.as_posix())
+        return original(path, text, result, **kwargs)
+
+    monkeypatch.setattr(MCPScanner, "_parse_yaml_mapping", staticmethod(counted))
+    result = MCPScanner().scan(root, config_only=True)
+    assert len(parses) == 1
+    assert sorted(result.scan_failures) == [
+        f"p{index}/.continue/mcpServers/x.yaml: {YAML_FAILURE}" for index in range(4)
+    ]
