@@ -1,0 +1,391 @@
+{
+  "commit": "da94a91e691e1cf5b3151416bb15b5b62729bea8",
+  "labels": [
+    {
+      "context": {
+        "bom_ref": "model:notebooks/Simple QA Crew + Flow/db/9b1e5adc-9f74-43a5-a2b8-180c85535334/link_lists.bin",
+        "category": "signing_status",
+        "component_type": "model",
+        "detail": "Model 'link_lists.bin' has no verified artifact-bound signature (signature-not-found).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "Chroma hnswlib persistence file (binary index), not a model or a pickle.",
+      "observation": "12c635161116b0c7",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "false-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:notebooks/QA Agent/db/eb595800-58e8-4a23-b57f-60dad6aaadea/link_lists.bin",
+        "category": "serialization_format",
+        "component_type": "model",
+        "detail": "Model 'link_lists.bin' has evidence of a potentially code-executing serialization or loader.",
+        "kind": "finding",
+        "severity": "critical"
+      },
+      "date": "2026-11-19",
+      "note": "Chroma hnswlib persistence file (binary index), not a model or a pickle.",
+      "observation": "15ded84f0535ddb3",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "false-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:notebooks/Simple QA Crew + Flow/db/9b1e5adc-9f74-43a5-a2b8-180c85535334/header.bin",
+        "category": "serialization_format",
+        "component_type": "model",
+        "detail": "Model 'header.bin' has evidence of a potentially code-executing serialization or loader.",
+        "kind": "finding",
+        "severity": "critical"
+      },
+      "date": "2026-11-19",
+      "note": "Chroma hnswlib persistence file (binary index), not a model or a pickle.",
+      "observation": "24496cd8e70d6352",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "false-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:notebooks/QA Agent/db/eb595800-58e8-4a23-b57f-60dad6aaadea/link_lists.bin",
+        "category": "signing_status",
+        "component_type": "model",
+        "detail": "Model 'link_lists.bin' has no verified artifact-bound signature (signature-not-found).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "Chroma hnswlib persistence file (binary index), not a model or a pickle.",
+      "observation": "2bc412a224859363",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "false-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:crews/match_profile_to_positions/trained_agents_data.pkl",
+        "category": "signing_status",
+        "component_type": "model",
+        "detail": "Model 'trained_agents_data.pkl' has no verified artifact-bound signature (signature-not-found).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "A data pickle, not a model; the finding applies a model signature expectation.",
+      "observation": "2c5153d0e0499624",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "out-of-scope"
+    },
+    {
+      "context": {
+        "bom_ref": "model:notebooks/Simple QA Crew + Flow/db/9b1e5adc-9f74-43a5-a2b8-180c85535334/header.bin",
+        "category": "signing_status",
+        "component_type": "model",
+        "detail": "Model 'header.bin' has no verified artifact-bound signature (signature-not-found).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "Chroma hnswlib persistence file (binary index), not a model or a pickle.",
+      "observation": "3262c27a014eaf15",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "false-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:notebooks/Simple QA Crew + Flow/db/9b1e5adc-9f74-43a5-a2b8-180c85535334/length.bin",
+        "category": "signing_status",
+        "component_type": "model",
+        "detail": "Model 'length.bin' has no verified artifact-bound signature (signature-not-found).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "Chroma hnswlib persistence file (binary index), not a model or a pickle.",
+      "observation": "3447bc95f9edba46",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "false-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:notebooks/QA Agent/db/eb595800-58e8-4a23-b57f-60dad6aaadea/header.bin",
+        "category": "signing_status",
+        "component_type": "model",
+        "detail": "Model 'header.bin' has no verified artifact-bound signature (signature-not-found).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "Chroma hnswlib persistence file (binary index), not a model or a pickle.",
+      "observation": "3686043422b713bf",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "false-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:notebooks/QA Agent/db/eb595800-58e8-4a23-b57f-60dad6aaadea/data_level0.bin",
+        "category": "signing_status",
+        "component_type": "model",
+        "detail": "Model 'data_level0.bin' has no verified artifact-bound signature (signature-not-found).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "Chroma hnswlib persistence file (binary index), not a model or a pickle.",
+      "observation": "3b80cec239f66373",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "false-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:notebooks/Simple QA Crew + Flow/db/9b1e5adc-9f74-43a5-a2b8-180c85535334/data_level0.bin",
+        "category": "serialization_format",
+        "component_type": "model",
+        "detail": "Model 'data_level0.bin' has evidence of a potentially code-executing serialization or loader.",
+        "kind": "finding",
+        "severity": "critical"
+      },
+      "date": "2026-11-19",
+      "note": "Chroma hnswlib persistence file (binary index), not a model or a pickle.",
+      "observation": "4ceef0b886a79556",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "false-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:notebooks/QA Agent/db/eb595800-58e8-4a23-b57f-60dad6aaadea/data_level0.bin",
+        "category": "serialization_format",
+        "component_type": "model",
+        "detail": "Model 'data_level0.bin' has evidence of a potentially code-executing serialization or loader.",
+        "kind": "finding",
+        "severity": "critical"
+      },
+      "date": "2026-11-19",
+      "note": "Chroma hnswlib persistence file (binary index), not a model or a pickle.",
+      "observation": "548cba3d1178078f",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "false-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:crews/surprise_trip/training_data.pkl",
+        "category": "signing_status",
+        "component_type": "model",
+        "detail": "Model 'training_data.pkl' has no verified artifact-bound signature (signature-not-found).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "A data pickle, not a model; the finding applies a model signature expectation.",
+      "observation": "6cdbe4865f64599c",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "out-of-scope"
+    },
+    {
+      "context": {
+        "bom_ref": "model:crews/surprise_trip/trained_agents_data.pkl",
+        "category": "signing_status",
+        "component_type": "model",
+        "detail": "Model 'trained_agents_data.pkl' has no verified artifact-bound signature (signature-not-found).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "A data pickle, not a model; the finding applies a model signature expectation.",
+      "observation": "798f0961857511e0",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "out-of-scope"
+    },
+    {
+      "context": {
+        "bom_ref": "model:notebooks/Simple QA Crew + Flow/db/9b1e5adc-9f74-43a5-a2b8-180c85535334/data_level0.bin",
+        "category": "signing_status",
+        "component_type": "model",
+        "detail": "Model 'data_level0.bin' has no verified artifact-bound signature (signature-not-found).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "Chroma hnswlib persistence file (binary index), not a model or a pickle.",
+      "observation": "7a17d48fea9ca658",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "false-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:notebooks/QA Agent/db/eb595800-58e8-4a23-b57f-60dad6aaadea/length.bin",
+        "category": "signing_status",
+        "component_type": "model",
+        "detail": "Model 'length.bin' has no verified artifact-bound signature (signature-not-found).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "Chroma hnswlib persistence file (binary index), not a model or a pickle.",
+      "observation": "7bb004e983cb0f4c",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "false-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:crews/surprise_trip/training_data.pkl",
+        "category": "serialization_format",
+        "component_type": "model",
+        "detail": "Model 'training_data.pkl' has evidence of a potentially code-executing serialization or loader.",
+        "kind": "finding",
+        "severity": "critical"
+      },
+      "date": "2026-11-19",
+      "note": "A pickle file; loading it with pickle runs code.",
+      "observation": "8169eb5350bb2191",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "true-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:crews/match_profile_to_positions/trained_agents_data.pkl",
+        "category": "serialization_format",
+        "component_type": "model",
+        "detail": "Model 'trained_agents_data.pkl' has evidence of a potentially code-executing serialization or loader.",
+        "kind": "finding",
+        "severity": "critical"
+      },
+      "date": "2026-11-19",
+      "note": "A pickle file; loading it with pickle runs code.",
+      "observation": "889f6c19a0e9809a",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "true-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:crews/marketing_strategy/trained_agents_data.pkl",
+        "category": "signing_status",
+        "component_type": "model",
+        "detail": "Model 'trained_agents_data.pkl' has no verified artifact-bound signature (signature-not-found).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "A data pickle, not a model; the finding applies a model signature expectation.",
+      "observation": "8f4817afebed6554",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "out-of-scope"
+    },
+    {
+      "context": {
+        "bom_ref": "model:crews/marketing_strategy/trained_agents_data.pkl",
+        "category": "serialization_format",
+        "component_type": "model",
+        "detail": "Model 'trained_agents_data.pkl' has evidence of a potentially code-executing serialization or loader.",
+        "kind": "finding",
+        "severity": "critical"
+      },
+      "date": "2026-11-19",
+      "note": "A pickle file; loading it with pickle runs code.",
+      "observation": "9af97a8627b8cd02",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "true-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:notebooks/QA Agent/db/eb595800-58e8-4a23-b57f-60dad6aaadea/length.bin",
+        "category": "serialization_format",
+        "component_type": "model",
+        "detail": "Model 'length.bin' has evidence of a potentially code-executing serialization or loader.",
+        "kind": "finding",
+        "severity": "critical"
+      },
+      "date": "2026-11-19",
+      "note": "Chroma hnswlib persistence file (binary index), not a model or a pickle.",
+      "observation": "b2abdbb6cb52d080",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "false-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:crews/surprise_trip/trained_agents_data.pkl",
+        "category": "serialization_format",
+        "component_type": "model",
+        "detail": "Model 'trained_agents_data.pkl' has evidence of a potentially code-executing serialization or loader.",
+        "kind": "finding",
+        "severity": "critical"
+      },
+      "date": "2026-11-19",
+      "note": "A pickle file; loading it with pickle runs code.",
+      "observation": "cb15567562b8fc9b",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "true-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:notebooks/QA Agent/db/eb595800-58e8-4a23-b57f-60dad6aaadea/header.bin",
+        "category": "serialization_format",
+        "component_type": "model",
+        "detail": "Model 'header.bin' has evidence of a potentially code-executing serialization or loader.",
+        "kind": "finding",
+        "severity": "critical"
+      },
+      "date": "2026-11-19",
+      "note": "Chroma hnswlib persistence file (binary index), not a model or a pickle.",
+      "observation": "cb2e4759cb8c2032",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "false-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:notebooks/Simple QA Crew + Flow/db/9b1e5adc-9f74-43a5-a2b8-180c85535334/length.bin",
+        "category": "serialization_format",
+        "component_type": "model",
+        "detail": "Model 'length.bin' has evidence of a potentially code-executing serialization or loader.",
+        "kind": "finding",
+        "severity": "critical"
+      },
+      "date": "2026-11-19",
+      "note": "Chroma hnswlib persistence file (binary index), not a model or a pickle.",
+      "observation": "e2abf38dd9d62018",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "false-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:notebooks/Simple QA Crew + Flow/db/9b1e5adc-9f74-43a5-a2b8-180c85535334/link_lists.bin",
+        "category": "serialization_format",
+        "component_type": "model",
+        "detail": "Model 'link_lists.bin' has evidence of a potentially code-executing serialization or loader.",
+        "kind": "finding",
+        "severity": "critical"
+      },
+      "date": "2026-11-19",
+      "note": "Chroma hnswlib persistence file (binary index), not a model or a pickle.",
+      "observation": "efa638f7324ceeef",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "false-positive"
+    }
+  ],
+  "repository": "crewAIInc_crewAI-examples",
+  "schema_version": 1
+}

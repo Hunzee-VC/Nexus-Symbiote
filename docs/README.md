@@ -50,6 +50,7 @@ Reference material: exact behavior, fields and limits.
 | [Security regression corpus](../benchmarks/README.md) | The committed security fixtures CI enforces, and what passing them does not show |
 | [Inventory regression corpus](../benchmarks/inventory/README.md) | Labeled tool-inventory cases from public MCP servers, with explicit uncertainty bounds |
 | [Seeded hostile corpus](../benchmarks/seeded-corpus/README.md) | Seeded benchmark that grades AI-BOM generators (this one included) on data, models, MCP, skills and agents, and on scanner safety against hostile repositories; its ranking is self-authored, written in this repository, and provisional until an outside party runs a corpus |
+| [Real-repository precision harness](../benchmarks/realrepos/README.md) | Findings, gate verdicts, label-based false-positive rates and budgets on 24 pinned public repositories, against a committed baseline; false-positive calibration, not a field efficacy estimate |
 
 ## How: guides
 

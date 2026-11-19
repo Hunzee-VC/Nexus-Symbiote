@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "categories": {
+    "credential_exfiltration": {"max_false_positives": 0},
+    "credential_exposure": {"max_false_positives": 0},
+    "script_download_execution": {"max_false_positives": 2},
+    "tool_description_instructions": {"max_false_positives": {"critical": 0, "high": 0, "medium": 2}}
+  },
+  "component_min_precision": 0.95,
+  "cost": {"max_rss_ratio": 2.0, "max_time_ratio": 2.0, "time_floor_seconds": 5.0},
+  "exit_codes": [0],
+  "negative_groups": ["negative"],
+  "negative_max_new_observations": 0
+}

@@ -1,0 +1,119 @@
+{
+  "commit": "6b8a6f7878f1a4d151ca8af6f597440f19b6a47f",
+  "labels": [
+    {
+      "context": {
+        "bom_ref": "mcp-server:a160eee3668c9829bc0805143e934ebaa900b52156bac6e48d6691cdf2a35766",
+        "category": "version_pinning",
+        "component_type": "mcp-server",
+        "detail": "MCP server 'aurora-dsql' uses an unpinned package reference (arguments omitted).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "Committed client configuration runs uvx <package>@latest, which floats.",
+      "observation": "05a5b83806ba2cf8",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "true-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "mcp-server:9f8bf5e6e1c9bb771eb1471781294e2c885b7fb1680c203af914ad9fa1783d3a",
+        "category": "version_pinning",
+        "component_type": "mcp-server",
+        "detail": "MCP server 'aws-core' uses an unpinned package reference (arguments omitted).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "Committed client configuration runs uvx <package>@latest, which floats.",
+      "observation": "1ad7ade851d65dea",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "true-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "mcp-server:b0deaf71d3e63312897e357c1dec85cfecd6dd497703bdc249630e65665584ab",
+        "category": "version_pinning",
+        "component_type": "mcp-server",
+        "detail": "MCP server 'healthlake' uses an unpinned package reference (arguments omitted).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "Committed client configuration runs uvx <package>@latest, which floats.",
+      "observation": "351d3956183b399f",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "true-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "mcp-server:b38c938a4f18eb6f89b73fe7b3155ec6417cc7b468212768a3fa3089d64ff43b",
+        "category": "version_pinning",
+        "component_type": "mcp-server",
+        "detail": "MCP server 'awslabs.mysql-mcp-server' uses an unpinned package reference (arguments omitted).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "Committed client configuration runs uvx <package>@latest, which floats.",
+      "observation": "56bca5edb5df73ec",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "true-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "mcp-server:d5022e86e7db3c9dca5d1597282d0fdefb08a6e3c422e5dedaaec088fee3b164",
+        "category": "version_pinning",
+        "component_type": "mcp-server",
+        "detail": "MCP server 'cloudwatch' uses an unpinned package reference (arguments omitted).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "Committed client configuration runs uvx <package>@latest, which floats.",
+      "observation": "7570d7a484dcca13",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "true-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "mcp-server:795b83406b70688a9db871f7cd5f5b4d43e34cfd74489ea19122b85588439546",
+        "category": "version_pinning",
+        "component_type": "mcp-server",
+        "detail": "MCP server 'awslabs.postgres-mcp-server' uses an unpinned package reference (arguments omitted).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "Committed client configuration runs uvx <package>@latest, which floats.",
+      "observation": "b818e51bb1920af5",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "true-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "mcp-server:b5c5bfe892188f227a581590a3a9c0dddbd68aa8c32034a1d2dcfee275bcb5e5",
+        "category": "version_pinning",
+        "component_type": "mcp-server",
+        "detail": "MCP server 'cloudwatch-appsignals' uses an unpinned package reference (arguments omitted).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "Committed client configuration runs uvx <package>@latest, which floats.",
+      "observation": "c44d5e2f4f349325",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "true-positive"
+    }
+  ],
+  "repository": "awslabs_mcp",
+  "schema_version": 1
+}

@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "name": "nexus-realrepos",
+  "repositories": [
+    {
+      "id": "crewAIInc_crewAI-examples",
+      "url": "https://github.com/crewAIInc/crewAI-examples",
+      "ref": "main",
+      "commit": "da94a91e691e1cf5b3151416bb15b5b62729bea8",
+      "tree": "f3af944bd9bb51bc7639c833688ba261cbc26677",
+      "group": "agents",
+      "license": "NOASSERTION",
+      "rationale": "CrewAI YAML and Python agents"
+    },
+    {
+      "id": "google_adk-samples",
+      "url": "https://github.com/google/adk-samples",
+      "ref": "main",
+      "commit": "ead8d7f74d5b1def48a5a7451aed8106aae8d2e6",
+      "tree": "ba7c9993bbffd7e5ba1576ae893feb434d5fb21f",
+      "group": "agents",
+      "license": "Apache-2.0",
+      "rationale": "Google ADK agents"
+    },
+    {
+      "id": "huggingface_smolagents",
+      "url": "https://github.com/huggingface/smolagents",
+      "ref": "main",
+      "commit": "2689e450364d451a0afa0a5e883d12a031c125dd",
+      "tree": "40faae9d14cea003a64156ae28ed7455783c691e",
+      "group": "agents",
+      "license": "Apache-2.0",
+      "rationale": "CodeAgent/ToolCallingAgent, tools, HF model IDs"
+    },
+    {
+      "id": "langchain-ai_langgraph",
+      "url": "https://github.com/langchain-ai/langgraph",
+      "ref": "main",
+      "commit": "84ced603d3a201ab0f9379936bb35868e243f3f3",
+      "tree": "b4b691992451b9e553daf6286db483f83075a852",
+      "group": "agents",
+      "license": "MIT",
+      "rationale": "LangGraph prebuilt agents and examples"
+    },
+    {
+      "id": "microsoft_autogen",
+      "url": "https://github.com/microsoft/autogen",
+      "ref": "main",
+      "commit": "8390985108cb1e3881f5f7297765758d8ad2540c",
+      "tree": "c906552fe9aec122c4268bdd6c81813fb8286ca6",
+      "group": "agents",
+      "license": "CC-BY-4.0 AND MIT",
+      "rationale": "AutoGen AssistantAgent samples"
+    },
+    {
+      "id": "openai_openai-agents-python",
+      "url": "https://github.com/openai/openai-agents-python",
+      "ref": "main",
+      "commit": "e7ce15a25b336bb3d0840ad16dee597f69a6e6d3",
+      "tree": "f5919b44508627bdf0331a54c2dab8b84ce844ef",
+      "group": "agents",
+      "license": "MIT",
+      "rationale": "OpenAI Agents SDK examples with Agent, tools and handoffs"
+    },
+    {
+      "id": "pydantic_pydantic-ai",
+      "url": "https://github.com/pydantic/pydantic-ai",
+      "ref": "main",
+      "commit": "574ea3c59430d772ea1e3b2b5a921a1f6849effa",
+      "tree": "16e9045483971055770c3cf4b7eba0ab4a7381be",
+      "group": "agents",
+      "license": "MIT",
+      "rationale": "PydanticAI agents, model IDs and tools"
+    },
+    {
+      "id": "modelcontextprotocol_python-sdk",
+      "url": "https://github.com/modelcontextprotocol/python-sdk",
+      "ref": "main",
+      "commit": "77001c96f9507be0f4d009b83210a384a5e08bda",
+      "tree": "b10bdc065b26d148271554674303868bb943d495",
+      "group": "mcp-sdk",
+      "license": "MIT",
+      "rationale": "FastMCP examples and tool docstrings"
+    },
+    {
+      "id": "modelcontextprotocol_typescript-sdk",
+      "url": "https://github.com/modelcontextprotocol/typescript-sdk",
+      "ref": "main",
+      "commit": "5ee54ee30ddc00a914a3d981880f87fdce0e6246",
+      "tree": "975878244fefa7c7a4b1085ba988b33cf556e370",
+      "group": "mcp-sdk",
+      "license": "MIT AND Apache-2.0",
+      "rationale": "McpServer and registerTool examples"
+    },
+    {
+      "id": "awslabs_mcp",
+      "url": "https://github.com/awslabs/mcp",
+      "ref": "main",
+      "commit": "6b8a6f7878f1a4d151ca8af6f597440f19b6a47f",
+      "tree": "2b485c956e3ea849e9f7fed0a0abcf0f21601d1c",
+      "group": "mcp-servers",
+      "license": "Apache-2.0",
+      "rationale": "monorepo of Python MCP servers with long, file- and credential-mentioning descriptions"
+    },
+    {
+      "id": "github_github-mcp-server",
+      "url": "https://github.com/github/github-mcp-server",
+      "ref": "main",
+      "commit": "df32d7ec5786e0e71932767fce9982409cbaec40",
+      "tree": "f884648b38fe32a227e4ec260aee2395c7218a21",
+      "group": "mcp-servers",
+      "license": "MIT",
+      "rationale": "Go MCP server and client configs"
+    },
+    {
+      "id": "microsoft_playwright-mcp",
+      "url": "https://github.com/microsoft/playwright-mcp",
+      "ref": "main",
+      "commit": "eb36463ee796ed71afd2c2cb1ec96d83770ed4df",
+      "tree": "4a6f9d5ae4f0176a1bf652e659111db6e24f0efd",
+      "group": "mcp-servers",
+      "license": "Apache-2.0",
+      "rationale": "TypeScript MCP server with browser tool descriptions"
+    },
+    {
+      "id": "modelcontextprotocol_servers",
+      "url": "https://github.com/modelcontextprotocol/servers",
+      "ref": "main",
+      "commit": "c799c8552b0f27b7a33a7b9233773da144dddcf5",
+      "tree": "81cc883b08e5b16ac26441ef177cfa042e682199",
+      "group": "mcp-servers",
+      "license": "MIT AND Apache-2.0",
+      "rationale": "reference MCP servers in TS and Python with many tool descriptions"
+    },
+    {
+      "id": "anthropics_claude-cookbooks",
+      "url": "https://github.com/anthropics/claude-cookbooks",
+      "ref": "main",
+      "commit": "ce8b2629efe8b24048b127b4c79af1e9cbab93d4",
+      "tree": "213dbc105ade71c141bb2b6a5b6ffeef03c2f7ab",
+      "group": "mixed",
+      "license": "MIT",
+      "rationale": "cookbooks with model IDs, tools and RAG examples"
+    },
+    {
+      "id": "ollama_ollama",
+      "url": "https://github.com/ollama/ollama",
+      "ref": "main",
+      "commit": "508d8be9c8a43d6b9f98d6abca099f51320bff2b",
+      "tree": "314381489ff84b4f1db8ae9b76209b594d157f24",
+      "group": "models",
+      "license": "MIT",
+      "rationale": "Modelfile examples and model references"
+    },
+    {
+      "id": "pallets_flask",
+      "url": "https://github.com/pallets/flask",
+      "ref": "main",
+      "commit": "49943b5a94413a530761350f04e896f76e8d620e",
+      "tree": "6751ab7eae06e6f97a157860470fd588920a734b",
+      "group": "negative",
+      "license": "BSD-3-Clause",
+      "rationale": "non-AI web framework: should yield no AI findings"
+    },
+    {
+      "id": "psf_requests",
+      "url": "https://github.com/psf/requests",
+      "ref": "main",
+      "commit": "3c7baaa05ab4aa49cc819ce3a819d260de19c157",
+      "tree": "0c8b989695d73c087123936657c0fbfe3034471f",
+      "group": "negative",
+      "license": "Apache-2.0",
+      "rationale": "non-AI HTTP library: should yield no AI findings"
+    },
+    {
+      "id": "langchain-ai_rag-from-scratch",
+      "url": "https://github.com/langchain-ai/rag-from-scratch",
+      "ref": "main",
+      "commit": "1fdb7d0e4f1d3e731c8397332452715512f18667",
+      "tree": "de45987a81cc30fa43e2f7af9c114b4aabb6e345",
+      "group": "rag",
+      "license": "NOASSERTION",
+      "rationale": "RAG notebooks and examples"
+    },
+    {
+      "id": "pinecone-io_canopy",
+      "url": "https://github.com/pinecone-io/canopy",
+      "ref": "main",
+      "commit": "fabb7d7c8bafffd9c7d0890c1624bec75e5bef77",
+      "tree": "8c72e8fb9a0fc777ec7dd63f4c7fe3c8595e20ca",
+      "group": "rag",
+      "license": "Apache-2.0",
+      "rationale": "RAG framework built on Pinecone indexes"
+    },
+    {
+      "id": "weaviate_Verba",
+      "url": "https://github.com/weaviate/Verba",
+      "ref": "main",
+      "commit": "70b6cfb8ef59c9f178ffccfaf3aadcf737757a18",
+      "tree": "a6d5cb7ec4b073b57f994f31e25005d6edbb783b",
+      "group": "rag",
+      "license": "BSD-3-Clause",
+      "rationale": "RAG application with vector store configuration"
+    },
+    {
+      "id": "anthropics_claude-code",
+      "url": "https://github.com/anthropics/claude-code",
+      "ref": "main",
+      "commit": "0bd56cf67610ac307b8c8d2a64e95cb1ec6a381d",
+      "tree": "e53e3fb7f08da2f8b14db42485e96a64cde26f1c",
+      "group": "skills",
+      "license": "LicenseRef-Anthropic-Commercial-Terms",
+      "rationale": "plugins, hooks and commands examples"
+    },
+    {
+      "id": "anthropics_skills",
+      "url": "https://github.com/anthropics/skills",
+      "ref": "main",
+      "commit": "e4bb5d960d87126ff3b3a8af1a104b7db67560ba",
+      "tree": "d495c40fdd16cfe817a71aa05ecc1969ba98e925",
+      "group": "skills",
+      "license": "NOASSERTION",
+      "rationale": "real Agent Skills with bundled scripts"
+    },
+    {
+      "id": "huggingface_alignment-handbook",
+      "url": "https://github.com/huggingface/alignment-handbook",
+      "ref": "main",
+      "commit": "53c11c328684f965162f41ff93185bb9e0448263",
+      "tree": "6068aee747dc9a590cc98070bb5f095927b8fbd4",
+      "group": "training",
+      "license": "Apache-2.0",
+      "rationale": "recipes with model and dataset IDs in YAML"
+    },
+    {
+      "id": "huggingface_trl",
+      "url": "https://github.com/huggingface/trl",
+      "ref": "main",
+      "commit": "99bbdfec75ad1a57bb2df9c72278b391508eda5f",
+      "tree": "24e71c47f313f2cd159a43c67e63704cad358112",
+      "group": "training",
+      "license": "Apache-2.0",
+      "rationale": "load_dataset and from_pretrained in training scripts"
+    }
+  ]
+}

@@ -1,0 +1,1194 @@
+{
+  "budgets": [
+    {
+      "actual": 0,
+      "budget": "false positives: credential_exfiltration",
+      "limit": 0,
+      "passed": true
+    },
+    {
+      "actual": 0,
+      "budget": "false positives: credential_exposure",
+      "limit": 0,
+      "passed": true
+    },
+    {
+      "actual": 0,
+      "budget": "false positives: script_download_execution",
+      "limit": 2,
+      "passed": true
+    },
+    {
+      "actual": 0,
+      "budget": "false positives: tool_description_instructions critical",
+      "limit": 0,
+      "passed": true
+    },
+    {
+      "actual": 0,
+      "budget": "false positives: tool_description_instructions high",
+      "limit": 0,
+      "passed": true
+    },
+    {
+      "actual": 0,
+      "budget": "false positives: tool_description_instructions medium",
+      "limit": 2,
+      "passed": true
+    },
+    {
+      "actual": "all allowed",
+      "budget": "scan exit codes",
+      "limit": [
+        0
+      ],
+      "passed": true
+    },
+    {
+      "actual": 0,
+      "budget": "negative repositories: new observations",
+      "limit": 0,
+      "passed": true
+    },
+    {
+      "actual": "no baseline",
+      "budget": "coverage: new gaps on complete-coverage repositories",
+      "limit": 0,
+      "passed": null
+    },
+    {
+      "actual": "no baseline",
+      "budget": "cost: wall time",
+      "limit": 2.0,
+      "passed": null
+    },
+    {
+      "actual": "no baseline",
+      "budget": "cost: peak RSS",
+      "limit": 2.0,
+      "passed": null
+    }
+  ],
+  "component_metrics": {
+    "a2a-server": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 1,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 1
+    },
+    "agent": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 24,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 24
+    },
+    "ide-agent": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 16,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 16
+    },
+    "mcp-client": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 8,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 8
+    },
+    "mcp-server": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 100,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 100
+    },
+    "model": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 14,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 14
+    },
+    "prompt-template": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 82,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 82
+    },
+    "rag-source": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 6,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 6
+    },
+    "registry-entry": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 63,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 63
+    },
+    "skill-package": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 690,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 690
+    },
+    "tool": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 318,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 318
+    }
+  },
+  "component_totals": {
+    "a2a-server": 1,
+    "agent": 24,
+    "ide-agent": 16,
+    "mcp-client": 8,
+    "mcp-server": 100,
+    "model": 14,
+    "prompt-template": 82,
+    "rag-source": 6,
+    "registry-entry": 63,
+    "skill-package": 690,
+    "tool": 318
+  },
+  "delta": null,
+  "finding_metrics": {
+    "completeness": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 21,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 21
+    },
+    "detection_method": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 1,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 1
+    },
+    "hidden_markup": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 22,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 22
+    },
+    "hook_commands": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 3,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 3
+    },
+    "local_process": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 13,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 13
+    },
+    "mutable_image_tag": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 1,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 1
+    },
+    "nonregistry_source": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 3,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 3
+    },
+    "package_source": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 7,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 7
+    },
+    "permission_scope": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 2,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 2
+    },
+    "prompt_size": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 4,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 4
+    },
+    "rag_discovery": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": null,
+      "false_positives_per_repository": 0.0,
+      "labelled": 0,
+      "observations": 6,
+      "out_of_scope": 0,
+      "precision": null,
+      "true_positive": 0,
+      "unlabeled": 6
+    },
+    "serialization_format": {
+      "confirmed": 0,
+      "false_positive": 8,
+      "false_positive_rate": 0.5714,
+      "false_positives_per_repository": 0.3333,
+      "labelled": 14,
+      "observations": 14,
+      "out_of_scope": 0,
+      "precision": 0.4286,
+      "true_positive": 6,
+      "unlabeled": 0
+    },
+    "signing_status": {
+      "confirmed": 0,
+      "false_positive": 8,
+      "false_positive_rate": 1.0,
+      "false_positives_per_repository": 0.3333,
+      "labelled": 14,
+      "observations": 14,
+      "out_of_scope": 6,
+      "precision": 0.0,
+      "true_positive": 0,
+      "unlabeled": 0
+    },
+    "version_pinning": {
+      "confirmed": 0,
+      "false_positive": 0,
+      "false_positive_rate": 0.0,
+      "false_positives_per_repository": 0.0,
+      "labelled": 7,
+      "observations": 61,
+      "out_of_scope": 0,
+      "precision": 1.0,
+      "true_positive": 7,
+      "unlabeled": 54
+    }
+  },
+  "finding_totals": {
+    "completeness": {
+      "low": 21
+    },
+    "detection_method": {
+      "info": 1
+    },
+    "hidden_markup": {
+      "low": 22
+    },
+    "hook_commands": {
+      "medium": 3
+    },
+    "local_process": {
+      "medium": 13
+    },
+    "mutable_image_tag": {
+      "medium": 1
+    },
+    "nonregistry_source": {
+      "medium": 3
+    },
+    "package_source": {
+      "medium": 7
+    },
+    "permission_scope": {
+      "medium": 2
+    },
+    "prompt_size": {
+      "medium": 4
+    },
+    "rag_discovery": {
+      "info": 6
+    },
+    "serialization_format": {
+      "critical": 14
+    },
+    "signing_status": {
+      "high": 14
+    },
+    "version_pinning": {
+      "high": 7,
+      "medium": 54
+    }
+  },
+  "gates": {
+    "failed": 20,
+    "passed": 4
+  },
+  "repositories": [
+    {
+      "commit": "da94a91e691e1cf5b3151416bb15b5b62729bea8",
+      "complete_coverage": false,
+      "components": {
+        "agent": 1,
+        "model": 12,
+        "tool": 1
+      },
+      "exit_code": 0,
+      "findings": {
+        "serialization_format": {
+          "critical": 12
+        },
+        "signing_status": {
+          "high": 12
+        }
+      },
+      "gaps": 12,
+      "gate": "failed",
+      "gate_reasons": [
+        "finding at or above critical",
+        "aggregate score is at or above fail_threshold",
+        "collection coverage is unknown or incomplete"
+      ],
+      "group": "agents",
+      "id": "crewAIInc_crewAI-examples",
+      "max_rss_kib": 76380,
+      "risk_level": "critical",
+      "score": 204.0,
+      "seconds": 1.759,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "ead8d7f74d5b1def48a5a7451aed8106aae8d2e6",
+      "complete_coverage": false,
+      "components": {
+        "a2a-server": 1,
+        "agent": 1,
+        "mcp-client": 1,
+        "mcp-server": 8,
+        "prompt-template": 18,
+        "skill-package": 71,
+        "tool": 1
+      },
+      "exit_code": 0,
+      "findings": {
+        "completeness": {
+          "low": 7
+        },
+        "detection_method": {
+          "info": 1
+        },
+        "local_process": {
+          "medium": 6
+        },
+        "prompt_size": {
+          "medium": 1
+        }
+      },
+      "gaps": 4,
+      "gate": "failed",
+      "gate_reasons": [
+        "collection coverage is unknown or incomplete"
+      ],
+      "group": "agents",
+      "id": "google_adk-samples",
+      "max_rss_kib": 85992,
+      "risk_level": "high",
+      "score": 35.0,
+      "seconds": 5.277,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "2689e450364d451a0afa0a5e883d12a031c125dd",
+      "complete_coverage": false,
+      "components": {
+        "agent": 1,
+        "prompt-template": 1,
+        "registry-entry": 13,
+        "tool": 3
+      },
+      "exit_code": 0,
+      "findings": {
+        "version_pinning": {
+          "medium": 13
+        }
+      },
+      "gaps": 5,
+      "gate": "failed",
+      "gate_reasons": [
+        "aggregate score is at or above fail_threshold",
+        "collection coverage is unknown or incomplete"
+      ],
+      "group": "agents",
+      "id": "huggingface_smolagents",
+      "max_rss_kib": 80368,
+      "risk_level": "critical",
+      "score": 52.0,
+      "seconds": 2.061,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "84ced603d3a201ab0f9379936bb35868e243f3f3",
+      "complete_coverage": false,
+      "components": {
+        "agent": 1,
+        "ide-agent": 1,
+        "prompt-template": 1,
+        "tool": 2
+      },
+      "exit_code": 0,
+      "findings": {
+        "completeness": {
+          "low": 1
+        },
+        "permission_scope": {
+          "medium": 1
+        }
+      },
+      "gaps": 2,
+      "gate": "failed",
+      "gate_reasons": [
+        "collection coverage is unknown or incomplete"
+      ],
+      "group": "agents",
+      "id": "langchain-ai_langgraph",
+      "max_rss_kib": 90828,
+      "risk_level": "moderate",
+      "score": 5.0,
+      "seconds": 4.573,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "8390985108cb1e3881f5f7297765758d8ad2540c",
+      "complete_coverage": false,
+      "components": {
+        "agent": 1,
+        "ide-agent": 1,
+        "mcp-client": 1,
+        "prompt-template": 1,
+        "rag-source": 1
+      },
+      "exit_code": 0,
+      "findings": {
+        "rag_discovery": {
+          "info": 1
+        }
+      },
+      "gaps": 8,
+      "gate": "failed",
+      "gate_reasons": [
+        "collection coverage is unknown or incomplete"
+      ],
+      "group": "agents",
+      "id": "microsoft_autogen",
+      "max_rss_kib": 81252,
+      "risk_level": "clean",
+      "score": 0.0,
+      "seconds": 2.965,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "e7ce15a25b336bb3d0840ad16dee597f69a6e6d3",
+      "complete_coverage": false,
+      "components": {
+        "agent": 1,
+        "ide-agent": 1,
+        "mcp-client": 1,
+        "prompt-template": 2,
+        "registry-entry": 6,
+        "skill-package": 51
+      },
+      "exit_code": 0,
+      "findings": {
+        "version_pinning": {
+          "medium": 4
+        }
+      },
+      "gaps": 28,
+      "gate": "failed",
+      "gate_reasons": [
+        "collection coverage is unknown or incomplete"
+      ],
+      "group": "agents",
+      "id": "openai_openai-agents-python",
+      "max_rss_kib": 101124,
+      "risk_level": "moderate",
+      "score": 16.0,
+      "seconds": 6.181,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "574ea3c59430d772ea1e3b2b5a921a1f6849effa",
+      "complete_coverage": false,
+      "components": {
+        "agent": 1,
+        "ide-agent": 1,
+        "prompt-template": 39,
+        "registry-entry": 6,
+        "skill-package": 38,
+        "tool": 1
+      },
+      "exit_code": 0,
+      "findings": {
+        "completeness": {
+          "low": 1
+        },
+        "hidden_markup": {
+          "low": 16
+        },
+        "permission_scope": {
+          "medium": 1
+        },
+        "prompt_size": {
+          "medium": 2
+        },
+        "version_pinning": {
+          "medium": 6
+        }
+      },
+      "gaps": 87,
+      "gate": "failed",
+      "gate_reasons": [
+        "aggregate score is at or above fail_threshold",
+        "collection coverage is unknown or incomplete"
+      ],
+      "group": "agents",
+      "id": "pydantic_pydantic-ai",
+      "max_rss_kib": 114680,
+      "risk_level": "critical",
+      "score": 53.0,
+      "seconds": 31.158,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "77001c96f9507be0f4d009b83210a384a5e08bda",
+      "complete_coverage": false,
+      "components": {
+        "agent": 1,
+        "ide-agent": 1,
+        "mcp-client": 1,
+        "mcp-server": 3,
+        "prompt-template": 2,
+        "rag-source": 1,
+        "registry-entry": 4,
+        "skill-package": 2,
+        "tool": 3
+      },
+      "exit_code": 0,
+      "findings": {
+        "rag_discovery": {
+          "info": 1
+        },
+        "version_pinning": {
+          "medium": 4
+        }
+      },
+      "gaps": 186,
+      "gate": "failed",
+      "gate_reasons": [
+        "collection coverage is unknown or incomplete"
+      ],
+      "group": "mcp-sdk",
+      "id": "modelcontextprotocol_python-sdk",
+      "max_rss_kib": 86748,
+      "risk_level": "moderate",
+      "score": 16.0,
+      "seconds": 3.97,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "5ee54ee30ddc00a914a3d981880f87fdce0e6246",
+      "complete_coverage": false,
+      "components": {
+        "agent": 1,
+        "ide-agent": 1,
+        "mcp-server": 2,
+        "prompt-template": 2,
+        "registry-entry": 3,
+        "skill-package": 15
+      },
+      "exit_code": 0,
+      "findings": {
+        "hidden_markup": {
+          "low": 3
+        },
+        "nonregistry_source": {
+          "medium": 3
+        }
+      },
+      "gaps": 8,
+      "gate": "failed",
+      "gate_reasons": [
+        "collection coverage is unknown or incomplete"
+      ],
+      "group": "mcp-sdk",
+      "id": "modelcontextprotocol_typescript-sdk",
+      "max_rss_kib": 86016,
+      "risk_level": "moderate",
+      "score": 15.0,
+      "seconds": 2.462,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "6b8a6f7878f1a4d151ca8af6f597440f19b6a47f",
+      "complete_coverage": false,
+      "components": {
+        "agent": 1,
+        "mcp-client": 2,
+        "mcp-server": 81,
+        "prompt-template": 1,
+        "tool": 281
+      },
+      "exit_code": 0,
+      "findings": {
+        "completeness": {
+          "low": 7
+        },
+        "local_process": {
+          "medium": 7
+        },
+        "package_source": {
+          "medium": 7
+        },
+        "version_pinning": {
+          "high": 7
+        }
+      },
+      "gaps": 271,
+      "gate": "failed",
+      "gate_reasons": [
+        "aggregate score is at or above fail_threshold",
+        "collection coverage is unknown or incomplete"
+      ],
+      "group": "mcp-servers",
+      "id": "awslabs_mcp",
+      "max_rss_kib": 98764,
+      "risk_level": "critical",
+      "score": 112.0,
+      "seconds": 16.785,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "df32d7ec5786e0e71932767fce9982409cbaec40",
+      "complete_coverage": true,
+      "components": {
+        "agent": 1,
+        "ide-agent": 1,
+        "mcp-server": 1,
+        "prompt-template": 2
+      },
+      "exit_code": 0,
+      "findings": {
+        "completeness": {
+          "low": 1
+        }
+      },
+      "gaps": 0,
+      "gate": "passed",
+      "gate_reasons": [],
+      "group": "mcp-servers",
+      "id": "github_github-mcp-server",
+      "max_rss_kib": 78452,
+      "risk_level": "moderate",
+      "score": 1.0,
+      "seconds": 1.81,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "eb36463ee796ed71afd2c2cb1ec96d83770ed4df",
+      "complete_coverage": false,
+      "components": {
+        "agent": 1,
+        "ide-agent": 1,
+        "prompt-template": 1,
+        "registry-entry": 1,
+        "skill-package": 1
+      },
+      "exit_code": 0,
+      "findings": {},
+      "gaps": 2,
+      "gate": "failed",
+      "gate_reasons": [
+        "collection coverage is unknown or incomplete"
+      ],
+      "group": "mcp-servers",
+      "id": "microsoft_playwright-mcp",
+      "max_rss_kib": 74496,
+      "risk_level": "unknown",
+      "score": 0,
+      "seconds": 1.559,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "c799c8552b0f27b7a33a7b9233773da144dddcf5",
+      "complete_coverage": false,
+      "components": {
+        "agent": 1,
+        "ide-agent": 1,
+        "mcp-client": 1,
+        "mcp-server": 5,
+        "prompt-template": 2,
+        "registry-entry": 6,
+        "skill-package": 21,
+        "tool": 26
+      },
+      "exit_code": 0,
+      "findings": {
+        "completeness": {
+          "low": 2
+        },
+        "hook_commands": {
+          "medium": 1
+        },
+        "prompt_size": {
+          "medium": 1
+        },
+        "version_pinning": {
+          "medium": 4
+        }
+      },
+      "gaps": 38,
+      "gate": "failed",
+      "gate_reasons": [
+        "collection coverage is unknown or incomplete"
+      ],
+      "group": "mcp-servers",
+      "id": "modelcontextprotocol_servers",
+      "max_rss_kib": 86380,
+      "risk_level": "high",
+      "score": 26.0,
+      "seconds": 2.211,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "ce8b2629efe8b24048b127b4c79af1e9cbab93d4",
+      "complete_coverage": true,
+      "components": {
+        "agent": 1,
+        "ide-agent": 3,
+        "model": 2,
+        "prompt-template": 4,
+        "registry-entry": 3,
+        "skill-package": 44
+      },
+      "exit_code": 0,
+      "findings": {
+        "completeness": {
+          "low": 1
+        },
+        "hook_commands": {
+          "medium": 2
+        },
+        "serialization_format": {
+          "critical": 2
+        },
+        "signing_status": {
+          "high": 2
+        },
+        "version_pinning": {
+          "medium": 3
+        }
+      },
+      "gaps": 0,
+      "gate": "failed",
+      "gate_reasons": [
+        "finding at or above critical",
+        "aggregate score is at or above fail_threshold"
+      ],
+      "group": "mixed",
+      "id": "anthropics_claude-cookbooks",
+      "max_rss_kib": 92540,
+      "risk_level": "critical",
+      "score": 55.0,
+      "seconds": 3.67,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "508d8be9c8a43d6b9f98d6abca099f51320bff2b",
+      "complete_coverage": false,
+      "components": {
+        "agent": 1,
+        "ide-agent": 1,
+        "prompt-template": 2
+      },
+      "exit_code": 0,
+      "findings": {},
+      "gaps": 2,
+      "gate": "failed",
+      "gate_reasons": [
+        "collection coverage is unknown or incomplete"
+      ],
+      "group": "models",
+      "id": "ollama_ollama",
+      "max_rss_kib": 77172,
+      "risk_level": "unknown",
+      "score": 0,
+      "seconds": 2.413,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "49943b5a94413a530761350f04e896f76e8d620e",
+      "complete_coverage": true,
+      "components": {
+        "agent": 1
+      },
+      "exit_code": 0,
+      "findings": {},
+      "gaps": 0,
+      "gate": "failed",
+      "gate_reasons": [
+        "no agent manifest or supported local inventory evidence was found"
+      ],
+      "group": "negative",
+      "id": "pallets_flask",
+      "max_rss_kib": 74876,
+      "risk_level": "unknown",
+      "score": 0,
+      "seconds": 1.759,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "3c7baaa05ab4aa49cc819ce3a819d260de19c157",
+      "complete_coverage": true,
+      "components": {
+        "agent": 1
+      },
+      "exit_code": 0,
+      "findings": {},
+      "gaps": 0,
+      "gate": "failed",
+      "gate_reasons": [
+        "no agent manifest or supported local inventory evidence was found"
+      ],
+      "group": "negative",
+      "id": "psf_requests",
+      "max_rss_kib": 74804,
+      "risk_level": "unknown",
+      "score": 0,
+      "seconds": 1.659,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "1fdb7d0e4f1d3e731c8397332452715512f18667",
+      "complete_coverage": true,
+      "components": {
+        "agent": 1
+      },
+      "exit_code": 0,
+      "findings": {},
+      "gaps": 0,
+      "gate": "failed",
+      "gate_reasons": [
+        "no agent manifest or supported local inventory evidence was found"
+      ],
+      "group": "rag",
+      "id": "langchain-ai_rag-from-scratch",
+      "max_rss_kib": 74304,
+      "risk_level": "unknown",
+      "score": 0,
+      "seconds": 1.458,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "fabb7d7c8bafffd9c7d0890c1624bec75e5bef77",
+      "complete_coverage": false,
+      "components": {
+        "agent": 1,
+        "rag-source": 3,
+        "registry-entry": 11
+      },
+      "exit_code": 0,
+      "findings": {
+        "rag_discovery": {
+          "info": 3
+        },
+        "version_pinning": {
+          "medium": 11
+        }
+      },
+      "gaps": 2,
+      "gate": "failed",
+      "gate_reasons": [
+        "collection coverage is unknown or incomplete"
+      ],
+      "group": "rag",
+      "id": "pinecone-io_canopy",
+      "max_rss_kib": 77056,
+      "risk_level": "high",
+      "score": 44.0,
+      "seconds": 1.809,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "70b6cfb8ef59c9f178ffccfaf3aadcf737757a18",
+      "complete_coverage": true,
+      "components": {
+        "agent": 1,
+        "rag-source": 1,
+        "registry-entry": 1
+      },
+      "exit_code": 0,
+      "findings": {
+        "mutable_image_tag": {
+          "medium": 1
+        },
+        "rag_discovery": {
+          "info": 1
+        }
+      },
+      "gaps": 0,
+      "gate": "passed",
+      "gate_reasons": [],
+      "group": "rag",
+      "id": "weaviate_Verba",
+      "max_rss_kib": 78928,
+      "risk_level": "moderate",
+      "score": 4.0,
+      "seconds": 2.111,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "0bd56cf67610ac307b8c8d2a64e95cb1ec6a381d",
+      "complete_coverage": true,
+      "components": {
+        "agent": 1,
+        "ide-agent": 1,
+        "prompt-template": 1,
+        "skill-package": 3
+      },
+      "exit_code": 0,
+      "findings": {
+        "completeness": {
+          "low": 1
+        }
+      },
+      "gaps": 0,
+      "gate": "passed",
+      "gate_reasons": [],
+      "group": "skills",
+      "id": "anthropics_claude-code",
+      "max_rss_kib": 77364,
+      "risk_level": "moderate",
+      "score": 1.0,
+      "seconds": 2.262,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "e4bb5d960d87126ff3b3a8af1a104b7db67560ba",
+      "complete_coverage": false,
+      "components": {
+        "agent": 1,
+        "ide-agent": 1,
+        "mcp-client": 1,
+        "skill-package": 442
+      },
+      "exit_code": 0,
+      "findings": {
+        "hidden_markup": {
+          "low": 3
+        }
+      },
+      "gaps": 3,
+      "gate": "failed",
+      "gate_reasons": [
+        "collection coverage is unknown or incomplete"
+      ],
+      "group": "skills",
+      "id": "anthropics_skills",
+      "max_rss_kib": 85092,
+      "risk_level": "moderate",
+      "score": 3.0,
+      "seconds": 3.266,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "53c11c328684f965162f41ff93185bb9e0448263",
+      "complete_coverage": true,
+      "components": {
+        "agent": 1
+      },
+      "exit_code": 0,
+      "findings": {},
+      "gaps": 0,
+      "gate": "failed",
+      "gate_reasons": [
+        "no agent manifest or supported local inventory evidence was found"
+      ],
+      "group": "training",
+      "id": "huggingface_alignment-handbook",
+      "max_rss_kib": 74492,
+      "risk_level": "unknown",
+      "score": 0,
+      "seconds": 1.558,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    },
+    {
+      "commit": "99bbdfec75ad1a57bb2df9c72278b391508eda5f",
+      "complete_coverage": true,
+      "components": {
+        "agent": 1,
+        "ide-agent": 1,
+        "prompt-template": 3,
+        "registry-entry": 9,
+        "skill-package": 2
+      },
+      "exit_code": 0,
+      "findings": {
+        "version_pinning": {
+          "medium": 9
+        }
+      },
+      "gaps": 0,
+      "gate": "passed",
+      "gate_reasons": [],
+      "group": "training",
+      "id": "huggingface_trl",
+      "max_rss_kib": 79352,
+      "risk_level": "high",
+      "score": 36.0,
+      "seconds": 1.86,
+      "spec_version": "1.2.0",
+      "timed_out": false
+    }
+  ],
+  "schema_version": 1,
+  "source": {
+    "commit": "526aafaa7238ab9f74be3b67e20ed27a449189d8",
+    "dirty": false
+  },
+  "tool_version": "nexus-symbiote, version 0.2.0"
+}

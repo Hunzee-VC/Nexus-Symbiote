@@ -1,0 +1,71 @@
+{
+  "commit": "ce8b2629efe8b24048b127b4c79af1e9cbab93d4",
+  "labels": [
+    {
+      "context": {
+        "bom_ref": "model:capabilities/classification/data/vector_db.pkl",
+        "category": "serialization_format",
+        "component_type": "model",
+        "detail": "Model 'vector_db.pkl' has evidence of a potentially code-executing serialization or loader.",
+        "kind": "finding",
+        "severity": "critical"
+      },
+      "date": "2026-11-19",
+      "note": "A pickle file; loading it with pickle runs code.",
+      "observation": "010aeaa6bd8c8217",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "true-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:capabilities/text_to_sql/data/vector_db.pkl",
+        "category": "serialization_format",
+        "component_type": "model",
+        "detail": "Model 'vector_db.pkl' has evidence of a potentially code-executing serialization or loader.",
+        "kind": "finding",
+        "severity": "critical"
+      },
+      "date": "2026-11-19",
+      "note": "A pickle file; loading it with pickle runs code.",
+      "observation": "03925f68b631694d",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "true-positive"
+    },
+    {
+      "context": {
+        "bom_ref": "model:capabilities/text_to_sql/data/vector_db.pkl",
+        "category": "signing_status",
+        "component_type": "model",
+        "detail": "Model 'vector_db.pkl' has no verified artifact-bound signature (signature-not-found).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "A data pickle, not a model; the finding applies a model signature expectation.",
+      "observation": "a99a2c8c04453da6",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "out-of-scope"
+    },
+    {
+      "context": {
+        "bom_ref": "model:capabilities/classification/data/vector_db.pkl",
+        "category": "signing_status",
+        "component_type": "model",
+        "detail": "Model 'vector_db.pkl' has no verified artifact-bound signature (signature-not-found).",
+        "kind": "finding",
+        "severity": "high"
+      },
+      "date": "2026-11-19",
+      "note": "A data pickle, not a model; the finding applies a model signature expectation.",
+      "observation": "e84ca738cd1e597c",
+      "reviewer": "implementing session (B04)",
+      "status": "proposed",
+      "verdict": "out-of-scope"
+    }
+  ],
+  "repository": "anthropics_claude-cookbooks",
+  "schema_version": 1
+}
