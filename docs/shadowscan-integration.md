@@ -81,8 +81,10 @@ sensitive and must be handled accordingly.
 The projection profile `nexus-symbiote/shadowscan-projection/v4` identifies the
 SymBiote mapping, not a ShadowScan report schema or authenticated producer
 version. A native report that declares per-scan credential pseudonyms is projected
-under `nexus-symbiote/shadowscan-projection/v5`, which is v4 with those pseudonyms
-renamed (see [Compare discovery across reruns](#compare-discovery-across-reruns)). Each projected component records the exact report digest
+under `nexus-symbiote/shadowscan-projection/v4+run-scoped`, which is v4 with those
+pseudonyms renamed (see [Compare discovery across reruns](#compare-discovery-across-reruns)).
+That profile is always the mapping's own with `+run-scoped` appended, so a later
+mapping version moves it too and it never names another mapping version. Each projected component records the exact report digest
 (`shadowscan:report-sha256`) and a content digest of its own source finding
 (`shadowscan:finding-sha256`, see below). CycloneDX `dependsOn` edges are copied
 only when both endpoints map to components. They remain declared, source-reported
@@ -260,7 +262,7 @@ under `credential_identity_schema` `shadowscan.credential-identity/v1`. The same
 credential then gets a new pseudonym on every run. For such a native report, the
 inventory records the content digest under `nexus-symbiote/shadowscan-content/v2`,
 and each imported component carries the projection profile
-`nexus-symbiote/shadowscan-projection/v5`. They are v1 and v4, except that every
+`nexus-symbiote/shadowscan-projection/v4+run-scoped`. They are v1 and v4, except that every
 `credential:hmac-sha256:` and `caller:hmac-sha256:` pseudonym is renamed by its
 order of first appearance, visiting object keys in sorted order: across the whole
 report for the content digest, and within one finding for `shadowscan:finding-sha256`.
@@ -277,7 +279,12 @@ example from a CI secret: ShadowScan requires at least 32 secret bytes, written 
 profiles, so a changed credential changes their content digests. A change between
 a stable and a per-scan key changes the profiles, and that comparison falls back to
 the exact report digest. So does the first comparison after an upgrade for a report
-with per-scan pseudonyms, since the earlier inventory recorded v1 and v4.
+with per-scan pseudonyms, since the earlier inventory recorded v1 and v4. A later
+mapping version moves the run-scoped projection profile with it, so the first
+comparison after one compares each imported component by the exact report digest,
+as it does for a keyed report. A build without the content profile v2 refuses an
+inventory that records it, so upgrade the build that reads a baseline, such as the
+one that runs `diff` in CI, together with the baseline.
 
 ### Require a signed report in CI
 

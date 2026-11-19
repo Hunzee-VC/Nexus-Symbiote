@@ -8,6 +8,7 @@ pseudonyms by order of first appearance, under its own versioned profile.
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from jsonschema import Draft202012Validator
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.diff.differ import AIBOMDiffer
+from nexus_symbiote.scanners import shadowscan
 from nexus_symbiote.scanners.shadowscan import (
     CONTENT_PROFILE,
     PROJECTION_PROFILE,
@@ -146,7 +148,23 @@ def test_content_vector_renames_pseudonyms_by_first_appearance():
         "sha256:547f53e0948b65547398fb2681469f5feea3e63512567c7a5e98bd8a702cf4bc"
     )
     assert RUN_SCOPED_CONTENT_PROFILE == "nexus-symbiote/shadowscan-content/v2"
-    assert RUN_SCOPED_PROJECTION_PROFILE == "nexus-symbiote/shadowscan-projection/v5"
+    assert RUN_SCOPED_PROJECTION_PROFILE == "nexus-symbiote/shadowscan-projection/v4+run-scoped"
+
+
+def test_run_scoped_projection_profile_is_the_mapping_profile_with_a_suffix():
+    assert RUN_SCOPED_PROJECTION_PROFILE == PROJECTION_PROFILE + "+run-scoped"
+
+
+@pytest.mark.parametrize("version", ["v4", "v5", "v12"])
+def test_a_mapping_change_moves_the_run_scoped_projection_profile(monkeypatch, version):
+    mapping = f"nexus-symbiote/shadowscan-projection/{version}"
+    monkeypatch.setattr(shadowscan, "PROJECTION_PROFILE", mapping)
+    (run_scoped,) = _import(_report("a")).components
+    (keyed,) = _import(_report("a", scope="keyed")).components
+    profile = run_scoped.properties["shadowscan:projection-profile"]
+    assert profile == mapping + "+run-scoped"
+    assert keyed.properties["shadowscan:projection-profile"] == mapping
+    assert not re.fullmatch(r"nexus-symbiote/shadowscan-projection/v[0-9]+", profile)
 
 
 def test_new_run_scoped_pseudonyms_do_not_change_content_digests():

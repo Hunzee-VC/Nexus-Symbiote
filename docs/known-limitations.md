@@ -1316,7 +1316,13 @@ A way around a limit that its entry does not describe is worth a
   pseudonyms, so a rerun is not drift, but they cannot show one credential replacing
   another, and a finding identifier ShadowScan derives from a pseudonym, such as a
   gateway caller's, still changes on every run, which `diff` reports as a change.
-  Set `SHADOWSCAN_IDENTITY_KEY` for every ShadowScan run; see
+  Such a report's components carry the mapping's projection profile with `+run-scoped`
+  appended (`nexus-symbiote/shadowscan-projection/v4+run-scoped`), so a later mapping
+  version moves it and the first comparison after one compares each imported component
+  by the exact report digest. A build without the content profile
+  `nexus-symbiote/shadowscan-content/v2` refuses an inventory that records it: upgrade the
+  build that reads a baseline together with the baseline. Set `SHADOWSCAN_IDENTITY_KEY`
+  for every ShadowScan run; see
   [compare discovery across reruns](shadowscan-integration.md#compare-discovery-across-reruns).
 - **`export-inventory` approves only the repository's root project.** Components,
   nested projects, agents that ShadowScan reports per source file, remote MCP servers
