@@ -1043,8 +1043,11 @@ def inspect_model_format(
                     budget or InspectionBudget(),
                     by_content=model_format(path) is None,
                 )
+                # 'G' is an opcode byte, so GGUF content can parse as a pickle stream; the
+                # name rating says what the file is.
                 if container is not None and (
                     container[0] is SerializationSafety.UNSAFE_CODE_EXECUTION
+                    and not (pickle_family and prefix.startswith(_GGUF_MAGIC))
                     or not (safetensors or pickle_family)
                 ):
                     return container
@@ -1082,8 +1085,6 @@ def _pickle_name_rating(
     """
     if size == 0:
         return SerializationSafety.UNKNOWN, PICKLE_NAME_EMPTY
-    if container is not None and container[1] in _CONTENT_UNREAD:
-        return SerializationSafety.UNSAFE_CODE_EXECUTION, _loader_rated(container[1])
     start = head.start(min(size, _TAR_BLOCK))
     if (
         path.suffixes[-1].lower() in _PICKLE_WRAPPERS
@@ -1095,6 +1096,8 @@ def _pickle_name_rating(
         return SerializationSafety.UNSAFE_CODE_EXECUTION, PICKLE_NAME_WRAPPED
     if start.startswith(_GGUF_MAGIC):
         return SerializationSafety.UNSAFE_CODE_EXECUTION, PICKLE_NAME_GGUF
+    if container is not None and container[1] in _CONTENT_UNREAD:
+        return SerializationSafety.UNSAFE_CODE_EXECUTION, _loader_rated(container[1])
     if container is not None:
         return container
     return SerializationSafety.UNKNOWN, PICKLE_NAME_UNEVIDENCED

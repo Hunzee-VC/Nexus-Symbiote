@@ -296,6 +296,7 @@ def test_a_tar_header_with_a_valid_checksum_under_a_torch_name_is_a_wrapped_stre
 
 @settings(PROPERTY_SETTINGS, max_examples=60)
 @given(st.binary(max_size=512), st.sampled_from([".bin", ".pkl", ".pt"]))
+@example(tail=b"\x00\x00\x00\x00\x00i\x01\x00", suffix=".bin")
 def test_gguf_magic_under_a_pickle_family_name_is_critical_whatever_follows(tail, suffix):
     # 'G' is an opcode byte, so the property above never reaches these bytes; llama.cpp
     # opens a model by this magic, and the chat-template check runs only under .gguf.
