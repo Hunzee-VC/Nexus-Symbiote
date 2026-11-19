@@ -24,6 +24,7 @@ import importlib.util
 import json
 import os
 import shutil
+import stat
 import struct
 import sys
 import zipfile
@@ -35,6 +36,7 @@ from types import ModuleType
 from typing import Any
 from urllib.parse import quote, quote_plus
 
+import click
 import pytest
 from click.testing import CliRunner, Result
 
@@ -74,8 +76,9 @@ REPRODUCIBLE = [scenario for scenario in SCENARIOS[PUBLIC_SEED] if scenario < "s
 FORMATS = ("json", "cyclonedx", "spdx", "sarif")
 SOURCE_DATE_EPOCH = "1763424000"
 INTERNAL_ERROR = "internal error ("
-# Collection failures each scenario must name, by substring; every other scenario names
-# none. "{surrogate}" is the server that s10's lone-surrogate row names.
+# The distinct collection failures each scenario names, one per entry, by substring;
+# every other scenario names none. "{surrogate}" is the server that s10's lone-surrogate
+# row names.
 EXPECTED_FAILURES = {
     "s09c-symlink-escape": (
         ".cursor/mcp.json: symlink target is outside the collection root",
@@ -85,12 +88,19 @@ EXPECTED_FAILURES = {
     NEW_SURFACES: (
         ".cursor/mcp.json: invalid tool definition for server '{surrogate}'",
         ".mcp.json: nonregular file excluded",
+        ".mcp.json: read refused",
         "CLAUDE.md: nonregular file excluded",
+        "CLAUDE.md: read refused",
     ),
 }
 # C0 controls other than tab, line feed and carriage return, DEL, and the C1 controls
-# (CSI is U+009B, DCS U+0090): any of them raw in an output can drive a terminal.
-_CONTROL = frozenset(chr(code) for code in (*range(0x20), *range(0x7F, 0xA0))) - set("\t\n\r")
+# (CSI is U+009B, DCS U+0090): any of them raw in an output can drive a terminal. Outputs
+# are decoded with surrogateescape, so a raw byte that is not valid UTF-8, such as a lone
+# 0x9B, arrives as U+DC9B and is matched in that form too.
+_CONTROL_CODES = frozenset((*range(0x20), *range(0x7F, 0xA0))) - {0x09, 0x0A, 0x0D}
+_CONTROL = frozenset(chr(code) for code in _CONTROL_CODES) | frozenset(
+    chr(0xDC00 + code) for code in _CONTROL_CODES if code >= 0x80
+)
 # Audit events that mean a collector reached the network, started a process or resolved
 # a pickle global; code executed or imported from a file under the corpus is reported
 # too. Socket creation is not here: an import-time probe in urllib3 creates a loopback
@@ -386,6 +396,21 @@ def assert_no_control(texts: dict[str, str]) -> None:
     assert not found, found
 
 
+def unpinned(failures: list[str], expected: tuple[str, ...]) -> tuple[list[str], list[str]]:
+    """The expected failures no failure names and the distinct failures no expected one
+    accounts for, each matched to at most one expected substring. Every collector that
+    reads a surface records its failure, so a failure can repeat."""
+    unexpected = sorted(set(failures))
+    missing = []
+    for text in expected:
+        match = next((failure for failure in unexpected if text in failure), None)
+        if match is None:
+            missing.append(text)
+        else:
+            unexpected.remove(match)
+    return missing, unexpected
+
+
 def assert_no_crash(result: Result) -> None:
     exception = result.exception
     assert exception is None or isinstance(exception, SystemExit), repr(exception)
@@ -419,7 +444,11 @@ class InProcessScan:
     refused: list[str] = field(default_factory=list)
 
     def texts(self) -> dict[str, str]:
-        streams = {f"{label} output": result.output for label, result in self.results.items()}
+        streams = {
+            f"{label} {name}": _decoded(data)
+            for label, result in self.results.items()
+            for name, data in (("stdout", result.stdout_bytes), ("stderr", result.stderr_bytes))
+        }
         return {**self.outputs, **streams}
 
 
@@ -456,14 +485,16 @@ class InProcessScans:
                 record.outputs[output_format] = _decoded(target.read_bytes())
         inventory = out / "scan.json"
         if inventory.exists():
-            record.results["vex"] = runner.invoke(
-                main, ["vex", str(inventory), "-o", str(out / "vex.json")]
-            )
+            with offline_refusals() as refused:
+                record.results["vex"] = runner.invoke(
+                    main, ["vex", str(inventory), "-o", str(out / "vex.json")]
+                )
+                record.results["risk"] = runner.invoke(
+                    main, ["risk", str(inventory), "--no-project-policy"]
+                )
+            record.refused += refused
             if (out / "vex.json").exists():
                 record.outputs["vex"] = _decoded((out / "vex.json").read_bytes())
-            record.results["risk"] = runner.invoke(
-                main, ["risk", str(inventory), "--no-project-policy"]
-            )
         record.outside_opens = self._corpora.watch.opened()
         return record
 
@@ -573,6 +604,36 @@ def test_the_corpus_has_the_scenarios_this_suite_pins(corpora):
     assert all(corpus.secrets for corpus in corpora.seeds.values())
 
 
+def test_a_failure_beside_the_pinned_ones_or_counted_twice_is_unpinned():
+    expected = ("a.json: invalid JSON", "b: nonregular file excluded")
+    pinned = ["a.json: invalid JSON or duplicate keys", "b: nonregular file excluded"]
+    assert unpinned(pinned, expected) == ([], [])
+    assert unpinned(pinned * 6, expected) == ([], [])
+    extra = [*pinned, "a.json: collector crashed mid-file"]
+    assert unpinned(extra, expected) == ([], ["a.json: collector crashed mid-file"])
+    assert unpinned(pinned[:1], expected) == (["b: nonregular file excluded"], [])
+    assert unpinned([], ()) == ([], [])
+
+
+@pytest.mark.parametrize("data", [b"a\x9b2Kb", b"a\x90qb", b"a\xc2\x9b2Kb", b"a\x1b[2Kb"])
+def test_a_raw_control_byte_is_found_whether_or_not_it_is_valid_utf8(data):
+    with pytest.raises(AssertionError):
+        assert_no_control({"file": _decoded(data)})
+
+    @click.command()
+    def write() -> None:
+        sys.stdout.buffer.write(data)
+        sys.stderr.buffer.write(data)
+
+    record = InProcessScan(results={"probe": CliRunner().invoke(write)})
+    found = list(record.texts())
+    assert found == ["probe stdout", "probe stderr"]
+    for label in found:
+        with pytest.raises(AssertionError):
+            assert_no_control({label: record.texts()[label]})
+    assert_no_control({"file": _decoded("tab\tline\r\n\u00e9\u2028".encode())})
+
+
 def test_the_cli_and_this_suite_run_every_built_in_collector():
     assert {scanner.name for scanner in ALL_SCANNERS} == BUILTIN_SCANNER_NAMES
 
@@ -636,10 +697,9 @@ def test_collection_failures_are_the_pinned_ones(corpora, in_process, seed, scen
     failures = json.loads(in_process(seed, scenario).outputs["json"])["metadata"]["completeness"][
         "scan_failures"
     ]
-    expected = corpora.seeds[seed].failures.get(scenario, ())
-    assert [text for text in expected if not any(text in failure for failure in failures)] == []
-    if not expected:
-        assert failures == []
+    missing, unexpected = unpinned(failures, corpora.seeds[seed].failures.get(scenario, ()))
+    assert missing == []
+    assert unexpected == []
 
 
 @pytest.mark.no_cover
@@ -698,11 +758,42 @@ def test_memory_and_time_do_not_grow_with_the_inflated_size_of_a_bomb(corpora, t
     assert cpu[256] < 2.5 * cpu[64], runs
 
 
+def _copy(source: str, destination: str) -> object:
+    if stat.S_ISFIFO(os.lstat(source).st_mode):
+        os.mkfifo(destination)
+        return destination
+    return shutil.copy2(source, destination)
+
+
 def _checkout(source: Path, destination: Path) -> Path:
-    shutil.copytree(source, destination, symlinks=True)
+    shutil.copytree(source, destination, symlinks=True, copy_function=_copy)
     return destination
 
 
+def _interpreter_scan(checkout: Path, directory: Path, output_format: str) -> bytes:
+    """Scan ``checkout`` from inside it in an isolated interpreter, which has a hash seed
+    of its own."""
+    home = directory / "home"
+    home.mkdir(parents=True)
+    target = directory / f"scan.{output_format}"
+    run = capped_cli(
+        "scan",
+        ".",
+        "--no-project-policy",
+        "--report-only",
+        "-f",
+        output_format,
+        "-o",
+        str(target),
+        cwd=checkout,
+        env={**os.environ, "HOME": str(home), "SOURCE_DATE_EPOCH": SOURCE_DATE_EPOCH},
+        stderr=directory / "stderr",
+    )
+    assert run.returncode == 0, (directory / "stderr").read_bytes()[-2000:]
+    return target.read_bytes()
+
+
+@pytest.mark.no_cover
 @pytest.mark.parametrize("scenario", REPRODUCIBLE)
 def test_two_checkouts_scan_to_identical_bytes_in_every_format(
     corpora, tmp_path, monkeypatch, scenario
@@ -712,6 +803,17 @@ def test_two_checkouts_scan_to_identical_bytes_in_every_format(
         _checkout(source, tmp_path / "laptop" / scenario),
         _checkout(source, tmp_path / "ci" / "runner" / "work" / scenario),
     ]
+    with ThreadPoolExecutor(max_workers=len(FORMATS)) as pool:
+        separate = {
+            output_format: pool.submit(
+                _interpreter_scan,
+                checkouts[1],
+                tmp_path / "isolated" / output_format,
+                output_format,
+            )
+            for output_format in FORMATS
+        }
+        interpreted = {output_format: future.result() for output_format, future in separate.items()}
     runner = CliRunner()
     for output_format in FORMATS:
         outputs = []
@@ -729,9 +831,42 @@ def test_two_checkouts_scan_to_identical_bytes_in_every_format(
             assert result.exit_code == 0, result.output
             outputs.append(target.read_bytes())
         assert outputs[0] == outputs[1], output_format
+        assert interpreted[output_format] == outputs[0], output_format
         assert os.fsencode(tmp_path) not in outputs[0], output_format
         assert os.fsencode(os.path.realpath(tmp_path)) not in outputs[0], output_format
     assert corpora.canaries() == []
+
+
+@pytest.mark.parametrize("scenario", ["s09c-symlink-escape", NEW_SURFACES])
+def test_excluded_hostile_paths_are_neither_read_nor_failed(corpora, tmp_path, scenario):
+    seeded = corpora.seeds[PUBLIC_SEED]
+    # Beside scenarios/, so the relative links still resolve into outside/.
+    project = _checkout(seeded.scenario(scenario), seeded.root / "excluded" / scenario)
+    try:
+        excluded = sorted({failure.split(":", 1)[0] for failure in seeded.failures[scenario]})
+        (project / ".nexus-symbiote.yaml").write_text(
+            "scan:\n  exclude_paths: " + json.dumps(excluded) + "\n"
+        )
+        target = tmp_path / "scan.json"
+        with offline_refusals() as refused:
+            result = CliRunner().invoke(
+                main,
+                ["scan", str(project), "--accept-project-policy", "--report-only"]
+                + ["-o", str(target)],
+            )
+        assert_no_crash(result)
+        assert result.exit_code == 0, result.output
+        completeness = json.loads(target.read_bytes())["metadata"]["completeness"]
+        assert completeness["scan_failures"] == []
+        assert (
+            sorted(entry.split(":", 1)[0] for entry in completeness["surfaces_excluded"])
+            == excluded
+        )
+        assert refused == []
+        assert corpora.watch.opened() == []
+        assert corpora.canaries() == []
+    finally:
+        shutil.rmtree(seeded.root / "excluded")
 
 
 @pytest.mark.parametrize(("seed", "scenario"), CASES, ids=CASE_IDS)
