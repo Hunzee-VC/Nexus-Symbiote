@@ -39,24 +39,28 @@ SEED_CORPUS: tuple[bytes, ...] = (
 )
 
 
-def exercise_one_input(data: bytes) -> None:
-    """Feed arbitrary bytes into every bounded parser entry point; expected errors are caught."""
+def exercise_one_input(data: bytes) -> int:
+    """Feed arbitrary bytes into every bounded parser entry point; return caught rejection count."""
     text = data.decode("utf-8", errors="replace")
+    rejected = 0
 
     try:
         parse_yaml_mapping(text[:4096], max_nodes=256)
     except (PolicyError, ValueError):
-        pass
+        # Mutated bytes are expected to violate strict YAML syntax, node budget, or key uniqueness.
+        rejected += 1
 
     try:
         tomllib.loads(text[:4096])
     except (tomllib.TOMLDecodeError, ValueError):
-        pass
+        # Mutated bytes are expected to violate TOML 1.0 grammar or UTF-8 scalar constraints.
+        rejected += 1
 
     try:
         ecma_pattern(text[:256])
     except (ValueError, re.error):
-        pass
+        # Mutated regex strings are expected to trigger ECMA-262 syntax or repetition bounds.
+        rejected += 1
 
     collect_typescript_source(Path("server.ts"), data[:4096], ScanResult(scanner_name="mcp"))
 
@@ -71,6 +75,7 @@ def exercise_one_input(data: bytes) -> None:
         MCPScanner().scan(root)
         RegistryScanner().scan(root)
         ModelScanner().scan(root)
+    return rejected
 
 
 def _mutate(seed: bytes, step: int) -> bytes:

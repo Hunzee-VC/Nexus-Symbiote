@@ -77,16 +77,25 @@ def evaluate_class_floors(
     scores_doc: dict[str, Any], floors: dict[str, float] = DEFAULT_CLASS_FLOORS
 ) -> list[str]:
     """Check per-class recall in an AIBOM-Bench score document against recorded floors."""
+    import math
+
     failures: list[str] = []
-    per_class = scores_doc.get("per_class_recall") or scores_doc.get("classes")
+    per_class = scores_doc.get("per_class_recall")
+    if per_class is None:
+        per_class = scores_doc.get("classes")
     if not isinstance(per_class, dict):
         return ["scores document missing per_class_recall / classes mapping"]
     for cls_name, floor in sorted(floors.items()):
-        entry = per_class.get(cls_name)
-        if entry is None:
+        if cls_name not in per_class:
+            failures.append(f"{cls_name}: missing from scores document")
             continue
+        entry = per_class[cls_name]
         recall = entry.get("recall") if isinstance(entry, dict) else entry
-        if isinstance(recall, bool) or not isinstance(recall, (int, float)):
+        if (
+            isinstance(recall, bool)
+            or not isinstance(recall, (int, float))
+            or not math.isfinite(float(recall))
+        ):
             failures.append(f"{cls_name}: invalid recall value")
             continue
         if float(recall) + 1e-9 < floor:

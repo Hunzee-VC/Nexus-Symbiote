@@ -84,8 +84,12 @@ security-regressions: ## Run the committed security regression contracts
 precision: ## Run the precision and drift-regression gate against recorded class floors
 	PYTHONPATH=src python scripts/check_precision_gate.py --out precision-gate.json
 
+.PHONY: fuzz-smoke
+fuzz-smoke: ## Exercise bounded parser readers against the deterministic fuzz corpus
+	PYTHONPATH=src python scripts/fuzz_parsers.py --iterations 64
+
 .PHONY: check
-check: quality coverage security-regressions ## Run the offline subset of the required CI checks
+check: quality coverage security-regressions precision fuzz-smoke ## Run the offline subset of the required CI checks
 	$(MAKE) clean-dist
 	$(MAKE) build
 	$(MAKE) check-dist
@@ -122,7 +126,7 @@ clean: ## Remove build artifacts and caches
 	rm -rf build/ dist/ *.egg-info src/*.egg-info
 	find src tests scripts -type d -name __pycache__ -prune -exec rm -rf {} +
 	rm -rf .coverage .coverage.* htmlcov .hypothesis .mypy_cache .pytest_cache .ruff_cache
-	rm -f coverage.json security-regressions.json benchmark-results.json
+	rm -f coverage.json security-regressions.json precision-gate.json benchmark-results.json
 
 # ── Help ─────────────────────────────────────────────────────
 

@@ -209,12 +209,20 @@ jobs:
         env:
           REGRESSION_REPORT: ${{ runner.temp }}/security-regressions.json
         run: python scripts/check_security_regressions.py --out "$REGRESSION_REPORT"
+      - name: Enforce drift-regression and benchmark class recall floors
+        env:
+          PRECISION_REPORT: ${{ runner.temp }}/precision-gate.json
+        run: python scripts/check_precision_gate.py --out "$PRECISION_REPORT"
+      - name: Run bounded parser fuzz smoke gate
+        run: python scripts/fuzz_parsers.py --iterations 64
       - name: Retain per-case security evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: security-regression-evidence
-          path: ${{ runner.temp }}/security-regressions.json
+          path: |
+            ${{ runner.temp }}/security-regressions.json
+            ${{ runner.temp }}/precision-gate.json
           if-no-files-found: error
           retention-days: 14
   dependency-audit:

@@ -13,8 +13,3 @@
 /pyproject.toml @aisecnomad
 /requirements-*.lock @aisecnomad
 /tests/conftest.py @aisecnomad
-
-# Collectors, validators and export projections: require second-maintainer review once configured.
-/src/nexus_symbiote/scanners/ @aisecnomad
-/src/nexus_symbiote/validators/ @aisecnomad
-/src/nexus_symbiote/generators/ @aisecnomad
