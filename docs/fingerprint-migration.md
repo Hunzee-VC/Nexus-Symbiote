@@ -179,9 +179,12 @@ appears in them and they are unchanged. A reference derived from an A2A card's o
 A2A client's name (`a2a-server:<name>`, `a2a-client:<name>`) or a RAG source's name
 (`rag:<name>`) now percent-encodes, as its UTF-8 bytes, each character that
 neutralization replaces in the name, so `a2a-server:browser<ESC>[2K` becomes
-`a2a-server:browser%1B[2K`; such a component has a new reference, which `diff`
-reports as one component removed and another added, and policy entries and
-suppressions that name the old reference no longer apply. References derived from a
+`a2a-server:browser%1B[2K`. A name that is encoded, or that already holds a `%`
+and two hex digits, also has each `%` written `%25`, so a literal
+`browser%1B[2K` becomes `a2a-server:browser%251B[2K` and no two names share a
+reference; a name with neither is its own reference. Such a component has a new
+reference, which `diff` reports as one component removed and another added, and
+policy entries and suppressions that name the old reference no longer apply. References derived from a
 path, such as a prompt import's, keep the path as collected, as do `source_path`,
 evidence locators and `surfaces_scanned`
 ([known limitations](known-limitations.md#every-collector)).

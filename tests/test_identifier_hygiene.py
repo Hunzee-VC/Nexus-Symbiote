@@ -41,7 +41,7 @@ from nexus_symbiote.generators._rules import RULES, rule_tags
 from nexus_symbiote.generators.validation import validate_cyclonedx, validate_sarif, validate_spdx
 from nexus_symbiote.generators.vex import VEXGenerator
 from nexus_symbiote.utils.terminal import UNSAFE_TEXT, neutralize
-from tests.support import otlp_export, otlp_span
+from tests.support import otlp_export, otlp_span, scaling_ratio
 
 ESC_NAME = "browser\x1b[2K"
 ESC_NAME_SHA256 = "363f76b7a8f435e71ca89dc6d3ee5e63ac2c197a5e34db43e03c1738664d6f60"
@@ -633,6 +633,35 @@ def test_selectors_and_joiners_are_kept_only_in_ordinary_spelling(value, kept):
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
+        (f"র{ZWJ}\u09cdয{ZWJ}{ZWJ}\u09cdক", f"র{ZWJ}\u09cdয\ufffd\ufffd\u09cdক"),
+        (f"srv{ZWJ}क\u094d{ZWJ}ष{ZWJ}", f"srv\ufffdक\u094d{ZWJ}ष\ufffd"),
+        (
+            f"\U0001f468{ZWJ}\U0001f469{ZWJ}a{ZWJ}\u09cd",
+            f"\U0001f468{ZWJ}\U0001f469\ufffda\ufffd\u09cd",
+        ),
+        (f"ক\u09bc{ZWJ}\u09cdষ ক{ZWJ}\u094d", f"ক\u09bc{ZWJ}\u09cdষ ক\ufffd\u094d"),
+        (f"{ZWJ}\u09cd{ZWJ}", "\ufffd\u09cd\ufffd"),
+        (f"ന\u0d4d{ZWJ}{ZWNJ}x{ZWJ}\u0d4dന", f"ന\u0d4d{ZWJ}\ufffdx\ufffd\u0d4dന"),
+    ],
+)
+def test_joiners_in_mixed_strings_are_judged_each_on_its_neighbours(value, expected):
+    assert neutral_text(value) == expected
+    assert neutral_text(expected) == expected
+
+
+@pytest.mark.parametrize(
+    "unit",
+    [ZWJ, f"র{ZWJ}\u09cd"],
+    ids=["joiners-after-latin", "bengali-ra-ya-phala"],
+)
+def test_neutralizing_many_joiners_is_linear(unit):
+    values = {scale: "srv" + unit * (40_000 * scale // len(unit)) for scale in (1, 4)}
+    assert scaling_ratio(lambda scale: neutral_text(values[scale])) < 10
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
         ("MCP сервер", ()),
         ("GitHub-интеграция", ()),
         ("Slack-уведомления_bot", ()),
@@ -805,6 +834,21 @@ def test_reference_text_escapes_only_what_neutralization_replaces():
     assert reference_text("##[x") == "#%23[x"
     assert reference_text("\U000e0041") == "%F3%A0%81%81"
     assert reference_text("x\x1b") != reference_text("x\x07")
+
+
+@pytest.mark.parametrize(
+    ("raw", "literal"),
+    [
+        ("browser\x1b[2K", "browser%1B[2K"),
+        ("docs\u202etxt.exe", "docs%E2%80%AEtxt.exe"),
+        ("a\tb", "a%09b"),
+    ],
+)
+def test_a_literal_percent_escape_never_shares_a_raw_names_reference(raw, literal):
+    assert reference_text(literal) == literal.replace("%", "%25")
+    assert reference_text(raw) == literal
+    assert reference_text(f"{raw} 100%") == f"{literal} 100%25"
+    assert reference_text("100% ok") == "100% ok"
 
 
 def _owner_status(tmp_path: Path, owner: str) -> str:

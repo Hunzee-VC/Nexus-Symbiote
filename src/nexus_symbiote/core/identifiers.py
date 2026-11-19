@@ -210,6 +210,7 @@ _EAST_ASIAN = (
 )
 _SHOWN_CHARS = 80
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+_PERCENT_TRIPLET = re.compile(r"%[0-9A-Fa-f]{2}")
 _LISTED_VALUES = 10
 
 
@@ -238,12 +239,16 @@ def _emoji_before(value: str, index: int) -> bool:
     return index > 0 and _emoji(value[index - 1])
 
 
-def _virama_on_its_letter(value: str, index: int) -> bool:
-    """Whether ``value[index]`` is a virama on a letter of its own script."""
+def _virama_on_its_letter(value: str, index: int, base: int | None = None) -> bool:
+    """Whether ``value[index]`` is a virama on a letter of its own script.
+
+    The letter is sought from ``base`` back, by default the character before the virama,
+    so a ZWJ between the two can be stepped over without copying ``value``.
+    """
     if not 0 < index < len(value) or unicodedata.combining(value[index]) != _VIRAMA:
         return False
     script = _script_word(value[index])
-    base = index - 1
+    base = index - 1 if base is None else base
     while base >= 0 and unicodedata.category(value[base])[0] == "M":
         base -= 1
     return (
@@ -287,7 +292,7 @@ def _kept(value: str, index: int) -> bool:
     if _virama_on_its_letter(value, index - 1):
         return True
     if char == _ZWJ:
-        return _virama_on_its_letter(value[:index] + value[index + 1 :], index)
+        return _virama_on_its_letter(value, index + 1, index - 1)
     previous = _joining_neighbour(value, index - 1, -1)
     following = _joining_neighbour(value, index + 1, 1)
     return (
@@ -366,18 +371,21 @@ def reference_text(value: str) -> str:
     """``value`` for use inside a ``bom_ref``.
 
     Each character ``neutral_text`` would replace is percent-encoded as its UTF-8 bytes
-    instead, so no reference holds a control or format character and two raw names that
-    neutralize alike still get different references. Other text, ``%`` included, is
-    kept, so a reference to a name without such characters is unchanged.
+    instead, so no reference holds a control or format character. When anything is
+    encoded, or the name already holds a ``%`` and two hex digits, every ``%`` becomes
+    ``%25`` too, so an encoded reference decodes to exactly one name and different raw
+    names get different references. A name with neither, ``%`` alone included, is its
+    own reference.
     """
     rewrites = _rewrites(value)
-    if not rewrites:
+    if not rewrites and not _PERCENT_TRIPLET.search(value):
         return value
     chars = list(value)
-    for index in rewrites:
-        chars[index] = "".join(
-            f"%{byte:02X}" for byte in value[index].encode("utf-8", "surrogatepass")
-        )
+    for index, char in enumerate(chars):
+        if index in rewrites:
+            chars[index] = "".join(f"%{byte:02X}" for byte in char.encode("utf-8", "surrogatepass"))
+        elif char == "%":
+            chars[index] = "%25"
     return "".join(chars)
 
 
