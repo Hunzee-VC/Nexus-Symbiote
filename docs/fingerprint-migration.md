@@ -127,6 +127,37 @@ Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a server that declares one carries 
 launch values are unbound for it, even between identical inventories. Set the key
 on both collections to compare those values, or review and accept the alert.
 
+## MCP client dialects
+
+Junie's `.junie/mcp/mcp.json` was read as a nested `mcp.json`: its servers were
+inventoried as launched from `.junie/mcp`, with the medium `package_source` finding
+of a launch in a nested directory and no `package_url`, beside a coverage gap that
+the client file was not inventoried. It is now the `junie` client's own file, whose
+servers the collector reads as launched from the project root, so the same server
+keeps its `bom_ref` but loses the gap and the `package_source` finding, gains a
+`package_url` for an exact version from the default registry, and joins a new
+`junie` MCP client.
+`diff` against an inventory written before this change reports each such server
+once as a critical `MCP server launcher package changed` alert, with the static
+source binding and `package_url` changed and the `package_source` finding removed,
+and the new client and its `configured-with` relationship as added. `validate
+--project` of the earlier inventory already failed on its `MCP client configuration
+not inventoried` gap and partial coverage; it now also fails because each Junie
+server's component changed (its `package_url` and static source binding) and because
+the new `junie` client and its `configured-with` relationship are missing.
+Recollect the baseline, review the servers' package identities and the client, and
+approve the new snapshot instead of accepting the alerts against the old one.
+
+Servers in Zed, opencode and Continue files, and servers in any client file that
+declare neither a command nor an endpoint, were gaps or gap-free records before; the
+first scan after upgrading reports them as added, or adds a high
+`launcher_identity` finding and a gap to them. For a server with no launch, `diff`
+also reports `version_pinned` changed (unset before, `false` now, as for a Zed
+extension server), a high `New coverage gaps` alert and, where the baseline's MCP
+coverage was complete, `Collector 'mcp' coverage changed from complete to
+partial`; `validate` warns that its package version is not pinned although it names
+no package. Review them the same way.
+
 ## SARIF rule identifiers
 
 0.1.0 keyed SARIF rules by category (`nexus_symbiote/<category>`) and raised a

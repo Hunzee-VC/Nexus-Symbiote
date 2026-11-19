@@ -351,7 +351,12 @@ def test_every_new_dialect_names_its_host_and_is_listed_for_the_reference():
     assert hosts["opencode.json"] == hosts["opencode.jsonc"] == "opencode"
     assert hosts[".continue/config.yaml"] == hosts[".continue/mcpServers/x.yml"] == "continue"
     assert hosts[".junie/mcp/mcp.json"] == "junie"
-    assert MCP_CONFIG_DIRECTORIES == [".continue/mcpServers"]
+    assert MCP_CONFIG_DIRECTORIES == [
+        ".continue/mcpServers",
+        ".continue/agents",
+        ".continue/assistants",
+        ".continue/configs",
+    ]
     assert MCPScanner._detect_host_from_config("pkg/.continue/mcpServers/x.yaml") == "continue"
 
 

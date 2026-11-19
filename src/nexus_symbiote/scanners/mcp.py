@@ -107,6 +107,9 @@ class McpDialect:
     # Set on a directory the client reads one server file at a time: the suffixes of
     # the files it reads there, each a document in the dialect's syntax.
     members: tuple[str, ...] = ()
+    # The suffixes of files below such a directory that the client may read and the
+    # collector does not read there: in a deeper directory, or not among ``members``.
+    member_gaps: tuple[str, ...] = ()
     # The client whose file this is, when no host directory or file name names it.
     host: str | None = None
 
@@ -136,7 +139,8 @@ MCP_DIALECTS = (
     McpDialect(".cline/mcp.json", "json", _SERVER_MAPS),
     McpDialect(".codex/config.toml", "toml", ("mcp_servers",)),
     McpDialect(".zed/settings.json", "jsonc", ("context_servers",), shape="zed", host="zed"),
-    McpDialect("opencode.json", "json", ("mcp",), shape="opencode"),
+    # opencode reads comments and trailing commas in both names.
+    McpDialect("opencode.json", "jsonc", ("mcp",), shape="opencode"),
     McpDialect("opencode.jsonc", "jsonc", ("mcp",), shape="opencode"),
     McpDialect(".continue/config.yaml", "yaml", ("mcpServers",), shape="continue", host="continue"),
     McpDialect(
@@ -145,9 +149,27 @@ MCP_DIALECTS = (
         ("mcpServers",),
         shape="continue",
         members=(".yaml", ".yml"),
+        member_gaps=(".json", ".yaml", ".yml"),
         host="continue",
     ),
+    # Continue's local agent configurations, each in the config.yaml format; the
+    # assistants and configs directories are the names it also reads them from.
+    *(
+        McpDialect(
+            f".continue/{name}",
+            "yaml",
+            ("mcpServers",),
+            shape="continue",
+            members=(".yaml", ".yml"),
+            member_gaps=(".yaml", ".yml"),
+            host="continue",
+        )
+        for name in ("agents", "assistants", "configs")
+    ),
     McpDialect(".junie/mcp/mcp.json", "json", _SERVER_MAPS, host="junie"),
+    # Continue merges a workspace .continuerc.json onto its global config.json, whose
+    # experimental.modelContextProtocolServers the collector does not read: a gap.
+    McpDialect(".continuerc.json", "jsonc", (), shape="continuerc", host="continue"),
 )
 MCP_CONFIG_FILES = [dialect.path for dialect in MCP_DIALECTS if not dialect.members]
 MCP_CONFIG_DIRECTORIES = [dialect.path for dialect in MCP_DIALECTS if dialect.members]
@@ -201,10 +223,13 @@ _FOLDED_TEMPLATES = sorted(
     ),
     key=lambda template: -len(template[0]),
 )
-_FOLDED_DIRECTORIES = [template for template in _FOLDED_TEMPLATES if template[2]]
 # Files below a server directory that the client does not read there, or whose reading
 # there is not confirmed, are gaps rather than silence.
-_DIRECTORY_GAP_SUFFIXES = (".json", ".yaml", ".yml")
+_DIRECTORY_DIALECTS = {
+    tuple(fold_name(part) for part in dialect.path.split("/")): dialect
+    for dialect in MCP_DIALECTS
+    if dialect.members
+}
 _DIRECTORY_GAP = "file below an MCP server directory that the collector does not read there"
 
 
@@ -257,18 +282,17 @@ def _directory_gap(path: Path) -> bool:
     """Whether the walked ``path``, which names no client file, is a gap below a server
     directory: a file of a suffix the client may read, deeper than the directory or of
     a suffix the collector does not read there, in any spelling of the directory."""
-    if not path.name.lower().endswith(_DIRECTORY_GAP_SUFFIXES):
-        return False
+    name = path.name.lower()
     folded = tuple(fold_name(part) for part in path.parts[:-1])
     return any(
-        folded[start : start + len(template)] == template
-        for template, _, _ in _FOLDED_DIRECTORIES
+        name.endswith(dialect.member_gaps) and folded[start : start + len(template)] == template
+        for template, dialect in _DIRECTORY_DIALECTS.items()
         for start in range(len(folded) - len(template) + 1)
     )
 
 
 def _directory_members(
-    files: ConfinedCollection, directory: Path, members: tuple[str, ...]
+    files: ConfinedCollection, directory: Path, dialect: McpDialect
 ) -> tuple[list[Path], list[Path]]:
     """The files a client reads in a linked server ``directory``, and the gaps below it.
 
@@ -283,9 +307,9 @@ def _directory_members(
             relative = path.relative_to(target)
         except ValueError:
             continue
-        if len(relative.parts) == 1 and fold_name(relative.name).endswith(members):
+        if len(relative.parts) == 1 and fold_name(relative.name).endswith(dialect.members):
             found.append(directory / relative)
-        elif relative.name.lower().endswith(_DIRECTORY_GAP_SUFFIXES):
+        elif relative.name.lower().endswith(dialect.member_gaps):
             gaps.append(directory / relative)
     return found, gaps
 
@@ -306,17 +330,19 @@ def _linked_client_files(
     gaps: list[Path] = []
     for link in links:
         folded = tuple(fold_name(part) for part in link.parts)
-        candidates: dict[Path, tuple[str, ...]] = {}
+        candidates: dict[Path, McpDialect | None] = {}
         if folded[-1] in _FOLDED_HOST_DIRECTORIES:
-            candidates.update((link / name, ()) for name in MCP_CONFIG_NAMES)
+            candidates.update((link / name, None) for name in MCP_CONFIG_NAMES)
         for template, spelling, members in _FOLDED_TEMPLATES:
             for size in range(1, len(template) + (1 if members else 0)):
                 if folded[-size:] == template[:size]:
-                    candidates[link.joinpath(*spelling[size:])] = members
-        for path, members in sorted(candidates.items()):
-            if members:
+                    candidates[link.joinpath(*spelling[size:])] = (
+                        _DIRECTORY_DIALECTS[template] if members else None
+                    )
+        for path, directory in sorted(candidates.items(), key=lambda item: item[0]):
+            if directory is not None:
                 if files.is_directory(path):
-                    files_found, files_gaps = _directory_members(files, path, members)
+                    files_found, files_gaps = _directory_members(files, path, directory)
                     found.extend(files_found)
                     gaps.extend(files_gaps)
                     continue
@@ -510,11 +536,14 @@ class _Normalized:
 
 @dataclass(frozen=True)
 class _Entries:
-    """One file's servers by name, with the problems and unknown launchers of its shape."""
+    """One file's servers by name, with the problems and unknown launchers of its shape,
+    and the entries its shape drops before naming them, whose credential values the
+    file's servers may still repeat."""
 
     servers: list[tuple[str, Any]]
     problems: dict[str, str]
     unknown: dict[str, str]
+    dropped: tuple[dict[str, Any], ...] = ()
 
 
 _INVALID_SERVER = "invalid server configuration"
@@ -536,6 +565,7 @@ def _interpreted(field: str, shape: str) -> bool:
 
 
 _ZED_EXTENSION = "provided by a Zed extension; the client file holds no launch"
+_NO_LAUNCH = "declares neither a command nor an endpoint; the client file holds no launch"
 # Fields that mark a Continue server file whose top level is a server, a shape the
 # collector does not confirm, rather than a block holding a server list.
 _SERVER_FIELDS = ("command", "args", "url", "type")
@@ -546,11 +576,13 @@ def _zed_server(config: dict[str, Any]) -> _Normalized:
 
     Older settings nest the launch as ``{"command": {"path", "args", "env"}}``; newer
     ones declare it beside ``"source": "custom"``. A ``"source": "extension"`` entry,
-    and any entry with neither a command nor an endpoint, is a server the editor's
-    extension starts from its own code, so its launcher is unknown and its
-    ``settings`` are the extension's, scrubbed as environment values are.
+    and an entry with no source and neither a command nor an endpoint, is a server the
+    editor's extension starts from its own code, so its launcher is unknown and its
+    ``settings`` are the extension's, scrubbed as environment values are; a custom
+    entry without a launch holds none, as in any other client file. Zed reads ``env``
+    as optional, so a null one is absent.
     """
-    config = dict(config)
+    config = {key: value for key, value in config.items() if key != "env" or value is not None}
     problem = _INVALID_SERVER if _EXTENSION_SETTINGS in config else None
     if "settings" in config:
         config[_EXTENSION_SETTINGS] = config.pop("settings")
@@ -561,7 +593,7 @@ def _zed_server(config: dict[str, Any]) -> _Normalized:
     if isinstance(command, dict):
         config["command"] = command.get("path")
         for key, value in command.items():
-            if key == "path":
+            if key == "path" or (key == "env" and value is None):
                 continue
             if key in ("args", "env"):
                 if key in config:
@@ -570,10 +602,20 @@ def _zed_server(config: dict[str, Any]) -> _Normalized:
             else:
                 config[f"command.{key}"] = value
     launched = bool(config.get("command")) or any(config.get(field) for field in _ENDPOINT_FIELDS)
-    unknown = _ZED_EXTENSION if source == "extension" or not launched else None
+    unknown = _ZED_EXTENSION if source == "extension" or (source is None and not launched) else None
     if source == "extension" and launched:
         problem = "MCP server declares a launch beside an extension source"
     return _Normalized(config, unknown, problem)
+
+
+# opencode replaces {env:NAME} and {file:PATH} in its configuration text when it loads it.
+_OPENCODE_SUBSTITUTION = re.compile(r"(?<!\$)\{((?:env|file):[^}]+)\}")
+
+
+def _opencode_text(value: Any) -> Any:
+    """``value`` with each opencode substitution spelled as the reference ``${...}``,
+    which every reader treats as unresolved; other values are returned unchanged."""
+    return _OPENCODE_SUBSTITUTION.sub(r"${\1}", value) if isinstance(value, str) else value
 
 
 def _opencode_server(config: dict[str, Any]) -> _Normalized:
@@ -581,9 +623,20 @@ def _opencode_server(config: dict[str, Any]) -> _Normalized:
 
     A local server's ``command`` is a list of words and its environment is
     ``environment``; a remote server's ``type`` is ``remote``, whose transport the
-    endpoint decides, as for a client file that declares none.
+    endpoint decides, as for a client file that declares none, and which is
+    Streamable HTTP when it declares no endpoint. A substitution in a
+    value, or in a word or value one level below, is an unresolved reference.
     """
-    config = dict(config)
+    config = {
+        key: (
+            [_opencode_text(item) for item in value]
+            if isinstance(value, list)
+            else {name: _opencode_text(item) for name, item in value.items()}
+            if isinstance(value, dict)
+            else _opencode_text(value)
+        )
+        for key, value in config.items()
+    }
     problem = _INVALID_SERVER if _OAUTH_DISABLED in config else None
     if config.get("oauth") is False:
         del config["oauth"]
@@ -605,7 +658,12 @@ def _opencode_server(config: dict[str, Any]) -> _Normalized:
         else:
             config["env"] = config.pop("environment")
     if config.get("type") == "remote":
-        del config["type"]
+        if any(field in config for field in _ENDPOINT_FIELDS):
+            del config["type"]
+        else:
+            # opencode starts no command for a remote server, so one without an endpoint
+            # keeps a remote type and a command beside it reads as transport ambiguity.
+            config["type"] = "streamable-http"
     return _Normalized(config, None, problem)
 
 
@@ -810,10 +868,11 @@ def _auth_object_secrets(settings: dict[str, Any]) -> list[str]:
 
 
 def _settings_secrets(settings: dict[str, Any]) -> list[str]:
-    """Credentials a Zed extension's ``settings`` object holds, at any depth.
+    """Credentials an object such as a Zed extension's ``settings`` holds, at any depth.
 
     Each string is read as the value of the key that names it, as an environment
-    value is, and by its shape. _server_problem bounds the object, so every node is read.
+    value is, and by its shape. _server_problem bounds an extension's object, and the
+    file's size and parse depth bound a shape's credential fields, so every node is read.
     """
     found: list[str] = []
     pending: list[tuple[str, Any]] = [("", settings)]
@@ -828,6 +887,24 @@ def _settings_secrets(settings: dict[str, Any]) -> list[str]:
         elif isinstance(current, list):
             pending.extend((key, item) for item in current)
     return found
+
+
+# Credential fields of a client's own shape that the collector does not interpret: a
+# refused opencode server's environment beside env, and Continue's apiKey, request
+# options and hub block inputs. Their values are scrubbed from every server of the file
+# all the same.
+_SHAPE_CREDENTIALS = {
+    "opencode": ("environment",),
+    "continue": ("apiKey", "requestOptions", "with"),
+}
+
+
+def _shape_credentials(config: dict[str, Any], shape: str) -> list[str]:
+    """Credential values ``config`` holds in its shape's uninterpreted credential fields."""
+    fields = {
+        field: config[field] for field in _SHAPE_CREDENTIALS.get(shape, ()) if field in config
+    }
+    return _settings_secrets(fields) if fields else []
 
 
 def _launch_words(texts: Iterable[str]) -> list[str]:
@@ -2213,7 +2290,11 @@ class MCPScanner(Scanner):
                 result.scan_failures.append(f"{dialect.path}: {key_error}")
                 continue
             # Prepared once per file and reused for every server and diagnostic.
-            file_secrets = SecretScrubber(self._file_secrets(entries, dialect.shape))
+            file_secrets = SecretScrubber(
+                self._file_secrets(
+                    [*entries, *(("", config) for config in read.dropped)], dialect.shape
+                )
+            )
             if len(file_secrets) > MAX_SECRETS_PER_FILE:
                 result.scan_failures.append(
                     f"{dialect.path}: more than {MAX_SECRETS_PER_FILE} credential values in one "
@@ -2290,6 +2371,7 @@ class MCPScanner(Scanner):
         for _, config in entries:
             if not isinstance(config, dict):
                 continue
+            values.extend(_shape_credentials(config, shape))
             if cls._server_problem(config, shape) is not None:
                 for field in ("env", "headers", "http_headers"):
                     mapping = config.get(field)
@@ -2338,12 +2420,16 @@ class MCPScanner(Scanner):
     ) -> Any:
         if dialect.syntax == "json":
             return files.read_json(dialect.path, missing_ok=True)
-        if dialect.syntax == "yaml":
-            # The bounded reader: anchors, aliases, tags and a non-mapping are failures.
-            return self._read_mapping(Path(dialect.path), result)
         text = files.read_text(dialect.path, missing_ok=True)
         if text is None:
             return None
+        if dialect.syntax == "yaml":
+            # The bounded reader: an empty document holds no servers; anchors, aliases,
+            # tags and a non-mapping are failures where a server could be declared.
+            names = (*dialect.maps, *(_SERVER_FIELDS if dialect.members else ()))
+            return self._parse_yaml_mapping(
+                Path(dialect.path), text, result, inert_without=frozenset(names)
+            )
         try:
             if dialect.syntax == "toml":
                 return load_toml(text, parse_float=_finite_float)
@@ -2360,6 +2446,17 @@ class MCPScanner(Scanner):
         entries: dict[str, Any] = {}
         problems: dict[str, str] = {}
         unknown: dict[str, str] = {}
+        dropped: list[dict[str, Any]] = []
+        experimental = data.get("experimental")
+        if (
+            dialect.shape == "continuerc"
+            and isinstance(experimental, dict)
+            and experimental.get("modelContextProtocolServers")
+        ):
+            result.surfaces_excluded.append(
+                f"{dialect.path}: Continue workspace MCP servers "
+                "(experimental.modelContextProtocolServers) not inventoried"
+            )
         for key in dialect.maps:
             servers = data.get(key)
             if servers is None:
@@ -2374,6 +2471,10 @@ class MCPScanner(Scanner):
                 repeated: set[str] = set()
                 for index, config in enumerate(servers, 1):
                     name = config.get("name") if isinstance(config, dict) else None
+                    if isinstance(config, dict) and (
+                        not isinstance(name, str) or not name or name in entries or name in repeated
+                    ):
+                        dropped.append(config)
                     if isinstance(config, dict) and "uses" in config and name is None:
                         # The slug is not shown: it is the checkout's text, not an identity.
                         result.surfaces_excluded.append(
@@ -2391,7 +2492,7 @@ class MCPScanner(Scanner):
                         entries[name] = config
                 for name in sorted(repeated):
                     # Which entry the client keeps is not confirmed, so neither is read.
-                    del entries[name]
+                    dropped.append(entries.pop(name))
                     result.scan_failures.append(
                         f"{dialect.path}: MCP server declared more than once; not inventoried"
                     )
@@ -2467,7 +2568,7 @@ class MCPScanner(Scanner):
                     "exceeded"
                 )
                 return None
-        return _Entries(sorted(entries.items()), problems, unknown)
+        return _Entries(sorted(entries.items()), problems, unknown, tuple(dropped))
 
     @staticmethod
     def _server_problem(config: dict[str, Any], shape: str) -> str | None:
@@ -2611,6 +2712,8 @@ class MCPScanner(Scanner):
             )
         if identity_unknown is None:
             identity_unknown = launcher_unknown
+        if identity_unknown is None and not command and not endpoints:
+            identity_unknown = _NO_LAUNCH
         if identity_unknown:
             gaps.append(f"launcher identity unknown ({identity_unknown})")
         if identity.withheld:
