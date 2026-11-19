@@ -74,6 +74,8 @@ change them. See [collection limits](collection-limits.md).
 | [`attest`](#attest) | offline | Sign a file's exact bytes, usually an inventory or a baseline, for a stated purpose |
 | [`verify-attestation`](#verify-attestation) | offline | Check that trusted keys attested a file's bytes or inventory content for a purpose |
 | [`trace-diff`](#trace-diff) | offline | Compare the runtime use that OpenTelemetry traces report with an AgentBOM |
+| [`model-policy`](#model-policy) | offline | Enforce model pinning, license, `trust_remote_code`, and offline AIROM retirement policy |
+| [`completeness-score`](#completeness-score) | offline | Score an AgentBOM on separate structure and completeness axes with missing-field checklists |
 | [`discover-mcp`](#discover-mcp) | **live** | List the tools an HTTPS MCP server serves, without calling them |
 | [`advisories`](#advisories) | **live** | Query OSV for advisories affecting exact PyPI and npm package versions |
 | [`verify-live`](#verify-live) | **live** | Compare an AgentBOM with the tools that operator-pinned stdio servers serve |
@@ -1056,6 +1058,39 @@ and `stdio`, such as the `websocket` that the `mcp` collector records for a `ws:
 `wss://` endpoint, fails with reason `unsupported-transport`. The
 [launch policy](#launch-policy) section gives the policy's format and where it may be
 kept.
+
+### `model-policy`
+
+Evaluate `ModelComponent` records in an AgentBOM offline against pinning, license, `trust_remote_code`, weight-serialization safety, and an offline AIROM model retirement catalog.
+
+```text
+nexus-symbiote model-policy [OPTIONS] AIBOM_PATH
+```
+
+| Option | Description |
+|---|---|
+| `--policy` `PATH` | Operator-owned model governance policy YAML or JSON outside the scanned project. |
+| `--policy-attestation` `PATH` | Ed25519 DSSE attestation envelope (`purpose=reviewed`) verifying `--policy` (required by default when `--policy` is supplied). |
+| `--retirement-catalog` `PATH` | Operator-owned offline AIROM model retirement catalog JSON outside the scanned project. |
+| `--catalog-attestation` `PATH` | Ed25519 DSSE attestation envelope (`purpose=reviewed`) verifying `--retirement-catalog` (required by default when `--retirement-catalog` is supplied). |
+| `--trusted-key` `PATH` | Trusted Ed25519 public key PEM outside the project (repeatable; used with `--policy-attestation` / `--catalog-attestation`). |
+| `--allow-unsigned-policy` | Explicitly allow an unattested `--policy` or `--retirement-catalog` instead of requiring DSSE verification. |
+| `--project-root` `PATH` | Scanned project root used to refuse policy, catalog, or key files stored inside the checkout. |
+| `-o`, `--output` `PATH` | Write the policy report JSON to this file instead of standard output. |
+
+### `completeness-score`
+
+Compute deterministic dual-axis `structure_score` and `completeness_score` (0–100) for an AgentBOM offline, with per-component `missing_fields` checklists.
+
+```text
+nexus-symbiote completeness-score [OPTIONS] AIBOM_PATH
+```
+
+| Option | Description |
+|---|---|
+| `--min-structure` `FLOAT` | Exit 1 when overall `structure_score` is below this threshold (0–100). |
+| `--min-completeness` `FLOAT` | Exit 1 when overall `completeness_score` is below this threshold (0–100). |
+| `-o`, `--output` `PATH` | Write the completeness report JSON to this file instead of standard output. |
 
 ### `vex`
 
