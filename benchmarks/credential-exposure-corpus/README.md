@@ -34,6 +34,47 @@ sh run_all.sh .venv/bin/python /tmp/cred main=/checkouts/main fix=/checkouts/fix
   Stage 3 adds positions (private key blocks, endpoint URL query, the command field).
   They have no tests and no documentation.
 
+## Forty-five more cases from the second check
+
+A second agent re-ran all 1,437 cases on worktrees of its own and reproduced every row.
+It also wrote 45 cases of its own, without seeing how `corpus.py` was built:
+
+- `extra_cases.py` builds them, in the same manifest format:
+
+  ```sh
+  python3 -I extra_cases.py /tmp/cred-extra
+  cd /checkouts/fix && HOME=/tmp/empty PYTHONPATH=src python3 -B \
+      /path/to/run_tree.py fix /tmp/cred-extra /tmp/cred-extra-results/fix.jsonl
+  python3 compare.py /tmp/cred-extra /tmp/cred-extra-results fix
+  ```
+
+- `extra-verdicts.tsv` holds one row per case with the verdicts of `main`, pull request
+  255 at `6738b8ee`, pull request 259 at `be778342` and prototype stage 3. Names are
+  listed; values are not.
+
+| | Credentials reported (of 30) | Benign values reported (of 15) |
+| --- | ---: | ---: |
+| `main` | 0 | 0 |
+| Pull request 255 at `6738b8ee` | 13 | 13 |
+| Pull request 259 at `be778342` | 12 | 1 |
+| Prototype stage 3 | 13 | 10 |
+
+The benign 15 are ordinary launcher settings, not values written to break a rule:
+`ssh -o StrictHostKeyChecking=accept-new`, `-o PreferredAuthentications=publickey`,
+`-o HostKeyAlgorithms=ssh-ed25519`, `uvx --keyring-provider subprocess`,
+`UV_KEYRING_PROVIDER`, `PYTHON_KEYRING_BACKEND`, a Docker host mapping and two mounts, a
+timestamp, a timeout, a CORS header, a public anon JWT, an scp-style repository address
+and a README placeholder. The 30 credentials include shapes that none of the three
+trees reports: an Azure SAS `sig=`, a literal default in `${NAME:-literal}`, passwords
+under `DB_PW`, `ADMIN_PSWD` and `--pw`, five vendor token prefixes under names without a
+credential word, a registry auth document and `-u user:password`.
+
+The second check also corrects what the prototype is said to do: at stage 3 it still
+reports two reference cases (`c0413`, `c0417`), its endpoint-query position adds ten
+benign reports of its own, three of them `page_token` locators, and it still reports
+ten of these fifteen benign values. Its gain on the main corpus comes from value rules
+and does not reach the name rule.
+
 ## Reading the numbers
 
 The benign set is hostile by construction: lists written to break pull request 259, and
