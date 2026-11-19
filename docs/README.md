@@ -87,17 +87,20 @@ Reference material: exact behavior, fields and limits.
 | [Releasing](releasing.md) | Build, attest, rehearse on TestPyPI and publish a release |
 | [Hostile corpus suite](../benchmarks/README.md#hostile-corpus-suite) | Check that no collector executes, connects, escapes the scan root, leaks a credential or a terminal escape, or exceeds its bounds on the seeded hostile corpus, and add a row for a new parser |
 | [Support](../SUPPORT.md) | Troubleshoot collection, import and validation outcomes |
+| [Labels](labels.md) | What each pull-request label means, who sets it, and which labels every pull request carries |
 
 ## Project records
 
 | Record | Contents |
 | --- | --- |
 | [Changelog](../CHANGELOG.md) | Notable changes, including breaking ones |
+| [Decisions](decisions.md) | Where each kind of decision is recorded, and how to record a new one |
 | [Roadmap](../ROADMAP.md) | What was delivered against the external reviews, the plan with its acceptance tests, a scorecard, and decisions and non-goals |
 | [Closed-PR audit, 2026-11-02](audits/closed-pr-review-2026-11-02.md) | Disposition of every closed pull request up to #73, and what reached the supported package |
 | [Pull-request, branch and issue review, 2026-11-03](audits/closed-pr-review-2026-11-03.md) | Pull requests #74–#116, every branch, and the issues still open on 2026-11-03 |
 | [Security audit of the whole repository, 2026-11-14](audits/security-audit-2026-11-14.md) | Every module, script, workflow and page at `4aaf727`: verdict, 35 ranked findings, the controls confirmed under hostile input, and what to do next |
-| [Status of the 2026-11-14 audit findings](audits/security-audit-2026-11-14-status.md) | Each finding on `main` after batch 1 and this branch: fixed and how it was verified, partly fixed, deferred, or awaiting an administrator or a decision |
+| [Status of the 2026-11-14 audit findings](audits/security-audit-2026-11-14-status.md) | Each finding on `main` at `a604c33` (batch 1, #202) and on the branch that carried the note: fixed and how it was verified, partly fixed, deferred, or awaiting an administrator or a decision |
 | [Repository audit and open pull request review, 2026-11-16](audits/repository-audit-2026-11-16.md) | `main` after #226 and #227, and pull requests #224, #228 and #229: automated checks of the whole tree, eight ranked findings with their fixes, and recommendations |
+| [Pull-request, branch and label review, 2026-11-19](audits/pull-request-review-2026-11-19.md) | Pull requests #117–#291: how each merged one reached `main` and whether its lines survive, why each closed one closed, the open ones against the roadmap with their overlaps, and every branch by whether deleting it loses a commit |
 
 Documentation changes follow the same review as code. Local links, including links to headings, are checked in CI by `scripts/check_repository_hygiene.py`; run `make hygiene` before you open a pull request.

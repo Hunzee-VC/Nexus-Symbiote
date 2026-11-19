@@ -6,6 +6,12 @@
 
 <!-- For example: Closes #123. Write "None" if there is no issue. -->
 
+## Roadmap and decisions
+
+<!-- Name the ROADMAP.md item this change implements and any recorded decision it relies on or
+would change (docs/decisions.md says where each kind is recorded). Check that no open pull request
+already implements the same item. Write "None" for a fix or chore outside the roadmap. -->
+
 ## Type of change
 
 - [ ] Bug fix (non-breaking change that fixes an issue)
@@ -20,6 +26,7 @@
 `make check` runs the offline subset of the required CI checks. See [CONTRIBUTING.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CONTRIBUTING.md).
 
 - [ ] Tests cover the new or changed behavior
+- [ ] New tests take __ s in total without coverage (`python -m pytest --durations=0`; at most 60 s, see CONTRIBUTING.md)
 - [ ] `ruff check src tests scripts` passes
 - [ ] `ruff format --check src tests scripts` passes
 - [ ] `mypy src/nexus_symbiote scripts` passes
@@ -27,8 +34,11 @@
 - [ ] Dependency changes: locks regenerated with `make lock`, and the "Dependency health" run is green
 - [ ] Documentation updated (if applicable)
 - [ ] CHANGELOG.md updated under Unreleased
+- [ ] Labelled with one type and one area label ([label guide](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/labels.md))
 
 ## Review record
+
+<!-- A behavior- or security-changing pull request stays open for at least 24 hours: opened __ UTC, merge not before __ UTC. -->
 
 <!-- Who reviewed the full rendered diff after Verified CI finished, and when. Name any AI
 assistance used to write or review the change and whether its review ran outside the session
