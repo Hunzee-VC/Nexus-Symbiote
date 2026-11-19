@@ -853,6 +853,37 @@ CROSSWALK: dict[str, tuple[Reference, ...]] = {
         _ref(EU_AI_ACT, "Art. 15", _RESILIENCE),
         _ref(ISO_42001, "A.10.3", _SUPPLIER),
     ),
+    "oversight_gap": (
+        _ref(CWE, "CWE-250", "A destructive or shell tool executes without human approval."),
+        _ref(
+            OWASP_LLM_2025,
+            "LLM06:2025",
+            "Auto-approving destructive tools grants excessive agency.",
+        ),
+        _ref(
+            OWASP_ASI_2026,
+            "ASI02",
+            "Destructive tool calls lack human-in-the-loop confirmation.",
+        ),
+        _ref(
+            OWASP_LLM_2026,
+            "LLM03:2026",
+            "Auto-approving destructive tools grants excessive agency.",
+        ),
+    ),
+    "subagent_inline_mcp_server": (
+        _ref(
+            OWASP_ASI_2026,
+            "ASI04",
+            "Inline subagent mcpServers bypass top-level MCP server inventory review.",
+        ),
+        _ref(
+            OWASP_LLM_2025,
+            "LLM03:2025",
+            "Unpinned inline MCP server declarations expand the agent supply chain.",
+        ),
+        _ref(NIST_AI_RMF, "MANAGE-3.1", _THIRD_PARTY),
+    ),
     "permission_scope": (
         _ref(CWE, "CWE-250", "The agent runs with permissions beyond what a task needs."),
         _ref(

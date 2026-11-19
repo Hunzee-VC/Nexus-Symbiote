@@ -29,7 +29,12 @@ from typing import Any
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import canonical_json, hash_canonical, parse_json_strict
-from nexus_symbiote.core.models import IDEAgentComponent, RiskAssessment, VerifiedExtensionComponent
+from nexus_symbiote.core.models import (
+    IDEAgentComponent,
+    ModelComponent,
+    RiskAssessment,
+    VerifiedExtensionComponent,
+)
 from nexus_symbiote.scanners.base import Scanner, ScanResult
 from nexus_symbiote.scanners.mcp import (
     _CODE_LOADING_ENVIRONMENT,
@@ -37,9 +42,16 @@ from nexus_symbiote.scanners.mcp import (
     _exported_function,
 )
 from nexus_symbiote.scanners.source_binding import BindingError, value_binding
+from nexus_symbiote.settings_precedence import (
+    extract_deny_rules,
+    extract_sandbox_allowed_domains,
+    oversight_gap_assessments,
+    scan_subagent_and_rule_frontmatter,
+)
 from nexus_symbiote.utils.confined import ConfinedCollection, fold_name
 from nexus_symbiote.utils.jsonc import strip_jsonc
 from nexus_symbiote.utils.secrets import REDACTED, redact_keyed_text, redact_text
+from nexus_symbiote.utils.terminal import neutralize
 from nexus_symbiote.utils.toml import loads as load_toml
 
 IDE_AGENT_CONFIGS: dict[str, dict[str, Any]] = {
@@ -2582,6 +2594,8 @@ class IDEAgentScanner(Scanner):
             if data is not None:
                 documents[relative] = data
         self._bind_settings(ide_type, documents, result, risks, properties)
+        if ide_type in {"claude-code", "cursor"}:
+            scan_subagent_and_rule_frontmatter(files, base, risks, properties)
         mode = self._extract_permission_mode(settings or {}, ide_type, result)
         toml_mode = False
         if ide_type == "codex" and mode is None:
@@ -2776,6 +2790,23 @@ class IDEAgentScanner(Scanner):
         }
         if counts:
             properties["declared_permission_rule_counts"] = counts
+        deny_rules = extract_deny_rules(merged)
+        if deny_rules:
+            properties["deny_rules"] = deny_rules
+        sandbox_domains = extract_sandbox_allowed_domains(merged)
+        if sandbox_domains:
+            properties["sandbox_allowed_domains"] = sandbox_domains
+        default_mode = (
+            rules.get("defaultMode") if isinstance(rules.get("defaultMode"), str) else None
+        )
+        tool_states, oversight_risks = oversight_gap_assessments(
+            rules,
+            approval_policy=default_mode,
+            source_name=f"{base}/.claude/settings.json" if base else ".claude/settings.json",
+        )
+        if tool_states:
+            properties["tool_human_in_the_loop"] = tool_states
+        risks.extend(oversight_risks)
         hook_commands = 0
         hook_severity: RiskSeverity | None = None
         # Auto-run settings and credential helpers run without an agent event, as hooks do.
@@ -2977,6 +3008,19 @@ class IDEAgentScanner(Scanner):
             sandbox = None
         properties["approval_policy"] = approval
         properties["sandbox_mode"] = sandbox
+        codex_model = config.get("model")
+        if isinstance(codex_model, str) and codex_model.strip():
+            clean_model = codex_model.strip()
+            properties["model"] = clean_model
+            model_ref = f"model.{neutralize(clean_model)}"
+            if not any(comp.bom_ref == model_ref for comp in result.components):
+                result.components.append(
+                    ModelComponent(
+                        bom_ref=model_ref,
+                        name=clean_model,
+                        properties={"source": CODEX_CONFIG},
+                    )
+                )
         full_access = sandbox in {"danger-full-access", "full-access"} or approval == "always"
         declared = (
             "an unsandboxed full-access mode"

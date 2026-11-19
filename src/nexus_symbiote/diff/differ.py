@@ -543,6 +543,7 @@ class AIBOMDiffer:
         self._diff_inputs(old, new, report)
         self._diff_dependencies(old, new, report, old_refs & new_refs)
         self._generate_security_alerts(report)
+        self._settings_drift_alerts(old_map, new_map, old_refs & new_refs, report)
 
         report.has_changes = report.total_changes > 0
         return report
@@ -1475,3 +1476,68 @@ class AIBOMDiffer:
                     ),
                 }
             )
+
+    def _settings_drift_alerts(
+        self,
+        old_map: dict[str, Any],
+        new_map: dict[str, Any],
+        retained: set[str],
+        report: DiffReport,
+    ) -> None:
+        for ref in sorted(retained):
+            old_props = getattr(old_map[ref], "properties", None) or {}
+            new_props = getattr(new_map[ref], "properties", None) or {}
+            comp_name = _clip(getattr(new_map[ref], "name", ref))
+            removed_deny = sorted(
+                set(old_props.get("deny_rules") or []) - set(new_props.get("deny_rules") or [])
+            )
+            if removed_deny:
+                report.security_alerts.append(
+                    {
+                        "severity": "high",
+                        "component": ref,
+                        "alert_type": "deny_rule_removed",
+                        "alert": (
+                            f"deny_rule_removed: {', '.join(_clip(r) for r in removed_deny)} "
+                            f"removed from '{comp_name}'."
+                        ),
+                    }
+                )
+            added_domains = sorted(
+                set(new_props.get("sandbox_allowed_domains") or [])
+                - set(old_props.get("sandbox_allowed_domains") or [])
+            )
+            if added_domains:
+                report.security_alerts.append(
+                    {
+                        "severity": "high",
+                        "component": ref,
+                        "alert_type": "sandbox_egress_widened",
+                        "alert": (
+                            f"sandbox_egress_widened: allowedDomains added "
+                            f"{', '.join(_clip(d) for d in added_domains)} in '{comp_name}'."
+                        ),
+                    }
+                )
+            old_act = old_props.get("activation") or {}
+            new_act = new_props.get("activation") or {}
+            if isinstance(old_act, dict) and isinstance(new_act, dict):
+                for path, new_scope in sorted(new_act.items()):
+                    old_scope = old_act.get(path)
+                    if not isinstance(old_scope, dict) or not isinstance(new_scope, dict):
+                        continue
+                    widened = (
+                        not old_scope.get("always_apply") and new_scope.get("always_apply")
+                    ) or bool(set(new_scope.get("globs") or []) - set(old_scope.get("globs") or []))
+                    if widened:
+                        report.security_alerts.append(
+                            {
+                                "severity": "high",
+                                "component": ref,
+                                "alert_type": "scope_widened",
+                                "alert": (
+                                    f"scope_widened: activation scope widened for '{_clip(path)}' "
+                                    f"in '{comp_name}'."
+                                ),
+                            }
+                        )
