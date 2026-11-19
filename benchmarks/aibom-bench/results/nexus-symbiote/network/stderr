@@ -1,0 +1,49 @@
+Scanning /aibom-run/work/nexus-symbiote/corpus
+  Running mcp scanner...
+    Found 19 components (failed)
+  Running model scanner...
+    Found 5 components (failed)
+  Running prompt scanner...
+    Found 11 components (failed)
+  Running rag scanner...
+    Found 4 components (failed)
+  Running registry scanner...
+    Found 16 components
+  Running shadowscan scanner...
+    Found 0 components
+  Running a2a scanner...
+    Found 1 components (failed)
+  Running ide_agents scanner...
+    Found 5 components (failed)
+Saved /aibom-run/results2/nexus-symbiote/network/bom.json
+Risk warning: score 172.0
+Scan gate failed
+  - finding at or above critical
+  - aggregate score is at or above fail_threshold
+  - collection coverage is unknown or incomplete
+  - finding: critical data/raw/embeddings.bin [serialization_format] Model 'embeddings.bin' has evidence of a potentially code-executing serialization or loader.
+  - finding: critical models/legacy/intent.pkl [serialization_format] Model 'intent.pkl' has evidence of a potentially code-executing serialization or loader.
+  - finding: critical models/legacy/intent.pt [serialization_format] Model 'intent.pt' has evidence of a potentially code-executing serialization or loader.
+  - finding: critical .claude/skills/refund-approver/SKILL.md [bidi_override] '.claude/skills/refund-approver/SKILL.md' contains bidirectional override characters: RIGHT-TO-LEFT OVERRIDE (U+202E) x1. Bidi overrides can make malicious instructions appear as benign text.
+  - score: 172.0 (fail threshold 50)
+  - collection: config/secrets-link: symlink target is absolute (from mcp)
+  - collection: deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n: depth limit of 32 exceeded; raise it with --limit depth=N (from mcp)
+  - collection: models/escape.gguf: symlink target is outside the collection root (from mcp)
+  - collection: .codex/config.toml: invalid TOML (from mcp)
+  - collection: config/secrets-link: symlink target is absolute (from model)
+  - collection: deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n: depth limit of 32 exceeded; raise it with --limit depth=N (from model)
+  - collection: models/escape.gguf: symlink target is outside the collection root (from model)
+  - collection: config/secrets-link: symlink target is absolute (from prompt)
+  - collection: deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n: depth limit of 32 exceeded; raise it with --limit depth=N (from prompt)
+  - collection: models/escape.gguf: symlink target is outside the collection root (from prompt)
+  - collection: services/billing/claude.md: case variant of services/billing/CLAUDE.md is the active file on case-insensitive file systems and is not inventoried (from prompt)
+  - collection: rag: conflicting duplicate component rag:env-pinecone
+  - collection: config/secrets-link: symlink target is absolute (from rag)
+  - collection: deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n: depth limit of 32 exceeded; raise it with --limit depth=N (from rag)
+  - collection: models/escape.gguf: symlink target is outside the collection root (from rag)
+  - collection: config/secrets-link: symlink target is absolute (from a2a)
+  - collection: deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n: depth limit of 32 exceeded; raise it with --limit depth=N (from a2a)
+  - collection: models/escape.gguf: symlink target is outside the collection root (from a2a)
+  - collection: .codex/config.toml: invalid TOML (from ide_agents)
+  - collection: config/secrets-link: symlink target is absolute (from ide_agents)
+  - collection: 2 more in metadata.completeness.scan_failures

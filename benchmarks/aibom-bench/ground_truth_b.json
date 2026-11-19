@@ -1,0 +1,735 @@
+{
+ "version": "1.0-b",
+ "notes": "Corpus B ground truth. Same schema as ground_truth.json; written from standards and competitor READMEs, not from the host tool's docs. Correction 2026-11-18: the item mcp.cline-time (source .cline/mcp_settings.json) was removed. Cline documents MCP servers only in its global cline_mcp_settings.json, and its project-level .cline/ directory holds rules, skills and hooks, so the file name was the corpus author's invention; no tool detected the item. F08 (whose only location was that file) was removed and the .cline entries were dropped from F03 and F07. The corpus file itself is unchanged.",
+ "classes": {
+  "mcp-server": "",
+  "tool": "",
+  "skill": "",
+  "prompt": "",
+  "model": "",
+  "model-file": "",
+  "dataset": "",
+  "training": "",
+  "vector-store": "",
+  "a2a": "",
+  "agent-config": "",
+  "ci-agent": "",
+  "container": "",
+  "package": "",
+  "guardrail": ""
+ },
+ "components": [
+  {
+   "id": "mcp.notion",
+   "class": "mcp-server",
+   "source": [
+    "config/claude_desktop_config.json"
+   ],
+   "match_any": [
+    "notion-mcp-server"
+   ],
+   "match_regex": "(?i)notion-mcp-server|\\bnotion\\b[^\\n]{0,30}\\(mcp|mcp[ _-]?server[^\\n]{0,30}\\bnotion\\b"
+  },
+  {
+   "id": "mcp.supabase",
+   "class": "mcp-server",
+   "source": [
+    "config/claude_desktop_config.json"
+   ],
+   "match_any": [
+    "mcp-server-supabase"
+   ],
+   "note": "unversioned; token passed as a launch argument"
+  },
+  {
+   "id": "mcp.sequential",
+   "class": "mcp-server",
+   "source": [
+    ".windsurf/mcp_config.json"
+   ],
+   "match_any": [
+    "server-sequential-thinking"
+   ]
+  },
+  {
+   "id": "mcp.continue-slack",
+   "class": "mcp-server",
+   "source": [
+    ".continue/config.yaml"
+   ],
+   "match_any": [
+    "mcp/slack"
+   ],
+   "note": "YAML config; docker :latest; env token"
+  },
+  {
+   "id": "mcp.zed-fetch",
+   "class": "mcp-server",
+   "source": [
+    ".zed/settings.json"
+   ],
+   "match_any": [
+    "mcp-server-fetch"
+   ],
+   "pin": "2025.4.7"
+  },
+  {
+   "id": "mcp.own-analytics",
+   "class": "mcp-server",
+   "source": [
+    "mcp/analytics-server/src/server.ts"
+   ],
+   "match_any": [
+    "analytics-mcp",
+    "analytics-server/src/server.ts",
+    "analytics-server%2Fsrc%2Fserver.ts"
+   ],
+   "note": "credited by name or by source location"
+  },
+  {
+   "id": "tool.run_sql",
+   "class": "tool",
+   "source": [
+    "mcp/analytics-server/src/server.ts"
+   ],
+   "match_any": [
+    "run_sql"
+   ],
+   "note": "poisoned description"
+  },
+  {
+   "id": "tool.export_report",
+   "class": "tool",
+   "source": [
+    "mcp/analytics-server/src/server.ts",
+    "openai/assistant.json"
+   ],
+   "match_any": [
+    "export_report"
+   ]
+  },
+  {
+   "id": "tool.assistant-code-interpreter",
+   "class": "tool",
+   "source": [
+    "openai/assistant.json"
+   ],
+   "match_any": [
+    "code_interpreter"
+   ],
+   "soft": true
+  },
+  {
+   "id": "prompt.system-prompt",
+   "class": "prompt",
+   "source": [
+    "prompts/system.prompt.md"
+   ],
+   "match_any": [
+    "system.prompt.md"
+   ]
+  },
+  {
+   "id": "prompt.judge-yaml",
+   "class": "prompt",
+   "source": [
+    "prompts/judge.yaml"
+   ],
+   "match_any": [
+    "judge.yaml"
+   ]
+  },
+  {
+   "id": "prompt.windsurfrules",
+   "class": "prompt",
+   "source": [
+    ".windsurfrules"
+   ],
+   "match_any": [
+    ".windsurfrules"
+   ]
+  },
+  {
+   "id": "prompt.clinerules",
+   "class": "prompt",
+   "source": [
+    ".clinerules"
+   ],
+   "match_regex": "\\.clinerules(?!/)"
+  },
+  {
+   "id": "prompt.inline-instructions",
+   "class": "prompt",
+   "source": [
+    "src/agent.ts"
+   ],
+   "match_any": [
+    "Never expose raw user ids"
+   ],
+   "soft": true
+  },
+  {
+   "id": "prompt.assistant-instructions",
+   "class": "prompt",
+   "source": [
+    "openai/assistant.json"
+   ],
+   "match_any": [
+    "assistant.json"
+   ],
+   "soft": true
+  },
+  {
+   "id": "prompt.llms-txt",
+   "class": "prompt",
+   "source": [
+    "llms.txt"
+   ],
+   "match_any": [
+    "llms.txt"
+   ],
+   "soft": true
+  },
+  {
+   "id": "model.gpt-4.1-mini",
+   "class": "model",
+   "source": [
+    "src/agent.ts"
+   ],
+   "match_any": [
+    "gpt-4.1-mini"
+   ]
+  },
+  {
+   "id": "model.gemini-2.5-pro",
+   "class": "model",
+   "source": [
+    "src/agent.ts",
+    "prompts/judge.yaml"
+   ],
+   "match_any": [
+    "gemini-2.5-pro"
+   ]
+  },
+  {
+   "id": "model.text-embedding-3-large",
+   "class": "model",
+   "source": [
+    "src/agent.ts"
+   ],
+   "match_any": [
+    "text-embedding-3-large"
+   ]
+  },
+  {
+   "id": "model.o3-mini",
+   "class": "model",
+   "source": [
+    "src/agent.ts"
+   ],
+   "match_regex": "(?<![A-Za-z0-9-])o3-mini"
+  },
+  {
+   "id": "model.mistral-large",
+   "class": "model",
+   "source": [
+    "src/rag.ts"
+   ],
+   "match_any": [
+    "mistral-large-latest"
+   ]
+  },
+  {
+   "id": "model.gpt-4o-dated",
+   "class": "model",
+   "source": [
+    "sidecar/main.go"
+   ],
+   "match_any": [
+    "gpt-4o-2024-08-06"
+   ]
+  },
+  {
+   "id": "model.qwen",
+   "class": "model",
+   "source": [
+    "notebooks/train_churn.ipynb",
+    "hf-cache/",
+    "artifacts/churn.onnx.card.md"
+   ],
+   "match_any": [
+    "Qwen2.5-0.5B-Instruct"
+   ],
+   "pin": "7ae557604adf67be50417f59c2c2f167def9a775"
+  },
+  {
+   "id": "model.gpt-4.1-assistant",
+   "class": "model",
+   "source": [
+    "openai/assistant.json"
+   ],
+   "match_regex": "gpt-4\\.1(?!-mini)"
+  },
+  {
+   "id": "model.gpt-4o-mini-n8n",
+   "class": "model",
+   "source": [
+    "n8n/weekly-digest.json"
+   ],
+   "match_any": [
+    "gpt-4o-mini"
+   ],
+   "soft": true
+  },
+  {
+   "id": "model.nova-pro",
+   "class": "model",
+   "source": [
+    "infra/bedrock.tf"
+   ],
+   "match_any": [
+    "amazon.nova-pro-v1:0"
+   ],
+   "soft": true
+  },
+  {
+   "id": "model.mistral-7b-vllm",
+   "class": "model",
+   "source": [
+    "k8s/vllm.yaml"
+   ],
+   "match_any": [
+    "Mistral-7B-Instruct-v0.3"
+   ],
+   "soft": true
+  },
+  {
+   "id": "model.mlflow-registered",
+   "class": "model",
+   "source": [
+    "configs/mlflow.yaml"
+   ],
+   "match_any": [
+    "churn-xgb"
+   ],
+   "soft": true
+  },
+  {
+   "id": "file.onnx",
+   "class": "model-file",
+   "source": [
+    "artifacts/churn.onnx"
+   ],
+   "match_any": [
+    "churn.onnx"
+   ]
+  },
+  {
+   "id": "file.tflite",
+   "class": "model-file",
+   "source": [
+    "artifacts/intent.tflite"
+   ],
+   "match_any": [
+    "intent.tflite"
+   ]
+  },
+  {
+   "id": "file.churn-pt",
+   "class": "model-file",
+   "source": [
+    "artifacts/churn.pt"
+   ],
+   "match_any": [
+    "churn.pt"
+   ]
+  },
+  {
+   "id": "file.hf-snapshot-safetensors",
+   "class": "model-file",
+   "source": [
+    "hf-cache/.../model.safetensors"
+   ],
+   "match_any": [
+    "model.safetensors"
+   ]
+  },
+  {
+   "id": "file.model-card",
+   "class": "model-file",
+   "source": [
+    "artifacts/churn.onnx.card.md"
+   ],
+   "match_any": [
+    "churn.onnx.card.md"
+   ],
+   "soft": true
+  },
+  {
+   "id": "data.demo1",
+   "class": "dataset",
+   "source": [
+    "notebooks/train_churn.ipynb",
+    "data/datasets.yaml",
+    "artifacts/churn.onnx.card.md"
+   ],
+   "match_any": [
+    "lhoestq/demo1"
+   ]
+  },
+  {
+   "id": "data.s3-events",
+   "class": "dataset",
+   "source": [
+    "data/datasets.yaml"
+   ],
+   "match_any": [
+    "benchb-lake"
+   ]
+  },
+  {
+   "id": "data.dvc",
+   "class": "dataset",
+   "source": [
+    "data/events.dvc"
+   ],
+   "match_any": [
+    "events.dvc"
+   ]
+  },
+  {
+   "id": "data.retention",
+   "class": "dataset",
+   "source": [
+    "data/retention-policy.md"
+   ],
+   "match_any": [
+    "retention-policy"
+   ],
+   "soft": true
+  },
+  {
+   "id": "train.notebook",
+   "class": "training",
+   "source": [
+    "notebooks/train_churn.ipynb"
+   ],
+   "match_any": [
+    "train_churn.ipynb"
+   ]
+  },
+  {
+   "id": "train.mlflow",
+   "class": "training",
+   "source": [
+    "configs/mlflow.yaml"
+   ],
+   "match_any": [
+    "mlflow"
+   ]
+  },
+  {
+   "id": "rag.weaviate",
+   "class": "vector-store",
+   "source": [
+    "src/rag.ts",
+    "package.json"
+   ],
+   "match_any": [
+    "weaviate"
+   ]
+  },
+  {
+   "id": "rag.file-search",
+   "class": "vector-store",
+   "source": [
+    "openai/assistant.json"
+   ],
+   "match_any": [
+    "file_search"
+   ],
+   "soft": true
+  },
+  {
+   "id": "ide.n8n-workflow",
+   "class": "agent-config",
+   "source": [
+    "n8n/weekly-digest.json"
+   ],
+   "match_any": [
+    "weekly-digest"
+   ]
+  },
+  {
+   "id": "ide.openai-assistant",
+   "class": "agent-config",
+   "source": [
+    "openai/assistant.json"
+   ],
+   "match_any": [
+    "asst_benchb",
+    "Insight Assistant"
+   ]
+  },
+  {
+   "id": "ci.codex-action",
+   "class": "ci-agent",
+   "source": [
+    ".github/workflows/review.yml"
+   ],
+   "match_any": [
+    "codex-action"
+   ]
+  },
+  {
+   "id": "img.vllm",
+   "class": "container",
+   "source": [
+    "k8s/vllm.yaml"
+   ],
+   "match_any": [
+    "vllm/vllm-openai"
+   ],
+   "pin": "sha256:9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b"
+  },
+  {
+   "id": "img.node-base",
+   "class": "container",
+   "source": [
+    "Dockerfile"
+   ],
+   "match_any": [
+    "node:22-alpine"
+   ]
+  },
+  {
+   "id": "img.mcp-slack",
+   "class": "container",
+   "source": [
+    ".continue/config.yaml"
+   ],
+   "match_any": [
+    "mcp/slack:latest"
+   ],
+   "soft": true
+  },
+  {
+   "id": "pkg.ai-sdk",
+   "class": "package",
+   "source": [
+    "package.json"
+   ],
+   "match_any": [
+    "@ai-sdk/openai"
+   ]
+  },
+  {
+   "id": "pkg.openai-agents",
+   "class": "package",
+   "source": [
+    "package.json"
+   ],
+   "match_any": [
+    "@openai/agents"
+   ]
+  },
+  {
+   "id": "pkg.go-openai",
+   "class": "package",
+   "source": [
+    "sidecar/go.mod"
+   ],
+   "match_any": [
+    "go-openai"
+   ]
+  },
+  {
+   "id": "pkg.transformers",
+   "class": "package",
+   "source": [
+    "requirements-train.txt"
+   ],
+   "match_regex": "(?s)(?<![A-Za-z-])transformers.{0,80}?4\\.57\\.0"
+  },
+  {
+   "id": "pkg.mcp-sdk",
+   "class": "package",
+   "source": [
+    "mcp/analytics-server/package.json"
+   ],
+   "match_any": [
+    "@modelcontextprotocol/sdk"
+   ]
+  },
+  {
+   "id": "guard.bedrock-guardrail",
+   "class": "guardrail",
+   "source": [
+    "infra/bedrock.tf"
+   ],
+   "match_any": [
+    "guardrail/benchb"
+   ],
+   "soft": true
+  }
+ ],
+ "decoys": [
+  {
+   "id": "decoy.readme-model",
+   "kind": "hard",
+   "source": "README.md",
+   "match_any": [
+    "llama-3.1-70b"
+   ],
+   "why": "rejected model in prose"
+  },
+  {
+   "id": "decoy.readme-mcp",
+   "kind": "hard",
+   "source": "README.md",
+   "match_any": [
+    "old-jira"
+   ],
+   "why": "config quoted in docs"
+  },
+  {
+   "id": "decoy.comment-model",
+   "kind": "hard",
+   "source": "src/agent.ts",
+   "match_any": [
+    "claude-opus-4-1"
+   ],
+   "why": "model named in a TODO comment"
+  },
+  {
+   "id": "decoy.vendored-mcp",
+   "kind": "soft",
+   "source": "vendor/pkg/.cursor/mcp.json",
+   "match_any": [
+    "vendored-x"
+   ],
+   "why": "vendored dependency config under vendor/ (not node_modules); five of seven tools reported it, and vendor/ is not a universally ignored path, so the auditor downgraded this decoy to soft"
+  }
+ ],
+ "secrets": {
+  "openai": "sk-proj-BENCHB-SENTINEL-11",
+  "notion": "ntn_BENCHB_SENTINEL_12",
+  "slack": "xoxb-BENCHB-SENTINEL-13",
+  "supabase": "sbp_BENCHB_SENTINEL_14",
+  "hf": "hf_BENCHBSENTINEL15",
+  "gcp": "BENCHB_GCP_SA_KEY_SENTINEL_16",
+  "time": "BENCHB_TIME_SENTINEL_17"
+ },
+ "leak_markers": {
+  "etc-passwd": "root:x:0:0"
+ },
+ "neutralization": {
+  "ansi_escape_raw": "\u001b[",
+  "ansi_escape_json": "\\u001b",
+  "rlo_raw": "\u202e",
+  "zwsp_raw": "\u200b"
+ },
+ "integrity_digests": {},
+ "pins": {
+  "mcp.zed-fetch": "2025.4.7",
+  "img.vllm": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
+  "model.qwen.revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+  "mcp.notion": "1.8.1"
+ },
+ "expected_findings": [
+  {
+   "id": "F01",
+   "title": "Floating MCP versions",
+   "where": [
+    "supabase",
+    "sequential-thinking",
+    "mcp/slack:latest"
+   ],
+   "hints": [
+    "latest",
+    "unpinned",
+    "unversioned"
+   ]
+  },
+  {
+   "id": "F03",
+   "title": "Credentials in agent config",
+   "where": [
+    "claude_desktop_config env",
+    "supabase launch arg",
+    "continue env",
+    ".env.local",
+    "k8s HF_TOKEN"
+   ],
+   "hints": [
+    "secret",
+    "token",
+    "credential",
+    "api key"
+   ]
+  },
+  {
+   "id": "F04",
+   "title": "Pickle-based artifact",
+   "where": [
+    "artifacts/churn.pt"
+   ],
+   "hints": [
+    "pickle",
+    "deserializ"
+   ]
+  },
+  {
+   "id": "F05",
+   "title": "Tool-description poisoning",
+   "where": [
+    "run_sql description",
+    "assistant instructions HTML comment"
+   ],
+   "hints": [
+    "poison",
+    "injection",
+    "DROP TABLE",
+    "attacker.example"
+   ]
+  },
+  {
+   "id": "F07",
+   "title": "Hidden characters",
+   "where": [
+    "docs file name RLO"
+   ],
+   "hints": [
+    "bidi",
+    "control",
+    "escape",
+    "invisible"
+   ]
+  },
+  {
+   "id": "F11",
+   "title": "Symlink escapes recorded",
+   "where": [
+    "infra/secret-link",
+    "artifacts/escape.onnx",
+    "vendor/self"
+   ],
+   "hints": [
+    "symlink",
+    "symbolic",
+    "outside"
+   ]
+  },
+  {
+   "id": "F12",
+   "title": "Dataset revision floating",
+   "where": [
+    "datasets.yaml revision main"
+   ],
+   "hints": [
+    "revision",
+    "main"
+   ]
+  }
+ ]
+}
