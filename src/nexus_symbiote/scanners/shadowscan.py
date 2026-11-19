@@ -475,8 +475,12 @@ def _line_parts(line: str) -> tuple[str | None, str | None]:
         quoted = found.group(1)[: -len(mark)].rstrip().endswith(('"', "'"))
         if mark in {"=", "=="} and _PADDING_TAIL.fullmatch(rest) is not None:
             return found.group(1), token
+        opens = _OPENS_BELOW.fullmatch(rest) is not None
+        if not opens and token is not None and line.lstrip()[:1] in "[({":
+            # A compact entry such as `{"type":"basic"},` is one value, not a key line.
+            return None, token
         if "=" in mark or quoted or not rest or rest[0].isspace():
-            return (found.group(1) if _OPENS_BELOW.fullmatch(rest) else None), None
+            return (found.group(1) if opens else None), None
     return None, token
 
 

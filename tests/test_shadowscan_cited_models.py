@@ -532,6 +532,9 @@ BELOW_A_KEY = {
     "yaml-anchor-after-the-key": "{key}: &shared\n  {value}\n",
     "yaml-tag-after-the-key": "{key}: !vault\n  {value}\n",
     "shell-line-continuation": "export {key}=\\\n{value}\n",
+    "compact-entry-between": '{{\n  "{key}": [\n    {{"type":"basic"}},\n    "{value}"\n  ]\n}}\n',
+    "compact-entry-in-a-constant": 'const {key} = [\n  {{"id":"primary"}},\n  "{value}",\n];\n',
+    "compact-entry-cited": '{{\n  "{key}": [\n    {{"value":"{value}"}}\n  ]\n}}\n',
 }
 
 
