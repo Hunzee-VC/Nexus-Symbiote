@@ -5,10 +5,10 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Final
-
-import yaml
+from urllib.parse import urlsplit, urlunsplit
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import AssuranceLevel, AutonomyLevel, RiskSeverity, TrustTier
@@ -21,11 +21,14 @@ from nexus_symbiote.core.models import (
     ModelComponent,
     RiskAssessment,
 )
+from nexus_symbiote.policy import parse_yaml_mapping
 from nexus_symbiote.utils.confined import ConfinedCollection
-from nexus_symbiote.utils.secrets import redact_text, redact_url
+from nexus_symbiote.utils.secrets import REDACTED, redact_text
 from nexus_symbiote.utils.terminal import neutralize
 
 MAX_AGENT_YAML_BYTES: Final[int] = 256 * 1024
+MAX_AGENT_YAML_NODES: Final[int] = 4096
+_SUPPORTED_SCHEMA_VERSIONS: Final[frozenset[str]] = frozenset({"1.0", "1.1"})
 _RFC3339_RE: Final[re.Pattern[str]] = re.compile(
     r"\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})",
     re.ASCII,
@@ -35,6 +38,7 @@ _SAFE_URL_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:https|s3|gs|hf|oci)://[^\s<>\"'\\]+",
     re.ASCII,
 )
+_ALLOWED_URL_SCHEMES: Final[frozenset[str]] = frozenset({"https", "s3", "gs", "hf", "oci"})
 _SPDX_DATASET_TYPES: Final[frozenset[str]] = frozenset(
     {
         "audio",
@@ -117,14 +121,17 @@ def resolve_automation_mapping(
 
 
 def spdx_autonomy_presence(comp: AnyComponent) -> str:
-    """Return SPDX 3.0.1 PresenceType ('yes', 'no', or 'noAssertion') for an AI component."""
+    """Return SPDX 3.0.1 PresenceType ('yes', 'no', or 'noAssertion') for an AI component.
+
+    Observed autonomy_level always takes precedence over producer declarations.
+    """
+    if isinstance(comp, AgentComponent) and comp.autonomy_level is not None:
+        mapped = resolve_automation_mapping(comp.autonomy_level)
+        if mapped is not None:
+            return mapped.spdx_autonomy_presence
     declared_iso = comp.properties.get("iso_22989_automation")
     if isinstance(declared_iso, str):
         mapped = resolve_automation_mapping(declared_iso)
-        if mapped is not None:
-            return mapped.spdx_autonomy_presence
-    if isinstance(comp, AgentComponent) and comp.autonomy_level is not None:
-        mapped = resolve_automation_mapping(comp.autonomy_level)
         if mapped is not None:
             return mapped.spdx_autonomy_presence
     return "noAssertion"
@@ -156,15 +163,31 @@ def _clean_text(value: Any, *, max_len: int = 512) -> str | None:
 
 
 def _clean_url(value: Any) -> str | None:
+    """Sanitize a declared download URI, preserving safe paths while stripping query/fragment/credentials."""
     if not isinstance(value, str) or not value.strip():
         return None
-    redacted = redact_url(value.strip())
-    if "@" in redacted.split("://", 1)[-1].split("/", 1)[0]:
+    candidate = value.strip()
+    try:
+        parts = urlsplit(candidate)
+    except ValueError:
         return None
-    return redacted if _SAFE_URL_RE.fullmatch(redacted) else None
+    scheme = parts.scheme.lower()
+    if scheme not in _ALLOWED_URL_SCHEMES or not parts.hostname or not parts.netloc:
+        return None
+    if parts.username or parts.password or "@" in parts.netloc:
+        return None
+    if parts.path and REDACTED in redact_text(parts.path):
+        return None
+    rebuilt = urlunsplit((scheme, parts.netloc, parts.path, "", ""))
+    return rebuilt if _SAFE_URL_RE.fullmatch(rebuilt) else None
 
 
 def _clean_rfc3339(value: Any) -> str | None:
+    if isinstance(value, datetime):
+        aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return aware.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    if isinstance(value, date):
+        return f"{value.isoformat()}T00:00:00Z"
     if not isinstance(value, str):
         return None
     candidate = value.strip()
@@ -173,11 +196,14 @@ def _clean_rfc3339(value: Any) -> str | None:
     return candidate if _RFC3339_RE.fullmatch(candidate) else None
 
 
-def _clean_license(value: Any) -> str | None:
-    if not isinstance(value, str):
+def clean_license_identifier(value: Any) -> str | None:
+    """Validate and secret-scrub a license identifier or SPDX expression."""
+    if not isinstance(value, str) or not value.strip():
         return None
-    candidate = value.strip()
-    return candidate if _SAFE_LICENSE_RE.fullmatch(candidate) else None
+    redacted = neutralize(redact_text(value.strip()))
+    if REDACTED in redacted:
+        return None
+    return redacted if _SAFE_LICENSE_RE.fullmatch(redacted) else None
 
 
 def _conflict_risk(field_name: str, component_name: str, locator: str) -> RiskAssessment:
@@ -202,6 +228,36 @@ def _record_claim(comp: AnyComponent, key: str, locator: str) -> None:
         scope=key,
         locator=locator,
     )
+
+
+def _apply_version_declaration(
+    comp: AnyComponent, ver: str, locator: str, notices: list[str]
+) -> None:
+    if comp.version and comp.version != ver:
+        comp.risks.append(_conflict_risk("version", comp.name, locator))
+        notices.append(f"{comp.bom_ref}: version conflict with {locator}")
+        return
+    if comp.assurance_level == AssuranceLevel.DECLARED:
+        if not comp.version:
+            comp.version = ver
+    elif not comp.version:
+        comp.properties["declared_version"] = ver
+    _record_claim(comp, "version", locator)
+
+
+def _apply_supplier_declaration(
+    comp: AnyComponent, sup: str, locator: str, notices: list[str]
+) -> None:
+    if comp.supplier and comp.supplier != sup:
+        comp.risks.append(_conflict_risk("supplier", comp.name, locator))
+        notices.append(f"{comp.bom_ref}: supplier conflict with {locator}")
+        return
+    if comp.assurance_level == AssuranceLevel.DECLARED:
+        if not comp.supplier:
+            comp.supplier = sup
+    elif not comp.supplier:
+        comp.properties["declared_supplier"] = sup
+    _record_claim(comp, "supplier", locator)
 
 
 def apply_agent_yaml_declarations(
@@ -239,15 +295,21 @@ def apply_agent_yaml_declarations(
                     raw_bytes = data
                     locator = candidate
                     break
-        if relative_path is not None and (failures or raw_bytes is None):
+        if failures:
+            raise ValueError(
+                f"cannot safely read {neutralize(relative_path or locator)} inside project root"
+            )
+        if relative_path is not None and raw_bytes is None:
             raise ValueError(f"cannot safely read {neutralize(relative_path)} inside project root")
 
     if raw_bytes is None:
         return notices
 
-    parsed = yaml.safe_load(raw_bytes.decode("utf-8"))
-    if not isinstance(parsed, dict):
-        raise ValueError(f"{locator} must hold a YAML mapping")
+    parsed = parse_yaml_mapping(raw_bytes.decode("utf-8"), max_nodes=MAX_AGENT_YAML_NODES)
+    if "schema_version" in parsed:
+        schema_ver = parsed["schema_version"]
+        if not isinstance(schema_ver, str) or schema_ver not in _SUPPORTED_SCHEMA_VERSIONS:
+            raise ValueError("unsupported agent.yaml schema_version")
 
     doc_digest = hash_bytes(raw_bytes)
     owner = _clean_text(parsed.get("owner"), max_len=200)
@@ -266,21 +328,16 @@ def apply_agent_yaml_declarations(
     )
     raw_licenses = parsed.get("licenses")
     default_license = (
-        _clean_license(raw_licenses[0])
+        clean_license_identifier(raw_licenses[0])
         if isinstance(raw_licenses, list) and raw_licenses
-        else _clean_license(raw_licenses)
+        else clean_license_identifier(raw_licenses)
     )
     iso_level = resolve_automation_mapping(parsed.get("automation_level"))
 
     for comp in aibom.components:
         if isinstance(comp, AgentComponent):
             if owner:
-                if comp.supplier and comp.supplier != owner:
-                    comp.risks.append(_conflict_risk("supplier", comp.name, locator))
-                    notices.append(f"{comp.bom_ref}: supplier conflict with {locator}")
-                elif not comp.supplier:
-                    comp.supplier = owner
-                _record_claim(comp, "owner", locator)
+                _apply_supplier_declaration(comp, owner, locator, notices)
             if data_usage:
                 comp.properties["declared_data_usage"] = data_usage
                 _record_claim(comp, "data_usage", locator)
@@ -300,20 +357,20 @@ def apply_agent_yaml_declarations(
                 ):
                     comp.risks.append(_conflict_risk("autonomy_level", comp.name, locator))
                     notices.append(f"{comp.bom_ref}: autonomy_level conflict with {locator}")
-                comp.properties["iso_22989_automation"] = iso_level.iso_name
+                    comp.properties["declared_iso_22989_automation"] = iso_level.iso_name
+                else:
+                    comp.properties["iso_22989_automation"] = iso_level.iso_name
                 _record_claim(comp, "automation_level", locator)
             for extra_key in ("release_time", "download_location", "version"):
                 raw_val = parsed.get(extra_key)
                 if extra_key == "release_time" and (ts := _clean_rfc3339(raw_val)):
                     comp.properties.setdefault("declared_release_time", ts)
+                    _record_claim(comp, "release_time", locator)
                 elif extra_key == "download_location" and (dl := _clean_url(raw_val)):
                     comp.properties.setdefault("declared_download_location", dl)
+                    _record_claim(comp, "download_location", locator)
                 elif extra_key == "version" and (ver := _clean_text(raw_val, max_len=128)):
-                    if comp.version and comp.version != ver:
-                        comp.risks.append(_conflict_risk("version", comp.name, locator))
-                        notices.append(f"{comp.bom_ref}: version conflict with {locator}")
-                    elif not comp.version:
-                        comp.version = ver
+                    _apply_version_declaration(comp, ver, locator, notices)
 
     by_name: dict[str, AnyComponent] = {c.name: c for c in aibom.components}
 
@@ -329,7 +386,7 @@ def apply_agent_yaml_declarations(
             existing = by_name.get(ds_name)
             ds_ver = _clean_text(entry.get("version"), max_len=128)
             ds_sup = _clean_text(entry.get("supplier"), max_len=200) or owner
-            ds_lic = _clean_license(entry.get("license")) or default_license
+            ds_lic = clean_license_identifier(entry.get("license")) or default_license
             ds_uri = _clean_url(entry.get("download_location") or entry.get("source_uri"))
             ds_rel = _clean_rfc3339(entry.get("release_time") or entry.get("collection_date"))
             ds_type = _clean_text(entry.get("dataset_type"), max_len=64)
@@ -338,16 +395,16 @@ def apply_agent_yaml_declarations(
 
             if isinstance(existing, DataSourceComponent):
                 ds_comp = existing
-                if ds_ver and ds_comp.version and ds_comp.version != ds_ver:
-                    ds_comp.risks.append(_conflict_risk("version", ds_name, locator))
-                    notices.append(f"{ds_comp.bom_ref}: version conflict with {locator}")
-                elif ds_ver and not ds_comp.version:
-                    ds_comp.version = ds_ver
-                if ds_lic and ds_comp.license and ds_comp.license != ds_lic:
-                    ds_comp.risks.append(_conflict_risk("license", ds_name, locator))
-                    notices.append(f"{ds_comp.bom_ref}: license conflict with {locator}")
-                elif ds_lic and not ds_comp.license:
-                    ds_comp.license = ds_lic
+                if ds_ver:
+                    _apply_version_declaration(ds_comp, ds_ver, locator, notices)
+                if ds_sup:
+                    _apply_supplier_declaration(ds_comp, ds_sup, locator, notices)
+                if ds_lic:
+                    if ds_comp.license and ds_comp.license != ds_lic:
+                        ds_comp.risks.append(_conflict_risk("license", ds_name, locator))
+                        notices.append(f"{ds_comp.bom_ref}: license conflict with {locator}")
+                    elif ds_comp.assurance_level == AssuranceLevel.DECLARED and not ds_comp.license:
+                        ds_comp.license = ds_lic
             else:
                 digest_id = hashlib.sha256(ds_name.encode("utf-8")).hexdigest()[:16]
                 ds_comp = DataSourceComponent(
@@ -365,19 +422,26 @@ def apply_agent_yaml_declarations(
                 )
                 aibom.components.append(ds_comp)
                 by_name[ds_name] = ds_comp
+                if ds_ver:
+                    _record_claim(ds_comp, "version", locator)
+                if ds_sup:
+                    _record_claim(ds_comp, "supplier", locator)
 
-            if ds_sup and not ds_comp.supplier:
-                ds_comp.supplier = ds_sup
             if ds_rel:
                 ds_comp.properties["declared_release_time"] = ds_rel
+                _record_claim(ds_comp, "release_time", locator)
             if ds_uri:
                 ds_comp.properties["declared_download_location"] = ds_uri
+                _record_claim(ds_comp, "download_location", locator)
             if ds_lic:
                 ds_comp.properties["declared_license"] = ds_lic
+                _record_claim(ds_comp, "license", locator)
             if ds_avail in _SPDX_AVAILABILITY_TYPES:
                 ds_comp.properties["declared_availability"] = ds_avail
+                _record_claim(ds_comp, "availability", locator)
             if ds_pii in {"yes", "no", "noAssertion"}:
                 ds_comp.properties["declared_sensitive_pii"] = ds_pii
+                _record_claim(ds_comp, "sensitive_personal_information", locator)
             ds_comp.properties["declaration_source_sha256"] = doc_digest
             _record_claim(ds_comp, "dataset", locator)
             dataset_refs_by_name[ds_name] = ds_comp.bom_ref
@@ -393,7 +457,7 @@ def apply_agent_yaml_declarations(
             existing = by_name.get(m_name)
             m_ver = _clean_text(entry.get("version"), max_len=128)
             m_sup = _clean_text(entry.get("supplier"), max_len=200) or owner
-            m_lic = _clean_license(entry.get("license")) or default_license
+            m_lic = clean_license_identifier(entry.get("license")) or default_license
             m_dl = _clean_url(entry.get("download_location"))
             m_rel = _clean_rfc3339(entry.get("release_time"))
             m_domain = _clean_text(entry.get("domain"), max_len=128)
@@ -401,16 +465,10 @@ def apply_agent_yaml_declarations(
 
             if isinstance(existing, ModelComponent):
                 m_comp = existing
-                if m_ver and m_comp.version and m_comp.version != m_ver:
-                    m_comp.risks.append(_conflict_risk("version", m_name, locator))
-                    notices.append(f"{m_comp.bom_ref}: version conflict with {locator}")
-                elif m_ver and not m_comp.version:
-                    m_comp.version = m_ver
-                if m_sup and m_comp.supplier and m_comp.supplier != m_sup:
-                    m_comp.risks.append(_conflict_risk("supplier", m_name, locator))
-                    notices.append(f"{m_comp.bom_ref}: supplier conflict with {locator}")
-                elif m_sup and not m_comp.supplier:
-                    m_comp.supplier = m_sup
+                if m_ver:
+                    _apply_version_declaration(m_comp, m_ver, locator, notices)
+                if m_sup:
+                    _apply_supplier_declaration(m_comp, m_sup, locator, notices)
             else:
                 digest_id = hashlib.sha256(m_name.encode("utf-8")).hexdigest()[:16]
                 m_comp = ModelComponent(
@@ -425,6 +483,10 @@ def apply_agent_yaml_declarations(
                 )
                 aibom.components.append(m_comp)
                 by_name[m_name] = m_comp
+                if m_ver:
+                    _record_claim(m_comp, "version", locator)
+                if m_sup:
+                    _record_claim(m_comp, "supplier", locator)
 
             if m_lic:
                 prev_lic = m_comp.properties.get("declared_license")
@@ -433,18 +495,24 @@ def apply_agent_yaml_declarations(
                     notices.append(f"{m_comp.bom_ref}: license conflict with {locator}")
                 else:
                     m_comp.properties["declared_license"] = m_lic
+                    _record_claim(m_comp, "license", locator)
             if m_rel:
                 m_comp.properties["declared_release_time"] = m_rel
+                _record_claim(m_comp, "release_time", locator)
             if m_dl:
                 m_comp.properties["declared_download_location"] = m_dl
+                _record_claim(m_comp, "download_location", locator)
             if m_domain:
                 m_comp.properties["declared_domain"] = m_domain
+                _record_claim(m_comp, "domain", locator)
             if compliance_list:
                 m_comp.properties.setdefault("declared_compliance", compliance_list)
+                _record_claim(m_comp, "compliance", locator)
             if isinstance(training, dict):
                 summary = _clean_text(training.get("description") or training.get("method"))
                 if summary:
                     m_comp.properties["declared_training_info"] = summary
+                    _record_claim(m_comp, "training", locator)
                 ds_list = training.get("datasets")
                 if isinstance(ds_list, list):
                     for ds_ref_name in ds_list[:50]:

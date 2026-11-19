@@ -74,10 +74,7 @@ _MAPPING_V3 = {
 _MAPPING_V4 = {
     **_MAPPING_V3,
     "uses-model": "dependsOn",
-    "delegates-to": "delegatedTo",
-    "retrieves-from": "hasInput",
     "loads-skill": "dependsOn",
-    "provides-tool": "hasProvidedDependency",
     "configured-with": "configures",
     "produces": "generates",
 }
@@ -333,6 +330,8 @@ class SPDXGenerator(Generator):
             for key in sorted(edge_values)
         ]
 
+        from nexus_symbiote.spdx_profiles import clean_license_identifier
+
         license_elements: dict[str, dict[str, Any]] = {}
         license_relationships: list[dict[str, Any]] = []
         used_no_assertion = False
@@ -345,8 +344,7 @@ class SPDXGenerator(Generator):
                 raw_lic = src_comp.properties.get("declared_license") or getattr(
                     src_comp, "license", None
                 )
-                if isinstance(raw_lic, str) and raw_lic.strip():
-                    declared_lic = _comment_text(raw_lic.strip())[:128]
+                declared_lic = clean_license_identifier(raw_lic)
             for kind in ("hasDeclaredLicense", "hasConcludedLicense"):
                 if kind == "hasDeclaredLicense" and declared_lic:
                     lic_id = ids.element("license-expression", declared_lic)
@@ -480,18 +478,12 @@ class SPDXGenerator(Generator):
         )
 
         typ = SPDX_TYPE_MAP.get(comp.component_type, "software_Package")
+        declared_fields: list[str] = []
         element: dict[str, Any] = {
             "type": typ,
             "spdxId": ids.element("component", comp.bom_ref),
             "creationInfo": ids.creation,
             "name": comp.name,
-            "extension": _extension(
-                [
-                    component_property(comp, native),
-                    *claim_properties(comp),
-                    *package_identifier_properties(comp),
-                ]
-            ),
         }
         package = package_identifier(comp)
         if package.value is not None:
@@ -524,18 +516,24 @@ class SPDXGenerator(Generator):
                 presence = spdx_autonomy_presence(comp)
                 if presence != "noAssertion":
                     element["ai_autonomyType"] = presence
+                    if not (isinstance(comp, AgentComponent) and comp.autonomy_level is not None):
+                        declared_fields.append("ai_autonomyType")
                 rel_ts = comp.properties.get("declared_release_time")
                 if isinstance(rel_ts, str) and rel_ts:
                     element["releaseTime"] = rel_ts
+                    declared_fields.append("releaseTime")
                 dl_loc = comp.properties.get("declared_download_location")
                 if isinstance(dl_loc, str) and dl_loc:
                     element["software_downloadLocation"] = dl_loc
+                    declared_fields.append("software_downloadLocation")
                 domain = comp.properties.get("declared_domain")
                 if isinstance(domain, str) and domain:
                     element["ai_domain"] = [domain]
+                    declared_fields.append("ai_domain")
                 train_info = comp.properties.get("declared_training_info")
                 if isinstance(train_info, str) and train_info:
                     element["ai_informationAboutTraining"] = train_info
+                    declared_fields.append("ai_informationAboutTraining")
                 compliance = comp.properties.get("declared_compliance")
                 if (
                     isinstance(compliance, list)
@@ -543,6 +541,7 @@ class SPDXGenerator(Generator):
                     and compliance
                 ):
                     element["ai_standardCompliance"] = list(compliance)
+                    declared_fields.append("ai_standardCompliance")
         elif typ == "dataset_DatasetPackage":
             element["software_primaryPurpose"] = "data"
             if v4:
@@ -557,17 +556,22 @@ class SPDXGenerator(Generator):
                 rel_ts = comp.properties.get("declared_release_time")
                 if isinstance(rel_ts, str) and rel_ts:
                     element["releaseTime"] = rel_ts
+                    declared_fields.append("releaseTime")
                 dl_loc = comp.properties.get("declared_download_location") or getattr(
                     comp, "source_uri", None
                 )
                 if isinstance(dl_loc, str) and dl_loc:
                     element["software_downloadLocation"] = dl_loc
+                    if comp.properties.get("declared_download_location"):
+                        declared_fields.append("software_downloadLocation")
                 avail = comp.properties.get("declared_availability")
                 if isinstance(avail, str) and avail:
                     element["dataset_datasetAvailability"] = avail
+                    declared_fields.append("dataset_datasetAvailability")
                 pii = comp.properties.get("declared_sensitive_pii")
                 if pii in {"yes", "no", "noAssertion"}:
                     element["dataset_hasSensitivePersonalInformation"] = pii
+                    declared_fields.append("dataset_hasSensitivePersonalInformation")
             else:
                 # The only property the Dataset class requires; the inventory has no type.
                 element["dataset_datasetType"] = ["noAssertion"]
@@ -581,6 +585,13 @@ class SPDXGenerator(Generator):
             element["software_primaryPurpose"] = "application"
         elif comp.component_type == ComponentType.VERIFIED_EXTENSION:
             element["software_primaryPurpose"] = "library"
+        ext_props = [
+            component_property(comp, native),
+            *claim_properties(comp),
+            *package_identifier_properties(comp),
+            *({"name": "nexus-symbiote:declaredField", "value": f} for f in declared_fields),
+        ]
+        element["extension"] = _extension(ext_props)
         hashes = standard_hashes(comp)
         if hashes:
             element["verifiedUsing"] = [
@@ -601,6 +612,12 @@ class SPDXGenerator(Generator):
         mapping = _MAPPING_V4 if v4 else _MAPPING_V3
         body = edge.model_dump(mode="json", exclude_none=True)
         typed = mapping.get(edge.relationship)
+        from_ref = edge.source_ref
+        to_ref = edge.target_ref
+        # In SPDX 3.0.1, `from --configures--> to` means `from` is the configuration
+        # applied to `to`, which is the inverse of native `agent --configured-with--> prompt`.
+        if v4 and not edge.conditions and typed == "configures":
+            from_ref, to_ref = edge.target_ref, edge.source_ref
         relationship = {
             "type": "Relationship",
             "spdxId": ids.element("relationship", content_digest(body)),
@@ -608,8 +625,8 @@ class SPDXGenerator(Generator):
             # A typed SPDX relationship is unconditional; standard-only consumers
             # never see the native condition, so match the CycloneDX graph rule.
             "relationshipType": "other" if edge.conditions or typed is None else typed,
-            "from": ids.element("component", edge.source_ref),
-            "to": [ids.element("component", edge.target_ref)],
+            "from": ids.element("component", from_ref),
+            "to": [ids.element("component", to_ref)],
             "completeness": completeness,
             "extension": _extension(
                 [{"name": "nexus-symbiote:relationship", "value": json_text(body)}]

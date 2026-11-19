@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import click
 
 from nexus_symbiote.core.aibom import AIBOM, ContentSerialError, NativeFormatError
+from nexus_symbiote.policy import PolicyError
 from nexus_symbiote.spdx_profiles import apply_agent_yaml_declarations
 from nexus_symbiote.supply_chain_cli import _refuse_source_overwrite
 from nexus_symbiote.utils.terminal import echo_line, json_text, neutralize, write_cli_output
@@ -19,6 +21,32 @@ def _load_native(path: Path) -> AIBOM:
         raise click.ClickException(
             f"{neutralize(path)} is not a valid native AIBOM file. {neutralize(exc)}"
         ) from exc
+    except (OSError, ValueError, RecursionError) as exc:
+        raise click.ClickException(
+            f"{neutralize(path)} is not a valid native AIBOM file. "
+            f"Reason: {neutralize(type(exc).__name__)}."
+        ) from exc
+
+
+def _resolve_project_root(value: Path, *, label: str) -> Path:
+    """Resolve a project directory without importing cli.py, refusing symlink escapes."""
+    resolved = value.resolve()
+    if Path(os.path.normpath(value.absolute())) == resolved:
+        return resolved
+    if (
+        not value.is_absolute()
+        and ".." not in value.parts
+        and not resolved.is_relative_to(Path.cwd().resolve())
+    ):
+        raise click.BadParameter(
+            f"{neutralize(value)} leads outside the current directory through a symbolic link; "
+            f"name the directory it resolves to, {neutralize(resolved)}, to collect that directory",
+            param_hint=label,
+        )
+    echo_line(
+        "Note: ", label, " ", value, " resolves through a symbolic link to ", resolved, err=True
+    )
+    return resolved
 
 
 @click.command("export-standard")
@@ -89,24 +117,29 @@ def export_standard_cmd(
     project: Path | None,
 ) -> None:
     """Export a native AgentBOM to CycloneDX (1.6/1.7) or SPDX 3.0.1 with typed AI projections."""
-    from nexus_symbiote.cli import _project_root
     from nexus_symbiote.generators.cyclonedx import CycloneDXGenerator
     from nexus_symbiote.generators.spdx import SPDXGenerator
 
     _refuse_source_overwrite(output, aibom_path)
     if agent_yaml is not None and project is None:
         raise click.UsageError("--agent-yaml requires --project")
+    if project is not None and agent_yaml is None:
+        raise click.UsageError("--project requires --agent-yaml")
+    if output_format == "spdx" and spdx_projection == "3" and author:
+        raise click.UsageError("--author with --format spdx requires --spdx-projection 4")
+    if output_format == "cyclonedx" and spec_version == "1.6" and cyclonedx_projection == "2":
+        raise click.UsageError("--spec-version 1.6 requires --cyclonedx-projection 3")
 
     bom = _load_native(aibom_path)
-    if project is not None:
-        root = _project_root(str(project), label="--project")
+    if agent_yaml is not None and project is not None:
+        root = _resolve_project_root(project, label="--project")
         try:
             notices = apply_agent_yaml_declarations(
                 bom,
                 root,
                 relative_path=agent_yaml,
             )
-        except (OSError, ValueError, UnicodeError) as exc:
+        except (OSError, ValueError, UnicodeError, PolicyError) as exc:
             raise click.ClickException(
                 f"Cannot safely read agent.yaml declarations: {neutralize(type(exc).__name__)}"
             ) from exc

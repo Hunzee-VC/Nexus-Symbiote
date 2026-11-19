@@ -159,6 +159,11 @@ class CycloneDXGenerator(Generator):
         native = native_document(aibom) if native is None else native
         components = native_components(native)
         subject = repository_subject(aibom)
+        comp_by_ref: dict[str, AnyComponent] = {c.bom_ref: c for c in aibom.components}
+        outgoing_by_source: dict[str, list[Any]] = {}
+        for edge in aibom.dependencies:
+            if not edge.conditions:
+                outgoing_by_source.setdefault(edge.source_ref, []).append(edge)
         aggregate = coverage_aggregate(aibom.metadata.completeness)
         composition: dict[str, Any] = {"aggregate": aggregate}
         if subject is not None:
@@ -168,9 +173,21 @@ class CycloneDXGenerator(Generator):
             "specVersion": self._spec_version,
             "version": aibom.metadata.version,
             "serialNumber": aibom.metadata.serial_number,
-            "metadata": self._metadata(aibom, native, subject),
+            "metadata": self._metadata(
+                aibom,
+                native,
+                subject,
+                comp_by_ref=comp_by_ref,
+                outgoing_by_source=outgoing_by_source,
+            ),
             "components": [
-                self._component(c, components[c.bom_ref], aibom=aibom, subject=subject)
+                self._component(
+                    c,
+                    components[c.bom_ref],
+                    subject=subject,
+                    comp_by_ref=comp_by_ref,
+                    outgoing_edges=outgoing_by_source.get(c.bom_ref, ()),
+                )
                 for c in sorted(aibom.components, key=lambda c: c.bom_ref)
                 if c is not subject
             ],
@@ -357,7 +374,13 @@ class CycloneDXGenerator(Generator):
         return recovered
 
     def _metadata(
-        self, aibom: AIBOM, native: dict[str, Any], subject: AnyComponent | None
+        self,
+        aibom: AIBOM,
+        native: dict[str, Any],
+        subject: AnyComponent | None,
+        *,
+        comp_by_ref: dict[str, AnyComponent] | None = None,
+        outgoing_by_source: dict[str, list[Any]] | None = None,
     ) -> dict[str, Any]:
         # The native BOM carries no wall-clock timestamp by default; omit
         # the field rather than emitting null, which the CycloneDX schema
@@ -384,8 +407,9 @@ class CycloneDXGenerator(Generator):
             meta["component"] = self._component(
                 subject,
                 native_components(native)[subject.bom_ref],
-                aibom=aibom,
                 subject=subject,
+                comp_by_ref=comp_by_ref or {},
+                outgoing_edges=(outgoing_by_source or {}).get(subject.bom_ref, ()),
             )
         edges = sorted(
             {
@@ -432,6 +456,8 @@ class CycloneDXGenerator(Generator):
             return raw
         for claim in comp.claims.values():
             locator = claim.locator or ""
+            if "://" in locator:
+                continue
             if ":" in locator:
                 tail = locator.rsplit(":", 1)[1]
                 if tail.isdigit() and int(tail) > 0:
@@ -443,9 +469,12 @@ class CycloneDXGenerator(Generator):
         comp: AnyComponent,
         native: dict[str, Any],
         *,
-        aibom: AIBOM | None = None,
         subject: AnyComponent | None = None,
+        comp_by_ref: dict[str, AnyComponent] | None = None,
+        outgoing_edges: Any = (),
     ) -> dict[str, Any]:
+        from nexus_symbiote.spdx_profiles import clean_license_identifier
+
         result = standard_component(comp)
         if comp.supplier:
             result["supplier"] = {"name": comp.supplier}
@@ -459,28 +488,29 @@ class CycloneDXGenerator(Generator):
                     occurrence["line"] = line_no
             result["evidence"] = {"occurrences": [occurrence]}
         if self._projection_version == 3:
-            lic = comp.properties.get("declared_license") or getattr(comp, "license", None)
-            if isinstance(lic, str) and lic.strip():
-                result["licenses"] = [{"license": {"name": lic.strip()}}]
+            observed_lic = clean_license_identifier(getattr(comp, "license", None))
+            declared_lic = clean_license_identifier(comp.properties.get("declared_license"))
+            if observed_lic:
+                result["licenses"] = [{"license": {"name": observed_lic}}]
+            elif declared_lic:
+                result["licenses"] = [
+                    {"license": {"name": declared_lic, "acknowledgement": "declared"}}
+                ]
             dl = comp.properties.get("declared_download_location") or getattr(
                 comp, "source_uri", None
             )
             if isinstance(dl, str) and _is_uri(dl):
                 result["externalReferences"] = [{"type": "distribution", "url": dl}]
-            if isinstance(comp, ModelComponent) and aibom is not None:
+            if isinstance(comp, ModelComponent) and comp_by_ref is not None:
                 ancestors: list[dict[str, Any]] = []
                 seen_ancestors: set[str] = set()
-                for edge in sorted(
-                    aibom.dependencies, key=lambda e: (e.relationship, e.target_ref)
-                ):
+                for edge in sorted(outgoing_edges, key=lambda e: (e.relationship, e.target_ref)):
                     if (
-                        edge.conditions
-                        or edge.source_ref != comp.bom_ref
-                        or edge.relationship not in _DERIVATION_EDGES
+                        edge.relationship not in _DERIVATION_EDGES
                         or edge.target_ref in seen_ancestors
                     ):
                         continue
-                    anc = aibom.get_component(edge.target_ref)
+                    anc = comp_by_ref.get(edge.target_ref)
                     if anc is None:
                         continue
                     seen_ancestors.add(edge.target_ref)
@@ -503,11 +533,9 @@ class CycloneDXGenerator(Generator):
                 dataset_refs = sorted(
                     {
                         edge.target_ref
-                        for edge in aibom.dependencies
-                        if not edge.conditions
-                        and edge.source_ref == comp.bom_ref
-                        and edge.relationship == "trained-on"
-                        and (ds := aibom.get_component(edge.target_ref)) is not None
+                        for edge in outgoing_edges
+                        if edge.relationship == "trained-on"
+                        and (ds := comp_by_ref.get(edge.target_ref)) is not None
                         and ds is not subject
                     }
                 )

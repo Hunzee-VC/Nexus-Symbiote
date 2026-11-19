@@ -1083,11 +1083,18 @@ nexus-symbiote export-standard [OPTIONS] AIBOM_PATH
 | `-f`, `--format` `cyclonedx\|spdx` | Target standard export format. (required) |
 | `-o`, `--output` `PATH` | Write the exported document to this file instead of standard output. |
 | `--cyclonedx-projection` `2\|3` | CycloneDX projection version (`3` default emits typed AI relationships, `services`, `modelCard`, `pedigree` and `licenses`). |
-| `--spec-version` `1.6\|1.7` | CycloneDX specification version when `--format cyclonedx` is selected (`1.7` default). |
+| `--spec-version` `1.6\|1.7` | CycloneDX specification version when `--format cyclonedx` is selected (`1.7` default; `1.6` requires `--cyclonedx-projection 3`). |
 | `--spdx-projection` `3\|4` | SPDX 3.0.1 projection version (`4` default emits typed AI/Dataset `RelationshipType` values and conditional profile conformance). |
 | `--spdx-namespace` `URI` | Explicit HTTPS namespace base URI for SPDX 3.0.1 element IDs. |
-| `--author` `TEXT` | Repeatable operator-supplied author name recorded in CycloneDX `metadata.authors` or SPDX `Person` + `CreationInfo.createdBy`. |
-| `--agent-yaml` `PATH` | Relative path under `--project` to an `agent.yaml` 1.1 producer declaration file; recorded at `declared` assurance (`declaration_conflict` on contradiction). |
-| `--project` `DIR` | Trusted project root used to confine `--agent-yaml` declarations. |
+| `--author` `TEXT` | Repeatable operator-supplied author name recorded in CycloneDX `metadata.authors` or SPDX `Person` + `CreationInfo.createdBy` (with `--format spdx`, requires `--spdx-projection 4`). |
+| `--agent-yaml` `PATH` | Relative path under `--project` to an `agent.yaml` (`1.0` or `1.1`) producer declaration file; recorded at `declared` assurance (`declaration_conflict` on contradiction). |
+| `--project` `DIR` | Trusted project root used to confine `--agent-yaml` declarations (requires `--agent-yaml`). |
+
+`--agent-yaml` and `--project` must be passed together; `--project` alone never reads `agent.yaml` implicitly. Producer declarations (`schema_version`, `owner`, `version`, `automation_level`, `licenses`, `data_usage`, `compliance`, `allowed_regions`, `release_time`, `download_location`, `datasets[]`, and `models[]`) never overwrite observed collector fields (`version`, `supplier`, `autonomy_level`); on observed components they are recorded under `declared_*` properties with per-field `declaration.<field>` claims. Passing `--author` or `--agent-yaml` enriches the embedded native inventory inside the exported document, so the recovered inventory's content digest reflects those additions rather than an attestation signed over the unmodified input `AIBOM_PATH`.
+
+```bash
+nexus-symbiote scan examples/demo-agent -f json --report-only -o /tmp/demo-aibom.json
+nexus-symbiote export-standard /tmp/demo-aibom.json -f spdx --spdx-projection 4 -o /tmp/demo.spdx.json
+```
 
 
