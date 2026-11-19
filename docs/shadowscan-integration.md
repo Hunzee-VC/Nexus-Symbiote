@@ -134,8 +134,11 @@ property `nexus-symbiote:omittedImportedFindings`.
 ## What each ShadowScan kind becomes
 
 ShadowScan 0.1.4 reports 18 kinds of finding. This table was reviewed against that
-version at commit `2b80f199659a8de17ea9c7792c07940d5b747d72`. A kind or resource type
-that another version adds or renames stays unmapped until the mapping is reviewed.
+version at commit `2b80f199659a8de17ea9c7792c07940d5b747d72`. A kind that another
+version adds or renames stays unmapped until the mapping is reviewed, and so does a new
+resource type of `framework-usage` or `agent-config`. The kinds `agent`, `mcp-server`
+and `local-model` are projected for any resource type, so a new one of theirs is
+projected too.
 
 | ShadowScan kind | Becomes | Condition, or why it is a gap |
 | --- | --- | --- |
@@ -143,7 +146,7 @@ that another version adds or renames stays unmapped until the mapping is reviewe
 | `framework-usage` | `agent` | Resource type `project` only: a project that uses an agent framework, a model SDK or only the MCP SDK, in which ShadowScan saw no agent indicator. Autonomy is recorded as unknown. |
 | `agent-config` | `ide-agent` | Resource type `coding-agent-config` only: one coding-agent signature in one project, which is a product such as Claude Code or an instruction convention such as an `AGENTS.md` file or a set of `SKILL.md` files. `ide_type` and `permission_mode` stay unset and no configuration file is listed. |
 | `mcp-server` | `mcp-server`, or `tool` for resource type `mcp-tool` | A tool is recorded without a server association. |
-| `local-model` | `model` | Model weights that ShadowScan found stored for a local runtime. |
+| `local-model` | `model` | Any resource type: a model file in a repository, model weights stored for a local runtime, or a running process that holds model files open. |
 | `secret`, `token` | Gap | A credential is never a component. ShadowScan's own CycloneDX export leaves both kinds out. |
 | `oauth-grant`, `service-identity`, `iam-grant` | Gap | An identity or a grant, for which the inventory has no component type. |
 | `infra`, `cloud-resource`, `workflow`, `bot-app`, `ai-app` | Gap | No component type describes it. |
@@ -180,8 +183,9 @@ AWS registry (`agent-registry-record`, `agentcore-registry-record`). None of tho
 a project or a coding-agent signature in one, so any other resource type of the two
 kinds, a missing one included, stays unmapped. The projected resource type is
 recorded in `shadowscan:resource-type`, from the importer's own table. In a
-CycloneDX report an entry whose `type` or `group` contradicts its
-`shadowscan:kind` stays unmapped whatever the kind.
+CycloneDX report an entry of `type` `machine-learning-model` or `group` `mcp-server`
+whose `shadowscan:kind` says otherwise stays unmapped whatever the kind. No other
+`type` or `group` is compared with the kind.
 
 An imported `agent` or `ide-agent` is a claim that the report holds such a finding.
 It carries a digest-based label, declared assurance and unknown trust, it is never

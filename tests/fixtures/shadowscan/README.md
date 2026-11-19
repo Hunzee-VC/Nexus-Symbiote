@@ -12,8 +12,9 @@ with ShadowScan commit `1a821e5763e9`.
 ## agent-framework-report-0.1.4.json
 
 Produced by Nexus-ShadowScan 0.1.4 at commit
-`2b80f199659a8de17ea9c7792c07940d5b747d72`. It holds one finding of each form that
-projection profile 6 maps from a code report, and nothing that stays unmapped:
+`2b80f199659a8de17ea9c7792c07940d5b747d72`. It holds one finding of each of the four
+forms below, among them both that projection profile 6 adds, and nothing that stays
+unmapped:
 
 | Index | Kind | Resource type | Reported for | Becomes |
 | --- | --- | --- | --- | --- |

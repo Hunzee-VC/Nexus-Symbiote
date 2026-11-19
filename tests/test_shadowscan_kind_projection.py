@@ -314,6 +314,37 @@ def test_another_spelling_of_the_two_kinds_is_not_read_as_the_kind(kind, resourc
         assert result.unmapped_kinds == {"unrecognized kind": 1}
 
 
+@pytest.mark.parametrize(
+    "kind",
+    ["secret ", " secret", "secret\n", "infra\t", "agent ", "\tmcp-server", "model ", " ", "\n"],
+)
+def test_a_kind_with_white_space_around_it_is_never_named_by_the_report(kind):
+    for report in (native(finding(kind)), cyclonedx(entry(kind))):
+        result = parse(report)
+        assert result.components == []
+        assert result.unmapped_kinds == {"unrecognized kind": 1}
+        assert result.limitations[-1] == (
+            "1 source entries were not mapped into BOM components (unrecognized kind: 1)"
+        )
+
+
+@pytest.mark.parametrize(
+    ("report", "label"),
+    [
+        (native(finding("agent", "mcp-tool")), "agent (unprojected form)"),
+        (
+            cyclonedx(entry("mcp-server", type="machine-learning-model")),
+            "mcp-server (unprojected form)",
+        ),
+        (cyclonedx(entry("local-model", group="mcp-server")), "local-model (unprojected form)"),
+        (native(finding("model", "mcp-tool")), "model (unprojected form)"),
+    ],
+)
+def test_a_refused_form_of_every_projected_kind_reads_unprojected_form(report, label):
+    result = parse(report)
+    assert result.components == [] and result.unmapped_kinds == {label: 1}
+
+
 @pytest.mark.parametrize("kind", sorted(BOUND))
 @pytest.mark.parametrize("shape", ["number", "boolean", "list", "object"])
 def test_a_resource_type_that_is_not_a_string_stays_unmapped(kind, shape):

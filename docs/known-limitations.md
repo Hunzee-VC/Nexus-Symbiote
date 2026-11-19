@@ -1325,7 +1325,8 @@ A way around a limit that its entry does not describe is worth a
   and a `framework-usage` finding an `agent` only with resource type `project`. Any other
   resource type of those kinds stays unmapped, such as the `lockfile-inventory` finding that
   ShadowScan 0.1.4 reports for a `uv.lock` that lists an AI package, and so does every
-  `secret`, `token`, `infra`, identity, grant and run-time finding. One unmapped entry keeps
+  `secret`, `token`, `infra`, identity and grant finding and every finding of the kinds
+  `gateway-caller`, `network-contact` and `runtime-process`. One unmapped entry keeps
   the default scan, validate and risk gates closed, so a code report with a credential, an
   infrastructure file or such a lockfile still does not pass. The component type is no
   narrower than the kind and resource type: a project that only implements or configures an
