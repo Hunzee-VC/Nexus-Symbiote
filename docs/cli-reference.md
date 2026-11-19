@@ -58,7 +58,7 @@ change them. See [collection limits](collection-limits.md).
 | [`blast-radius`](#blast-radius) | offline | List agents and components associated with one component |
 | [`graph`](#graph) | offline | Write a self-contained HTML or JSON view of an inventory's associations, risk classes and exposure paths |
 | [`baseline`](#baseline) | offline | Write an unsigned snapshot only if the scan gate passes |
-| [`vex`](#vex) | offline | Export findings as a VEX document with status `in_triage` |
+| [`vex`](#vex) | offline | Export schema-validated VEX findings with optional operator decisions, advisories and trace evidence |
 | [`crosswalk`](#crosswalk) | offline | Map findings to OWASP, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE entries |
 | [`minimum-elements`](#minimum-elements) | offline | Report which G7 AI SBOM minimum elements an AgentBOM's CycloneDX export carries, and how to supply the missing ones |
 | [`verify-artifact`](#verify-artifact) | offline | Check a file's SHA-256, and optionally its Sigstore bundle |
@@ -334,6 +334,9 @@ nexus-symbiote advisories [OPTIONS] AIBOM_PATH
 | `--exclude` `NAME` | Never send this package name to OSV; a trailing `*` matches a prefix, and a `*` anywhere else is refused. Names are compared as PyPI normalizes them, and in any case (repeatable). |
 | `--exclude-private-origins` | Send only packages whose lockfile resolution records the public PyPI or npm registry. A Python package that no `uv.lock` or `poetry.lock` resolves has no recorded origin, so it is withheld; withhold private names with `--exclude` instead to keep public ones checked. |
 | `--dry-run` | List the package identities that would be sent, without contacting OSV (works offline). |
+| `--offline-db` `PATH` | Match exact pinned PyPI/npm packages offline against an OSV JSON bundle or directory without contacting `api.osv.dev`; deduplicates alias pairs and records bundle SHA-256 provenance. |
+| `--kev` `PATH` | Offline CISA/ENISA KEV JSON catalog used with `--offline-db` to elevate matched advisories to `critical` with source provenance (repeatable). |
+| `--epss` `PATH` | Offline EPSS CSV/JSON catalog used with `--offline-db` to attach EPSS scores and percentiles. |
 
 The command sends each package's ecosystem, normalized name and exact version to
 `https://api.osv.dev/v1/querybatch`, including packages resolved from a private
@@ -1059,7 +1062,7 @@ kept.
 
 ### `vex`
 
-Export schema-validated findings in triage, without asserting exploitability.
+Export schema-validated VEX findings with optional operator decisions, advisories, and trace evidence.
 
 ```text
 nexus-symbiote vex [OPTIONS] AIBOM_PATH
@@ -1068,3 +1071,7 @@ nexus-symbiote vex [OPTIONS] AIBOM_PATH
 | Option | Description |
 |---|---|
 | `-o`, `--output` `PATH` | Write the VEX document to this file instead of standard output. |
+| `--decisions` `PATH` | Operator-owned VEX decisions YAML/JSON stored outside the scanned project; expired decisions revert to `in_triage` with a warning. |
+| `--project-root` `PATH` | Scanned project root used to refuse `--decisions` files stored inside the checkout. |
+| `--advisories` `PATH` | Link matched advisories from an `advisories` report JSON into the VEX document. |
+| `--trace-evidence` `PATH` | Runtime trace or execution-evidence JSON yielding execution-bound VEX outcomes (`declared-never-loaded`, `invoked`, `shadowed`). |

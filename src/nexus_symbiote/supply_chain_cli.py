@@ -514,14 +514,72 @@ def register_supply_chain_commands(main: click.Group) -> None:
         type=click.Path(path_type=Path),
         help="Write the VEX document to this file instead of standard output.",
     )
-    def vex(aibom_path: Path, output: Path | None) -> None:
-        """Export schema-validated findings in triage, without asserting exploitability."""
+    @click.option(
+        "--decisions",
+        "decisions_path",
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        help=(
+            "Operator-owned VEX decisions YAML/JSON outside the scanned project; expired "
+            "decisions revert to in_triage with a warning."
+        ),
+    )
+    @click.option(
+        "--project-root",
+        type=click.Path(exists=True, file_okay=False, path_type=Path),
+        help="Scanned project root used to refuse --decisions files stored inside the checkout.",
+    )
+    @click.option(
+        "--advisories",
+        "advisories_path",
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        help="Link matched advisories from an advisories report JSON into the VEX document.",
+    )
+    @click.option(
+        "--trace-evidence",
+        "trace_evidence_path",
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        help=(
+            "Runtime trace or execution-evidence JSON yielding execution-bound VEX outcomes "
+            "(declared-never-loaded, invoked, shadowed)."
+        ),
+    )
+    def vex(
+        aibom_path: Path,
+        output: Path | None,
+        decisions_path: Path | None,
+        project_root: Path | None,
+        advisories_path: Path | None,
+        trace_evidence_path: Path | None,
+    ) -> None:
+        """Export schema-validated VEX findings with optional decisions, advisories, and trace evidence."""
         from nexus_symbiote.generators.vex import VEXGenerator
+        from nexus_symbiote.vex_decisions import (
+            load_advisory_report,
+            load_execution_evidence,
+            load_vex_decisions,
+        )
 
         _refuse_source_overwrite(output, aibom_path)
         bom = _load_inventory(aibom_path)
         try:
-            text = VEXGenerator().generate_json(bom)
+            loaded_decisions = (
+                load_vex_decisions(decisions_path, project_root=project_root)
+                if decisions_path is not None
+                else None
+            )
+            loaded_trace = (
+                load_execution_evidence(trace_evidence_path)
+                if trace_evidence_path is not None
+                else None
+            )
+            loaded_advisories = (
+                load_advisory_report(advisories_path)[0] if advisories_path is not None else None
+            )
+            text = VEXGenerator(
+                decisions=loaded_decisions,
+                execution_evidence=loaded_trace,
+                advisories=loaded_advisories,
+            ).generate_json(bom)
         except (OSError, ValueError, RecursionError) as exc:
             raise click.ClickException(neutralize(exc)) from exc
         if output:
@@ -564,6 +622,30 @@ def register_supply_chain_commands(main: click.Group) -> None:
         is_flag=True,
         help="List the package identities that would be sent, without contacting OSV (works offline).",
     )
+    @click.option(
+        "--offline-db",
+        type=click.Path(exists=True, path_type=Path),
+        help=(
+            "Match exact pinned PyPI/npm packages offline against an OSV JSON bundle or "
+            "directory without contacting api.osv.dev."
+        ),
+    )
+    @click.option(
+        "--kev",
+        "kev_paths",
+        multiple=True,
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        help=(
+            "Offline CISA/ENISA KEV JSON catalog used with --offline-db to elevate matched "
+            "advisories to critical with source provenance (repeatable)."
+        ),
+    )
+    @click.option(
+        "--epss",
+        "epss_path",
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        help="Offline EPSS CSV/JSON catalog used with --offline-db to attach EPSS scores.",
+    )
     def advisories(
         aibom_path: Path,
         output: Path | None,
@@ -571,16 +653,14 @@ def register_supply_chain_commands(main: click.Group) -> None:
         exclude: tuple[str, ...],
         exclude_private_origins: bool,
         dry_run: bool,
+        offline_db: Path | None,
+        kev_paths: tuple[Path, ...],
+        epss_path: Path | None,
     ) -> None:
-        """Live: query OSV for exact PyPI/npm package URLs in the inventory.
-
-        Sends each package's ecosystem, normalized name and exact version to
-        api.osv.dev, including packages from private registries unless excluded.
-        Exits 1 when an advisory is found (unless --no-fail-on-advisory) or when
-        not every package in scope was looked up, including when none was; with
-        --dry-run, only when the report lists an error.
-        """
-        if not dry_run:
+        """Query OSV (live) or an offline OSV bundle for exact PyPI/npm package URLs."""
+        if (kev_paths or epss_path is not None) and offline_db is None:
+            raise click.ClickException("--kev and --epss require --offline-db")
+        if not dry_run and offline_db is None:
             modes.require_live("advisories")
         from nexus_symbiote.advisories import fetch_advisories
         from nexus_symbiote.core.hashing import hash_bytes
@@ -597,21 +677,37 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 f"{neutralize(aibom_path)} is not a valid native AIBOM file."
             ) from exc
         try:
-            report = fetch_advisories(
-                bom,
-                exclude=exclude,
-                exclude_private_origins=exclude_private_origins,
-                dry_run=dry_run,
-                inventory_sha256=hash_bytes(data),
-            )
+            if offline_db is not None:
+                from nexus_symbiote.offline_advisories import match_offline_advisories
+
+                report, provenance = match_offline_advisories(
+                    bom,
+                    db_path=offline_db,
+                    kev_paths=kev_paths,
+                    epss_path=epss_path,
+                    exclude=exclude,
+                    inventory_sha256=hash_bytes(data),
+                )
+                payload = report.to_dict()
+                payload["sent_to_osv"] = "nothing (offline advisory bundle)"
+                payload["provenance"] = provenance
+            else:
+                report = fetch_advisories(
+                    bom,
+                    exclude=exclude,
+                    exclude_private_origins=exclude_private_origins,
+                    dry_run=dry_run,
+                    inventory_sha256=hash_bytes(data),
+                )
+                payload = report.to_dict()
         except (OSError, ValueError) as exc:
             raise click.ClickException(neutralize(exc)) from exc
-        text = json.dumps(report.to_dict(), indent=2)
+        text = json.dumps(payload, indent=2)
         if output:
             write_cli_output(output, text)
         else:
             click.echo(json_text(text))
-        if dry_run:
+        if dry_run and offline_db is None:
             if report.errors:
                 raise click.exceptions.Exit(1)
             return
