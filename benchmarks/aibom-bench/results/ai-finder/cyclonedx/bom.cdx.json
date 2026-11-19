@@ -1,0 +1,1006 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:b3538f6e-8b41-4ac9-8acd-e0b03d53cbc2",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-18T10:13:52.624498+00:00",
+    "tools": [
+      {
+        "vendor": "SCANOSS",
+        "name": "ai-finder",
+        "version": "0.5.0"
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "datasets",
+      "purl": "pkg:pypi/datasets@4.1.1",
+      "bom-ref": "pkg:datasets",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/training/finetune.py",
+            "line": 5,
+            "additionalContext": "from datasets import load_dataset"
+          },
+          {
+            "location": "requirements.txt",
+            "line": 12,
+            "additionalContext": "datasets ==4.1.1"
+          }
+        ]
+      },
+      "version": "4.1.1",
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "transformers",
+      "purl": "pkg:pypi/transformers@4.57.0",
+      "bom-ref": "pkg:transformers",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/training/finetune.py",
+            "line": 6,
+            "additionalContext": "from transformers import AutoModelForSequenceClassification, Trainer, TrainingArguments"
+          },
+          {
+            "location": "src/agent/llm.py",
+            "line": 12,
+            "additionalContext": "from transformers import AutoModelForSequenceClassification, AutoTokenizer, pipeline"
+          },
+          {
+            "location": "src/agent/guardrails.py",
+            "line": 5,
+            "additionalContext": "from transformers import pipeline"
+          },
+          {
+            "location": ".claude/skills/triage-ticket/scripts/classify.py",
+            "line": 2,
+            "additionalContext": "from transformers import pipeline"
+          },
+          {
+            "location": "requirements.txt",
+            "line": 8,
+            "additionalContext": "transformers ==4.57.0"
+          }
+        ]
+      },
+      "version": "4.57.0",
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "data",
+      "name": "huggingface-dataset",
+      "bom-ref": "pkg:huggingface-dataset",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/training/finetune.py",
+            "line": 5
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "anthropic",
+      "purl": "pkg:pypi/anthropic@0.69.0",
+      "bom-ref": "pkg:anthropic",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/llm.py",
+            "line": 7,
+            "additionalContext": "import anthropic"
+          },
+          {
+            "location": "requirements.txt",
+            "line": 1,
+            "additionalContext": "anthropic ==0.69.0"
+          }
+        ]
+      },
+      "version": "0.69.0",
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "langchain-anthropic",
+      "purl": "pkg:pypi/langchain-anthropic@0.3.19",
+      "bom-ref": "pkg:langchain-anthropic",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/llm.py",
+            "line": 9,
+            "additionalContext": "from langchain_anthropic import ChatAnthropic"
+          },
+          {
+            "location": "requirements.txt",
+            "line": 4,
+            "additionalContext": "langchain-anthropic ==0.3.19"
+          }
+        ]
+      },
+      "version": "0.3.19",
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "openai",
+      "purl": "pkg:pypi/openai@1.109.1",
+      "bom-ref": "pkg:openai",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/llm.py",
+            "line": 10,
+            "additionalContext": "from openai import AzureOpenAI, OpenAI"
+          },
+          {
+            "location": "src/agent/retrieval.py",
+            "line": 8,
+            "additionalContext": "from openai import OpenAI"
+          },
+          {
+            "location": "requirements.txt",
+            "line": 2,
+            "additionalContext": "openai ==1.109.1"
+          }
+        ]
+      },
+      "version": "1.109.1",
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "sentence-transformers",
+      "purl": "pkg:pypi/sentence-transformers@5.1.1",
+      "bom-ref": "pkg:sentence-transformers",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/llm.py",
+            "line": 11,
+            "additionalContext": "from sentence_transformers import SentenceTransformer"
+          },
+          {
+            "location": "requirements.txt",
+            "line": 10,
+            "additionalContext": "sentence-transformers ==5.1.1"
+          }
+        ]
+      },
+      "version": "5.1.1",
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "huggingface-embeddings",
+      "bom-ref": "pkg:huggingface-embeddings",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/llm.py",
+            "line": 11
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "langgraph",
+      "purl": "pkg:pypi/langgraph@0.6.7",
+      "bom-ref": "pkg:langgraph",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/graph.py",
+            "line": 5,
+            "additionalContext": "from langgraph.graph import END, StateGraph"
+          },
+          {
+            "location": "requirements.txt",
+            "line": 6,
+            "additionalContext": "langgraph ==0.6.7"
+          }
+        ]
+      },
+      "version": "0.6.7",
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "langgraph-agent",
+      "bom-ref": "pkg:langgraph-agent",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/graph.py",
+            "line": 5
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "langchain-core",
+      "purl": "pkg:pypi/langchain-core@0.3.76",
+      "bom-ref": "pkg:langchain-core",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/tools.py",
+            "line": 5,
+            "additionalContext": "from langchain_core.tools import tool"
+          },
+          {
+            "location": "requirements.txt",
+            "line": 5,
+            "additionalContext": "langchain-core ==0.3.76"
+          }
+        ]
+      },
+      "version": "0.3.76",
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "lookup_customer",
+      "bom-ref": "pkg:lookup_customer",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/tools.py",
+            "line": 10
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "issue_refund",
+      "bom-ref": "pkg:issue_refund",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/tools.py",
+            "line": 16
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "search_kb",
+      "bom-ref": "pkg:search_kb",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/tools.py",
+            "line": 22
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "chromadb",
+      "purl": "pkg:pypi/chromadb@1.1.0",
+      "bom-ref": "pkg:chromadb",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/retrieval.py",
+            "line": 7,
+            "additionalContext": "import chromadb"
+          },
+          {
+            "location": "requirements.txt",
+            "line": 11,
+            "additionalContext": "chromadb ==1.1.0"
+          }
+        ]
+      },
+      "version": "1.1.0",
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "pinecone",
+      "purl": "pkg:pypi/pinecone@7.3.0",
+      "bom-ref": "pkg:pinecone",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/retrieval.py",
+            "line": 9,
+            "additionalContext": "from pinecone import Pinecone"
+          },
+          {
+            "location": "requirements.txt",
+            "line": 14,
+            "additionalContext": "pinecone ==7.3.0"
+          }
+        ]
+      },
+      "version": "7.3.0",
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "chroma",
+      "bom-ref": "pkg:chroma",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/retrieval.py",
+            "line": 7
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "pinecone",
+      "bom-ref": "pkg:pinecone-2",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/retrieval.py",
+            "line": 9
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "qdrant",
+      "bom-ref": "pkg:qdrant",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent/retrieval.py",
+            "line": 19
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@modelcontextprotocol/sdk",
+      "purl": "pkg:npm/modelcontextprotocol/sdk@1.18.0",
+      "bom-ref": "pkg:modelcontextprotocol-sdk",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "mcp-server/src/index.ts",
+            "line": 1,
+            "additionalContext": "import { McpServer } from \"@modelcontextprotocol/sdk/server/mcp.js\""
+          },
+          {
+            "location": "mcp-server/package.json",
+            "additionalContext": "@modelcontextprotocol/sdk ^1.18.0"
+          }
+        ]
+      },
+      "version": "1.18.0",
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "name": "acme-support-mcp",
+      "properties": [
+        {
+          "name": "ai-finder:mcp:role",
+          "value": "server"
+        },
+        {
+          "name": "ai-finder:mcp:source",
+          "value": "code"
+        }
+      ],
+      "bom-ref": "pkg:acme-support-mcp",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "mcp-server/src/index.ts",
+            "line": 5,
+            "additionalContext": "new McpServer(...)"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "langchain",
+      "version": "0.3.27",
+      "purl": "pkg:pypi/langchain@0.3.27",
+      "bom-ref": "pkg:langchain",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "requirements.txt",
+            "line": 3,
+            "additionalContext": "langchain ==0.3.27"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "mcp",
+      "version": "1.16.0",
+      "purl": "pkg:pypi/mcp@1.16.0",
+      "bom-ref": "pkg:mcp",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "requirements.txt",
+            "line": 7,
+            "additionalContext": "mcp ==1.16.0"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "torch",
+      "version": "2.8.0",
+      "purl": "pkg:pypi/torch@2.8.0",
+      "bom-ref": "pkg:torch",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "requirements.txt",
+            "line": 9,
+            "additionalContext": "torch ==2.8.0"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "safetensors",
+      "version": "0.6.2",
+      "purl": "pkg:pypi/safetensors@0.6.2",
+      "bom-ref": "pkg:safetensors",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "requirements.txt",
+            "line": 15,
+            "additionalContext": "safetensors ==0.6.2"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@anthropic-ai/sdk",
+      "version": "0.65.0",
+      "purl": "pkg:npm/anthropic-ai/sdk@0.65.0",
+      "bom-ref": "pkg:anthropic-ai-sdk",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "mcp-server/package.json",
+            "additionalContext": "@anthropic-ai/sdk ^0.65.0"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "name": "@modelcontextprotocol/server-filesystem",
+      "properties": [
+        {
+          "name": "ai-finder:mcp:role",
+          "value": "server"
+        },
+        {
+          "name": "ai-finder:mcp:source",
+          "value": "config"
+        },
+        {
+          "name": "ai-finder:mcp:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "ai-finder:kb:id",
+          "value": "mcp-filesystem"
+        }
+      ],
+      "purl": "pkg:npm/modelcontextprotocol/server-filesystem@2025.8.21",
+      "version": "2025.8.21",
+      "bom-ref": "pkg:modelcontextprotocol-server-filesystem",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": ".mcp.json",
+            "line": 3,
+            "additionalContext": "npx @modelcontextprotocol/server-filesystem@2025.8.21"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "name": "ghcr.io/github/github-mcp-server",
+      "properties": [
+        {
+          "name": "ai-finder:mcp:role",
+          "value": "server"
+        },
+        {
+          "name": "ai-finder:mcp:source",
+          "value": "config"
+        },
+        {
+          "name": "ai-finder:mcp:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "ai-finder:kb:id",
+          "value": "github-mcp-server"
+        }
+      ],
+      "purl": "pkg:docker/github/github-mcp-server@sha256:7c7f6ab9bb4a4e4e4a1d0a0c5f2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d?repository_url=ghcr.io",
+      "version": "sha256:7c7f6ab9bb4a4e4e4a1d0a0c5f2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d",
+      "bom-ref": "pkg:ghcr.io-github-github-mcp-server",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": ".mcp.json",
+            "line": 11,
+            "additionalContext": "docker ghcr.io/github/github-mcp-server@sha256:7c7f6ab9bb4a4e4e4a1d0a0c5f2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "name": "mcp-server-postgres",
+      "properties": [
+        {
+          "name": "ai-finder:mcp:role",
+          "value": "server"
+        },
+        {
+          "name": "ai-finder:mcp:source",
+          "value": "config"
+        },
+        {
+          "name": "ai-finder:mcp:transport",
+          "value": "stdio"
+        }
+      ],
+      "purl": "pkg:pypi/mcp-server-postgres",
+      "bom-ref": "pkg:mcp-server-postgres",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": ".mcp.json",
+            "line": 25,
+            "additionalContext": "uvx mcp-server-postgres"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "name": "remote-crm",
+      "properties": [
+        {
+          "name": "ai-finder:mcp:role",
+          "value": "server"
+        },
+        {
+          "name": "ai-finder:mcp:source",
+          "value": "config"
+        },
+        {
+          "name": "ai-finder:mcp:transport",
+          "value": "http"
+        }
+      ],
+      "bom-ref": "pkg:remote-crm",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": ".mcp.json",
+            "line": 34,
+            "additionalContext": "https://mcp.crm.example.com/mcp"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "name": "@playwright/mcp",
+      "properties": [
+        {
+          "name": "ai-finder:mcp:role",
+          "value": "server"
+        },
+        {
+          "name": "ai-finder:mcp:source",
+          "value": "config"
+        },
+        {
+          "name": "ai-finder:mcp:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "ai-finder:kb:id",
+          "value": "playwright-mcp"
+        }
+      ],
+      "purl": "pkg:npm/playwright/mcp",
+      "bom-ref": "pkg:playwright-mcp",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": ".cursor/mcp.json",
+            "additionalContext": "npx @playwright/mcp"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "name": "deep-mcp",
+      "properties": [
+        {
+          "name": "ai-finder:mcp:role",
+          "value": "server"
+        },
+        {
+          "name": "ai-finder:mcp:source",
+          "value": "config"
+        },
+        {
+          "name": "ai-finder:mcp:transport",
+          "value": "stdio"
+        }
+      ],
+      "purl": "pkg:npm/deep-mcp@1.0.0",
+      "version": "1.0.0",
+      "bom-ref": "pkg:deep-mcp",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json",
+            "line": 3,
+            "additionalContext": "npx deep-mcp@1.0.0"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "machine-learning-model",
+      "name": "models/llm/acme-intent-tiny.Q8_0.gguf",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "46cac5ddd076c4f843546daacd3586af7beaa78211b614c9c778868979a30c50"
+        }
+      ],
+      "description": "Model format: gguf, quantization: Q8_0",
+      "modelCard": {
+        "modelParameters": {
+          "learningType": "supervised",
+          "inputs": [
+            {
+              "format": "string"
+            }
+          ],
+          "outputs": [
+            {
+              "format": "string"
+            }
+          ]
+        }
+      },
+      "properties": [
+        {
+          "name": "ai-finder:model:format",
+          "value": "gguf"
+        },
+        {
+          "name": "ai-finder:model:quantization",
+          "value": "Q8_0"
+        }
+      ],
+      "bom-ref": "pkg:models-llm-acme-intent-tiny.Q8_0.gguf",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "models/llm/acme-intent-tiny.Q8_0.gguf"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "machine-learning-model",
+      "name": "models/classifier/model.safetensors",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "5bdeef2029fa7ebfc5507027c5060f6557fd4187cad5cf02cded1eecd1a977f7"
+        }
+      ],
+      "description": "Model format: safetensors",
+      "modelCard": {
+        "modelParameters": {
+          "learningType": "supervised",
+          "inputs": [
+            {
+              "format": "string"
+            }
+          ],
+          "outputs": [
+            {
+              "format": "string"
+            }
+          ],
+          "modelArchitecture": "gemma3"
+        }
+      },
+      "properties": [
+        {
+          "name": "ai-finder:model:format",
+          "value": "safetensors"
+        },
+        {
+          "name": "ai-finder:model:parameters",
+          "value": "27432067952"
+        },
+        {
+          "name": "ai-finder:model:source_url",
+          "value": "https://huggingface.co/Otakadelic/mergekit-model_stock-prczfmj-Q4_K_M-GGUF"
+        },
+        {
+          "name": "ai-finder:model:base_model",
+          "value": "pkg:huggingface/mergekit-community/mergekit-model_stock-prczfmj"
+        }
+      ],
+      "bom-ref": "pkg:models-classifier-model.safetensors",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "models/classifier/model.safetensors"
+          }
+        ]
+      },
+      "purl": "pkg:huggingface/Otakadelic/mergekit-model_stock-prczfmj-Q4_K_M-GGUF",
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "machine-learning-model",
+      "name": "models/legacy/intent.pt",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "90d72e0bfe091224a075ec8d66d9ab989d874bbeca15431794c8eb9894ad3734"
+        }
+      ],
+      "description": "Model format: pytorch",
+      "modelCard": {
+        "modelParameters": {
+          "learningType": "supervised",
+          "inputs": [
+            {
+              "format": "string"
+            }
+          ],
+          "outputs": [
+            {
+              "format": "string"
+            }
+          ],
+          "modelArchitecture": "Qwen2ForCausalLM",
+          "architectureFamily": "llama",
+          "task": "text-generation"
+        }
+      },
+      "properties": [
+        {
+          "name": "ai-finder:model:format",
+          "value": "pytorch"
+        },
+        {
+          "name": "ai-finder:model:parameters",
+          "value": "3085938688"
+        },
+        {
+          "name": "ai-finder:model:source_url",
+          "value": "https://huggingface.co/AndriLawrence/Qwen-3B-Intent-Microplan-v2"
+        },
+        {
+          "name": "ai-finder:model:base_model",
+          "value": "pkg:huggingface/Qwen/Qwen2.5-3B-Instruct"
+        }
+      ],
+      "bom-ref": "pkg:models-legacy-intent.pt",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "models/legacy/intent.pt"
+          }
+        ]
+      },
+      "purl": "pkg:huggingface/AndriLawrence/Qwen-3B-Intent-Microplan-v2",
+      "licenses": [
+        {
+          "license": {
+            "id": "other"
+          }
+        }
+      ]
+    }
+  ]
+}

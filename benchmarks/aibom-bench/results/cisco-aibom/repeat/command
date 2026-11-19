@@ -1,0 +1,1 @@
+/aibom-run/venvs/cisco-aibom/bin/python -I benchmarks/aibom-bench/cisco_tier1.py /aibom-run/work/cisco-aibom/corpus /aibom-run/results2/cisco-aibom/repeat/tier1.json 

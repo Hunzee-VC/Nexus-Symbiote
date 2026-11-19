@@ -1,0 +1,1 @@
+/aibom-run/venvs/ai-bom/bin/ai-bom scan /aibom-run/work/trusera-ai-bom/corpus --deep --quiet --no-telemetry -f cyclonedx -o /aibom-run/results2/trusera-ai-bom/cyclonedx/bom.cdx.json 

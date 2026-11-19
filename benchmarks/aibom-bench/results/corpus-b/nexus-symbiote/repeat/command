@@ -1,0 +1,1 @@
+/aibom-run/venvs/nexus/bin/nexus-symbiote scan /aibom-run/work/nexus-symbiote/corpus -f json -o /aibom-run/resultsB/nexus-symbiote/repeat/bom.json 

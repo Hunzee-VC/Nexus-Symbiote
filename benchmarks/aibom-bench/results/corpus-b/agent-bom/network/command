@@ -1,0 +1,1 @@
+/aibom-run/venvs/agent-bom/bin/agent-bom scan -p /aibom-run/work/agent-bom/corpus --no-discover --no-scan --scan-prompts --model-files /aibom-run/work/agent-bom/corpus --model-provenance --ai-inventory /aibom-run/work/agent-bom/corpus --dataset-cards /aibom-run/work/agent-bom/corpus --enforce --full-analysis -f json -o /aibom-run/resultsB/agent-bom/network/report.json 
