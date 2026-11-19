@@ -35,7 +35,14 @@ PY_TOOL = "@mcp.tool()\ndef read_note() -> str:\n    return ''\n"
 LONG = "n" * (MAX_SERVER_NAME_CHARS + 1)
 TOKEN = "ghp_" + "SYNTHETICSENTINEL" + "0" * 19
 KEY = "sk-ant-api03-" + "A" * 95
-GLUED = ("server-" + KEY, "prod-" + KEY, "x_" + KEY, "v1" + KEY, "1" + TOKEN, "xAKIASYNTHETICSENTINE")
+GLUED = (
+    "server-" + KEY,
+    "prod-" + KEY,
+    "x_" + KEY,
+    "v1" + KEY,
+    "1" + TOKEN,
+    "xAKIASYNTHETICSENTINE",
+)
 
 
 def _scan(root: Path, files: dict[str, str | bytes]):

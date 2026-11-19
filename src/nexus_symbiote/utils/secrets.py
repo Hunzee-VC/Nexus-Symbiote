@@ -117,6 +117,8 @@ _EMBEDDED_TOKEN = re.compile(
 def holds_token_shape(text: str) -> bool:
     """Whether a credential shape occurs anywhere in ``text``, also glued to other text."""
     return _EMBEDDED_TOKEN.search(text) is not None
+
+
 # A header value with no scheme is redacted when it looks like a credential; after
 # Negotiate or NTLM, which the scheme rule above does not know, whatever its shape.
 _RAW_AUTH_HEADER = re.compile(
