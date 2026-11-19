@@ -689,8 +689,9 @@ A way around a limit that its entry does not describe is worth a
   other model suffix, such as text saved as `model.onnx`, `model.tflite` or
   `model.ggml`, is recorded with the format its name claims and a model type, rated
   `unknown`, and one under a pickle-family name the same, rated
-  `unsafe-code-execution`. The GGUF check reads the magic only: a file that starts
-  with `GGUF` is recorded as `llama.cpp` whatever follows, and
+  `unsafe-code-execution`. The GGUF check reads the magic and rates what follows: a
+  file that starts with `GGUF` is recorded as `llama.cpp` unless the content after the
+  magic is rated `unsafe-code-execution`, and
   `properties.gguf_metadata` says when its version or metadata could not be read.
   The standard exports keep such a file's type: a file whose format was not
   established is still a CycloneDX `machine-learning-model` and an SPDX `ai_AIPackage`,

@@ -25,8 +25,9 @@ not show that the file is of that format. Collect such an inventory again. For e
 file whose header is not its format's, `diff` reports the changed fields and
 properties as one alert, on which it exits 1 unless `--no-fail-on-alert` is given,
 and `validate --project` reports the older record as `Missing or mismatched local
-component`. The alert is medium for a `.gguf` file and for a pickle under either
-suffix. It is high for any other file named as SafeTensors that does not validate,
+component`. The alert is medium for a `.gguf` file, and for a pickle, a ZIP that
+holds a pickle or a NumPy object array under either suffix. It is high for any other
+file named as SafeTensors that does not validate,
 such as an empty or a text file, and begins `Risk findings added: 1 high
 (invalid_safetensors).`, because the finding the collector now stores is new on
 the record. The `invalid_safetensors` gate is unchanged: `risk` raises it for
