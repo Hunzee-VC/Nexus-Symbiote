@@ -52,7 +52,9 @@ from nexus_symbiote.generators.validation import (
 )
 
 PROJECTION = "spdx-3.0.1/3"
+PROJECTION_V4 = "spdx-3.0.1/4"
 PREVIOUS_PROJECTION = "spdx-3.0.1/2"
+_AUTHOR_PROPERTY = "nexus-symbiote:spdx:author"
 SPDX_TYPE_MAP = {
     ComponentType.AGENT: "ai_AIPackage",
     ComponentType.MODEL: "ai_AIPackage",
@@ -60,6 +62,24 @@ SPDX_TYPE_MAP = {
     ComponentType.MEMORY_STORE: "dataset_DatasetPackage",
     ComponentType.RAG_SOURCE: "dataset_DatasetPackage",
     ComponentType.DATA_SOURCE: "dataset_DatasetPackage",
+}
+_MAPPING_V3 = {
+    "invokes": "usesTool",
+    "trained-on": "trainedOn",
+    "depends-on": "dependsOn",
+    "fine-tuned-from": "descendantOf",
+    "quantized-from": "descendantOf",
+    "merged-from": "descendantOf",
+}
+_MAPPING_V4 = {
+    **_MAPPING_V3,
+    "uses-model": "dependsOn",
+    "delegates-to": "delegatedTo",
+    "retrieves-from": "hasInput",
+    "loads-skill": "dependsOn",
+    "provides-tool": "hasProvidedDependency",
+    "configured-with": "configures",
+    "produces": "generates",
 }
 
 
@@ -192,8 +212,21 @@ class SPDXGenerator(Generator):
 
     format_name = "spdx-3.0.1"
 
-    def __init__(self, namespace: str | None = None) -> None:
+    def __init__(
+        self,
+        namespace: str | None = None,
+        *,
+        projection_version: int = 3,
+        author: str | None = None,
+    ) -> None:
+        if projection_version not in {3, 4}:
+            raise ValueError("SPDX projection_version must be 3 or 4")
+        if author is not None and projection_version < 4:
+            raise ValueError("SPDX author option requires projection_version=4")
         self._namespace = None if namespace is None else _validated_namespace(namespace)
+        self._projection_version = projection_version
+        cleaned_author = _comment_text(author.strip())[:200] if author and author.strip() else None
+        self._author = cleaned_author
 
     def generate(self, aibom: AIBOM) -> dict[str, Any]:
         document = self._projection(aibom)
@@ -212,6 +245,7 @@ class SPDXGenerator(Generator):
     ) -> dict[str, Any]:
         prepare(aibom)
         native = native_document(aibom) if native is None else native
+        v4 = self._projection_version == 4 and not legacy_v2
         # Native refs are BOM-local, and producers can reuse serial numbers across revisions.
         ids = self._ids(content_digest(native).removeprefix("sha256:"))
         ci = ids.creation
@@ -230,6 +264,27 @@ class SPDXGenerator(Generator):
             "name": aibom.metadata.tool_name,
             "summary": aibom.metadata.tool_version,
         }
+        author_elements: list[dict[str, Any]] = []
+        created_by = [producer_id]
+        if v4:
+            author_names = sorted(
+                {
+                    *([self._author] if self._author else []),
+                    *(_comment_text(a.strip())[:200] for a in aibom.metadata.authors if a.strip()),
+                }
+            )
+            for author_name in author_names:
+                aid = ids.element("author", author_name)
+                author_elements.append(
+                    {
+                        "type": "Person",
+                        "spdxId": aid,
+                        "creationInfo": ci,
+                        "name": author_name,
+                    }
+                )
+                created_by.append(aid)
+
         # SPDX 3.0.1 requires CreationInfo.created. The native BOM carries no
         # wall-clock timestamp by default, so fall back to the export time.
         # This is the only wall-clock field in SPDX output: two exports of
@@ -243,7 +298,7 @@ class SPDXGenerator(Generator):
             .replace(microsecond=0)
             .isoformat()
             .replace("+00:00", "Z"),
-            "createdBy": [producer_id],
+            "createdBy": created_by,
             "createdUsing": [tool_id],
         }
         suppliers = {comp.supplier for comp in aibom.components if comp.supplier}
@@ -258,7 +313,10 @@ class SPDXGenerator(Generator):
         ]
         native_by_ref = native_components(native)
         ordered = sorted(aibom.components, key=lambda c: c.bom_ref)
-        components = [self._element(comp, ids, native_by_ref[comp.bom_ref]) for comp in ordered]
+        components = [
+            self._element(comp, ids, native_by_ref[comp.bom_ref], v4=v4) for comp in ordered
+        ]
+        comp_by_spdx_id = {ids.element("component", comp.bom_ref): comp for comp in ordered}
         edge_values = {
             json_text(edge.model_dump(mode="json", exclude_none=True)): edge
             for edge in aibom.dependencies
@@ -270,25 +328,58 @@ class SPDXGenerator(Generator):
                 ids,
                 "incomplete" if coverage == "incomplete" else "noAssertion",
                 neutralize_comments=not legacy_v2,
+                v4=v4,
             )
             for key in sorted(edge_values)
         ]
-        license_relationships = [
-            {
-                "type": "Relationship",
-                "spdxId": ids.element("license-relationship", component["spdxId"] + ":" + kind),
-                "creationInfo": ci,
-                "relationshipType": kind,
-                "from": component["spdxId"],
-                "to": [NO_ASSERTION_LICENSE],
-            }
-            for component in components
-            if component["type"] in {"ai_AIPackage", "dataset_DatasetPackage"}
-            for kind in ("hasDeclaredLicense", "hasConcludedLicense")
-        ]
+
+        license_elements: dict[str, dict[str, Any]] = {}
+        license_relationships: list[dict[str, Any]] = []
+        used_no_assertion = False
+        for component in components:
+            if component["type"] not in {"ai_AIPackage", "dataset_DatasetPackage"}:
+                continue
+            src_comp = comp_by_spdx_id[component["spdxId"]]
+            declared_lic: str | None = None
+            if v4:
+                raw_lic = src_comp.properties.get("declared_license") or getattr(
+                    src_comp, "license", None
+                )
+                if isinstance(raw_lic, str) and raw_lic.strip():
+                    declared_lic = _comment_text(raw_lic.strip())[:128]
+            for kind in ("hasDeclaredLicense", "hasConcludedLicense"):
+                if kind == "hasDeclaredLicense" and declared_lic:
+                    lic_id = ids.element("license-expression", declared_lic)
+                    license_elements.setdefault(
+                        lic_id,
+                        {
+                            "type": "simplelicensing_LicenseExpression",
+                            "spdxId": lic_id,
+                            "creationInfo": ci,
+                            "simplelicensing_licenseExpression": declared_lic,
+                        },
+                    )
+                    target_lic = lic_id
+                else:
+                    target_lic = NO_ASSERTION_LICENSE
+                    used_no_assertion = True
+                license_relationships.append(
+                    {
+                        "type": "Relationship",
+                        "spdxId": ids.element(
+                            "license-relationship", component["spdxId"] + ":" + kind
+                        ),
+                        "creationInfo": ci,
+                        "relationshipType": kind,
+                        "from": component["spdxId"],
+                        "to": [target_lic],
+                    }
+                )
+
         subject = repository_subject(aibom)
         members: list[dict[str, Any]] = [
             *parties,
+            *(license_elements[k] for k in sorted(license_elements)),
             *components,
             *relationships,
             *license_relationships,
@@ -306,7 +397,59 @@ class SPDXGenerator(Generator):
         }
         if repository_scan(aibom):
             sbom["software_sbomType"] = ["source"]
-        elements: list[dict[str, Any]] = [creator, generator, *members, sbom]
+        elements: list[dict[str, Any]] = [creator, *author_elements, generator, *members, sbom]
+
+        profiles = ["core", "software"]
+        if v4:
+            ai_pkgs = [c for c in components if c["type"] == "ai_AIPackage"]
+            if ai_pkgs and all(
+                all(
+                    req in c
+                    for req in (
+                        "suppliedBy",
+                        "releaseTime",
+                        "software_packageVersion",
+                        "software_downloadLocation",
+                    )
+                )
+                for c in ai_pkgs
+            ):
+                profiles.append("ai")
+            ds_pkgs = [c for c in components if c["type"] == "dataset_DatasetPackage"]
+            if ds_pkgs and all(
+                all(
+                    req in c
+                    for req in (
+                        "suppliedBy",
+                        "releaseTime",
+                        "software_packageVersion",
+                        "software_downloadLocation",
+                    )
+                )
+                and c.get("dataset_datasetType") != ["noAssertion"]
+                for c in ds_pkgs
+            ):
+                profiles.append("dataset")
+            if license_elements:
+                profiles.append("simpleLicensing")
+        if used_no_assertion or (not v4 and license_relationships):
+            profiles.append("expandedLicensing")
+        profiles.append("extension")
+
+        doc_props = [
+            *document_properties(aibom, self.format_name, native),
+            *(
+                [{"name": _AUTHOR_PROPERTY, "value": self._author}]
+                if v4 and self._author is not None
+                else []
+            ),
+            {
+                "name": PROJECTION_PROPERTY,
+                "value": (
+                    PREVIOUS_PROJECTION if legacy_v2 else (PROJECTION_V4 if v4 else PROJECTION)
+                ),
+            },
+        ]
         doc = {
             "type": "SpdxDocument",
             "spdxId": ids.document,
@@ -314,22 +457,9 @@ class SPDXGenerator(Generator):
             "name": "Nexus SymBiote AgentBOM " + str(aibom.metadata.serial_number),
             "element": [element["spdxId"] for element in elements],
             "rootElement": [sbom["spdxId"]],
-            "profileConformance": [
-                "core",
-                "software",
-                *(["expandedLicensing"] if license_relationships else []),
-                "extension",
-            ],
+            "profileConformance": profiles,
             "comment": COVERAGE_COMMENTS[coverage],
-            "extension": _extension(
-                [
-                    *document_properties(aibom, self.format_name, native),
-                    {
-                        "name": PROJECTION_PROPERTY,
-                        "value": PREVIOUS_PROJECTION if legacy_v2 else PROJECTION,
-                    },
-                ]
-            ),
+            "extension": _extension(doc_props),
         }
         return {
             "@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld",
@@ -337,7 +467,18 @@ class SPDXGenerator(Generator):
         }
 
     @staticmethod
-    def _element(comp: AnyComponent, ids: _DocumentIds, native: dict[str, Any]) -> dict[str, Any]:
+    def _element(
+        comp: AnyComponent,
+        ids: _DocumentIds,
+        native: dict[str, Any],
+        *,
+        v4: bool = False,
+    ) -> dict[str, Any]:
+        from nexus_symbiote.spdx_profiles import (
+            normalize_spdx_dataset_type,
+            spdx_autonomy_presence,
+        )
+
         typ = SPDX_TYPE_MAP.get(comp.component_type, "software_Package")
         element: dict[str, Any] = {
             "type": typ,
@@ -379,10 +520,57 @@ class SPDXGenerator(Generator):
                 element["ai_typeOfModel"] = [comp.model_type]
             if isinstance(comp, AgentComponent) and comp.description:
                 element["ai_informationAboutApplication"] = comp.description
+            if v4:
+                presence = spdx_autonomy_presence(comp)
+                if presence != "noAssertion":
+                    element["ai_autonomyType"] = presence
+                rel_ts = comp.properties.get("declared_release_time")
+                if isinstance(rel_ts, str) and rel_ts:
+                    element["releaseTime"] = rel_ts
+                dl_loc = comp.properties.get("declared_download_location")
+                if isinstance(dl_loc, str) and dl_loc:
+                    element["software_downloadLocation"] = dl_loc
+                domain = comp.properties.get("declared_domain")
+                if isinstance(domain, str) and domain:
+                    element["ai_domain"] = [domain]
+                train_info = comp.properties.get("declared_training_info")
+                if isinstance(train_info, str) and train_info:
+                    element["ai_informationAboutTraining"] = train_info
+                compliance = comp.properties.get("declared_compliance")
+                if (
+                    isinstance(compliance, list)
+                    and all(isinstance(x, str) for x in compliance)
+                    and compliance
+                ):
+                    element["ai_standardCompliance"] = list(compliance)
         elif typ == "dataset_DatasetPackage":
             element["software_primaryPurpose"] = "data"
-            # The only property the Dataset class requires; the inventory has no type.
-            element["dataset_datasetType"] = ["noAssertion"]
+            if v4:
+                raw_ds_type = getattr(comp, "dataset_type", None) or getattr(
+                    comp, "corpus_type", None
+                )
+                element["dataset_datasetType"] = [
+                    normalize_spdx_dataset_type(
+                        raw_ds_type if isinstance(raw_ds_type, str) else None
+                    )
+                ]
+                rel_ts = comp.properties.get("declared_release_time")
+                if isinstance(rel_ts, str) and rel_ts:
+                    element["releaseTime"] = rel_ts
+                dl_loc = comp.properties.get("declared_download_location") or getattr(
+                    comp, "source_uri", None
+                )
+                if isinstance(dl_loc, str) and dl_loc:
+                    element["software_downloadLocation"] = dl_loc
+                avail = comp.properties.get("declared_availability")
+                if isinstance(avail, str) and avail:
+                    element["dataset_datasetAvailability"] = avail
+                pii = comp.properties.get("declared_sensitive_pii")
+                if pii in {"yes", "no", "noAssertion"}:
+                    element["dataset_hasSensitivePersonalInformation"] = pii
+            else:
+                # The only property the Dataset class requires; the inventory has no type.
+                element["dataset_datasetType"] = ["noAssertion"]
         elif comp.component_type in {
             ComponentType.MCP_CLIENT,
             ComponentType.MCP_SERVER,
@@ -408,15 +596,9 @@ class SPDXGenerator(Generator):
         completeness: str,
         *,
         neutralize_comments: bool = True,
+        v4: bool = False,
     ) -> dict[str, Any]:
-        mapping = {
-            "invokes": "usesTool",
-            "trained-on": "trainedOn",
-            "depends-on": "dependsOn",
-            "fine-tuned-from": "descendantOf",
-            "quantized-from": "descendantOf",
-            "merged-from": "descendantOf",
-        }
+        mapping = _MAPPING_V4 if v4 else _MAPPING_V3
         body = edge.model_dump(mode="json", exclude_none=True)
         typed = mapping.get(edge.relationship)
         relationship = {
@@ -486,7 +668,15 @@ class SPDXGenerator(Generator):
         projection = declared_projection(properties)
         namespace = _document_namespace(doc["spdxId"])
         recovered, native = recover_native(properties)
-        if projection in {PROJECTION, PREVIOUS_PROJECTION}:
+        if projection == PROJECTION_V4:
+            author_prop = next(
+                (p["value"] for p in properties if p["name"] == _AUTHOR_PROPERTY),
+                None,
+            )
+            expected = SPDXGenerator(
+                namespace, projection_version=4, author=author_prop
+            )._projection(recovered, native)
+        elif projection in {PROJECTION, PREVIOUS_PROJECTION}:
             expected = SPDXGenerator(namespace)._projection(
                 recovered, native, legacy_v2=projection == PREVIOUS_PROJECTION
             )
