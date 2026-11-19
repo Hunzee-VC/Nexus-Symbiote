@@ -56,11 +56,13 @@ _NAME_PARTS = re.compile(
     r"|(?<=[A-Za-z])(?=[0-9])|(?<=[0-9])(?=[A-Za-z])"
 )
 _CREDENTIAL_WORDS = _words(
-    "token password passwd passphrase pass pwd secret credential credentials apikey auth "
-    "authorization bearer jwt sig signature dsn pat cookie"
+    "token password passwd passphrase pass pwd pw pswd psw secret credential credentials apikey "
+    "auth authorization bearer jwt sig signature dsn pat cookie mnemonic seedphrase"
 )
 # PGPASSWORD, ACCESSTOKEN, CLIENTSECRET: a compound written without separators.
-_COMPOUND_ENDINGS = _word_tuple("password passwd passphrase token secret credential credentials")
+_COMPOUND_ENDINGS = _word_tuple(
+    "password passwd passphrase token secret credential credentials pw pswd"
+)
 _COMPOUND_KEYS = _words(
     "secretkey privatekey apikey accesskey apitoken sessionkey signingkey sshkey licensekey"
 )
@@ -84,31 +86,43 @@ _CREDENTIAL_PAIRS = frozenset(
         ("id", "token"),
         ("auth", "token"),
         ("bearer", "token"),
+        ("seed", "phrase"),
+        ("recovery", "phrase"),
     }
 )
 # A key that holds no secret: CACHE_KEY, SORT_KEY, IDEMPOTENCY_KEY.
 _PLAIN_KEY_QUALIFIERS = _words(
     "cache sort partition primary foreign index row hash range shard lookup search order "
     "group composite candidate super natural surrogate unique idempotency dedup correlation "
-    "routing aggregate shortcut"
+    "routing aggregate shortcut site"
 )
+_QUALIFIED_KEY_LENGTH = 32
+_ACCOUNT_KEY_QUALIFIERS = _words("primary routing")
 # The last word describes a property of a credential, not the credential: API_KEY_ID,
 # SECRET_NAME, TOKEN_PATH, PASSWORD_POLICY, --token-env.
 _DESCRIPTORS = _words(
     "name id fingerprint audience issuer provider strategy method backend algorithm alg "
-    "scope scopes policy endpoint url uri path file filename dir home root type mode format "
+    "scope scopes policy endpoint url uri path file filename dir home type mode format "
     "version count limit size length ttl timeout expiry expires expiration interval env var "
     "variable header prefix suffix label description help hint usage source store manager "
-    "service region bucket arn role user username realm domain host port flag enabled "
-    "required optional field column attribute hasher hashers complexity rules"
+    "region bucket arn role user username realm domain host port flag enabled required "
+    "optional field column attribute hasher hashers complexity rules"
 )
 # A pass that is a stage, not a password: FIRST_PASS, COMPILER_PASS, PASS_THROUGH.
 _PLAIN_PASS_WORDS = frozenset(
     {"first", "second", "third", "last", "final", "next", "compiler", "render", "multi", "single"}
 )
 _PASS_CONTINUATIONS = frozenset({"through", "thru"})
-_PUBLIC_WORDS = frozenset({"publishable", "public", "pub", "verify", "verification"})
-_PASSWORD_WORDS = frozenset({"password", "passwd", "passphrase", "pass"})
+_PUBLIC_WORDS = _words("publishable public pub verify verification")
+_JWT_PUBLIC_WORDS = _words("anon anonymous public publishable pk")
+_PUBLIC_JWT = re.compile(r"(?:[Bb]earer\s+)?eyJ[\w-]+\.[\w-]+\.[\w-]*")
+_PASSWORD_WORDS = _words("password passwd passphrase pass pw pswd psw")
+# An owner after a password or key word: DB_PASSWORD_ROOT, API_KEY_SERVICE, not AUTH_SERVICE.
+_OWNERS, _OWNED = _words("root service"), _PASSWORD_WORDS | {"key"}
+_PASSWORD_ENDINGS = _word_tuple("password passwd passphrase pw pswd")
+# BIP39: 12 to 24 words, in steps of three, under a mnemonic or seed phrase name.
+_MNEMONIC = re.compile(r"[a-z]{3,8}(?: [a-z]{3,8}){11}(?:(?: [a-z]{3,8}){3}){0,4}")
+_MNEMONIC_WORDS = _words("mnemonic seedphrase phrase")
 # Query parameters that carry paging or protocol state, never a credential.
 _STATE_WORDS = frozenset(
     {"page", "next", "continuation", "pagination", "cursor", "csrf", "nonce", "state", "challenge"}
@@ -166,7 +180,7 @@ _STORE_SCHEMES = _words(
     "conjur cyberark akeyless 1password projects"
 )
 _STORE_REFERENCE = re.compile(r"([A-Za-z0-9][A-Za-z0-9-]{0,31})(?::|/)")
-_STORE_PREFIXES = ("@microsoft.keyvault(",)
+_STORE_PREFIXES = ("@microsoft.keyvault(", "enc[")
 
 _PATH_START = re.compile(
     r"(?i)(?:\./|\.\./|~|\\\\|\.\\|[a-z]:[\\/]|file://|%(?:userprofile|appdata|localappdata|home)%)"
@@ -195,6 +209,7 @@ _WORD_VALUES = frozenset(
     {"true", "false", "yes", "no", "on", "off", "null", "none", "nil", "undefined"}
 )
 _EMAIL = re.compile(r"[A-Za-z0-9._%+-]{1,64}@(?:[A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,63}")
+_MAILBOX = re.compile(r"[A-Za-z0-9._%+-]{2,64}@(?:[A-Za-z-]{1,63}\.)+[A-Za-z]{2,63}")
 _IMAGE = re.compile(
     r"(?:docker://|oci://|containers-storage:)?[a-z0-9][a-z0-9./_-]{0,255}"
     r"(?:(?::[A-Za-z0-9._-]{1,128})?@sha256:[0-9a-f]{12,64}"
@@ -205,7 +220,14 @@ _NAMESPACED_IMAGE = re.compile(
     r"[a-z0-9][a-z0-9._-]{0,127}(?:/[a-z0-9._-]{1,128}){1,8}:([\w.-]{1,128})"
 )
 _URN = re.compile(r"(?i)urn:[a-z0-9][a-z0-9-]{0,31}:\S{1,2048}")
-_DURATION = re.compile(r"P(?:\d+[YMWD])*(?:T(?:\d+[HMS])+)?")
+_DURATION = re.compile(r"P(?:\d+[YMWD])*(?:T(?:\d+[HMS])+)?|(?:\d+(?:ms|[wdhms])){2,6}")
+# ISO 8601 and RFC 3339 dates and times, a time of day, and RFC 2822 dates.
+_DATE = re.compile(
+    r"(?i)\d{4}-?(?:\d{2}-?\d{2}|\d{3}|w\d{2}(?:-?\d)?)"
+    r"(?:[t _]?\d{2}[:-]?\d{2}(?:[:-]?\d{2}(?:[.,]\d{1,9})?)?)?(?:z|[+-]\d{2}:?\d{2})?"
+    r"|\d{1,2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?|(?:[a-z]{3}, ?)?\d{1,2}[ -][a-z]{3}[ -]\d{4}"
+    r"(?: \d{2}:\d{2}(?::\d{2})?)?(?: (?:[+-]\d{4}|[a-z]{1,5}))?"
+)
 _PACKAGE = re.compile(
     r"(?:@[a-z0-9._-]{1,214}/)?[a-z0-9._-]{1,214}"
     r"(?:@(?:[~^]?v?\d+(?:\.\d+)*(?:[-+][0-9A-Za-z.-]+)?|latest|next)"
@@ -219,10 +241,21 @@ _HOST = re.compile(
 )
 _HOST_PORT = re.compile(r"[A-Za-z0-9.-]{1,253}:(\d{1,5})(?:/\S{0,2048})?")
 _PORT_PATH = re.compile(r"\d{1,5}(?:/\S{0,2048})?")
+_PLAIN_PORT_PATH = re.compile(r"\d{1,5}(?:/[\w./-]{0,2048})?")
 _PORT_OR_PATH = re.compile(r"[^:/]*[:/]")
-_OPTION_LIST = re.compile(r"[A-Za-z][\w.-]{0,63}=[^=]")
+# NAME=VALUE options and flags of plain characters (sslmode=require, SameSite=Lax;Secure);
+# a lone pair needs a key of three or more characters: T=/0NbJ and Kq=7mZw9x are passwords.
+_OPTION = r"[A-Za-z][\w.-]{0,63}(?:=[\w./:@+-]{0,256})?"
+_OPTION_LIST = re.compile(
+    rf"(?=[^=]*=)(?:{_OPTION}(?:[,;&] ?{_OPTION})+|[A-Za-z][\w.-]{{2,63}}=[\w./:@+-]{{1,256}})"
+)
 
-_PLACEHOLDER_MARK = re.compile(r"<[^<>]{0,256}>|\[[^\[\]]{0,256}\]|\.\.\.|…")
+_PLACEHOLDER_MARK = re.compile(r"<([^<>]{0,256})>|\[([^\[\]]{0,256})\]|\.\.\.|…")
+# Inside a value, a mark holds a word or phrase (<token-1>) or a character class
+# ([0-9]); aB3[x9]Kq7 is a password.
+_PLACEHOLDER_PHRASE = re.compile(
+    r"[a-z]{2,}(?:[ _-][a-z0-9]+)*|[A-Z]{2,}(?:[ _-][A-Z0-9]+)*|(?:\w-\w)+_?"
+)
 _PLACEHOLDER_WORDS = _words(
     "your here paste enter insert replace changeme change placeholder example sample dummy "
     "todo tbd fixme goes from dashboard settings console portal my test dev local "
@@ -237,6 +270,7 @@ _DEFAULT_VALUES = _words(
     "default test dummy sample example placeholder changeme password postgres admin secret "
     "token string value redacted hidden omitted xxx todo tbd"
 )
+_SPACE = re.compile(r"\s")
 _VALUE_WORDS = re.compile(r"[^\W_]+", re.UNICODE)
 _NUMBERED_WORD = re.compile(r"([^\W\d_]+)\d+")
 _CAMEL_WORD = re.compile(r"[A-Z]+(?=[A-Z][a-z])|[A-Z]?[a-z]+|[A-Z]+(?![a-z])")
@@ -257,6 +291,13 @@ _SETTING = re.compile(r"[a-z0-9]{1,15}(?:[-_.:][a-z0-9]{1,15}){1,7}")
 _PHRASE_LENGTH = 32
 _SETTING_LENGTH = 16
 _RUN_LENGTH = 6
+_RUN = re.compile(
+    "|".join(
+        [r"(.)\1{5}"]
+        + [("0123456789" * 2)[i : i + 6] for i in range(10)]
+        + [string.ascii_lowercase[i : i + 6] for i in range(21)]
+    )
+)
 _PASSPHRASE_WORDS = 3
 _PASSPHRASE_LENGTH = 16
 # A sentence holds these; a passphrase of random words seldom does.
@@ -283,8 +324,12 @@ _CONNECTION_KEYS = frozenset(
 _CONNECTION_PASSWORDS = frozenset({"password", "pwd"})
 # libpq's keyword form: host=db user=app password=x dbname=app.
 _KEYWORD_PAIR = re.compile(r"([A-Za-z_][A-Za-z0-9_]{0,40})=(\S{1,8192})")
-_KEYWORD_PAIRS = 3
-_LOCATOR = re.compile(r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]{0,31}://[^\s,\"'<>]{1,4096}")
+_KEYWORD_PAIRS = range(3, 65)
+# A comma may sit in user information, before the "@": postgres://app:p,w@db/app.
+_LOCATOR = re.compile(
+    r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]{0,31}://"
+    r"(?:[^\s/?#@\"'<>]{0,256}@)?[^\s,\"'<>]{1,4096}"
+)
 _ASSIGNMENT = re.compile(
     r"(?<![\w$])(?:--?|/)?([A-Za-z_][A-Za-z0-9_.-]{0,63})[\"']?[ \t]{0,8}[:=](?![=>])[ \t]{0,8}"
     r"(\"[^\"\n]{0,8192}\"|'[^'\n]{0,8192}'|[^\s,;\"'&|]{1,8192})"
@@ -313,6 +358,8 @@ def credential_name(name: str) -> bool:
     words = name_words(stripped)
     if not words or words[-1] in _DESCRIPTORS or not _PUBLIC_WORDS.isdisjoint(words):
         return False
+    if words[-1] in _OWNERS and _OWNED.isdisjoint(words[-2:-1]):
+        return False
     if len(words) > 1 and words[0] in _NEGATIONS:
         return False
     if words == ["key"]:
@@ -326,7 +373,7 @@ def credential_name(name: str) -> bool:
             return True
     if any(pair in _CREDENTIAL_PAIRS for pair in zip(words, words[1:], strict=False)):
         return True
-    return len(words) > 1 and words[-1] == "key" and words[-2] not in _PLAIN_KEY_QUALIFIERS
+    return len(words) > 1 and words[-1] == "key" and not _plain_key(words)
 
 
 def _plain_pass(words: list[str], index: int) -> bool:
@@ -340,16 +387,18 @@ def password_name(name: str) -> bool:
     words = name_words(name)
     return credential_name(name) and any(
         (word in _PASSWORD_WORDS and not (word == "pass" and _plain_pass(words, index)))
-        or word.endswith(("password", "passwd", "passphrase"))
+        or word.endswith(_PASSWORD_ENDINGS)
         for index, word in enumerate(words)
     )
 
 
 def _passphrase_name(name: str) -> bool:
     words = name_words(name)
-    return bool(words) and (
-        words[-1] in _PASSWORD_WORDS or words[-1].endswith(("password", "passwd", "passphrase"))
-    )
+    return bool(words) and (words[-1] in _PASSWORD_WORDS or words[-1].endswith(_PASSWORD_ENDINGS))
+
+
+def _spaced(text: str) -> bool:
+    return _SPACE.search(text) is not None
 
 
 def _strip(value: str) -> str:
@@ -385,6 +434,8 @@ def reference(value: str) -> bool:
 def _runs(value: str) -> int:
     """Characters in runs of six or more repeated or ascending characters (9 wraps to 0)."""
     lowered = value.lower()
+    if _RUN.search(lowered) is None:
+        return 0
     covered = 0
     index = 0
     while index < len(lowered):
@@ -437,12 +488,18 @@ def _value_words(value: str) -> list[str]:
 
 def placeholder(value: str) -> bool:
     """Whether ``value`` is a placeholder or a documented default, not a real credential."""
-    if _PLACEHOLDER_MARK.search(value) is not None:
-        return True
+    for mark in _PLACEHOLDER_MARK.finditer(value):
+        inner = mark.group(1) if mark.group(1) is not None else mark.group(2)
+        if mark.span() == (0, len(value)) or inner is None or _PLACEHOLDER_PHRASE.fullmatch(inner):
+            return True
+        if not _PLACEHOLDER_WORDS.isdisjoint(_value_words(inner)):
+            return True
     lowered = value.lower()
     if any(infix in lowered for infix in _PLACEHOLDER_INFIXES):
         return True
-    if not _PLACEHOLDER_WORDS.isdisjoint(_value_words(value)):
+    # Placeholder words make up the value, not one segment among random ones.
+    found = sum(word in _PLACEHOLDER_WORDS for word in _value_words(value))
+    if found and found >= sum(map(credential_shaped, _VALUE_WORDS.findall(value))):
         return True
     if re.sub(r"[-_.\s]+", "", lowered) in _DEFAULT_VALUES:
         return True
@@ -450,7 +507,7 @@ def placeholder(value: str) -> bool:
 
 
 def _path(value: str) -> bool:
-    if not value or any(char.isspace() for char in value):
+    if not value or _spaced(value):
         return False
     if _PATH_START.match(value) is not None:
         return True
@@ -488,8 +545,9 @@ def _random_segment(segment: str) -> bool:
 def _locator_or_value(value: str, *, password: bool = False) -> bool:
     """A path, number, version, image, package, host, port, e-mail or flag word.
 
-    Under a password name a dotted word is a host only with a port or a path after it:
-    ``p4ssw0rd.secure`` is a password.
+    Under a password name a dotted word is a host only with a port or a path after it,
+    and an address only with two or more characters before the "@" and no digit after
+    it: ``p4ssw0rd.secure`` and ``p@ssw0rd.secure`` are passwords.
     """
     if _path(value):
         return True
@@ -498,7 +556,9 @@ def _locator_or_value(value: str, *, password: bool = False) -> bool:
         return True
     if _DURATION.fullmatch(value) or _URN.fullmatch(value):
         return True
-    if _EMAIL.fullmatch(value) or _IMAGE.fullmatch(value) or _PACKAGE.fullmatch(value):
+    if _EMAIL.fullmatch(value) and not (password and _MAILBOX.fullmatch(value) is None):
+        return True
+    if _IMAGE.fullmatch(value) or _PACKAGE.fullmatch(value):
         return True
     image = _NAMESPACED_IMAGE.fullmatch(value)
     if image is not None and not _random_segment(image.group(1)):
@@ -510,7 +570,7 @@ def _locator_or_value(value: str, *, password: bool = False) -> bool:
     host = _HOST.fullmatch(value)
     if host is not None and not (password and _PORT_OR_PATH.match(value) is None):
         return True
-    if _PORT_PATH.fullmatch(value):
+    if (_PLAIN_PORT_PATH if password else _PORT_PATH).fullmatch(value):
         return True
     port = _HOST_PORT.fullmatch(value)
     return port is not None and int(port.group(1)) <= 65535
@@ -578,15 +638,15 @@ def literal_value(value: str, *, password: bool = False) -> bool:
     credential punctuation or an upper-case letter after the first.
     """
     value = _strip(value)
-    if len(value) < MIN_SECRET_LENGTH:
+    if len(value) < MIN_SECRET_LENGTH or all(map(_DATE.fullmatch, value.split("/", 1))):
         return False
-    if any(char.isspace() for char in value) and not (password and _passphrase(value)):
+    if _spaced(value) and not (password and _passphrase(value)):
         return False
     if "://" in value or public_material(value) or reference(value) or placeholder(value):
         return False
     if not password and _SHELL_VARIABLE.fullmatch(value) is not None:
         return False
-    if _OPTION_LIST.match(value) is not None or _locator_or_value(value, password=password):
+    if _OPTION_LIST.fullmatch(value) or _locator_or_value(value, password=password):
         return False
     if not password and (_word_phrase(value) or _setting(value) or _foreign_script(value)):
         return False
@@ -658,8 +718,11 @@ def _connection_hits(value: str) -> list[Hit]:
         pairs = [_CONNECTION_PAIR.fullmatch(part) for part in value.split(";")]
         found = [(pair.group(1), pair.group(2)) for pair in pairs if pair is not None]
     else:
-        words = [_KEYWORD_PAIR.fullmatch(word) for word in value.split()]
-        if len(words) < _KEYWORD_PAIRS or None in words:
+        split = value.split()
+        if len(split) not in _KEYWORD_PAIRS:
+            return []
+        words = [_KEYWORD_PAIR.fullmatch(word) for word in split]
+        if None in words:
             return []
         found = [(word.group(1), word.group(2)) for word in words if word is not None]
     if len(found) < 2:
@@ -700,7 +763,7 @@ def _scheme_hits(value: str) -> list[Hit]:
     if parts is None:
         return []
     scheme, credential = parts
-    if any(char.isspace() for char in credential) or len(credential) < MIN_SECRET_LENGTH:
+    if _spaced(credential) or len(credential) < MIN_SECRET_LENGTH:
         return []
     if _CHALLENGE.match(credential) is not None or _phrase_or_placeholder(credential):
         return []
@@ -766,11 +829,16 @@ def _netrc_hits(value: str) -> list[Hit]:
     ]
 
 
-def assignment_hits(text: str) -> list[Hit]:
-    """Credential-named ``NAME=value`` and ``NAME: value`` assignments anywhere in ``text``."""
+def assignment_hits(text: str, *, spaced: bool = False) -> list[Hit]:
+    """Credential-named ``NAME=value`` and ``NAME: value`` assignments anywhere in ``text``.
+
+    ``spaced`` reads only those that hold white space, which no single word holds.
+    """
     hits: list[Hit] = []
     for match in _ASSIGNMENT.finditer(text):
         name, literal = match.group(1), match.group(2)
+        if spaced and not _spaced(match.group()):
+            continue
         if credential_name(name):
             hits.extend(value_hits(name, literal.strip("\"'")))
     return hits
@@ -782,6 +850,8 @@ def value_hits(name: str, value: str, *, header: bool = False) -> list[Hit]:
     ``header`` marks a header name, under which an Authorization or Proxy-Authorization
     value counts whatever its shape and a Cookie value is read pair by pair.
     """
+    if _PUBLIC_JWT.fullmatch(_strip(value)) and not _JWT_PUBLIC_WORDS.isdisjoint(name_words(name)):
+        return []  # A JWT under an anon or public name is a key published by design.
     hits = _token_hits(value)
     if _private_key(value):
         hits.append((NAMED_CLASS, value))
@@ -798,7 +868,7 @@ def value_hits(name: str, value: str, *, header: bool = False) -> list[Hit]:
     hits.extend(_scheme_hits(stripped))
     if "://" in stripped:
         return hits + _url_hits(stripped)
-    if any(char.isspace() for char in stripped):
+    if _spaced(stripped):
         hits.extend(_netrc_hits(stripped))
     return hits + _named_hits(name, stripped)
 
@@ -815,13 +885,26 @@ def _default_hits(name: str, value: str) -> list[Hit]:
 
 
 def _named_hits(name: str, value: str) -> list[Hit]:
-    if credential_name(name) and literal_value(value, password=_password_or_phrase(name, value)):
-        return [(NAMED_CLASS, value)]
+    words = name_words(name)
+    if credential_name(name):
+        if literal_value(value, password=_password_or_phrase(name, value)):
+            return [(NAMED_CLASS, value)]
+        phrase = " ".join(value.lower().split())
+        if _MNEMONIC.fullmatch(phrase) and not _MNEMONIC_WORDS.isdisjoint(words):
+            return [(NAMED_CLASS, value)]
+    elif _plain_key(words) and words[-2] in _ACCOUNT_KEY_QUALIFIERS:
+        # PRIMARY_KEY=id is a column; 32 random characters there are an account key.
+        if len(value) >= _QUALIFIED_KEY_LENGTH and literal_value(value):
+            return [(NAMED_CLASS, value)]
     return []
 
 
+def _plain_key(words: list[str]) -> bool:
+    return len(words) > 1 and words[-1] == "key" and words[-2] in _PLAIN_KEY_QUALIFIERS
+
+
 def _password_or_phrase(name: str, value: str) -> bool:
-    if any(char.isspace() for char in value):
+    if _spaced(value):
         return _passphrase_name(name)
     return password_name(name)
 

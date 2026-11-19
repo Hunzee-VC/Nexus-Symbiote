@@ -94,6 +94,12 @@ _DISTINCT_SHAPES = (
     r"|shppa_[0-9a-fA-F]{32}|dapi[0-9a-f]{32}|xapp-[\w-]{20,}+|PMAK-[0-9a-f]{24}-[0-9a-f]{34}"
     # A Doppler service token may name its config first: dp.st.<config>.<token>.
     r"|dp\.(?:pt|ct|sa|scim|audit|st(?:\.[a-z0-9_-]{2,35}+)?)\.[A-Za-z0-9]{40,}+"
+    r"|do[opr]_v1_[0-9a-f]{64}|lin_(?:api|oauth)_[A-Za-z0-9]{40}|ATATT3[\w=-]{40,}+"
+    r"|AGE-SECRET-KEY-1[02-9AC-HJ-NP-Z]{58}"
+    # Discord: a decimal id in base64 (M, N or O first, with a digit), a 6-character
+    # stamp that is not a lower-case word, and an HMAC: not plugin.module.Class names.
+    r"|(?<![A-Za-z0-9])[MNO](?=[A-Za-z0-9]{0,26}[0-9])[A-Za-z0-9]{23,27}"
+    r"\.(?![A-Za-z][a-z]{5}\.)[\w-]{6}\.[\w-]{27,38}(?![\w-])"
 )
 # A JWT can fail only at its first dot, so it starts only at a word boundary: started
 # after every "_" its first segment would be rescanned once per position.

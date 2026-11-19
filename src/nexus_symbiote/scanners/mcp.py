@@ -700,8 +700,14 @@ _ENDPOINT_QUERY_POSITION = "endpoint URL query"
 _ASSIGNMENT_FLAGS = frozenset({"env", "e", "build-arg"})
 # The scheme words _AUTH reads, after which cmd's `set NAME=<scheme> <credential>` splits.
 _ASSIGNMENT_SCHEMES = frozenset({"bearer", "basic", "token", "bot", "apikey", "api-key"})
-# curl's `-u user:password`, also in a cluster of short flags (`-su`).
-_USER_FLAG = re.compile(r"--user|-[A-Za-z]{0,4}u")
+# curl's `-u user:password`, also in a cluster of short flags (`-su`), and httpie's `-a`
+# (`--auth`), which counts only under a fetcher.
+# Under another command (docker -u www-data:www-data) the part after the colon counts
+# only when it reads as a literal under a name that is not a password's.
+_USER_FLAG = re.compile(r"--user|--auth|-a|-[A-Za-z]{0,4}u")
+_FETCHERS = frozenset({"curl", "wget", "http", "https", "httpie"})
+_NAME_FORM = re.compile(r"[A-Z]+(?:_[A-Z]+)+|[A-Z][a-z]*(?:-[A-Z][a-z]*)+")
+_PLAIN_ASSIGNMENT = re.compile(r"-{0,2}[A-Za-z_][\w.-]{0,63}=[^,;\"'&|:]*")
 # Past this length an argument's words are split at white space only: shell quoting is
 # read one character at a time, and its cost grows faster than the argument.
 _SHELL_SPLIT_LIMIT = 65536
@@ -762,29 +768,34 @@ def _flag_value(flag: str, word: str) -> bool:
     )
 
 
-def _user_hits(previous: str | None, word: str) -> list[Hit]:
+def _user_hits(previous: str | None, word: str, fetcher: bool) -> list[Hit]:
     """The password of ``-u user:password``."""
     if previous is None or _USER_FLAG.fullmatch(previous) is None:
         return []
     user, colon, password = word.partition(":")
-    if not (user and colon and literal_value(password, password=True)):
+    fetched = fetcher or not previous.endswith(("-a", "auth"))
+    if not (user and colon and fetched and literal_value(password, password=fetcher)):
         return []
     return [(NAMED_CLASS, password)]
 
 
-def _word_hits(previous: str | None, word: str, following: str | None) -> list[Hit]:
+def _word_hits(
+    previous: str | None, word: str, following: str | None, fetcher: bool = False
+) -> list[Hit]:
     """The hits of one argument or shell word, given the words around it."""
-    hits = value_hits("", word)
-    hits.extend(_header_line_hits(word, explicit=_explicit_header(previous, word)))
-    hits.extend(_assignment_word_hits(word, following))
-    hits.extend(assignment_hits(word))
-    hits.extend(_user_hits(previous, word))
-    if previous is not None and _flag_value(previous, word):
-        hits.extend(value_hits(previous, word))
+    flagged = previous is not None and _flag_value(previous, word)
+    hits = value_hits(previous if flagged and previous else "", word)
+    if ":" in word:
+        hits.extend(_header_line_hits(word, explicit=_explicit_header(previous, word)))
+    if "=" in word:
+        hits.extend(_assignment_word_hits(word, following))
+    if (":" in word or "=" in word) and _PLAIN_ASSIGNMENT.fullmatch(word) is None:
+        hits.extend(assignment_hits(word))
+    hits.extend(_user_hits(previous, word, fetcher))
     return hits
 
 
-def _argument_hits(previous: str | None, argument: str) -> list[Hit]:
+def _argument_hits(previous: str | None, argument: str, fetcher: bool = False) -> list[Hit]:
     """The hits of a launch argument.
 
     An argument without white space is one word, read with the argument before it as
@@ -794,22 +805,23 @@ def _argument_hits(previous: str | None, argument: str) -> list[Hit]:
     so ``-c "API_TOKEN=${API_TOKEN} exec ..."`` is never a ``NAME=value`` or a literal.
     """
     if not any(char.isspace() for char in argument):
-        return _word_hits(previous, argument, None)
-    hits = value_hits("", argument)
+        return _word_hits(previous, argument, None, fetcher)
+    flagged = previous is not None and _flag_value(previous, argument)
+    hits = value_hits(previous if flagged and previous else "", argument)
     hits.extend(_header_line_hits(argument, explicit=_explicit_header(previous, argument)))
-    hits.extend(assignment_hits(argument))
-    if previous is not None and _flag_value(previous, argument):
-        hits.extend(value_hits(previous, argument))
+    hits.extend(assignment_hits(argument, spaced=True))
     if len(argument) > _SHELL_SPLIT_LIMIT:
         words = argument.split()
     else:
         words = _launch_words([argument])[1:]
+    fetcher = fetcher or not _FETCHERS.isdisjoint(map(posixpath.basename, words))
     for index, word in enumerate(words):
         hits.extend(
             _word_hits(
                 words[index - 1] if index else None,
                 word,
                 words[index + 1] if index + 1 < len(words) else None,
+                fetcher,
             )
         )
     return hits
@@ -824,8 +836,17 @@ def _credential_hits(
     args: list[Any],
     header_maps: Sequence[dict[str, Any]],
     endpoints: Sequence[Any],
+    command: Any = "",
 ) -> Iterator[tuple[str, str, list[Hit]]]:
-    """Each launch position, as its kind and name, with the literal credentials it holds."""
+    """Each launch position, as its kind and name, with the literal credentials it holds.
+
+    A header value with a line break injects a header line after it: each following
+    line is read as one, at the position of the header that carries it.
+    """
+    words = [command, *args]
+    fetcher = not _FETCHERS.isdisjoint(
+        posixpath.basename(word) for word in words if isinstance(word, str)
+    )
     for name in sorted(env):
         value = env[name]
         hits = _name_hits(name)
@@ -836,7 +857,7 @@ def _credential_hits(
     previous: str | None = None
     for index, argument in enumerate(args, start=1):
         if isinstance(argument, str):
-            yield ("argument", str(index), _argument_hits(previous, argument))
+            yield ("argument", str(index), _argument_hits(previous, argument, fetcher))
             previous = argument
         else:
             previous = None
@@ -845,7 +866,8 @@ def _credential_hits(
         hits = _name_hits(name)
         if isinstance(value, str):
             hits.extend(value_hits(name, value, header=True))
-            hits.extend(_header_line_hits(value, explicit=False))
+            for line in [value, *value.splitlines()[1:]]:
+                hits.extend(_header_line_hits(line, explicit=False))
         yield ("header", name, hits)
     for endpoint in endpoints:
         if isinstance(endpoint, str):
@@ -867,6 +889,7 @@ def _credential_positions(
     scrubber: SecretScrubber | None = None,
     endpoints: Sequence[Any] = (),
     hits: PositionHits | None = None,
+    command: Any = "",
 ) -> list[tuple[str, str]]:
     """Each launch position holding a literal credential, with its pattern class.
 
@@ -879,7 +902,7 @@ def _credential_positions(
     the positions _server_hits already read, so a file is read once.
     """
     if hits is None:
-        hits = list(_credential_hits(env, args, header_maps, endpoints))
+        hits = list(_credential_hits(env, args, header_maps, endpoints, command))
     positions: dict[tuple[str, str], None] = {}
     for kind, name, found_hits in hits:
         found = strongest(found_hits)
@@ -909,6 +932,7 @@ def _server_hits(config: dict[str, Any]) -> PositionHits:
             config.get("args", []),
             [config.get("headers", {}), config.get("http_headers", {})],
             endpoints,
+            config.get("command", ""),
         )
     )
 
@@ -1284,10 +1308,15 @@ def _shown_name(name: str, scrubber: SecretScrubber | None = None) -> bool:
     """Whether a name may be exported: exportable, and holding none of the known values.
 
     A name can repeat a secret value (a password written as an env name), one the
-    scrubber would change: the scrubber holds every literal credential the finding
-    reads in the same file. Such a name is withheld whole.
+    scrubber holds for the same file: such a name is withheld whole. A value that is
+    itself a credential's name of letters in upper snake or header case (X-Api-Key) is
+    never a literal, and a word only part of a name (production in production_DB_HOST)
+    is not a credential-shaped part of it: both stay shown.
     """
-    return _exportable_name(name) and not (scrubber is not None and scrubber.contains(name))
+    spans = scrubber.spans(name) if scrubber is not None and _exportable_name(name) else []
+    if spans == [(0, len(name))]:
+        return _NAME_FORM.fullmatch(name) is not None and credential_name(name)
+    return _exportable_name(name) and not any(credential_shaped(name[a:b]) for a, b in spans)
 
 
 def _exported_names(names: Iterable[str], scrubber: SecretScrubber | None = None) -> list[str]:

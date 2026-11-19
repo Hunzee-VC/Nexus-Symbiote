@@ -281,7 +281,7 @@ A way around a limit that its entry does not describe is worth a
   `YARN_*`, `BUN_*`, `DOCKER_*` and similar) are a medium `package_source`
   finding, and the package URL is withheld. Configuration names that look like
   tokens or hold one after a prefix (`AWS_AKIA...`), and `env` and header names
-  that repeat any credential value found in the same configuration file, are
+  that repeat a value the scrubber holds for the same file (not `X-Api-Key`), are
   exported as `[redacted]` (`[redacted-N]` in the `env` map), and a launcher
   package whose name or specifier looks like a token is withheld
   (`[withheld]`, no package URL) with a medium `completeness` finding.
@@ -337,7 +337,15 @@ A way around a limit that its entry does not describe is worth a
   with no credential name, such as a value after `-t`, a positional argument or
   `echo <token> | docker login --password-stdin`. Names are read as words: `TOTP_SEED`
   and `PIN` do not name a credential, and `VAULT_SECRET_ID` ends in the descriptor
-  `id`, so it is not reported although an AppRole secret ID is a credential. Values
+  `id`, so it is not reported although an AppRole secret ID is a credential; an index
+  key other than a primary or routing key (`SORT_KEY`, `RECAPTCHA_SITE_KEY`) holds none,
+  and an owner or location (`AUTH_USER`, `TOKEN_ISSUER`, `DB_PASSWORD_HOST`) describes
+  one. A JWT, bare or after `Bearer`, under an `anon`, `anonymous`, `public`,
+  `publishable` or `pk` name is not reported even when it is a misnamed service key, a
+  seed phrase counts only under a mnemonic or seed phrase name (not `WALLET_SEED`),
+  httpie's `-a` only under a fetcher, and elsewhere `-u user:secret` only with a literal
+  after the colon. A Discord token's first part starts with M, N or O, and the header
+  lines one value injects count toward the 4,096 values of one file. Values
   are read for what they most likely are, so a real credential that looks like a
   reference, a placeholder or a label is missed: a value that holds `${` or `$(`
   anywhere (the default or alternate text of a shell expansion, `${TOKEN:-<value>}`,
@@ -346,8 +354,9 @@ A way around a limit that its entry does not describe is worth a
   punctuation or its end (`S3cure!Pa$$W0RD` and `$PR0D_KEY` read as `$NAME`;
   `$PR0D_Kx9...` does count), or a name in braces set off from letters and digits
   (`pw-{prod}`), or, under a name that is not a password's, a lower-case shell
-  variable such as `$api_token_2`; one that holds a placeholder word such as `test`, `dev`, `my` or
-  `example` (a host such as `db.dev.internal:5432:<password>` included), a value of
+  variable such as `$api_token_2`; one made of placeholder words such as `test`, `dev`,
+  `my` or `example` that random segments do not outnumber, a date, time or duration
+  (`2027-01-01T00:00:00Z`, `1h30m`) under a credential name, a value of
   fewer than eight characters, a single word of letters under 16 characters
   (`letmeinplease`, `Sunshinesummer`) even under a password name, since what remains
   must be credential-shaped, a phrase of short words (`MixedCaseLettersOnlyValue`)

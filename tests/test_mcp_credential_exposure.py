@@ -23,6 +23,7 @@ from nexus_symbiote.scanners.mcp import (
     _server_secrets,
 )
 from nexus_symbiote.utils.secrets import names_reference
+from tests.support import scaling_ratio
 
 CATEGORY = "credential_exposure"
 NAMED = "a generic secret-like value"
@@ -441,6 +442,12 @@ def test_colon_chains_keep_the_server_inventoried_and_stay_fast(tmp_path, field,
         ("args", "--token=${TOKEN}", False),
         ("args", "run --password $PASSWORD", False),
         ("args", "--port=8080", False),
+        ("env", "2027-01-01T00:00:00Z", False),
+        ("env", "Kq7mZw9x-dev-4Lp8ZtQ2vN", True),
+        ("headers", "abc\r\nAuthorization: Bearer " + SCHEME_SENTINEL, True),
+        ("headers", "abc\r\nX-Other: Bearer ${TOKEN}", False),
+        ("args", "postgres://app:Zx9,Kv4Qm7Tn2@db.invalid/app", True),
+        ("args", "https://a.invalid,https://b.invalid", False),
     ],
 )
 def test_the_finding_fires_exactly_where_the_scrubber_redacts_a_literal(field, value, literal):
@@ -562,6 +569,7 @@ def _positions(server: dict) -> list[tuple[str, str]]:
         server.get("args", []),
         [server.get("headers", {})],
         endpoints=[server[field] for field in ("url",) if field in server],
+        command=server.get("command", ""),
     )
 
 
@@ -836,6 +844,21 @@ RANDOM = "eb0PtJYwJyiQMPj68c7HBAi01TWElQxv"  # noqa: S105 - synthetic sentinel
         "apiKey",
         "TOKEN2",
         "Secret2",
+        "DB_PW",
+        "ADMIN_PSWD",
+        "SMTP_PSW",
+        "ADMINPW",
+        "DB_PASSWORD_ROOT",
+        "API_KEY_SERVICE",
+        "ADMINPSWD",
+        "SUPABASE_ANON_KEY",
+        "PK_PASSWORD",
+        "PK_PASSPHRASE",
+        "SIGNING_PK_PASSWORD",
+        "ANON_SMTP_PASSWORD",
+        "APNS_PK_SECRET",
+        "PK_API_KEY",
+        "RECAPTCHA_SECRET_KEY",
     ],
 )
 def test_credential_names_by_their_words_fire(name):
@@ -858,8 +881,6 @@ def test_credential_names_by_their_words_fire(name):
         "API_KEY_NAME",
         "SECRET_NAME",
         "COOKIE_NAME",
-        "JWT_AUDIENCE",
-        "AUTH_PROVIDER",
         "AUTH_STRATEGY",
         "TOKEN_ENDPOINT_AUTH_METHOD",
         "SECRET_BACKEND",
@@ -876,10 +897,44 @@ def test_credential_names_by_their_words_fire(name):
         "IDEMPOTENCY_KEY",
         "STRIPE_PUBLISHABLE_KEY",
         "JWT_VERIFY_KEY",
+        "PW_POLICY",
+        "PSWD_MIN_LENGTH",
+        "SEED_PHRASE_FILE",
+        "RECAPTCHA_SITE_KEY",
+        "TURNSTILE_SITE_KEY",
+        # An owner or a location of the credential: AUTH_USER=McpReader2024 is a setting.
+        "JWT_AUDIENCE",
+        "TOKEN_AUDIENCE",
+        "TOKEN_ISSUER",
+        "AUTH_PROVIDER",
+        "SECRET_PROVIDER",
+        "AUTH_USER",
+        "AUTH_USERNAME",
+        "API_KEY_USER",
+        "PASSWORD_USER",
+        "DB_PASSWORD_HOST",
+        "AUTH_REALM",
+        "AUTH_DOMAIN",
+        "SECRET_ROLE",
+        "AUTH_REGION",
+        "TOKEN_ARN",
+        "TOKEN_BUCKET",
+        "TOKEN_PORT",
+        "AUTH_SERVICE",
+        "SECRET_ROOT",
     ],
 )
 def test_names_that_describe_or_index_do_not_name_a_credential(name):
     assert _positions({"command": "npx", "env": {name: RANDOM}}) == []
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["PRIMARY_KEY", "COSMOS_PRIMARY_KEY", "AZURE_STORAGE_PRIMARY_KEY", "PAGERDUTY_ROUTING_KEY"],
+)
+def test_a_primary_or_routing_key_holds_a_credential_at_32_random_characters(name):
+    assert _positions({"command": "npx", "env": {name: CLASSIFIER_ONLY}}) == []
+    assert _positions({"command": "npx", "env": {name: RANDOM}}) == [(f"env {name}", NAMED)]
 
 
 @pytest.mark.parametrize(
@@ -890,6 +945,7 @@ def test_names_that_describe_or_index_do_not_name_a_credential(name):
         (["-t", RANDOM], ["-k", RANDOM]),
         (["--token-env", "GITHUB_TOKEN_2"], ["--token", RANDOM]),
         (["--api-key-env", RANDOM], ["--api-key", RANDOM]),
+        (["--pw-file", RANDOM], ["--pw", RANDOM]),
     ],
 )
 def test_flag_names_follow_the_name_rules(benign, credential):
@@ -999,7 +1055,7 @@ def test_a_lower_case_passphrase_counts_only_under_a_passphrase_name(benign, cre
     assert _positions({"command": "npx", "args": args}) == [("argument 3", NAMED)]
 
 
-@pytest.mark.parametrize("name", ["DB_PASSWORD", "DB_PASS"])
+@pytest.mark.parametrize("name", ["DB_PASSWORD", "DB_PASS", "ADMIN_PSWD", "DB_PW"])
 def test_word_phrases_stay_literals_under_password_names(name):
     value = "launch-password-hunter"
     assert _positions({"command": "npx", "env": {name: value}}) == [(f"env {name}", NAMED)]
@@ -1427,20 +1483,25 @@ def test_connection_netrc_challenge_and_code_read_rules_have_twins(name, benign,
     assert _positions({"command": "npx", "env": {name: credential}})
 
 
-def test_a_name_that_repeats_a_value_only_the_scrubber_redacts_is_withheld(tmp_path):
-    scrubbed = "oauth2-client-secret-xyz"
+def test_a_name_holding_a_variable_name_or_a_word_value_is_kept(tmp_path):
     servers = {
-        "api": {
+        "a": {"command": "uvx", "args": ["x", "--api-key-env", "OPENAI_API_KEY"]},
+        "b": {"command": "uvx", "args": ["x"], "env": {"OPENAI_API_KEY": "${OPENAI_API_KEY}"}},
+        "c": {"command": "uvx", "args": ["x"], "env": {"SECRET_KEY": "production"}},
+        "d": {"command": "uvx", "args": ["x"], "env": {"production_DB_HOST": "db.invalid"}},
+        "e": {
             "url": "https://example.invalid/mcp",
-            "env": {"API_TOKEN": scrubbed, scrubbed: "1"},
-            "headers": {"X-Api-Key": scrubbed, scrubbed: "1"},
-        }
+            "headers": {"X-Auth-Header-Name": "X-Api-Key", "X-Api-Key": "${KEY}"},
+        },
+        "f": {"command": "uvx", "args": ["x"], "env": {"API_TOKEN": "oauth2-client-secret-xyz"}},
+        "g": {"command": "uvx", "args": ["x"], "env": {"oauth2-client-secret-xyz": "1"}},
     }
-    result = _scan(tmp_path, servers)
-    server = _servers(result)["api"].model_dump(mode="json")
-    assert list(server["env"]) == ["API_TOKEN", "[redacted-1]"]
-    assert "[redacted]" in server["properties"]["header_names"]
-    assert scrubbed not in _dump(result)
+    found = _servers(_scan(tmp_path, servers))
+    assert all(_findings(server) == [] for server in found.values())
+    assert list(found["b"].env) == ["OPENAI_API_KEY"]
+    assert list(found["d"].env) == ["production_DB_HOST"]
+    assert list(found["g"].env) == ["[redacted-1]"]
+    assert "X-Api-Key" in found["e"].properties["header_names"]
 
 
 def test_a_server_named_after_its_own_classifier_literal_is_withheld(tmp_path):
@@ -1516,3 +1577,239 @@ def test_a_negated_flag_names_no_credential():
     assert _positions({"command": "npx", "args": args}) == []
     args = ["x@1.0.0", "--password", "service1.internal"]
     assert _positions({"command": "npx", "args": args}) == [("argument 3", NAMED)]
+
+
+SHAPE = "a vendor token shape"
+JWT = "eyJ" + "SENTINEL" * 2 + ".eyJ" + "SENTINEL" * 3 + "." + "SENTINEL" * 4
+# Each body is a low-entropy sentinel in the vendor's alphabet and length.
+UNLISTED_SHAPES = {
+    "DIGITALOCEAN": "do" + "p_v1_" + "0a1b" * 16,
+    "LINEAR": "lin" + "_api_" + "SENTINEL" * 5,
+    "ATLASSIAN": "ATA" + "TT3" + "xFfGF0" + "SENTINEL" * 6 + "=" + "0A1B2C3D",
+    "SOPS_AGE": "AGE-SECRET" + "-KEY-1" + ("SYNTHETC" * 8)[:58],
+    "DISCORD_BOT": ("N0" + "SENTINEL" * 3)[:24] + "." + "SENTNL" + "." + ("SENTINEL" * 5)[:38],
+}
+
+
+@pytest.mark.parametrize("name", sorted(UNLISTED_SHAPES))
+def test_unlisted_vendor_prefixes_are_token_shapes_under_any_name(name):
+    token = UNLISTED_SHAPES[name]
+    assert _positions({"command": "npx", "env": {name: token}}) == [(f"env {name}", SHAPE)]
+    assert _positions({"command": "npx", "env": {name: token[:20]}}) == []
+
+
+@pytest.mark.parametrize(
+    "benign,credential",
+    [
+        ({"SUPABASE_ANON_KEY": JWT}, {"SUPABASE_SERVICE_ROLE_KEY": JWT}),
+        ({"NEXT_PUBLIC_SUPABASE_KEY": JWT}, {"SUPABASE_KEY": JWT}),
+        ({"ANONYMOUS_TOKEN": JWT}, {"JWT_SECRET": JWT}),
+        ({"PK": JWT}, {"SUPABASE_ANON_KEY": VENDOR_TOKEN}),
+        ({"SUPABASE_ANON_KEY": "Bearer " + JWT}, {"PUB_SUB_TOKEN": JWT}),
+        ({"PUBLIC_ANON_KEY": JWT}, {"JWT_VERIFY_KEY": JWT}),
+    ],
+)
+def test_a_jwt_under_a_public_name_is_published_by_design(benign, credential):
+    assert _positions({"command": "npx", "env": benign}) == []
+    assert [kind for _, kind in _positions({"command": "npx", "env": credential})] == [SHAPE]
+
+
+MNEMONIC = "alpha bravo delta echo golf hotel india kilo lima mike oscar papa"
+MNEMONIC_WORDS = MNEMONIC.split(" ")
+
+
+@pytest.mark.parametrize(
+    "name,benign,credential",
+    [
+        ("WALLET_MNEMONIC", " ".join(MNEMONIC_WORDS[:11]), " ".join(MNEMONIC_WORDS)),
+        ("SEED_PHRASE", " ".join((MNEMONIC_WORDS * 2)[:13]), " ".join(MNEMONIC_WORDS * 2)),
+        ("RECOVERY_PHRASE", "/run/secrets/seed", " ".join((MNEMONIC_WORDS * 2)[:15])),
+        ("SEEDPHRASE", "${SEED_PHRASE}", " ".join((MNEMONIC_WORDS * 2)[:18])),
+        ("MNEMONIC", "english", " ".join((MNEMONIC_WORDS * 2)[:21])),
+        ("WALLET_MNEMONIC", " ".join((MNEMONIC_WORDS * 3)[:27]), "  ".join(MNEMONIC_WORDS)),
+        ("MNEMONIC", " ".join(MNEMONIC_WORDS[:4]), " ".join(MNEMONIC_WORDS).title()),
+        ("MNEMONIC_LANGUAGE", "english", "Kx9Qm7Tn2Lp8Wz4R"),
+    ],
+)
+def test_a_seed_phrase_counts_only_under_a_mnemonic_name(name, benign, credential):
+    assert _positions({"command": "npx", "env": {name: benign}}) == []
+    assert _positions({"command": "npx", "env": {name: credential}}) == [(f"env {name}", NAMED)]
+    phrase = {"API_TOKEN": " ".join(MNEMONIC_WORDS), "SEED": "42", "RANDOM_SEED": "1234"}
+    assert _positions({"command": "npx", "env": phrase}) == []
+
+
+@pytest.mark.parametrize(
+    "name,benign,credential",
+    [
+        ("TOKEN_EXPIRES_AT", "2027-01-01T00:00:00Z", "2027-01-01-Kx9Qm7Tn2Lp8"),
+        ("TOKEN", "2027-01-01T00:00:00.123+02:00", "2027-01-01T00:00:00Zx9Kq"),
+        ("TOKEN", "2026-11-19", "2026-11-19.Kx9Qm7"),
+        ("API_TOKEN", "Mon, 01 Jan 2027 00:00:00 +0000", RANDOM),
+        ("DB_PASSWORD", "Mon, 01 Jan 2027 00:00:00 GMT", "Mon-01-Jan-Kx9Qm7"),
+        ("API_TOKEN", "1h30m", "1h30m-Kx9Qm7Tn2"),
+        ("API_TOKEN", "PT15M", RANDOM),
+        ("TOKEN_CREATED", "20270101T000000Z", "20270101T000000Zx9Kq"),
+        ("TOKEN_ISSUED_AT", "20270101000000Z", "20270101000000Zx9Kq"),
+        ("SECRET_VALID_UNTIL", "01-Jan-2027", "01-Jan-2027-Kx9Qm7"),
+        ("SECRET_VALID_UNTIL", "2027-01-01_00-00-00", "2027-01-01_Kx9Qm7Tn"),
+        ("API_KEY_CREATED", "2027-001T00:00:00Z", "2027-001T00:00:00Zx9Kq"),
+        ("TOKEN_CREATED", "2027-W01-1", "2027-W01-1-Kx9Qm7"),
+        ("TOKEN_CREATED", "2027-01-01T00:00:00Z/2027-02-01T00:00:00Z", "2027-01-01/Kx9Qm7Tn2"),
+        ("PASSWORD_CHANGED_AT", "2027-01-01T00:00:00.000000000Z", "2027-01-01T00:00:00.Kx9Q"),
+        ("API_TOKEN", "12:30:45.250", "12:30:45:Kx9Qm7Tn"),
+        # A value under a credential name is judged whole before it is an option list.
+        ("DB_PASSWORD", "sslmode=require", "T=/0NbJEjel_"),
+        ("DB_PASSWORD", "<db-password>", "aB3[x9]Kq7mZw"),
+        ("DB_PASSWORD", "pre-[your password]", "aB3<x9>Kq7mZw"),
+        ("API_KEY", "sk-proj-your-key-here", "Kq7mZw9x-dev-4Lp8ZtQ2vN"),
+        ("API_KEY", "test-token-dev", "Kq7mZw9x-test-4Lp8ZtQ2vN"),
+        ("API_KEY", "changeme-later", "Kq7mZw9x-my-4Lp8ZtQ2vN"),
+        ("COSMOS_PRIMARY_KEY", "id", RANDOM),
+        ("PRIMARY_KEY", "/tenantId", RANDOM),
+        ("ROUTING_KEY", "orders.created", RANDOM),
+        ("API_TOKEN", "prefix-<token-1>", "prefix-" + RANDOM),
+        ("IGNORE_PAT", "^tmp_[0-9]+$", "Kq7[x9]mZw"),
+        ("API_TOKEN", "ENC[AES256_GCM,data:9aBc,iv:x,tag:y,type:str]", "ENC" + RANDOM),
+        ("DB_PASSWORD", "sslmode=require&connect_timeout=10", "kq=7mZw9x4Lp8"),
+        ("DB_PASSWORD", "SameSite=Lax;Secure", "W3=8gXJ>+z(OJ^oC"),
+        ("COOKIE_OPTS", "Secure;HttpOnly;SameSite=Strict;Path=/", "AB=x9!Qm7Tn2"),
+        ("TOKEN_FLAGS", "Kind=Bearer,Scope=ReadWrite,Lifetime=3600", "Kq=7mZw9x4Lp8"),
+        ("PASSWORD_OPTIONS", "Algorithm=Argon2id,Iterations=3", "alq_=A[WxOC@!,.+fWc"),
+        ("SECRET_OPTIONS", "RotationDays=90,AutoRotate=true", "ab=Kq7mZw9x!4Lp8"),
+        ("DB_PASSWORD", "[db password]", "h^um<>7^qcp"),
+        ("DB_PASSWORD", "<db password>", "!ir]X[]osfX~D7pLJ"),
+        ("API_TOKEN", "[Kq7mZw9x4Lp8]", RANDOM),
+        ("API_TOKEN", "Kq7mZw9x4Lp8-Zt9Q2vNx7Kp-<My-Key>", RANDOM),
+        ("API_TOKEN", "Kq7mZw9x<API_TOKEN>", RANDOM),
+        ("API_TOKEN", "Kq7mZw9x4Lp8ZtQ2vN-dev", "Kq7mZw9x4Lp8ZtQ2vN-Wz4"),
+        ("API_TOKEN", "8443/api/v2", RANDOM),
+        ("REDIS_PASS", "${REDIS_PASS}", "60/<Bjf,@U=W(4(ZtO^"),
+        ("DB_PASSWORD", "1h30m15s", "1h30m15sKq"),
+        ("DB_PASSWORD", "ops@example.com", "x@hunter.secure"),
+        ("DB_PASSWORD", "deploy@db.example.com", "pa@ssw0rd.secure"),
+        ("DB_PASSWORD_ROOT", "root", PASSWORD),
+        ("API_KEY_SERVICE", "billing-api", RANDOM),
+        ("REDIS_PASSWORD", "ops@example.com", "p@ssw0rd.secure"),
+        ("REDIS_PASSWORD", "deploy@db.example.com", "p@ss.w0rd.secure"),
+        (
+            "DATABASE_URL",
+            "https://a.example.com,https://b.example.com/x",
+            "postgres://app:" + "xJ69,Y2x" + "@db.example.com/app",
+        ),
+    ],
+)
+def test_narrowed_value_rules_have_credential_twins(name, benign, credential):
+    assert _positions({"command": "npx", "env": {name: benign}}) == []
+    assert _positions({"command": "npx", "env": {name: credential}}) == [(f"env {name}", NAMED)]
+
+
+def test_dates_durations_and_addresses_are_settings_under_any_name():
+    env = {
+        "SESSION_EXPIRY": "1h30m",
+        "KEY_ROTATED_ON": "2026-11-19",
+        "TOKEN_TTL": "P1D",
+        "SMTP_FROM": "p@ssw0rd.secure",
+        "SSH_TARGET": "deploy@host.example.com",
+    }
+    assert _positions({"command": "npx", "env": env}) == []
+
+
+@pytest.mark.parametrize(
+    "benign,credential",
+    [
+        ("abc\r\nX-Request-Id: 42", "abc\r\nAuthorization: Bearer " + SCHEME_SENTINEL),
+        ("abc\nAuthorization: Bearer ${TOKEN}", "abc\nX-Api-Key: " + RANDOM),
+        ("abc\rX-Note: see the docs", "abc\rCookie: sid=" + RANDOM),
+    ],
+)
+def test_a_header_line_injected_after_a_line_break_is_read(benign, credential):
+    assert _positions({"url": "https://x.invalid/mcp", "headers": {"X-Trace": benign}}) == []
+    found = _positions({"url": "https://x.invalid/mcp", "headers": {"X-Trace": credential}})
+    assert [position for position, _ in found] == ["header X-Trace"]
+
+
+@pytest.mark.parametrize(
+    "command,args,fires",
+    [
+        ("docker", ["run", "-u", "www-data:www-data", "img"], False),
+        ("docker", ["run", "--user", "app-user:app-group", "img"], False),
+        ("podman", ["run", "-u", "1001:docker-grp", "img"], False),
+        ("docker", ["run", "-u", "app:Kq7mZw9x4Lp8", "img"], True),
+        ("curl", ["-u", "svc:Zx9Kv4Qm7Tn2Lp8", "https://x.invalid/"], True),
+        ("curl", ["-u", "svc:hunter-two-pw", "https://x.invalid/"], True),
+        ("http", ["-a", "svc:hunter-two-pw", "https://x.invalid/"], True),
+        ("sh", ["-c", "wget --user=svc --password=hunter-two-pw https://x.invalid/"], True),
+        ("sh", ["-c", "docker run -u www-data:www-data img"], False),
+        ("docker", ["run", "-u", "AppUser42:AppGroup", "img"], False),
+        ("npx", ["-y", "x@1.0.0", "-a", "region:EuWest2024x"], False),
+        ("npx", ["-y", "x@1.0.0", "-u", "region:EuWest2024x"], True),
+        ("http", ["--auth", "svc:hunter-two-pw", "https://x.invalid/"], True),
+        ("wget", ["--user", "svc:hunter-two-pw", "https://x.invalid/"], True),
+        ("/usr/bin/curl", ["-u", "svc:hunter-two-pw", "https://x.invalid/"], True),
+        ("sh", ["-c", "curl -u svc:hunter-two-pw https://x.invalid/"], True),
+        ("sh", ["-c", "npx x -u svc:hunter-two-pw"], False),
+    ],
+)
+def test_a_user_flag_is_a_password_pair_for_fetchers_or_a_literal(command, args, fires):
+    assert bool(_positions({"command": command, "args": args})) is fires
+
+
+def test_a_long_argument_of_assignments_scales_linearly():
+    def run(scale: int) -> object:
+        words = " ".join(f"password=Kx9Qm{index:07d}Lp8" for index in range(9_000 * scale))
+        return _positions({"command": "sh", "args": ["-c", words]})
+
+    assert scaling_ratio(run, factor=10) < 25
+
+
+def test_a_name_that_repeats_a_value_the_scrubber_holds_is_withheld(tmp_path):
+    word, phrase = "letmein" * 2, "secret-for-prod-1"
+    servers = {
+        "a": {"command": "uvx", "args": ["x"], "env": {"DB_SECRET": word, word: "1"}},
+        "b": {
+            "url": "https://example.invalid/mcp",
+            "headers": {"X-Client-Secret": phrase, phrase: "Bearer " + "SYNTHETIC" * 3},
+        },
+        "c": {"command": "uvx", "args": ["x"], "env": {"DB_PASSWORD": "Sunshinesummer"}},
+        "d": {"command": "uvx", "args": ["x"], "env": {"Sunshinesummer": VENDOR_TOKEN}},
+    }
+    result = _scan(tmp_path, servers)
+    found = _servers(result)
+    assert list(found["a"].env) == ["DB_SECRET", "[redacted-1]"]
+    (finding,) = _findings(found["b"])
+    assert finding.detail.endswith("in its launch: a header (an authorization scheme credential).")
+    (finding,) = _findings(found["d"])
+    assert finding.detail.endswith("in its launch: an env key (a vendor token shape).")
+    dump = _dump(result) + json.dumps([risk.detail for risk in _all_findings(result)])
+    assert word not in dump and phrase not in dump and "Sunshinesummer" not in dump
+
+
+def _all_findings(result) -> list:
+    return [risk for server in _servers(result).values() for risk in _findings(server)]
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [("DB_PSW", "correct-horse-battery"), ("ADMINPW", "correct-horse-battery")],
+)
+def test_abbreviated_password_names_read_a_phrase_as_a_password(name, value):
+    assert _positions({"command": "npx", "env": {name: value}}) == [(f"env {name}", NAMED)]
+    assert _positions({"command": "npx", "env": {"API_TOKEN": value}}) == []
+
+
+def test_a_libpq_keyword_string_counts_from_three_to_sixty_four_pairs():
+    pairs = "host=db port=5432 user=app password=Kq7mZw9x4Lp8 dbname=app sslmode=require"
+    assert _positions({"command": "npx", "env": {"PGCONN": pairs}})
+    many = " ".join(f"k{index}=v" for index in range(70)) + " password=Kq7mZw9x4Lp8"
+    assert _positions({"command": "npx", "env": {"PGCONN": many}}) == []
+
+
+def test_a_name_that_repeats_a_reported_literal_is_withheld_even_in_upper_case(tmp_path):
+    literal = "POSTGRES_PASSWORD_" + "9" * 4
+    servers = {
+        "a": {"command": "uvx", "args": ["x"], "env": {"DB_PASSWORD": literal}},
+        "b": {"command": "uvx", "args": ["x"], "env": {literal: "1", "N": "x"}},
+    }
+    result = _scan(tmp_path, servers)
+    assert list(_servers(result)["b"].env) == ["N", "[redacted-1]"]
+    assert literal not in _dump(result)
