@@ -1,0 +1,56 @@
+{
+  "note": "Every schema score.py validates against is vendored under schemas/, so the scorer runs offline and the published scores reproduce from the files beside them. Each record gives where the copy came from, when, its SHA-256 and its licence. fetch_schemas.py copies the set to a directory and checks the digests; with --refresh it downloads each source and reports whether the upstream bytes still match.",
+  "schemas": {
+    "bom-1.5.schema.json": {
+      "source": "https://raw.githubusercontent.com/CycloneDX/specification/master/schema/bom-1.5.schema.json",
+      "retrieved": "2026-11-18",
+      "sha256": "2d956c1d05c092695457a91f3b5c57c749793c013ec224a0935807cfc8ae4480",
+      "license": "Apache-2.0 (OWASP CycloneDX specification; see schemas/NOTICE.txt)"
+    },
+    "bom-1.6.schema.json": {
+      "source": "https://raw.githubusercontent.com/CycloneDX/specification/master/schema/bom-1.6.schema.json",
+      "retrieved": "2026-11-18",
+      "sha256": "18f57f7482593bad9f21b4feed09084640cbeff419d62ad5090c5ceccca5b37d",
+      "license": "Apache-2.0 (OWASP CycloneDX specification; see schemas/NOTICE.txt)"
+    },
+    "bom-1.7.schema.json": {
+      "source": "https://raw.githubusercontent.com/CycloneDX/specification/master/schema/bom-1.7.schema.json",
+      "retrieved": "2026-11-18",
+      "sha256": "73308edec3ab2d38bfffd993e96a042b594314143b6971a6e9ed98bbb6bd76ce",
+      "license": "Apache-2.0 (OWASP CycloneDX specification; see schemas/NOTICE.txt)"
+    },
+    "jsf-0.82.schema.json": {
+      "source": "https://raw.githubusercontent.com/CycloneDX/specification/master/schema/jsf-0.82.schema.json",
+      "retrieved": "2026-11-18",
+      "sha256": "09690de376901af3df1887d34464c4565274b117be50f5455fb0c3cc39460323",
+      "upstream_sha256": "8bae002c25e723db7ee1f26afde680ae1a2b1a8f6b4b4b0fd65dc3becb090aae",
+      "modified": "the author's e-mail address is removed from the $comment; nothing else differs",
+      "license": "Apache-2.0 (OWASP CycloneDX specification; see schemas/NOTICE.txt)"
+    },
+    "spdx.schema.json": {
+      "source": "https://raw.githubusercontent.com/CycloneDX/specification/master/schema/spdx.schema.json",
+      "retrieved": "2026-11-18",
+      "sha256": "4b345e2329f209f34e960ae2a8e7cb46a166907e6a45e94978565925dc47b359",
+      "license": "Apache-2.0 (OWASP CycloneDX specification; see schemas/NOTICE.txt)"
+    },
+    "cryptography-defs.schema.json": {
+      "source": "https://raw.githubusercontent.com/CycloneDX/specification/master/schema/cryptography-defs.schema.json",
+      "retrieved": "2026-11-18",
+      "sha256": "013919cfb1c6209f919cd7253a4e3f740cb44023697bb4657a5f0584d6f47137",
+      "license": "Apache-2.0 (OWASP CycloneDX specification; see schemas/NOTICE.txt)"
+    },
+    "sarif-schema-2.1.0.json": {
+      "source": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+      "retrieved": "2026-11-18",
+      "sha256": "c3b4bb2d6093897483348925aaa73af03b3e3f4bd4ca38cef26dcb4212a2682e",
+      "license": "OASIS SARIF TC; OASIS IPR Policy, copyright notice in schemas/NOTICE.txt"
+    },
+    "spdx-json-schema-3.0.1.json": {
+      "source": "https://spdx.github.io/spdx-spec/v3.0.1/rdf/schema.json",
+      "retrieved": "2026-11-18",
+      "sha256": "bf586836b9abc14e54fa2a4f215290e5f39cd0d9e5c45646bc5a9b89b7dc6e1f",
+      "license": "Community-Spec-1.0 (pre-existing portions CC-BY-3.0); the same bytes as src/nexus_symbiote/generators/schemas/vendor/spdx/spdx-json-schema-3.0.1.json",
+      "sameAsPackageCopy": true
+    }
+  }
+}

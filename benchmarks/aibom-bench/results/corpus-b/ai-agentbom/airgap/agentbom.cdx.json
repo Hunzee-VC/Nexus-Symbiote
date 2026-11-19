@@ -1,0 +1,450 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.5.schema.json",
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "agentbom:dependency:ai",
+      "name": "ai",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "dependency"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "package.json"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        },
+        {
+          "name": "agentbom:dependency_category",
+          "value": "ai_framework"
+        }
+      ],
+      "type": "library"
+    },
+    {
+      "bom-ref": "agentbom:dependency:ai-sdk-google",
+      "name": "@ai-sdk/google",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "dependency"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "package.json"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        },
+        {
+          "name": "agentbom:dependency_category",
+          "value": "provider_sdk"
+        }
+      ],
+      "type": "library"
+    },
+    {
+      "bom-ref": "agentbom:dependency:ai-sdk-openai",
+      "name": "@ai-sdk/openai",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "dependency"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "package.json"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        },
+        {
+          "name": "agentbom:dependency_category",
+          "value": "provider_sdk"
+        }
+      ],
+      "type": "library"
+    },
+    {
+      "bom-ref": "agentbom:dependency:anthropic-ai-sdk",
+      "name": "@anthropic-ai/sdk",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "dependency"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "package.json"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        },
+        {
+          "name": "agentbom:dependency_category",
+          "value": "provider_sdk"
+        }
+      ],
+      "type": "library"
+    },
+    {
+      "bom-ref": "agentbom:dependency:github-com-sashabaranov-go-openai",
+      "name": "github.com/sashabaranov/go-openai",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "dependency"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "sidecar/go.mod"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        },
+        {
+          "name": "agentbom:dependency_category",
+          "value": "provider_sdk"
+        }
+      ],
+      "type": "library"
+    },
+    {
+      "bom-ref": "agentbom:dependency:langchain",
+      "name": "langchain",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "dependency"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "package.json"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        },
+        {
+          "name": "agentbom:dependency_category",
+          "value": "ai_framework"
+        }
+      ],
+      "type": "library"
+    },
+    {
+      "bom-ref": "agentbom:dependency:openai-agents",
+      "name": "@openai/agents",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "dependency"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "package.json"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        },
+        {
+          "name": "agentbom:dependency_category",
+          "value": "ai_framework"
+        }
+      ],
+      "type": "library"
+    },
+    {
+      "bom-ref": "agentbom:framework:langchain",
+      "name": "langchain",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "framework"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "package.json"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "framework"
+    },
+    {
+      "bom-ref": "agentbom:framework:openai-agents",
+      "name": "openai_agents",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "framework"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "package.json"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "framework"
+    },
+    {
+      "bom-ref": "agentbom:framework:vercel-ai-sdk",
+      "name": "vercel_ai_sdk",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "framework"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "package.json"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "framework"
+    },
+    {
+      "bom-ref": "agentbom:model:claude-opus-4-1",
+      "name": "claude-opus-4.1",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "model"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "src/agent.ts"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "high"
+        }
+      ],
+      "type": "machine-learning-model"
+    },
+    {
+      "bom-ref": "agentbom:model:gemini-2-5-pro",
+      "name": "gemini-2.5-pro",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "model"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "prompts/judge.yaml"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "machine-learning-model"
+    },
+    {
+      "bom-ref": "agentbom:model:gpt-4-1",
+      "name": "gpt-4.1",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "model"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "openai/assistant.json"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "machine-learning-model"
+    },
+    {
+      "bom-ref": "agentbom:model:gpt-4-1-mini",
+      "name": "gpt-4.1-mini",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "model"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "src/agent.ts"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "high"
+        }
+      ],
+      "type": "machine-learning-model"
+    },
+    {
+      "bom-ref": "agentbom:model:gpt-4o-mini",
+      "name": "gpt-4o-mini",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "model"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "n8n/weekly-digest.json"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "machine-learning-model"
+    },
+    {
+      "bom-ref": "agentbom:model:mistral-large-latest",
+      "name": "mistral-large-latest",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "model"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "src/rag.ts"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "high"
+        }
+      ],
+      "type": "machine-learning-model"
+    },
+    {
+      "bom-ref": "agentbom:model:o3-mini",
+      "name": "o3-mini",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "model"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "src/agent.ts"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "high"
+        }
+      ],
+      "type": "machine-learning-model"
+    },
+    {
+      "bom-ref": "agentbom:model:qwen2",
+      "name": "qwen2",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "model"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "hf-cache/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/config.json"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "machine-learning-model"
+    },
+    {
+      "bom-ref": "agentbom:provider:anthropic",
+      "name": "anthropic",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "provider"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "package.json"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "platform"
+    },
+    {
+      "bom-ref": "agentbom:provider:gemini",
+      "name": "gemini",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "provider"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "prompts/judge.yaml"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "platform"
+    },
+    {
+      "bom-ref": "agentbom:provider:openai",
+      "name": "openai",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "provider"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "package.json"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "platform"
+    }
+  ],
+  "metadata": {
+    "component": {
+      "bom-ref": "agentbom:repository",
+      "name": "/aibom-run/work/ai-agentbom/corpus",
+      "type": "application"
+    },
+    "tools": [
+      {
+        "name": "agentbom",
+        "vendor": "AgentBOM",
+        "version": "0.1.0"
+      }
+    ]
+  },
+  "serialNumber": "urn:uuid:agentbom-aibom-run-work-ai-agentbom-corpus",
+  "specVersion": "1.5",
+  "version": 1
+}
