@@ -8,7 +8,6 @@ pseudonyms by order of first appearance, under its own versioned profile.
 
 import hashlib
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -155,16 +154,26 @@ def test_run_scoped_projection_profile_is_the_mapping_profile_with_a_suffix():
     assert RUN_SCOPED_PROJECTION_PROFILE == PROJECTION_PROFILE + "+run-scoped"
 
 
-@pytest.mark.parametrize("version", ["v4", "v5", "v12"])
-def test_a_mapping_change_moves_the_run_scoped_projection_profile(monkeypatch, version):
-    mapping = f"nexus-symbiote/shadowscan-projection/{version}"
-    monkeypatch.setattr(shadowscan, "PROJECTION_PROFILE", mapping)
-    (run_scoped,) = _import(_report("a")).components
-    (keyed,) = _import(_report("a", scope="keyed")).components
-    profile = run_scoped.properties["shadowscan:projection-profile"]
-    assert profile == mapping + "+run-scoped"
-    assert keyed.properties["shadowscan:projection-profile"] == mapping
-    assert not re.fullmatch(r"nexus-symbiote/shadowscan-projection/v[0-9]+", profile)
+def test_a_later_mapping_version_compares_each_component_by_the_exact_report_digest(
+    tmp_path, monkeypatch
+):
+    first = _scan(tmp_path, "s0", _report("a"))
+    prefix, _, number = PROJECTION_PROFILE.rpartition("/v")
+    later = f"{prefix}/v{int(number) + 1}"
+    monkeypatch.setattr(shadowscan, "PROJECTION_PROFILE", later)
+    monkeypatch.setattr(shadowscan, "RUN_SCOPED_PROJECTION_PROFILE", later + "+run-scoped")
+    second = _scan(tmp_path, "s1", _report("bb"))
+    imported = {
+        component.bom_ref: component.properties["shadowscan:projection-profile"]
+        for component in _load(second).components
+        if "shadowscan:projection-profile" in component.properties
+    }
+    assert imported and set(imported.values()) == {later + "+run-scoped"}
+    alerts = AIBOMDiffer().diff(_load(first), _load(second)).security_alerts
+    assert {alert["component"] for alert in alerts} == set(imported)
+    for alert in alerts:
+        assert alert["severity"] == "high"
+        assert "properties.shadowscan:report-sha256 changed" in alert["alert"]
 
 
 def test_new_run_scoped_pseudonyms_do_not_change_content_digests():

@@ -42,8 +42,7 @@ CONTENT_PROFILE = "nexus-symbiote/shadowscan-content/v1"
 # each such pseudonym renamed by its order of first appearance. The projection profile
 # is the mapping's with a suffix, so every mapping change moves it and it never names
 # another mapping version.
-RUN_SCOPED_PROJECTION_SUFFIX = "+run-scoped"
-RUN_SCOPED_PROJECTION_PROFILE = PROJECTION_PROFILE + RUN_SCOPED_PROJECTION_SUFFIX
+RUN_SCOPED_PROJECTION_PROFILE = PROJECTION_PROFILE + "+run-scoped"
 RUN_SCOPED_CONTENT_PROFILE = "nexus-symbiote/shadowscan-content/v2"
 RUN_SCOPED_IDENTITIES_GAP = (
     "ShadowScan keyed credential pseudonyms to this scan only; diff cannot tell a "
@@ -645,9 +644,7 @@ class ShadowScanImporter(Scanner):
                 finding.get("shadow"),
                 resource_type=finding.get("resource_type"),
                 projection_profile=(
-                    PROJECTION_PROFILE + RUN_SCOPED_PROJECTION_SUFFIX
-                    if run_scoped
-                    else PROJECTION_PROFILE
+                    RUN_SCOPED_PROJECTION_PROFILE if run_scoped else PROJECTION_PROFILE
                 ),
             )
             if comp is None:

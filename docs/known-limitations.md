@@ -1319,7 +1319,9 @@ A way around a limit that its entry does not describe is worth a
   Such a report's components carry the mapping's projection profile with `+run-scoped`
   appended (`nexus-symbiote/shadowscan-projection/v4+run-scoped`), so a later mapping
   version moves it and the first comparison after one compares each imported component
-  by the exact report digest. A build without the content profile
+  by the exact report digest. That digest changes on every run of such a report, so the
+  comparison raises a high alert on every imported component: review it and record the
+  baseline again. A build without the content profile
   `nexus-symbiote/shadowscan-content/v2` refuses an inventory that records it: upgrade the
   build that reads a baseline together with the baseline. Set `SHADOWSCAN_IDENTITY_KEY`
   for every ShadowScan run; see

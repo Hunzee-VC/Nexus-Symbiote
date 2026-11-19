@@ -282,9 +282,11 @@ the exact report digest. So does the first comparison after an upgrade for a rep
 with per-scan pseudonyms, since the earlier inventory recorded v1 and v4. A later
 mapping version moves the run-scoped projection profile with it, so the first
 comparison after one compares each imported component by the exact report digest,
-as it does for a keyed report. A build without the content profile v2 refuses an
-inventory that records it, so upgrade the build that reads a baseline, such as the
-one that runs `diff` in CI, together with the baseline.
+as it does for a keyed report. That digest changes on every run of a report with
+per-scan pseudonyms, so this comparison raises a high alert on every imported
+component: review it and record the baseline again. A build without the content
+profile v2 refuses an inventory that records it, so upgrade the build that reads a
+baseline, such as the one that runs `diff` in CI, together with the baseline.
 
 ### Require a signed report in CI
 
