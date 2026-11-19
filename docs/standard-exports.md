@@ -114,6 +114,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `endpoint_identity` | Unestablished endpoint identity | none | none | none | ASI07 | none | MEASURE-2.7 |
 | `hidden_markup` | Comments in instructions | none | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
 | `hook_commands` | Hook commands | none | none | none | ASI05 | AML.T0142 | MEASURE-2.7 |
+| `instruction_injection` | Injected instructions or deception in prompt files | CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
 | `instruction_layering` | Layered instruction files | none | LLM01:2025 | LLM01:2026 | ASI01 | none | MEASURE-2.7 |
 | `invalid_safetensors` | Unverified SafeTensors structure | none | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0011.000 | MANAGE-3.2 |
 | `invisible_characters` | Invisible characters in instructions | CWE-451, CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
@@ -142,6 +143,7 @@ Messages and recommendations are one line of plain text: control, bidirectional 
 | `shadowscan-inventory-unmatched` | Imported unmatched discovery | none | none | none | none | none | GOVERN-1.6 |
 | `signing_status` | Unsigned model artifact | CWE-345 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0010.003 | MANAGE-3.2 |
 | `tag_characters` | Unicode tag characters in instructions | CWE-451, CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01 | AML.T0068 | MEASURE-2.7 |
+| `tool_description_poisoning` | Poisoned instructions in tool description or schema | CWE-1427 | LLM01:2025 | LLM01:2026 | ASI01, ASI02 | AML.T0010.005, AML.T0068 | MEASURE-2.7 |
 | `transitive_resolution` | Dependencies resolved at launch | CWE-829 | LLM03:2025 | LLM04:2026 | ASI04 | AML.T0109 | MANAGE-3.1 |
 | `transport_ambiguity` | Ambiguous MCP transport | none | none | none | none | none | MEASURE-2.7 |
 | `transport_security` | Transport security | CWE-319 (critical and high findings) | none | none | ASI07 | none | MEASURE-2.7 |
