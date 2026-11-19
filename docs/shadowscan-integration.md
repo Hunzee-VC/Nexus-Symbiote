@@ -310,11 +310,13 @@ All of these must hold.
   withheld. A value can also follow its key on a later line. A line that holds one
   value and no key of its own is therefore read together with the line before it, as
   a value follows `Authorization: Bearer`, and as the value of each key that opens it
-  within the eight lines above. A line opens a value when it is a key and its mark
-  with nothing after them but a YAML block indicator, an opening bracket or a comment:
-  `password:`, `password: >-`, `"credentials": [`, `export const credentials = [`,
-  `token =  # rotated`. Blank lines, comment lines and other single values, such as
-  list entries, may lie in between. The redactor decides which keys name a credential,
+  within the eight lines above. A line opens a value when it is a key and its mark,
+  after at most one opening bracket, with nothing after them but a YAML anchor or tag, a
+  block indicator, an opening bracket, a shell line continuation or a comment:
+  `password:`, `password: >-`, `password: &shared`, `{"credentials":`,
+  `"credentials": [`, `export const credentials = [`, `export API_KEY=\`,
+  `token =  # rotated`. Blank lines, comment lines, lines that only open a bracket and
+  other single values, such as list entries, may lie in between. The redactor decides which keys name a credential,
   and it reads names broadly: a list below `requires_token:` or `cache_key = (` is
   withheld as a value on the same line as that key always was. What the lines hold
   decides all of this, not which identifier a report cites there, so the order of a

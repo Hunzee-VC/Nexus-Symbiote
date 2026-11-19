@@ -527,6 +527,11 @@ BELOW_A_KEY = {
     "tab-before-the-comma": '{key}:\n  "{value}"\t,\n',
     "padded-entry-above": "{key}:\n  - Zmlyc3QtZW50cnktMDAwMQ==\n  - {value}\n",
     "empty-assignment-entry-above": "[auth]\n{key}=\n    first-entry\n    {value}\n",
+    "bracket-on-its-own-line": '{{"{key}":\n[\n"{value}"]}}\n',
+    "brace-and-bracket-on-their-own-lines": '{{\n"{key}":\n[\n"{value}"\n]\n}}\n',
+    "yaml-anchor-after-the-key": "{key}: &shared\n  {value}\n",
+    "yaml-tag-after-the-key": "{key}: !vault\n  {value}\n",
+    "shell-line-continuation": "export {key}=\\\n{value}\n",
 }
 
 

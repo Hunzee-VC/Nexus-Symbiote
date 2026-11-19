@@ -1324,9 +1324,8 @@ A way around a limit that its entry does not describe is worth a
   The redactor decides which keys name a credential and reads names broadly, so a list of
   model identifiers below `requires_token:`, `cache_key = (` or `modelsRequiringApiKey = [`
   is withheld; plural names such as `api_keys:` and `tokens:` are not credential names to
-  it. The kind is
-  the report's: the scan checks that the identifier
-  stands at the cited line, not that it names a model, except that an Amazon Bedrock
+  it. The kind is the report's: the scan checks that the identifier stands at the cited
+  line, not that it names a model, except that an Amazon Bedrock
   resource name of another kind, such as a guardrail, is not named. The same model written
   two ways, such as `anthropic/<model>` and `<model>`, is two components. Findings of other kinds, container images, infrastructure
   and data are not named this way, and a standalone `import-shadowscan` names nothing; see

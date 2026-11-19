@@ -138,14 +138,18 @@ _LOOSE_JSON = re.compile(
     re.ASCII,
 )
 # A key and its mark at the start of a line: `password:`, `"credentials":`, `API_KEY=`,
-# `- token:`, `export TOKEN=`. Group 1 is the key with its mark, group 2 the mark.
+# `- token:`, `export TOKEN=`, `{"token":`. Group 1 is the key with its mark, group 2 the mark.
 _KEY = re.compile(
-    r"""\s*+(?:[-*]\s++)?(?:(?:export|const|let|var|val|final)\s++){0,2}+"""
+    r"""\s*+(?:[\[({]\s*+)?(?:[-*]\s++)?(?:(?:export|const|let|var|val|final)\s++){0,2}+"""
     r"""(["']?[\w./@-]{1,128}+["']?\s*+([:=]{1,2}+>?+))"""
 )
-# What may follow the mark on a line that opens a value written below it: a YAML block
-# indicator or an opening bracket, and a comment.
-_OPENS_BELOW = re.compile(r"\s*+(?:[>|][-+0-9]{0,2}+|[\[({])?\s*+(?:(?:#|//).*+)?")
+# What may follow the mark on a line that opens a value written below it: a YAML anchor
+# or tag, a block indicator, an opening bracket or a shell line continuation, and a comment.
+_OPENS_BELOW = re.compile(
+    r"\s*+(?:[&!][^\s#]*+\s*+){0,2}+(?:[>|][-+0-9]{0,2}+|[\[({\\])?\s*+(?:(?:#|//).*+)?"
+)
+# A line that only opens a bracket, as `[` below `"password":`.
+_BRACKET_LINE = re.compile(r"\s*+[\[({]++\s*+")
 # After `=`, what a value that ends in base64 padding leaves on its line.
 _PADDING_TAIL = re.compile(r"""["'\],\s]*+""")
 _COMMENT_LINE = re.compile(r"\s*+(?:#|//)")
@@ -484,7 +488,8 @@ def _credential_readings(
     A line with a key of its own, or of several words, is read alone. A line that is one
     value is read below the line before it, as a value follows `Authorization: Bearer`. It
     is also read as the value of each key that opens it within ``MAX_KEY_LOOKBACK`` lines,
-    with blank lines, comments and other single values in between: after `password: >-`,
+    with blank lines, comments, lines that only open a bracket and other single values in
+    between: after `password: >-`, `password: &anchor`, `export TOKEN=\\`,
     `"credentials": [` or a key and a comment the redactor would take the block indicator,
     the bracket or the comment for the value. What the lines hold decides this, not which
     identifier a report cites there.
@@ -503,7 +508,7 @@ def _credential_readings(
     keys = []
     for back in range(index - 1, max(index - 1 - MAX_KEY_LOOKBACK, -1), -1):
         other = lines[back]
-        if not other.strip() or _COMMENT_LINE.match(other):
+        if not other.strip() or _COMMENT_LINE.match(other) or _BRACKET_LINE.fullmatch(other):
             continue
         key, value = kind(back)
         if key is not None:
