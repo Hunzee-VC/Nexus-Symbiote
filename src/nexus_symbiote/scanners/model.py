@@ -205,6 +205,47 @@ GGUF_MISMATCH = (
 GGUF_TOO_SHORT = (
     "Named as GGUF, but too short to hold the GGUF magic; the format was not established"
 )
+PICKLE_NAME_UNREADABLE = "Potential code-executing loader format (artifact could not be inspected)"
+PICKLE_NAME_UNEVIDENCED = "Named pickle-family format; no pickle evidence in the inspected prefix"
+PICKLE_NAME_EMPTY = "empty file"
+PICKLE_NAME_WRAPPED = (
+    "Potential code-executing loader format (compressed or archived stream; decompressed "
+    "content not inspected)"
+)
+PICKLE_NAME_GGUF = (
+    "Potential code-executing loader format (GGUF content under a pickle-family name; its "
+    "chat templates are not inspected under this name)"
+)
+_UNVALIDATED = "; no bounded structural validator for this format/loader"
+# Compression and archive magic that pandas, joblib and torch unwrap before unpickling.
+_WRAPPER_MAGIC = (
+    b"\x1f\x8b",
+    b"BZh",
+    b"\xfd7zXZ\x00",
+    b"\x28\xb5\x2f\xfd",
+    b"\x04\x22\x4d\x18",
+    b"ZF",
+    b"\x78\x01",
+    b"\x78\x5e",
+    b"\x78\x9c",
+    b"\x78\xda",
+)
+_TAR_MAGIC_OFFSET = 257
+_TAR_MAGIC = b"ustar"
+_TAR_BLOCK = 512
+_TAR_CHECKSUM = slice(148, 156)
+# mode, uid, gid, size, mtime, devmajor and devminor, which tarfile parses in every header.
+_TAR_NUMBERS = (
+    slice(100, 108),
+    slice(108, 116),
+    slice(116, 124),
+    slice(124, 136),
+    slice(136, 148),
+    slice(329, 337),
+    slice(337, 345),
+)
+_LZMA_ALONE_HEADER = 13
+_LZMA_JOBLIB_PREFIX = b"\x5d\x00"
 # Content that a bound left unread: a file no model name rates is inventoried for it.
 _CONTENT_UNREAD = frozenset(
     {
@@ -973,9 +1014,20 @@ def inspect_model_format(
     """Inspect bounded structure without deserializing a model or running code.
 
     A file that cannot be read, or whose content check fails, is unknown: a SafeTensors
-    one as malformed SafeTensors, any other as ``INSPECTION_FAILED``. A file named as
-    GGUF whose content is not recognized as anything else is unknown as
+    one as malformed SafeTensors, any other as ``INSPECTION_FAILED``, except a
+    pickle-family name, which keeps the code-executing rating its loader implies. A
+    file named as GGUF whose content is not recognized as anything else is unknown as
     ``GGUF_MISMATCH`` without the GGUF magic, or ``GGUF_TOO_SHORT`` when shorter than it.
+
+    A pickle-family name is rated by its inspected content, not by the name alone: it
+    keeps the code-executing rating when the content is a recognized pickle, a NumPy
+    object-dtype array, a ZIP archive with a pickle member or such an array, content a
+    bound left unread, or a compressed or archived stream (by a wrapper suffix, its
+    magic or its header), whose decompressed content is not inspected, or GGUF content,
+    whose chat templates are inspected only under a ``.gguf`` name. A ZIP archive read
+    whole with no pickle member keeps that unknown verdict; anything else is unknown
+    with ``PICKLE_NAME_UNEVIDENCED`` (``PICKLE_NAME_EMPTY`` for a zero-length file),
+    which keeps the high unknown-format finding.
 
     ``budget`` is shared with the other files of one scan; NumPy array headers spend it.
     A file that no model name rates is inspected for what it holds, so the collector
@@ -985,12 +1037,13 @@ def inspect_model_format(
     layout. It is not a claim about model behavior, parser vulnerabilities,
     adjacent repository code, or the safety of the eventual loader.
     """
-    if _pickle_family(path):
-        return SerializationSafety.UNSAFE_CODE_EXECUTION, "Potential code-executing loader format"
+    pickle_family = _pickle_family(path)
     safetensors = path.suffix.lower() == ".safetensors"
     try:
         context = nullcontext(stream) if stream is not None else open_regular_file(path)
-        with context as opened:
+        with context as source:
+            head = _HeadReader(source) if pickle_family else None
+            opened = cast(BinaryIO, head) if head is not None else source
             size = os.fstat(opened.fileno()).st_size
             prefix = opened.read(8)
             length = int.from_bytes(prefix, "little")
@@ -1007,10 +1060,16 @@ def inspect_model_format(
                     budget or InspectionBudget(),
                     by_content=model_format(path) is None,
                 )
+                # 'G' is an opcode byte, so GGUF content can parse as a pickle stream; the
+                # name rating says what the file is.
                 if container is not None and (
-                    container[0] is SerializationSafety.UNSAFE_CODE_EXECUTION or not safetensors
+                    container[0] is SerializationSafety.UNSAFE_CODE_EXECUTION
+                    and not (pickle_family and prefix.startswith(GGUF_MAGIC))
+                    or not (safetensors or pickle_family)
                 ):
                     return container
+            if head is not None:
+                return _pickle_name_rating(path, head, size, container)
             if not safetensors:
                 if path.suffix.lower() == ".gguf" and not prefix.startswith(GGUF_MAGIC):
                     return (
@@ -1028,7 +1087,117 @@ def inspect_model_format(
     except (OSError, ValueError, RecursionError, UnicodeError):
         if safetensors:
             return SerializationSafety.UNKNOWN, "Malformed or unsupported SafeTensors structure"
+        if pickle_family:
+            return SerializationSafety.UNSAFE_CODE_EXECUTION, PICKLE_NAME_UNREADABLE
         return SerializationSafety.UNKNOWN, INSPECTION_FAILED
+
+
+def _pickle_name_rating(
+    path: Path,
+    head: _HeadReader,
+    size: int,
+    container: tuple[SerializationSafety, str] | None,
+) -> tuple[SerializationSafety, str]:
+    """Rate a pickle-family name whose inspected content showed no code-bearing container.
+
+    Content a bound left unread, and a compressed or archived stream, which its loader
+    unwraps before it unpickles, keep the code-executing rating the name implies. So
+    does GGUF content: llama.cpp opens a model by its magic, not its name, and its chat
+    templates are inspected only under a ``.gguf`` name.
+    """
+    if size == 0:
+        return SerializationSafety.UNKNOWN, PICKLE_NAME_EMPTY
+    start = head.start(min(size, _TAR_BLOCK))
+    if (
+        path.suffixes[-1].lower() in _PICKLE_WRAPPERS
+        or start.startswith(_WRAPPER_MAGIC)
+        or _lzma_alone_header(start)
+        or start[_TAR_MAGIC_OFFSET : _TAR_MAGIC_OFFSET + len(_TAR_MAGIC)] == _TAR_MAGIC
+        or _tar_header(start)
+    ):
+        return SerializationSafety.UNSAFE_CODE_EXECUTION, PICKLE_NAME_WRAPPED
+    if start.startswith(GGUF_MAGIC):
+        return SerializationSafety.UNSAFE_CODE_EXECUTION, PICKLE_NAME_GGUF
+    if container is not None and container[1] in _CONTENT_UNREAD:
+        return SerializationSafety.UNSAFE_CODE_EXECUTION, _loader_rated(container[1])
+    if container is not None:
+        return container
+    return SerializationSafety.UNKNOWN, PICKLE_NAME_UNEVIDENCED
+
+
+def _lzma_alone_header(start: bytes) -> bool:
+    """Whether ``start`` opens an LZMA-alone stream that joblib detects and unwraps.
+
+    joblib takes content that starts ``5d 00``, its encoder's properties byte and the
+    low byte of a dictionary size, for LZMA-alone. The uncompressed size is unknown (all
+    ones) or below 2**63, and the range coder's first byte, after the header, is always
+    zero. Other properties bytes reach ``lzma`` only through a loader that asks for it.
+    """
+    if len(start) <= _LZMA_ALONE_HEADER or not start.startswith(_LZMA_JOBLIB_PREFIX):
+        return False
+    unpacked = start[5:_LZMA_ALONE_HEADER]
+    return (unpacked == b"\xff" * 8 or unpacked[-1] <= 0x7F) and start[_LZMA_ALONE_HEADER] == 0
+
+
+def _tar_header(start: bytes) -> bool:
+    """Whether ``start`` opens with a tar header that tarfile reads, ustar or not.
+
+    ``torch.load`` opens a legacy checkpoint with tarfile, which reads a first block
+    whatever its name and type when its checksum field holds the sum of the other bytes,
+    unsigned or signed, plus eight spaces for the field itself, and its numeric fields
+    parse. A type-specific field tarfile also parses is not checked, which only widens
+    the rating.
+    """
+    if len(start) < _TAR_BLOCK:
+        return False
+    stored = _tar_number(start[_TAR_CHECKSUM])
+    if stored is None or any(_tar_number(start[field]) is None for field in _TAR_NUMBERS):
+        return False
+    rest = start[: _TAR_CHECKSUM.start] + start[_TAR_CHECKSUM.stop : _TAR_BLOCK]
+    unsigned = 256 + sum(rest)
+    return stored in (unsigned, unsigned - 256 * sum(byte > 0x7F for byte in rest))
+
+
+def _tar_number(field: bytes) -> int | None:
+    """A tar header's number field as ``tarfile.nti`` reads it: octal text or base-256."""
+    if field[0] in (0x80, 0xFF):
+        return int.from_bytes(field[1:], "big") - (
+            256 ** (len(field) - 1) if field[0] == 0xFF else 0
+        )
+    try:
+        return int(field.split(b"\0", 1)[0].decode("ascii").strip() or "0", 8)
+    except ValueError:
+        return None
+
+
+def _loader_rated(evidence: str) -> str:
+    """The rating of a pickle-family name whose content the bounds left unrated."""
+    return f"Potential code-executing loader format ({evidence.removesuffix(_UNVALIDATED)})"
+
+
+class _HeadReader:
+    """Keep the first bytes read from ``stream``, where a wrapper's header sits."""
+
+    def __init__(self, stream: BinaryIO) -> None:
+        self._stream = stream
+        self._head = bytearray()
+
+    def fileno(self) -> int:
+        return self._stream.fileno()
+
+    def read(self, size: int) -> bytes:
+        data = self._stream.read(size)
+        self._head.extend(data[: max(0, _TAR_BLOCK - len(self._head))])
+        return data
+
+    def reread(self, offset: int, size: int) -> bytes:
+        return _reread(self._stream, offset, size)
+
+    def start(self, length: int) -> bytes:
+        """The first ``length`` bytes, reading on past what inspection read if needed."""
+        while len(self._head) < length and self.read(length - len(self._head)):
+            pass
+        return bytes(self._head[:length])
 
 
 class _HashingModelReader:
@@ -2331,7 +2500,7 @@ class ModelScanner(Scanner):
             safety, format_evidence = observation.safety, observation.explanation
             weight_hash: str | None = observation.digest
         elif _pickle_family(path):
-            # The name alone rates these formats; an unreadable file keeps that rating.
+            # Content rates these formats; an unreadable file keeps the loader's rating.
             safety = SerializationSafety.UNSAFE_CODE_EXECUTION
             format_evidence = (
                 "Potential code-executing loader format (artifact could not be hashed)"

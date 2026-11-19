@@ -30,6 +30,7 @@ from nexus_symbiote.scanners.model import (
     GGUF_MISMATCH,
     GGUF_TOO_SHORT,
     MAX_MODEL_HEADER_BYTES,
+    PICKLE_NAME_UNEVIDENCED,
     ModelScanner,
 )
 from nexus_symbiote.validators.risk import RiskScorer, _intrinsic_model_risks
@@ -293,7 +294,8 @@ def test_a_zip_archive_named_as_gguf_is_not_recorded_as_gguf(tmp_path: Path) -> 
         ("model.onnx", "onnx", "unknown", NO_VALIDATOR),
         ("model.tflite", "tensorflow-lite", "unknown", NO_VALIDATOR),
         ("model.ggml", "llama.cpp-legacy", "unknown", NO_VALIDATOR),
-        ("model.pkl", "pickle", "unsafe-code-execution", "Potential code-executing loader format"),
+        # A pickle-family name is rated by its content: text there shows no pickle evidence.
+        ("model.pkl", "pickle", "unknown", PICKLE_NAME_UNEVIDENCED),
     ],
 )
 def test_a_suffix_without_a_header_check_is_recorded_from_the_name(

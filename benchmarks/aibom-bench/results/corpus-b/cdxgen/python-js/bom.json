@@ -1,0 +1,243 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "serialNumber": "urn:uuid:26f549a2-a0bb-4b5a-8f2e-706ed4afff78",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-18T11:39:51Z",
+    "tools": {
+      "components": [
+        {
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "version": "12.9.2",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@12.9.2",
+          "type": "application",
+          "bom-ref": "pkg:npm/@cyclonedx/cdxgen@12.9.2",
+          "publisher": "OWASP Foundation",
+          "authors": [
+            {
+              "name": "OWASP Foundation"
+            }
+          ]
+        }
+      ]
+    },
+    "authors": [
+      {
+        "name": "OWASP Foundation"
+      }
+    ],
+    "lifecycles": [
+      {
+        "phase": "pre-build"
+      }
+    ],
+    "component": {
+      "group": "",
+      "name": "corpus",
+      "version": "latest",
+      "type": "application",
+      "bom-ref": "pkg:pypi/corpus@latest",
+      "purl": "pkg:pypi/corpus@latest"
+    },
+    "properties": [
+      {
+        "name": "cdx:bom:componentTypes",
+        "value": "pypi"
+      },
+      {
+        "name": "cdx:bom:componentSrcFiles",
+        "value": "aibom-run/work/cdxgen/corpus/requirements-train.txt"
+      }
+    ]
+  },
+  "components": [
+    {
+      "group": "",
+      "name": "datasets",
+      "version": "4.1.1",
+      "purl": "pkg:pypi/datasets@4.1.1",
+      "type": "library",
+      "bom-ref": "pkg:pypi/datasets@4.1.1",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements-train.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements-train.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements-train.txt"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "transformers",
+      "version": "4.57.0",
+      "purl": "pkg:pypi/transformers@4.57.0",
+      "type": "library",
+      "bom-ref": "pkg:pypi/transformers@4.57.0",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements-train.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements-train.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements-train.txt"
+          }
+        ]
+      },
+      "tags": [
+        "transform"
+      ]
+    },
+    {
+      "group": "",
+      "name": "torch",
+      "version": "2.8.0",
+      "purl": "pkg:pypi/torch@2.8.0",
+      "type": "library",
+      "bom-ref": "pkg:pypi/torch@2.8.0",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements-train.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements-train.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements-train.txt"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "mlflow",
+      "version": "3.4.0",
+      "purl": "pkg:pypi/mlflow@3.4.0",
+      "type": "library",
+      "bom-ref": "pkg:pypi/mlflow@3.4.0",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements-train.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements-train.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements-train.txt"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "onnxruntime",
+      "version": "1.23.0",
+      "purl": "pkg:pypi/onnxruntime@1.23.0",
+      "type": "library",
+      "bom-ref": "pkg:pypi/onnxruntime@1.23.0",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements-train.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements-train.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements-train.txt"
+          }
+        ]
+      }
+    }
+  ],
+  "services": [],
+  "dependencies": [
+    {
+      "ref": "pkg:pypi/corpus@latest",
+      "dependsOn": []
+    }
+  ],
+  "annotations": [
+    {
+      "bom-ref": "metadata-annotations",
+      "subjects": [
+        "pkg:pypi/corpus@latest"
+      ],
+      "annotator": {
+        "component": {
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "version": "12.9.2",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@12.9.2",
+          "type": "application",
+          "bom-ref": "pkg:npm/@cyclonedx/cdxgen@12.9.2",
+          "publisher": "OWASP Foundation",
+          "authors": [
+            {
+              "name": "OWASP Foundation"
+            }
+          ]
+        }
+      },
+      "timestamp": "2026-11-18T11:39:51Z",
+      "text": "This Software Bill-of-Materials (SBOM) document was created on Wednesday, November 18, 2026 with cdxgen. The data was captured during the pre-build lifecycle phase without building the application. The document describes an application named 'corpus'."
+    }
+  ]
+}

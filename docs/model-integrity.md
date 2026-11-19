@@ -12,7 +12,10 @@ The collector inventories every file whose name has one of these suffixes:
 `.mlmodel`, `.pte`, and the pickle family `.pkl`, `.pickle`, `.pck`, `.dill`,
 `.pt`, `.pth`, `.bin`, `.joblib`, `.ckpt` and `.pdparams`. A pickle-family name
 inside an archive or compression suffix, such as `checkpoint.pth.tar` or
-`model.pkl.gz`, counts as pickle family too. TensorFlow graphs named
+`model.pkl.gz`, counts as pickle family too, and such a file is
+`unsafe-code-execution` whatever it holds unless it is empty, since its content is
+not decompressed.
+TensorFlow graphs named
 `saved_model.pb` or `saved_model.pbtxt` are collected; other `.pb` files are not.
 
 A file that no name above rates is inventoried by its content when it is named
@@ -67,7 +70,9 @@ of the file, after which nothing is read. The ratings are:
   behaviour is decided is `unknown` wherever it starts, in a file inventoried by its
   content too, and the explanation says whether it had already resolved an importable
   name. So a pickle padded with harmless opcodes, such as `N0` (NONE, POP) repeated, or
-  with a string longer than 64 KiB, before what it calls is `unknown` and inventoried.
+  with a string longer than 64 KiB, before what it calls is `unknown` and inventoried,
+  unless a pickle-family name says a loader unpickles it, which rates it
+  `unsafe-code-execution` with that explanation.
   Text ends or fails before a bound, as two reads past the sample are decided without
   the bytes they miss: one that ends past the end of the file, which the C unpickler
   fails as truncated and the pure-Python one follows to the end of the file, and a
@@ -92,10 +97,47 @@ A pickle whose STOP falls inside a protocol 4 or 5 FRAME with bytes left in the 
 is read on from both places a loader resumes: after the frame, as `io.BytesIO` and an
 unbuffered file give the bytes, and right after the STOP, as the C unpickler reading a
 buffered file, such as the one `torch.load` opens for a path, does. The worse reading
-counts, and such a file is rated `unknown` at least. Under a model suffix other than
-the pickle family, content is also recognized by its shape, as before: a binary
+counts, and such a file is rated `unknown` at least. Under a model suffix, the pickle
+family included, content is also recognized by its shape: a binary
 pickle with PROTO and 16 well-formed opcodes in its first 64 KiB, or a stream that
-passes `pickletools` checks to its first STOP, is `unsafe-code-execution`.
+passes `pickletools` checks to its first STOP, is `unsafe-code-execution`. A
+pickle-family name rates no content but a pickle, a compressed or archived stream
+and a file that starts with the GGUF magic: a pickle opcode stream that a
+bound cuts short before a recognized shape or a call is `unsafe-code-execution`
+under such a name, with the evidence `Potential code-executing loader format (...)`
+around the bounded verdict, as the loader unpickles whatever it holds; a readable
+file whose first 64 KiB start no pickle, NumPy array, ZIP archive, compressed or
+archived stream or GGUF magic is `unknown`,
+with the evidence `Named pickle-family format; no pickle evidence in the inspected
+prefix` (`empty file` for a zero-length one); and a file that cannot be read keeps
+the loader's `unsafe-code-execution` rating by name. Under a pickle-family name, a
+ZIP archive whose directory is malformed or over 1 MiB, or with a member that was
+not checked, and a NumPy array whose header is past the inspection limits are
+`unsafe-code-execution` with the evidence `Potential code-executing loader format
+(...)` around that verdict, as `torch.load` and `np.load` still read past the bound;
+so is a compressed or archived stream, named with a wrapper suffix (`.tar`, `.gz`,
+`.bz2`, `.xz`, `.lzma`, `.zst`) or starting with gzip, zlib, bzip2, xz, Zstandard,
+LZ4 frame or joblib `ZF` magic, an LZMA-alone header after joblib's `5d 00`, the
+ustar magic at offset 257, or a tar header that `tarfile` reads without that magic,
+which pandas, joblib and `torch.load` unwrap before they unpickle, with the evidence
+`Potential code-executing loader format (compressed or archived stream; decompressed
+content not inspected)`. An LZMA-alone header is read from the first 14 bytes:
+joblib's `5d 00`, which it detects whatever dictionary size follows, an uncompressed
+size that is unknown or below 2^63, and a zero byte after it, where the range coder
+starts. A tar header is a first 512-byte block whose checksum `tarfile` accepts and
+whose mode, owner, size, time and device numbers it parses, whatever its name and
+type. A raw array whose first bytes happen to form such a header is rated critical
+by it: a little-endian integer array whose first value is 93, such as a `labels.bin`
+of 32-bit integers 93 to 156, opens with an LZMA-alone header, and, rarely, a float32
+array, such as one upcast from bfloat16, opens with a tar header that `tarfile`
+reads. A file that starts with the GGUF magic, whatever follows,
+as with the wrapper magics, is `unsafe-code-execution` too under a pickle-family
+name, with the evidence `Potential code-executing loader format
+(GGUF content under a pickle-family name; its chat templates are not inspected under
+this name)`: llama.cpp opens a model by its magic, not its name, and the chat-template
+check below runs only under a `.gguf` name. Only a ZIP archive whose directory was
+read whole and lists no pickle-family member or object-dtype array keeps its
+`unknown` verdict.
 Any other content, such as a numeric NumPy array or a ZIP archive with
 neither a pickle-family member nor an object-dtype array as a member, is not a
 component. Each such file is opened once, after every file that the models with a
@@ -118,10 +160,10 @@ The serialization rating is:
 
 | Rating | When |
 | --- | --- |
-| `unsafe-code-execution` | A pickle-family name, rated on the name alone, even when the file cannot be read; or, under any other model suffix and for a file inventoried by its content, content recognized as a binary or text-protocol pickle, a NumPy array with an object dtype, which `np.load(allow_pickle=True)` unpickles, or a ZIP archive with a pickle-family member (`.pkl`, as `torch.save` writes `data.pkl`, `.pickle`, the other listed suffixes, or such a name inside a compression suffix such as `.pkl.gz`) or with such an array as a member. A pickle is recognized when `pickle.load`, read as [above](#model-files-and-references), calls or changes what it resolved within the first 64 KiB and 4,096 opcodes, before any flaw that ends it, as `pickle.load` runs that call first. Under a model suffix, a binary pickle is also recognized by its PROTO opcode and at least 16 well-formed opcodes in its first 64 KiB, whatever follows them, and a text-protocol one by a consistent opcode stream of at most 4,096 opcodes to its first STOP. An object dtype is found in a NumPy version 1, 2 or 3 header of at most 64 KiB, which holds every version 1 header however it is padded, parsed as `np.load` parses it; only its `descr` value names types, in structured, nested and subarray dtypes too, so a field name is never taken for a type. A ZIP member's name is read from the archive's first local header or from its central directory, read from the end of the archive up to 1 MiB, including ZIP64, wherever a reader locates it: at the offset the end record stores, ending where the end record (or a ZIP64 record before a ZIP64 locator, whatever the classic record holds) starts, as `zipfile` and so `np.load` locate it, and at the ZIP64 locator's offset; a member that any of these directories lists is rated, so a decoy directory hides none, and an archive where any of them lies beyond that bound, or starts but cannot be read, is unread. As in `zipfile`, the end record is the last 22 bytes when they hold one without a comment, and a name, extra field or comment that runs past its directory is cut where the directory ends. A file that starts with an end record (`PK\x05\x06`), which `np.load` hands to `zipfile`, is read as an archive too. Every listed member, whatever its name, is checked for an array from its local header and the start of its data, stored or DEFLATE-compressed |
+| `unsafe-code-execution` | A pickle-family name whose file cannot be read, whose first 64 KiB hold a pickle opcode stream, recognized or cut short by a bound, or a compressed or archived stream, or starts with the GGUF magic (whose chat templates are inspected only under a `.gguf` name), or whose ZIP archive or NumPy array a bound left unread; or, under any model suffix and for a file inventoried by its content, content recognized as a binary or text-protocol pickle, a NumPy array with an object dtype, which `np.load(allow_pickle=True)` unpickles, or a ZIP archive with a pickle-family member (`.pkl`, as `torch.save` writes `data.pkl`, `.pickle`, the other listed suffixes, or such a name inside a compression suffix such as `.pkl.gz`) or with such an array as a member. A pickle is recognized when `pickle.load`, read as [above](#model-files-and-references), calls or changes what it resolved within the first 64 KiB and 4,096 opcodes, before any flaw that ends it, as `pickle.load` runs that call first. Under a model suffix, a binary pickle is also recognized by its PROTO opcode and at least 16 well-formed opcodes in its first 64 KiB, whatever follows them, and a text-protocol one by a consistent opcode stream of at most 4,096 opcodes to its first STOP. An object dtype is found in a NumPy version 1, 2 or 3 header of at most 64 KiB, which holds every version 1 header however it is padded, parsed as `np.load` parses it; only its `descr` value names types, in structured, nested and subarray dtypes too, so a field name is never taken for a type. A ZIP member's name is read from the archive's first local header or from its central directory, read from the end of the archive up to 1 MiB, including ZIP64, wherever a reader locates it: at the offset the end record stores, ending where the end record (or a ZIP64 record before a ZIP64 locator, whatever the classic record holds) starts, as `zipfile` and so `np.load` locate it, and at the ZIP64 locator's offset; a member that any of these directories lists is rated, so a decoy directory hides none, and an archive where any of them lies beyond that bound, or starts but cannot be read, is unread. As in `zipfile`, the end record is the last 22 bytes when they hold one without a comment, and a name, extra field or comment that runs past its directory is cut where the directory ends. A file that starts with an end record (`PK\x05\x06`), which `np.load` hands to `zipfile`, is read as an archive too. Every listed member, whatever its name, is checked for an array from its local header and the start of its data, stored or DEFLATE-compressed |
 | `safe` | A SafeTensors file whose header is UTF-8 JSON with string metadata, known dtypes and tensor spans that index the whole data region, with no configured chat template matching the access-pattern heuristic. The rating is not a guarantee that the template is safe; `validate` compares templates only through its completeness check |
 | `unsafe-template-injection` | A GGUF file whose embedded chat template matches the access-pattern heuristic, or a SafeTensors file that would be `safe` in a directory whose Hugging Face chat template matches it. A match does not establish that the renderer executes the pattern or that its sandbox is bypassed |
-| `unknown` | Everything else, including ONNX, GGUF, Keras, HDF5, SavedModel, TFLite, Core ML and ExecuTorch files, a pickle that the 64 KiB, 4,096-opcode or 64-MARK bound cuts short before `pickle.load` calls anything, where [the check above](#model-files-and-references) rates it, a SafeTensors header over the 1 MiB inspection limit, a NumPy array header over 64 KiB or past the 16,000,000 structure units one scan shares with the ONNX and GGUF readers, at one unit a header byte, and a ZIP archive whose central directory is malformed or over 1 MiB or that has a member that was not checked: one compressed by another method, such as BZIP2 or LZMA, one whose data runs past the next member's local header, or one with an array header past those limits |
+| `unknown` | Everything else, including ONNX, GGUF, Keras, HDF5, SavedModel, TFLite, Core ML and ExecuTorch files, a readable pickle-family file whose first 64 KiB start no recognized pickle, NumPy array, ZIP archive, compressed or archived stream or GGUF magic (`Named pickle-family format; no pickle evidence in the inspected prefix`, or `empty file` for a zero-length one), a pickle under any other name that the 64 KiB, 4,096-opcode or 64-MARK bound cuts short before `pickle.load` calls anything, where [the check above](#model-files-and-references) rates it, a SafeTensors header over the 1 MiB inspection limit, a NumPy array header over 64 KiB or past the 16,000,000 structure units one scan shares with the ONNX and GGUF readers, at one unit a header byte, and a ZIP archive whose central directory is malformed or over 1 MiB or that has a member that was not checked: one compressed by another method, such as BZIP2 or LZMA, one whose data runs past the next member's local header, or one with an array header past those limits; under a pickle-family name, such a NumPy array or ZIP archive is `unsafe-code-execution` instead |
 
 ### Format and model type
 

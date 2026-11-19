@@ -22,8 +22,8 @@ def _two_pickles(tmp_path: Path) -> tuple[Path, Path, dict]:
     (project / "fixtures").mkdir(parents=True)
     (project / "models").mkdir()
     (project / "AGENTS.md").write_text("Use read-only tools.\n")
-    (project / "fixtures" / "firmware.pkl").write_bytes(b"fixture bytes")
-    (project / "models" / "classifier.pkl").write_bytes(b"model bytes")
+    (project / "fixtures" / "firmware.pkl").write_bytes(b"\x80\x04K\x01.")
+    (project / "models" / "classifier.pkl").write_bytes(b"\x80\x04N.")
     inventory = tmp_path / "bom.json"
     args = ["scan", str(project), "--no-project-policy", "--report-only", "-o", str(inventory)]
     result = CliRunner().invoke(main, args)

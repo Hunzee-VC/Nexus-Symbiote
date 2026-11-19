@@ -1,0 +1,3488 @@
+{
+  "agent-bom-alt": {
+    "d1": {
+      "anchor": 2,
+      "class_recall": {
+        "a2a": 0.0,
+        "agent-config": 0.0,
+        "ci-agent": 1.0,
+        "container": 0.25,
+        "dataset": 0.364,
+        "guardrail": 0.5,
+        "mcp-server": 0.556,
+        "model": 0.4,
+        "model-file": 0.9,
+        "package": 1.0,
+        "prompt": 0.417,
+        "skill": 1.0,
+        "tool": 1.0,
+        "training": 0.5,
+        "vector-store": 1.0
+      },
+      "components": {
+        "a2a.agent-card": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "ci.claude-code-action": {
+          "detected": true,
+          "matched": "claude-code-action",
+          "override": null,
+          "soft": false
+        },
+        "data.acme-support-tickets": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.datasheet": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "data.dvc-pointer": {
+          "detected": true,
+          "matched": "tickets.csv.dvc",
+          "override": null,
+          "soft": false
+        },
+        "data.faq-corpus": {
+          "detected": true,
+          "matched": "data/faq",
+          "override": null,
+          "soft": false
+        },
+        "data.golden-eval": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.imdb": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "eval.promptfoo": {
+          "detected": true,
+          "matched": "promptfooconfig",
+          "override": null,
+          "soft": true
+        },
+        "file.gguf": {
+          "detected": true,
+          "matched": "acme-intent-tiny",
+          "override": null,
+          "soft": false
+        },
+        "file.model-card": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "file.model-config": {
+          "detected": true,
+          "matched": "DistilBertForSequenceClassification",
+          "override": null,
+          "soft": true
+        },
+        "file.pickle": {
+          "detected": true,
+          "matched": "intent.pkl",
+          "override": null,
+          "soft": false
+        },
+        "file.safetensors": {
+          "detected": true,
+          "matched": "model.safetensors",
+          "override": null,
+          "soft": false
+        },
+        "file.torch-pt": {
+          "detected": true,
+          "matched": "intent.pt",
+          "override": null,
+          "soft": false
+        },
+        "guard.config": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "ide.claude-settings": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "ide.hook-pretooluse": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "ide.permission-webfetch": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "img.agent-base-latest": {
+          "detected": true,
+          "matched": "agent-base",
+          "override": null,
+          "soft": false
+        },
+        "img.ollama": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "img.python-base": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "img.qdrant": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "mcp.codex-jira": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "mcp.cursor-browser": {
+          "detected": true,
+          "matched": "playwright/mcp",
+          "override": null,
+          "soft": false
+        },
+        "mcp.deep-nested": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "mcp.filesystem": {
+          "detected": true,
+          "matched": "server-filesystem",
+          "override": null,
+          "soft": false
+        },
+        "mcp.gemini-slack": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "mcp.github": {
+          "detected": true,
+          "matched": "github-mcp-server",
+          "override": null,
+          "soft": false
+        },
+        "mcp.own-server": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "mcp.postgres": {
+          "detected": true,
+          "matched": "mcp-server-postgres",
+          "override": null,
+          "soft": false
+        },
+        "mcp.remote-crm": {
+          "detected": true,
+          "matched": "mcp.crm.example.com",
+          "override": null,
+          "soft": false
+        },
+        "mcp.vscode-sqlite": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.azure-gpt-4o-prod": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.bedrock-claude": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.claude-haiku-4-5": {
+          "detected": true,
+          "matched": "claude-haiku-4-5",
+          "override": null,
+          "soft": false
+        },
+        "model.claude-sonnet-4-5": {
+          "detected": true,
+          "matched": "claude-sonnet-4-5",
+          "override": null,
+          "soft": false
+        },
+        "model.codex-o4-mini": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "model.gpt-4o-mini": {
+          "detected": true,
+          "matched": "gpt-4o-mini",
+          "override": null,
+          "soft": false
+        },
+        "model.hf-distilbert-base": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.hf-distilbert-sst2": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.hf-minilm": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.hf-roberta-sentiment": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.llama-guard": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.ollama-llama3.2": {
+          "detected": true,
+          "matched": "llama3.2",
+          "override": null,
+          "soft": false
+        },
+        "model.text-embedding-3-small": {
+          "detected": true,
+          "matched": "text-embedding-3-small",
+          "override": null,
+          "soft": false
+        },
+        "pkg.anthropic": {
+          "detected": true,
+          "matched": "(?s)(?<![A-Za-z-])anthropic.{0,80}?0\\.69\\.0",
+          "override": null,
+          "soft": false
+        },
+        "pkg.langgraph": {
+          "detected": true,
+          "matched": "(?s)langgraph.{0,80}?0\\.6\\.7",
+          "override": null,
+          "soft": false
+        },
+        "pkg.mcp": {
+          "detected": true,
+          "matched": "(?s)(?<![A-Za-z-])mcp(?![A-Za-z-]).{0,80}?1\\.16\\.0",
+          "override": null,
+          "soft": false
+        },
+        "pkg.npm-mcp-sdk": {
+          "detected": true,
+          "matched": "@modelcontextprotocol/sdk",
+          "override": null,
+          "soft": false
+        },
+        "pkg.transformers": {
+          "detected": true,
+          "matched": "(?s)(?<![A-Za-z-])transformers.{0,80}?4\\.57\\.0",
+          "override": null,
+          "soft": false
+        },
+        "pkg.unresolvable": {
+          "detected": true,
+          "matched": "langchain-acme-utils",
+          "override": null,
+          "soft": false
+        },
+        "prompt.agents-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.claude-import-policies": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.claude-import-rules": {
+          "detected": true,
+          "matched": "rules/security.md",
+          "override": null,
+          "soft": false
+        },
+        "prompt.claude-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.copilot-instructions": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.cursor-mdc": {
+          "detected": true,
+          "matched": "python.mdc",
+          "override": null,
+          "soft": true
+        },
+        "prompt.cursorrules": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.gemini-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.inline-system": {
+          "detected": true,
+          "matched": "SYSTEM_PROMPT",
+          "override": null,
+          "soft": true
+        },
+        "prompt.modelfile-system": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "prompt.refund-policy": {
+          "detected": true,
+          "matched": "refund_policy.txt",
+          "override": null,
+          "soft": false
+        },
+        "prompt.relocated-claude-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "prompt.system-md": {
+          "detected": true,
+          "matched": "prompts/system.md",
+          "override": null,
+          "soft": false
+        },
+        "prompt.triage-j2": {
+          "detected": true,
+          "matched": "triage.j2",
+          "override": null,
+          "soft": false
+        },
+        "rag.chroma": {
+          "detected": true,
+          "matched": "chroma",
+          "override": null,
+          "soft": false
+        },
+        "rag.pinecone": {
+          "detected": true,
+          "matched": "pinecone",
+          "override": null,
+          "soft": false
+        },
+        "rag.qdrant": {
+          "detected": true,
+          "matched": "qdrant",
+          "override": null,
+          "soft": false
+        },
+        "skill.refund-approver": {
+          "detected": true,
+          "matched": "refund-approver",
+          "override": null,
+          "soft": false
+        },
+        "skill.triage-ticket": {
+          "detected": true,
+          "matched": "triage-ticket",
+          "override": null,
+          "soft": false
+        },
+        "tool.issue_refund": {
+          "detected": true,
+          "matched": "issue_refund",
+          "override": null,
+          "soft": false
+        },
+        "tool.lookup_customer": {
+          "detected": true,
+          "matched": "lookup_customer",
+          "override": null,
+          "soft": false
+        },
+        "tool.search_kb": {
+          "detected": true,
+          "matched": "search_kb",
+          "override": null,
+          "soft": false
+        },
+        "train.finetune-config": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "train.finetune-script": {
+          "detected": true,
+          "matched": "finetune.py",
+          "override": null,
+          "soft": false
+        }
+      },
+      "decoy_penalty": 0.5,
+      "decoys": {
+        "decoy.comment-model": {
+          "kind": "hard",
+          "reported": true
+        },
+        "decoy.doc-code-block": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.node-modules-mcp": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.readme-model": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.test-fixture": {
+          "kind": "soft",
+          "reported": false
+        }
+      },
+      "score": 1.5,
+      "weighted_recall": 0.581
+    },
+    "d2": {
+      "digests_present": {
+        "models/classifier/model.safetensors": false,
+        "models/legacy/intent.pkl": false,
+        "models/legacy/intent.pt": false,
+        "models/llm/acme-intent-tiny.Q8_0.gguf": false
+      },
+      "pins_present": {
+        "img.python-base": false,
+        "mcp.filesystem": true,
+        "mcp.github.image": true,
+        "mcp.vscode-sqlite": true,
+        "model.hf-distilbert-sst2.revision": false
+      }
+    },
+    "d5": {
+      "finding_hints": {
+        "F01": {
+          "hints_in_outputs": [
+            "latest",
+            "floating"
+          ],
+          "hints_in_stderr_only": [
+            "unpinned"
+          ],
+          "title": "Floating MCP server versions"
+        },
+        "F02": {
+          "hints_in_outputs": [
+            "latest"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Floating container tags"
+        },
+        "F03": {
+          "hints_in_outputs": [
+            "credential",
+            "secret",
+            "token",
+            "api key"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Credentials in agent configuration"
+        },
+        "F04": {
+          "hints_in_outputs": [
+            "pickle",
+            "deserializ",
+            "arbitrary code"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Code-executing model serialization"
+        },
+        "F05": {
+          "hints_in_outputs": [
+            "poison",
+            "injection",
+            "credentials"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Tool-description poisoning"
+        },
+        "F06": {
+          "hints_in_outputs": [
+            "injection",
+            "ignore all previous"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Instruction injection aimed at the agent and at the scanner"
+        },
+        "F07": {
+          "hints_in_outputs": [
+            "escape"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Hidden or obfuscating characters in names and instructions"
+        },
+        "F08": {
+          "hints_in_outputs": [
+            "remote",
+            "http",
+            "url"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Remote MCP endpoints"
+        },
+        "F09": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Hook runs a shell command on tool calls"
+        },
+        "F10": {
+          "hints_in_outputs": [
+            "toml",
+            "parse",
+            "failed",
+            "gap"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Malformed configuration recorded as a gap, not silence"
+        },
+        "F11": {
+          "hints_in_outputs": [
+            "symlink",
+            "outside",
+            "escape"
+          ],
+          "hints_in_stderr_only": [
+            "loop"
+          ],
+          "title": "Symbolic links that escape the root or loop are refused and recorded"
+        },
+        "F12": {
+          "hints_in_outputs": [
+            "revision",
+            "main"
+          ],
+          "hints_in_stderr_only": [
+            "unpinned"
+          ],
+          "title": "Hosted model references without an immutable revision"
+        },
+        "F13": {
+          "hints_in_outputs": [
+            "not found",
+            "unresolv"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Declared dependency that cannot be resolved (live only)"
+        },
+        "F14": {
+          "hints_in_outputs": [
+            "permission",
+            "allow"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Permissive agent permissions"
+        },
+        "F15": {
+          "hints_in_outputs": [
+            "exposure",
+            "exfiltrat"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Exposure path: untrusted input + sensitive tools + egress"
+        }
+      }
+    },
+    "d6": {
+      "etc_passwd_in_outputs": [],
+      "neutralization": {
+        "json_escaped_esc_files": [],
+        "raw_esc_files": [],
+        "raw_rlo_files": [],
+        "raw_zwsp_files": []
+      },
+      "secret_leaks_in_outputs": [],
+      "secret_leaks_in_stderr": [],
+      "stderr_raw_esc": true
+    },
+    "d7": {
+      "determinism": null,
+      "network_vs_airgap_equal": null
+    },
+    "modes": {
+      "ambient-cwd": {
+        "corpus_delta": {
+          "added": [],
+          "modified": [],
+          "removed": []
+        },
+        "exit": "1",
+        "home_writes": [
+          "./.agent-bom/local-analytics.sqlite"
+        ],
+        "outputs": {
+          "report.json": 411846,
+          "stdout": 0
+        },
+        "schema": [],
+        "seconds": 2.83
+      },
+      "enterprise-offline": {
+        "corpus_delta": {
+          "added": [],
+          "modified": [],
+          "removed": []
+        },
+        "exit": "1",
+        "home_writes": [],
+        "outputs": {
+          "stdout": 0
+        },
+        "schema": [],
+        "seconds": 3.9
+      }
+    }
+  },
+  "ai-finder-alt": {
+    "d1": {
+      "anchor": 1,
+      "class_recall": {
+        "a2a": 0.0,
+        "agent-config": 0.0,
+        "ci-agent": 0.0,
+        "container": 0.0,
+        "dataset": 0.0,
+        "guardrail": 0.0,
+        "mcp-server": 0.722,
+        "model": 0.0,
+        "model-file": 0.6,
+        "package": 0.833,
+        "prompt": 0.0,
+        "skill": 0.5,
+        "tool": 1.0,
+        "training": 0.5,
+        "vector-store": 1.0
+      },
+      "components": {
+        "a2a.agent-card": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "ci.claude-code-action": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.acme-support-tickets": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.datasheet": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "data.dvc-pointer": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.faq-corpus": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.golden-eval": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.imdb": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "eval.promptfoo": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "file.gguf": {
+          "detected": true,
+          "matched": "acme-intent-tiny",
+          "override": null,
+          "soft": false
+        },
+        "file.model-card": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "file.model-config": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "file.pickle": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "file.safetensors": {
+          "detected": true,
+          "matched": "model.safetensors",
+          "override": null,
+          "soft": false
+        },
+        "file.torch-pt": {
+          "detected": true,
+          "matched": "intent.pt",
+          "override": null,
+          "soft": false
+        },
+        "guard.config": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "ide.claude-settings": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "ide.hook-pretooluse": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "ide.permission-webfetch": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "img.agent-base-latest": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "img.ollama": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "img.python-base": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "img.qdrant": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "mcp.codex-jira": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "mcp.cursor-browser": {
+          "detected": true,
+          "matched": "playwright/mcp",
+          "override": null,
+          "soft": false
+        },
+        "mcp.deep-nested": {
+          "detected": true,
+          "matched": "deep-mcp",
+          "override": null,
+          "soft": true
+        },
+        "mcp.filesystem": {
+          "detected": true,
+          "matched": "server-filesystem",
+          "override": null,
+          "soft": false
+        },
+        "mcp.gemini-slack": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "mcp.github": {
+          "detected": true,
+          "matched": "github-mcp-server",
+          "override": null,
+          "soft": false
+        },
+        "mcp.own-server": {
+          "detected": true,
+          "matched": "acme-support-mcp",
+          "override": null,
+          "soft": false
+        },
+        "mcp.postgres": {
+          "detected": true,
+          "matched": "mcp-server-postgres",
+          "override": null,
+          "soft": false
+        },
+        "mcp.remote-crm": {
+          "detected": true,
+          "matched": "mcp.crm.example.com",
+          "override": null,
+          "soft": false
+        },
+        "mcp.vscode-sqlite": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.azure-gpt-4o-prod": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.bedrock-claude": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.claude-haiku-4-5": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.claude-sonnet-4-5": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.codex-o4-mini": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "model.gpt-4o-mini": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.hf-distilbert-base": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.hf-distilbert-sst2": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.hf-minilm": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.hf-roberta-sentiment": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.llama-guard": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.ollama-llama3.2": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.text-embedding-3-small": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "pkg.anthropic": {
+          "detected": true,
+          "matched": "(?s)(?<![A-Za-z-])anthropic.{0,80}?0\\.69\\.0",
+          "override": null,
+          "soft": false
+        },
+        "pkg.langgraph": {
+          "detected": true,
+          "matched": "(?s)langgraph.{0,80}?0\\.6\\.7",
+          "override": null,
+          "soft": false
+        },
+        "pkg.mcp": {
+          "detected": true,
+          "matched": "(?s)(?<![A-Za-z-])mcp(?![A-Za-z-]).{0,80}?1\\.16\\.0",
+          "override": null,
+          "soft": false
+        },
+        "pkg.npm-mcp-sdk": {
+          "detected": true,
+          "matched": "@modelcontextprotocol/sdk",
+          "override": null,
+          "soft": false
+        },
+        "pkg.transformers": {
+          "detected": true,
+          "matched": "(?s)(?<![A-Za-z-])transformers.{0,80}?4\\.57\\.0",
+          "override": null,
+          "soft": false
+        },
+        "pkg.unresolvable": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.agents-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.claude-import-policies": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.claude-import-rules": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.claude-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.copilot-instructions": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.cursor-mdc": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "prompt.cursorrules": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.gemini-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.inline-system": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "prompt.modelfile-system": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "prompt.refund-policy": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.relocated-claude-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "prompt.system-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.triage-j2": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "rag.chroma": {
+          "detected": true,
+          "matched": "chroma",
+          "override": null,
+          "soft": false
+        },
+        "rag.pinecone": {
+          "detected": true,
+          "matched": "pinecone",
+          "override": null,
+          "soft": false
+        },
+        "rag.qdrant": {
+          "detected": true,
+          "matched": "qdrant",
+          "override": null,
+          "soft": false
+        },
+        "skill.refund-approver": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "skill.triage-ticket": {
+          "detected": true,
+          "matched": "triage-ticket",
+          "override": null,
+          "soft": false
+        },
+        "tool.issue_refund": {
+          "detected": true,
+          "matched": "issue_refund",
+          "override": null,
+          "soft": false
+        },
+        "tool.lookup_customer": {
+          "detected": true,
+          "matched": "lookup_customer",
+          "override": null,
+          "soft": false
+        },
+        "tool.search_kb": {
+          "detected": true,
+          "matched": "search_kb",
+          "override": null,
+          "soft": false
+        },
+        "train.finetune-config": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "train.finetune-script": {
+          "detected": true,
+          "matched": "finetune.py",
+          "override": null,
+          "soft": false
+        }
+      },
+      "decoy_penalty": 0.0,
+      "decoys": {
+        "decoy.comment-model": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.doc-code-block": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.node-modules-mcp": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.readme-model": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.test-fixture": {
+          "kind": "soft",
+          "reported": false
+        }
+      },
+      "score": 1.0,
+      "weighted_recall": 0.355
+    },
+    "d2": {
+      "digests_present": {
+        "models/classifier/model.safetensors": true,
+        "models/legacy/intent.pkl": false,
+        "models/legacy/intent.pt": true,
+        "models/llm/acme-intent-tiny.Q8_0.gguf": true
+      },
+      "pins_present": {
+        "img.python-base": false,
+        "mcp.filesystem": true,
+        "mcp.github.image": true,
+        "mcp.vscode-sqlite": true,
+        "model.hf-distilbert-sst2.revision": false
+      }
+    },
+    "d5": {
+      "finding_hints": {
+        "F01": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Floating MCP server versions"
+        },
+        "F02": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Floating container tags"
+        },
+        "F03": {
+          "hints_in_outputs": [
+            "token"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Credentials in agent configuration"
+        },
+        "F04": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Code-executing model serialization"
+        },
+        "F05": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Tool-description poisoning"
+        },
+        "F06": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Instruction injection aimed at the agent and at the scanner"
+        },
+        "F07": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Hidden or obfuscating characters in names and instructions"
+        },
+        "F08": {
+          "hints_in_outputs": [
+            "remote",
+            "http",
+            "url"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Remote MCP endpoints"
+        },
+        "F09": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Hook runs a shell command on tool calls"
+        },
+        "F10": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Malformed configuration recorded as a gap, not silence"
+        },
+        "F11": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Symbolic links that escape the root or loop are refused and recorded"
+        },
+        "F12": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Hosted model references without an immutable revision"
+        },
+        "F13": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Declared dependency that cannot be resolved (live only)"
+        },
+        "F14": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Permissive agent permissions"
+        },
+        "F15": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Exposure path: untrusted input + sensitive tools + egress"
+        }
+      }
+    },
+    "d6": {
+      "etc_passwd_in_outputs": [],
+      "neutralization": {
+        "json_escaped_esc_files": [],
+        "raw_esc_files": [],
+        "raw_rlo_files": [],
+        "raw_zwsp_files": []
+      },
+      "secret_leaks_in_outputs": [],
+      "secret_leaks_in_stderr": [],
+      "stderr_raw_esc": false
+    },
+    "d7": {
+      "determinism": null,
+      "network_vs_airgap_equal": null
+    },
+    "modes": {
+      "noenrich": {
+        "corpus_delta": {
+          "added": [],
+          "modified": [],
+          "removed": []
+        },
+        "exit": "0",
+        "home_writes": [
+          "./.config/producttelemetry/ai-finder/client_id",
+          "./.config/producttelemetry/ai-finder/pending_events.json"
+        ],
+        "outputs": {
+          "report.json": 31239,
+          "stdout": 0
+        },
+        "schema": [],
+        "seconds": 3.11
+      }
+    }
+  },
+  "cdxgen-alt": {
+    "d1": {
+      "anchor": 1,
+      "class_recall": {
+        "a2a": 0.0,
+        "agent-config": 0.4,
+        "ci-agent": 1.0,
+        "container": 0.0,
+        "dataset": 0.182,
+        "guardrail": 0.5,
+        "mcp-server": 0.722,
+        "model": 0.56,
+        "model-file": 0.4,
+        "package": 1.0,
+        "prompt": 0.292,
+        "skill": 0.0,
+        "tool": 0.0,
+        "training": 0.5,
+        "vector-store": 0.667
+      },
+      "components": {
+        "a2a.agent-card": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "ci.claude-code-action": {
+          "detected": true,
+          "matched": "claude-code-action",
+          "override": null,
+          "soft": false
+        },
+        "data.acme-support-tickets": {
+          "detected": true,
+          "matched": "acme/support-tickets",
+          "override": null,
+          "soft": false
+        },
+        "data.datasheet": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "data.dvc-pointer": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.faq-corpus": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.golden-eval": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.imdb": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "eval.promptfoo": {
+          "detected": true,
+          "matched": "promptfooconfig",
+          "override": null,
+          "soft": true
+        },
+        "file.gguf": {
+          "detected": true,
+          "matched": "acme-intent-tiny",
+          "override": null,
+          "soft": false
+        },
+        "file.model-card": {
+          "detected": true,
+          "matched": "models/classifier/README.md",
+          "override": null,
+          "soft": true
+        },
+        "file.model-config": {
+          "detected": true,
+          "matched": "models/classifier/config.json",
+          "override": null,
+          "soft": true
+        },
+        "file.pickle": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "file.safetensors": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "file.torch-pt": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "guard.config": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "ide.claude-settings": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "ide.hook-pretooluse": {
+          "detected": true,
+          "matched": "audit-tool-call.sh",
+          "override": null,
+          "soft": false
+        },
+        "ide.permission-webfetch": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "img.agent-base-latest": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "img.ollama": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "img.python-base": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "img.qdrant": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "mcp.codex-jira": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "mcp.cursor-browser": {
+          "detected": true,
+          "matched": "playwright/mcp",
+          "override": null,
+          "soft": false
+        },
+        "mcp.deep-nested": {
+          "detected": true,
+          "matched": "deep-mcp",
+          "override": null,
+          "soft": true
+        },
+        "mcp.filesystem": {
+          "detected": true,
+          "matched": "server-filesystem",
+          "override": null,
+          "soft": false
+        },
+        "mcp.gemini-slack": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "mcp.github": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "mcp.own-server": {
+          "detected": true,
+          "matched": "acme-support-mcp",
+          "override": null,
+          "soft": false
+        },
+        "mcp.postgres": {
+          "detected": true,
+          "matched": "mcp-server-postgres",
+          "override": null,
+          "soft": false
+        },
+        "mcp.remote-crm": {
+          "detected": true,
+          "matched": "mcp.crm.example.com",
+          "override": null,
+          "soft": false
+        },
+        "mcp.vscode-sqlite": {
+          "detected": true,
+          "matched": "mcp-server-sqlite",
+          "override": null,
+          "soft": false
+        },
+        "model.azure-gpt-4o-prod": {
+          "detected": true,
+          "matched": "acme-eastus.openai.azure.com",
+          "override": null,
+          "soft": false
+        },
+        "model.bedrock-claude": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.claude-haiku-4-5": {
+          "detected": true,
+          "matched": "claude-haiku-4-5",
+          "override": null,
+          "soft": false
+        },
+        "model.claude-sonnet-4-5": {
+          "detected": true,
+          "matched": "claude-sonnet-4-5",
+          "override": null,
+          "soft": false
+        },
+        "model.codex-o4-mini": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "model.gpt-4o-mini": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.hf-distilbert-base": {
+          "detected": true,
+          "matched": "distilbert-base-uncased(?!-finetuned)",
+          "override": null,
+          "soft": false
+        },
+        "model.hf-distilbert-sst2": {
+          "detected": true,
+          "matched": "distilbert-base-uncased-finetuned-sst-2-english",
+          "override": null,
+          "soft": false
+        },
+        "model.hf-minilm": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.hf-roberta-sentiment": {
+          "detected": true,
+          "matched": "twitter-roberta-base-sentiment-latest",
+          "override": null,
+          "soft": false
+        },
+        "model.llama-guard": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.ollama-llama3.2": {
+          "detected": true,
+          "matched": "llama3.2",
+          "override": null,
+          "soft": false
+        },
+        "model.text-embedding-3-small": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "pkg.anthropic": {
+          "detected": true,
+          "matched": "(?s)(?<![A-Za-z-])anthropic.{0,80}?0\\.69\\.0",
+          "override": null,
+          "soft": false
+        },
+        "pkg.langgraph": {
+          "detected": true,
+          "matched": "(?s)langgraph.{0,80}?0\\.6\\.7",
+          "override": null,
+          "soft": false
+        },
+        "pkg.mcp": {
+          "detected": true,
+          "matched": "(?s)(?<![A-Za-z-])mcp(?![A-Za-z-]).{0,80}?1\\.16\\.0",
+          "override": null,
+          "soft": false
+        },
+        "pkg.npm-mcp-sdk": {
+          "detected": true,
+          "matched": "@modelcontextprotocol/sdk",
+          "override": null,
+          "soft": false
+        },
+        "pkg.transformers": {
+          "detected": true,
+          "matched": "(?s)(?<![A-Za-z-])transformers.{0,80}?4\\.57\\.0",
+          "override": null,
+          "soft": false
+        },
+        "pkg.unresolvable": {
+          "detected": true,
+          "matched": "langchain-acme-utils",
+          "override": null,
+          "soft": false
+        },
+        "prompt.agents-md": {
+          "detected": true,
+          "matched": "AGENTS.md",
+          "override": null,
+          "soft": false
+        },
+        "prompt.claude-import-policies": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.claude-import-rules": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.claude-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.copilot-instructions": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.cursor-mdc": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "prompt.cursorrules": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.gemini-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.inline-system": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "prompt.modelfile-system": {
+          "detected": true,
+          "matched": "Modelfile",
+          "override": null,
+          "soft": true
+        },
+        "prompt.refund-policy": {
+          "detected": true,
+          "matched": "refund_policy.txt",
+          "override": null,
+          "soft": false
+        },
+        "prompt.relocated-claude-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "prompt.system-md": {
+          "detected": true,
+          "matched": "prompts/system.md",
+          "override": null,
+          "soft": false
+        },
+        "prompt.triage-j2": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "rag.chroma": {
+          "detected": true,
+          "matched": "chroma",
+          "override": null,
+          "soft": false
+        },
+        "rag.pinecone": {
+          "detected": true,
+          "matched": "pinecone",
+          "override": null,
+          "soft": false
+        },
+        "rag.qdrant": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "skill.refund-approver": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "skill.triage-ticket": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "tool.issue_refund": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "tool.lookup_customer": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "tool.search_kb": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "train.finetune-config": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "train.finetune-script": {
+          "detected": true,
+          "matched": "finetune.py",
+          "override": null,
+          "soft": false
+        }
+      },
+      "decoy_penalty": 0.5,
+      "decoys": {
+        "decoy.comment-model": {
+          "kind": "hard",
+          "reported": true
+        },
+        "decoy.doc-code-block": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.node-modules-mcp": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.readme-model": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.test-fixture": {
+          "kind": "soft",
+          "reported": false
+        }
+      },
+      "score": 0.5,
+      "weighted_recall": 0.4
+    },
+    "d2": {
+      "digests_present": {
+        "models/classifier/model.safetensors": false,
+        "models/legacy/intent.pkl": false,
+        "models/legacy/intent.pt": false,
+        "models/llm/acme-intent-tiny.Q8_0.gguf": false
+      },
+      "pins_present": {
+        "img.python-base": false,
+        "mcp.filesystem": true,
+        "mcp.github.image": false,
+        "mcp.vscode-sqlite": true,
+        "model.hf-distilbert-sst2.revision": false
+      }
+    },
+    "d5": {
+      "finding_hints": {
+        "F01": {
+          "hints_in_outputs": [
+            "latest"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Floating MCP server versions"
+        },
+        "F02": {
+          "hints_in_outputs": [
+            "latest"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Floating container tags"
+        },
+        "F03": {
+          "hints_in_outputs": [
+            "credential",
+            "secret",
+            "token"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Credentials in agent configuration"
+        },
+        "F04": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Code-executing model serialization"
+        },
+        "F05": {
+          "hints_in_outputs": [
+            "poison",
+            "credentials"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Tool-description poisoning"
+        },
+        "F06": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Instruction injection aimed at the agent and at the scanner"
+        },
+        "F07": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Hidden or obfuscating characters in names and instructions"
+        },
+        "F08": {
+          "hints_in_outputs": [
+            "remote",
+            "http",
+            "url"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Remote MCP endpoints"
+        },
+        "F09": {
+          "hints_in_outputs": [
+            "hook",
+            "audit-tool-call"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Hook runs a shell command on tool calls"
+        },
+        "F10": {
+          "hints_in_outputs": [
+            "toml",
+            "failed"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Malformed configuration recorded as a gap, not silence"
+        },
+        "F11": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Symbolic links that escape the root or loop are refused and recorded"
+        },
+        "F12": {
+          "hints_in_outputs": [
+            "revision",
+            "main"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Hosted model references without an immutable revision"
+        },
+        "F13": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Declared dependency that cannot be resolved (live only)"
+        },
+        "F14": {
+          "hints_in_outputs": [
+            "permission"
+          ],
+          "hints_in_stderr_only": [
+            "allow"
+          ],
+          "title": "Permissive agent permissions"
+        },
+        "F15": {
+          "hints_in_outputs": [
+            "exposure"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Exposure path: untrusted input + sensitive tools + egress"
+        }
+      }
+    },
+    "d6": {
+      "etc_passwd_in_outputs": [],
+      "neutralization": {
+        "json_escaped_esc_files": [
+          "mcp-only/bom.json"
+        ],
+        "raw_esc_files": [],
+        "raw_rlo_files": [],
+        "raw_zwsp_files": []
+      },
+      "secret_leaks_in_outputs": [],
+      "secret_leaks_in_stderr": [],
+      "stderr_raw_esc": false
+    },
+    "d7": {
+      "determinism": null,
+      "network_vs_airgap_equal": null
+    },
+    "modes": {
+      "ai-ml-profile": {
+        "corpus_delta": {
+          "added": [
+            "node_modules/@acme/legacy-tool/package-lock.json"
+          ],
+          "modified": [],
+          "removed": []
+        },
+        "exit": "0",
+        "home_writes": [
+          "./.config/go/telemetry/local/go@go1.24.7-go1.24.7-linux-amd64-2026-11-18.v1.count",
+          "./.config/go/telemetry/local/upload.token",
+          "./.config/go/telemetry/local/weekends",
+          "./.npm/_logs/2026-11-18T10_29_57_840Z-debug-0.log",
+          "./.npm/_logs/2026-11-18T10_29_58_282Z-debug-0.log",
+          "./.npm/_update-notifier-last-checked"
+        ],
+        "outputs": {
+          "bom.json": 56521,
+          "stdout": 8858
+        },
+        "schema": [
+          {
+            "component_types": {
+              "data": 1,
+              "file": 8,
+              "framework": 5,
+              "library": 12,
+              "machine-learning-model": 20
+            },
+            "components": 46,
+            "dependencies": 7,
+            "error_count": 0,
+            "file": "bom.json",
+            "first_errors": [],
+            "has_annotations": true,
+            "has_compositions": false,
+            "has_formulation": true,
+            "kind": "cyclonedx-1.7",
+            "services": 3,
+            "valid": true,
+            "vulnerabilities": 0,
+            "with_evidence": 0,
+            "with_hashes": 0,
+            "with_modelcard": 4,
+            "with_properties": 0,
+            "with_purl": 37
+          }
+        ],
+        "seconds": 305.05
+      },
+      "deep-noignore": {
+        "corpus_delta": {
+          "added": [],
+          "modified": [],
+          "removed": []
+        },
+        "exit": "0",
+        "home_writes": [],
+        "outputs": {
+          "bom.json": 32707,
+          "stdout": 5588
+        },
+        "schema": [
+          {
+            "component_types": {
+              "data": 1,
+              "file": 8,
+              "machine-learning-model": 11
+            },
+            "components": 20,
+            "dependencies": 6,
+            "error_count": 0,
+            "file": "bom.json",
+            "first_errors": [],
+            "has_annotations": true,
+            "has_compositions": false,
+            "has_formulation": false,
+            "kind": "cyclonedx-1.7",
+            "services": 3,
+            "valid": true,
+            "vulnerabilities": 0,
+            "with_evidence": 20,
+            "with_hashes": 0,
+            "with_modelcard": 2,
+            "with_properties": 20,
+            "with_purl": 11
+          }
+        ],
+        "seconds": 1.3
+      },
+      "mcp-only": {
+        "corpus_delta": {
+          "added": [],
+          "modified": [],
+          "removed": []
+        },
+        "exit": "0",
+        "home_writes": [],
+        "outputs": {
+          "bom.json": 20248,
+          "stdout": 5588
+        },
+        "schema": [
+          {
+            "component_types": {
+              "file": 4
+            },
+            "components": 4,
+            "dependencies": 0,
+            "error_count": 0,
+            "file": "bom.json",
+            "first_errors": [],
+            "has_annotations": true,
+            "has_compositions": false,
+            "has_formulation": false,
+            "kind": "cyclonedx-1.7",
+            "services": 7,
+            "valid": true,
+            "vulnerabilities": 0,
+            "with_evidence": 0,
+            "with_hashes": 0,
+            "with_modelcard": 0,
+            "with_properties": 4,
+            "with_purl": 0
+          }
+        ],
+        "seconds": 1.15
+      }
+    }
+  },
+  "nexus-alt": {
+    "d1": {
+      "anchor": 2,
+      "class_recall": {
+        "a2a": 1.0,
+        "agent-config": 0.4,
+        "ci-agent": 0.0,
+        "container": 0.5,
+        "dataset": 0.0,
+        "guardrail": 0.0,
+        "mcp-server": 0.833,
+        "model": 0.0,
+        "model-file": 0.9,
+        "package": 0.833,
+        "prompt": 0.667,
+        "skill": 1.0,
+        "tool": 1.0,
+        "training": 0.0,
+        "vector-store": 1.0
+      },
+      "components": {
+        "a2a.agent-card": {
+          "detected": true,
+          "matched": "agent-card.json",
+          "override": null,
+          "soft": false
+        },
+        "ci.claude-code-action": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.acme-support-tickets": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.datasheet": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "data.dvc-pointer": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.faq-corpus": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.golden-eval": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.imdb": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "eval.promptfoo": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "file.gguf": {
+          "detected": true,
+          "matched": "acme-intent-tiny",
+          "override": null,
+          "soft": false
+        },
+        "file.model-card": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "file.model-config": {
+          "detected": true,
+          "matched": "models/classifier/config.json",
+          "override": null,
+          "soft": true
+        },
+        "file.pickle": {
+          "detected": true,
+          "matched": "intent.pkl",
+          "override": null,
+          "soft": false
+        },
+        "file.safetensors": {
+          "detected": true,
+          "matched": "model.safetensors",
+          "override": null,
+          "soft": false
+        },
+        "file.torch-pt": {
+          "detected": true,
+          "matched": "intent.pt",
+          "override": null,
+          "soft": false
+        },
+        "guard.config": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "ide.claude-settings": {
+          "detected": true,
+          "matched": ".claude/settings.json",
+          "override": null,
+          "soft": false
+        },
+        "ide.hook-pretooluse": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "ide.permission-webfetch": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "img.agent-base-latest": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "img.ollama": {
+          "detected": true,
+          "matched": "ollama/ollama",
+          "override": null,
+          "soft": false
+        },
+        "img.python-base": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "img.qdrant": {
+          "detected": true,
+          "matched": "qdrant/qdrant",
+          "override": null,
+          "soft": false
+        },
+        "mcp.codex-jira": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "mcp.cursor-browser": {
+          "detected": true,
+          "matched": "playwright/mcp",
+          "override": null,
+          "soft": false
+        },
+        "mcp.deep-nested": {
+          "detected": true,
+          "matched": "deep-mcp",
+          "override": null,
+          "soft": true
+        },
+        "mcp.filesystem": {
+          "detected": true,
+          "matched": "server-filesystem",
+          "override": null,
+          "soft": false
+        },
+        "mcp.gemini-slack": {
+          "detected": true,
+          "matched": "mcp.slack.example.com",
+          "override": null,
+          "soft": false
+        },
+        "mcp.github": {
+          "detected": true,
+          "matched": "github-mcp-server",
+          "override": null,
+          "soft": false
+        },
+        "mcp.own-server": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "mcp.postgres": {
+          "detected": true,
+          "matched": "mcp-server-postgres",
+          "override": null,
+          "soft": false
+        },
+        "mcp.remote-crm": {
+          "detected": true,
+          "matched": "mcp.crm.example.com",
+          "override": null,
+          "soft": false
+        },
+        "mcp.vscode-sqlite": {
+          "detected": true,
+          "matched": "mcp-server-sqlite",
+          "override": null,
+          "soft": false
+        },
+        "model.azure-gpt-4o-prod": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.bedrock-claude": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.claude-haiku-4-5": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.claude-sonnet-4-5": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.codex-o4-mini": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "model.gpt-4o-mini": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.hf-distilbert-base": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.hf-distilbert-sst2": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.hf-minilm": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.hf-roberta-sentiment": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.llama-guard": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.ollama-llama3.2": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.text-embedding-3-small": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "pkg.anthropic": {
+          "detected": true,
+          "matched": "(?s)(?<![A-Za-z-])anthropic.{0,80}?0\\.69\\.0",
+          "override": null,
+          "soft": false
+        },
+        "pkg.langgraph": {
+          "detected": true,
+          "matched": "(?s)langgraph.{0,80}?0\\.6\\.7",
+          "override": null,
+          "soft": false
+        },
+        "pkg.mcp": {
+          "detected": true,
+          "matched": "(?s)(?<![A-Za-z-])mcp(?![A-Za-z-]).{0,80}?1\\.16\\.0",
+          "override": null,
+          "soft": false
+        },
+        "pkg.npm-mcp-sdk": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "pkg.transformers": {
+          "detected": true,
+          "matched": "(?s)(?<![A-Za-z-])transformers.{0,80}?4\\.57\\.0",
+          "override": null,
+          "soft": false
+        },
+        "pkg.unresolvable": {
+          "detected": true,
+          "matched": "langchain-acme-utils",
+          "override": null,
+          "soft": false
+        },
+        "prompt.agents-md": {
+          "detected": true,
+          "matched": "AGENTS.md",
+          "override": null,
+          "soft": false
+        },
+        "prompt.claude-import-policies": {
+          "detected": true,
+          "matched": "docs/policies.md",
+          "override": null,
+          "soft": false
+        },
+        "prompt.claude-import-rules": {
+          "detected": true,
+          "matched": "rules/security.md",
+          "override": null,
+          "soft": false
+        },
+        "prompt.claude-md": {
+          "detected": true,
+          "matched": "(?<![A-Za-z./])CLAUDE\\.md",
+          "override": null,
+          "soft": false
+        },
+        "prompt.copilot-instructions": {
+          "detected": true,
+          "matched": "copilot-instructions.md",
+          "override": null,
+          "soft": false
+        },
+        "prompt.cursor-mdc": {
+          "detected": true,
+          "matched": "python.mdc",
+          "override": null,
+          "soft": true
+        },
+        "prompt.cursorrules": {
+          "detected": true,
+          "matched": ".cursorrules",
+          "override": null,
+          "soft": false
+        },
+        "prompt.gemini-md": {
+          "detected": true,
+          "matched": "GEMINI.md",
+          "override": null,
+          "soft": false
+        },
+        "prompt.inline-system": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "prompt.modelfile-system": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "prompt.refund-policy": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.relocated-claude-md": {
+          "detected": true,
+          "matched": "billing/claude.md",
+          "override": null,
+          "soft": true
+        },
+        "prompt.system-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.triage-j2": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "rag.chroma": {
+          "detected": true,
+          "matched": "chroma",
+          "override": null,
+          "soft": false
+        },
+        "rag.pinecone": {
+          "detected": true,
+          "matched": "pinecone",
+          "override": null,
+          "soft": false
+        },
+        "rag.qdrant": {
+          "detected": true,
+          "matched": "qdrant",
+          "override": null,
+          "soft": false
+        },
+        "skill.refund-approver": {
+          "detected": true,
+          "matched": "refund-approver",
+          "override": null,
+          "soft": false
+        },
+        "skill.triage-ticket": {
+          "detected": true,
+          "matched": "triage-ticket",
+          "override": null,
+          "soft": false
+        },
+        "tool.issue_refund": {
+          "detected": true,
+          "matched": "issue_refund",
+          "override": null,
+          "soft": false
+        },
+        "tool.lookup_customer": {
+          "detected": true,
+          "matched": "lookup_customer",
+          "override": null,
+          "soft": false
+        },
+        "tool.search_kb": {
+          "detected": true,
+          "matched": "search_kb",
+          "override": null,
+          "soft": false
+        },
+        "train.finetune-config": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "train.finetune-script": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        }
+      },
+      "decoy_penalty": 0.0,
+      "decoys": {
+        "decoy.comment-model": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.doc-code-block": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.node-modules-mcp": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.readme-model": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.test-fixture": {
+          "kind": "soft",
+          "reported": false
+        }
+      },
+      "score": 2.0,
+      "weighted_recall": 0.562
+    },
+    "d2": {
+      "digests_present": {
+        "models/classifier/model.safetensors": true,
+        "models/legacy/intent.pkl": true,
+        "models/legacy/intent.pt": true,
+        "models/llm/acme-intent-tiny.Q8_0.gguf": true
+      },
+      "pins_present": {
+        "img.python-base": false,
+        "mcp.filesystem": true,
+        "mcp.github.image": true,
+        "mcp.vscode-sqlite": true,
+        "model.hf-distilbert-sst2.revision": false
+      }
+    },
+    "d5": {
+      "finding_hints": {
+        "F01": {
+          "hints_in_outputs": [
+            "latest",
+            "unpinned"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Floating MCP server versions"
+        },
+        "F02": {
+          "hints_in_outputs": [
+            "latest"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Floating container tags"
+        },
+        "F03": {
+          "hints_in_outputs": [
+            "credential",
+            "secret",
+            "token"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Credentials in agent configuration"
+        },
+        "F04": {
+          "hints_in_outputs": [
+            "pickle"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Code-executing model serialization"
+        },
+        "F05": {
+          "hints_in_outputs": [
+            "credentials"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Tool-description poisoning"
+        },
+        "F06": {
+          "hints_in_outputs": [
+            "hidden"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Instruction injection aimed at the agent and at the scanner"
+        },
+        "F07": {
+          "hints_in_outputs": [
+            "bidi",
+            "zero-width",
+            "escape",
+            "invisible",
+            "unicode"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Hidden or obfuscating characters in names and instructions"
+        },
+        "F08": {
+          "hints_in_outputs": [
+            "remote",
+            "http",
+            "url"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Remote MCP endpoints"
+        },
+        "F09": {
+          "hints_in_outputs": [
+            "hook"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Hook runs a shell command on tool calls"
+        },
+        "F10": {
+          "hints_in_outputs": [
+            "codex",
+            "toml",
+            "failed"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Malformed configuration recorded as a gap, not silence"
+        },
+        "F11": {
+          "hints_in_outputs": [
+            "symlink",
+            "outside",
+            "escape"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Symbolic links that escape the root or loop are refused and recorded"
+        },
+        "F12": {
+          "hints_in_outputs": [
+            "unpinned",
+            "main"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Hosted model references without an immutable revision"
+        },
+        "F13": {
+          "hints_in_outputs": [
+            "unresolv"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Declared dependency that cannot be resolved (live only)"
+        },
+        "F14": {
+          "hints_in_outputs": [
+            "permission",
+            "allow"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Permissive agent permissions"
+        },
+        "F15": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Exposure path: untrusted input + sensitive tools + egress"
+        }
+      }
+    },
+    "d6": {
+      "etc_passwd_in_outputs": [],
+      "neutralization": {
+        "json_escaped_esc_files": [
+          "depth64/bom.json"
+        ],
+        "raw_esc_files": [],
+        "raw_rlo_files": [],
+        "raw_zwsp_files": []
+      },
+      "secret_leaks_in_outputs": [],
+      "secret_leaks_in_stderr": [],
+      "stderr_raw_esc": false
+    },
+    "d7": {
+      "determinism": null,
+      "network_vs_airgap_equal": null
+    },
+    "modes": {
+      "depth64": {
+        "corpus_delta": {
+          "added": [],
+          "modified": [],
+          "removed": []
+        },
+        "exit": "1",
+        "home_writes": [],
+        "outputs": {
+          "bom.json": 114525,
+          "stdout": 0
+        },
+        "schema": [],
+        "seconds": 4.17
+      }
+    }
+  },
+  "trusera-alt": {
+    "d1": {
+      "anchor": 1,
+      "class_recall": {
+        "a2a": 0.0,
+        "agent-config": 0.0,
+        "ci-agent": 1.0,
+        "container": 0.5,
+        "dataset": 0.0,
+        "guardrail": 0.0,
+        "mcp-server": 0.556,
+        "model": 0.16,
+        "model-file": 0.6,
+        "package": 0.0,
+        "prompt": 0.0,
+        "skill": 0.5,
+        "tool": 0.0,
+        "training": 0.5,
+        "vector-store": 1.0
+      },
+      "components": {
+        "a2a.agent-card": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "ci.claude-code-action": {
+          "detected": true,
+          "matched": "claude-code-action",
+          "override": null,
+          "soft": false
+        },
+        "data.acme-support-tickets": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.datasheet": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "data.dvc-pointer": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.faq-corpus": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.golden-eval": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "data.imdb": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "eval.promptfoo": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "file.gguf": {
+          "detected": true,
+          "matched": "acme-intent-tiny",
+          "override": null,
+          "soft": false
+        },
+        "file.model-card": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "file.model-config": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "file.pickle": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "file.safetensors": {
+          "detected": true,
+          "matched": "model.safetensors",
+          "override": null,
+          "soft": false
+        },
+        "file.torch-pt": {
+          "detected": true,
+          "matched": "intent.pt",
+          "override": null,
+          "soft": false
+        },
+        "guard.config": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "ide.claude-settings": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "ide.hook-pretooluse": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "ide.permission-webfetch": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "img.agent-base-latest": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "img.ollama": {
+          "detected": true,
+          "matched": "ollama/ollama",
+          "override": null,
+          "soft": false
+        },
+        "img.python-base": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "img.qdrant": {
+          "detected": true,
+          "matched": "qdrant/qdrant",
+          "override": null,
+          "soft": false
+        },
+        "mcp.codex-jira": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "mcp.cursor-browser": {
+          "detected": true,
+          "matched": "(?i)playwright/mcp|\\bbrowser\\b[^\\n]{0,30}\\(mcp|mcp[ _-]?server[^\\n]{0,30}\\bbrowser\\b",
+          "override": null,
+          "soft": false
+        },
+        "mcp.deep-nested": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "mcp.filesystem": {
+          "detected": true,
+          "matched": "(?i)server-filesystem|mcp[^\\n]{0,40}\\bfilesystem\\b|\\bfilesystem\\b[^\\n]{0,40}mcp",
+          "override": null,
+          "soft": false
+        },
+        "mcp.gemini-slack": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "mcp.github": {
+          "detected": true,
+          "matched": "(?i)github-mcp-server|\\bgithub\\b[^\\n]{0,30}\\(mcp|mcp[ _-]?server[^\\n]{0,30}\\bgithub\\b",
+          "override": null,
+          "soft": false
+        },
+        "mcp.own-server": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "mcp.postgres": {
+          "detected": true,
+          "matched": "(?i)mcp-server-postgres|\\bpostgres\\b[^\\n]{0,30}\\(mcp|mcp[ _-]?server[^\\n]{0,30}\\bpostgres\\b",
+          "override": null,
+          "soft": false
+        },
+        "mcp.remote-crm": {
+          "detected": true,
+          "matched": "remote-crm",
+          "override": null,
+          "soft": false
+        },
+        "mcp.vscode-sqlite": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.azure-gpt-4o-prod": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.bedrock-claude": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.claude-haiku-4-5": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.claude-sonnet-4-5": {
+          "detected": true,
+          "matched": "claude-sonnet-4-5",
+          "override": null,
+          "soft": false
+        },
+        "model.codex-o4-mini": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "model.gpt-4o-mini": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.hf-distilbert-base": {
+          "detected": true,
+          "matched": "distilbert-base-uncased(?!-finetuned)",
+          "override": null,
+          "soft": false
+        },
+        "model.hf-distilbert-sst2": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.hf-minilm": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.hf-roberta-sentiment": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.llama-guard": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.ollama-llama3.2": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "model.text-embedding-3-small": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "pkg.anthropic": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "pkg.langgraph": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "pkg.mcp": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "pkg.npm-mcp-sdk": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "pkg.transformers": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "pkg.unresolvable": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.agents-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.claude-import-policies": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.claude-import-rules": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.claude-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.copilot-instructions": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.cursor-mdc": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "prompt.cursorrules": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.gemini-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.inline-system": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "prompt.modelfile-system": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "prompt.refund-policy": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.relocated-claude-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": true
+        },
+        "prompt.system-md": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "prompt.triage-j2": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "rag.chroma": {
+          "detected": true,
+          "matched": "chroma",
+          "override": null,
+          "soft": false
+        },
+        "rag.pinecone": {
+          "detected": true,
+          "matched": "pinecone",
+          "override": null,
+          "soft": false
+        },
+        "rag.qdrant": {
+          "detected": true,
+          "matched": "qdrant",
+          "override": null,
+          "soft": false
+        },
+        "skill.refund-approver": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "skill.triage-ticket": {
+          "detected": true,
+          "matched": "triage-ticket",
+          "override": null,
+          "soft": false
+        },
+        "tool.issue_refund": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "tool.lookup_customer": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "tool.search_kb": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "train.finetune-config": {
+          "detected": false,
+          "matched": null,
+          "override": null,
+          "soft": false
+        },
+        "train.finetune-script": {
+          "detected": true,
+          "matched": "finetune.py",
+          "override": null,
+          "soft": false
+        }
+      },
+      "decoy_penalty": 0.0,
+      "decoys": {
+        "decoy.comment-model": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.doc-code-block": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.node-modules-mcp": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.readme-model": {
+          "kind": "hard",
+          "reported": false
+        },
+        "decoy.test-fixture": {
+          "kind": "soft",
+          "reported": false
+        }
+      },
+      "score": 1.0,
+      "weighted_recall": 0.3
+    },
+    "d2": {
+      "digests_present": {
+        "models/classifier/model.safetensors": false,
+        "models/legacy/intent.pkl": false,
+        "models/legacy/intent.pt": false,
+        "models/llm/acme-intent-tiny.Q8_0.gguf": false
+      },
+      "pins_present": {
+        "img.python-base": false,
+        "mcp.filesystem": false,
+        "mcp.github.image": false,
+        "mcp.vscode-sqlite": false,
+        "model.hf-distilbert-sst2.revision": false
+      }
+    },
+    "d5": {
+      "finding_hints": {
+        "F01": {
+          "hints_in_outputs": [
+            "latest",
+            "unpinned"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Floating MCP server versions"
+        },
+        "F02": {
+          "hints_in_outputs": [
+            "latest"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Floating container tags"
+        },
+        "F03": {
+          "hints_in_outputs": [
+            "api key"
+          ],
+          "hints_in_stderr_only": [
+            "secret"
+          ],
+          "title": "Credentials in agent configuration"
+        },
+        "F04": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Code-executing model serialization"
+        },
+        "F05": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Tool-description poisoning"
+        },
+        "F06": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Instruction injection aimed at the agent and at the scanner"
+        },
+        "F07": {
+          "hints_in_outputs": [
+            "escape"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Hidden or obfuscating characters in names and instructions"
+        },
+        "F08": {
+          "hints_in_outputs": [
+            "remote",
+            "http",
+            "url"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Remote MCP endpoints"
+        },
+        "F09": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Hook runs a shell command on tool calls"
+        },
+        "F10": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Malformed configuration recorded as a gap, not silence"
+        },
+        "F11": {
+          "hints_in_outputs": [
+            "escape"
+          ],
+          "hints_in_stderr_only": [
+            "symlink",
+            "outside",
+            "loop"
+          ],
+          "title": "Symbolic links that escape the root or loop are refused and recorded"
+        },
+        "F12": {
+          "hints_in_outputs": [
+            "unpinned"
+          ],
+          "hints_in_stderr_only": [],
+          "title": "Hosted model references without an immutable revision"
+        },
+        "F13": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Declared dependency that cannot be resolved (live only)"
+        },
+        "F14": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Permissive agent permissions"
+        },
+        "F15": {
+          "hints_in_outputs": [],
+          "hints_in_stderr_only": [],
+          "title": "Exposure path: untrusted input + sensitive tools + egress"
+        }
+      }
+    },
+    "d6": {
+      "etc_passwd_in_outputs": [],
+      "neutralization": {
+        "json_escaped_esc_files": [
+          "nodeep/report.json"
+        ],
+        "raw_esc_files": [],
+        "raw_rlo_files": [],
+        "raw_zwsp_files": []
+      },
+      "secret_leaks_in_outputs": [],
+      "secret_leaks_in_stderr": [],
+      "stderr_raw_esc": false
+    },
+    "d7": {
+      "determinism": null,
+      "network_vs_airgap_equal": null
+    },
+    "modes": {
+      "nodeep": {
+        "corpus_delta": {
+          "added": [],
+          "modified": [],
+          "removed": []
+        },
+        "exit": "0",
+        "home_writes": [],
+        "outputs": {
+          "report.json": 46512,
+          "stdout": 0
+        },
+        "schema": [
+          {
+            "component_types": {
+              "container": 2,
+              "framework": 8,
+              "library": 1,
+              "machine-learning-model": 27,
+              "service": 19
+            },
+            "components": 57,
+            "dependencies": 0,
+            "error_count": 19,
+            "file": "report.json",
+            "first_errors": [
+              "components/33/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac",
+              "components/34/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac",
+              "components/35/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac"
+            ],
+            "has_annotations": false,
+            "has_compositions": false,
+            "has_formulation": false,
+            "kind": "cyclonedx-1.6",
+            "services": 0,
+            "valid": false,
+            "vulnerabilities": 0,
+            "with_evidence": 0,
+            "with_hashes": 0,
+            "with_modelcard": 0,
+            "with_properties": 57,
+            "with_purl": 57
+          }
+        ],
+        "seconds": 1.72
+      }
+    }
+  }
+}

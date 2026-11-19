@@ -1,0 +1,1 @@
+/aibom-run/venvs/ai-agentbom/bin/agentbom scan /aibom-run/work/ai-agentbom/corpus --output-dir /aibom-run/results2/ai-agentbom/repeat --pretty --cyclonedx --sarif --mermaid 
