@@ -523,7 +523,11 @@ nexus-symbiote evidence-profile [OPTIONS] AIBOM_PATH
 | Option | Description |
 |---|---|
 | `-o`, `--output` `PATH` | Write the evidence profile report to this file instead of standard output. |
+| `--project` `DIRECTORY` | Project root for corroborating artifact signatures and digest pins under `--signature-policy`. |
+| `--signature-policy` `FILE` | Explicit operator signer policy JSON outside the project; requires `--project`. |
 | `--json-output` | Emit the per-component evidence profile as JSON. |
+
+`signed_under_policy` is `true` only when `--project` and `--signature-policy` are supplied and verification under that operator policy succeeds; inventory-declared `signing_status` assertions are reported separately under `declared_signing_status` and never trusted on their own.
 
 ### `export-inventory`
 
@@ -585,13 +589,15 @@ nexus-symbiote import-sbom [OPTIONS] FOREIGN_BOM_PATH
 
 | Option | Description |
 |---|---|
-| `-o`, `--output` `PATH` | Write the resulting native AgentBOM JSON to this file. |
+| `-o`, `--output` `PATH` | Write the resulting native AgentBOM JSON to this file (must lie outside `--project`). |
 | `--into` `PATH` | Existing native AgentBOM to merge imported SBOM claims into. |
 | `--project` `PATH` | Trusted project root for SHA-256 local file binding, nested manifests, and shape census. |
-| `--reveal-names` | Retain plain component names from the foreign SBOM instead of sha256-hashed names. |
-| `--walk-manifests` | Walk nested manifests below --project and record manifest-only vs locked pinning state. |
-| `--census` | Count unread non-control-plane artifact shapes (*.ipynb, n8n/*.json, *.tf, Chart.yaml). |
+| `--reveal-names` | Retain plain component names from the foreign SBOM instead of hashed names. |
+| `--walk-manifests` | Walk nested manifests below `--project` and record manifest-only vs locked pinning state. |
+| `--census` | Count unread non-control-plane artifact shapes (`*.ipynb`, `n8n/*.json`, `*.tf`, `Chart.yaml`). |
 | `--json-output` | Print a structured JSON summary of imported, bound, and conflicting entries. |
+
+By default component names are hashed (`imported-<16hex>`). When `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY` is set (at least 16 characters), names and raw entry digests use keyed HMAC-SHA256 (`name_hash_mode: "hmac-sha256"`); otherwise `import-sbom` falls back to unsalted SHA-256 (`name_hash_mode: "unsalted-sha256"`), which prevents plain-text echo in downstream prompts or logs but can be guessed for known public package names. Local digest binding (`local_digest_binding`) runs only against non-credential regular files beneath `--project`.
 
 ### `import-shadowscan`
 

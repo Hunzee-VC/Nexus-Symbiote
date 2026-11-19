@@ -4,32 +4,36 @@ from __future__ import annotations
 
 import configparser
 import hashlib
+import hmac
+import json
+import os
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Final
 
-import yaml
 from packaging.requirements import InvalidRequirement, Requirement
+from packaging.specifiers import InvalidSpecifier, SpecifierSet
+from packaging.version import InvalidVersion, Version
 
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.canonical import json_text
 from nexus_symbiote.core.enums import AssuranceLevel, RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import hash_bytes, open_regular_file, parse_json_strict
 from nexus_symbiote.core.models import (
     AnyComponent,
     ClaimEvidence,
     CompletenessClaim,
+    DataSourceComponent,
     MCPServerComponent,
     ModelComponent,
     RegistryEntryComponent,
     RiskAssessment,
 )
-from nexus_symbiote.scanners.registry import (
-    AI_IMAGE_KEYWORDS,
-    AI_PACKAGE_NAMES,
-    AI_PACKAGE_PREFIXES,
-)
+from nexus_symbiote.evidence_profile import is_exact_version, purl_has_exact_version
+from nexus_symbiote.policy import PolicyError, parse_yaml_mapping
+from nexus_symbiote.scanners import registry as _reg
+from nexus_symbiote.scanners.credential_files import credential_shaped
+from nexus_symbiote.scanners.mcp import _MIN_SOURCE_BINDING_KEY_LENGTH, SOURCE_BINDING_KEY_ENV
 from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.secrets import redact_text
 from nexus_symbiote.utils.terminal import neutralize
@@ -37,37 +41,16 @@ from nexus_symbiote.utils.toml import loads as load_toml
 
 MAX_FOREIGN_SBOM_BYTES: Final[int] = 16 * 1024 * 1024
 MAX_FOREIGN_COMPONENTS: Final[int] = 10_000
+MAX_NESTED_CDX_DEPTH: Final[int] = 32
 MAX_MANIFEST_YAML_BYTES: Final[int] = 512 * 1024
-MAX_MANIFEST_YAML_DEPTH: Final[int] = 64
-_EXACT_VERSION_RE: Final[re.Pattern[str]] = re.compile(
-    r"v?[0-9]+\.[0-9]+(?:\.[0-9]+)?(?:[-+][0-9A-Za-z.-]+)?",
-    re.ASCII,
-)
+MAX_CONFLICT_SAMPLES: Final[int] = 8
+MAX_CONFLICT_SUMMARY: Final[int] = 200
+_SUPPORTED_CDX_SPECS: Final[frozenset[str]] = frozenset(["1.4", "1.5", "1.6", "1.7"])
+_SUPPORTED_SPDX2_VERSIONS: Final[frozenset[str]] = frozenset(("SPDX-2.2", "SPDX-2.3"))
 _SHA256_HEX_RE: Final[re.Pattern[str]] = re.compile(r"[0-9a-fA-F]{64}", re.ASCII)
-
-
-@dataclass(frozen=True)
-class UnreadShapeCount:
-    """Advisory count of repository artifact shapes owned by ShadowScan / external tools."""
-
-    shape: str
-    count: int
-    owner: str = "shadowscan"
-
-
-@dataclass
-class SBOMImportSummary:
-    """Result of importing a foreign CycloneDX or SPDX BOM into an AIBOM."""
-
-    aibom: AIBOM
-    source_format: str
-    document_sha256: str
-    imported_count: int = 0
-    bound_local_count: int = 0
-    conflict_count: int = 0
-    conflicts: list[str] = field(default_factory=list)
-
-
+_REQ_HASH_RE: Final[re.Pattern[str]] = re.compile(r"--hash=sha256:([0-9a-fA-F]{64})", re.ASCII)
+_REQ_OPT_RE: Final[re.Pattern[str]] = re.compile(r"(?:^|\s+)--[A-Za-z0-9_-]+(?:=\S+)?")
+_HIDDEN_SECRET_DIRS: Final[frozenset[str]] = frozenset([".ssh", ".aws", ".gnupg", ".kube"])
 _EXTRA_AI_PREFIXES: Final[tuple[str, ...]] = (
     "candle-",
     "async-openai",
@@ -77,157 +60,249 @@ _EXTRA_AI_PREFIXES: Final[tuple[str, ...]] = (
     "langchaingo",
     "go-openai",
 )
+_CONDA_NAMES: Final[frozenset[str]] = frozenset(
+    ("environment.yml", "environment.yaml", "conda.yml", "conda.yaml")
+)
+_NESTED_MANIFEST_NAMES: Final[frozenset[str]] = frozenset(
+    ("package.json", "pyproject.toml", "setup.cfg", "Cargo.toml", "go.mod", *_CONDA_NAMES)
+)
+
+
+@dataclass(frozen=True)
+class UnreadShapeCount:
+    shape: str
+    count: int
+    owner: str = "shadowscan"
+
+
+@dataclass
+class SBOMImportSummary:
+    aibom: AIBOM
+    source_format: str
+    document_sha256: str
+    imported_count: int = 0
+    bound_local_count: int = 0
+    conflict_count: int = 0
+    conflicts: list[str] = field(default_factory=list)
+    scan_failures: list[str] = field(default_factory=list)
+
+
+@dataclass
+class _IdentityBucket:
+    versions: dict[str, str] = field(default_factory=dict)
+    digests: dict[str, str] = field(default_factory=dict)
+    extra_version_conflicts: int = 0
+    extra_digest_conflicts: int = 0
+    local_peers: list[AnyComponent] = field(default_factory=list)
+
+
+def _norm_pkg(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name.strip().lower())
 
 
 def _is_ai_package_name(name: str) -> bool:
-    lowered = re.sub(r"[-_.]+", "-", name.strip().lower())
-    if lowered in AI_PACKAGE_NAMES or lowered == "ort":
+    lowered = _norm_pkg(name)
+    if lowered in _reg.AI_PACKAGE_NAMES or lowered == "ort":
         return True
     unscoped = lowered.rsplit("/", 1)[-1] if "/" in lowered else lowered
     return any(
-        unscoped.startswith(prefix) for prefix in (*AI_PACKAGE_PREFIXES, *_EXTRA_AI_PREFIXES)
-    ) or any(kw in lowered for kw in AI_IMAGE_KEYWORDS)
+        unscoped.startswith(p) for p in (*_reg.AI_PACKAGE_PREFIXES, *_EXTRA_AI_PREFIXES)
+    ) or any(kw in lowered for kw in _reg.AI_IMAGE_KEYWORDS)
 
 
 def _normalize_sha256(alg: str, digest: str) -> str | None:
-    cleaned_alg = alg.strip().upper().replace("-", "")
     cleaned_val = digest.strip().removeprefix("sha256:").lower()
-    if cleaned_alg == "SHA256" and _SHA256_HEX_RE.fullmatch(cleaned_val):
+    if alg.strip().upper().replace("-", "") == "SHA256" and _SHA256_HEX_RE.fullmatch(cleaned_val):
         return f"sha256:{cleaned_val}"
     return None
 
 
-def _display_name(raw_name: str, *, doc_sha256: str, reveal_names: bool) -> str:
+def _find_sha256(items: Any, alg_key: str, val_key: str) -> str | None:
+    if isinstance(items, list):
+        for item in items:
+            if (
+                isinstance(item, dict)
+                and isinstance(item.get(alg_key), str)
+                and isinstance(item.get(val_key), str)
+                and (val := _normalize_sha256(item[alg_key], item[val_key]))
+            ):
+                return val
+    return None
+
+
+def _make_entry(
+    raw_entry: dict[str, Any],
+    name: str,
+    version: Any,
+    purl: Any,
+    kind: str,
+    supplier: str | None = None,
+    sha256: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "raw_entry": raw_entry,
+        "name": name,
+        "version": version if isinstance(version, str) else None,
+        "purl": purl if isinstance(purl, str) else None,
+        "type": kind,
+        "supplier": supplier,
+        "sha256": sha256,
+    }
+
+
+def _binding_key() -> bytes | None:
+    raw = os.environ.get(SOURCE_BINDING_KEY_ENV, "")
+    if not raw:
+        return None
+    if len(raw) < _MIN_SOURCE_BINDING_KEY_LENGTH:
+        raise ValueError(
+            f"{SOURCE_BINDING_KEY_ENV} must contain at least {_MIN_SOURCE_BINDING_KEY_LENGTH} characters"
+        )
+    return raw.encode("utf-8")
+
+
+def _display_name(raw_name: str, *, key: bytes | None, reveal_names: bool) -> tuple[str, str]:
     cleaned = neutralize(redact_text(raw_name.strip()))
     if reveal_names and cleaned:
-        return cleaned[:200]
-    digest = hashlib.sha256(f"{doc_sha256}:{raw_name}".encode()).hexdigest()[:16]
-    return f"imported-{digest}"
+        return cleaned[:200], "plain"
+    payload = raw_name.strip().encode("utf-8")
+    if key is not None:
+        digest = hmac.new(
+            key, b"nexus-symbiote/sbom-name/v1:" + payload, hashlib.sha256
+        ).hexdigest()
+        return f"imported-{digest[:16]}", "hmac-sha256"
+    return f"imported-{hashlib.sha256(payload).hexdigest()[:16]}", "unsalted-sha256"
 
 
-def _yaml_flow_depth_exceeds(text: str, max_depth: int = MAX_MANIFEST_YAML_DEPTH) -> bool:
-    depth = 0
-    in_single = False
-    in_double = False
-    escape = False
-    for ch in text:
-        if escape:
-            escape = False
-            continue
-        if in_double and ch == "\\":
-            escape = True
-            continue
-        if ch == "'" and not in_double:
-            in_single = not in_single
-            continue
-        if ch == '"' and not in_single:
-            in_double = not in_double
-            continue
-        if in_single or in_double:
-            continue
-        if ch in "[{":
-            depth += 1
-            if depth > max_depth:
-                return True
-        elif ch in "]}" and depth > 0:
-            depth -= 1
-    return False
+def _clean_exact_spec(ver: str | None) -> str | None:
+    if not ver:
+        return None
+    s = ver.strip()
+    for pfx in ("===", "=="):
+        if s.startswith(pfx):
+            return s[len(pfx) :].strip()
+    return s[1:].strip() if (s.startswith("=") and not s.startswith("=>")) else s
+
+
+def _versions_conflict(peer_ver: str | None, cand_ver: str | None) -> bool:
+    if not peer_ver or not cand_ver:
+        return False
+    p_norm, c_norm = _clean_exact_spec(peer_ver) or "", _clean_exact_spec(cand_ver) or ""
+    if p_norm == c_norm or p_norm.lstrip("v") == c_norm.lstrip("v"):
+        return False
+    for spec_side, exact_side in ((peer_ver.strip(), c_norm), (cand_ver.strip(), p_norm)):
+        if any(op in spec_side for op in (">", "<", "~", "!", ",")) and is_exact_version(
+            exact_side
+        ):
+            try:
+                return not SpecifierSet(spec_side).contains(
+                    Version(exact_side.lstrip("v")), prereleases=True
+                )
+            except (InvalidSpecifier, InvalidVersion):
+                pass
+    return True
+
+
+def _record_bucket_item(
+    mapping: dict[str, str], key: str, ref: str, overflow_attr: str, bucket: _IdentityBucket
+) -> None:
+    if key not in mapping:
+        if len(mapping) < MAX_CONFLICT_SAMPLES:
+            mapping[key] = ref
+        else:
+            setattr(bucket, overflow_attr, getattr(bucket, overflow_attr) + 1)
+
+
+def _cdx_supplier(node: dict[str, Any]) -> str | None:
+    for field_name in ("supplier", "provider"):
+        sub = node.get(field_name)
+        if isinstance(sub, dict) and isinstance(sup := sub.get("name"), str):
+            return sup
+    return None
 
 
 def _extract_cdx_entries(doc: dict[str, Any]) -> list[dict[str, Any]]:
-    raw_comps = doc.get("components")
-    if raw_comps is None:
-        return []
-    if not isinstance(raw_comps, list):
-        raise ValueError("CycloneDX components field must be a JSON array")
-    if len(raw_comps) > MAX_FOREIGN_COMPONENTS:
-        raise ValueError(f"foreign SBOM exceeds maximum component count ({MAX_FOREIGN_COMPONENTS})")
     entries: list[dict[str, Any]] = []
-    for item in raw_comps:
-        if not isinstance(item, dict) or not isinstance(item.get("name"), str):
-            continue
-        sha256_val: str | None = None
-        raw_hashes = item.get("hashes")
-        if isinstance(raw_hashes, list):
-            for h in raw_hashes:
-                if (
-                    isinstance(h, dict)
-                    and isinstance(h.get("alg"), str)
-                    and isinstance(h.get("content"), str)
-                ):
-                    sha256_val = _normalize_sha256(h["alg"], h["content"])
-                    if sha256_val:
-                        break
-        entries.append(
-            {
-                "raw_entry": item,
-                "name": item["name"],
-                "version": item.get("version") if isinstance(item.get("version"), str) else None,
-                "purl": item.get("purl") if isinstance(item.get("purl"), str) else None,
-                "type": item.get("type") if isinstance(item.get("type"), str) else "library",
-                "supplier": (
-                    item["supplier"].get("name")
-                    if isinstance(item.get("supplier"), dict)
-                    and isinstance(item["supplier"].get("name"), str)
-                    else None
-                ),
-                "sha256": sha256_val,
-            }
-        )
+    stack: list[tuple[dict[str, Any], int, str]] = []
+    for key_name, kind in (("services", "service"), ("components", "component")):
+        raw = doc.get(key_name)
+        if raw is not None and not isinstance(raw, list):
+            raise ValueError(f"CycloneDX {key_name} field must be a JSON array")
+        if isinstance(raw, list):
+            stack.extend((item, 0, kind) for item in reversed(raw) if isinstance(item, dict))
+    meta = doc.get("metadata")
+    if isinstance(meta, dict) and isinstance(meta.get("component"), dict):
+        stack.append((meta["component"], 0, "root"))
+
+    allowed_root = {"machine-learning-model", "data", "library", "framework", "container"}
+    while stack:
+        node, depth, kind = stack.pop()
+        if depth > MAX_NESTED_CDX_DEPTH:
+            raise ValueError("CycloneDX nested components exceed maximum depth")
+        name = node.get("name")
+        if isinstance(name, str) and name.strip():
+            nt = node.get("type")
+            raw_type = nt if isinstance(nt, str) else "library"
+            if kind != "root" or raw_type in allowed_root:
+                if len(entries) >= MAX_FOREIGN_COMPONENTS:
+                    raise ValueError(
+                        f"foreign SBOM exceeds maximum component count ({MAX_FOREIGN_COMPONENTS})"
+                    )
+                sha = _find_sha256(node.get("hashes"), "alg", "content")
+                k, sup = ("service" if kind == "service" else raw_type), _cdx_supplier(node)
+                v, p = node.get("version"), node.get("purl")
+                entries.append(_make_entry(node, name, v, p, k, sup, sha))
+        for key_name, child_kind in (("components", "component"), ("services", "service")):
+            children = node.get(key_name)
+            if isinstance(children, list):
+                stack.extend(
+                    (c, depth + 1, child_kind) for c in reversed(children) if isinstance(c, dict)
+                )
     return entries
 
 
 def _extract_spdx_entries(doc: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
     entries: list[dict[str, Any]] = []
     if isinstance(doc.get("@graph"), list):
-        graph = doc["@graph"]
+        ctx, graph = doc.get("@context"), doc["@graph"]
+        has_ctx = (isinstance(ctx, str) and "spdx.org/rdf/3." in ctx) or (
+            isinstance(ctx, list)
+            and any(isinstance(x, str) and "spdx.org/rdf/3." in x for x in ctx)
+        )
+        if not has_ctx and not any(
+            isinstance(n, dict) and ("spdxId" in n or n.get("type") == "CreationInfo")
+            for n in graph[:20]
+        ):
+            raise ValueError("unrecognized SPDX @graph document (missing SPDX 3.x @context/spdxId)")
         if len(graph) > MAX_FOREIGN_COMPONENTS:
             raise ValueError(
                 f"foreign SPDX @graph exceeds maximum element count ({MAX_FOREIGN_COMPONENTS})"
             )
+        type_map = {
+            "ai_AIPackage": "machine-learning-model",
+            "dataset_DatasetPackage": "data",
+            "software_Package": "library",
+        }
         for node in graph:
-            if not isinstance(node, dict):
-                continue
-            typ = node.get("type")
-            if typ not in {"software_Package", "ai_AIPackage", "dataset_DatasetPackage"}:
-                continue
-            name = node.get("name")
-            if not isinstance(name, str) or not name:
-                continue
-            sha256_val: str | None = None
-            verified = node.get("verifiedUsing")
-            if isinstance(verified, list):
-                for h in verified:
-                    if (
-                        isinstance(h, dict)
-                        and isinstance(h.get("algorithm"), str)
-                        and isinstance(h.get("hashValue"), str)
-                    ):
-                        sha256_val = _normalize_sha256(h["algorithm"], h["hashValue"])
-                        if sha256_val:
-                            break
-            entries.append(
-                {
-                    "raw_entry": node,
-                    "name": name,
-                    "version": (
-                        node.get("software_packageVersion")
-                        if isinstance(node.get("software_packageVersion"), str)
-                        else None
-                    ),
-                    "purl": (
-                        node.get("software_packageUrl")
-                        if isinstance(node.get("software_packageUrl"), str)
-                        else None
-                    ),
-                    "type": "machine-learning-model" if typ == "ai_AIPackage" else "library",
-                    "supplier": None,
-                    "sha256": sha256_val,
-                }
-            )
+            if (
+                isinstance(node, dict)
+                and node.get("type") in type_map
+                and isinstance(node.get("name"), str)
+                and node["name"]
+            ):
+                sha = _find_sha256(node.get("verifiedUsing"), "algorithm", "hashValue")
+                ver, purl = node.get("software_packageVersion"), node.get("software_packageUrl")
+                entries.append(
+                    _make_entry(node, node["name"], ver, purl, type_map[node["type"]], None, sha)
+                )
         return "spdx-3.0.1", entries
 
     if isinstance(doc.get("packages"), list):
+        spdx_ver = doc.get("spdxVersion")
+        if not isinstance(spdx_ver, str) or spdx_ver not in _SUPPORTED_SPDX2_VERSIONS:
+            raise ValueError(
+                "unrecognized SPDX JSON version (expected spdxVersion SPDX-2.2 or SPDX-2.3)"
+            )
         packages = doc["packages"]
         if len(packages) > MAX_FOREIGN_COMPONENTS:
             raise ValueError(
@@ -236,60 +311,93 @@ def _extract_spdx_entries(doc: dict[str, Any]) -> tuple[str, list[dict[str, Any]
         for pkg in packages:
             if not isinstance(pkg, dict) or not isinstance(pkg.get("name"), str):
                 continue
-            sha256_val = None
-            for chk in pkg.get("checksums", []) if isinstance(pkg.get("checksums"), list) else []:
-                if (
-                    isinstance(chk, dict)
-                    and isinstance(chk.get("algorithm"), str)
-                    and isinstance(chk.get("checksumValue"), str)
-                ):
-                    sha256_val = _normalize_sha256(chk["algorithm"], chk["checksumValue"])
-                    if sha256_val:
-                        break
-            purl_val: str | None = None
-            for ref in (
-                pkg.get("externalRefs", []) if isinstance(pkg.get("externalRefs"), list) else []
-            ):
-                if isinstance(ref, dict) and ref.get("referenceType") == "purl":
-                    loc = ref.get("referenceLocator")
-                    if isinstance(loc, str):
-                        purl_val = loc
-                        break
-            entries.append(
-                {
-                    "raw_entry": pkg,
-                    "name": pkg["name"],
-                    "version": (
-                        pkg.get("versionInfo") if isinstance(pkg.get("versionInfo"), str) else None
-                    ),
-                    "purl": purl_val,
-                    "type": "library",
-                    "supplier": None,
-                    "sha256": sha256_val,
-                }
+            refs = pkg["externalRefs"] if isinstance(pkg.get("externalRefs"), list) else []
+            purl_val = next(
+                (
+                    r["referenceLocator"]
+                    for r in refs
+                    if isinstance(r, dict)
+                    and r.get("referenceType") == "purl"
+                    and isinstance(r.get("referenceLocator"), str)
+                ),
+                None,
             )
-        return "spdx-2.3", entries
+            sha = _find_sha256(pkg.get("checksums"), "algorithm", "checksumValue")
+            entries.append(
+                _make_entry(
+                    pkg, pkg["name"], pkg.get("versionInfo"), purl_val, "library", None, sha
+                )
+            )
+        return spdx_ver.lower(), entries
 
     raise ValueError("unrecognized foreign SBOM format (expected CycloneDX or SPDX JSON)")
 
 
-def _local_digest_index(
-    aibom: AIBOM, project_root: Path | None
-) -> tuple[dict[str, str], list[str]]:
-    """Map sha256:<hex> to existing component bom_ref or local relative path."""
+def _local_digest_index(project_root: Path | None) -> tuple[dict[str, str], list[str]]:
     by_digest: dict[str, str] = {}
-    for comp in aibom.components:
-        sha = comp.hashes.get("sha256")
-        if isinstance(sha, str):
-            by_digest[sha] = comp.bom_ref
     failures: list[str] = []
-    if project_root is not None:
-        with ConfinedCollection(project_root, failures) as files:
-            for rel_path in files.iter_files():
-                raw = files.read_bytes(rel_path.as_posix(), missing_ok=True)
-                if raw is not None:
-                    by_digest.setdefault(hash_bytes(raw), rel_path.as_posix())
+    if project_root is None:
+        return by_digest, failures
+    with ConfinedCollection(project_root, failures) as files:
+        for rel_path in files.iter_files():
+            rel_posix = rel_path.as_posix()
+            is_cred = credential_shaped(rel_posix) or any(
+                p.lower() in _HIDDEN_SECRET_DIRS for p in PurePosixPath(rel_posix).parts[:-1]
+            )
+            if not is_cred and (raw := files.read_bytes(rel_posix, missing_ok=True)) is not None:
+                by_digest.setdefault(hash_bytes(raw), rel_posix)
     return by_digest, failures
+
+
+def _build_imported_component(
+    entry: dict[str, Any],
+    comp_ref: str,
+    shown_name: str,
+    clean_ver: str | None,
+    clean_purl: str | None,
+    exact_ver: bool,
+    reveal_names: bool,
+    props: dict[str, Any],
+    claims: dict[str, ClaimEvidence],
+    risks: list[RiskAssessment],
+) -> AnyComponent:
+    sup = (
+        neutralize(redact_text(entry["supplier"]))[:200]
+        if (reveal_names and entry["supplier"])
+        else None
+    )
+    common: dict[str, Any] = {
+        "bom_ref": comp_ref,
+        "name": shown_name,
+        "version": clean_ver,
+        "assurance_level": AssuranceLevel.DECLARED,
+        "trust_tier": TrustTier.UNKNOWN,
+        "properties": props,
+        "claims": claims,
+        "risks": risks,
+    }
+    if entry["type"] == "machine-learning-model":
+        return ModelComponent(supplier=sup, **common)
+    if entry["type"] == "data":
+        return DataSourceComponent(supplier=sup, **common)
+    if entry["type"] == "service":
+        reg_type = "cyclonedx-service"
+    elif clean_purl and clean_purl.startswith("pkg:pypi/"):
+        reg_type = "pypi"
+    elif clean_purl and clean_purl.startswith("pkg:npm/"):
+        reg_type = "npm"
+    else:
+        reg_type = "foreign-sbom"
+    props["version_pinned"] = exact_ver
+    return RegistryEntryComponent(
+        registry_type=reg_type, package_url=clean_purl if reveal_names else None, **common
+    )
+
+
+def _conflict_risk(detail: str, rec: str) -> RiskAssessment:
+    return RiskAssessment(
+        severity=RiskSeverity.MEDIUM, category="source_conflict", detail=detail, recommendation=rec
+    )
 
 
 def import_foreign_sbom(
@@ -299,7 +407,8 @@ def import_foreign_sbom(
     project_root: Path | None = None,
     reveal_names: bool = False,
 ) -> SBOMImportSummary:
-    """Import any CycloneDX or SPDX JSON BOM as DECLARED evidence without picking silent winners."""
+    """Import a CycloneDX (1.4–1.7) or SPDX (2.2/2.3/3.0.1) JSON BOM as DECLARED evidence."""
+    key = _binding_key()
     with open_regular_file(bom_path) as handle:
         raw_bytes = handle.read(MAX_FOREIGN_SBOM_BYTES + 1)
     if len(raw_bytes) > MAX_FOREIGN_SBOM_BYTES:
@@ -312,169 +421,204 @@ def import_foreign_sbom(
 
     if parsed.get("bomFormat") == "CycloneDX":
         spec_val = parsed.get("specVersion")
-        spec = neutralize(spec_val)[:32] if isinstance(spec_val, str) and spec_val else "unknown"
-        source_format = f"cyclonedx-{spec}"
-        entries = _extract_cdx_entries(parsed)
+        if not isinstance(spec_val, str) or spec_val not in _SUPPORTED_CDX_SPECS:
+            raise ValueError("unsupported CycloneDX specVersion (expected 1.4, 1.5, 1.6, or 1.7)")
+        source_format, entries = f"cyclonedx-{spec_val}", _extract_cdx_entries(parsed)
     else:
         source_format, entries = _extract_spdx_entries(parsed)
 
     bom = target_aibom.model_copy(deep=True) if target_aibom is not None else AIBOM()
-    digest_index, local_failures = _local_digest_index(bom, project_root)
+    digest_index, local_failures = _local_digest_index(project_root)
+    existing_refs = {c.bom_ref for c in bom.components}
 
-    # Index existing components by canonical package_url or normalized name to detect source_conflict.
-    by_identity: dict[str, list[AnyComponent]] = {}
+    buckets: dict[str, _IdentityBucket] = {}
     for existing in bom.components:
+        keys_for_existing = [f"name:{_norm_pkg(existing.name)}"]
         if isinstance(existing, RegistryEntryComponent) and existing.package_url:
-            by_identity.setdefault(f"purl:{existing.package_url.split('@')[0]}", []).append(
-                existing
-            )
-        by_identity.setdefault(f"name:{existing.name.lower()}", []).append(existing)
+            keys_for_existing.append(f"purl:{existing.package_url.split('@')[0].lower()}")
+        for k in dict.fromkeys(keys_for_existing):
+            b = buckets.setdefault(k, _IdentityBucket())
+            if existing.version:
+                _record_bucket_item(
+                    b.versions, existing.version, existing.bom_ref, "extra_version_conflicts", b
+                )
+            sha = existing.hashes.get("sha256") or existing.properties.get("declared_sha256")
+            if isinstance(sha, str) and sha:
+                _record_bucket_item(b.digests, sha, existing.bom_ref, "extra_digest_conflicts", b)
+            if not existing.bom_ref.startswith("sbom:"):
+                b.local_peers.append(existing)
 
     summary = SBOMImportSummary(
         aibom=bom,
         source_format=source_format,
         document_sha256=doc_sha256,
+        scan_failures=list(local_failures),
     )
+    clean_cache: dict[str, str] = {}
+    safe_short_re = re.compile(r"[0-9A-Za-z.+_-]{1,15}", re.ASCII)
 
+    def _clean_str(val: str) -> str:
+        if (cached := clean_cache.get(val)) is not None:
+            return cached
+        res = val if safe_short_re.fullmatch(val) else neutralize(redact_text(val))
+        if len(clean_cache) < 4096:
+            clean_cache[val] = res
+        return res
+
+    prefix_map = {"machine-learning-model": "sbom:model:", "data": "sbom:data:"}
     for index, entry in enumerate(entries):
-        entry_sha256 = hash_bytes(json_text(entry["raw_entry"]).encode("utf-8"))
         raw_name: str = entry["name"]
-        shown_name = _display_name(raw_name, doc_sha256=doc_sha256, reveal_names=reveal_names)
-        raw_ver = entry["version"]
-        clean_ver = neutralize(redact_text(raw_ver))[:128] if raw_ver else None
-        raw_purl = entry["purl"]
-        clean_purl = neutralize(redact_text(raw_purl))[:512] if raw_purl else None
+        clean_ver = _clean_str(entry["version"])[:128] if entry["version"] else None
+        ref_hash = hashlib.sha256(f"{doc_sha256}:{index}".encode()).hexdigest()[:16]
+        comp_ref = f"{prefix_map.get(entry['type'], 'sbom:pkg:')}{ref_hash}"
+        if comp_ref in existing_refs:
+            continue
+
+        entry_bytes = json.dumps(
+            entry["raw_entry"], sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        ).encode("utf-8")
+        entry_sha256 = (
+            "hmac-sha256:" + hmac.new(key, entry_bytes, hashlib.sha256).hexdigest()
+            if key is not None
+            else hash_bytes(entry_bytes)
+        )
+        cleaned_nm = _clean_str(raw_name.strip()) if reveal_names else ""
+        shown_name, hash_mode = (
+            (cleaned_nm[:200], "plain")
+            if (reveal_names and cleaned_nm)
+            else _display_name(raw_name, key=key, reveal_names=False)
+        )
+        clean_purl = _clean_str(entry["purl"])[:512] if entry["purl"] else None
         sha256_val: str | None = entry["sha256"]
 
-        key_base = (
-            f"purl:{clean_purl.split('@')[0]}"
-            if clean_purl
-            else f"name:{neutralize(raw_name).lower()}"
-        )
-        peers = by_identity.get(key_base, [])
+        cand_keys = [f"name:{_norm_pkg(_clean_str(raw_name))}"]
+        if clean_purl:
+            cand_keys.insert(0, f"purl:{clean_purl.split('@')[0].lower()}")
+        cand_keys = list(dict.fromkeys(cand_keys))
 
         bound_target = digest_index.get(sha256_val) if sha256_val else None
         if bound_target is not None:
             summary.bound_local_count += 1
 
         conflict_msgs: list[str] = []
-        for peer in peers:
-            peer_sha = peer.hashes.get("sha256")
-            if clean_ver and peer.version and peer.version != clean_ver:
-                conflict_msgs.append(
-                    f"version disagrees with {peer.bom_ref} ({peer.version} vs {clean_ver})"
-                )
-            elif sha256_val and peer_sha and peer_sha != sha256_val:
-                conflict_msgs.append(f"digest disagrees with {peer.bom_ref}")
-
-        ref_seed = f"{doc_sha256}:{index}:{raw_name}:{clean_ver or ''}"
-        ref_hash = hashlib.sha256(ref_seed.encode("utf-8")).hexdigest()[:16]
+        seen_peer: set[tuple[str, str]] = set()
+        overflow = 0
+        local_peers: dict[str, AnyComponent] = {}
+        for k in cand_keys:
+            bucket = buckets.setdefault(k, _IdentityBucket())
+            for lp in bucket.local_peers:
+                local_peers.setdefault(lp.bom_ref, lp)
+            if clean_ver:
+                for p_ver, p_ref in bucket.versions.items():
+                    if (p_ref, "ver") not in seen_peer and _versions_conflict(p_ver, clean_ver):
+                        seen_peer.add((p_ref, "ver"))
+                        if len(conflict_msgs) < 3:
+                            conflict_msgs.append(
+                                f"version disagrees with {neutralize(p_ref)} ({_clean_str(p_ver)} vs {clean_ver})"
+                            )
+                        else:
+                            overflow += 1
+                overflow += bucket.extra_version_conflicts
+            if sha256_val:
+                for p_sha, p_ref in bucket.digests.items():
+                    if (p_ref, "sha") not in seen_peer and p_sha != sha256_val:
+                        seen_peer.add((p_ref, "sha"))
+                        if len(conflict_msgs) < 3:
+                            conflict_msgs.append(f"digest disagrees with {neutralize(p_ref)}")
+                        else:
+                            overflow += 1
+                overflow += bucket.extra_digest_conflicts
 
         risks: list[RiskAssessment] = []
         if conflict_msgs:
             summary.conflict_count += 1
-            joined = "; ".join(conflict_msgs)
-            summary.conflicts.append(f"sbom:{ref_hash}: {joined}")
+            joined = "; ".join(conflict_msgs) + (f" (+{overflow} more)" if overflow > 0 else "")
+            if len(summary.conflicts) < MAX_CONFLICT_SUMMARY:
+                summary.conflicts.append(f"{comp_ref}: {joined}")
             risks.append(
-                RiskAssessment(
-                    severity=RiskSeverity.MEDIUM,
-                    category="source_conflict",
-                    detail=(
-                        f"Imported SBOM entry '{shown_name}' conflicts with existing inventory "
-                        f"declaration ({neutralize(joined)}); both records are retained."
-                    ),
-                    recommendation=(
-                        "Reconcile the supplier SBOM with the repository lockfiles and manifests."
-                    ),
+                _conflict_risk(
+                    f"Imported SBOM entry '{shown_name}' conflicts with existing inventory declaration ({neutralize(joined)}); both records are retained.",
+                    "Reconcile the supplier SBOM with repository lockfiles and manifests.",
                 )
             )
-            for peer in peers:
-                peer_risks = getattr(peer, "risks", None)
+            for lp in local_peers.values():
+                peer_risks = getattr(lp, "risks", None)
                 if isinstance(peer_risks, list) and not any(
                     r.category == "source_conflict" for r in peer_risks
                 ):
                     peer_risks.append(
-                        RiskAssessment(
-                            severity=RiskSeverity.MEDIUM,
-                            category="source_conflict",
-                            detail=(
-                                f"Component '{neutralize(peer.name)}' conflicts with imported "
-                                f"SBOM {doc_sha256[:19]} ({neutralize(joined)})."
-                            ),
-                            recommendation=(
-                                "Reconcile the repository manifest or lockfile with the imported SBOM."
-                            ),
+                        _conflict_risk(
+                            f"Component '{neutralize(redact_text(lp.name))}' conflicts with imported SBOM {doc_sha256[:19]} ({neutralize(joined)}).",
+                            "Reconcile repository manifest or lockfile with imported SBOM.",
                         )
                     )
+
+        for k in cand_keys:
+            bucket = buckets[k]
+            if clean_ver:
+                _record_bucket_item(
+                    bucket.versions, clean_ver, comp_ref, "extra_version_conflicts", bucket
+                )
+            if sha256_val:
+                _record_bucket_item(
+                    bucket.digests, sha256_val, comp_ref, "extra_digest_conflicts", bucket
+                )
 
         claims = {
             "imported.sbom": ClaimEvidence(
                 assurance=AssuranceLevel.DECLARED,
                 method=f"sbom-import:{source_format}",
-                scope="component",
+                scope="external-sbom",
                 locator=f"{neutralize(bom_path.name)}#{index}",
             )
         }
+        exact_ver = is_exact_version(clean_ver) or (
+            clean_ver is None and purl_has_exact_version(clean_purl)
+        )
+        pin_state = (
+            "digest-pinned"
+            if (bound_target is not None and exact_ver)
+            else ("pinned-version" if exact_ver else "unpinned")
+        )
         props: dict[str, Any] = {
             "imported_document_sha256": doc_sha256,
             "imported_entry_sha256": entry_sha256,
             "imported_source_format": source_format,
             "name_hashed": not reveal_names,
+            "name_hash_mode": hash_mode,
+            "pinning_state": pin_state,
         }
+        if sha256_val:
+            props["declared_sha256"] = sha256_val
         if bound_target is not None:
             props["local_digest_binding"] = bound_target
 
-        hashes = {"sha256": sha256_val} if sha256_val else {}
-        pinned = bool(clean_ver and _EXACT_VERSION_RE.fullmatch(clean_ver)) or bool(hashes)
-
-        comp: AnyComponent
-        if entry["type"] == "machine-learning-model":
-            comp = ModelComponent(
-                bom_ref=f"sbom:model:{ref_hash}",
-                name=shown_name,
-                version=clean_ver,
-                supplier=(
-                    neutralize(redact_text(entry["supplier"]))[:200]
-                    if (reveal_names and entry["supplier"])
-                    else None
-                ),
-                hashes=hashes,
-                assurance_level=AssuranceLevel.DECLARED,
-                trust_tier=TrustTier.UNKNOWN,
-                properties=props,
-                claims=claims,
-                risks=risks,
+        bom.components.append(
+            _build_imported_component(
+                entry,
+                comp_ref,
+                shown_name,
+                clean_ver,
+                clean_purl,
+                exact_ver,
+                reveal_names,
+                props,
+                claims,
+                risks,
             )
-        else:
-            reg_type = (
-                "pypi"
-                if (clean_purl and clean_purl.startswith("pkg:pypi/"))
-                else (
-                    "npm" if (clean_purl and clean_purl.startswith("pkg:npm/")) else "foreign-sbom"
-                )
-            )
-            props["version_pinned"] = pinned
-            comp = RegistryEntryComponent(
-                bom_ref=f"sbom:pkg:{ref_hash}",
-                name=shown_name,
-                version=clean_ver,
-                registry_type=reg_type,
-                package_url=clean_purl if reveal_names else None,
-                hashes=hashes,
-                assurance_level=AssuranceLevel.DECLARED,
-                trust_tier=TrustTier.UNKNOWN,
-                properties=props,
-                claims=claims,
-                risks=risks,
-            )
-
-        bom.components.append(comp)
-        by_identity.setdefault(key_base, []).append(comp)
+        )
+        existing_refs.add(comp_ref)
         summary.imported_count += 1
 
-    # Ensure completeness reflects imported discovery (never complete!).
-    limitation = f"foreign-sbom:{source_format}:{doc_sha256}"
     if bom.metadata.completeness is None:
+        unobserved = [
+            "effective-authorization",
+            "effective-identity",
+            "filesystem",
+            "live-tools",
+            "network",
+            "runtime",
+        ]
         bom.metadata.completeness = CompletenessClaim(
             scope="sbom-imported",
             collectors_requested=[],
@@ -482,16 +626,10 @@ def import_foreign_sbom(
             scanner_status={},
             scan_failures=list(local_failures),
             source_report_status="incomplete",
-            source_projection_limitations=[limitation],
-            unobserved_surfaces=["runtime", "network", "filesystem"],
+            source_projection_limitations=[f"foreign-sbom:{source_format}:{doc_sha256}"],
+            unobserved_surfaces=unobserved,
         )
-    else:
-        if "sbom" not in bom.metadata.completeness.scope:
-            bom.metadata.completeness.scope = f"{bom.metadata.completeness.scope}+sbom"
-        existing_lims = list(bom.metadata.completeness.source_projection_limitations or [])
-        if limitation not in existing_lims:
-            existing_lims.append(limitation)
-        bom.metadata.completeness.source_projection_limitations = existing_lims
+    elif local_failures:
         for fail in local_failures:
             if fail not in bom.metadata.completeness.scan_failures:
                 bom.metadata.completeness.scan_failures.append(fail)
@@ -499,19 +637,14 @@ def import_foreign_sbom(
     return summary
 
 
-def unread_shape_census(project_root: Path) -> list[UnreadShapeCount]:
-    """Count unread non-control-plane artifact shapes below project_root (advisory by default)."""
+def unread_shape_census_with_failures(
+    project_root: Path,
+) -> tuple[list[UnreadShapeCount], list[str]]:
     failures: list[str] = []
-    counts: dict[str, int] = {
-        "*.ipynb": 0,
-        "n8n/*.json": 0,
-        "*.tf": 0,
-        "Chart.yaml": 0,
-    }
+    counts = {"*.ipynb": 0, "n8n/*.json": 0, "*.tf": 0, "Chart.yaml": 0}
     with ConfinedCollection(project_root, failures) as files:
         for rel in files.iter_files():
-            posix = rel.as_posix()
-            name = rel.name
+            posix, name = rel.as_posix(), rel.name
             if name.endswith(".ipynb"):
                 counts["*.ipynb"] += 1
             elif name.endswith(".tf"):
@@ -523,35 +656,158 @@ def unread_shape_census(project_root: Path) -> list[UnreadShapeCount]:
                 if raw and '"nodes"' in raw and '"connections"' in raw:
                     counts["n8n/*.json"] += 1
     return [
-        UnreadShapeCount(shape=shape, count=count)
-        for shape, count in sorted(counts.items())
-        if count > 0
-    ]
+        UnreadShapeCount(shape=s, count=c) for s, c in sorted(counts.items()) if c > 0
+    ], failures
+
+
+def unread_shape_census(project_root: Path) -> list[UnreadShapeCount]:
+    return unread_shape_census_with_failures(project_root)[0]
+
+
+def _npm_locked_packages(
+    files: ConfinedCollection, prefix: str, path_set: set[str]
+) -> dict[str, str]:
+    resolved: dict[str, str] = {}
+    for lk in ("package-lock.json", "npm-shrinkwrap.json"):
+        cand = f"{prefix}{lk}"
+        if cand in path_set and (raw := files.read_text(cand, missing_ok=True)):
+            try:
+                doc = parse_json_strict(raw, max_bytes=4 * 1024 * 1024)
+            except ValueError:
+                continue
+            if not isinstance(doc, dict):
+                continue
+            for sec in ("packages", "dependencies"):
+                entries = doc.get(sec)
+                if isinstance(entries, dict):
+                    for k, v in entries.items():
+                        if (
+                            isinstance(k, str)
+                            and isinstance(v, dict)
+                            and isinstance(v.get("version"), str)
+                        ):
+                            if sec == "packages" and "node_modules/" not in k:
+                                continue
+                            pkg_key = k.rsplit("node_modules/", 1)[-1] if sec == "packages" else k
+                            resolved.setdefault(pkg_key, v["version"])
+    if f"{prefix}pnpm-lock.yaml" in path_set and (
+        raw := files.read_text(f"{prefix}pnpm-lock.yaml", missing_ok=True)
+    ):
+        try:
+            pkgs = parse_yaml_mapping(raw, max_nodes=32768).get("packages")
+            if isinstance(pkgs, dict):
+                for k in pkgs:
+                    if isinstance(k, str) and (at := k.lstrip("/").rfind("@")) > 0:
+                        cleaned = k.lstrip("/")
+                        resolved.setdefault(cleaned[:at], cleaned[at + 1 :].split("(", 1)[0])
+        except PolicyError:
+            pass
+    if f"{prefix}yarn.lock" in path_set and (
+        raw := files.read_text(f"{prefix}yarn.lock", missing_ok=True)
+    ):
+        cur_pkg: str | None = None
+        for line in raw.splitlines():
+            if line and not line[0].isspace() and line.endswith(":"):
+                hdr = line[:-1].split(",", 1)[0].strip().strip('"')
+                at = hdr.rfind("@")
+                cur_pkg = hdr[:at] if at > 0 else None
+            elif cur_pkg and line.strip().startswith("version "):
+                if ver := line.strip().removeprefix("version").strip().strip('"').strip(":"):
+                    resolved.setdefault(cur_pkg, ver)
+                cur_pkg = None
+    return resolved
+
+
+def _toml_locked_packages(
+    files: ConfinedCollection, prefix: str, lock_names: tuple[str, ...], path_set: set[str]
+) -> dict[str, str]:
+    resolved: dict[str, str] = {}
+    for lk in lock_names:
+        cand = f"{prefix}{lk}"
+        if cand in path_set and (raw := files.read_text(cand, missing_ok=True)):
+            try:
+                pkgs = load_toml(raw).get("package")
+            except ValueError:
+                continue
+            if isinstance(pkgs, list):
+                for item in pkgs:
+                    if (
+                        isinstance(item, dict)
+                        and isinstance(item.get("name"), str)
+                        and isinstance(item.get("version"), str)
+                    ):
+                        resolved.setdefault(_norm_pkg(item["name"]), item["version"])
+    return resolved
+
+
+def _go_sum_modules(
+    files: ConfinedCollection, prefix: str, path_set: set[str]
+) -> set[tuple[str, str]]:
+    mods: set[tuple[str, str]] = set()
+    if f"{prefix}go.sum" in path_set and (
+        raw := files.read_text(f"{prefix}go.sum", missing_ok=True)
+    ):
+        for line in raw.splitlines():
+            parts = line.split()
+            if len(parts) >= 3:
+                mods.add((parts[0], parts[1].removesuffix("/go.mod")))
+    return mods
+
+
+def _join_continued_lines(text: str) -> list[str]:
+    out, buf = [], ""
+    for raw_line in text.splitlines():
+        code = raw_line.split("#", 1)[0].rstrip()
+        if code.endswith("\\"):
+            buf += code[:-1] + " "
+        else:
+            buf += code
+            if buf.strip():
+                out.append(buf.strip())
+            buf = ""
+    if buf.strip():
+        out.append(buf.strip())
+    return out
+
+
+def _py_req_item(
+    raw_req: str, py_locks: dict[str, str] | None = None
+) -> tuple[str, str | None, str, str, dict[str, str]] | None:
+    try:
+        req = Requirement(raw_req)
+    except InvalidRequirement:
+        return None
+    if not _is_ai_package_name(req.name):
+        return None
+    if py_locks and (locked := py_locks.get(_norm_pkg(req.name))):
+        return (req.name, locked, "pypi", "locked", {})
+    spec_s = str(req.specifier) or None
+    return (
+        req.name,
+        spec_s,
+        "pypi",
+        "pinned-version" if is_exact_version(spec_s) else "manifest-only",
+        {},
+    )
 
 
 def _parse_nested_manifest(
     rel_posix: str,
     text: str,
-    sibling_names: set[str],
+    files: ConfinedCollection,
+    path_set: set[str],
+    lock_cache: dict[tuple[str, str], Any],
 ) -> list[RegistryEntryComponent]:
-    name = Path(rel_posix).name
-    parent_dir = str(Path(rel_posix).parent)
+    name, parent_dir = Path(rel_posix).name, str(Path(rel_posix).parent)
     prefix = "" if parent_dir == "." else f"{parent_dir}/"
-    found: list[tuple[str, str | None, str, str]] = []
+    found: list[tuple[str, str | None, str, str, dict[str, str]]] = []
 
     if name == "package.json":
         parsed = parse_json_strict(text)
         if isinstance(parsed, dict):
-            locked = any(
-                f"{prefix}{lk}" in sibling_names
-                for lk in (
-                    "package-lock.json",
-                    "npm-shrinkwrap.json",
-                    "pnpm-lock.yaml",
-                    "yarn.lock",
-                )
+            npm_locks = lock_cache.setdefault(
+                (prefix, "npm"), _npm_locked_packages(files, prefix, path_set)
             )
-            pin_state = "locked" if locked else "manifest-only"
             for section in ("dependencies", "devDependencies", "optionalDependencies"):
                 deps = parsed.get(section)
                 if isinstance(deps, dict):
@@ -561,217 +817,197 @@ def _parse_nested_manifest(
                             and isinstance(spec, str)
                             and _is_ai_package_name(pkg_name)
                         ):
-                            found.append((pkg_name, spec.strip(), "npm", pin_state))
+                            if locked_ver := npm_locks.get(pkg_name):
+                                found.append((pkg_name, locked_ver, "npm", "locked", {}))
+                            else:
+                                st = "pinned-version" if is_exact_version(spec) else "manifest-only"
+                                found.append((pkg_name, spec.strip(), "npm", st, {}))
     elif name.startswith("requirements") and name.endswith(".txt"):
-        for raw_line in text.splitlines():
-            line = raw_line.split("#", 1)[0].strip()
-            if not line or line.startswith("-"):
+        for logical in _join_continued_lines(text):
+            if not logical or logical.startswith("-"):
                 continue
+            sha_matches = _REQ_HASH_RE.findall(logical)
             try:
-                req = Requirement(line)
+                req = Requirement(_REQ_OPT_RE.sub(" ", logical).strip())
             except InvalidRequirement:
                 continue
             if _is_ai_package_name(req.name):
                 spec_str = str(req.specifier) or None
-                pin_state = "digest-pinned" if "--hash=" in raw_line else "manifest-only"
-                found.append((req.name, spec_str, "pypi", pin_state))
+                exact = (
+                    len(req.specifier) == 1
+                    and next(iter(req.specifier)).operator in {"==", "==="}
+                    and "*" not in str(req.specifier)
+                )
+                hashes = (
+                    {"sha256": f"sha256:{sha_matches[0].lower()}"}
+                    if (exact and sha_matches)
+                    else {}
+                )
+                st = "digest-pinned" if hashes else ("pinned-version" if exact else "manifest-only")
+                found.append((req.name, spec_str, "pypi", st, hashes))
     elif name == "pyproject.toml":
         parsed_toml = load_toml(text)
-        locked = any(f"{prefix}{lk}" in sibling_names for lk in ("uv.lock", "poetry.lock"))
-        pin_state = "locked" if locked else "manifest-only"
+        py_locks = lock_cache.setdefault(
+            (prefix, "pypi"),
+            _toml_locked_packages(files, prefix, ("uv.lock", "poetry.lock"), path_set),
+        )
         proj = parsed_toml.get("project")
         if isinstance(proj, dict) and isinstance(proj.get("dependencies"), list):
             for item in proj["dependencies"]:
-                if isinstance(item, str):
-                    try:
-                        req = Requirement(item)
-                    except InvalidRequirement:
-                        continue
-                    if _is_ai_package_name(req.name):
-                        found.append((req.name, str(req.specifier) or None, "pypi", pin_state))
+                if isinstance(item, str) and (entry := _py_req_item(item, py_locks)):
+                    found.append(entry)
     elif name == "setup.cfg":
         parser = configparser.ConfigParser(interpolation=None)
         parser.read_string(text)
         if parser.has_option("options", "install_requires"):
             for line in parser.get("options", "install_requires").splitlines():
-                cleaned = line.strip()
-                if not cleaned:
-                    continue
-                try:
-                    req = Requirement(cleaned)
-                except InvalidRequirement:
-                    continue
-                if _is_ai_package_name(req.name):
-                    found.append((req.name, str(req.specifier) or None, "pypi", "manifest-only"))
+                if line.strip() and (entry := _py_req_item(line.strip())):
+                    found.append(entry)
     elif name == "Cargo.toml":
         parsed_cargo = load_toml(text)
-        locked = f"{prefix}Cargo.lock" in sibling_names
-        pin_state = "locked" if locked else "manifest-only"
+        cargo_locks = lock_cache.setdefault(
+            (prefix, "cargo"), _toml_locked_packages(files, prefix, ("Cargo.lock",), path_set)
+        )
         for sec in ("dependencies", "dev-dependencies"):
             deps = parsed_cargo.get(sec)
             if isinstance(deps, dict):
                 for crate, spec in deps.items():
                     if isinstance(crate, str) and _is_ai_package_name(crate):
-                        ver = (
+                        raw_v = (
                             spec
                             if isinstance(spec, str)
-                            else (
-                                spec.get("version")
-                                if isinstance(spec, dict) and isinstance(spec.get("version"), str)
-                                else None
-                            )
+                            else (spec.get("version") if isinstance(spec, dict) else None)
                         )
-                        found.append((crate, ver, "cargo", pin_state))
+                        ver = raw_v if isinstance(raw_v, str) else None
+                        if locked_ver := cargo_locks.get(_norm_pkg(crate)):
+                            found.append((crate, locked_ver, "cargo", "locked", {}))
+                        else:
+                            found.append((crate, ver, "cargo", "manifest-only", {}))
     elif name == "go.mod":
-        locked = f"{prefix}go.sum" in sibling_names
-        pin_state = "locked" if locked else "manifest-only"
+        go_locks = lock_cache.setdefault((prefix, "go"), _go_sum_modules(files, prefix, path_set))
+        skip_kw = {"module", "go", "require", "replace", "exclude", "retract", ")"}
         for line in text.splitlines():
             parts = line.split("//", 1)[0].strip().split()
-            if not parts:
-                continue
-            if parts[0] == "require" and len(parts) >= 3 and parts[1] != "(":
-                mod, ver = parts[1], parts[2]
-                if _is_ai_package_name(mod):
-                    found.append((mod, ver, "golang", pin_state))
-            elif len(parts) >= 2 and parts[0] not in {
-                "module",
-                "go",
-                "require",
-                "replace",
-                "exclude",
-                "retract",
-                ")",
-            }:
-                mod, ver = parts[0], parts[1]
-                if _is_ai_package_name(mod):
-                    found.append((mod, ver, "golang", pin_state))
-    elif name in {"environment.yml", "environment.yaml", "conda.yml", "conda.yaml"}:
+            if len(parts) >= 3 and parts[0] == "require" and parts[1] != "(":
+                mod_ver: tuple[str, str] | None = (parts[1], parts[2])
+            elif len(parts) >= 2 and parts[0] not in skip_kw:
+                mod_ver = (parts[0], parts[1])
+            else:
+                mod_ver = None
+            if mod_ver and _is_ai_package_name(mod_ver[0]):
+                st = "locked" if mod_ver in go_locks else "manifest-only"
+                found.append((mod_ver[0], mod_ver[1], "golang", st, {}))
+    elif name in _CONDA_NAMES:
         if len(text.encode("utf-8")) > MAX_MANIFEST_YAML_BYTES:
             raise ValueError("conda manifest exceeds size limit")
-        if _yaml_flow_depth_exceeds(text):
-            raise ValueError("conda manifest exceeds flow nesting limit")
-        parsed_conda = yaml.safe_load(text)
-        if isinstance(parsed_conda, dict) and isinstance(parsed_conda.get("dependencies"), list):
+        parsed_conda = parse_yaml_mapping(text, max_nodes=4096)
+        if isinstance(parsed_conda.get("dependencies"), list):
             for dep in parsed_conda["dependencies"]:
                 if isinstance(dep, str):
                     pkg, _, ver = dep.partition("=")
                     if _is_ai_package_name(pkg):
-                        found.append((pkg.strip(), ver.strip() or None, "conda", "manifest-only"))
-    elif name == "devcontainer.json" or name == ".devcontainer.json":
+                        found.append(
+                            (pkg.strip(), ver.strip() or None, "conda", "manifest-only", {})
+                        )
+    elif name in {"devcontainer.json", ".devcontainer.json"}:
         parsed_dev = parse_json_strict(text)
         if isinstance(parsed_dev, dict) and isinstance(parsed_dev.get("image"), str):
             img = parsed_dev["image"].strip()
             if _is_ai_package_name(img):
-                pin_state = "digest-pinned" if "@sha256:" in img else "manifest-only"
-                found.append((img, None, "oci", pin_state))
+                st = "digest-pinned" if "@sha256:" in img else "manifest-only"
+                found.append((img, None, "oci", st, {}))
 
     out: list[RegistryEntryComponent] = []
-    for pkg_name, spec, ecosystem, pin_state in found:
+    for pkg_name, spec, ecosystem, pin_state, hashes in found:
         clean_ver = spec.lstrip("=") if spec and spec.startswith("==") else spec
-        exact = bool(clean_ver and _EXACT_VERSION_RE.fullmatch(clean_ver))
-        seed = f"{rel_posix}:{ecosystem}:{pkg_name}"
-        ref_id = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
+        exact = is_exact_version(clean_ver) or pin_state == "digest-pinned"
+        ref_id = hashlib.sha256(f"{rel_posix}:{ecosystem}:{pkg_name}".encode()).hexdigest()[:16]
+        nested_props: dict[str, Any] = {
+            "manifest_path": rel_posix,
+            "pinning_state": pin_state,
+            "version_pinned": exact and pin_state != "manifest-only",
+        }
+        if hashes.get("sha256"):
+            nested_props["declared_sha256"] = hashes["sha256"]
+        claim = ClaimEvidence(
+            assurance=AssuranceLevel.DECLARED,
+            method="nested-manifest-walk",
+            scope="nested-manifest",
+            collector="registry",
+            locator=rel_posix,
+        )
         out.append(
             RegistryEntryComponent(
                 bom_ref=f"registry:nested:{ref_id}",
                 name=neutralize(redact_text(pkg_name))[:200],
                 version=neutralize(redact_text(clean_ver))[:128] if clean_ver else None,
                 registry_type=ecosystem,
-                source_path=rel_posix,
+                source_path=None,
                 assurance_level=AssuranceLevel.DECLARED,
                 trust_tier=TrustTier.UNKNOWN,
-                properties={
-                    "pinning_state": pin_state,
-                    "version_pinned": exact and pin_state != "manifest-only",
-                },
-                claims={
-                    "manifest": ClaimEvidence(
-                        assurance=AssuranceLevel.DECLARED,
-                        method="nested-manifest-walk",
-                        scope="dependency",
-                        collector="registry",
-                        locator=rel_posix,
-                    )
-                },
+                properties=nested_props,
+                claims={"manifest": claim},
             )
         )
     return out
 
 
 def walk_nested_manifests(project_root: Path) -> tuple[list[RegistryEntryComponent], list[str]]:
-    """Walk manifests below project_root using ConfinedCollection (recording symlink & parse failures)."""
     failures: list[str] = []
     components: list[RegistryEntryComponent] = []
+    lock_cache: dict[tuple[str, str], Any] = {}
     with ConfinedCollection(project_root, failures) as files:
         all_paths = [p.as_posix() for p in files.iter_files()]
         path_set = set(all_paths)
         for posix in all_paths:
-            # Root manifests are already owned by RegistryScanner's root pass except setup.cfg/go.mod/Cargo.toml/conda/devcontainer.
             rel = Path(posix)
-            is_root = rel.parent == Path(".")
-            name = rel.name
-            if is_root and name in {"package.json", "pyproject.toml"}:
+            is_root, name = rel.parent == Path("."), rel.name
+            is_req = name.startswith("requirements") and name.endswith(".txt")
+            if is_root and (name in {"package.json", "pyproject.toml"} or is_req):
                 continue
-            if is_root and name.startswith("requirements") and name.endswith(".txt"):
+            is_dev = (
+                posix.endswith(".devcontainer/devcontainer.json") or posix == ".devcontainer.json"
+            )
+            if not (name in _NESTED_MANIFEST_NAMES or is_req or is_dev):
                 continue
-            if not (
-                name
-                in {
-                    "package.json",
-                    "pyproject.toml",
-                    "setup.cfg",
-                    "Cargo.toml",
-                    "go.mod",
-                    "environment.yml",
-                    "environment.yaml",
-                    "conda.yml",
-                    "conda.yaml",
-                }
-                or (name.startswith("requirements") and name.endswith(".txt"))
-                or posix.endswith(".devcontainer/devcontainer.json")
-                or posix == ".devcontainer.json"
-            ):
-                continue
-            text = files.read_text(posix, missing_ok=True)
-            if text is not None:
+            if (text := files.read_text(posix, missing_ok=True)) is not None:
                 try:
-                    components.extend(_parse_nested_manifest(posix, text, path_set))
-                except (
-                    ValueError,
-                    yaml.YAMLError,
-                    configparser.Error,
-                    RecursionError,
-                ) as exc:
+                    components.extend(
+                        _parse_nested_manifest(posix, text, files, path_set, lock_cache)
+                    )
+                except (ValueError, PolicyError, configparser.Error, RecursionError) as exc:
                     failures.append(
                         f"{neutralize(posix)}: manifest parse failed ({type(exc).__name__})"
                     )
     return components, failures
 
 
-def classify_pinning_state(aibom: AIBOM) -> dict[str, str]:
-    """Compute pinning_state ('digest-pinned', 'locked', 'pinned-version', 'manifest-only', 'unpinned') per server/package."""
+def classify_pinning_state(aibom: AIBOM, *, only_refs: set[str] | None = None) -> dict[str, str]:
     states: dict[str, str] = {}
     for comp in aibom.components:
-        existing_prop = comp.properties.get("pinning_state")
-        if isinstance(existing_prop, str):
-            states[comp.bom_ref] = existing_prop
+        if isinstance(comp.properties.get("pinning_state"), str):
+            states[comp.bom_ref] = comp.properties["pinning_state"]
+            continue
+        if only_refs is not None and comp.bom_ref not in only_refs:
             continue
         if isinstance(comp, RegistryEntryComponent):
-            if comp.hashes:
+            exact_ver = is_exact_version(comp.version) or purl_has_exact_version(comp.package_url)
+            if comp.hashes and exact_ver:
                 state = "locked"
-            elif comp.package_url or comp.properties.get("version_pinned") is True:
+            elif exact_ver or (
+                comp.properties.get("version_pinned") is True and comp.version is None
+            ):
                 state = "pinned-version"
             else:
                 state = "manifest-only"
             comp.properties["pinning_state"] = state
             states[comp.bom_ref] = state
         elif isinstance(comp, MCPServerComponent):
-            if comp.hashes:
-                state = "digest-pinned"
-            elif comp.version_pinned:
-                state = "pinned-version"
-            else:
-                state = "unpinned"
+            state = (
+                "digest-pinned"
+                if comp.hashes
+                else ("pinned-version" if comp.version_pinned else "unpinned")
+            )
             comp.properties["pinning_state"] = state
             states[comp.bom_ref] = state
     return states
