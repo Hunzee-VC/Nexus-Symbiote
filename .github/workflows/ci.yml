@@ -91,8 +91,9 @@ jobs:
   coverage:
     name: Coverage Python 3.12
     runs-on: ubuntu-24.04
-    # Tracing makes the suite two to three times slower, and hosted runners differ in speed
-    # by about 1.6x: the run of main at 7ca2235 hit 55 minutes at 95% with no test failing.
+    # Tracing makes the suite about twice as slow (1.6-2.7x), and hosted runners differ in speed
+    # by about 1.6x: the run of #249's head 57030e26 hit 55 minutes at 95% with no test
+    # failing and passed in 37 on its re-run, and #255's and #265's runs hit the same limit.
     timeout-minutes: 80
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
