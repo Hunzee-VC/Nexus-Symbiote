@@ -675,7 +675,7 @@ PROMPT_TEXT_SUFFIXES = frozenset(
         *(".j2", ".jinja", ".jinja2", ".tmpl", ".tpl", ".hbs", ".mustache", ".prompt"),
     }
 )
-PROMPT_TEMPLATE_TYPE = "prompt-template"
+PROMPT_TEMPLATE_TYPE = "template"
 # Test, build output, documentation, example, dependency and vendored trees hold prompts
 # that illustrate or ship with something else; the mcp collector's source search skips
 # the same names.
@@ -775,6 +775,10 @@ _ESCAPED_FORMATS = {".json": "JSON", ".yaml": "YAML", ".yml": "YAML", ".toml": "
 _MAX_YAML_EVENTS = 20_000
 # The YAML and TOML parsers are pure Python; a longer file is decoded by pattern.
 _MAX_PARSED_CHARACTERS = 65_536
+# PyYAML's cost grows with flow nesting depth, past 20 s for 20,000 brackets; YAML nested
+# deeper is decoded by pattern.
+_MAX_YAML_FLOW_DEPTH = 64
+_FLOW_BRACKETS = re.compile(r"[\[\]{}]")
 _ESCAPE = re.compile(
     r"\\(?:x([0-9A-Fa-f]{2})|u([0-9A-Fa-f]{4})|U([0-9A-Fa-f]{8})|([LPN_e])|.)", re.S
 )
@@ -787,10 +791,11 @@ def _escaped_text(relative: str, text: str) -> str | None:
     """What a JSON, YAML or TOML prompt file, or the YAML front matter of a Markdown
     one, decodes to, or ``None`` when it holds no backslash.
 
-    YAML of at most ``_MAX_YAML_EVENTS`` events and TOML within the dotted-key bound,
-    each up to ``_MAX_PARSED_CHARACTERS``, give the strings they parse to, one per
-    line. JSON, which a host may read leniently, with comments, duplicate keys or lone
-    surrogates, and YAML or TOML that does not parse or is longer, give the text with
+    YAML of at most ``_MAX_YAML_EVENTS`` events and ``_MAX_YAML_FLOW_DEPTH`` nested flow
+    collections and TOML within the dotted-key bound, each up to ``_MAX_PARSED_CHARACTERS``,
+    give the strings they parse to, one per line. JSON, which a host may read leniently,
+    with comments, duplicate keys or lone surrogates, and YAML or TOML that does not
+    parse or is past those bounds, give the text with
     each escape that an odd run of backslashes starts decoded: ``\\xXX``, ``\\uXXXX``,
     ``\\UXXXXXXXX``, YAML's ``\\L``, ``\\P``, ``\\N`` and ``\\_``, and ``\\e``. That
     also decodes YAML and TOML escapes in a literal string or a comment, which only
@@ -805,7 +810,11 @@ def _escaped_text(relative: str, text: str) -> str | None:
         if front is None or "\\" not in front.group(1):
             return None
         kind, body = "YAML", front.group(1)
-    if kind != "JSON" and len(body) <= _MAX_PARSED_CHARACTERS:
+    if (
+        kind != "JSON"
+        and len(body) <= _MAX_PARSED_CHARACTERS
+        and (kind == "TOML" or _flow_depth(body) <= _MAX_YAML_FLOW_DEPTH)
+    ):
         import yaml
 
         try:
@@ -815,6 +824,19 @@ def _escaped_text(relative: str, text: str) -> str | None:
         else:
             return _joined_surrogates("\n".join(strings))
     return _joined_surrogates(_ESCAPE.sub(_unescape, body))
+
+
+def _flow_depth(text: str) -> int:
+    """The deepest bracket nesting in ``text``, counting brackets in strings and comments
+    too: a cheap first check, which ``_yaml_scalars`` repeats on the collections it parses."""
+    depth = deepest = 0
+    for match in _FLOW_BRACKETS.finditer(text):
+        if match.group() in "[{":
+            depth += 1
+            deepest = max(deepest, depth)
+        else:
+            depth = max(depth - 1, 0)
+    return deepest
 
 
 def _unescape(match: re.Match[str]) -> str:
@@ -851,11 +873,22 @@ def _yaml_scalars(text: str) -> list[str]:
     import yaml
 
     strings: list[str] = []
+    flows: list[bool] = []
+    depth = 0
     for count, event in enumerate(yaml.parse(text), start=1):
         if count > _MAX_YAML_EVENTS:
             raise ValueError("too many YAML events")
         if isinstance(event, yaml.ScalarEvent):
             strings.append(event.value)
+        elif isinstance(event, yaml.CollectionStartEvent):
+            flows.append(bool(event.flow_style))
+            depth += flows[-1]
+            # ``_flow_depth`` also counts brackets in quoted strings, where a closing one
+            # hides an opening one from it.
+            if depth > _MAX_YAML_FLOW_DEPTH:
+                raise ValueError("YAML nested too deep")
+        elif isinstance(event, yaml.CollectionEndEvent) and flows:
+            depth -= flows.pop()
     return strings
 
 
@@ -918,6 +951,30 @@ def _read_unless_credential(
     if result is not None:
         result.scan_failures.append(f"{path}: file changed during collection")
     return None
+
+
+# Paths the one finding for unbound prompt templates names before it counts the rest.
+_MAX_NAMED_UNBOUND = 12
+
+
+def _unbound_templates_risk(components: list[PromptComponent]) -> RiskAssessment:
+    names = [f"'{neutralize(component.source_path or '')}'" for component in components]
+    shown = ", ".join(names[:_MAX_NAMED_UNBOUND])
+    more = len(names) - _MAX_NAMED_UNBOUND
+    count = f"{len(names)} prompt template{'s have' if len(names) != 1 else ' has'}"
+    return RiskAssessment(
+        severity=RiskSeverity.LOW,
+        category="completeness",
+        detail=(
+            f"{count} {UNBOUND_VALUES_DETAIL}: the content of each, which is not an "
+            f"instruction file and carries no unkeyed digest: {shown}"
+            + (f" and {more} more" if more > 0 else "")
+            + "."
+        ),
+        recommendation=(
+            f"Set {SOURCE_BINDING_KEY_ENV} during collection to detect changes to these files."
+        ),
+    )
 
 
 def _found_by_name(path: str, prompt_type: str | None, directory: object = None) -> bool:
@@ -1226,8 +1283,10 @@ class PromptScanner(Scanner):
             importers += self._variant_importers(variants, texts, set(importers), files)
             imported: set[str] = set()
             self._follow_imports(importers, texts, recorded, files, result, imported)
+            self._scan_skills(skill_listing, files, result, reported)
             # An import keeps the identity it had before prompt templates were collected,
-            # also when it names the file through a directory symlink.
+            # also when it names the file through a directory symlink. Templates are read
+            # last, so they spend no part of the total-bytes budget that skills had.
             claimed = {*recorded, *walked, *imported}
             self._record_prompt_templates(
                 [path for path in prompt_candidates if path not in claimed],
@@ -1237,7 +1296,6 @@ class PromptScanner(Scanner):
             )
             claimed.update(recorded, prompt_candidates)
             result.surfaces_excluded.extend(_linked_prompt_gaps(links, tree, claimed, files))
-            self._scan_skills(skill_listing, files, result, reported)
             # A spelling that a walk inventories is recorded and checked under its own
             # name; any other is a file the collector does not read.
             inventoried = {component.source_path for component in result.components}
@@ -1405,6 +1463,7 @@ class PromptScanner(Scanner):
                     break
                 looked_up.add(target)
                 if _credential_shaped(target):
+                    imported.add(target)
                     result.surfaces_excluded.append(
                         f"{target}: imported by {importer} but its name says it holds "
                         "credentials; not read or inventoried"
@@ -1412,6 +1471,9 @@ class PromptScanner(Scanner):
                     continue
                 content = self._read_import(importer, target, files, result)
                 if content is None:
+                    imported.add(target)
+                    if (real := files.link_target(target)) is not None:
+                        imported.add(real)
                     continue
                 if depth + 1 > _MAX_IMPORT_DEPTH:
                     result.surfaces_excluded.append(
@@ -1474,7 +1536,8 @@ class PromptScanner(Scanner):
         so its exact bytes may hold configuration or secrets: an unkeyed digest of them
         would let anyone holding the inventory confirm guesses offline (see
         ``source_binding``). Its hash is withheld; with the operator key an HMAC binds
-        the content, and without one the component says the content is unbound.
+        the content, and without one the component says the content is unbound; prompt
+        templates say so together, in one finding (see ``_record_prompt_templates``).
         """
         imported = prompt_type == "imported-instruction"
         subject = "Imported file" if imported else "File"
@@ -1493,6 +1556,8 @@ class PromptScanner(Scanner):
             return
         if binding:
             component.properties.update(binding)
+            return
+        if prompt_type == PROMPT_TEMPLATE_TYPE:
             return
         component.risks.append(
             RiskAssessment(
@@ -1548,24 +1613,33 @@ class PromptScanner(Scanner):
         ``prompt-files``.
 
         Like a rule file, one that is not UTF-8 is a failure. Each is also checked for
-        the hidden characters its escapes spell (see ``_escaped_text``).
+        the hidden characters its escapes spell (see ``_escaped_text``). Without the
+        operator key, the templates whose content is unbound share one low completeness
+        finding, on the first of them, so a library of templates costs one point.
         """
         bound = limits.bound("prompt-files")
+        unbound: list[PromptComponent] = []
         for count, relative in enumerate(candidates, start=1):
             if count > bound.value:
                 result.scan_failures.append(
                     f"{relative}: prompt files from this one on are not inventoried; "
                     + bound.exceeded()
                 )
-                return
+                break
             content = _read_unless_credential(relative, files, result)
             if content is None:
                 continue
             component = self._record(
                 relative, PROMPT_TEMPLATE_TYPE, content, files, result, escapes=True
             )
-            if component is not None:
-                recorded[relative] = component
+            if component is None:
+                continue
+            recorded[relative] = component
+            properties = component.properties
+            if "content_hash_withheld" in properties and "static_value_binding" not in properties:
+                unbound.append(component)
+        if unbound:
+            unbound[0].risks.append(_unbound_templates_risk(unbound))
 
     @staticmethod
     def _list_skills(

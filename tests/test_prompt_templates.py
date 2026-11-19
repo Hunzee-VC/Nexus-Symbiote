@@ -3,6 +3,7 @@ depth, outside the trees the source search skips."""
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from nexus_symbiote.scanners.prompt import (
     PromptScanner,
     withholds_content_hash,
 )
+from tests.support import scaling_ratio
 
 RLO = "\u202e"
 TAG = "\U000e0041"
@@ -63,13 +65,13 @@ def test_prompts_directories_and_prompt_files_are_collected_with_digests(tmp_pat
     assert set(components) == {f"prompt:{path}" for path in expected}
     for path in expected:
         component = components[f"prompt:{path}"]
-        assert component.prompt_type == "prompt-template"
+        assert component.prompt_type == "template"
         assert component.source_path == path
         assert component.content_hash is not None
         assert component.content_hash.startswith("sha256:")
         assert not withholds_content_hash(component)
         assert path in result.surfaces_scanned
-    assert result.surfaces_scanned[: len(expected)] == sorted(expected)
+    assert result.surfaces_scanned[-len(expected) :] == sorted(expected)
 
 
 def test_a_non_markdown_file_under_prompts_keeps_no_unkeyed_digest(tmp_path):
@@ -77,7 +79,7 @@ def test_a_non_markdown_file_under_prompts_keeps_no_unkeyed_digest(tmp_path):
     result = PromptScanner().scan(tmp_path)
     assert not result.scan_failures
     component = _components(result)["prompt:app/prompts/settings.yaml"]
-    assert component.prompt_type == "prompt-template"
+    assert component.prompt_type == "template"
     assert component.content_hash is None
     assert withholds_content_hash(component)
     assert [risk.category for risk in component.risks] == ["completeness"]
@@ -194,8 +196,10 @@ def test_more_prompt_files_than_the_bound_record_the_limit(tmp_path):
     with limits.applied(replace(limits.DEFAULTS, prompt_files=2)):
         result = PromptScanner().scan(tmp_path)
     assert result.scan_failures == [
-        "prompts/p2.md: prompt files from this one on are not inventoried; prompt-files "
-        "limit of 2 exceeded; raise it with --limit prompt-files=N"
+        (
+            "prompts/p2.md: prompt files from this one on are not inventoried; prompt-files "
+            "limit of 2 exceeded; raise it with --limit prompt-files=N"
+        )
     ]
     assert set(_components(result)) == {
         "prompt:prompts/p0.md",
@@ -228,8 +232,10 @@ def test_invalid_utf8_and_credential_named_prompt_files(tmp_path):
     ]
     assert sorted(result.surfaces_excluded) == [
         "prompts/api_key.txt: its name says it holds credentials; not read or inventoried",
-        "prompts/notes.txt: a symlink leads to .env, whose name says it holds credentials; "
-        "not read or inventoried",
+        (
+            "prompts/notes.txt: a symlink leads to .env, whose name says it holds credentials; "
+            "not read or inventoried"
+        ),
     ]
     assert set(_components(result)) == {"prompt:prompts/good.md"}
 
@@ -245,7 +251,7 @@ def test_files_under_prompts_that_are_not_text_are_not_read(tmp_path):
     assert not result.scan_failures
     assert not result.surfaces_excluded
     assert set(_components(result)) == {"prompt:app/prompts/system.md"}
-    assert result.surfaces_scanned[0] == "app/prompts/system.md"
+    assert result.surfaces_scanned[-1] == "app/prompts/system.md"
     assert not any("flow.png" in line or "DS_Store" in line for line in result.surfaces_scanned)
 
 
@@ -305,7 +311,7 @@ def test_an_imported_prompt_file_keeps_the_identity_of_an_import(tmp_path):
         "prompt:CLAUDE.md": "system-prompt",
         "prompt:import:prompts/system.md": "imported-instruction",
         "prompt:import:prompts/extra.txt": "imported-instruction",
-        "prompt:prompts/other.md": "prompt-template",
+        "prompt:prompts/other.md": "template",
     }
     assert components["prompt:CLAUDE.md"].properties["imports"] == ["prompts/system.md"]
     system = components["prompt:import:prompts/system.md"]
@@ -424,7 +430,7 @@ def test_a_file_a_strict_reader_refuses_still_has_its_escapes_decoded(tmp_path, 
     assert not result.scan_failures
     assert not result.surfaces_excluded
     (component,) = result.components
-    assert component.prompt_type == "prompt-template"
+    assert component.prompt_type == "template"
     assert {"bidi_override", "invisible_characters"} & {risk.category for risk in component.risks}
 
 
@@ -524,9 +530,11 @@ def test_a_directory_symlink_to_files_no_walk_inventories_is_a_gap(
     result = PromptScanner().scan(tmp_path)
     assert not result.scan_failures
     assert result.surfaces_excluded == [
-        f"{link}: directory symlink to {directory}; prompt templates under it, such as "
-        f"{alias}, are not inventoried, because the walk reads their files only under "
-        f"{directory}, where they are not prompt templates"
+        (
+            f"{link}: directory symlink to {directory}; prompt templates under it, such as "
+            f"{alias}, are not inventoried, because the walk reads their files only under "
+            f"{directory}, where they are not prompt templates"
+        )
     ]
     assert set(_components(result)) == {"prompt:prompts/clean.md"}
 
@@ -581,8 +589,10 @@ def test_a_case_variant_of_an_instruction_name_under_prompts_stays_a_failure(
     _write(tmp_path, "pkg/prompts/system.md", "Hello.")
     result = PromptScanner().scan(tmp_path)
     assert result.scan_failures == [
-        f"{relative}: case variant of {named} is the active file on case-insensitive file "
-        "systems and is not inventoried"
+        (
+            f"{relative}: case variant of {named} is the active file on case-insensitive file "
+            "systems and is not inventoried"
+        )
     ]
     assert set(_components(result)) == {"prompt:pkg/prompts/system.md"}
 
@@ -624,3 +634,261 @@ def test_an_imported_prompt_template_keeps_its_escape_check(tmp_path, memory, li
     assert not result.scan_failures
     (imported,) = [c for c in result.components if c.prompt_type == "imported-instruction"]
     assert ("tag_characters", "critical") in _findings(imported)
+
+
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        ("a.yaml", lambda size: "[" * size + "\\"),
+        ("a.yml", lambda size: "{" * size + "\\"),
+        ("a.md", lambda size: "---\nk: " + "[" * size + "\\\n---\nBody.\n"),
+        ("b.yaml", lambda size: ("[" * 63 + '"' + "]" * 63 + '",') * (size // 130) + "\\"),
+        (
+            "b.md",
+            lambda size: (
+                "---\nk: " + ("[" * 63 + '"' + "]" * 63 + '",') * (size // 130) + "\\\n---\nBody.\n"
+            ),
+        ),
+    ],
+)
+def test_deeply_nested_yaml_is_decoded_by_pattern_in_linear_time(tmp_path, name, text):
+    roots = {}
+    for scale in (1, 4):
+        root = tmp_path / str(scale)
+        for index in range(10):
+            _write(root, f"prompts/{index}{name}", text(5_000 * scale))
+        roots[scale] = root
+
+    def run(scale: int) -> None:
+        result = PromptScanner().scan(roots[scale])
+        assert len(result.components) == 10
+        assert not result.scan_failures
+
+    assert scaling_ratio(run) < 8
+
+
+@pytest.mark.parametrize("depth", [64, 1_000, 2_000])
+def test_closed_nested_yaml_keeps_its_escape_check(tmp_path, depth):
+    _write(tmp_path, "prompts/a.yaml", "k: " + "[" * depth + '"\\U000E0049"' + "]" * depth + "\n")
+    (component,) = PromptScanner().scan(tmp_path).components
+    assert ("tag_characters", "critical") in _findings(component)
+
+
+def test_a_library_of_unbound_templates_is_one_finding(tmp_path):
+    for index in range(15):
+        _write(
+            tmp_path, f"prompts/tpl_{index:02d}.j2", f"Summarize {{{{ text }}}} in style {index}."
+        )
+    _write(tmp_path, "prompts/readme.md", "Templates.")
+    result = PromptScanner().scan(tmp_path)
+    risks = [risk for component in result.components for risk in component.risks]
+    (risk,) = risks
+    assert (risk.category, risk.severity.value) == ("completeness", "low")
+    assert risk.detail.startswith("15 prompt templates have values not bound in this inventory")
+    assert "'prompts/tpl_11.j2' and 3 more." in risk.detail
+    assert "tpl_12" not in risk.detail
+    assert _components(result)["prompt:prompts/tpl_00.j2"].risks == [risk]
+    assert [c.source_path for c in result.components if not withholds_content_hash(c)] == [
+        "prompts/readme.md"
+    ]
+
+
+def test_a_changed_template_without_its_own_finding_is_unbound_in_diff(tmp_path):
+    from nexus_symbiote.diff import differ
+
+    _write(tmp_path, "prompts/a.j2", "A {{ x }}")
+    _write(tmp_path, "prompts/b.j2", "B {{ x }}")
+    component = _components(PromptScanner().scan(tmp_path))["prompt:prompts/b.j2"]
+    assert not component.risks
+    assert differ._values_unbound(component)
+
+
+def test_cli_passes_a_project_with_fifty_templates(tmp_path):
+    project = tmp_path / "project"
+    _write(project, "CLAUDE.md", "Follow the house style.")
+    for index in range(1, 51):
+        _write(
+            project, f"prompts/tpl_{index:02d}.j2", f"Summarize {{{{ text }}}} in style {index}."
+        )
+    output = tmp_path / "bom.json"
+    run = CliRunner().invoke(main, ["scan", str(project), "--no-project-policy", "-o", str(output)])
+    assert run.exit_code == 0, run.output
+    assert "Scan gate passed" in run.output
+    bom = json.loads(output.read_text())
+    risks = [risk for component in bom["components"] for risk in component.get("risks", [])]
+    assert [(risk["category"], risk["severity"]) for risk in risks] == [("completeness", "low")]
+    assert "50 prompt templates" in risks[0]["detail"]
+    assert "and 38 more." in risks[0]["detail"]
+
+
+@pytest.mark.parametrize(
+    ("relative", "content", "reason"),
+    [
+        (
+            "support/prompts/credentials_help.txt",
+            b"Help.",
+            (
+                "excluded: support/prompts/credentials_help.txt: its name says it holds "
+                "credentials; not read or inventoried"
+            ),
+        ),
+        (
+            "prompts/a.txt",
+            "Hello prompt".encode("utf-16"),
+            "collection: prompts/a.txt: invalid UTF-8 instruction",
+        ),
+    ],
+)
+def test_cli_fails_a_project_whose_prompts_cannot_be_read(tmp_path, relative, content, reason):
+    project = tmp_path / "project"
+    _write(project, "CLAUDE.md", "Follow the house style.")
+    (project / relative).parent.mkdir(parents=True)
+    (project / relative).write_bytes(content)
+    run = CliRunner().invoke(main, ["scan", str(project), "--no-project-policy", "--check"])
+    assert run.exit_code == 1, run.output
+    assert "collection coverage is unknown or incomplete" in run.output
+    assert reason in run.output
+
+
+def test_templates_are_read_after_skills_keep_their_budget(tmp_path):
+    _write(tmp_path, ".claude/skills/pdf/SKILL.md", "---\nname: pdf\n---\nUse it.\n")
+    _write(tmp_path, "prompts/a.txt", "x" * 40_000)
+    _write(tmp_path, "prompts/b.txt", "x" * 25_520)
+    with limits.applied(limits.resolve(["file-bytes=64KiB", "total-bytes=64KiB"], {})):
+        result = PromptScanner().scan(tmp_path)
+    assert result.scan_failures == [
+        "prompts/b.txt: total-bytes limit of 64 KiB exceeded; raise it with --limit total-bytes=N"
+    ]
+    assert set(_components(result)) == {
+        "skill:.claude/skills/pdf/SKILL.md",
+        "prompt:prompts/a.txt",
+    }
+
+
+def test_an_imported_credential_name_under_prompts_is_excluded_once(tmp_path):
+    _write(tmp_path, "CLAUDE.md", "See @prompts/api_key.txt.")
+    _write(tmp_path, "prompts/api_key.txt", "synthetic-placeholder\n")
+    result = PromptScanner().scan(tmp_path)
+    assert result.surfaces_excluded == [
+        (
+            "prompts/api_key.txt: imported by CLAUDE.md but its name says it holds credentials; "
+            "not read or inventoried"
+        )
+    ]
+
+
+def _quoted_closers(depth: int) -> str:
+    """YAML nested ``depth`` flow collections deep whose brackets, counting the closing
+    ones in a quoted string, nest only 40 deep."""
+    return (
+        "k: "
+        + "[" * 40
+        + '"'
+        + "]" * 40
+        + '", '
+        + "[" * (depth - 40)
+        + "'C:\\Logs'"
+        + "]" * depth
+        + "\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("relative", "text", "decoded_by_pattern"),
+    [
+        ("prompts/a.yaml", "k: " + "[" * 64 + "'C:\\Logs'" + "]" * 64 + "\n", False),
+        ("prompts/a.yaml", "k: " + "[" * 65 + "'C:\\Logs'" + "]" * 65 + "\n", True),
+        ("prompts/a.yaml", "k: " + "{a: " * 65 + "'C:\\Logs'" + "}" * 65 + "\n", True),
+        ("prompts/a.yaml", _quoted_closers(64), False),
+        ("prompts/a.yaml", _quoted_closers(65), True),
+        ("prompts/a.toml", "k = " + "[" * 100 + "'C:\\Logs'" + "]" * 100 + "\n", False),
+    ],
+)
+def test_yaml_nested_past_the_flow_bound_is_decoded_by_pattern(
+    tmp_path, relative, text, decoded_by_pattern
+):
+    _write(tmp_path, relative, text)
+    (component,) = PromptScanner().scan(tmp_path).components
+    assert (("line_separators", "low") in _findings(component)) is decoded_by_pattern
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "# " + "]" * 100 + "\nk: " + "[" * 100 + "\\",
+        "k: " + "[" * 100 + '"\\\\"' + "\n# " + "]" * 99 + "[\n",
+        "{" * 100 + "\\",
+    ],
+)
+def test_flow_depth_is_the_deepest_nesting(text):
+    assert prompt_module._flow_depth(text) == 100
+
+
+def test_templates_bound_by_the_operator_key_carry_no_finding(tmp_path, monkeypatch):
+    from nexus_symbiote.scanners.source_binding import SOURCE_BINDING_KEY_ENV
+
+    _write(tmp_path, "prompts/a.j2", "A {{ x }}")
+    _write(tmp_path, "prompts/b.j2", "B {{ x }}")
+    monkeypatch.setenv(SOURCE_BINDING_KEY_ENV, "prompt-template-key-" + "0123456789abcdef" * 2)
+    components = PromptScanner().scan(tmp_path).components
+    assert len(components) == 2
+    assert all("static_value_binding" in c.properties for c in components)
+    assert all(withholds_content_hash(c) and not c.risks for c in components)
+    monkeypatch.delenv(SOURCE_BINDING_KEY_ENV)
+    unkeyed = PromptScanner().scan(tmp_path).components
+    assert [len(c.risks) for c in unkeyed] == [1, 0]
+
+
+def test_templates_recorded_before_the_bound_keep_their_finding(tmp_path):
+    for index in range(3):
+        _write(tmp_path, f"prompts/t{index}.j2", f"T{index} {{{{ x }}}}")
+    with limits.applied(replace(limits.DEFAULTS, prompt_files=2)):
+        result = PromptScanner().scan(tmp_path)
+    assert result.scan_failures == [
+        (
+            "prompts/t2.j2: prompt files from this one on are not inventoried; prompt-files "
+            "limit of 2 exceeded; raise it with --limit prompt-files=N"
+        )
+    ]
+    (risk,) = [risk for component in result.components for risk in component.risks]
+    assert risk.detail.startswith("2 prompt templates have values not bound")
+    assert risk.detail.endswith(": 'prompts/t0.j2', 'prompts/t1.j2'.")
+
+
+@pytest.mark.parametrize(
+    ("count", "start", "end"),
+    [
+        (1, "1 prompt template has values not bound", ": 'prompts/t00.j2'."),
+        (12, "12 prompt templates have values not bound", ", 'prompts/t11.j2'."),
+    ],
+)
+def test_the_shared_finding_names_every_template_up_to_twelve(tmp_path, count, start, end):
+    for index in range(count):
+        _write(tmp_path, f"prompts/t{index:02d}.j2", f"T{index} {{{{ x }}}}")
+    (risk,) = [r for c in PromptScanner().scan(tmp_path).components for r in c.risks]
+    assert risk.detail.startswith(start)
+    assert risk.detail.endswith(end)
+
+
+@pytest.mark.parametrize(
+    ("link", "target", "link_text"),
+    [
+        ("prompts/notes.txt", ".env", "../.env"),
+        ("prompts/notes.md", "prompts/credentials.txt", "credentials.txt"),
+    ],
+)
+def test_an_import_through_a_symlink_to_a_credential_file_is_excluded_once(
+    tmp_path, link, target, link_text
+):
+    _write(tmp_path, "CLAUDE.md", f"See @{link}.")
+    _write(tmp_path, target, "A=1\n")
+    (tmp_path / "prompts").mkdir(exist_ok=True)
+    (tmp_path / link).symlink_to(link_text)
+    result = PromptScanner().scan(tmp_path)
+    assert result.surfaces_excluded == [
+        (
+            f"{link}: imported by CLAUDE.md but a symlink leads to {target}, whose name says "
+            "it holds "
+            "credentials; not read or inventoried"
+        )
+    ]

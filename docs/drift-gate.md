@@ -20,8 +20,9 @@ or `notify` command, or the arguments of a command, an HTTP header value or the 
 of a permission rule, which it keeps by shape only; see
 [source binding](verification-source-binding.md). None of those changes alters the
 record, so a record that holds such values without the key carries a low `completeness`
-finding saying its values are not bound in this inventory, and `diff` raises a medium
-alert for it on every comparison, changed or not. A keyless `diff --fail-on-alert`
+finding saying its values are not bound in this inventory, or, as a prompt template,
+shares one such finding with the other templates, and `diff` raises a medium alert for
+each such record on every comparison, changed or not. A keyless `diff --fail-on-alert`
 therefore fails on such a record; the alert says the values are unbound and records no
 value. The [known limitations](known-limitations.md) list those surfaces.
 
@@ -91,9 +92,9 @@ request with itself, and that gate can never fail.
   of 32 or more characters for the baseline and every candidate scan. Without it, the
   values described above cannot alert on a change: every record that carries the low
   `completeness` finding for unbound values, whether an MCP server, an IDE agent, a RAG
-  source, an A2A agent or client, a prompt file whose content hash is withheld, or the
-  repository agent when redaction changed an `agent.yaml` field,
-  raises a medium alert on every comparison instead, so `diff --fail-on-alert` fails on
+  source, an A2A agent or client, or the repository agent when redaction changed an
+  `agent.yaml` field, and every prompt file whose content hash is withheld, with or
+  without that finding, raises a medium alert on every comparison instead, so `diff --fail-on-alert` fails on
   it rather than reporting no change; the alert does not name the value. The same
   alert is raised when only one of the two scans has the key, and the digests of the
   IDE settings files digested as read then differ. With a different key, every MCP,
@@ -149,7 +150,7 @@ then notes, then the added, removed and modified components and relationships.
 | Trust tier or signing status raised | medium: a snapshot is written unsigned, so a raised label is a claim to review |
 | Risk findings added | the highest added severity, at least medium |
 | Risk findings removed; any other field changed, including snapshot metadata such as the producer's `tool_name` or `tool_vendor` | medium |
-| Values unbound in either snapshot: the record has no keyed binding (`static_value_binding`) and carries a `completeness` finding saying its values are not bound in this inventory, as MCP launch values, IDE agent settings values, RAG and A2A values and the content of a prompt file whose content hash is withheld, such as an `@path` import that is not Markdown, do without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`. Raised on every comparison, changed or not, and names no value: `MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections.` for an MCP server, `Values are unbound in one snapshot without the binding key; a change to them is undetectable and no value is recorded. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections.` for any other record | medium |
+| Values unbound in either snapshot: the record has no keyed binding (`static_value_binding`) and either carries a `completeness` finding saying its values are not bound in this inventory, as MCP launch values, IDE agent settings values and RAG and A2A values do without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, or has its content hash withheld, as a prompt file has without the key, such as an `@path` import that is not Markdown or a prompt template, which shares one such finding with the other templates. Raised on every comparison, changed or not, and names no value: `MCP server launch values are unbound in one snapshot; argument, environment and endpoint-path drift is undetectable. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections.` for an MCP server, `Values are unbound in one snapshot without the binding key; a change to them is undetectable and no value is recorded. Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during both collections.` for any other record | medium |
 | Relationship added | medium; high for `invokes`, `delegates-to` and `acts-as-identity` |
 | Relationship removed | medium; high for `uses-guardrail` and `approved-under` |
 | Relationship kept but its assurance or conditions changed | high |

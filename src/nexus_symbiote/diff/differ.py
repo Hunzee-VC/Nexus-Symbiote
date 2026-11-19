@@ -39,12 +39,15 @@ def _values_unbound(component: AnyComponent) -> bool:
 
     The collector records that as a low completeness finding naming
     ``UNBOUND_VALUES_DETAIL``: MCP launch values, IDE settings values, RAG and A2A
-    values, or the content of a prompt file whose digest is withheld. Nothing else in
-    the record changes when one of those values does, so diff cannot see the change
-    and must not report the snapshots as equal.
+    values, or the content of a prompt file whose digest is withheld. Prompt templates
+    share one such finding, so a withheld digest without a binding counts too. Nothing
+    else in the record changes when one of those values does, so diff cannot see the
+    change and must not report the snapshots as equal.
     """
     if component.properties.get("static_value_binding"):
         return False
+    if component.properties.get("content_hash_withheld"):
+        return True
     return any(
         risk.category == "completeness" and UNBOUND_VALUES_DETAIL in risk.detail
         for risk in getattr(component, "risks", ())
