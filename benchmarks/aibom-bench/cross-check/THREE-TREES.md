@@ -3,12 +3,77 @@
 Three branches of this repository each hold a benchmark called AIBOM-Bench at
 `benchmarks/aibom-bench/`, written on 18 November 2026 by three authors who did not see each
 other's work. This is a comparison of the three by a reviewing agent that wrote none of
-them, asked to assume none is better. It was produced in the session that wrote tree B.
-A second agent's re-check of its numbers was still running when this was committed.
+them, asked to assume none is better. It was produced in the session that wrote tree B,
+and it sits in tree B's directory only because that is the branch its session can push to.
+A second agent then re-derived its numbers; what that changed is in the next section, and
+the two statements it corrected are marked where they stand.
 
 ## Summary
 
 All three trees sit at benchmarks/aibom-bench and every pair conflicts on README.md and SPEC.md (plus score.py for A+C and docs/README.md for B+C), so no second branch can land as it stands; each merges cleanly with main alone. All three graded Nexus SymBiote 0.2.0 at a13b622-equal source (73.0 B, 67.9 C, 65.3 C) and agree on its main gaps (model references in code, datasets, framework-defined agents, poisoned tool descriptions, literal credentials not raised) and on its safe behaviour; I reproduced its detections in all three from regenerated corpora, and the points where they disagree trace to matching rules or corpus layout, not to tool mode or commit. The counts the owner's draft attributes to 'AIBOM-Bench v1.1' cannot be derived from tree B (the tree named 1.1.0) either, the trees rank the other tools differently, and none of them is the pre-registered third-party round that main's roadmap row L4 asks for.
+
+## Second check (19 November)
+
+A second agent re-derived the numbers below from its own scans and counts, without the
+first one's working files. Every count, score, rank and path statement it could run held,
+apart from the two corrections in items 2 and 3. Item 1 was then confirmed a third time by
+reading tree A's committed outputs.
+
+1. **Tree A's counts for SymBiote are upper bounds.** Its scorer credits a labelled item
+   when the item's token occurs anywhere in the tool's output. Three of SymBiote's credits
+   are not a record of that item. `rag.qdrant` matches only the container image entry
+   `qdrant/qdrant:v1.12.1`, which is credited again as `img.qdrant`. `rag.weaviate`, on
+   corpus B, matches only the npm entry `weaviate-client`. `prompt.relocated-claude-md`
+   matches only a scan-failure line that says the file "is not inventoried". Counted by
+   record, SymBiote identifies 36 of 76 and 16 of 53 components, and vector stores are 2 of 3
+   and 0 of 2, where T2 and T3 row 16 give tree A's stored 3 of 3 and 1 of 2. The roadmap on
+   tree A's branch lists vector-store 3 of 3 and 1 of 2 as a level to hold.
+2. **Correction to T4.** On tree A's corpus B, 0.247 is the `cdxgen -t mcp` entry. Plain
+   cdxgen is 0.200, which is below Trusera's 0.239, not above it.
+3. **Correction to T6.** A search over every grouping of tree B's 20 kinds finds 86 that
+   give 9 items with 1 found, not one. Datasets with vector stores is the only one inside
+   the data pillar. The conclusion stands: no grouping that includes models has 16 items,
+   and no kind named agent gives 0 of 2.
+4. **Ranks move with the weights inside one tree.** Tree B's own sensitivity table
+   (results/2026-11-18/RESULTS.md:84-96) puts SymBiote first under equal weight per group
+   and fourth on inventory alone. T4 gives one rank per tree.
+5. **The causes in T3 rows 13 to 15 were tested directly.** With tree B's compose file,
+   npm manifest and one prompt file copied to the places SymBiote reads, it recorded three
+   images, both npm SDKs and the prompt: 68 components became 76.
+6. **One more decoy.** On tree A's corpus B, SymBiote reports the vendored configuration
+   `vendor/pkg/.cursor/mcp.json` as an MCP server. It does not report the `node_modules`
+   decoys of tree A's corpus A or of tree B.
+7. **The relocated layout was built.** With each tree under its own directory name there is
+   one conflict (`docs/README.md`). Eight links from tree A's roadmap, plan and
+   `benchmarks/README.md` then break and take 14 changed lines, tree B's test takes one,
+   and the hygiene check, ruff and 52 tests pass. The cost was also measured: tracked paths
+   go from 598 to 1,386 and the source distribution from 2.78 MB to 4.19 MB unless
+   `pyproject.toml` excludes the benchmark directories. Of the 785 added benchmark files,
+   691 are tree A's raw tool outputs.
+
+**What this changes in the recommendation.** Point 5 called the rename the step that
+"commits to nothing". It is not needed when one tree lands and the other two stay as
+branches or tags cited by commit, and it is not free when all three land. The order is
+therefore:
+
+- Decide what the benchmark is for first (point 2).
+- If it is regression evidence and a gap list, with no ranking before main's L4 round, land
+  at most one harness and cite the other two by commit. Three siblings in `main` would put
+  three rankings that contradict each other there and postpone the choice of one detection
+  rule, which item 1 shows matters.
+- Only if all three are wanted in `main`, use the relocated layout of item 7, with a
+  source-distribution exclusion and no ranking table in the index.
+
+Facts for choosing one, which is the maintainer's choice because this comparison comes from
+the session that wrote tree B:
+
+| Tree | For | Against |
+|---|---|---|
+| A | The only one a third party can rescore from committed raw outputs; its branch's roadmap cites it | Its matcher needs the tightening in item 1; it does not measure the pair |
+| B | The only one wired into the test suite; measures ShadowScan and the pair | Ten of its 100 points are assessed, and raters judge its risk and drift verdicts; it commits no raw tool outputs |
+| C | Every point is computed; seeded, with a positive control | No test in the suite; its branch carries 19 paths outside the benchmark |
+
+The other points of the recommendation stand.
 
 Conventions. Tree A = origin/claude/laughing-hawking-5f9x78 at 326cfc51; tree B = origin/claude/modest-gauss-ymoyc9 at 30abed25; tree C = origin/claude/nice-archimedes-368l54 at 071ed932. Paths without a prefix are relative to benchmarks/aibom-bench/ in the named tree. "(ran)" marks what I ran today; everything else is read from the tree unless marked "(inferred)".
 
@@ -164,7 +229,7 @@ Where the orders differ, with what the trees record as different (causal link no
 | OWASP AIBOM Generator | graded 22.7 from source in A; B and C decline to grade it | |
 | Only in one tree | k8s-aibom, ai-finder, ai-agentbom (A); Snyk Agent Scan (B); aibom-scanner, AIBoMGen CLI (C) | |
 
-Coverage-only orders. A corpus A: agent-bom 0.615, SymBiote 0.555, Cisco 0.504, Trusera 0.370, ai-finder 0.314, cdxgen 0.305, ai-agentbom 0.164. A corpus B: agent-bom 0.575, Cisco 0.445, SymBiote 0.357, ai-agentbom 0.254, cdxgen 0.247, Trusera 0.239, ai-finder 0.197. B components of 92: pair 55, agent-bom 52, Cisco 51, SymBiote 48, cdxgen 45, Trusera 34, ShadowScan 33, AIROM 31, Syft 14, AIsbom 13, Snyk 7. C components of 68: pair 54, ShadowScan 44, SymBiote 43, Cisco 40, agent-bom 39, cdxgen 31, Trusera 23, AIROM 22, aibom-scanner 19, Syft 11, AIsbom 11, AIBoMGen 7.
+Coverage-only orders. A corpus A: agent-bom 0.615, SymBiote 0.555, Cisco 0.504, Trusera 0.370, ai-finder 0.314, cdxgen 0.305, ai-agentbom 0.164. A corpus B: agent-bom 0.575, Cisco 0.445, SymBiote 0.357, ai-agentbom 0.254, cdxgen 0.247 (corrected: this is the `-t mcp` entry; plain cdxgen is 0.200, below Trusera), Trusera 0.239, ai-finder 0.197. B components of 92: pair 55, agent-bom 52, Cisco 51, SymBiote 48, cdxgen 45, Trusera 34, ShadowScan 33, AIROM 31, Syft 14, AIsbom 13, Snyk 7. C components of 68: pair 54, ShadowScan 44, SymBiote 43, Cisco 40, agent-bom 39, cdxgen 31, Trusera 23, AIROM 22, aibom-scanner 19, Syft 11, AIsbom 11, AIBoMGen 7.
 
 ## T5. Path collisions and trial merges (ran)
 
@@ -250,7 +315,7 @@ Read against that text (inferred): each tree has one author working in the grade
 
 4. All three sessions: give the three benchmarks distinct names. Today 1.0, 1.1.0 and 1.0.0 are unrelated things under one name, which is how the "v1.1" citation went wrong.
 
-5. The step that options 2, 3 and 4 all need, and that commits to nothing, is to move each tree to its own directory name and leave benchmarks/aibom-bench free for whatever becomes canonical. Who changes what:
+5. (Revised by the second check above: decide the purpose first; the rename is needed only if more than one tree lands.) The step that options 3 and 4 need is to move each tree to its own directory name and leave benchmarks/aibom-bench free for whatever becomes canonical. Who changes what:
    - Tree A's session: the path sentence at ROADMAP.md:22-23, 4 path mentions in the roadmap, 15 in the enhancement plan, the benchmarks/README.md section; also the decoy count at SPEC.md:82 and REPORT.md:11.
    - Tree B's session: tests/test_aibom_bench.py:16, its docs/README.md row, the counts at README.md:17-18 and :61; aibom_bench/runner.py:117 only if the directory depth changes.
    - Tree C's session: its docs/README.md row; and either split the 19 non-benchmark paths into their own pull request or state in the pull request that product changes are included.
@@ -267,6 +332,6 @@ Read against that text (inferred): each tree has one author working in the grade
 - Tree A's strace-derived results (egress, execve, symlink opens) could not be recomputed: the logs are not committed. Its scorer needed CycloneDX 1.5 and 1.6 and SARIF schemas from the session scratchpad, not from the repository.
 - gitleaks is not installed here, so I have no secret-scanner verdict for the literal sentinels in tree A or the literal key in tree C.
 - Beyond the hygiene script, ruff on the three benchmark directories and tree B's one test file, I ran no repository gate (no mypy, no full suite, no `make quality`).
-- I built no merged or relocated tree. The statements that distinct directory names leave only docs/README.md to merge, and the list of path fixes per tree, come from path lists and reading the code.
+- I built no merged or relocated tree. The statements that distinct directory names leave only docs/README.md to merge, and the list of path fixes per tree, come from path lists and reading the code. (The second check built it; see item 7 there.)
 - The owner's draft is not in the repository; its counts were checked only against the three trees. External facts (tool versions, whether cdxgen 13.8.0 was released) were not checked: nothing left this machine.
 - The generated corpora were deleted from scratch after use because they hold live hostile payloads; the commands in the facts regenerate them. Copies of the tree B and tree C ground truths with the secret values removed are kept in out/.
