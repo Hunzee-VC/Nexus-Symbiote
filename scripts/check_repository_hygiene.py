@@ -63,10 +63,15 @@ STABLE_IDENTIFIERS = ((Path("src/nexus_symbiote/attestation.py"), "PREDICATE_TYP
 # v0.1.0 was published while the Hunzee-VC organization owned the repository, and its
 # attestation certificate names that repository and workflow. The README's verified
 # install of that release must pass the same identity, or verification cannot succeed.
+# A fenced block may name it only where its verify command names that release's wheel,
+# so a later release verified under the old identity is reported as stale.
 SIGNED_RELEASE_IDENTITIES = {
     Path("README.md"): (
-        "--repo Hunzee-VC/Nexus-Symbiote",
-        "--signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml",
+        "nexus_symbiote-0.1.0-py3-none-any.whl",
+        (
+            "--repo Hunzee-VC/Nexus-Symbiote",
+            "--signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml",
+        ),
     ),
 }
 
@@ -244,6 +249,40 @@ def stable_identifiers(root: Path) -> list[str]:
     return values
 
 
+def without_signed_release_identities(text: str, wheel: str, identities: tuple[str, ...]) -> str:
+    """Blank ``identities`` inside fenced blocks whose ``gh attestation verify`` names ``wheel``.
+
+    Outside such a block, and in a block that verifies any other artifact, the
+    identities stay in the text and the owner check reports them as stale.
+    """
+    verifies = re.compile(r"gh attestation verify\s+(?:\S*/)?" + re.escape(wheel) + r"(?!\S)")
+    output: list[str] = []
+    block: list[str] = []
+    fence = ""
+    for line in text.splitlines(keepends=True):
+        stripped = line.lstrip()
+        if stripped.startswith(("```", "~~~")):
+            marker = stripped[:3]
+            if fence == marker:
+                body = "".join(block)
+                if verifies.search(body) is not None:
+                    for identity in identities:
+                        body = body.replace(identity, " ")
+                output.append(body)
+                block = []
+                fence = ""
+            elif not fence:
+                fence = marker
+            else:
+                block.append(line)
+                continue
+            output.append(line)
+            continue
+        (block if fence else output).append(line)
+    output.extend(block)
+    return "".join(output)
+
+
 def owner_issues(root: Path, files: list[Path]) -> list[str]:
     """Reject links to this repository under a stale owner.
 
@@ -269,8 +308,10 @@ def owner_issues(root: Path, files: list[Path]) -> list[str]:
         except (OSError, ValueError, UnicodeError):
             errors.append(f"{relative}: source is unavailable or unsafe")
             continue
-        for identifier in (*identifiers, *SIGNED_RELEASE_IDENTITIES.get(relative, ())):
+        for identifier in identifiers:
             text = text.replace(identifier, " ")
+        if relative in SIGNED_RELEASE_IDENTITIES:
+            text = without_signed_release_identities(text, *SIGNED_RELEASE_IDENTITIES[relative])
         # The bare owner/repo slug is matched too: a transfer leaves it stale in
         # command examples, where it is an argument rather than a link.
         name = re.escape(repository)

@@ -306,22 +306,47 @@ def test_without_the_identifier_source_a_quoted_identifier_is_stale(tmp_path):
     assert len(hygiene.owner_issues(tmp_path, [Path("guide.md")])) == 1
 
 
+def _verify_block(wheel: str) -> str:
+    return (
+        "```bash\n"
+        f"gh attestation verify dist/{wheel} --repo Hunzee-VC/Nexus-Symbiote \\\n"
+        "  --signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml\n"
+        "```\n"
+    )
+
+
+STALE = "links to Hunzee-VC/Nexus-Symbiote instead of aisecnomad/Nexus-Symbiote"
+
+
 def test_the_signed_release_identity_is_accepted_only_in_the_readme(tmp_path):
     _project(tmp_path, homepage="https://github.com/aisecnomad/Nexus-Symbiote")
-    command = (
-        "gh attestation verify w.whl --repo Hunzee-VC/Nexus-Symbiote \\\n"
-        "  --signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml\n"
-    )
+    block = _verify_block("nexus_symbiote-0.1.0-py3-none-any.whl")
     for name in ("README.md", "guide.md"):
-        tmp_path.joinpath(name).write_text(command)
+        tmp_path.joinpath(name).write_text(block)
     assert hygiene.owner_issues(tmp_path, [Path("README.md")]) == []
-    assert hygiene.owner_issues(tmp_path, [Path("guide.md")]) == [
-        "guide.md: links to Hunzee-VC/Nexus-Symbiote instead of aisecnomad/Nexus-Symbiote"
-    ]
+    assert hygiene.owner_issues(tmp_path, [Path("guide.md")]) == [f"guide.md: {STALE}"]
     tmp_path.joinpath("README.md").write_text(
-        command + "git clone https://github.com/Hunzee-VC/Nexus-Symbiote.git\n"
+        block + "git clone https://github.com/Hunzee-VC/Nexus-Symbiote.git\n"
     )
     assert len(hygiene.owner_issues(tmp_path, [Path("README.md")])) == 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        _verify_block("nexus_symbiote-0.2.0-py3-none-any.whl"),
+        _verify_block("nexus_symbiote-0.1.0-py3-none-any.whl.sig"),
+        _verify_block("nexus_symbiote-0.1.0-py3-none-any.whl").strip("`bash\n") + "\n",
+        "```bash\necho nexus_symbiote-0.1.0-py3-none-any.whl\n```\n"
+        "```bash\ngh attestation verify w.whl --repo Hunzee-VC/Nexus-Symbiote\n```\n",
+        _verify_block("nexus_symbiote-0.1.0-py3-none-any.whl").rsplit("```", 1)[0],
+    ],
+    ids=["later-release", "other-artifact", "outside-a-fence", "other-block", "unterminated"],
+)
+def test_the_signed_release_identity_is_stale_outside_the_release_verify_block(tmp_path, text):
+    _project(tmp_path, homepage="https://github.com/aisecnomad/Nexus-Symbiote")
+    tmp_path.joinpath("README.md").write_text(text)
+    assert hygiene.owner_issues(tmp_path, [Path("README.md")]) == [f"README.md: {STALE}"]
 
 
 def test_unparseable_homepage_fails_closed(tmp_path):
