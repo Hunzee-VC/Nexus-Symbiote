@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Positive control for AIBOM-Bench: a deliberately unsafe "scanner".
+"""Positive control for the seeded hostile corpus: a deliberately unsafe "scanner".
 
 It does everything a scanner must never do with an untrusted repository, so that
 every safety probe of the benchmark can be shown to fire inside the sandbox:

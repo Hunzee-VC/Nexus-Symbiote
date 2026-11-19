@@ -1,4 +1,10 @@
-# AIBOM-Bench
+# Seeded hostile corpus
+
+**The ranking here is self-authored and provisional.** The benchmark, its scorer and its
+ranking were written inside the Nexus SymBiote repository, and the tools it ranks include
+Nexus SymBiote and its discovery companion Nexus-ShadowScan. Treat the ranking as
+provisional until a party outside the project runs a corpus (roadmap row L4 / R1.2-5 on
+[#267](https://github.com/Hunzee-VC/Nexus-Symbiote/pull/267)).
 
 A tool-neutral, executable benchmark for AI bill-of-materials generators. It scores
 how completely a tool inventories the AI supply chain of a repository (data, models,
@@ -16,11 +22,20 @@ and how safely it behaves when that repository is hostile.
 This directory is self-contained. It imports nothing from `nexus_symbiote`; Nexus
 SymBiote is graded as one tool among the others.
 
+Until 19 November 2026 this tree was called AIBOM-Bench on the branch that added it, and
+corpora generated before then label their ground truth `aibom-bench`; that name and
+`benchmarks/aibom-bench/` now belong to the tree of
+[#267](https://github.com/Hunzee-VC/Nexus-Symbiote/pull/267).
+
 ## Run it
 
 Prerequisites: Linux, root on a **disposable** machine or VM (the runner uses
 `unshare -n` and `setpriv`), `strace`, Python 3.11+, and each tool you want to grade.
 The corpus contains live hostile payloads, so do not generate it on a workstation.
+
+The paths below are those of the published run, whose directory name predates the
+rename. Any root works, but the published corpus digest is reproducible only with the
+corpus at `/opt/aibom-bench/corpus2`.
 
 1. Create the unprivileged sandbox user. Tools run as this user, so they cannot write
    the corpus or the results of other tools:

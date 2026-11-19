@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Score AIBOM-Bench runs against ground truth.
+"""Score runs over the seeded hostile corpus against ground truth.
 
 Every tool's output files (CycloneDX, SPDX 3, SPDX 2, SARIF, or native JSON) are
 reduced to two record kinds, components and findings, by format-generic readers.
@@ -1197,7 +1197,7 @@ def scorecard(results: dict[str, Any]) -> str:
     head = ["Rank", "Tool", "Version", "Grade", "Score", "In-scope", "Risk findings"]
     head += doms + ["Gates"]
     lines = [
-        f"# AIBOM-Bench {results['version']} scorecard",
+        f"# Seeded hostile corpus {results['version']} scorecard",
         "",
         f"Seed `{results['seed']}`, corpus digest `{results['corpus_digest'][:16]}`. "
         "Ranked by grade (after gates), then score. Domain columns are percentages; Score is "

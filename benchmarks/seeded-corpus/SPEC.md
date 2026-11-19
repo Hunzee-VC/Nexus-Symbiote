@@ -1,9 +1,9 @@
-# AIBOM-Bench 1.0 specification
+# Seeded hostile corpus 1.0 specification
 
-AIBOM-Bench measures how well a tool inventories the AI supply chain of a repository
-(data, models, tools, and agent components) and how safely it does so when the
-repository is hostile. It is executable: every point comes from running the tool in a
-sandbox and comparing its output with machine-readable ground truth. No points come
+The seeded hostile corpus measures how well a tool inventories the AI supply chain of a
+repository (data, models, tools, and agent components) and how safely it does so when
+the repository is hostile. It is executable: every point comes from running the tool in
+a sandbox and comparing its output with machine-readable ground truth. No points come
 from a tool's documentation or feature list.
 
 ## Why an AI-BOM exists, and what the benchmark therefore rewards

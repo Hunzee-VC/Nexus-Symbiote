@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run AI-BOM tools over the AIBOM-Bench corpus inside a confinement sandbox.
+"""Run AI-BOM tools over the seeded hostile corpus inside a confinement sandbox.
 
 Each command runs in fresh network, PID and mount namespaces (only loopback up,
 private /tmp, /var/tmp and /dev/shm), as an unprivileged user with no_new_privs,

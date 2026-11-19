@@ -1,4 +1,10 @@
-# AIBOM-Bench 1.0 results
+# Seeded hostile corpus 1.0 results
+
+**This ranking is self-authored and provisional.** The benchmark, its scorer and this
+ranking were written inside the Nexus SymBiote repository, and Nexus SymBiote,
+Nexus-ShadowScan and their pipeline take the first three places. Treat the ranking as provisional until a
+party outside the project runs a corpus (roadmap row L4 / R1.2-5 on
+[#267](https://github.com/Hunzee-VC/Nexus-Symbiote/pull/267)).
 
 Run on 2026-11-18. Seed `20261118`, corpus digest `e771ea4d7f519c31`, 126 scored items in 15
 scenarios. Ten third-party tools were graded, plus Nexus SymBiote with its discovery

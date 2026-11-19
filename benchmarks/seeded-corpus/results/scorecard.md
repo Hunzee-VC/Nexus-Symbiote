@@ -1,4 +1,4 @@
-# AIBOM-Bench 1.0.0 scorecard
+# Seeded hostile corpus 1.0.0 scorecard
 
 Seed `20261118`, corpus digest `e771ea4d7f519c31`. Ranked by grade (after gates), then score. Domain columns are percentages; Score is the weighted total out of 100; Risk findings is the share of finding points earned across all domains.
 

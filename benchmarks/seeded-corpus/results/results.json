@@ -1,5 +1,5 @@
 {
-  "benchmark": "aibom-bench",
+  "benchmark": "seeded-corpus",
   "version": "1.0.0",
   "seed": 20261118,
   "corpus_digest": "e771ea4d7f519c3112584461584728a8fb3ae3cd5c281cc1a5863225d9d59e95",
@@ -20753,7 +20753,7 @@
     },
     "positive-control": {
       "display": "Positive control (executes every payload)",
-      "source": "benchmarks/aibom-bench/executor.py",
+      "source": "benchmarks/seeded-corpus/executor.py",
       "version": "bench",
       "mode_note": null,
       "version_reported": "executor",

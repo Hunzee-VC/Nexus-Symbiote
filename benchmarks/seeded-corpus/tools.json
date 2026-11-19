@@ -859,7 +859,7 @@
       "display": "Positive control (executes every payload)",
       "version": "bench",
       "calibration": true,
-      "source": "benchmarks/aibom-bench/executor.py",
+      "source": "benchmarks/seeded-corpus/executor.py",
       "version_cmd": [
         "python3",
         "-c",
