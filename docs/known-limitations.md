@@ -1783,5 +1783,8 @@ A way around a limit that its entry does not describe is worth a
   fast the machine is does: a file whose parse takes about that long records
   `TypeScript parsing exceeded its time limit` on a slower machine and a different
   verdict on a faster one. A file that parses stays below the limit, and ordinary
-  source reaches the node limit first; see
+  source reaches the node limit first. The parser reads its clock only between steps
+  of its own, and some input makes one step long: 32 KiB of `f<a,` runs for about
+  ten times the limit and 1.4 GB of memory before it stops, in this release and in
+  those before it. See
   [the TypeScript parse time limit](collection-limits.md#the-typescript-parse-time-limit).

@@ -228,6 +228,77 @@ def test_a_parse_that_never_gets_its_processor_time_is_refused_after_the_attempt
     assert result.scan_failures == TIME_LIMIT and not _tools(result)
 
 
+def _spend(monkeypatch, share: float) -> None:
+    """Every parse attempt reads ``share`` of the default budget as its processor time."""
+    used = [0.0]
+
+    def clock() -> float:
+        used[0] += share * ts_tools.MAX_PARSE_SECONDS
+        return used[0]
+
+    monkeypatch.setattr(time, "thread_time", clock)
+
+
+@pytest.mark.parametrize(
+    ("share", "attempts"),
+    [(0.9, 1), (ts_tools._HELD_UP_SHARE, 1), (0.4, ts_tools._PARSE_ATTEMPTS)],
+)
+def test_a_stopped_parse_starts_again_only_when_the_machine_held_it_up(
+    tmp_path, monkeypatch, share, attempts
+):
+    intervals = _stop_parses(monkeypatch, ts_tools._PARSE_ATTEMPTS + 10)
+    _spend(monkeypatch, share)
+    result = _scan(tmp_path, TOOL)
+    assert intervals == [INTERVAL] * attempts
+    assert result.scan_failures == TIME_LIMIT and not _tools(result)
+
+
+def test_a_parse_that_finishes_within_its_processor_time_is_kept_however_much_it_used(
+    tmp_path, monkeypatch
+):
+    _spend(monkeypatch, 0.9)
+    result = _scan(tmp_path, TOOL)
+    assert [tool.name for tool in _tools(result)] == ["read"] and not result.scan_failures
+
+
+# A source the real parser cannot finish within 50 ms on any machine: error recovery
+# for an unclosed type-argument list, repeated over the default size limit.
+RUNAWAY = (IMPORT + "f<a," * 65_536)[: limits.DEFAULTS.syntax_bytes].encode()
+SHORT = 0.05
+
+
+def _count_builds(monkeypatch) -> list[float]:
+    intervals: list[float] = []
+    build = ts_tools._parser
+
+    def counting_build(seconds: float, jsx: bool):
+        intervals.append(seconds)
+        return build(seconds, jsx)
+
+    monkeypatch.setattr(ts_tools, "_parser", counting_build)
+    return intervals
+
+
+def test_the_real_parser_stops_at_its_interval_and_an_idle_machine_does_not_start_again(
+    monkeypatch,
+):
+    # On an idle machine the processor clock runs just behind the wall clock, so an
+    # attempt the interval stops has spent almost, and never quite, its whole budget.
+    intervals = _count_builds(monkeypatch)
+    monkeypatch.setattr(time, "thread_time", lambda: 0.9 * time.perf_counter())
+    with pytest.raises(ts_tools._RefusedError, match="exceeded its time limit"):
+        ts_tools._parse(RUNAWAY, False, SHORT)
+    assert intervals == [SHORT]
+
+
+def test_the_real_parser_starts_again_when_the_thread_did_not_run(monkeypatch):
+    intervals = _count_builds(monkeypatch)
+    monkeypatch.setattr(time, "thread_time", lambda: 0.0)
+    with pytest.raises(ts_tools._RefusedError, match="exceeded its time limit"):
+        ts_tools._parse(RUNAWAY, False, SHORT)
+    assert intervals == [SHORT] * ts_tools._PARSE_ATTEMPTS
+
+
 def test_where_the_processor_clock_is_missing_a_parse_fails_closed(tmp_path, monkeypatch):
     monkeypatch.delattr(time, "thread_time")
     result = _scan(tmp_path, TOOL)

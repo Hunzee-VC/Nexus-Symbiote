@@ -96,16 +96,18 @@ MAX_PARSE_SECONDS = 0.25
 # The parser can be stopped only after an interval of wall-clock time. The interval
 # equals the processor budget, which is the wall-clock deadline used before, so a parse
 # the grammar cannot end reaches, in one attempt, exactly the point it was stopped at,
-# and uses no more time or memory. On an idle machine that interval is enough to spend
-# the budget. The interval does not grow between attempts.
+# and uses no more time or memory. The interval does not grow between attempts.
 _PARSE_INTERVAL = 1.0
 # Attempts before a file is refused for want of its processor time. A parse the clock
-# stops short on a loaded machine is retried from the beginning a few times, which
-# absorbs the one-time native-parser load and a brief scheduling stall, so that a small
-# server is still collected; an idle machine reaches the budget or finishes on the
-# first attempt, so it never retries. Each attempt costs at most one budget, bounding
-# a file the grammar cannot end to this multiple of what one deadline spent on it.
+# stops while the machine held it up is retried from the beginning a few times, which
+# absorbs a brief scheduling stall, so that a small server is still collected. Each
+# attempt costs at most one budget.
 _PARSE_ATTEMPTS = 3
+# A stopped parse that had at least this share of its budget as processor time was not
+# held up: another attempt would spend the same again, so it is refused at once. An idle
+# machine measures just under the whole budget, never all of it, because the processor
+# clock leaves out the moments the thread did not run.
+_HELD_UP_SHARE = 0.5
 
 LAUNCHED = "MCP server launched from application code; launcher not inventoried"
 REACHED = "MCP server reached from application code; endpoint not inventoried"
@@ -897,13 +899,13 @@ def _parse(source: bytes, jsx: bool, seconds: float) -> Tree:
     whether or not the parser runs, so the interval only returns control for the
     processor time to be read. The interval equals the budget, the wall-clock deadline
     used before, so one attempt reaches the point a runaway parse was stopped at. A
-    parse the interval stops before the parser has had its processor time starts again
-    from the beginning, up to ``_PARSE_ATTEMPTS`` times, because a resumed parse can
-    build a different tree. A parse that reaches its processor time, finished or not, is
-    refused. Load alone does not use the budget up, though a parse that never gets its
-    processor time within the attempts is refused, and a slower machine reaches the budget
-    on a smaller file. The one-time load of the native parser does not count, because the
-    clock is read after it.
+    parse the interval stops when the parser has had less than ``_HELD_UP_SHARE`` of its
+    budget starts again from the beginning, up to ``_PARSE_ATTEMPTS`` times, because a
+    resumed parse can build a different tree. A stopped parse that had that share, and
+    one that reaches its processor time, finished or not, is refused. Load alone does
+    not use the budget up, though a parse that never gets its processor time within the
+    attempts is refused, and a slower machine reaches the budget on a smaller file. The
+    one-time load of the native parser does not count, because the clock is read after it.
     """
     interval = _PARSE_INTERVAL * seconds
     for _ in range(_PARSE_ATTEMPTS):
@@ -918,10 +920,10 @@ def _parse(source: bytes, jsx: bool, seconds: float) -> Tree:
         # Free the parser's native arena before the next attempt builds another, so a
         # retried parse holds no more memory at once than a single parse does.
         del parser
-        if spent >= seconds:
-            break
-        if tree is not None:
+        if tree is not None and spent < seconds:
             return tree
+        if spent >= seconds * _HELD_UP_SHARE:
+            break
     raise _RefusedError("TypeScript parsing exceeded its time limit")
 
 

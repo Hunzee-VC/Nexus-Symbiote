@@ -293,10 +293,13 @@ and its grammar before the first parse, which those releases counted and which
 could turn a cold first scan of a small server into a failure. The parser can be
 stopped only after an interval of wall-clock time; that interval equals the
 budget, the deadline used before, so one attempt at a runaway parse stops where it
-stopped before and uses no more time or memory. A parse the interval stops
-before the parser has had its processor time starts again from the beginning, a
-few times, which lets a small server through on a loaded machine; a file that
-never gets its processor time is then refused.
+stopped before and uses no more time or memory. A parse the interval stops when
+the parser has had less than half of the budget as processor time was held up by
+the machine, and starts again from the beginning, for at most three attempts. That
+lets a small server through on a loaded machine; a file that never gets its
+processor time is then refused. A stopped parse that had at least half of the
+budget is refused at once, so on an idle machine a file the grammar cannot end
+costs one interval.
 
 A file whose parse reaches the limit is the failure
 `TypeScript parsing exceeded its time limit`, and fails the default gates. A file
