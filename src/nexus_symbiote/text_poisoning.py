@@ -285,6 +285,18 @@ ComponentWithRisks = (
 )
 
 
+def _utf8_width(ch: str) -> int:
+    # A JSON value can hold a lone surrogate ("\ud800"), which str.encode refuses.
+    code = ord(ch)
+    if code < 0x80:
+        return 1
+    if code < 0x800:
+        return 2
+    if code < 0x10000:
+        return 3
+    return 4
+
+
 def normalize_for_lexical_scan(text: str) -> tuple[str, list[int]]:
     """Strip invisible Unicode format (Cf) characters in one O(N) pass.
 
@@ -295,7 +307,7 @@ def normalize_for_lexical_scan(text: str) -> tuple[str, list[int]]:
     byte_offsets: list[int] = []
     byte_pos = 0
     for ch in text:
-        ch_bytes = len(ch.encode("utf-8"))
+        ch_bytes = _utf8_width(ch)
         if unicodedata.category(ch) != "Cf":
             stripped_chars.append(ch)
             byte_offsets.append(byte_pos)
