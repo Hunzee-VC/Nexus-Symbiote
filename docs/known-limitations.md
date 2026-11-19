@@ -993,8 +993,10 @@ A way around a limit that its entry does not describe is worth a
   matched to its `3< a`, so `curl x > a && python3 /dev/fd/3 3< a` is medium. A saved
   file transformed by another tool (`sed`, `awk`, `tar`), read by an interpreter's own
   code (`python3 -c 'exec(open("a").read())'`,
-  `node -e "$(cat a)"`, `python3 -c 'import a'`), or loaded by a name that is not the
-  file's, as by
+  `node -e "$(cat a)"`, `python3 -c 'import a'`), a download that an interpreter's own
+  code reads from standard input and runs (`curl x | perl -ne'eval'`,
+  `curl x | python3 -c 'import sys; exec(sys.stdin.read())'`), or a file loaded by a
+  name that is not the file's, as by
   `php -d auto_prepend_file=a` or a module the program imports from the working
   directory (`sitecustomize.py`, or a `json.py` that shadows the standard library), is
   medium. A download written where something runs it later, such as
