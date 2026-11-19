@@ -609,14 +609,18 @@ def _zed_server(config: dict[str, Any]) -> _Normalized:
 
 
 # opencode replaces {env:NAME} and {file:PATH} in its configuration text when it loads it.
-# Bounded and closed at the next brace either way, so an unclosed run is linear to read.
-_OPENCODE_SUBSTITUTION = re.compile(r"(?<!\$)\{((?:env|file):[^{}]{1,1024})\}")
+_OPENCODE_SUBSTITUTION = re.compile(r"(?<!\$)\{((?:env|file):[^}]+)\}")
 
 
 def _opencode_text(value: Any) -> Any:
     """``value`` with each opencode substitution spelled as the reference ``${...}``,
     which every reader treats as unresolved; other values are returned unchanged."""
-    return _OPENCODE_SUBSTITUTION.sub(r"${\1}", value) if isinstance(value, str) else value
+    if not isinstance(value, str):
+        return value
+    # Past the last closing brace nothing can match, and an opening there would scan
+    # to the end of the text, so a run of unclosed openings would read in quadratic time.
+    end = value.rfind("}") + 1
+    return _OPENCODE_SUBSTITUTION.sub(r"${\1}", value[:end]) + value[end:]
 
 
 def _opencode_server(config: dict[str, Any]) -> _Normalized:

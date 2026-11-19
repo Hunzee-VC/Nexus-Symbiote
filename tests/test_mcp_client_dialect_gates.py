@@ -165,7 +165,22 @@ def test_both_gates_pass_a_pinned_opencode_server(tmp_path):
     assert gates(tmp_path, {"opencode.json": json.dumps(config)}) == (0, 0)
 
 
-@pytest.mark.parametrize("word", ["{env:MCP_SERVER_BIN}", "{file:./bin/server}", "{env:SHELL}"])
+LONG_SUBSTITUTIONS = [
+    "{file:" + "./" * 510 + "bin/server}",
+    "{env:" + "A" * 1100 + "}",
+    "{env:A{B}",
+]
+
+
+@pytest.mark.parametrize("word", LONG_SUBSTITUTIONS)
+def test_both_gates_fail_on_a_long_or_braced_opencode_substitution(tmp_path, word):
+    config = {"mcp": {"x": {"type": "local", "command": [word, "--stdio"]}}}
+    assert gates(tmp_path, {"opencode.json": json.dumps(config)}) == (1, 1)
+
+
+@pytest.mark.parametrize(
+    "word", ["{env:MCP_SERVER_BIN}", "{file:./bin/server}", "{env:SHELL}", *LONG_SUBSTITUTIONS]
+)
 def test_an_opencode_substitution_in_the_command_is_an_environment_dependent_launcher(
     tmp_path, word
 ):
@@ -233,6 +248,9 @@ def test_an_opencode_substitution_in_a_header_or_environment_is_a_reference(tmp_
         ("{envx:A}", "{envx:A}"),
         ("{team}", "{team}"),
         ("{env:A", "{env:A"),
+        ("{env:A{B}", "${env:A{B}"),
+        ("{env:{env:A}", "${env:{env:A}"),
+        ("{env:A}-{env:B", "${env:A}-{env:B"),
         (3, 3),
     ],
 )
@@ -663,12 +681,18 @@ def test_a_continuerc_without_mcp_servers_is_complete(tmp_path, content):
     assert not result.scan_failures and not result.surfaces_excluded and not clients(result)
 
 
-def test_an_unclosed_opencode_substitution_run_is_read_in_linear_time(tmp_path):
+@pytest.mark.parametrize(
+    "unit",
+    ["{env:", "{env:{env:A}", "{env:A}{env:", "{env:A{B}{env:", "${env:{file:"],
+)
+@pytest.mark.parametrize("closed", [False, True])
+def test_an_unclosed_opencode_substitution_run_is_read_in_linear_time(tmp_path, unit, closed):
     def run(scale: int) -> None:
         project = tmp_path / f"run{scale}"
         project.mkdir(exist_ok=True)
+        word = unit * (20_000 * scale // len(unit)) + ("}" if closed else "")
         (project / "opencode.json").write_text(
-            json.dumps({"mcp": {"x": {"type": "local", "command": ["{env:" * (5_000 * scale)]}}})
+            json.dumps({"mcp": {"x": {"type": "local", "command": [word]}}})
         )
         MCPScanner().scan(project)
 
