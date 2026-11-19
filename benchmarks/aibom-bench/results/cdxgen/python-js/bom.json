@@ -1,0 +1,661 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "serialNumber": "urn:uuid:ce5e30dd-9968-4553-8d7b-2c3a61f2694d",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-18T10:13:24Z",
+    "tools": {
+      "components": [
+        {
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "version": "12.9.2",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@12.9.2",
+          "type": "application",
+          "bom-ref": "pkg:npm/@cyclonedx/cdxgen@12.9.2",
+          "publisher": "OWASP Foundation",
+          "authors": [
+            {
+              "name": "OWASP Foundation"
+            }
+          ]
+        }
+      ]
+    },
+    "authors": [
+      {
+        "name": "OWASP Foundation"
+      }
+    ],
+    "lifecycles": [
+      {
+        "phase": "pre-build"
+      }
+    ],
+    "component": {
+      "name": "acme-support-agent",
+      "version": "1.4.0",
+      "properties": [
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.12"
+        },
+        {
+          "name": "SrcFile",
+          "value": "/aibom-run/work/cdxgen/corpus/pyproject.toml"
+        }
+      ],
+      "type": "application",
+      "bom-ref": "pkg:pypi/acme-support-agent@1.4.0",
+      "purl": "pkg:pypi/acme-support-agent@1.4.0"
+    },
+    "properties": [
+      {
+        "name": "cdx:bom:componentTypes",
+        "value": "npm\\npypi"
+      },
+      {
+        "name": "cdx:bom:componentNamespaces",
+        "value": "@acme"
+      },
+      {
+        "name": "cdx:bom:componentSrcFiles",
+        "value": "aibom-run/work/cdxgen/corpus/node_modules/@acme/legacy-tool/package.json\\naibom-run/work/cdxgen/corpus/requirements.txt"
+      }
+    ]
+  },
+  "components": [
+    {
+      "group": "@acme",
+      "name": "legacy-tool",
+      "version": "0.0.9",
+      "scope": "optional",
+      "purl": "pkg:npm/%40acme/legacy-tool@0.0.9",
+      "type": "library",
+      "bom-ref": "pkg:npm/@acme/legacy-tool@0.0.9",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/node_modules/@acme/legacy-tool/package.json"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.7,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.7,
+                "value": "aibom-run/work/cdxgen/corpus/node_modules/@acme/legacy-tool/package.json"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/node_modules/@acme/legacy-tool/package.json"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "anthropic",
+      "version": "0.69.0",
+      "purl": "pkg:pypi/anthropic@0.69.0",
+      "type": "library",
+      "bom-ref": "pkg:pypi/anthropic@0.69.0",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements.txt"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "openai",
+      "version": "1.109.1",
+      "purl": "pkg:pypi/openai@1.109.1",
+      "type": "library",
+      "bom-ref": "pkg:pypi/openai@1.109.1",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements.txt"
+          }
+        ]
+      },
+      "tags": [
+        "ml"
+      ]
+    },
+    {
+      "group": "",
+      "name": "langchain",
+      "version": "0.3.27",
+      "purl": "pkg:pypi/langchain@0.3.27",
+      "type": "library",
+      "bom-ref": "pkg:pypi/langchain@0.3.27",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements.txt"
+          }
+        ]
+      },
+      "tags": [
+        "ml"
+      ]
+    },
+    {
+      "group": "",
+      "name": "langchain-anthropic",
+      "version": "0.3.19",
+      "purl": "pkg:pypi/langchain-anthropic@0.3.19",
+      "type": "library",
+      "bom-ref": "pkg:pypi/langchain-anthropic@0.3.19",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements.txt"
+          }
+        ]
+      },
+      "tags": [
+        "ml"
+      ]
+    },
+    {
+      "group": "",
+      "name": "langchain-core",
+      "version": "0.3.76",
+      "purl": "pkg:pypi/langchain-core@0.3.76",
+      "type": "library",
+      "bom-ref": "pkg:pypi/langchain-core@0.3.76",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements.txt"
+          }
+        ]
+      },
+      "tags": [
+        "ml"
+      ]
+    },
+    {
+      "group": "",
+      "name": "langgraph",
+      "version": "0.6.7",
+      "purl": "pkg:pypi/langgraph@0.6.7",
+      "type": "library",
+      "bom-ref": "pkg:pypi/langgraph@0.6.7",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements.txt"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "mcp",
+      "version": "1.16.0",
+      "purl": "pkg:pypi/mcp@1.16.0",
+      "type": "library",
+      "bom-ref": "pkg:pypi/mcp@1.16.0",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+        },
+        {
+          "name": "cdx:mcp:package",
+          "value": "true"
+        },
+        {
+          "name": "cdx:mcp:official",
+          "value": "true"
+        },
+        {
+          "name": "cdx:mcp:role",
+          "value": "sdk"
+        },
+        {
+          "name": "cdx:mcp:catalogSource",
+          "value": "official-sdk"
+        },
+        {
+          "name": "cdx:mcp:packageName",
+          "value": "mcp"
+        }
+      ],
+      "tags": [
+        "mcp",
+        "mcp-sdk",
+        "official-mcp-sdk",
+        "trusted-source"
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements.txt"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "transformers",
+      "version": "4.57.0",
+      "purl": "pkg:pypi/transformers@4.57.0",
+      "type": "library",
+      "bom-ref": "pkg:pypi/transformers@4.57.0",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements.txt"
+          }
+        ]
+      },
+      "tags": [
+        "transform"
+      ]
+    },
+    {
+      "group": "",
+      "name": "torch",
+      "version": "2.8.0",
+      "purl": "pkg:pypi/torch@2.8.0",
+      "type": "library",
+      "bom-ref": "pkg:pypi/torch@2.8.0",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements.txt"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "sentence-transformers",
+      "version": "5.1.1",
+      "purl": "pkg:pypi/sentence-transformers@5.1.1",
+      "type": "library",
+      "bom-ref": "pkg:pypi/sentence-transformers@5.1.1",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements.txt"
+          }
+        ]
+      },
+      "tags": [
+        "transform"
+      ]
+    },
+    {
+      "group": "",
+      "name": "chromadb",
+      "version": "1.1.0",
+      "purl": "pkg:pypi/chromadb@1.1.0",
+      "type": "library",
+      "bom-ref": "pkg:pypi/chromadb@1.1.0",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements.txt"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "datasets",
+      "version": "4.1.1",
+      "purl": "pkg:pypi/datasets@4.1.1",
+      "type": "library",
+      "bom-ref": "pkg:pypi/datasets@4.1.1",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements.txt"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "boto3",
+      "version": "1.40.49",
+      "purl": "pkg:pypi/boto3@1.40.49",
+      "type": "library",
+      "bom-ref": "pkg:pypi/boto3@1.40.49",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements.txt"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "pinecone",
+      "version": "7.3.0",
+      "purl": "pkg:pypi/pinecone@7.3.0",
+      "type": "library",
+      "bom-ref": "pkg:pypi/pinecone@7.3.0",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements.txt"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "safetensors",
+      "version": "0.6.2",
+      "purl": "pkg:pypi/safetensors@0.6.2",
+      "type": "library",
+      "bom-ref": "pkg:pypi/safetensors@0.6.2",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements.txt"
+          }
+        ]
+      }
+    },
+    {
+      "group": "",
+      "name": "langchain-acme-utils",
+      "version": "0.3.1",
+      "purl": "pkg:pypi/langchain-acme-utils@0.3.1",
+      "type": "library",
+      "bom-ref": "pkg:pypi/langchain-acme-utils@0.3.1",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+        }
+      ],
+      "evidence": {
+        "identity": [
+          {
+            "field": "purl",
+            "confidence": 0.5,
+            "methods": [
+              {
+                "technique": "manifest-analysis",
+                "confidence": 0.5,
+                "value": "aibom-run/work/cdxgen/corpus/requirements.txt"
+              }
+            ],
+            "concludedValue": "aibom-run/work/cdxgen/corpus/requirements.txt"
+          }
+        ]
+      },
+      "tags": [
+        "ml"
+      ]
+    }
+  ],
+  "services": [],
+  "dependencies": [
+    {
+      "ref": "pkg:pypi/acme-support-agent@1.4.0",
+      "dependsOn": []
+    }
+  ],
+  "annotations": [
+    {
+      "bom-ref": "metadata-annotations",
+      "subjects": [
+        "pkg:pypi/acme-support-agent@1.4.0"
+      ],
+      "annotator": {
+        "component": {
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "version": "12.9.2",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@12.9.2",
+          "type": "application",
+          "bom-ref": "pkg:npm/@cyclonedx/cdxgen@12.9.2",
+          "publisher": "OWASP Foundation",
+          "authors": [
+            {
+              "name": "OWASP Foundation"
+            }
+          ]
+        }
+      },
+      "timestamp": "2026-11-18T10:13:24Z",
+      "text": "This Software Bill-of-Materials (SBOM) document was created on Wednesday, November 18, 2026 with cdxgen. The data was captured during the pre-build lifecycle phase without building the application. The document describes an application named 'acme-support-agent' with version '1.4.0'. 2 package type(s) and 1 purl namespaces are described in the document under components."
+    }
+  ]
+}

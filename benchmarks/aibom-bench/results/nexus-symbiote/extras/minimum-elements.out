@@ -1,0 +1,174 @@
+G7 AI SBOM minimum-element coverage, edition g7-ai-sbom-2026-05-12
+Statement: Coverage is not compliance. The G7 minimum elements are non-binding guidance. This report says which elements the CycloneDX 1.7 export of the inventory carries in standard fields; a value only a nexus-symbiote: property carries does not count, and a present element is a recorded value, not a verified one.
+Evaluated: standard fields of the CycloneDX 1.7 export this build writes for the inventory (projection cyclonedx-1.7/2)
+Subjects: system subject yes; models 5; datasets 0; retrieval sources 3
+Overall: 13 of 39 present (33.3%) among the elements assessable from the BOM; missing 26, explicit unknown 0, needs producer input 11, not applicable 0
+Metadata: 8 of 9 present (88.8%); missing 1, explicit unknown 0, needs producer input 1, not applicable 0
+  present (generated): SBOM version; SBOM data format name; SBOM data format version; SBOM tool name; SBOM tool version; SBOM generation context; SBOM timestamp
+  present (declared): SBOM dependency relationship (partial; 2 of 62 relationships exported)
+  missing: SBOM author
+    how to supply it: Add the responsible person or organisation to metadata.authors in the inventory; no command records an author, and the tool is not one.
+  needs producer input: SBOM author signature
+    how to supply it: Sign the exact exported file in the release pipeline; this build embeds no signature, and a detached one is outside the BOM.
+System Level Properties: 1 of 7 present (14.2%); missing 6, explicit unknown 0, needs producer input 2, not applicable 0
+  present (observed): System components (partial)
+  missing: System name
+    why: The subject's name is inferred, not declared: the placeholder repository, or the checkout directory's name that release 0.1.0 gave an agent without agent.yaml.
+    how to supply it: Declare name in agent.yaml.
+  missing: System producer
+    how to supply it: Declare owner in agent.yaml; it is exported as the subject's supplier.
+  missing: System version
+    how to supply it: Declare version in agent.yaml; the G7 text asks for unknown when there is none, which this report counts as an explicit unknown.
+  missing: System timestamp
+    why: CycloneDX 1.7 has no dedicated standard field for this element.
+    how to supply it: Not available in this build: CycloneDX 1.7 has no field for when the system was last updated, and the BOM timestamp is not it.
+  missing: System data flow
+    only in the inventory's extension: /components/0/endpoint_url, /components/14/endpoint_url, /components/16/endpoint_url
+    how to supply it: Not available in this build: it writes no services, so declared MCP, A2A, model and retrieval endpoints stay in the extension.
+  needs producer input: System data usage
+    how to supply it: Producer documentation: how the system processes and consumes its data, such as data used to improve models and API call logs.
+  needs producer input: System input/output properties
+    how to supply it: Producer documentation: the system's input and output modalities and preprocessing.
+  missing: Intended application area
+    why: CycloneDX 1.7 has no dedicated standard field for this element.
+    how to supply it: Not available in this build: CycloneDX 1.7 has no dedicated field, and a declared purpose is exported as a description, which is not this element.
+Models: 3 of 12 present (25.0%); missing 9, explicit unknown 0, needs producer input 1, not applicable 0
+  present (observed): Model name; Model hash value; Model hash algorithm
+  missing: Model identifier (0 of 5 have it)
+    without it: model:data/raw/embeddings.bin
+    without it: model:models/classifier/model.safetensors
+    without it: model:models/legacy/intent.pkl
+    without it: model:models/legacy/intent.pt
+    without it: model:models/llm/acme-intent-tiny.Q8_0.gguf
+    how to supply it: Not available in this build: it writes no purl, CPE, SWID tag, OmniBOR or SWHID for a model, and a bom-ref is not an identifier.
+  missing: Model version (0 of 5 have it)
+    without it: model:data/raw/embeddings.bin
+    without it: model:models/classifier/model.safetensors
+    without it: model:models/legacy/intent.pkl
+    without it: model:models/legacy/intent.pt
+    without it: model:models/llm/acme-intent-tiny.Q8_0.gguf
+    how to supply it: State an exact revision as the model component's version in the inventory; no collector records one, and an alias such as gpt-4o is not a version.
+  missing: Model timestamp (0 of 5 have it)
+    why: CycloneDX 1.7 has no dedicated standard field for this element.
+    without it: model:data/raw/embeddings.bin
+    without it: model:models/classifier/model.safetensors
+    without it: model:models/legacy/intent.pkl
+    without it: model:models/legacy/intent.pt
+    without it: model:models/llm/acme-intent-tiny.Q8_0.gguf
+    how to supply it: Not available in this build: CycloneDX 1.7 has no field for a model's timestamp.
+  missing: Model producer (0 of 5 have it)
+    without it: model:data/raw/embeddings.bin
+    without it: model:models/classifier/model.safetensors
+    without it: model:models/legacy/intent.pkl
+    without it: model:models/legacy/intent.pt
+    without it: model:models/llm/acme-intent-tiny.Q8_0.gguf
+    how to supply it: State the producer as the model component's supplier in the inventory; no collector records it, and a hosting provider is not the producer.
+  missing: Model description (0 of 5 have it)
+    without it: model:data/raw/embeddings.bin
+    without it: model:models/classifier/model.safetensors
+    without it: model:models/legacy/intent.pkl
+    without it: model:models/legacy/intent.pt
+    without it: model:models/llm/acme-intent-tiny.Q8_0.gguf
+    how to supply it: State the model's capabilities and limitations as its description in the inventory; no collector records one.
+  missing: Model properties (0 of 5 have it)
+    only in the inventory's extension: /components/25/properties/gguf_architecture
+    without it: model:data/raw/embeddings.bin
+    without it: model:models/classifier/model.safetensors
+    without it: model:models/legacy/intent.pkl
+    without it: model:models/legacy/intent.pt
+    without it: model:models/llm/acme-intent-tiny.Q8_0.gguf
+    how to supply it: Not available in this build: it writes no model card, so a quantization method or GGUF architecture it records stays in the extension.
+  missing: Model input-output properties (0 of 5 have it)
+    without it: model:data/raw/embeddings.bin
+    without it: model:models/classifier/model.safetensors
+    without it: model:models/legacy/intent.pkl
+    without it: model:models/legacy/intent.pt
+    without it: model:models/llm/acme-intent-tiny.Q8_0.gguf
+    how to supply it: Not available in this build: it writes no model card inputs and outputs.
+  needs producer input: Model training properties
+    how to supply it: Producer documentation: the learning type and post-training techniques.
+  missing: Model license (0 of 5 have it)
+    without it: model:data/raw/embeddings.bin
+    without it: model:models/classifier/model.safetensors
+    without it: model:models/legacy/intent.pkl
+    without it: model:models/legacy/intent.pt
+    without it: model:models/llm/acme-intent-tiny.Q8_0.gguf
+    how to supply it: Not available in this build: it records no model licence and writes no licenses for models.
+  missing: Model external references (0 of 5 have it)
+    without it: model:data/raw/embeddings.bin
+    without it: model:models/classifier/model.safetensors
+    without it: model:models/legacy/intent.pkl
+    without it: model:models/legacy/intent.pt
+    without it: model:models/llm/acme-intent-tiny.Q8_0.gguf
+    how to supply it: Not available in this build: it writes no model card, documentation or paper references for models.
+Datasets Properties: 0 of 7 present (0.0%); missing 7, explicit unknown 0, needs producer input 3, not applicable 0
+  note: Retrieval sources (rag-source) are scored as datasets the system uses; this says nothing about the data its models were trained on.
+  missing: Dataset name (0 of 3 have it)
+    why: No standard field identifies the component as a model (type machine-learning-model) or a dataset (a data[] entry of type dataset, or a dataset tag).
+    only in the inventory's extension: /components/34/name, /components/35/name, /components/36/name
+    without it: rag:env-pinecone
+    without it: rag:import-chroma
+    without it: rag:import-pinecone
+    how to supply it: Not available in this build: it writes datasets and retrieval sources as generic data components without a data[] entry of type dataset.
+  missing: Dataset description (0 of 3 have it)
+    why: No standard field identifies the component as a model (type machine-learning-model) or a dataset (a data[] entry of type dataset, or a dataset tag).
+    without it: rag:env-pinecone
+    without it: rag:import-chroma
+    without it: rag:import-pinecone
+    how to supply it: Not available in this build: it does not mark datasets; a description would state the use, such as pre-training, fine-tuning, evaluation or retrieval.
+  missing: Dataset content (0 of 3 have it)
+    why: No standard field identifies the component as a model (type machine-learning-model) or a dataset (a data[] entry of type dataset, or a dataset tag).
+    without it: rag:env-pinecone
+    without it: rag:import-chroma
+    without it: rag:import-pinecone
+    how to supply it: Not available in this build: it writes no data[].contents describing a dataset's content and format.
+  missing: Dataset identifier (0 of 3 have it)
+    why: No standard field identifies the component as a model (type machine-learning-model) or a dataset (a data[] entry of type dataset, or a dataset tag).
+    without it: rag:env-pinecone
+    without it: rag:import-chroma
+    without it: rag:import-pinecone
+    how to supply it: Not available in this build: source URIs stay in the extension, and it writes no dataset identifier.
+  missing: Dataset hash (0 of 3 have it)
+    why: No standard field identifies the component as a model (type machine-learning-model) or a dataset (a data[] entry of type dataset, or a dataset tag).
+    without it: rag:env-pinecone
+    without it: rag:import-chroma
+    without it: rag:import-pinecone
+    how to supply it: Not available in this build: it does not mark datasets, so a content or index snapshot digest is the hash of a generic data component.
+  missing: Dataset provenance (0 of 3 have it)
+    why: No standard field identifies the component as a model (type machine-learning-model) or a dataset (a data[] entry of type dataset, or a dataset tag).
+    without it: rag:env-pinecone
+    without it: rag:import-chroma
+    without it: rag:import-pinecone
+    how to supply it: Not available in this build: it writes no data[].governance and does not mark datasets.
+  needs producer input: Dataset statistical properties
+    how to supply it: Producer documentation: dataset size, distribution statistics and known bias.
+  needs producer input: Dataset sensitivity
+    how to supply it: Producer documentation: personal or sensitive data and copyright status; no flag does not mean no sensitive data.
+  needs producer input: Dataset dependency relationship
+    how to supply it: Producer documentation: the software that created the dataset and the datasets it derives from.
+  missing: Dataset license (0 of 3 have it)
+    why: No standard field identifies the component as a model (type machine-learning-model) or a dataset (a data[] entry of type dataset, or a dataset tag).
+    without it: rag:env-pinecone
+    without it: rag:import-chroma
+    without it: rag:import-pinecone
+    how to supply it: Not available in this build: a supplied dataset's license stays in the extension, and it writes no licenses for datasets.
+Infrastructure: 1 of 1 present (100.0%); missing 0, explicit unknown 0, needs producer input 1, not applicable 0
+  present (declared): Infrastructure software (partial)
+  needs producer input: Infrastructure hardware
+    how to supply it: Producer documentation: a link to a hardware bill of materials, if one exists.
+Security Properties: 0 of 3 present (0.0%); missing 3, explicit unknown 0, needs producer input 1, not applicable 0
+  missing: Security controls
+    why: CycloneDX 1.7 has no dedicated standard field for this element.
+    only in the inventory's extension: /components/0/authentication_required
+    how to supply it: Not available in this build: CycloneDX 1.7 has no dedicated field; declared guardrail, authentication and encryption settings stay in the extension and do not show that a control works.
+  needs producer input: Security compliance
+    how to supply it: Producer documentation: the standards, certifications or frameworks the system complies with.
+  missing: Cybersecurity policy information
+    how to supply it: Not available in this build: it writes no rfc-9116 or security-contact reference; the producer publishes a security.txt.
+  missing: Vulnerability referencing
+    how to supply it: Not available in this build: it writes no vulnerabilities or advisory references, and NEXUS- findings are not vulnerability references.
+Key Performance Indicators: no element is assessable from the BOM; missing 0, explicit unknown 0, needs producer input 2, not applicable 0
+  needs producer input: Security metrics
+    how to supply it: Producer documentation: security measurements of the models or system, such as robustness benchmarks.
+  needs producer input: Operational performance KPIs
+    how to supply it: Runtime measurements such as uptime, latency and throughput, which a repository does not contain.

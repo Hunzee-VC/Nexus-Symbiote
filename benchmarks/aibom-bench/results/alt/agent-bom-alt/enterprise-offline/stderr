@@ -1,0 +1,380 @@
+Offline mode — local vulnerability DB only
+10:35:04 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+Auto-detected project scan surfaces: iac, github_actions, python_agents
+────────────────────────────────── Discovery ───────────────────────────────────
+
+🔍 Discovering MCP configurations...
+
+  ✓ Found project config with 4 MCP server(s): 
+/aibom-run/work/agent-bom-alt/corpus/.mcp.json
+  ✓ Found project config with 1 MCP server(s): 
+/aibom-run/work/agent-bom-alt/corpus/.cursor/mcp.json
+  ⚠ Error parsing 
+/aibom-run/work/agent-bom-alt/corpus/.vscode/mcp.json: Expecting property name 
+enclosed in double quotes: line 2 column 3 (char 4)
+10:35:04 WARNING agent_bom.discovery.coverage: Blocked insecure server 'slack': Command '' is not a recognized MCP launcher. Recognized launchers: bun, bundle, cargo, deno, docker, dotnet, go, gradle, java, mcp, mcp-server, mvn, node, npm, npx, pipx, podman, python, python3, ruby, tsx, uv, uvx. This check guards against misconfigured server commands only — it is not a sandbox. Use container isolation (--isolate) to restrict what a server can do.
+⚠️  Blocked insecure server 'slack': Command '' is not a recognized MCP 
+launcher. Recognized launchers: bun, bundle, cargo, deno, docker, dotnet, go, 
+gradle, java, mcp, mcp-server, mvn, node, npm, npx, pipx, podman, python, 
+python3, ruby, tsx, uv, uvx. This check guards against misconfigured server 
+commands only — it is not a sandbox. Use container isolation (--isolate) to 
+restrict what a server can do.
+  ✓ Found project config with 2 MCP server(s): 
+/aibom-run/work/agent-bom-alt/corpus/.gemini/settings.json
+
+  Found 3 configured agent(s) with 7 MCP server(s) total.
+
+Scanning 1 path(s) for AI components...
+
+10:35:04 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+10:35:04 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+╭──────────────────────────────────────────────────────────────────────────────╮
+│            AI Component Inventory — 20 components across 8 files             │
+│ ┏━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━┓ │
+│ ┃    Sev     ┃ Type               ┃ Name          ┃ File          ┃ Lang   ┃ │
+│ ┡━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━┩ │
+│ │ 🟡 MEDIUM  │ deprecated model   │ gpt-3.5-turbo │ src/agent/ll… │ python │ │
+│ │            │                    │ → gpt-4o-mini │               │        │ │
+│ └────────────┴────────────────────┴───────────────┴───────────────┴────────┘ │
+╰──────────────────────────────── 1 deprecated ────────────────────────────────╯
+
+  Agent graphs (1 graph(s) · 2 node(s) · 3 route(s))
+
+    graph langgraph · src/agent/graph.py:11
+      START → model
+      model → END
+      tools → model
+        tools: TOOLS
+  Eval suites: 1 found (promptfoo) — 0 safety, 0 quality, 1 purpose unknown; 1 
+linked to an agent or model, 0 unlinked
+
+Scanning project directory for package manifests: corpus
+
+  ⚠ skipping symlinked directory: 
+/aibom-run/work/agent-bom-alt/corpus/vendor/loop
+  ✓ corpus: 20 package(s) across 2 manifest directories (3 files, 0 lockfiles, 
+20 direct / 0 transitive, 0 lockfile-backed / 20 declaration-only)
+
+Scanning GitHub Actions workflows in 
+/aibom-run/work/agent-bom-alt/corpus...
+
+  ⚠ CI hardening in agent-review.yml: missing top-level permissions: policy; 
+declare least-privilege GITHUB_TOKEN permissions
+  ⚠ CI hardening: unpinned action × 2 (agent-review.yml: actions/checkout@v4, 
+anthropics/claude-code-action@v1); pin remote actions and reusable workflows to 
+a full commit SHA
+  ✓ 0 workflow(s) with AI usage, 2 action/reusable-workflow dependency(ies), 0 
+credential(s) detected
+
+Scanning Python agent project: 
+/aibom-run/work/agent-bom-alt/corpus...
+
+10:35:04 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+  ✓ 1 agent(s) found, 0 tool(s), 3 package(s) to scan
+10:35:04 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+
+Scanning 10 skill file(s)...
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                     Skill Security Audit — 9 finding(s)                      │
+│ ┏━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┓ │
+│ ┃    Sev     ┃ Category             ┃ Finding               ┃ Source       ┃ │
+│ ┡━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━┩ │
+│ │   ⚪ LOW   │ destructive_action   │ Destructive system    │ security.md  │ │
+│ │            │                      │ action                │              │ │
+│ │            │                      │ Detected in           │              │ │
+│ │            │                      │ /aibom-run… │              │ │
+│ │            │                      │ "rm -rf". Destructive │              │ │
+│ │            │                      │ actions can cause     │              │ │
+│ │            │                      │ data loss. Add        │              │ │
+│ │            │                      │ confirmation prompts  │              │ │
+│ │            │                      │ before any            │              │ │
+│ │            │                      │ delete/destroy        │              │ │
+│ │            │                      │ operation. Reported   │              │ │
+│ │            │                      │ at reduced severity:  │              │ │
+│ │            │                      │ the surrounding prose │              │ │
+│ │            │                      │ reads as policy or    │              │ │
+│ │            │                      │ documentation rather  │              │ │
+│ │            │                      │ than an instruction.  │              │ │
+│ │            │                      │ Confirm before        │              │ │
+│ │            │                      │ dismissing.           │              │ │
+│ │            │                      │ → Destructive actions │              │ │
+│ │            │                      │ can cause data loss.  │              │ │
+│ │            │                      │ Add confirmation      │              │ │
+│ │            │                      │ prompts before any    │              │ │
+│ │            │                      │ delete/destroy        │              │ │
+│ │            │                      │ operation.            │              │ │
+│ │  🟠 HIGH   │ prompt_coercion      │ Prompt coercion or    │ SKILL.md     │ │
+│ │            │                      │ guardrail override    │              │ │
+│ │            │                      │ Detected in           │              │ │
+│ │            │                      │ /aibom-run… │              │ │
+│ │            │                      │ "Ignore all previous  │              │ │
+│ │            │                      │ instructions". Prompt │              │ │
+│ │            │                      │ coercion patterns try │              │ │
+│ │            │                      │ to override system    │              │ │
+│ │            │                      │ instructions or hide  │              │ │
+│ │            │                      │ policy checks. Remove │              │ │
+│ │            │                      │ or rewrite these      │              │ │
+│ │            │                      │ instructions.         │              │ │
+│ │            │                      │ → Prompt coercion     │              │ │
+│ │            │                      │ patterns try to       │              │ │
+│ │            │                      │ override system       │              │ │
+│ │            │                      │ instructions or hide  │              │ │
+│ │            │                      │ policy checks. Remove │              │ │
+│ │            │                      │ or rewrite these      │              │ │
+│ │            │                      │ instructions.         │              │ │
+│ │ 🟡 MEDIUM  │ missing_source       │ No homepage or source │ SKILL.md     │ │
+│ │            │                      │ URL in skill metadata │              │ │
+│ │            │                      │ Skill                 │              │ │
+│ │            │                      │ 'refund‮revorppa' in   │              │ │
+│ │            │                      │ /aibom-run… │              │ │
+│ │            │                      │ has no homepage or    │              │ │
+│ │            │                      │ source URL in its     │              │ │
+│ │            │                      │ frontmatter. Users    │              │ │
+│ │            │                      │ cannot verify the     │              │ │
+│ │            │                      │ publisher or audit    │              │ │
+│ │            │                      │ the source code.      │              │ │
+│ │            │                      │ → Add 'homepage' and  │              │ │
+│ │            │                      │ 'source' fields to    │              │ │
+│ │            │                      │ the YAML frontmatter. │              │ │
+│ │   ⚪ LOW   │ missing_license      │ No license declared   │ SKILL.md     │ │
+│ │            │                      │ in skill metadata     │              │ │
+│ │            │                      │ Skill                 │              │ │
+│ │            │                      │ 'refund‮revorppa' in   │              │ │
+│ │            │                      │ /aibom-run… │              │ │
+│ │            │                      │ does not declare a    │              │ │
+│ │            │                      │ license. This makes   │              │ │
+│ │            │                      │ it unclear under what │              │ │
+│ │            │                      │ terms the skill can   │              │ │
+│ │            │                      │ be used.              │              │ │
+│ │            │                      │ → Add a 'license'     │              │ │
+│ │            │                      │ field (e.g.           │              │ │
+│ │            │                      │ 'Apache-2.0', 'MIT')  │              │ │
+│ │            │                      │ to the frontmatter.   │              │ │
+│ │ 🟡 MEDIUM  │ missing_source       │ No homepage or source │ SKILL.md     │ │
+│ │            │                      │ URL in skill metadata │              │ │
+│ │            │                      │ Skill 'triage-ticket' │              │ │
+│ │            │                      │ in                    │              │ │
+│ │            │                      │ /aibom-run… │              │ │
+│ │            │                      │ has no homepage or    │              │ │
+│ │            │                      │ source URL in its     │              │ │
+│ │            │                      │ frontmatter. Users    │              │ │
+│ │            │                      │ cannot verify the     │              │ │
+│ │            │                      │ publisher or audit    │              │ │
+│ │            │                      │ the source code.      │              │ │
+│ │            │                      │ → Add 'homepage' and  │              │ │
+│ │            │                      │ 'source' fields to    │              │ │
+│ │            │                      │ the YAML frontmatter. │              │ │
+│ │   ⚪ LOW   │ missing_license      │ No license declared   │ SKILL.md     │ │
+│ │            │                      │ in skill metadata     │              │ │
+│ │            │                      │ Skill 'triage-ticket' │              │ │
+│ │            │                      │ in                    │              │ │
+│ │            │                      │ /aibom-run… │              │ │
+│ │            │                      │ does not declare a    │              │ │
+│ │            │                      │ license. This makes   │              │ │
+│ │            │                      │ it unclear under what │              │ │
+│ │            │                      │ terms the skill can   │              │ │
+│ │            │                      │ be used.              │              │ │
+│ │            │                      │ → Add a 'license'     │              │ │
+│ │            │                      │ field (e.g.           │              │ │
+│ │            │                      │ 'Apache-2.0', 'MIT')  │              │ │
+│ │            │                      │ to the frontmatter.   │              │ │
+│ │ 🟡 MEDIUM  │ missing_source       │ No homepage or source │ python.mdc   │ │
+│ │            │                      │ URL in skill metadata │              │ │
+│ │            │                      │ Skill 'unknown' in    │              │ │
+│ │            │                      │ /aibom-run… │              │ │
+│ │            │                      │ has no homepage or    │              │ │
+│ │            │                      │ source URL in its     │              │ │
+│ │            │                      │ frontmatter. Users    │              │ │
+│ │            │                      │ cannot verify the     │              │ │
+│ │            │                      │ publisher or audit    │              │ │
+│ │            │                      │ the source code.      │              │ │
+│ │            │                      │ → Add 'homepage' and  │              │ │
+│ │            │                      │ 'source' fields to    │              │ │
+│ │            │                      │ the YAML frontmatter. │              │ │
+│ │   ⚪ LOW   │ missing_license      │ No license declared   │ python.mdc   │ │
+│ │            │                      │ in skill metadata     │              │ │
+│ │            │                      │ Skill 'unknown' in    │              │ │
+│ │            │                      │ /aibom-run… │              │ │
+│ │            │                      │ does not declare a    │              │ │
+│ │            │                      │ license. This makes   │              │ │
+│ │            │                      │ it unclear under what │              │ │
+│ │            │                      │ terms the skill can   │              │ │
+│ │            │                      │ be used.              │              │ │
+│ │            │                      │ → Add a 'license'     │              │ │
+│ │            │                      │ field (e.g.           │              │ │
+│ │            │                      │ 'Apache-2.0', 'MIT')  │              │ │
+│ │            │                      │ to the frontmatter.   │              │ │
+│ │   ⚪ LOW   │ missing_capability_… │ No explicit skill     │ python.mdc   │ │
+│ │            │                      │ capability            │              │ │
+│ │            │                      │ declaration           │              │ │
+│ │            │                      │ Skill 'unknown' in    │              │ │
+│ │            │                      │ /aibom-run… │              │ │
+│ │            │                      │ does not declare an   │              │ │
+│ │            │                      │ explicit capability   │              │ │
+│ │            │                      │ map. Sandboxed        │              │ │
+│ │            │                      │ runtimes and          │              │ │
+│ │            │                      │ Snowflake Native App  │              │ │
+│ │            │                      │ deployments need      │              │ │
+│ │            │                      │ declared read, write, │              │ │
+│ │            │                      │ network, and shell    │              │ │
+│ │            │                      │ boundaries before a   │              │ │
+│ │            │                      │ skill can be safely   │              │ │
+│ │            │                      │ invoked.              │              │ │
+│ │            │                      │ → Add a               │              │ │
+│ │            │                      │ 'capabilities' or     │              │ │
+│ │            │                      │ 'skill_capabilities'  │              │ │
+│ │            │                      │ frontmatter block     │              │ │
+│ │            │                      │ covering              │              │ │
+│ │            │                      │ read_findings,        │              │ │
+│ │            │                      │ read_inventory,       │              │ │
+│ │            │                      │ read_audit_log,       │              │ │
+│ │            │                      │ write_findings,       │              │ │
+│ │            │                      │ outbound_http, and    │              │ │
+│ │            │                      │ shell_exec.           │              │ │
+│ └────────────┴──────────────────────┴───────────────────────┴──────────────┘ │
+╰────────── Checked: 0 pkg(s) · 0 server(s) · 0 credential(s) · FAIL ──────────╯
+  Trust: security.md → SUSPICIOUS (2 fail)
+10:35:04 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+
+Scanned 3 prompt template file(s)...
+
+  • refund_policy.txt
+  • system.md
+  • triage.j2
+  ✓ No security issues found in prompt templates
+10:35:04 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+
+Scanning 1 path(s) for IaC misconfigurations...
+
+  ✓ 
+/aibom-run/work/agent-bom-alt/corpus: 14 finding(s) (4 high, 3 medium, 7 low)
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                    IaC Misconfigurations — 14 finding(s)                     │
+│ ┏━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┓ │
+│ ┃    Sev     ┃ Rule         ┃ Finding                   ┃ File             ┃ │
+│ ┡━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━┩ │
+│ │  🟠 HIGH   │ DOCKER-002   │ No USER directive (runs   │ Dockerfile:1     │ │
+│ │            │              │ as root)                  │                  │ │
+│ │            │              │ The final build stage     │                  │ │
+│ │            │              │ sets no USER, so the      │                  │ │
+│ │            │              │ container runs as root by │                  │ │
+│ │            │              │ default. Add a USER       │                  │ │
+│ │            │              │ directive with a non-root │                  │ │
+│ │            │              │ user.                     │                  │ │
+│ │  🟠 HIGH   │ DOCKER-009   │ COPY . . without          │ Dockerfile:5     │ │
+│ │            │              │ .dockerignore             │                  │ │
+│ │            │              │ COPY . . copies the       │                  │ │
+│ │            │              │ entire build context into │                  │ │
+│ │            │              │ the image. Without a      │                  │ │
+│ │            │              │ .dockerignore, secrets,   │                  │ │
+│ │            │              │ .git, and other sensitive │                  │ │
+│ │            │              │ files may be included.    │                  │ │
+│ │            │              │ Create a .dockerignore    │                  │ │
+│ │            │              │ file.                     │                  │ │
+│ │  🟠 HIGH   │ DOCKER-001   │ FROM uses :latest tag     │ Dockerfile.agen… │ │
+│ │            │              │ Image                     │                  │ │
+│ │            │              │ 'ghcr.io/acme/agent-base… │                  │ │
+│ │            │              │ uses the :latest tag. Pin │                  │ │
+│ │            │              │ to a specific version for │                  │ │
+│ │            │              │ reproducible builds.      │                  │ │
+│ │  🟠 HIGH   │ DOCKER-002   │ No USER directive (runs   │ Dockerfile.agen… │ │
+│ │            │              │ as root)                  │                  │ │
+│ │            │              │ The final build stage     │                  │ │
+│ │            │              │ sets no USER, so the      │                  │ │
+│ │            │              │ container runs as root by │                  │ │
+│ │            │              │ default. Add a USER       │                  │ │
+│ │            │              │ directive with a non-root │                  │ │
+│ │            │              │ user.                     │                  │ │
+│ │ 🟡 MEDIUM  │ GHA-002      │ Action not pinned to a    │ agent-review.ym… │ │
+│ │            │              │ commit SHA                │                  │ │
+│ │            │              │ 'actions/checkout@v4'     │                  │ │
+│ │            │              │ resolves a mutable tag or │                  │ │
+│ │            │              │ branch. Pin remote        │                  │ │
+│ │            │              │ actions and reusable      │                  │ │
+│ │            │              │ workflows to a full       │                  │ │
+│ │            │              │ commit SHA.               │                  │ │
+│ │ 🟡 MEDIUM  │ GHA-002      │ Action not pinned to a    │ agent-review.ym… │ │
+│ │            │              │ commit SHA                │                  │ │
+│ │            │              │ 'anthropics/claude-code-… │                  │ │
+│ │            │              │ resolves a mutable tag or │                  │ │
+│ │            │              │ branch. Pin remote        │                  │ │
+│ │            │              │ actions and reusable      │                  │ │
+│ │            │              │ workflows to a full       │                  │ │
+│ │            │              │ commit SHA.               │                  │ │
+│ │ 🟡 MEDIUM  │ DOCKER-010   │ FROM without digest pin   │ Dockerfile.agen… │ │
+│ │            │              │ Image                     │                  │ │
+│ │            │              │ 'ghcr.io/acme/agent-base… │                  │ │
+│ │            │              │ is not pinned by digest   │                  │ │
+│ │            │              │ (sha256). Use             │                  │ │
+│ │            │              │ @sha256:<hash> to         │                  │ │
+│ │            │              │ guarantee immutable base  │                  │ │
+│ │            │              │ images.                   │                  │ │
+│ │   ⚪ LOW   │ GHA-004      │ Workflow has no top-level │ agent-review.ym… │ │
+│ │            │              │ permissions               │                  │ │
+│ │            │              │ Without a top-level       │                  │ │
+│ │            │              │ permissions: block the    │                  │ │
+│ │            │              │ GITHUB_TOKEN gets the     │                  │ │
+│ │            │              │ repository default, which │                  │ │
+│ │            │              │ may be write. Declare     │                  │ │
+│ │            │              │ least-privilege           │                  │ │
+│ │            │              │ permissions.              │                  │ │
+│ │   ⚪ LOW   │ DOCKER-006   │ No HEALTHCHECK directive  │ Dockerfile:1     │ │
+│ │            │              │ No HEALTHCHECK            │                  │ │
+│ │            │              │ instruction found. Add a  │                  │ │
+│ │            │              │ HEALTHCHECK to enable     │                  │ │
+│ │            │              │ container health          │                  │ │
+│ │            │              │ monitoring and automatic  │                  │ │
+│ │            │              │ restart on failure.       │                  │ │
+│ │   ⚪ LOW   │ DOCKER-017   │ pip install without       │ Dockerfile:4     │ │
+│ │            │              │ --no-cache-dir            │                  │ │
+│ │            │              │ pip caches downloaded     │                  │ │
+│ │            │              │ packages. Add             │                  │ │
+│ │            │              │ --no-cache-dir to reduce  │                  │ │
+│ │            │              │ image size.               │                  │ │
+│ │   ⚪ LOW   │ DOCKER-006   │ No HEALTHCHECK directive  │ Dockerfile.agen… │ │
+│ │            │              │ No HEALTHCHECK            │                  │ │
+│ │            │              │ instruction found. Add a  │                  │ │
+│ │            │              │ HEALTHCHECK to enable     │                  │ │
+│ │            │              │ container health          │                  │ │
+│ │            │              │ monitoring and automatic  │                  │ │
+│ │            │              │ restart on failure.       │                  │ │
+│ │   ⚪ LOW   │ COMPOSE-011  │ Compose service does not  │ docker-compose.… │ │
+│ │            │              │ set no-new-privileges     │                  │ │
+│ │            │              │ Service 'qdrant' lets     │                  │ │
+│ │            │              │ processes gain privileges │                  │ │
+│ │            │              │ through setuid binaries.  │                  │ │
+│ │            │              │ Add                       │                  │ │
+│ │            │              │ 'no-new-privileges:true'  │                  │ │
+│ │            │              │ to security_opt.          │                  │ │
+│ │   ⚪ LOW   │ COMPOSE-011  │ Compose service does not  │ docker-compose.… │ │
+│ │            │              │ set no-new-privileges     │                  │ │
+│ │            │              │ Service 'ollama' lets     │                  │ │
+│ │            │              │ processes gain privileges │                  │ │
+│ │            │              │ through setuid binaries.  │                  │ │
+│ │            │              │ Add                       │                  │ │
+│ │            │              │ 'no-new-privileges:true'  │                  │ │
+│ │            │              │ to security_opt.          │                  │ │
+│ │   ⚪ LOW   │ COMPOSE-011  │ Compose service does not  │ docker-compose.… │ │
+│ │            │              │ set no-new-privileges     │                  │ │
+│ │            │              │ Service 'agent' lets      │                  │ │
+│ │            │              │ processes gain privileges │                  │ │
+│ │            │              │ through setuid binaries.  │                  │ │
+│ │            │              │ Add                       │                  │ │
+│ │            │              │ 'no-new-privileges:true'  │                  │ │
+│ │            │              │ to security_opt.          │                  │ │
+│ └────────────┴──────────────┴───────────────────────────┴──────────────────┘ │
+╰──────────────────── 0 critical · 4 high · scan complete ─────────────────────╯
+10:35:04 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+
+────────────────────────────── Package Extraction ──────────────────────────────
+
+  Transitive resolution enabled (max depth: 3)
+
+  Extracting packages from project:corpus/filesystem...
+  → Resolving transitive dependencies for filesystem (depth=3)...
+
+agent-bom error: Network request blocked: --offline mode is active
+Run with --verbose for the full traceback.

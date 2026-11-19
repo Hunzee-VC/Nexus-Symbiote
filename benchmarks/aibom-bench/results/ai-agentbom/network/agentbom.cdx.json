@@ -1,0 +1,370 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.5.schema.json",
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "bom-ref": "agentbom:capability:cloud",
+      "name": "cloud",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "capability"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "pyproject.toml"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "data"
+    },
+    {
+      "bom-ref": "agentbom:dependency:anthropic",
+      "name": "anthropic",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "dependency"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "pyproject.toml"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        },
+        {
+          "name": "agentbom:dependency_category",
+          "value": "provider_sdk"
+        }
+      ],
+      "type": "library"
+    },
+    {
+      "bom-ref": "agentbom:dependency:anthropic-ai-sdk",
+      "name": "@anthropic-ai/sdk",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "dependency"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "mcp-server/package.json"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        },
+        {
+          "name": "agentbom:dependency_category",
+          "value": "provider_sdk"
+        }
+      ],
+      "type": "library"
+    },
+    {
+      "bom-ref": "agentbom:dependency:langchain",
+      "name": "langchain",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "dependency"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "pyproject.toml"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        },
+        {
+          "name": "agentbom:dependency_category",
+          "value": "ai_framework"
+        }
+      ],
+      "type": "library"
+    },
+    {
+      "bom-ref": "agentbom:dependency:langgraph",
+      "name": "langgraph",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "dependency"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "pyproject.toml"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        },
+        {
+          "name": "agentbom:dependency_category",
+          "value": "ai_framework"
+        }
+      ],
+      "type": "library"
+    },
+    {
+      "bom-ref": "agentbom:dependency:mcp",
+      "name": "mcp",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "dependency"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "pyproject.toml"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        },
+        {
+          "name": "agentbom:dependency_category",
+          "value": "mcp"
+        }
+      ],
+      "type": "library"
+    },
+    {
+      "bom-ref": "agentbom:dependency:openai",
+      "name": "openai",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "dependency"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "pyproject.toml"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        },
+        {
+          "name": "agentbom:dependency_category",
+          "value": "provider_sdk"
+        }
+      ],
+      "type": "library"
+    },
+    {
+      "bom-ref": "agentbom:framework:langchain",
+      "name": "langchain",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "framework"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "pyproject.toml"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "framework"
+    },
+    {
+      "bom-ref": "agentbom:framework:langgraph",
+      "name": "langgraph",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "framework"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "pyproject.toml"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "framework"
+    },
+    {
+      "bom-ref": "agentbom:model:claude-haiku-4-5",
+      "name": "claude-haiku-4.5",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "model"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "src/agent/llm.py"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "high"
+        }
+      ],
+      "type": "machine-learning-model"
+    },
+    {
+      "bom-ref": "agentbom:model:claude-sonnet-4-5",
+      "name": "claude-sonnet-4.5",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "model"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "evals/promptfooconfig.yaml"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "machine-learning-model"
+    },
+    {
+      "bom-ref": "agentbom:model:gpt-4o-mini",
+      "name": "gpt-4o-mini",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "model"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "evals/promptfooconfig.yaml"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "machine-learning-model"
+    },
+    {
+      "bom-ref": "agentbom:model:llama3-2",
+      "name": "llama3.2",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "model"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "src/agent/llm.py"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "high"
+        }
+      ],
+      "type": "machine-learning-model"
+    },
+    {
+      "bom-ref": "agentbom:model:o4-mini",
+      "name": "o4-mini",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "model"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": ".codex/config.toml"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "machine-learning-model"
+    },
+    {
+      "bom-ref": "agentbom:provider:anthropic",
+      "name": "anthropic",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "provider"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "pyproject.toml"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "platform"
+    },
+    {
+      "bom-ref": "agentbom:provider:ollama",
+      "name": "ollama",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "provider"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "docker-compose.yml"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "platform"
+    },
+    {
+      "bom-ref": "agentbom:provider:openai",
+      "name": "openai",
+      "properties": [
+        {
+          "name": "agentbom:kind",
+          "value": "provider"
+        },
+        {
+          "name": "agentbom:source_file",
+          "value": "pyproject.toml"
+        },
+        {
+          "name": "agentbom:confidence",
+          "value": "medium"
+        }
+      ],
+      "type": "platform"
+    }
+  ],
+  "metadata": {
+    "component": {
+      "bom-ref": "agentbom:repository",
+      "name": "/aibom-run/work/ai-agentbom/corpus",
+      "type": "application"
+    },
+    "tools": [
+      {
+        "name": "agentbom",
+        "vendor": "AgentBOM",
+        "version": "0.1.0"
+      }
+    ]
+  },
+  "serialNumber": "urn:uuid:agentbom-aibom-run-work-ai-agentbom-corpus",
+  "specVersion": "1.5",
+  "version": 1
+}

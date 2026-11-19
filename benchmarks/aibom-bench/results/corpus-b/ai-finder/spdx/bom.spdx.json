@@ -1,0 +1,222 @@
+{
+  "@context": "https://spdx.github.io/spdx-spec/v3.0.1/rdf/spdx-context.jsonld",
+  "@graph": [
+    {
+      "type": "SpdxDocument",
+      "spdxId": "urn:spdx:document-af6f0ef6c550",
+      "creationInfo": {
+        "created": "2026-11-18T11:40:29Z",
+        "createdBy": [
+          "urn:spdx:tool-ai-finder-0.5.0"
+        ],
+        "specVersion": "3.0.1"
+      },
+      "rootElement": [
+        "urn:spdx:package-github.com-sashabaranov-go-openai",
+        "urn:spdx:package-analytics-mcp",
+        "urn:spdx:package-ai",
+        "urn:spdx:package-ai-sdk-openai",
+        "urn:spdx:package-anthropic-ai-sdk-0.65.0",
+        "urn:spdx:package-langchain-0.3.0",
+        "urn:spdx:package-langchain-community-0.3.0",
+        "urn:spdx:package-mistralai-mistralai",
+        "urn:spdx:package-go-openai-1.32.0",
+        "urn:spdx:package-anthropic-sdk-go-0.2.0",
+        "urn:spdx:package-modelcontextprotocol-sdk",
+        "urn:spdx:package-notionhq-notion-mcp-server-1.8.1",
+        "urn:spdx:package-supabase-mcp-server-supabase",
+        "urn:spdx:package-modelcontextprotocol-server-sequential-thinking",
+        "urn:spdx:package-vendored-x",
+        "urn:spdx:ai-package-hf-cache-models--Qwen--Qwen2.5-0.5B-Instruct-snaps",
+        "urn:spdx:ai-package-artifacts-churn.onnx",
+        "urn:spdx:ai-package-artifacts-intent.tflite"
+      ]
+    },
+    {
+      "type": "agent_Tool",
+      "spdxId": "urn:spdx:tool-ai-finder-0.5.0",
+      "name": "ai-finder-0.5.0",
+      "description": "AI Finder Scanner version 0.5.0"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-github.com-sashabaranov-go-openai",
+      "name": "github.com/sashabaranov/go-openai",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageUrl": "pkg:golang/github.com/sashabaranov/go-openai",
+      "software_sourceInfo": "found at: sidecar/main.go:4 (import \"github.com/sashabaranov/go-openai\")"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-analytics-mcp",
+      "name": "analytics-mcp",
+      "software_downloadLocation": "NOASSERTION",
+      "summary": "Model Context Protocol (MCP) server",
+      "comment": "ai-finder:mcp:role=server ai-finder:mcp:source=code",
+      "software_sourceInfo": "found at: mcp/analytics-server/src/server.ts:3 (new McpServer(...))"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-ai",
+      "name": "ai",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageUrl": "pkg:npm/ai",
+      "software_sourceInfo": "found at: src/agent.ts:1 (import { generateText, tool } from \"ai\"); package.json",
+      "software_packageVersion": "^5.0.0"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-ai-sdk-openai",
+      "name": "@ai-sdk/openai",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageUrl": "pkg:npm/@ai-sdk/openai",
+      "software_sourceInfo": "found at: src/agent.ts:2 (import { openai } from \"@ai-sdk/openai\"); package.json",
+      "software_packageVersion": "^2.0.0"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-anthropic-ai-sdk-0.65.0",
+      "name": "@anthropic-ai/sdk",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageVersion": "0.65.0",
+      "software_sourceInfo": "found at: package.json"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-langchain-0.3.0",
+      "name": "langchain",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageVersion": "^0.3.0",
+      "software_sourceInfo": "found at: package.json"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-langchain-community-0.3.0",
+      "name": "@langchain/community",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageVersion": "^0.3.0",
+      "software_sourceInfo": "found at: package.json"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-mistralai-mistralai",
+      "name": "@mistralai/mistralai",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageUrl": "pkg:npm/@mistralai/mistralai",
+      "software_sourceInfo": "found at: src/rag.ts:2 (import { MistralClient } from \"@mistralai/mistralai\"); package.json",
+      "software_packageVersion": "^1.5.0"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-go-openai-1.32.0",
+      "name": "go-openai",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageVersion": "v1.32.0",
+      "software_sourceInfo": "found at: sidecar/go.mod:6"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-anthropic-sdk-go-0.2.0",
+      "name": "anthropic-sdk-go",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageVersion": "v0.2.0",
+      "software_sourceInfo": "found at: sidecar/go.mod:7"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-modelcontextprotocol-sdk",
+      "name": "@modelcontextprotocol/sdk",
+      "software_downloadLocation": "NOASSERTION",
+      "software_packageUrl": "pkg:npm/@modelcontextprotocol/sdk",
+      "software_sourceInfo": "found at: mcp/analytics-server/src/server.ts:1 (import { McpServer } from \"@modelcontextprotocol/sdk/server/mcp.js\"); mcp/analytics-server/package.json",
+      "software_packageVersion": "1.19.1"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-notionhq-notion-mcp-server-1.8.1",
+      "name": "@notionhq/notion-mcp-server",
+      "software_downloadLocation": "NOASSERTION",
+      "summary": "Model Context Protocol (MCP) server",
+      "comment": "ai-finder:mcp:role=server ai-finder:mcp:source=config ai-finder:mcp:transport=stdio",
+      "software_packageUrl": "pkg:npm/%40notionhq/notion-mcp-server@1.8.1",
+      "software_packageVersion": "1.8.1",
+      "software_sourceInfo": "found at: config/claude_desktop_config.json:3 (npx @notionhq/notion-mcp-server@1.8.1)"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-supabase-mcp-server-supabase",
+      "name": "@supabase/mcp-server-supabase",
+      "software_downloadLocation": "NOASSERTION",
+      "summary": "Model Context Protocol (MCP) server",
+      "comment": "ai-finder:mcp:role=server ai-finder:mcp:source=config ai-finder:mcp:transport=stdio",
+      "software_packageUrl": "pkg:npm/%40supabase/mcp-server-supabase",
+      "software_sourceInfo": "found at: config/claude_desktop_config.json:13 (npx @supabase/mcp-server-supabase)"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-modelcontextprotocol-server-sequential-thinking",
+      "name": "@modelcontextprotocol/server-sequential-thinking",
+      "software_downloadLocation": "NOASSERTION",
+      "summary": "Model Context Protocol (MCP) server",
+      "comment": "ai-finder:mcp:role=server ai-finder:mcp:source=config ai-finder:mcp:transport=stdio",
+      "software_packageUrl": "pkg:npm/%40modelcontextprotocol/server-sequential-thinking",
+      "software_sourceInfo": "found at: .windsurf/mcp_config.json:3 (npx @modelcontextprotocol/server-sequential-thinking)"
+    },
+    {
+      "type": "software_Package",
+      "spdxId": "urn:spdx:package-vendored-x",
+      "name": "vendored-x",
+      "software_downloadLocation": "NOASSERTION",
+      "summary": "Model Context Protocol (MCP) server",
+      "comment": "ai-finder:mcp:role=server ai-finder:mcp:source=config ai-finder:mcp:transport=stdio",
+      "software_sourceInfo": "found at: vendor/pkg/.cursor/mcp.json:3 (node)"
+    },
+    {
+      "type": "ai_AIPackage",
+      "spdxId": "urn:spdx:ai-package-hf-cache-models--Qwen--Qwen2.5-0.5B-Instruct-snaps",
+      "name": "hf-cache/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/model.safetensors",
+      "ai_autonomyType": "assistive",
+      "ai_domain": "NOASSERTION",
+      "verifiedUsing": [
+        {
+          "type": "Hash",
+          "algorithm": "sha256",
+          "hashValue": "ce7603b60bc1d8c4d372a164a50a6f8a8b01288e688daf0d1d9c8d658f7df401"
+        }
+      ],
+      "software_packageUrl": "pkg:huggingface/Otakadelic/mergekit-model_stock-prczfmj-Q4_K_M-GGUF",
+      "software_downloadLocation": "https://huggingface.co/Otakadelic/mergekit-model_stock-prczfmj-Q4_K_M-GGUF"
+    },
+    {
+      "type": "ai_AIPackage",
+      "spdxId": "urn:spdx:ai-package-artifacts-churn.onnx",
+      "name": "artifacts/churn.onnx",
+      "ai_autonomyType": "assistive",
+      "ai_domain": "NOASSERTION",
+      "verifiedUsing": [
+        {
+          "type": "Hash",
+          "algorithm": "sha256",
+          "hashValue": "594e3630b20cf4e318fabfea47fe69cc2e4e3eea2956121afa6e8a7ea165f675"
+        }
+      ],
+      "software_packageUrl": "pkg:huggingface/Maldak123/TOTVS_Churn_V3",
+      "software_declaredLicense": "MIT",
+      "software_downloadLocation": "https://huggingface.co/Maldak123/TOTVS_Churn_V3"
+    },
+    {
+      "type": "ai_AIPackage",
+      "spdxId": "urn:spdx:ai-package-artifacts-intent.tflite",
+      "name": "artifacts/intent.tflite",
+      "ai_autonomyType": "assistive",
+      "ai_domain": "NOASSERTION",
+      "verifiedUsing": [
+        {
+          "type": "Hash",
+          "algorithm": "sha256",
+          "hashValue": "7a5d2fa44d4bbe4f7ef68e0e6f7ba38c40d32bad0475502ffb37f4dcb58af4f3"
+        }
+      ]
+    }
+  ]
+}

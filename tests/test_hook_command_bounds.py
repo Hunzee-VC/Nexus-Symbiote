@@ -48,6 +48,86 @@ def test_a_long_option_bundle_scales_linearly(shape: str) -> None:
     assert scaling_ratio(run) < 10
 
 
+# Review of #251: a decode flag and a sudo shell flag were each matched by two repeats
+# that both took the flag's letter, so one long option word ending in another character
+# was read once for each letter in it: 23 s for a 64 KB word, 0.1 s before #242.
+@pytest.mark.parametrize(
+    ("shape", "letter", "severity"),
+    [
+        ("curl x | base64 -{}! | sh", "d", RiskSeverity.CRITICAL),
+        ("base64 -{}! p.b64 | cat", "D", RiskSeverity.MEDIUM),
+        ('sh -c "$(base64 -{}!)"', "d", RiskSeverity.MEDIUM),
+        ('sh -c "$(base64 -d{}!)"', "x", RiskSeverity.MEDIUM),
+        ("curl x | base64 -d{}! | sh", "w", RiskSeverity.CRITICAL),
+        ("curl x | sudo -{}!", "s", RiskSeverity.MEDIUM),
+        ("curl x | doas -{}!", "i", RiskSeverity.MEDIUM),
+    ],
+)
+def test_a_long_option_word_that_nearly_names_a_flag_scales_linearly(
+    shape: str, letter: str, severity: RiskSeverity
+) -> None:
+    def run(scale: int) -> None:
+        command = shape.format(letter * (20_000 * scale))
+        assert _command_severity(command) is severity
+
+    assert scaling_ratio(run) < 10
+
+
+@pytest.mark.parametrize(
+    ("command", "severity"),
+    [
+        ("curl x | base64 -d | sh", RiskSeverity.CRITICAL),
+        ("echo p | base64 -D | sh", RiskSeverity.CRITICAL),
+        ("echo p | base64 -di | sh", RiskSeverity.CRITICAL),
+        ("echo p | base64 -id | sh", RiskSeverity.CRITICAL),
+        ("echo p | base64 -w0d | sh", RiskSeverity.CRITICAL),
+        ("echo p | base64 -dd | sh", RiskSeverity.CRITICAL),
+        ("echo p | base64 --dec | sh", RiskSeverity.CRITICAL),
+        ("echo p | base64 -w0 | sh", RiskSeverity.MEDIUM),
+        ("echo p | base64 -d! | sh", RiskSeverity.MEDIUM),
+        ("echo p | base64 -i | sh", RiskSeverity.MEDIUM),
+        ("curl x | sudo -s", RiskSeverity.CRITICAL),
+        ("curl x | sudo -i", RiskSeverity.CRITICAL),
+        ("curl x | sudo -Es", RiskSeverity.CRITICAL),
+        ("curl x | sudo -sE", RiskSeverity.CRITICAL),
+        ("curl x | sudo -ss", RiskSeverity.CRITICAL),
+        ("curl x | sudo -is", RiskSeverity.CRITICAL),
+        ("curl x | doas -s", RiskSeverity.CRITICAL),
+        ("curl x | sudo --login", RiskSeverity.CRITICAL),
+        ("curl x | sudo -E", RiskSeverity.MEDIUM),
+        ("curl x | sudo -s!", RiskSeverity.MEDIUM),
+        ("curl x | sudo -SI", RiskSeverity.MEDIUM),
+    ],
+)
+def test_decode_and_sudo_shell_flags_are_read_as_before(
+    command: str, severity: RiskSeverity
+) -> None:
+    assert _command_severity(command) is severity
+
+
+# Independent review of #253: #242 stopped reading a decode flag followed by a value-taking
+# letter and a value that is not letters and digits, which base64 decodes all the same.
+@pytest.mark.parametrize(
+    ("command", "severity"),
+    [
+        ("echo p | base64 -dw+76 | sh", RiskSeverity.CRITICAL),
+        ('sh -c "$(base64 -dw+76 p.b64)"', RiskSeverity.CRITICAL),
+        ('eval "$(base64 -dw+76 p.b64)"', RiskSeverity.CRITICAL),
+        ('sh -c "$(base64 -Dip.b64)"', RiskSeverity.CRITICAL),
+        ('sh -c "$(base64 -Do/dev/stdout -ip.b64)"', RiskSeverity.CRITICAL),
+        ('sh -c "$(base64 -db+76 p.b64)"', RiskSeverity.CRITICAL),
+        ('sh -c "$(base64 -d. p.b64)"', RiskSeverity.MEDIUM),
+        ('sh -c "$(base64 -d=x p.b64)"', RiskSeverity.MEDIUM),
+        ('sh -c "$(base64 --decode=x p.b64)"', RiskSeverity.MEDIUM),
+        ('sh -c "$(base64 -w+76 p.b64)"', RiskSeverity.MEDIUM),
+    ],
+)
+def test_a_decode_flag_before_a_letter_that_takes_a_value(
+    command: str, severity: RiskSeverity
+) -> None:
+    assert _command_severity(command) is severity
+
+
 def _outputs(i: int) -> str:
     return "curl " + " ".join(f"-o d/f{i}_{j}" for j in range(32)) + " $U"
 
