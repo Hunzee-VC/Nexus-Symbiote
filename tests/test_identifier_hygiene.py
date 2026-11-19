@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 from click.testing import CliRunner
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from nexus_symbiote.cli import main
@@ -410,8 +410,15 @@ def test_the_category_is_catalogued_with_hidden_text_and_tool_references():
     assert "external/mitre-atlas/aml.t0074" in tags
 
 
+# A joiner's context is judged as a second pass sees it: a replaced character between
+# it and its letter is not stepped over, since a second pass meets a U+FFFD there.
+STEPPED_OVER = ("\u0628\u200b\u200c\u0628", "\u0915\ufe0e\u094d\u200d\u0915")
+
+
 @settings(max_examples=200)
 @given(st.text(max_size=40))
+@example(STEPPED_OVER[0])
+@example(STEPPED_OVER[1])
 def test_a_neutralized_name_holds_no_class_and_a_changed_name_held_one(value):
     component = ModelComponent(bom_ref="model:x", name=value)
     finding = neutralize_identifiers(component)
@@ -826,6 +833,34 @@ def test_a2a_and_rag_references_escape_what_their_names_neutralize(tmp_path):
         assert any("browser%1B[2K" in text for text in strings), fmt
 
 
+def test_npm_references_escape_what_their_names_neutralize(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    name = "@openai/agents\x1b[2K\x1b]8;;https://x.example\x07sdk\u202ejs"
+    (project / "package.json").write_text(
+        json.dumps({"dependencies": {name: "1.0.0", "@openai/agents": "0.1.0"}})
+    )
+    output = tmp_path / "bom.json"
+    native = json.loads(_scan(project, output))
+    refs = {c["bom_ref"] for c in native["components"]}
+    assert {
+        "registry:npm/@openai/agents",
+        "registry:npm/@openai/agents%1B[2K%1B]8;;https://x.example%07sdk%E2%80%AEjs",
+    } <= refs
+    exports: dict[str, Any] = {"json": native}
+    for fmt in ("cyclonedx", "spdx", "sarif"):
+        exports[fmt] = json.loads(_scan(project, tmp_path / f"bom.{fmt}", "-f", fmt))
+    exports["vex"] = VEXGenerator().generate(AIBOM.model_validate(native))
+    for command in (["graph", str(output), "--format", "json"], ["crosswalk", str(output)]):
+        exports[command[0]] = json.loads(CliRunner().invoke(main, command).stdout)
+    risk = CliRunner().invoke(main, ["risk", str(output), "--json-output", "--no-project-policy"])
+    exports["risk"] = json.loads(risk.stdout)
+    for fmt, document in exports.items():
+        strings = _all_strings(document)
+        assert not [text for text in strings if UNSAFE_TEXT.search(text)], fmt
+        assert any("agents%1B[2K%1B]8;;" in text for text in strings), fmt
+
+
 def test_reference_text_escapes_only_what_neutralization_replaces():
     assert reference_text("plain 100% name") == "plain 100% name"
     assert reference_text(f"❤{VS16} ok") == f"❤{VS16} ok"
@@ -916,6 +951,8 @@ def test_export_inventory_refuses_a_name_or_owner_that_collection_rewrote(tmp_pa
         | st.sampled_from(["##[", "##vso[", "\x7f", "\x08", "\n", "\ufe0f", "\u200d", "\u200c"])
     ).map("".join)
 )
+@example(STEPPED_OVER[0])
+@example(STEPPED_OVER[1])
 def test_neutralized_text_is_never_longer_in_json_and_is_stable(value):
     text = neutral_text(value)
     assert len(json.dumps(text)) <= len(json.dumps(value))

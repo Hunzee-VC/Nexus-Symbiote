@@ -116,6 +116,7 @@ _JOINS_BACKWARD = _code_ranges(
     "10F70-10F81 10FB0 10FB2-10FB6 10FB8-10FBF 10FC1-10FC4 10FC9-10FCA 1E900-1E943"
 )
 _TRANSPARENT = frozenset({"Mn", "Me", "Cf"})
+_MARKS = frozenset({"Mn", "Mc", "Me"})
 # Cyrillic, Greek and Armenian letters that read as Latin ones (after UTS #39
 # confusables.txt): a word of only these beside Latin text is a lookalike.
 _LATIN_LOOKALIKES = frozenset("асеорхуіјѕԁһӏԛԝмАВЕКМНОРСТХІЈЅӀοανικρτυϲϳΑΒΕΖΗΙΚΜΝΟΡΤΥΧօոսհ")
@@ -249,7 +250,7 @@ def _virama_on_its_letter(value: str, index: int, base: int | None = None) -> bo
         return False
     script = _script_word(value[index])
     base = index - 1 if base is None else base
-    while base >= 0 and unicodedata.category(value[base])[0] == "M":
+    while base >= 0 and _stepped_over(value[base], _MARKS):
         base -= 1
     return (
         base >= 0
@@ -258,11 +259,18 @@ def _virama_on_its_letter(value: str, index: int, base: int | None = None) -> bo
     )
 
 
+def _stepped_over(char: str, categories: frozenset[str]) -> bool:
+    """Whether a context rule steps over ``char``, one of ``categories`` that is kept.
+
+    A character neutralization replaces is not stepped over: a second pass would meet
+    its U+FFFD instead and replace a joiner the first pass kept.
+    """
+    return unicodedata.category(char) in categories and not _REPLACED.match(char)
+
+
 def _joining_neighbour(value: str, index: int, step: int) -> str:
     """The first character from ``index`` in direction ``step`` that is not transparent."""
-    while 0 <= index < len(value) and (
-        unicodedata.category(value[index]) in _TRANSPARENT and value[index] not in _JOINERS
-    ):
+    while 0 <= index < len(value) and _stepped_over(value[index], _TRANSPARENT):
         index += step
     return value[index] if 0 <= index < len(value) else ""
 
