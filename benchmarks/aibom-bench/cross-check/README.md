@@ -139,6 +139,13 @@ Two things a re-score would meet:
 - The only SSE endpoint in corpus B is in `.cline/mcp_settings.json`, the item that
   tree's audit removed. No tree inventories it.
 
+## The three trees compared
+
+[THREE-TREES.md](THREE-TREES.md) compares the three benchmarks side by side: how each
+builds its corpus and runs and scores a tool, what each says about Nexus SymBiote by
+class, where they agree and disagree and why, how each ranks the other tools, which
+paths collide, and the options for one layout.
+
 ## Limits
 
 - One run on one machine. The corpora and the match rules belong to another author;

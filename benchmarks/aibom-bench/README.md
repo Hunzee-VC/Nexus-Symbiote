@@ -14,8 +14,8 @@ its own contracts and support no ranking. This one compares tools.
 - [SPEC.md](SPEC.md): what is measured, the weights, and the threats to validity.
 - [CHANGELOG.md](CHANGELOG.md): what version 1.1 changed after an audit of 1.0, and the
   effect on every tool's score.
-- [Results of 18 November 2026](results/2026-11-18/RESULTS.md): nine tools graded, one
-  not gradable.
+- [Results of 18 November 2026](results/2026-11-18/RESULTS.md): eleven entries graded
+  (ten tools and the ShadowScan-into-SymBiote pair), one not gradable.
 
 > [!IMPORTANT]
 > The benchmark was written in the repository of one of the tools it grades. Read
@@ -58,8 +58,8 @@ python benchmarks/aibom-bench/bench.py score --work WORK --schemas SCHEMAS --out
 ```
 
 `--tool <slug>` limits either command to one tool. `OUT/results.json` holds every
-per-component verdict; `OUT/RESULTS.md` is the summary. A full run of the ten adapters
-takes about an hour, most of it fixed waits inside two tools and three 180-second
+per-component verdict; `OUT/RESULTS.md` is the summary. A full run of the twelve adapters
+takes over an hour, most of it fixed waits inside two tools and three 180-second
 timeouts.
 
 Check the scorer itself before trusting a result:
