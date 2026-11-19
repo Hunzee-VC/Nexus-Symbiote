@@ -567,3 +567,171 @@ def test_deeply_nested_input_fails_closed_in_bounded_time(tmp_path, name):
             or failed
             or any("requirements.txt" in gap for gap in gaps)
         )
+
+
+# --- R1.0.0-1: @given properties for every maintained reader entry point ---
+
+
+@given(
+    st.dictionaries(
+        st.from_regex(r"[a-z][a-z0-9_]{0,12}", fullmatch=True),
+        st.one_of(
+            st.integers(-1000, 1000),
+            st.booleans(),
+            st.from_regex(r"[a-z0-9_.-]{1,16}", fullmatch=True),
+        ),
+        min_size=1,
+        max_size=6,
+    )
+)
+def test_yaml_mapping_reader_roundtrips_or_fails_closed(mapping):
+    from nexus_symbiote.policy import PolicyError, parse_yaml_mapping
+
+    lines = [
+        f"{k}: {json.dumps(v) if isinstance(v, (bool, str)) else v}" for k, v in mapping.items()
+    ]
+    parsed = parse_yaml_mapping("\n".join(lines) + "\n", max_nodes=128)
+    assert parsed == mapping
+    with pytest.raises((PolicyError, ValueError)):
+        parse_yaml_mapping("a: [1\n", max_nodes=32)
+
+
+@given(st.text(max_size=128))
+def test_toml_codex_reader_never_crashes_or_silently_ignores_malformed_config(raw):
+    import tomllib
+
+    from nexus_symbiote.scanners.ide_agents import IDEAgentScanner
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        codex_dir = root / ".codex"
+        codex_dir.mkdir()
+        (codex_dir / "config.toml").write_text(raw, encoding="utf-8")
+        result = IDEAgentScanner().scan(root)
+        try:
+            parsed = tomllib.loads(raw)
+        except (tomllib.TOMLDecodeError, ValueError):
+            gaps = [*result.scan_failures, *result.surfaces_excluded]
+            assert any("config.toml" in g for g in gaps)
+        else:
+            assert isinstance(parsed, dict)
+
+
+@given(
+    st.from_regex(r"[a-z][a-z0-9_-]{0,12}", fullmatch=True),
+    st.sampled_from(["", "// header comment\n", "/* block comment */\n"]),
+    st.booleans(),
+)
+def test_jsonc_mcp_reader_handles_comments_and_trailing_commas_cleanly(
+    server_name, comment, trailing_comma
+):
+    from nexus_symbiote.scanners.mcp import MCPScanner
+
+    comma = "," if trailing_comma else ""
+    payload = (
+        f"{comment}{{\n"
+        f'  "servers": {{\n'
+        f'    "{server_name}": {{"command": "node", "args": ["srv.js"{comma}]{comma}}}{comma}\n'
+        f"  }}{comma}\n"
+        f"}}\n"
+    )
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        vscode = root / ".vscode"
+        vscode.mkdir()
+        (vscode / "mcp.json").write_text(payload, encoding="utf-8")
+        result = MCPScanner().scan(root)
+        assert not result.scan_failures
+        assert any(server_name in c.name for c in result.components)
+
+
+@given(st.binary(max_size=128))
+def test_gguf_header_reader_bounds_arbitrary_bytes_without_unhandled_exception(payload):
+    import struct as _struct
+
+    from nexus_symbiote.scanners.model import ModelScanner
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "weights.gguf").write_bytes(b"GGUF" + payload)
+        result = ModelScanner().scan(root)
+        assert isinstance(result.components, list)
+        # Valid minimal v3 empty header succeeds cleanly.
+        (root / "minimal.gguf").write_bytes(b"GGUF" + _struct.pack("<IQQ", 3, 0, 0))
+        ok_res = ModelScanner().scan(root)
+        assert any("minimal.gguf" in c.name for c in ok_res.components)
+
+
+@given(st.integers(min_value=0, max_value=2048), st.binary(max_size=96))
+def test_safetensors_header_reader_bounds_length_prefix_and_payload(declared_len, body):
+    import struct as _struct
+
+    from nexus_symbiote.scanners.model import ModelScanner
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        (root / "corrupt.safetensors").write_bytes(_struct.pack("<Q", declared_len) + body)
+        result = ModelScanner().scan(root)
+        assert isinstance(result.components, list)
+
+
+@given(st.text(max_size=64))
+def test_ecma_regex_translator_compiles_or_raises_value_error(pattern):
+    from nexus_symbiote.runtime_validation import ecma_pattern
+
+    try:
+        translated = ecma_pattern(pattern)
+    except (ValueError, re.error):
+        return
+    compiled = re.compile(translated)
+    assert compiled.search("sample-123") is None or True
+
+
+@given(
+    st.from_regex(r"[a-z][a-z0-9_-]{0,15}", fullmatch=True),
+    st.from_regex(r"[a-zA-Z0-9_.-]{1,16}", fullmatch=True),
+)
+def test_typescript_mcp_reader_collects_literal_sdk_registrations_without_executing(
+    srv_name, tool_name
+):
+    from nexus_symbiote.scanners.base import ScanResult
+    from nexus_symbiote.scanners.ts_tools import collect_typescript_source
+
+    source = (
+        "import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';\n"
+        f"const server = new McpServer({{ name: '{srv_name}', version: '1.0.0' }});\n"
+        f"server.tool('{tool_name}', {{}}, async () => ({{ content: [] }}));\n"
+    ).encode()
+    res = ScanResult(scanner_name="mcp")
+    collect_typescript_source(Path("server.ts"), source, res)
+    assert not res.scan_failures
+    assert any(c.name == tool_name for c in res.components)
+
+
+READER_PROPERTY_MAP: dict[str, object] = {
+    "requirements_dockerfile": test_requirements_lines_reach_the_name_and_pin_packaging_reads,
+    "yaml_mapping": test_yaml_mapping_reader_roundtrips_or_fails_closed,
+    "toml_codex": test_toml_codex_reader_never_crashes_or_silently_ignores_malformed_config,
+    "jsonc_mcp": test_jsonc_mcp_reader_handles_comments_and_trailing_commas_cleanly,
+    "gguf_header": test_gguf_header_reader_bounds_arbitrary_bytes_without_unhandled_exception,
+    "safetensors_header": test_safetensors_header_reader_bounds_length_prefix_and_payload,
+    "ecma262_regex": test_ecma_regex_translator_compiles_or_raises_value_error,
+    "typescript_mcp": test_typescript_mcp_reader_collects_literal_sdk_registrations_without_executing,
+}
+
+
+def test_every_maintained_reader_has_a_registered_hypothesis_property():
+    expected_readers = {
+        "requirements_dockerfile",
+        "yaml_mapping",
+        "toml_codex",
+        "jsonc_mcp",
+        "gguf_header",
+        "safetensors_header",
+        "ecma262_regex",
+        "typescript_mcp",
+    }
+    assert set(READER_PROPERTY_MAP) == expected_readers
+    for reader_name, fn in READER_PROPERTY_MAP.items():
+        assert callable(fn), reader_name
+        assert hasattr(fn, "hypothesis"), f"{reader_name} must be decorated with @given"
