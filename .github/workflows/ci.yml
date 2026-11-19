@@ -14,10 +14,10 @@ jobs:
   test:
     name: Tests Python ${{ matrix.python }}
     runs-on: ubuntu-24.04
-    # Hosted runners differ in speed by about 1.6x: one commit's 3.12 suite took over
-    # 20 min and then 12 on a re-run. The budget fits the slow runners; a hung test
-    # still fails at test_timeout.
-    timeout-minutes: 35
+    # Hosted runners differ in speed by about 1.6x: the 3.12 suite takes 17 to 19 min,
+    # and on slow runners it reached 29 of 30 min (#249) and was killed at 99% (#272).
+    # The budget fits the slow runners; a hung test still fails at test_timeout.
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
@@ -39,7 +39,7 @@ jobs:
           PYTEST_LOG: ${{ runner.temp }}/pytest-python-${{ matrix.python }}.log
         run: |
           set -o pipefail
-          timeout --signal=INT --kill-after=30s 30m \
+          timeout --signal=INT --kill-after=30s 45m \
             bash --noprofile --norc -e -o pipefail -c '
               python -m pytest -vv --strict-skips --durations=20 -o test_timeout=120 \
                 2>&1 | tee "$PYTEST_LOG"
@@ -55,7 +55,7 @@ jobs:
   floor:
     name: Tests at the declared dependency floors
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -75,7 +75,7 @@ jobs:
           PYTEST_LOG: ${{ runner.temp }}/pytest-floor.log
         run: |
           set -o pipefail
-          timeout --signal=INT --kill-after=30s 30m \
+          timeout --signal=INT --kill-after=30s 45m \
             bash --noprofile --norc -e -o pipefail -c '
               python -m pytest -vv --strict-skips -m "not locked_only" --durations=20 \
                 -o test_timeout=120 2>&1 | tee "$PYTEST_LOG"
