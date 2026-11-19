@@ -864,15 +864,16 @@ def _redaction(
     # union of matches shows; whatever they hide is hidden here too. What a URL rewrite
     # removes is the rewrite's in both. With no known value in the text, main replaced
     # none: a replacement is what could make another value occur.
-    spans.extend(
-        hidden_spans(
-            value,
-            scrubber.values if known else (),
-            identifier=identifier,
-            removed=[span for rewrite in rewrites for span in rewrite.removed],
-            cookie=cookie,
+    if known or spans or rewrites:
+        spans.extend(
+            hidden_spans(
+                value,
+                scrubber.values if known else (),
+                identifier=identifier,
+                removed=[span for rewrite in rewrites for span in rewrite.removed],
+                cookie=cookie,
+            )
         )
-    )
     if known:
         masked_spans, masked_rewrites = _rule_matches(
             _masked(value, known), identifier=identifier, cookie=cookie

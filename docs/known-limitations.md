@@ -1452,14 +1452,10 @@ A way around a limit that its entry does not describe is worth a
 - **Without `--project`, only claims are checked.** `validate` and `risk` then check
   the inventory's own coverage claim and consistency. Pass `--project` to compare it
   with a fresh collection of the checkout.
-- **A re-hash of the checkout counts as verified.** With `--project`, which the
-  GitHub Action passes, integrity passes once one recorded digest matches the
-  checkout and no check fails or is unknown. The digest of an instruction file that
-  the same run read from that checkout matches, so a repository with only an MCP
-  configuration moves from unknown to passing integrity when it adds a `CLAUDE.md`,
-  although nothing about its MCP servers was verified. Without a signer policy,
-  passing integrity shows only that the inventory matches the checkout. The
-  [roadmap](../ROADMAP.md#plan) tracks the change (N12).
+- **Without a signer policy or an attested baseline, instruction-file digests check the checkout only.** With `--project`, which the
+  GitHub Action passes, re-hashing an instruction file from the checkout verifies that instruction file
+  alone and does not move a repository with unverified MCP servers from unknown to passing integrity.
+  Operator digest pins in `--signature-policy` verify any non-unsafe model format against pinned weight digests.
 - **A project policy can weaken its own gate.** `scan`, and `validate` and `risk`
   with `--project`, apply the checkout's `.nexus-symbiote.yaml`, including
   suppressions, ignored categories and raised thresholds. Each relaxation is listed

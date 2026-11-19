@@ -132,6 +132,8 @@ class _Item:
     operations: set[str] = field(default_factory=set)
     services: set[str] = field(default_factory=set)
     details: set[str] = field(default_factory=set)
+    workload_identities: set[str] = field(default_factory=set)
+    definition_hashes: set[str] = field(default_factory=set)
 
 
 def _enum_name(value: Identifier, members: frozenset[str]) -> str:
@@ -279,6 +281,16 @@ class Observations:
         if isinstance(detail, str) and detail not in item.details:
             self._record(span)
             item.details.add(detail)
+        for id_key in ("spiffe.id", "peer.identity"):
+            w_id = span.attributes.get(id_key)
+            if isinstance(w_id, str) and w_id not in item.workload_identities:
+                self._record(span)
+                item.workload_identities.add(w_id)
+        if kind == "tool":
+            t_hash = span.attributes.get("gen_ai.tool.definition_hash")
+            if isinstance(t_hash, str) and t_hash not in item.definition_hashes:
+                self._record(span)
+                item.definition_hashes.add(t_hash)
         if span.start is not None:
             item.first = span.start if item.first is None else min(item.first, span.start)
             item.last = span.start if item.last is None else max(item.last, span.start)
@@ -528,9 +540,25 @@ def reconcile(observations: Observations, bom: AIBOM) -> dict[str, list[dict[str
         count = sum(len(found) for found, _basis in parts)
         if count == 1:
             component, basis = next((found[0], basis) for found, basis in parts if found)
-            result["matched"].append(
-                {**identity, "inventory_ref": component.bom_ref, "basis": basis}
-            )
+            matched_entry: dict[str, Any] = {
+                **identity,
+                "inventory_ref": component.bom_ref,
+                "basis": basis,
+            }
+            if item.workload_identities:
+                declared_id = getattr(component, "workload_identity", None)
+                matched_entry["reported_workload_identities"] = sorted(item.workload_identities)
+                matched_entry["workload_identity_matched"] = (
+                    declared_id in item.workload_identities if declared_id else None
+                )
+            if item.definition_hashes and isinstance(component, ToolComponent):
+                matched_entry["reported_definition_hashes"] = sorted(item.definition_hashes)
+                matched_entry["definition_hash_matched"] = (
+                    component.definition_hash in item.definition_hashes
+                    if component.definition_hash
+                    else None
+                )
+            result["matched"].append(matched_entry)
             server = getattr(component, "mcp_server_ref", None)
             if isinstance(server, str):
                 mentioned.add(server)
@@ -566,6 +594,10 @@ def _observed(observations: Observations) -> list[dict[str, Any]]:
         }
         if item.kind in _DETAILS:
             entry[_DETAILS[item.kind]] = sorted(item.details)
+        if item.workload_identities:
+            entry["workload_identities"] = sorted(item.workload_identities)
+        if item.definition_hashes:
+            entry["definition_hashes"] = sorted(item.definition_hashes)
         entries.append(entry)
     return sorted(entries, key=_order)
 

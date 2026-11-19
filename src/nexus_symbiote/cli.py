@@ -1198,6 +1198,20 @@ def import_shadowscan(
     "--trust-root-sha256",
     help="Pinned SHA-256 (sha256:<hex>) the explicit trust root must match.",
 )
+@click.option(
+    "--oms-dsse",
+    is_flag=True,
+    help="Verify an OpenSSF Model Signing DSSE in-toto Statement/v1 Sigstore bundle.",
+)
+@click.option(
+    "--rekor-root-hash",
+    help="Operator-witnessed Rekor checkpoint root hash (sha256:<hex>) that the bundle inclusion proof must match.",
+)
+@click.option(
+    "--minimum-rekor-tree-size",
+    type=click.IntRange(min=1),
+    help="Minimum Rekor transparency log tree size required in the bundle checkpoint.",
+)
 def verify_artifact(
     artifact_path: str,
     project: str,
@@ -1207,6 +1221,9 @@ def verify_artifact(
     issuer: str | None,
     trust_root: str | None,
     trust_root_sha256: str | None,
+    oms_dsse: bool = False,
+    rekor_root_hash: str | None = None,
+    minimum_rekor_tree_size: int | None = None,
 ) -> None:
     """Verify a local artifact's digest and optionally its Sigstore bundle."""
     import hmac
@@ -1224,8 +1241,13 @@ def verify_artifact(
         not bundle and (signer_identity or issuer)
     ):
         raise click.UsageError("--bundle, --signer-identity and --issuer must be supplied together")
-    if not bundle and (trust_root or trust_root_sha256):
-        raise click.UsageError("--trust-root and --trust-root-sha256 require --bundle")
+    if not bundle and (
+        trust_root or trust_root_sha256 or oms_dsse or rekor_root_hash or minimum_rekor_tree_size
+    ):
+        raise click.UsageError(
+            "--trust-root, --trust-root-sha256, --oms-dsse, --rekor-root-hash and "
+            "--minimum-rekor-tree-size require --bundle"
+        )
     try:
         digest = hash_confined_file(_project_root(project, label="--project"), artifact_path)
     except OSError as exc:
@@ -1243,6 +1265,13 @@ def verify_artifact(
             raise click.UsageError(
                 "--bundle, --signer-identity and --issuer must be supplied together"
             )
+        extra_kwargs: dict[str, Any] = {}
+        if oms_dsse or rekor_root_hash is not None or minimum_rekor_tree_size is not None:
+            extra_kwargs = {
+                "allow_oms_dsse": oms_dsse,
+                "rekor_root_hash": rekor_root_hash,
+                "minimum_rekor_tree_size": minimum_rekor_tree_size,
+            }
         verified = verify_sigstore_digest(
             digest,
             bundle_bytes,
@@ -1250,6 +1279,7 @@ def verify_artifact(
             issuer,
             trust_root=trust_root,
             trust_root_sha256=trust_root_sha256,
+            **extra_kwargs,
         )
         if not verified.verified:
             if verified.error == SIGSTORE_MISSING:
@@ -1411,6 +1441,63 @@ def verify_discovery(
         )
 
 
+def _attestation_gate_options(command: Any) -> Any:
+    for option in reversed(
+        (
+            click.option(
+                "--require-attestation",
+                "attestation_envelope",
+                type=click.Path(dir_okay=False, path_type=Path),
+                default=None,
+                help=(
+                    "Require a verified inventory attestation DSSE envelope for AIBOM_PATH; "
+                    "requires at least one --trusted-key."
+                ),
+            ),
+            click.option(
+                "--trusted-key",
+                "trusted_keys",
+                multiple=True,
+                type=click.Path(dir_okay=False, path_type=Path),
+                help=(
+                    "Trusted Ed25519 public key PEM for --require-attestation; repeat to build "
+                    "the ring. Must lie outside every git working tree holding AIBOM_PATH, the "
+                    "envelope, --project or the current directory."
+                ),
+            ),
+            click.option(
+                "--attestation-purpose",
+                type=click.Choice(["generated", "reviewed"]),
+                default="reviewed",
+                show_default=True,
+                help="Purpose the attestation must have been signed for.",
+            ),
+            click.option(
+                "--attestation-threshold",
+                type=click.IntRange(min=1, max=32),
+                default=1,
+                show_default=True,
+                help="Minimum number of distinct trusted keys that must have signed.",
+            ),
+            click.option(
+                "--attestation-match",
+                type=click.Choice(["bytes", "content"]),
+                default="bytes",
+                show_default=True,
+                help="bytes: AIBOM_PATH is the attested file; content: same inventory content digest.",
+            ),
+            click.option(
+                "--attestation-max-age-days",
+                type=click.IntRange(min=1, max=36500),
+                default=None,
+                help="Refuse an attestation signed more than this many days ago.",
+            ),
+        )
+    ):
+        command = option(command)
+    return command
+
+
 @main.command()
 @click.argument("aibom_path", type=click.Path(exists=True))
 @click.option(
@@ -1463,6 +1550,7 @@ def verify_discovery(
     is_flag=True,
     help="Accept unverified discovery evidence explicitly (still warns); required in CI.",
 )
+@_attestation_gate_options
 def validate(
     aibom_path: str,
     project: str | None,
@@ -1474,6 +1562,12 @@ def validate(
     require_discovery_signature: bool = False,
     fail_on_unsigned_discovery: bool = False,
     allow_unsigned_discovery: bool = False,
+    attestation_envelope: Path | None = None,
+    trusted_keys: tuple[Path, ...] = (),
+    attestation_purpose: str = "reviewed",
+    attestation_threshold: int = 1,
+    attestation_match: str = "bytes",
+    attestation_max_age_days: int | None = None,
 ) -> None:
     """Validate an AIBOM for completeness and integrity.
 
@@ -1482,8 +1576,11 @@ def validate(
     local collection of that project, unless the policy skips the completeness check.
     """
     _unsigned_discovery_flags(fail_on_unsigned_discovery, allow_unsigned_discovery)
+    if trusted_keys and attestation_envelope is None:
+        raise click.UsageError("--trusted-key requires --require-attestation")
     bom = _load_bom(aibom_path)
 
+    from nexus_symbiote.attestation_cli import verify_gate_attestation
     from nexus_symbiote.validators.completeness import (
         CompletenessValidator,
         assurance_problems,
@@ -1547,6 +1644,19 @@ def validate(
             passed = passed and i_report.is_valid
         else:
             integrity = {"status": "skipped", "skipped_by": "policy"}
+    attestation_report: dict[str, object] | None = None
+    if attestation_envelope is not None:
+        attestation_report = verify_gate_attestation(
+            Path(aibom_path),
+            attestation_envelope,
+            trusted_keys=trusted_keys,
+            purpose=attestation_purpose,
+            threshold=attestation_threshold,
+            match=attestation_match,
+            max_age_days=attestation_max_age_days,
+            project=root,
+        )
+        passed = passed and bool(attestation_report["verified"])
     discovery: dict[str, Any] | None = None
     if root is not None and discovery_signature_required(
         policy.validation.require_discovery_signature or require_discovery_signature,
@@ -1574,11 +1684,13 @@ def validate(
     passed = passed and not assurance_errors and not graph_issues
     document = {
         "passed": passed,
+        "verification_mode": "static-offline",
         "assessment_basis": basis,
         "policy_source": policy_source,
         "policy_weakened": policy_weakened,
         "completeness": completeness,
         "integrity": integrity,
+        **({"attestation": attestation_report} if attestation_report is not None else {}),
         "discovery_producer": discovery,
         "unsigned_discovery": unsigned_reason,
         "minimum_assurance_level": minimum,
@@ -1660,6 +1772,7 @@ def validate(
     is_flag=True,
     help="Accept unverified discovery evidence explicitly (still warns); required in CI.",
 )
+@_attestation_gate_options
 def risk(
     aibom_path: str,
     threshold: float | None,
@@ -1673,11 +1786,20 @@ def risk(
     signature_policy: Path | None = None,
     no_score_threshold: bool = False,
     require_discovery_signature: bool = False,
+    attestation_envelope: Path | None = None,
+    trusted_keys: tuple[Path, ...] = (),
+    attestation_purpose: str = "reviewed",
+    attestation_threshold: int = 1,
+    attestation_match: str = "bytes",
+    attestation_max_age_days: int | None = None,
 ) -> None:
     """Score supply-chain risks in an AIBOM."""
     _unsigned_discovery_flags(fail_on_unsigned_discovery, allow_unsigned_discovery)
+    if trusted_keys and attestation_envelope is None:
+        raise click.UsageError("--trusted-key requires --require-attestation")
     bom = _load_bom(aibom_path)
 
+    from nexus_symbiote.attestation_cli import verify_gate_attestation
     from nexus_symbiote.validators.completeness import carries_discovery_evidence
     from nexus_symbiote.validators.risk import RiskReport, RiskScorer
 
@@ -1691,6 +1813,24 @@ def risk(
     root = _project_root(project, label="--project") if project else None
     if root is not None:
         _require_binding_key()
+    attestation_report: dict[str, object] | None = None
+    attestation_failure_reason: str | None = None
+    if attestation_envelope is not None:
+        attestation_report = verify_gate_attestation(
+            Path(aibom_path),
+            attestation_envelope,
+            trusted_keys=trusted_keys,
+            purpose=attestation_purpose,
+            threshold=attestation_threshold,
+            match=attestation_match,
+            max_age_days=attestation_max_age_days,
+            project=root,
+        )
+        if not attestation_report["verified"]:
+            attestation_failure_reason = (
+                f"attestation verification failed: {attestation_report['detail']} "
+                f"({attestation_report['reason']})"
+            )
     signature_policies = _signer_policies(signature_policy, root)
     policy, policy_source, policy_weakened = _inventory_policy(
         root,
@@ -1704,11 +1844,13 @@ def risk(
     if threshold <= 0 or not math.isfinite(threshold):
         raise click.BadParameter("threshold must be positive and finite", param_hint="--threshold")
     severity = fail_on_severity or policy.risk.fail_on_severity
-    context = {
+    context: dict[str, Any] = {
+        "verification_mode": "static-offline",
         "fail_on_severity": severity,
         "score_threshold": None if no_score_threshold else threshold,
         "policy_source": policy_source,
         "policy_weakened": policy_weakened,
+        **({"attestation": attestation_report} if attestation_report is not None else {}),
     }
     basis = "supplied-bom"
     supplier_claims: list[dict[str, str]] = []
@@ -1745,6 +1887,8 @@ def risk(
                 if issue.severity in {"error", "unknown"}
             ]
             reasons.extend(discovery)
+            if attestation_failure_reason is not None:
+                reasons.append(attestation_failure_reason)
             # The same keys as a scored report, so consumers need not special-case it.
             failed = {
                 **RiskReport().to_dict(),
@@ -1778,6 +1922,9 @@ def risk(
         already_verified=producer_verified,
     )
     if unsigned_reason is not None:
+        reasons = [unsigned_reason]
+        if attestation_failure_reason is not None:
+            reasons.append(attestation_failure_reason)
         # The same keys as a scored report, so consumers need not special-case it.
         unsigned = {
             **RiskReport().to_dict(),
@@ -1785,7 +1932,7 @@ def risk(
             "assessment_basis": "unsigned-discovery-evidence",
             "overall_score": None,
             "risk_level": "unknown",
-            "gate_reasons": [unsigned_reason],
+            "gate_reasons": reasons,
             "total_components": len(bom.components),
             "supplier_claims": supplier_claims,
             "supplier_claims_omitted": supplier_claims_omitted,
@@ -1804,8 +1951,14 @@ def risk(
         fail_on_severity=fail_on_severity,
     )
     passed, report = scorer.passes_gate(bom)
+    gate_reasons = list(report.gate_reasons)
+    if attestation_failure_reason is not None:
+        passed = False
+        gate_reasons.append(attestation_failure_reason)
     gate = {
         **report.gate,
+        "passed": passed,
+        "reasons": gate_reasons,
         **_gate_sources(policy, policy_source, threshold_from_cli, fail_on_severity),
     }
     if no_score_threshold:
@@ -1813,6 +1966,7 @@ def risk(
     document = {
         **report.to_dict(),
         "gate": gate,
+        "gate_reasons": gate_reasons,
         "passed": passed,
         "assessment_basis": basis,
         "supplier_claims": supplier_claims,

@@ -336,3 +336,114 @@ def test_a_bundle_over_the_byte_limit_is_refused_before_sigstore_is_imported(tmp
     assert result.error == "Sigstore bundle exceeds byte limit"
     bundle.write_bytes(oversized[:-1])
     assert verify_sigstore_bundle(artifact, bundle, identity, issuer).error == SIGSTORE_MISSING
+
+
+def test_rekor_checkpoint_witness_and_oms_dsse_verification(local_signed_bundle, monkeypatch):
+    from types import SimpleNamespace
+
+    from sigstore.models import Bundle
+    from sigstore.verify import Verifier
+
+    from nexus_symbiote.utils.crypto import SigstoreArtifactPolicy, verify_sigstore_digest
+
+    artifact, bundle_path, identity, issuer = local_signed_bundle
+    digest_hex = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    root_bytes = bytes.fromhex("ab" * 32)
+    bundle = Bundle.from_json("{}")
+    bundle.log_entry._inner.inclusion_proof = SimpleNamespace(
+        log_index=42,
+        tree_size=1000,
+        root_hash=root_bytes,
+        checkpoint=SimpleNamespace(envelope="rekor.sigstore.dev - 1\n1000\n"),
+    )
+
+    ok = verify_sigstore_bundle(
+        artifact,
+        bundle_path,
+        identity,
+        issuer,
+        rekor_root_hash=f"sha256:{root_bytes.hex()}",
+        minimum_rekor_tree_size=1000,
+    )
+    assert ok.verified
+    assert ok.details["rekor_log_index"] == 42
+    assert ok.details["rekor_tree_size"] == 1000
+    assert ok.details["rekor_root_hash"] == f"sha256:{root_bytes.hex()}"
+    assert ok.details["rekor_checkpoint_origin"] == "rekor.sigstore.dev - 1"
+
+    bad_root = verify_sigstore_bundle(
+        artifact,
+        bundle_path,
+        identity,
+        issuer,
+        rekor_root_hash="sha256:" + "cd" * 32,
+    )
+    assert not bad_root.verified
+    assert "root hash" in (bad_root.error or "")
+
+    bad_size = verify_sigstore_bundle(
+        artifact,
+        bundle_path,
+        identity,
+        issuer,
+        minimum_rekor_tree_size=1001,
+    )
+    assert not bad_size.verified
+    assert "tree size" in (bad_size.error or "")
+
+    # OpenSSF Model Signing DSSE statement verification
+    dsse_bundle_bytes = json.dumps(
+        {
+            "mediaType": "application/vnd.dev.sigstore.bundle.v0.3+json",
+            "verificationMaterial": {},
+            "dsseEnvelope": {"payload": "", "payloadType": "application/vnd.in-toto+json"},
+        }
+    ).encode("utf-8")
+    bundle_path.write_bytes(dsse_bundle_bytes)
+    statement = {
+        "_type": "https://in-toto.io/Statement/v1",
+        "subject": [{"name": "model.safetensors", "digest": {"sha256": digest_hex}}],
+        "predicateType": "https://model_signing/signature/v1.0",
+        "predicate": {},
+    }
+    monkeypatch.setattr(
+        Verifier,
+        "verify_dsse",
+        lambda self, b, p: (
+            "application/vnd.in-toto+json",
+            json.dumps(statement).encode("utf-8"),
+        ),
+    )
+
+    # Register policy options via SigstoreArtifactPolicy and call 4-arg verify_sigstore_bundle
+    SigstoreArtifactPolicy(
+        artifact,
+        bundle_path,
+        identity,
+        issuer,
+        allow_oms_dsse=True,
+        rekor_root_hash=f"sha256:{root_bytes.hex()}",
+        minimum_rekor_tree_size=500,
+    )
+    oms_ok = verify_sigstore_bundle(artifact, bundle_path, identity, issuer)
+    assert oms_ok.verified
+    assert oms_ok.details["method"] == "sigstore-python.verify_dsse"
+
+    # Digest mismatch in OMS subject fails closed
+    wrong_statement = {
+        **statement,
+        "subject": [{"name": "model.safetensors", "digest": {"sha256": "00" * 32}}],
+    }
+    monkeypatch.setattr(
+        Verifier,
+        "verify_dsse",
+        lambda self, b, p: (
+            "application/vnd.in-toto+json",
+            json.dumps(wrong_statement).encode("utf-8"),
+        ),
+    )
+    oms_mismatch = verify_sigstore_digest(
+        digest_hex, dsse_bundle_bytes, identity, issuer, allow_oms_dsse=True
+    )
+    assert not oms_mismatch.verified
+    assert "does not bind" in (oms_mismatch.error or "")

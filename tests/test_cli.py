@@ -236,6 +236,29 @@ class TestValidateCommand:
 
     def test_validate_with_project_fails_on_the_malformed_model_only(self, tmp_path):
         project = _project_beside_outputs(tmp_path)
+        (project / "mcp.json").write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "filesystem": {
+                            "command": "npx",
+                            "args": [
+                                "-y",
+                                "@modelcontextprotocol/server-filesystem@1.2.3",
+                                "/data",
+                            ],
+                            "tools": [
+                                {
+                                    "name": "read_file",
+                                    "description": "Read a file",
+                                    "inputSchema": {"type": "object"},
+                                }
+                            ],
+                        }
+                    }
+                }
+            )
+        )
         runner = CliRunner()
         bom_path = _scanned(runner, project, tmp_path / "test.json")
         result = runner.invoke(main, ["validate", str(bom_path), "--project", str(project)])

@@ -186,6 +186,23 @@ def register_supply_chain_commands(main: click.Group) -> None:
         ),
     )
     @click.option(
+        "--transport-evidence",
+        multiple=True,
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        help=(
+            "Recorded discover-mcp --record inventory providing live observation evidence "
+            "for remote MCP servers (repeatable)."
+        ),
+    )
+    @click.option(
+        "--require-transport-evidence",
+        is_flag=True,
+        help=(
+            "Fail closed when any remote MCP server in the inventory lacks verified "
+            "--transport-evidence instead of skipping it as not verifiable here."
+        ),
+    )
+    @click.option(
         "--no-isolation",
         is_flag=True,
         help=(
@@ -208,6 +225,8 @@ def register_supply_chain_commands(main: click.Group) -> None:
         json_output: bool,
         record: bool,
         accept_drift: bool,
+        transport_evidence: tuple[Path, ...],
+        require_transport_evidence: bool,
         no_isolation: bool,
     ) -> None:
         """Live: observe independently pinned stdio launchers; optionally emit an unsigned candidate.
@@ -216,8 +235,9 @@ def register_supply_chain_commands(main: click.Group) -> None:
         cover launcher bytes; use an externally isolated worker to restrict its
         host dependencies, filesystem, identity and egress. Project settings do
         not supply launch authority. Descriptor matches do not establish safety.
-        Remote MCP servers in the inventory are reported as not verifiable here;
-        observe them with discover-mcp --record.
+        Remote MCP servers in the inventory are reported as not verifiable here
+        unless verified with --transport-evidence or required with
+        --require-transport-evidence.
         """
         modes.require_live("verify-live")
         from nexus_symbiote.core.hashing import hash_bytes, open_regular_file, parse_json_strict
@@ -248,6 +268,14 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 inventory_bytes = stream.read(16 * 1024 * 1024 + 1)
             document = parse_json_strict(inventory_bytes, max_bytes=16 * 1024 * 1024)
             bom = AIBOM.from_document(document)
+            evidence_boms: list[AIBOM] = []
+            evidence_digests: list[str] = []
+            for evidence_path in transport_evidence:
+                with open_regular_file(evidence_path) as stream:
+                    ev_bytes = stream.read(16 * 1024 * 1024 + 1)
+                ev_doc = parse_json_strict(ev_bytes, max_bytes=16 * 1024 * 1024)
+                evidence_boms.append(AIBOM.from_document(ev_doc))
+                evidence_digests.append(hash_bytes(ev_bytes))
         except (OSError, ValueError, TypeError, RecursionError):
             raise click.ClickException("invalid BOM or operator launch policy") from None
         if no_isolation:
@@ -271,10 +299,20 @@ def register_supply_chain_commands(main: click.Group) -> None:
                     err=True,
                 )
         with isolation_off() if no_isolation else contextlib.nullcontext():
-            report = verify_mcp_servers(bom, trusted_launchers=policy)
+            report = verify_mcp_servers(
+                bom,
+                trusted_launchers=policy,
+                transport_evidence=evidence_boms,
+                require_transport_evidence=require_transport_evidence,
+            )
         report.inputs = {
             "inventory_sha256": hash_bytes(inventory_bytes),
             "launch_policy_sha256": hash_bytes(policy_bytes),
+            **(
+                {"transport_evidence_sha256": ",".join(evidence_digests)}
+                if evidence_digests
+                else {}
+            ),
         }
         if record:
             try:

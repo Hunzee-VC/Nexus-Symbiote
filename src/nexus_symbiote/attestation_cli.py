@@ -353,6 +353,145 @@ def verify_attestation(
         echo_line("Source revision claimed by the signer, not checked: ", predicate.source_revision)
 
 
+def verify_gate_attestation(
+    subject: Path,
+    envelope: Path,
+    *,
+    trusted_keys: tuple[Path, ...],
+    purpose: str = "reviewed",
+    threshold: int = 1,
+    match: str = "bytes",
+    max_age_days: int | None = None,
+    project: Path | None = None,
+) -> dict[str, object]:
+    """Verify an attestation for a gate command and return structured verification facts."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    from nexus_symbiote import attestation
+    from nexus_symbiote.runtime import key_id
+
+    if not trusted_keys:
+        return {
+            "verified": False,
+            "status": "fail",
+            "reason": "configuration-invalid",
+            "detail": "--require-attestation requires at least one --trusted-key",
+            "signers": [],
+        }
+    inputs = (subject, envelope) if project is None else (subject, envelope, project)
+    try:
+        _check_key_placement(
+            trusted_keys, inputs, option="--trusted-key", holders="SUBJECT, ENVELOPE"
+        )
+    except click.ClickException as exc:
+        return {
+            "verified": False,
+            "status": "fail",
+            "reason": "key-invalid",
+            "detail": exc.format_message(),
+            "signers": [],
+        }
+    ring: dict[str, Ed25519PublicKey] = {}
+    for path in trusted_keys:
+        try:
+            public = cast(Ed25519PublicKey, _load_trusted_public(path))
+        except _KeyFileError as exc:
+            return {
+                "verified": False,
+                "status": "fail",
+                "reason": "key-invalid",
+                "detail": str(exc),
+                "signers": [],
+            }
+        except _InputTooLargeError:
+            return {
+                "verified": False,
+                "status": "fail",
+                "reason": "input-too-large",
+                "detail": "the trusted key file exceeds its size limit",
+                "signers": [],
+            }
+        except OSError:
+            return {
+                "verified": False,
+                "status": "fail",
+                "reason": "input-unreadable",
+                "detail": "the trusted key file is not a readable regular file reached without symbolic links",
+                "signers": [],
+            }
+        ring[key_id(public)] = public
+    if threshold > len(ring):
+        return {
+            "verified": False,
+            "status": "fail",
+            "reason": "configuration-invalid",
+            "detail": f"threshold ({threshold}) exceeds the number of distinct trusted keys ({len(ring)})",
+            "signers": [],
+        }
+    for role, target, limit in (
+        ("envelope file", envelope, attestation.MAX_ENVELOPE_BYTES),
+        ("subject file", subject, MAX_SUBJECT_BYTES),
+    ):
+        try:
+            content = _read(target, limit)
+        except _InputTooLargeError:
+            return {
+                "verified": False,
+                "status": "fail",
+                "reason": "input-too-large",
+                "detail": f"the {role} exceeds its size limit",
+                "signers": [],
+            }
+        except OSError:
+            return {
+                "verified": False,
+                "status": "fail",
+                "reason": "input-unreadable",
+                "detail": f"the {role} is not a readable regular file reached without symbolic links",
+                "signers": [],
+            }
+        if role == "envelope file":
+            raw = content
+        else:
+            data = content
+    try:
+        verified = attestation.verify_attestation(
+            attestation.parse_envelope(raw),
+            data,
+            trusted_keys=ring,
+            purpose=cast(attestation.Purpose, purpose),
+            threshold=threshold,
+            match=cast(attestation.Match, match),
+            max_age=None if max_age_days is None else timedelta(days=max_age_days),
+        )
+    except attestation.AttestationError as exc:
+        return {
+            "verified": False,
+            "status": "fail",
+            "reason": exc.reason,
+            "detail": str(exc),
+            "signers": [],
+        }
+    predicate = verified.predicate
+    return {
+        "verified": True,
+        "status": "pass",
+        "purpose": predicate.purpose,
+        "signers": list(verified.signers),
+        "match": verified.match,
+        "subject_sha256": verified.subject_sha256,
+        "attested_sha256": verified.attested_sha256,
+        "subject_format": predicate.subject_format,
+        **predicate.model_dump(
+            mode="json",
+            include={"spec_version", "content_digest", "content_profile"},
+            exclude_none=True,
+        ),
+        "signed_at": predicate.model_dump(mode="json")["signed_at"],
+        **predicate.model_dump(mode="json", include={"source_revision"}, exclude_none=True),
+    }
+
+
 def register_attestation_commands(main: click.Group) -> None:
     main.add_command(attest)
     main.add_command(verify_attestation)

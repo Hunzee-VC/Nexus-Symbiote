@@ -327,20 +327,27 @@ class IntegrityValidator:
             for local in scanner.scan(project_root, config_only=True).components:
                 if isinstance(local, ToolComponent):
                     local_tools[local.bom_ref] = None if local.bom_ref in local_tools else local
+        prompt_rehashes_verified = 0
+        verified_mcp_servers: set[str] = set()
         for comp in bom.components:
             report.components_checked += 1
             first_issue = len(report.issues)
+            before_hashes = report.hashes_verified
             if isinstance(comp, ModelComponent) and not self._admit_model(
                 comp, project_root, report
             ):
                 continue
             if isinstance(comp, ToolComponent):
                 self._check_tool_hash(comp, report, local_tools)
+                if report.hashes_verified > before_hashes and comp.mcp_server_ref:
+                    verified_mcp_servers.add(comp.mcp_server_ref)
             elif isinstance(comp, ModelComponent):
                 self._check_model_integrity(comp, project_root, report)
                 self._check_tensor_metadata(comp, project_root, report)
             elif isinstance(comp, PromptComponent):
                 self._check_prompt_hash(comp, project_root, report)
+                if comp.content_hash and report.hashes_verified > before_hashes:
+                    prompt_rehashes_verified += report.hashes_verified - before_hashes
             elif isinstance(comp, MCPServerComponent) and comp.version_pinned is False:
                 report.issues.append(
                     IntegrityIssue(
@@ -355,6 +362,7 @@ class IntegrityValidator:
                     if comp.schema_hash is None:
                         raise ValueError("descriptor digest is unavailable")
                     normalize_digest(comp.schema_hash, "sha256")
+                    verified_mcp_servers.add(comp.bom_ref)
                 except ValueError:
                     report.issues.append(
                         IntegrityIssue(
@@ -364,7 +372,10 @@ class IntegrityValidator:
                             "warning",
                         )
                     )
+            before_file_hashes = report.hashes_verified
             self._check_file_hash(comp, project_root, report)
+            if isinstance(comp, MCPServerComponent) and report.hashes_verified > before_file_hashes:
+                verified_mcp_servers.add(comp.bom_ref)
             if comp.bom_ref in bound_imports and is_imported(comp):
                 for issue in report.issues[first_issue:]:
                     if issue.severity == "unknown" and issue.category in _IMPORTED_EVIDENCE_GAPS:
@@ -401,6 +412,16 @@ class IntegrityValidator:
                         )
         self._report_unused_policies(project_root, report)
         report.bytes_charged = self.byte_budget - self._digests.remaining
+        unverified_mcp_servers = [
+            comp.bom_ref
+            for comp in bom.components
+            if isinstance(comp, MCPServerComponent)
+            and not (comp.bom_ref in bound_imports and is_imported(comp))
+            and comp.bom_ref not in verified_mcp_servers
+        ]
+        non_prompt_verified = (
+            report.hashes_verified - prompt_rehashes_verified
+        ) + report.signatures_verified
         if report.hashes_verified + report.signatures_verified == 0 and not any(
             i.severity in {"critical", "error", "unknown"} for i in report.issues
         ):
@@ -409,6 +430,19 @@ class IntegrityValidator:
                     "inventory",
                     "nothing_verified",
                     "No artifact hash or signature could be verified against local evidence",
+                    "unknown",
+                )
+            )
+        elif (
+            unverified_mcp_servers
+            and non_prompt_verified == 0
+            and not any(i.severity in {"critical", "error", "unknown"} for i in report.issues)
+        ):
+            report.issues.append(
+                IntegrityIssue(
+                    "inventory",
+                    "nothing_verified",
+                    "Instruction file digests match the checkout, but no MCP server, tool descriptor, or model artifact could be verified against local evidence",
                     "unknown",
                 )
             )
@@ -717,6 +751,7 @@ class IntegrityValidator:
                             "Inspected model structure does not match the BOM's SHA-256 subject",
                         )
                     )
+        format_unverified_issue: IntegrityIssue | None = None
         if actual in {
             SerializationSafety.UNSAFE_CODE_EXECUTION,
             SerializationSafety.UNSAFE_TEMPLATE_INJECTION,
@@ -725,9 +760,10 @@ class IntegrityValidator:
                 IntegrityIssue(comp.bom_ref, "unsafe_format", explanation, "critical")
             )
         elif actual == SerializationSafety.UNKNOWN:
-            report.issues.append(
-                IntegrityIssue(comp.bom_ref, "format_unverified", explanation, "unknown")
+            format_unverified_issue = IntegrityIssue(
+                comp.bom_ref, "format_unverified", explanation, "unknown"
             )
+            report.issues.append(format_unverified_issue)
         if (
             comp.serialization_safety == SerializationSafety.SAFE
             and actual != SerializationSafety.SAFE
@@ -764,7 +800,8 @@ class IntegrityValidator:
                 )
             )
         local = sorted((weight.as_posix(), digest) for weight, digest in package.weight_files[1:])
-        if self._recorded_weight_files(comp) != local:
+        weight_mismatch = self._recorded_weight_files(comp) != local
+        if weight_mismatch:
             report.hashes_failed += 1
             report.issues.append(
                 IntegrityIssue(
@@ -785,6 +822,19 @@ class IntegrityValidator:
         report.signatures_checked += verification.signatures_checked
         report.signatures_verified += verification.signatures_verified
         report.hashes_verified += verification.pins_verified
+        if (
+            format_unverified_issue is not None
+            and observation is not None
+            and observation.onnx_error is None
+            and observation.gguf_error is None
+            and comp.hashes.get("sha256") is not None
+            and package.complete
+            and not package.budget_exhausted
+            and not weight_mismatch
+            and verification.pins_verified == len(package.weight_files)
+            and not verification.issues
+        ):
+            format_unverified_issue.severity = "info"
         for category, detail, severity in verification.issues:
             if severity == "unknown" and not self.require_model_signatures:
                 severity = "warning"

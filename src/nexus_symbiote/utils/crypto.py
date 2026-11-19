@@ -92,6 +92,9 @@ TRUST_ROOT_ENV = "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT"
 TRUST_ROOT_SHA256_ENV = "NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT_SHA256"
 
 
+_POLICY_OPTIONS: dict[tuple[Path, Path, str, str], tuple[bool, str | None, int | None]] = {}
+
+
 @dataclass(frozen=True)
 class SigstoreArtifactPolicy:
     """Trusted caller input, never inferred from a BOM or adjacent signature file.
@@ -108,11 +111,32 @@ class SigstoreArtifactPolicy:
     expected_issuer: str
     expected_sha256: str | None = None
     policy_digest: str | None = None
+    allow_oms_dsse: bool = False
+    rekor_root_hash: str | None = None
+    minimum_rekor_tree_size: int | None = None
 
     def __post_init__(self) -> None:
         if not self.expected_identity.strip() or not self.expected_issuer.strip():
             raise ValueError("Both an expected signer identity and OIDC issuer are required")
         object.__setattr__(self, "expected_sha256", _sha256(self.expected_sha256))
+        object.__setattr__(self, "rekor_root_hash", _sha256(self.rekor_root_hash))
+        if self.minimum_rekor_tree_size is not None and (
+            isinstance(self.minimum_rekor_tree_size, bool) or self.minimum_rekor_tree_size < 1
+        ):
+            raise ValueError("minimum_rekor_tree_size must be a positive integer")
+        with contextlib.suppress(OSError):
+            _POLICY_OPTIONS[
+                (
+                    Path(self.artifact_path).resolve(),
+                    Path(self.bundle_path).resolve(),
+                    self.expected_identity,
+                    self.expected_issuer,
+                )
+            ] = (
+                bool(self.allow_oms_dsse),
+                self.rekor_root_hash,
+                self.minimum_rekor_tree_size,
+            )
 
 
 @dataclass(frozen=True)
@@ -729,6 +753,116 @@ def _carries_dsse_envelope(bundle_json: bytes) -> bool:
     )
 
 
+OMS_PREDICATE_TYPES = frozenset(
+    {
+        "https://model_signing/signature/v1.0",
+        "https://model_signing/Digests/v0.1",
+        "https://github.com/ossf/model-signing/signature/v1.0",
+        "https://openssf.org/model-signing/signature/v1.0",
+    }
+)
+
+
+def _extract_rekor_checkpoint_details(bundle: Any) -> dict[str, Any]:
+    """Extract Rekor inclusion-proof checkpoint fields from a verified Sigstore bundle."""
+    try:
+        entry = getattr(bundle, "log_entry", None)
+        inner = getattr(entry, "_inner", None)
+        proof = getattr(inner, "inclusion_proof", None)
+        if proof is None:
+            return {}
+        details: dict[str, Any] = {}
+        log_index = getattr(proof, "log_index", None)
+        if isinstance(log_index, int) and not isinstance(log_index, bool):
+            details["rekor_log_index"] = log_index
+        tree_size = getattr(proof, "tree_size", None)
+        if isinstance(tree_size, int) and not isinstance(tree_size, bool):
+            details["rekor_tree_size"] = tree_size
+        root_hash = getattr(proof, "root_hash", None)
+        if isinstance(root_hash, (bytes, bytearray)) and len(root_hash) == 32:
+            details["rekor_root_hash"] = f"sha256:{bytes(root_hash).hex()}"
+        checkpoint = getattr(proof, "checkpoint", None)
+        envelope = getattr(checkpoint, "envelope", None)
+        if isinstance(envelope, str) and envelope.strip():
+            lines = envelope.splitlines()
+            if lines:
+                details["rekor_checkpoint_origin"] = lines[0].strip()
+        return details
+    except Exception:
+        return {}
+
+
+def _verify_rekor_witness(
+    rekor_details: dict[str, Any],
+    *,
+    rekor_root_hash: str | None = None,
+    minimum_rekor_tree_size: int | None = None,
+) -> str | None:
+    """Verify the bundle's Rekor checkpoint against an operator-witnessed root hash or minimum tree size."""
+    if rekor_root_hash is None and minimum_rekor_tree_size is None:
+        return None
+    if minimum_rekor_tree_size is not None:
+        if isinstance(minimum_rekor_tree_size, bool) or minimum_rekor_tree_size < 1:
+            return "Minimum Rekor tree size must be a positive integer"
+        actual_size = rekor_details.get("rekor_tree_size")
+        if not isinstance(actual_size, int) or actual_size < minimum_rekor_tree_size:
+            return "Rekor checkpoint tree size is smaller than the policy minimum"
+    if rekor_root_hash is not None:
+        try:
+            _alg, expected_hex = normalize_digest(rekor_root_hash, "sha256")
+        except ValueError:
+            return "Expected Rekor root hash must be a valid SHA-256 digest"
+        actual_root = rekor_details.get("rekor_root_hash")
+        if not isinstance(actual_root, str) or not hmac.compare_digest(
+            actual_root, f"sha256:{expected_hex}"
+        ):
+            return "Rekor checkpoint root hash does not match the witnessed root hash"
+    return None
+
+
+def _verify_oms_statement(
+    payload_type: str, payload_bytes: bytes, expected_digest_hex: str
+) -> str | None:
+    """Verify an OpenSSF Model Signing in-toto v1 statement payload against an artifact SHA-256."""
+    from nexus_symbiote.core.hashing import parse_json_strict
+
+    if payload_type != "application/vnd.in-toto+json":
+        return "OpenSSF Model Signing DSSE payloadType must be application/vnd.in-toto+json"
+    try:
+        statement = parse_json_strict(payload_bytes, max_bytes=MAX_BUNDLE_BYTES)
+    except (ValueError, RecursionError):
+        return "OpenSSF Model Signing DSSE payload is not valid strict JSON"
+    if not isinstance(statement, dict):
+        return "OpenSSF Model Signing DSSE statement must be a JSON object"
+    if statement.get("_type") != "https://in-toto.io/Statement/v1":
+        return "OpenSSF Model Signing DSSE statement requires in-toto Statement/v1"
+    predicate_type = statement.get("predicateType")
+    if not isinstance(predicate_type, str) or predicate_type not in OMS_PREDICATE_TYPES:
+        return "Unsupported OpenSSF Model Signing predicateType"
+    subjects = statement.get("subject")
+    if not isinstance(subjects, list) or not 1 <= len(subjects) <= 10_000:
+        return "OpenSSF Model Signing statement requires a bounded nonempty subject list"
+    matched = False
+    for subject in subjects:
+        if not isinstance(subject, dict):
+            return "OpenSSF Model Signing subject entry must be an object"
+        digest_map = subject.get("digest")
+        if not isinstance(digest_map, dict):
+            return "OpenSSF Model Signing subject entry requires a digest object"
+        raw_sha256 = digest_map.get("sha256")
+        if not isinstance(raw_sha256, str):
+            continue
+        try:
+            _alg, subject_hex = normalize_digest(raw_sha256, "sha256")
+        except ValueError:
+            return "OpenSSF Model Signing subject carries a malformed sha256 digest"
+        if hmac.compare_digest(subject_hex, expected_digest_hex):
+            matched = True
+    if not matched:
+        return "OpenSSF Model Signing statement does not bind the inspected artifact digest"
+    return None
+
+
 def verify_sigstore_digest(
     digest_hex: str,
     bundle_json: bytes,
@@ -737,24 +871,17 @@ def verify_sigstore_digest(
     *,
     trust_root: str | Path | None = None,
     trust_root_sha256: str | None = None,
+    allow_oms_dsse: bool = False,
+    rekor_root_hash: str | None = None,
+    minimum_rekor_tree_size: int | None = None,
 ) -> VerificationResult:
     """Verify a caller-inspected SHA-256 subject without a network refresh.
 
-    The caller must bind this digest to the inspected artifact. This function
-    verifies a message signature over the artifact digest. A DSSE envelope signs
-    an in-toto statement instead, so such a bundle is refused with a fixed reason.
-
-    The bundle must be UTF-8 JSON, as RFC 8259 requires between systems. A bundle
-    in another encoding, such as UTF-16, is refused as unreadable before any DSSE
-    check (``Sigstore artifact verification failed (UnicodeDecodeError)``), even when
-    it carries a DSSE envelope, so it never reports ``DSSE_UNSUPPORTED``.
-
-    The trust root comes from an explicit ``--trust-root``/``NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT``
-    override when one is set (verified against a pinned SHA-256 when one is
-    supplied, otherwise required to be a user-owned private file); otherwise
-    from the sigstore-python TUF cache, which must be user-owned and private
-    (created mode 0700 when missing) or verification fails closed. The path
-    actually trusted is reported in ``details["trust_root_path"]``.
+    The caller must bind this digest to the inspected artifact. By default this
+    function verifies a message signature over the artifact digest and refuses a
+    DSSE envelope with ``DSSE_UNSUPPORTED``. When ``allow_oms_dsse=True``, it
+    verifies an OpenSSF Model Signing DSSE in-toto Statement/v1 bundle binding
+    the artifact digest.
     """
     if (
         not expected_identity
@@ -778,8 +905,14 @@ def verify_sigstore_digest(
 
         if json_nesting_exceeds(bundle_json.decode("utf-8"), MAX_JSON_NESTING):
             raise ValueError("bundle JSON nesting limit exceeded")
-        if _carries_dsse_envelope(bundle_json):
+        is_dsse = _carries_dsse_envelope(bundle_json)
+        if is_dsse and not allow_oms_dsse:
             return VerificationResult(False, error=DSSE_UNSUPPORTED)
+        if allow_oms_dsse and not is_dsse:
+            return VerificationResult(
+                False,
+                error="OpenSSF Model Signing policy requires a DSSE Sigstore bundle",
+            )
         from sigstore.hashes import Hashed
         from sigstore.models import Bundle
         from sigstore.verify import Verifier
@@ -803,9 +936,27 @@ def verify_sigstore_digest(
             trust_root_path = cached_path
             trust_root_source = "cache"
             verifier = Verifier(trusted_root=_trusted_root_from_bytes(cached_content))
-        verifier.verify_artifact(
-            Hashed(algorithm=HashAlgorithm.SHA2_256, digest=bytes.fromhex(digest)), bundle, policy
+        if allow_oms_dsse:
+            payload_type, payload_bytes = verifier.verify_dsse(bundle, policy)
+            oms_error = _verify_oms_statement(payload_type, payload_bytes, digest)
+            if oms_error is not None:
+                return VerificationResult(False, error=oms_error)
+            method = "sigstore-python.verify_dsse"
+        else:
+            verifier.verify_artifact(
+                Hashed(algorithm=HashAlgorithm.SHA2_256, digest=bytes.fromhex(digest)),
+                bundle,
+                policy,
+            )
+            method = "sigstore-python.verify_artifact"
+        rekor_details = _extract_rekor_checkpoint_details(bundle)
+        witness_error = _verify_rekor_witness(
+            rekor_details,
+            rekor_root_hash=rekor_root_hash,
+            minimum_rekor_tree_size=minimum_rekor_tree_size,
         )
+        if witness_error is not None:
+            return VerificationResult(False, error=witness_error)
         return VerificationResult(
             True,
             identity=expected_identity,
@@ -813,9 +964,10 @@ def verify_sigstore_digest(
             details={
                 "artifact_digest": f"sha256:{digest}",
                 "bundle_digest": f"sha256:{hashlib.sha256(bundle_json).hexdigest()}",
-                "method": "sigstore-python.verify_artifact",
+                "method": method,
                 "trust_root_path": str(trust_root_path),
                 "trust_root_source": trust_root_source,
+                **rekor_details,
             },
         )
     except ImportError:
@@ -834,16 +986,11 @@ def verify_sigstore_bundle(
     *,
     trust_root: str | Path | None = None,
     trust_root_sha256: str | None = None,
+    allow_oms_dsse: bool | None = None,
+    rekor_root_hash: str | None = None,
+    minimum_rekor_tree_size: int | None = None,
 ) -> VerificationResult:
-    """Verify an exact local artifact under an explicitly selected signer policy.
-
-    Inputs are bounded, regular files with no symlink traversal. Streaming hash
-    verification uses the supported public sigstore-python 4.x API and offline
-    trust material. Missing trust material fails; no network refresh is initiated.
-    An explicit trust root (``trust_root``/``NEXUS_SYMBIOTE_SIGSTORE_TRUST_ROOT``,
-    optionally pinned by ``trust_root_sha256``) bypasses the user cache; otherwise
-    the cache must pass the private-cache check in ``_read_sigstore_cache``.
-    """
+    """Verify an exact local artifact under an explicitly selected signer policy."""
     if (
         not expected_identity
         or not expected_identity.strip()
@@ -854,6 +1001,18 @@ def verify_sigstore_bundle(
             False, error="Expected signer identity and OIDC issuer are both required"
         )
     try:
+        if allow_oms_dsse is None and rekor_root_hash is None and minimum_rekor_tree_size is None:
+            with contextlib.suppress(OSError):
+                registered = _POLICY_OPTIONS.get(
+                    (
+                        Path(artifact_path).resolve(),
+                        Path(bundle_path).resolve(),
+                        expected_identity,
+                        expected_issuer,
+                    )
+                )
+                if registered is not None:
+                    allow_oms_dsse, rekor_root_hash, minimum_rekor_tree_size = registered
         with open_regular_file(bundle_path) as stream:
             bundle_bytes = stream.read(MAX_BUNDLE_BYTES + 1)
         if len(bundle_bytes) > MAX_BUNDLE_BYTES:
@@ -863,6 +1022,13 @@ def verify_sigstore_bundle(
             return VerificationResult(
                 False, error="Artifact is unavailable, changed, or exceeds verification limit"
             )
+        extra_kwargs: dict[str, Any] = {}
+        if allow_oms_dsse or rekor_root_hash is not None or minimum_rekor_tree_size is not None:
+            extra_kwargs = {
+                "allow_oms_dsse": bool(allow_oms_dsse),
+                "rekor_root_hash": rekor_root_hash,
+                "minimum_rekor_tree_size": minimum_rekor_tree_size,
+            }
         return verify_sigstore_digest(
             digest,
             bundle_bytes,
@@ -870,6 +1036,7 @@ def verify_sigstore_bundle(
             expected_issuer,
             trust_root=trust_root,
             trust_root_sha256=trust_root_sha256,
+            **extra_kwargs,
         )
     except (OSError, ValueError):
         return VerificationResult(

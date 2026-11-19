@@ -103,6 +103,134 @@ def register_graph_commands(main: click.Group) -> None:
             err=True,
         )
 
+    @main.command("export-policy")
+    @click.argument("inventory", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+    @click.option(
+        "--format",
+        "policy_format",
+        type=click.Choice(["cedar", "rego", "json"]),
+        default="cedar",
+        show_default=True,
+        help="Target authorization policy language.",
+    )
+    @click.option(
+        "--verified-only/--include-declared",
+        default=True,
+        show_default=True,
+        help="Allowlist only observed/verified components with pinned digests, or include declared entries.",
+    )
+    @click.option(
+        "-o",
+        "--output",
+        type=click.Path(path_type=Path),
+        help="Write the policy to this file instead of standard output.",
+    )
+    def export_policy(
+        inventory: Path,
+        policy_format: str,
+        verified_only: bool,
+        output: Path | None,
+    ) -> None:
+        """Export a default-deny Cedar, Rego, or JSON runtime allowlist from an inventory."""
+        _refuse_source_overwrite(output, inventory)
+        bom = _load_inventory(inventory)
+        text = render_authorization_policy(bom, policy_format, verified_only=verified_only)
+        if output is None:
+            click.echo(
+                json_text(text) if policy_format == "json" else text, nl=policy_format == "json"
+            )
+            return
+        write_cli_output(output, text)
+
+
+def render_authorization_policy(
+    bom: AIBOM, policy_format: str = "cedar", *, verified_only: bool = True
+) -> str:
+    """Render a deterministic Cedar, Rego v1, or JSON authorization policy from an inventory."""
+    from nexus_symbiote.core.enums import AssuranceLevel
+    from nexus_symbiote.core.models import MCPServerComponent, ModelComponent, ToolComponent
+    from nexus_symbiote.utils.crypto import VERIFIED_SIGNING_STATUSES
+
+    allowed_assurance = {AssuranceLevel.OBSERVED, AssuranceLevel.VERIFIED}
+    tools = [
+        {
+            "bom_ref": c.bom_ref,
+            "name": c.name,
+            "mcp_server_ref": c.mcp_server_ref,
+            "definition_hash": c.definition_hash,
+        }
+        for c in sorted(bom.components, key=lambda x: x.bom_ref)
+        if isinstance(c, ToolComponent)
+        and c.definition_hash
+        and (not verified_only or c.assurance_level in allowed_assurance)
+    ]
+    servers = [
+        {
+            "bom_ref": c.bom_ref,
+            "name": c.name,
+            "transport": c.transport,
+            "version_pinned": c.version_pinned,
+            "mcp_role": c.properties.get("mcp_role", "server"),
+        }
+        for c in sorted(bom.components, key=lambda x: x.bom_ref)
+        if isinstance(c, MCPServerComponent)
+        and (
+            not verified_only
+            or (c.version_pinned is True and c.assurance_level in allowed_assurance)
+        )
+    ]
+    models = [
+        {
+            "bom_ref": c.bom_ref,
+            "name": c.name,
+            "sha256": c.hashes.get("sha256"),
+            "signing_status": c.signing_status,
+        }
+        for c in sorted(bom.components, key=lambda x: x.bom_ref)
+        if isinstance(c, ModelComponent)
+        and c.hashes.get("sha256")
+        and (not verified_only or c.signing_status in VERIFIED_SIGNING_STATUSES)
+    ]
+    bundle = {
+        "format": "nexus-symbiote/authorization-policy/v1",
+        "serial_number": bom.metadata.serial_number,
+        "verified_only": verified_only,
+        "allowed_tools": tools,
+        "allowed_mcp_servers": servers,
+        "allowed_models": models,
+    }
+    if policy_format == "json":
+        return json.dumps(bundle, indent=2)
+    if policy_format == "rego":
+        return (
+            "package nexus_symbiote.authz\n\nimport rego.v1\n\n"
+            "default allow_tool := false\ndefault allow_model := false\n\n"
+            f"allowed_tools := {json.dumps({t['bom_ref']: t['definition_hash'] for t in tools}, sort_keys=True)}\n"
+            f"allowed_models := {json.dumps({m['bom_ref']: m['sha256'] for m in models}, sort_keys=True)}\n\n"
+            "allow_tool if {\n"
+            "  expected := allowed_tools[input.tool_ref]\n"
+            "  input.definition_hash == expected\n"
+            "}\n\n"
+            "allow_model if {\n"
+            "  expected := allowed_models[input.model_ref]\n"
+            "  input.sha256 == expected\n"
+            "}\n"
+        )
+    lines = ["// Nexus SymBiote generated default-deny Cedar policy (v1)"]
+    for t in tools:
+        lines.append(
+            f'permit (principal, action == NexusSymbiote::Action::"InvokeTool", '
+            f"resource == NexusSymbiote::Tool::{json.dumps(t['bom_ref'])}) when {{\n"
+            f"  context.definition_hash == {json.dumps(t['definition_hash'])}\n}};"
+        )
+    for m in models:
+        lines.append(
+            f'permit (principal, action == NexusSymbiote::Action::"UseModel", '
+            f"resource == NexusSymbiote::Model::{json.dumps(m['bom_ref'])}) when {{\n"
+            f"  context.sha256 == {json.dumps(m['sha256'])}\n}};"
+        )
+    return "\n".join(lines) + "\n"
+
 
 def _load_inventory(path: str | Path) -> AIBOM:
     # The error names the class of problem; it never quotes the document.
