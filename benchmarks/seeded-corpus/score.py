@@ -17,7 +17,7 @@ contents or listing paths does not count as understanding:
 - A finding counts only when its own message text (not keys, not evidence) names the
   class of problem, at a word boundary, at a non-informational severity.
 
-    python3 score.py --corpus /opt/aibom-bench/corpus --runs /opt/aibom-bench/runs \
+    python3 score.py --corpus /opt/seeded-corpus/corpus --runs /opt/seeded-corpus/runs \
         --tools tools.json --out results
 """
 

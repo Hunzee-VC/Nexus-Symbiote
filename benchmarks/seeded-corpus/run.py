@@ -18,8 +18,8 @@ directory; the tool can write only its out/ subdirectory.
 
 Run as root on a disposable machine:
 
-    python3 run.py --corpus /opt/aibom-bench/corpus --tools tools.json \
-        --tools-root /opt/aibom-bench/tools --runs /opt/aibom-bench/runs
+    python3 run.py --corpus /opt/seeded-corpus/corpus --tools tools.json \
+        --tools-root /opt/seeded-corpus/tools --runs /opt/seeded-corpus/runs
 """
 
 from __future__ import annotations

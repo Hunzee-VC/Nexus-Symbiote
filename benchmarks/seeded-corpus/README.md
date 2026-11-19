@@ -6,10 +6,10 @@ Nexus SymBiote and its discovery companion Nexus-ShadowScan. Treat the ranking a
 provisional until a party outside the project runs a corpus (roadmap row L4 / R1.2-5 on
 [#267](https://github.com/Hunzee-VC/Nexus-Symbiote/pull/267)).
 
-A tool-neutral, executable benchmark for AI bill-of-materials generators. It scores
-how completely a tool inventories the AI supply chain of a repository (data, models,
-MCP servers and tool definitions, skills, instruction files, hooks, plugins, agents)
-and how safely it behaves when that repository is hostile.
+An executable benchmark for AI bill-of-materials generators, with tool-neutral output
+readers. It scores how completely a tool inventories the AI supply chain of a repository
+(data, models, MCP servers and tool definitions, skills, instruction files, hooks,
+plugins, agents) and how safely it behaves when that repository is hostile.
 
 - [`SPEC.md`](SPEC.md): what is measured, why, how it is scored, and the threats to validity.
 - [`CATALOG.md`](CATALOG.md): every case, with its weight and attribute checks.

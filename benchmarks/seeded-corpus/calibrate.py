@@ -11,7 +11,7 @@
 
 A scorer change that moves any of these numbers needs an explanation in SPEC.md.
 
-    python3 calibrate.py --corpus /opt/aibom-bench/corpus --work /tmp/aibom-calibration
+    python3 calibrate.py --corpus /opt/seeded-corpus/corpus --work /tmp/aibom-calibration
 """
 
 from __future__ import annotations
