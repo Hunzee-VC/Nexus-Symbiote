@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any, cast
 import click
 
 from nexus_symbiote import attestation
-from nexus_symbiote.attestation_cli import MAX_SUBJECT_BYTES, _load_trusted_public
 from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
 from nexus_symbiote.core.enums import AssuranceLevel, SerializationSafety
 from nexus_symbiote.core.hashing import normalize_digest
@@ -28,9 +27,10 @@ from nexus_symbiote.runtime_cli import (
     _check_key_placement,
     _InputTooLargeError,
     _KeyFileError,
+    _load_trusted_public,
     _read,
+    _refuse_source_overwrite,
 )
-from nexus_symbiote.supply_chain_cli import _refuse_source_overwrite
 from nexus_symbiote.utils.crypto import VERIFIED_SIGNING_STATUSES
 from nexus_symbiote.utils.terminal import echo_line, json_text, neutralize, write_cli_output
 
@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 
     from nexus_symbiote.utils.crypto import SigstoreArtifactPolicy
 
+MAX_SUBJECT_BYTES = 64 * 1024 * 1024
 _POLICY_FORMATS = frozenset({"cedar", "rego", "json"})
 _UNVERIFIED_SEVERITIES = frozenset({"critical", "error", "unknown"})
 
