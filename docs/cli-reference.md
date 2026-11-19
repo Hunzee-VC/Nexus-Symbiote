@@ -74,6 +74,7 @@ change them. See [collection limits](collection-limits.md).
 | [`attest`](#attest) | offline | Sign a file's exact bytes, usually an inventory or a baseline, for a stated purpose |
 | [`verify-attestation`](#verify-attestation) | offline | Check that trusted keys attested a file's bytes or inventory content for a purpose |
 | [`trace-diff`](#trace-diff) | offline | Compare the runtime use that OpenTelemetry traces report with an AgentBOM |
+| [`audit-control-plane`](#audit-control-plane) | offline | Audit hook targets, skill preambles, MCP bridges, steering surfaces, CI agents and identities |
 | [`discover-mcp`](#discover-mcp) | **live** | List the tools an HTTPS MCP server serves, without calling them |
 | [`advisories`](#advisories) | **live** | Query OSV for advisories affecting exact PyPI and npm package versions |
 | [`verify-live`](#verify-live) | **live** | Compare an AgentBOM with the tools that operator-pinned stdio servers serve |
@@ -1068,3 +1069,21 @@ nexus-symbiote vex [OPTIONS] AIBOM_PATH
 | Option | Description |
 |---|---|
 | `-o`, `--output` `PATH` | Write the VEX document to this file instead of standard output. |
+
+### `audit-control-plane`
+
+Audit hook command targets outside `.claude/hooks` and `.cursor/hooks`, skill `!` shell preambles, in-project MCP launcher targets, MCP bridge packages (`mcp-remote`, `supergateway`, `mcp-proxy`), writable steering surfaces, CI agent workflow actions, provider-hosted tools, workload identities (SPIFFE, OAuth grants, service identities) and reach-rated diff alerts.
+
+```text
+nexus-symbiote audit-control-plane [OPTIONS] [PROJECT_PATH]
+```
+
+| Option | Description |
+|---|---|
+| `--claims` `PATH` | Optional imported CR-3/CR-6/CR-7 ShadowScan JSON claims file. |
+| `--baseline` `PATH` | Optional baseline project directory for reach-rated control-plane diff alerts. |
+| `--compromised-ref` `TEXT` | Component reference (`tool:exec` or `mcp-server:fs`) to compute reachable identities. |
+| `-o`, `--output` `PATH` | Write JSON audit report to a file path. |
+| `--json-output` | Emit JSON audit summary to standard output. |
+| `--fail-on-severity` `critical\|high\|medium\|low\|none` | Exit 1 when a finding or reach-rated diff alert meets or exceeds this severity (`critical` by default). |
+
