@@ -119,8 +119,8 @@ the rules do not read, such as `oauth_scopes`, `filesystem_paths` or
 
 Sources are the agents and IDE agents in the view, in node order (agents before IDE
 agents, each by name and reference), at most 200; the number not searched is reported.
-When there are more than 200, a source that has an outgoing edge or is itself a sink
-is searched before one that has neither, which has no path.
+When there are more than 200, a source that reaches a sink, or is one, is searched
+before a source that reaches none, which has no path.
 Sinks are components with a `code-exec`, `exfil-capable`, `write-capable` or
 `secret-access` class or a high or critical finding; `network-egress` alone does not
 make a sink. Nor do unscoped allow rules: they leave an IDE agent unclassified, with a

@@ -551,8 +551,9 @@ nexus-symbiote graph [OPTIONS] INVENTORY
 
 Exposure paths are the shortest recorded paths from agents and IDE agents to
 components with a `code-exec`, `exfil-capable`, `write-capable` or `secret-access`
-risk class or a high or critical finding: at most 200 agents are searched and 200
-paths kept, and the view reports how many were left out. Edges are static repository
+risk class or a high or critical finding: at most 200 agents and IDE agents are
+searched, those that reach such a component first, and 200 paths kept, and the view
+reports how many were left out. Edges are static repository
 associations; runtime use and effective authority are not observed. The HTML file
 loads nothing from outside, pins its one style block and one script with a
 Content-Security-Policy hash, and shows inventory text only escaped. A graph larger
