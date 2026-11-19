@@ -609,7 +609,8 @@ def _zed_server(config: dict[str, Any]) -> _Normalized:
 
 
 # opencode replaces {env:NAME} and {file:PATH} in its configuration text when it loads it.
-_OPENCODE_SUBSTITUTION = re.compile(r"(?<!\$)\{((?:env|file):[^}]+)\}")
+# Bounded and closed at the next brace either way, so an unclosed run is linear to read.
+_OPENCODE_SUBSTITUTION = re.compile(r"(?<!\$)\{((?:env|file):[^{}]{1,1024})\}")
 
 
 def _opencode_text(value: Any) -> Any:

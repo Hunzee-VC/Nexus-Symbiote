@@ -19,6 +19,7 @@ from nexus_symbiote.cli import main
 from nexus_symbiote.core.models import MCPClientComponent, MCPServerComponent
 from nexus_symbiote.scanners.base import ScanResult
 from nexus_symbiote.scanners.mcp import MCPScanner, _opencode_text
+from tests.support import scaling_ratio
 
 NO_LAUNCH = "declares neither a command nor an endpoint; the client file holds no launch"
 DIRECTORY_GAP = "file below an MCP server directory that the collector does not read there"
@@ -660,3 +661,15 @@ def test_continue_workspace_mcp_servers_in_continuerc_are_a_gap(tmp_path, name):
 def test_a_continuerc_without_mcp_servers_is_complete(tmp_path, content):
     result = scan(tmp_path, {".continuerc.json": content})
     assert not result.scan_failures and not result.surfaces_excluded and not clients(result)
+
+
+def test_an_unclosed_opencode_substitution_run_is_read_in_linear_time(tmp_path):
+    def run(scale: int) -> None:
+        project = tmp_path / f"run{scale}"
+        project.mkdir(exist_ok=True)
+        (project / "opencode.json").write_text(
+            json.dumps({"mcp": {"x": {"type": "local", "command": ["{env:" * (5_000 * scale)]}}})
+        )
+        MCPScanner().scan(project)
+
+    assert scaling_ratio(run) < 10
