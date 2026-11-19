@@ -1,0 +1,333 @@
+--- /home/user/wt/coord-cred-pr255/src/nexus_symbiote/scanners/mcp.py	2026-11-18 21:10:32.801766461 +0000
++++ src/nexus_symbiote/scanners/mcp.py	2026-11-18 22:29:10.288383704 +0000
+@@ -74,14 +74,19 @@
+     REDACTED,
+     TOKEN_SHAPE,
+     SecretScrubber,
++    authorization_name,
++    credential_header,
+     credential_shaped,
+     is_reference,
++    locates,
+     names_reference,
+     redact_descriptor,
+     redact_text,
+     scheme_credentials,
++    scheme_token,
+     secret_like,
+     secret_values,
++    stands_in,
+ )
+ from nexus_symbiote.utils.terminal import neutralize
+ from nexus_symbiote.utils.toml import loads as load_toml
+@@ -480,6 +485,7 @@
+ _HEADER_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{1,63}")
+ _CLI_FLAG = re.compile(r"-{1,2}[A-Za-z][A-Za-z0-9_-]{0,63}")
+ _HEADER_FLAGS = frozenset({"-h", "--header"})
++_ENVIRONMENT_FLAGS = frozenset({"-e", "--env"})
+ _HEADER_PREFIXES = ("--header=", "-h=")
+ # The character before a requirement's version (pkg==1.2, pkg>=1.2, pkg~=1.2, pkg!=1.2).
+ _REQUIREMENT_OPERATORS = frozenset("<>!~=")
+@@ -689,7 +695,7 @@
+ _CREDENTIAL_CLASSES = (_SHAPE_CLASS, _SCHEME_CLASS, _NAMED_CLASS)
+ 
+ 
+-def _credential_class(name: str, value: str) -> str | None:
++def _credential_class(name: str, value: str, *, header_line: bool = False) -> str | None:
+     """The pattern class under which the scrubber takes ``value`` at a position named ``name``.
+ 
+     A reference or template, bare or after an auth scheme word, names a credential and
+@@ -697,12 +703,15 @@
+     the scrubber selects one; a plain locator under a credential name is scrubbed whole
+     but holds no literal credential.
+     """
+-    if TOKEN_SHAPE.search(value):
++    if any(not stands_in(match.group()) for match in TOKEN_SHAPE.finditer(value)):
+         return _SHAPE_CLASS
+     if names_reference(value):
+         return None
+     header = _header_line(value)
+-    if header is not None:
++    # Text of the form `Word: rest` is a header line where a header option says so, or
++    # where the word is a header that carries a credential; `Session: nightly run` and
++    # `auth-service:8443/api` are neither.
++    if header is not None and (header_line or credential_header(header[0])):
+         if names_reference(header[1]):
+             return None
+         if kind := _value_class(*header):
+@@ -711,28 +720,86 @@
+ 
+ 
+ def _value_class(name: str, value: str) -> str | None:
+-    """The scheme or named class of ``value``, without reading it as a header line."""
+-    if scheme_credentials(value):
++    """The scheme or named class of ``value``, without reading it as a header line.
++
++    After an auth scheme word, an Authorization header holds a credential whatever its
++    shape; under any other name only one credential-shaped word does, so prose that
++    starts with a scheme word ("Basic calculator tools") is none.
++    """
++    credentials = scheme_credentials(value)
++    if credentials and stands_in(credentials[0]):
++        return None
++    if credentials and (authorization_name(name) or scheme_token(value)):
+         return _SCHEME_CLASS
+-    if _url_secrets(value) or ("://" not in value and secret_like(name, value)):
+-        return _NAMED_CLASS
+-    return None
++    if "://" in value:
++        return _url_class(value)
++    if not secret_like(name, value):
++        return None
++    # The name marks a credential. A placeholder stands in for one and a path or file
++    # name locates one: the scrubber takes both whole, and neither is a literal.
++    return None if stands_in(value) or locates(value) else _NAMED_CLASS
++
++
++def _url_class(value: str) -> str | None:
++    """The class of a literal credential in the URLs of ``value``: a password in user
++    information that reads as a credential, or a query parameter that holds one."""
++    classes: list[str | None] = []
++    for url in _locators(value):
++        try:
++            parsed = urlsplit(url)
++            password = parsed.password
++        except ValueError:
++            # Malformed URLs contribute no parsed userinfo or query fields.
++            continue
++        if password is not None and any(
++            len(candidate) >= MIN_SECRET_LENGTH
++            and credential_shaped(candidate)
++            and not names_reference(candidate)
++            and not stands_in(candidate)
++            for candidate in dict.fromkeys((password, unquote(password)))
++        ):
++            classes.append(_NAMED_CLASS)
++        for query_name, query_value in parse_qsl(parsed.query):
++            if "://" not in query_value and not names_reference(query_value):
++                classes.append(_value_class(query_name, query_value))
++    return next((kind for kind in _CREDENTIAL_CLASSES if kind in classes), None)
+ 
+ 
+ def _argument_credential_class(previous: str | None, argument: str) -> str | None:
+     """The class of a launch argument: its words, their assignments, or a flag's value."""
+     classes = []
+     words = _launch_words([argument])
++    container = previous is not None and previous.lower() in _ENVIRONMENT_FLAGS
+     for index, word in enumerate(words):
+-        classes.append(_credential_class("", word))
++        before = previous if index == 0 else words[index - 1]
++        header_line = (
++            (before is not None and before.lower() in _HEADER_FLAGS)
++            or word.startswith("-H")
++            or word.lower().startswith(_HEADER_PREFIXES)
++        )
++        classes.append(_credential_class("", word, header_line=header_line))
+         if index > 0 and _flag_value(words[index - 1], word):
+             classes.append(_credential_class(words[index - 1], word))
++        if word == "=" and 0 < index < len(words) - 1:
++            # `NAME = value`, as a person may write an assignment.
++            classes.append(_credential_class(words[index - 1], words[index + 1]))
++            continue
+         name, equals, value = word.partition("=")
++        if name.lower() in _ENVIRONMENT_FLAGS and "=" in value:
++            # --env=NAME=value: the assignment follows the option.
++            name, equals, value = value.partition("=")
+         if equals and not _requirement(name, value):
++            if index == 0 and len(words) > 1 and not (name.startswith("-") or container):
++                # A script or program text: its assignments end with their words, which
++                # are read in turn. `NAME=${NAME} exec ...` holds no literal.
++                continue
+             name = name.lstrip("-").strip(" \"'")
+             value = value.strip(" \"'")
+             if name and value and name.lower() not in {"h", "header"}:
+                 classes.append(_credential_class(name, value))
++                # cmd's `set NAME=Bearer <token>` leaves the credential in the next word.
++                if index + 1 < len(words) and scheme_credentials(f"{value} {words[index + 1]}"):
++                    classes.append(_credential_class(name, f"{value} {words[index + 1]}"))
+     if previous is not None and _flag_value(previous, argument):
+         classes.append(_credential_class(previous, argument))
+     return next((kind for kind in _CREDENTIAL_CLASSES if kind in classes), None)
+@@ -748,22 +815,30 @@
+ 
+ 
+ def _credential_positions(
+-    env: dict[str, Any], args: list[Any], header_maps: Sequence[dict[str, Any]]
++    env: dict[str, Any],
++    args: list[Any],
++    header_maps: Sequence[dict[str, Any]],
++    scrubber: SecretScrubber | None = None,
+ ) -> list[tuple[str, str]]:
+     """Each launch position holding a literal credential, with its pattern class.
+ 
+     Positions are named as the inventory exports them: an env or header name that the
+-    inventory withholds is not named here either, and no value is. A name in a known
+-    token shape is itself a literal credential.
++    inventory withholds is not named here either, and no value is. Neither is a name
++    that repeats a credential value the file holds: the finding would carry that value
++    into every export. A name in a known token shape is itself a literal credential.
+     """
+     positions: dict[tuple[str, str], None] = {}
++
++    def shown(name: str) -> bool:
++        return _exportable_name(name) and not (scrubber is not None and scrubber.contains(name))
++
+     for name in sorted(env):
+         value = env[name]
+         kind = _credential_class(name, value) if isinstance(value, str) else None
+         if kind is None and TOKEN_SHAPE.search(name):
+             kind = _SHAPE_CLASS
+         if kind is not None:
+-            label = f"env {name}" if _exportable_name(name) else "an env key"
++            label = f"env {name}" if shown(name) else "an env key"
+             positions[(label, kind)] = None
+     previous: str | None = None
+     for index, argument in enumerate(args, start=1):
+@@ -780,7 +855,7 @@
+             kind = _SHAPE_CLASS
+         if kind is not None:
+             label = f"header {redact_text(name, identifier=True)}"
+-            positions[(label if _exportable_name(name) else "a header", kind)] = None
++            positions[(label if shown(name) else "a header", kind)] = None
+     return list(positions)
+ 
+ 
+@@ -2471,7 +2546,7 @@
+             name,
+             launch=launch,
+             credentials=_credential_positions(
+-                env, args, [config.get("headers", {}), config.get("http_headers", {})]
++                env, args, [config.get("headers", {}), config.get("http_headers", {})], scrubber
+             ),
+             transport=transport,
+             command=command,
+--- /home/user/wt/coord-cred-pr255/src/nexus_symbiote/utils/secrets.py	2026-11-18 21:10:32.806701664 +0000
++++ src/nexus_symbiote/utils/secrets.py	2026-11-18 22:12:47.268661609 +0000
+@@ -224,17 +224,124 @@
+     return _REFERENCE.fullmatch(value) is not None
+ 
+ 
++# The forms a client, its shell or a template engine replaces with a value: ${NAME} with
++# any modifier, ${{ expression }}, {{ name }}, $NAME, $env:NAME, %NAME%, $(command) and
++# `command`. A lower-case $name is not among them: a password may itself begin with "$".
++_EXPANDED = (
++    r"(?:\$\{\{[^{}]{1,256}\}\}|\$\{[^{}]{1,256}\}|\{\{[^{}]{1,256}\}\}"
++    r"|\$env:[A-Za-z_][A-Za-z0-9_]{0,127}|\$[A-Z][A-Z0-9_]{1,127}"
++    r"|%[A-Za-z_][A-Za-z0-9_]{0,127}%|\$\([^()]{1,512}\)|`[^`]{1,512}`)"
++)
++# One or more of them, and at most a path below them: $HOME/.ssh/id_ed25519. A literal
++# before a reference, or after it without a path separator, may be part of a credential.
++_NAMED_ELSEWHERE = re.compile(rf"{_EXPANDED}++(?:[/\\][^\s]{{0,512}})?")
++
++
+ def names_reference(value: str) -> bool:
+     """Whether ``value`` names where a credential comes from and holds none.
+ 
+-    A reference (``${NAME}``, ``$NAME``) or a template (``{{ name }}``), on its own or
+-    after an auth scheme word (``Bearer ${TOKEN}``).
++    A reference in a syntax the client, its shell or a template engine expands
++    (``${NAME}``, ``$NAME``, ``%NAME%``, ``$env:NAME``, ``${{ secrets.NAME }}``,
++    ``{{ name }}``, ``$(command)``), on its own, with a path below it, or after an auth
++    scheme word (``Bearer ${TOKEN}``).
+     """
+     stripped = value.strip()
+     parts = _SCHEME_AND_VALUE.fullmatch(stripped)
+     if parts is not None and parts.group(1).lower() in _AUTH_SCHEMES:
+         stripped = parts.group(3).strip()
+-    return is_reference(stripped) or _TEMPLATE.fullmatch(stripped) is not None
++    return _NAMED_ELSEWHERE.fullmatch(stripped) is not None
++
++
++# What says that a value stands in for a credential: text in angle or square brackets, a
++# value wholly in braces, a run of "x", "*" or ".", the sequences documentation counts
++# out, and the words templates use. A credential that holds one by chance is not reported.
++_PLACEHOLDER = re.compile(
++    r"(?i)<[^<>]++>|\[[^\[\]]++\]|\A\{[\w .:-]{0,64}\}\Z|x{4,}|\*{3,}|\.{3,}"
++    r"|123456|abcdef|your|example|sample|placeholder|change[-_ ]?me|replace|insert|dummy"
++    r"|redacted",
++    re.DOTALL,
++)
++_MIN_DISTINCT = 5
++_SHORT = 128
++# Where a credential is kept, not the credential: a path from a root, the home or the
++# current directory, a drive, a file with a known suffix, a key file by its usual name,
++# or a relative path of lower-case names. A run of 24 letters and digits that mixes both
++# is no path segment: a base64 secret may start with "/" or hold one.
++_PATH_START = re.compile(r"(?:[A-Za-z]:)?[\\/]|\.{1,2}[\\/]|~[\\/]")
++_FILE_SUFFIXES = (
++    ".json", ".yaml", ".yml", ".toml", ".txt", ".pem", ".key", ".p12", ".pfx", ".crt", ".cer",
++    ".env", ".ini", ".conf", ".p8", ".der", ".jks", ".ppk", ".pub",
++)  # fmt: skip
++_KEY_FILE = re.compile(r"(?:\A|[\\/])id_(?:rsa|dsa|ecdsa|ed25519)(?:_sk)?\Z")
++_RELATIVE_PATH = re.compile(r"[a-z0-9._-]++(?:[\\/][a-z0-9._-]++)++[\\/]?")
++_RANDOM_RUN = re.compile(r"[A-Za-z0-9+]{24,}")
++
++
++def _random_run(value: str) -> bool:
++    return any(
++        any(c.isdigit() for c in run) and any(c.isalpha() for c in run)
++        for run in _RANDOM_RUN.findall(value)
++    )
++
++
++def stands_in(value: str) -> bool:
++    """Whether ``value`` stands in for a credential: a placeholder mark, or a short value
++    of fewer than five different characters (``ghp_0000...``, ``11111111``)."""
++    return _PLACEHOLDER.search(value) is not None or (
++        len(value) <= _SHORT and len(set(value)) < _MIN_DISTINCT
++    )
++
++
++def locates(value: str) -> bool:
++    """Whether ``value`` says where a credential is kept: a path or a file name."""
++    text = value.strip()
++    if not text or any(char.isspace() for char in text) or _random_run(text):
++        return False
++    return (
++        _PATH_START.match(text) is not None
++        or text.lower().endswith(_FILE_SUFFIXES)
++        or _KEY_FILE.search(text) is not None
++        or _RELATIVE_PATH.fullmatch(text) is not None
++    )
++
++
++def authorization_name(name: str) -> bool:
++    """Whether ``name`` is an ``Authorization`` or ``Proxy-Authorization`` header name."""
++    return _AUTHORIZATION_KEY.fullmatch(name.strip()) is not None
++
++
++def credential_header(name: str) -> bool:
++    """Whether a header name carries a credential: ``Authorization``, ``Cookie``, or a
++    name that ends in a credential word, as the assignment rule reads one (``X-Api-Key``)."""
++    name = name.strip()
++    return (
++        _AUTHORIZATION_KEY.fullmatch(name) is not None
++        or _COOKIE_KEY.fullmatch(name) is not None
++        or _CREDENTIAL_KEY.search(name) is not None
++    )
++
++
++# A reference in a syntax a client or its shell expands, at the start of a word.
++_STARTS_EXPANDED = re.compile(
++    r"\$\{|\{\{|\$env:|\$[A-Z][A-Z0-9_]|%[A-Za-z_][A-Za-z0-9_]{0,127}%|\$\(|`"
++)
++
++
++def scheme_token(value: str) -> bool:
++    """Whether ``value`` is an auth scheme word and one credential-shaped word.
++
++    The shape rule is the one free text is redacted by: after ``Basic`` a base64
++    ``user:password`` pair, after another scheme at least 16 characters, or six with a
++    digit, punctuation or mixed case. ``Bearer authentication`` and a sentence that
++    starts with ``Basic`` are prose.
++    """
++    parts = _SCHEME_AND_VALUE.fullmatch(value.strip())
++    if parts is None or parts.group(1).lower() not in _AUTH_SCHEMES:
++        return False
++    credential = parts.group(3).strip()
++    if any(char.isspace() for char in credential) or _STARTS_EXPANDED.match(credential):
++        return False
++    return _credential_like(credential, parts.group(1))
+ 
+ 
+ def credential_shaped(value: str) -> bool:
