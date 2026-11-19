@@ -26,7 +26,7 @@ already implements the same item. Write "None" for a fix or chore outside the ro
 `make check` runs the offline subset of the required CI checks. See [CONTRIBUTING.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CONTRIBUTING.md).
 
 - [ ] Tests cover the new or changed behavior
-- [ ] New tests take __ s in total without coverage (`python -m pytest --durations=0`; at most 60 s, see CONTRIBUTING.md)
+- [ ] New tests take __ s in total without coverage (`python -m pytest --durations=0`; at most 60 s, or the suite's own documented budget; see CONTRIBUTING.md)
 - [ ] `ruff check src tests scripts` passes
 - [ ] `ruff format --check src tests scripts` passes
 - [ ] `mypy src/nexus_symbiote scripts` passes
@@ -34,7 +34,7 @@ already implements the same item. Write "None" for a fix or chore outside the ro
 - [ ] Dependency changes: locks regenerated with `make lock`, and the "Dependency health" run is green
 - [ ] Documentation updated (if applicable)
 - [ ] CHANGELOG.md updated under Unreleased
-- [ ] Labelled with one type and one area label ([label guide](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/labels.md))
+- [ ] Labelled with at least one type and one area label ([label guide](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/labels.md))
 
 ## Review record
 

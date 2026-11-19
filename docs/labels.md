@@ -6,9 +6,10 @@ label, add its row here in the same change.
 
 ## Rules
 
-- Every pull request carries at least one [type](#type) label and one [area](#area) label.
-- An open pull request carries exactly one [review state](#review-state) label. It starts at
-  `needs-independent-review`, and its reviewers move it.
+- Every pull request must carry at least one [type](#type) label and at least one [area](#area) label.
+- An open pull request carries exactly one [review state](#review-state) label:
+  `needs-independent-review`, `review: changes-needed` or `review: verified`. It starts at
+  `needs-independent-review`, and its reviewers move it. A [hold](#hold) may be added on top.
 - A pull request closed without merging carries a [disposition](#disposition) label and a comment
   that names its successor or gives the reason.
 - Labels never replace the review comment. A state label points to a comment that holds the
@@ -16,25 +17,33 @@ label, add its row here in the same change.
 
 ## Review state
 
-"Independent" means the review ran outside the session or person that wrote the change, as
-[AI-assisted contributions](../CONTRIBUTING.md#ai-assisted-contributions) defines it.
+"Independent" means a review by someone other than the author or, for an AI assistant, one that ran
+outside the session that wrote the change with its findings attached to the pull request, as
+[AI-assisted contributions](../CONTRIBUTING.md#ai-assisted-contributions) describes.
 
 | Label | Meaning | Set by |
 | --- | --- | --- |
 | `needs-independent-review` | No independent review yet, or a new head that no reviewer has read | The author, when opening the pull request or pushing a new head after a review |
 | `review: changes-needed` | An independent review found blocking issues; its comment lists them | The reviewer |
 | `review: verified` | The pull request passed an independent, test-executing review at the head SHA named in the review comment. A later head needs a new review | The reviewer |
-| `do-not-merge` | A hold: do not merge until the blocking review comment, or the merge coordination issue, clears it. It goes with `review: changes-needed` for a reproduced high-severity defect, or a conflict with a recorded decision | A reviewer, or whoever holds the merge lock |
+
+## Hold
+
+| Label | Meaning | Set by |
+| --- | --- | --- |
+| `do-not-merge` | Do not merge until the blocking review comment, or the merge coordination issue, clears it. A reviewer adds it when a finding must block the merge whatever else changes, such as a reproduced high-severity defect or a conflict with a recorded decision | A reviewer, or whoever holds the merge lock |
 
 ## Severity
 
-The `severity: high`, `severity: medium` and `severity: low` labels follow the scale of the
-[finding catalog](finding-catalog.md), and they have two uses. Read the review comment to tell which
+The `severity: high`, `severity: medium` and `severity: low` labels use the high, medium and low
+levels of the [finding catalog](finding-catalog.md)'s scale; a critical defect is labelled
+`severity: high`. They have two uses. Read the review comment to tell which
 one applies.
 
 - **On a fix:** the severity of the vulnerability or defect it fixes.
-- **On a pull request under review:** the most severe open review finding. The reviewer sets it with
-  `review: changes-needed`, and the next review updates or removes it when the findings are fixed.
+- **On a pull request under review:** the most severe open review finding, whatever the review
+  state. A `review: verified` pull request may carry `severity: low` for findings that can follow.
+  The next review updates or removes it.
 
 ## Type
 
@@ -57,7 +66,7 @@ one applies.
 | `scanner` | Collectors under `src/nexus_symbiote/scanners/` |
 | `generator` | Exports under `src/nexus_symbiote/generators/` |
 | `validator` | Validators under `src/nexus_symbiote/validators/` |
-| `integration` | Cross-tool integration, such as the ShadowScan import and export |
+| `integration` | Cross-tool integration, such as the ShadowScan import and export. It was also applied to the integration (batch-merge) pull requests #202, #203, #208, #218, #226 and #236; do not use it for that |
 | `provenance` | Build provenance, attestations and evidence binding |
 | `standards` | CycloneDX, SPDX, SARIF, VEX and other standards conformance |
 | `spec` | Specification and policy definitions |
