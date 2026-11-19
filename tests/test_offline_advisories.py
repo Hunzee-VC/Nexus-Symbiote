@@ -3,30 +3,44 @@
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
-from nexus_symbiote.core.models import RegistryEntryComponent
+from nexus_symbiote.core.enums import AssuranceLevel
+from nexus_symbiote.core.models import ClaimEvidence, RegistryEntryComponent
 from nexus_symbiote.offline_advisories import match_offline_advisories
 
 
 def _bom_with_package(
     *,
     name: str = "transformers",
-    version: str = "4.35.0",
+    version: str | None = "4.35.0",
     registry_type: str = "pypi",
     purl: str | None = None,
+    registry_uri: str | None = None,
+    claims: dict[str, ClaimEvidence] | None = None,
 ) -> AIBOM:
-    pkg_url = purl or f"pkg:{registry_type}/{name}@{version}"
+    pkg_url = (
+        purl
+        if purl is not None
+        else (
+            f"pkg:{registry_type}/{name}@{version}"
+            if version is not None
+            else f"pkg:{registry_type}/{name}"
+        )
+    )
     comp = RegistryEntryComponent(
-        bom_ref=f"pkg:{registry_type}:{name}@{version}",
+        bom_ref=f"pkg:{registry_type}:{name}@{version or 'unpinned'}",
         name=name,
         version=version,
         registry_type=registry_type,
         package_url=pkg_url,
+        registry_uri=registry_uri,
+        claims=claims or {},
     )
     return AIBOM(components=[comp])
 
@@ -96,6 +110,8 @@ def test_offline_advisories_matches_transformers_and_deduplicates_alias_pair(tmp
     assert len(report.advisories) == 1
     adv = report.advisories[0]
     assert adv["id"] == "CVE-2024-99999"
+    assert adv["advisory_id"] == "CVE-2024-99999"
+    assert adv["component_ref"] == "pkg:pypi:transformers@4.35.0"
     assert adv["aliases"] == ["GHSA-aaaa-bbbb-cccc"]
     assert adv["matched_ids"] == ["CVE-2024-99999", "GHSA-aaaa-bbbb-cccc"]
     assert adv["severity"] == "high"
@@ -166,6 +182,378 @@ def test_offline_advisories_kev_elevates_severity_and_epss_enriches(tmp_path):
     assert provenance["epss_catalog"] is not None
 
 
+def test_offline_advisories_order_independent_range_events_and_bounds(tmp_path):
+    """Out-of-order OSV events [introduced 0, introduced 4.0, fixed 3.0, fixed 5.0] match 4.35.0."""
+    db_file = tmp_path / "osv-unordered.json"
+    db_file.write_text(
+        json.dumps(
+            {
+                "advisories": [
+                    {
+                        "id": "CVE-2026-00001",
+                        "summary": "Multi-branch range in unsorted event order",
+                        "database_specific": {"severity": "HIGH"},
+                        "affected": [
+                            {
+                                "package": {"ecosystem": "PyPI", "name": "transformers"},
+                                "ranges": [
+                                    {
+                                        "type": "ECOSYSTEM",
+                                        "events": [
+                                            {"introduced": "0"},
+                                            {"introduced": "4.0"},
+                                            {"fixed": "3.0"},
+                                            {"fixed": "5.0"},
+                                        ],
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    hit, _ = match_offline_advisories(_bom_with_package(version="4.35.0"), db_path=db_file)
+    assert hit.complete is True
+    assert len(hit.advisories) == 1
+    assert hit.advisories[0]["fixed_versions"] == ["5.0"]
+
+    # Between fixed 3.0 and re-introduced 4.0 -> clean.
+    gap, _ = match_offline_advisories(_bom_with_package(version="3.5.0"), db_path=db_file)
+    assert gap.advisories == []
+
+    # Below first fix (2.5.0) -> vulnerable.
+    early, _ = match_offline_advisories(_bom_with_package(version="2.5.0"), db_path=db_file)
+    assert len(early.advisories) == 1
+
+    # At second fix (5.0.0) -> clean.
+    fixed, _ = match_offline_advisories(_bom_with_package(version="5.0.0"), db_path=db_file)
+    assert fixed.advisories == []
+
+
+def test_offline_advisories_partial_npm_semver_int_zero_and_range_edge_cases(tmp_path):
+    """Covers partial npm SemVer ("1", "1.0", "2.0"), int introduced: 0, bool rejection, GIT, limit, last_affected, withdrawn."""
+    db_file = tmp_path / "osv-edge.json"
+    db_file.write_text(
+        json.dumps(
+            {
+                "advisories": [
+                    {
+                        "id": "GHSA-npm-partial",
+                        "database_specific": {"severity": "HIGH"},
+                        "affected": [
+                            {
+                                "package": {"ecosystem": "npm", "name": "mcp-partial"},
+                                "ranges": [
+                                    {
+                                        "type": "SEMVER",
+                                        "events": [{"introduced": "1.0"}, {"fixed": "2.0"}],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "id": "GHSA-npm-major-only",
+                        "database_specific": {"severity": "MEDIUM"},
+                        "affected": [
+                            {
+                                "package": {"ecosystem": "npm", "name": "mcp-major"},
+                                "ranges": [
+                                    {
+                                        "type": "SEMVER",
+                                        "events": [{"introduced": "1"}, {"limit": "2.0"}],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "id": "GHSA-int-zero",
+                        "database_specific": {"severity": "HIGH"},
+                        "affected": [
+                            {
+                                "package": {"ecosystem": "npm", "name": "mcp-zero"},
+                                "ranges": [
+                                    {
+                                        "type": "SEMVER",
+                                        "events": [{"introduced": 0}, {"last_affected": "0.5.0"}],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "id": "GHSA-bool-not-zero",
+                        "database_specific": {"severity": "HIGH"},
+                        "affected": [
+                            {
+                                "package": {"ecosystem": "npm", "name": "mcp-bool"},
+                                "ranges": [{"type": "SEMVER", "events": [{"introduced": False}]}],
+                            }
+                        ],
+                    },
+                    {
+                        "id": "GHSA-git-ignored",
+                        "database_specific": {"severity": "CRITICAL"},
+                        "affected": [
+                            {
+                                "package": {"ecosystem": "npm", "name": "mcp-git"},
+                                "ranges": [
+                                    {
+                                        "type": "GIT",
+                                        "events": [{"introduced": "0"}, {"fixed": "deadbeef"}],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "id": "GHSA-withdrawn-skip",
+                        "withdrawn": "2026-01-15T00:00:00Z",
+                        "database_specific": {"severity": "CRITICAL"},
+                        "affected": [
+                            {
+                                "package": {"ecosystem": "npm", "name": "mcp-withdrawn"},
+                                "versions": ["1.0.0"],
+                            }
+                        ],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    # Partial npm SemVer: introduced "1.0" matches 1.5.0; fixed "2.0" closes 2.0.0.
+    r1, _ = match_offline_advisories(
+        _bom_with_package(name="mcp-partial", version="1.5.0", registry_type="npm"),
+        db_path=db_file,
+    )
+    assert [a["id"] for a in r1.advisories] == ["GHSA-npm-partial"]
+    r1_fixed, _ = match_offline_advisories(
+        _bom_with_package(name="mcp-partial", version="2.0.0", registry_type="npm"),
+        db_path=db_file,
+    )
+    assert r1_fixed.advisories == []
+
+    # Major-only "1" with exclusive limit "2.0".
+    r2, _ = match_offline_advisories(
+        _bom_with_package(name="mcp-major", version="1.9.9", registry_type="npm"),
+        db_path=db_file,
+    )
+    assert [a["id"] for a in r2.advisories] == ["GHSA-npm-major-only"]
+    r2_lim, _ = match_offline_advisories(
+        _bom_with_package(name="mcp-major", version="2.0.0", registry_type="npm"),
+        db_path=db_file,
+    )
+    assert r2_lim.advisories == []
+
+    # Integer introduced: 0 + inclusive last_affected: 0.5.0.
+    r3, _ = match_offline_advisories(
+        _bom_with_package(name="mcp-zero", version="0.5.0", registry_type="npm"),
+        db_path=db_file,
+    )
+    assert [a["id"] for a in r3.advisories] == ["GHSA-int-zero"]
+    r3_after, _ = match_offline_advisories(
+        _bom_with_package(name="mcp-zero", version="0.5.1", registry_type="npm"),
+        db_path=db_file,
+    )
+    assert r3_after.advisories == []
+
+    # Boolean False is NOT integer 0; GIT ranges and withdrawn records produce 0 matches.
+    for pkg_name in ("mcp-bool", "mcp-git", "mcp-withdrawn"):
+        clean, _ = match_offline_advisories(
+            _bom_with_package(name=pkg_name, version="1.0.0", registry_type="npm"),
+            db_path=db_file,
+        )
+        assert clean.advisories == [], pkg_name
+
+
+def test_offline_advisories_pypi_prereleases_and_epochs(tmp_path):
+    db_file = tmp_path / "osv-pep440.json"
+    db_file.write_text(
+        json.dumps(
+            {
+                "advisories": [
+                    {
+                        "id": "CVE-2026-44001",
+                        "database_specific": {"severity": "HIGH"},
+                        "affected": [
+                            {
+                                "package": {"ecosystem": "PyPI", "name": "torch"},
+                                "ranges": [
+                                    {
+                                        "type": "ECOSYSTEM",
+                                        "events": [{"introduced": "1.0.0a1"}, {"fixed": "1.0.0"}],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "id": "CVE-2026-44002",
+                        "database_specific": {"severity": "HIGH"},
+                        "affected": [
+                            {
+                                "package": {"ecosystem": "PyPI", "name": "epochpkg"},
+                                "ranges": [
+                                    {
+                                        "type": "ECOSYSTEM",
+                                        "events": [{"introduced": "0"}, {"fixed": "1!1.0.0"}],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    rc_hit, _ = match_offline_advisories(
+        _bom_with_package(name="torch", version="1.0.0rc1"), db_path=db_file
+    )
+    assert [a["id"] for a in rc_hit.advisories] == ["CVE-2026-44001"]
+    final_clean, _ = match_offline_advisories(
+        _bom_with_package(name="torch", version="1.0.0"), db_path=db_file
+    )
+    assert final_clean.advisories == []
+
+    pre_epoch, _ = match_offline_advisories(
+        _bom_with_package(name="epochpkg", version="9.0.0"), db_path=db_file
+    )
+    assert [a["id"] for a in pre_epoch.advisories] == ["CVE-2026-44002"]
+    post_epoch, _ = match_offline_advisories(
+        _bom_with_package(name="epochpkg", version="1!1.0.0"), db_path=db_file
+    )
+    assert post_epoch.advisories == []
+
+
+def test_offline_advisories_unpinned_package_marks_incomplete_and_exits_1(tmp_path):
+    bom_path = tmp_path / "unpinned.json"
+    _bom_with_package(name="requests", version=None, purl="pkg:pypi/requests").save(bom_path)
+    db_file = tmp_path / "osv.json"
+    db_file.write_text(json.dumps({"advisories": []}), encoding="utf-8")
+
+    runner = CliRunner()
+    res = runner.invoke(main, ["advisories", str(bom_path), "--offline-db", str(db_file)])
+    assert res.exit_code == 1
+    payload = json.loads(res.output)
+    assert payload["complete"] is False
+    assert any("exact package identity unavailable" in err for err in payload["errors"])
+
+
+def test_offline_advisories_over_4mb_db_and_over_500_packages_linear_speed(tmp_path):
+    """DB >4 MiB parses without hitting the 4 MiB default parser cap, and 1,000x20,000 matching stays linear."""
+    records = [
+        {
+            "id": f"GHSA-bulk-{i:05d}",
+            "summary": "x" * 160,
+            "database_specific": {"severity": "LOW"},
+            "affected": [
+                {
+                    "package": {"ecosystem": "PyPI", "name": f"other-pkg-{i:05d}"},
+                    "versions": ["1.0.0"],
+                }
+            ],
+        }
+        for i in range(18_000)
+    ]
+    records.append(
+        {
+            "id": "CVE-2026-88888",
+            "summary": "Planted target match",
+            "database_specific": {"severity": "HIGH"},
+            "affected": [
+                {
+                    "package": {"ecosystem": "PyPI", "name": "pkg-00500"},
+                    "versions": ["1.0.0"],
+                }
+            ],
+        }
+    )
+    db_file = tmp_path / "large-osv.json"
+    db_text = json.dumps({"advisories": records})
+    assert len(db_text.encode("utf-8")) > 4 * 1024 * 1024
+    db_file.write_text(db_text, encoding="utf-8")
+
+    comps = [
+        RegistryEntryComponent(
+            bom_ref=f"pkg:pypi:pkg-{i:05d}@1.0.0",
+            name=f"pkg-{i:05d}",
+            version="1.0.0",
+            registry_type="pypi",
+            package_url=f"pkg:pypi/pkg-{i:05d}@1.0.0",
+        )
+        for i in range(1_000)
+    ]
+    bom = AIBOM(components=comps)
+
+    t0 = time.monotonic()
+    report, _ = match_offline_advisories(bom, db_path=db_file)
+    elapsed = time.monotonic() - t0
+
+    assert report.complete is True
+    assert report.components_checked == 1_000
+    assert [a["id"] for a in report.advisories] == ["CVE-2026-88888"]
+    assert elapsed < 5.0, f"expected linear indexed matching (<5s), got {elapsed:.2f}s"
+
+
+@pytest.mark.parametrize(
+    "bad_epss",
+    [
+        "cve,epss,percentile\nCVE-2024-99999,nan,0.5\n",
+        "cve,epss,percentile\nCVE-2024-99999,inf,0.5\n",
+        "cve,epss,percentile\nCVE-2024-99999,-0.01,0.5\n",
+        "cve,epss,percentile\nCVE-2024-99999,1.01,0.5\n",
+        json.dumps({"data": [{"cve": "CVE-2024-99999", "epss": [1]}]}),
+        json.dumps({"data": [{"cve": "CVE-2024-99999", "epss": True}]}),
+    ],
+)
+def test_offline_advisories_rejects_hostile_epss_values(tmp_path, bad_epss):
+    db_file = tmp_path / "osv.json"
+    db_file.write_text(json.dumps(_sample_osv_bundle()), encoding="utf-8")
+    epss_file = tmp_path / "bad_epss.dat"
+    epss_file.write_text(bad_epss, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="finite number"):
+        match_offline_advisories(_bom_with_package(), db_path=db_file, epss_path=epss_file)
+
+
+def test_offline_advisories_exclude_validation_and_private_origins(tmp_path):
+    db_file = tmp_path / "osv.json"
+    db_file.write_text(json.dumps(_sample_osv_bundle()), encoding="utf-8")
+
+    # Wildcard not at end must be rejected just like live mode.
+    with pytest.raises(ValueError, match="last character"):
+        match_offline_advisories(_bom_with_package(), db_path=db_file, exclude=("trans*mers",))
+
+    # --exclude-private-origins withholds packages lacking lockfile-backed public origin.
+    bom_unrecorded = _bom_with_package()
+    rep_excl, _ = match_offline_advisories(
+        bom_unrecorded, db_path=db_file, exclude_private_origins=True
+    )
+    assert rep_excl.components_excluded == 1
+    assert rep_excl.components_checked == 0
+
+    bom_public = _bom_with_package(
+        registry_uri="https://pypi.org",
+        claims={
+            "package_resolution": ClaimEvidence(
+                assurance=AssuranceLevel.DECLARED,
+                method="lockfile",
+                scope="uv.lock",
+            )
+        },
+    )
+    rep_pub, _ = match_offline_advisories(bom_public, db_path=db_file, exclude_private_origins=True)
+    assert rep_pub.components_checked == 1
+    assert len(rep_pub.advisories) == 1
+
+
 def test_offline_advisories_npm_semver_and_symlink_rejection(tmp_path):
     db_file = tmp_path / "osv.json"
     db_file.write_text(json.dumps(_sample_osv_bundle()), encoding="utf-8")
@@ -187,13 +575,17 @@ def test_offline_advisories_npm_semver_and_symlink_rejection(tmp_path):
         match_offline_advisories(bom_npm, db_path=link)
 
 
-def test_advisories_cli_offline_mode_requires_no_live_flag(tmp_path):
+def test_advisories_cli_offline_mode_and_help_exit_codes(tmp_path):
     bom_path = tmp_path / "aibom.json"
     _bom_with_package().save(bom_path)
     db_file = tmp_path / "osv.json"
     db_file.write_text(json.dumps(_sample_osv_bundle()), encoding="utf-8")
 
     runner = CliRunner()
+    help_res = runner.invoke(main, ["advisories", "--help"])
+    assert help_res.exit_code == 0
+    assert "Exits 1" in help_res.output
+
     res = runner.invoke(main, ["advisories", str(bom_path), "--offline-db", str(db_file)])
     assert res.exit_code == 1
     payload = json.loads(res.output)

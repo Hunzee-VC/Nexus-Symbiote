@@ -3,18 +3,25 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+from nexus_symbiote.attestation import build_statement, sign_statement
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import RiskSeverity
+from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.core.models import RegistryEntryComponent, RiskAssessment, ToolComponent
 from nexus_symbiote.generators.vex import VEXGenerator, finding_id
 from nexus_symbiote.vex_decisions import (
     VEXDecisionError,
+    load_advisory_report,
     load_execution_evidence,
     load_vex_decisions,
 )
@@ -36,44 +43,169 @@ def _three_component_bom() -> AIBOM:
     )
 
 
-def test_execution_bound_vex_yields_three_distinct_outcomes(tmp_path):
+def _sign_trace_file(trace_path: Path, att_path: Path, pub_path: Path) -> None:
+    private = Ed25519PrivateKey.generate()
+    pub_bytes = private.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    pub_path.write_bytes(pub_bytes)
+    statement = build_statement(
+        trace_path.read_bytes(),
+        name=trace_path.name,
+        purpose="generated",
+        signed_at=datetime.now(UTC).replace(microsecond=0),
+    )
+    envelope = sign_statement(statement, [private])
+    att_path.write_text(
+        json.dumps(envelope.model_dump(mode="json", by_alias=True), indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_execution_bound_vex_yields_distinct_outcomes_and_keeps_unobserved_in_triage(tmp_path):
+    """declared_never_loaded clears non-critical dynamic risk, while unobserved stays in_triage."""
     bom = _three_component_bom()
+    bom.components.append(
+        ToolComponent(
+            bom_ref="tool:unobserved",
+            name="unobserved_tool",
+            risks=[
+                RiskAssessment(
+                    severity=RiskSeverity.HIGH,
+                    category="unpinned_tool",
+                    detail="Tool definition is unpinned",
+                )
+            ],
+        )
+    )
     trace_file = tmp_path / "trace-evidence.json"
     trace_file.write_text(
         json.dumps(
             {
-                "matched": [{"bom_ref": "tool:invoked"}],
-                "unobserved": [{"bom_ref": "tool:never-loaded"}],
-                "shadowed": [{"bom_ref": "tool:shadowed"}],
+                "reconciliation": {
+                    "matched": [{"kind": "tool", "inventory_ref": "tool:invoked"}],
+                    "unobserved": [{"kind": "tool", "inventory_ref": "tool:unobserved"}],
+                },
+                "declared_never_loaded": ["tool:never-loaded"],
+                "shadowed": ["tool:shadowed"],
             }
         ),
         encoding="utf-8",
     )
-    evidence = load_execution_evidence(trace_file)
+    evidence = load_execution_evidence(trace_file, allow_unsigned=True)
     doc = VEXGenerator(execution_evidence=evidence).generate(bom)
 
     by_comp = {v["affects"][0]["ref"]: v for v in doc["vulnerabilities"]}
-    assert set(by_comp.keys()) == {"tool:never-loaded", "tool:invoked", "tool:shadowed"}
+    assert set(by_comp.keys()) == {
+        "tool:never-loaded",
+        "tool:unobserved",
+        "tool:invoked",
+        "tool:shadowed",
+    }
 
-    # 1. Declared-never-loaded -> not_affected + code_not_reachable
+    # 1. Explicit declared_never_loaded on non-critical dynamic finding -> not_affected.
     never = by_comp["tool:never-loaded"]["analysis"]
     assert never["state"] == "not_affected"
     assert never["justification"] == "code_not_reachable"
-    assert "never observed" in never["detail"]
 
-    # 2. Invoked -> exploitable + update response
+    # 2. Real trace-diff unobserved -> MUST remain in_triage (absence of spans proves nothing).
+    unobs = by_comp["tool:unobserved"]["analysis"]
+    assert unobs["state"] == "in_triage"
+    assert "justification" not in unobs
+
+    # 3. Real trace-diff matched (inventory_ref) -> exploitable + update response.
     invoked = by_comp["tool:invoked"]["analysis"]
     assert invoked["state"] == "exploitable"
     assert invoked["response"] == ["update"]
-    assert "invoked" in invoked["detail"]
 
-    # 3. Shadowed -> in_triage + explicit shadowing reason
+    # 4. Shadowed -> in_triage + explicit shadowing reason.
     shadowed = by_comp["tool:shadowed"]["analysis"]
     assert shadowed["state"] == "in_triage"
     assert "shadowed" in shadowed["detail"]
 
 
-def test_operator_vex_decisions_active_and_expired_reverts_to_in_triage(tmp_path):
+def test_trace_evidence_cannot_suppress_hook_commands_critical_or_kev(tmp_path):
+    """Critical, hook_commands, and KEV advisories stay in_triage even under declared_never_loaded or unobserved."""
+    comp_hook = ToolComponent(
+        bom_ref="tool:hooked",
+        name="hooked_tool",
+        risks=[
+            RiskAssessment(
+                severity=RiskSeverity.CRITICAL,
+                category="hook_commands",
+                detail="Shell hook executes untrusted command",
+            )
+        ],
+    )
+    comp_pkg = RegistryEntryComponent(
+        bom_ref="pkg:pypi:transformers@4.35.0",
+        name="transformers",
+        version="4.35.0",
+        registry_type="pypi",
+        package_url="pkg:pypi/transformers@4.35.0",
+    )
+    bom = AIBOM(components=[comp_hook, comp_pkg])
+    trace_file = tmp_path / "trace.json"
+    trace_file.write_text(
+        json.dumps(
+            {
+                "declared_never_loaded": ["tool:hooked", "pkg:pypi:transformers@4.35.0"],
+                "unobserved": ["tool:hooked"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    evidence = load_execution_evidence(trace_file, allow_unsigned=True)
+    advisories = [
+        {
+            "component_ref": "pkg:pypi:transformers@4.35.0",
+            "advisory_id": "CVE-2024-99999",
+            "severity": "high",
+            "in_kev": True,
+            "kev_sources": ["cisa-kev"],
+            "offline": True,
+        }
+    ]
+    doc = VEXGenerator(execution_evidence=evidence, advisories=advisories).generate(bom)
+    assert len(doc["vulnerabilities"]) == 2
+    for vuln in doc["vulnerabilities"]:
+        assert vuln["analysis"]["state"] == "in_triage"
+        props = {p["name"]: p["value"] for p in vuln["properties"]}
+        assert props["nexus-symbiote:suppressionBlocked"] == "true"
+
+
+def test_operator_vex_decisions_wall_clock_expiry_ignores_stale_bom_and_source_date_epoch(
+    tmp_path, monkeypatch
+):
+    """A stale 2020 inventory timestamp and SOURCE_DATE_EPOCH=2020 must NOT keep a 2021 decision alive."""
+    bom = _three_component_bom()
+    bom.metadata.timestamp = datetime(2020, 1, 1, 0, 0, tzinfo=UTC)
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1577836800")  # 2020-01-01T00:00:00Z
+
+    fid = finding_id("tool:invoked", "unpinned_tool", "Tool definition is unpinned")
+    decisions_file = tmp_path / "decisions.yaml"
+    decisions_file.write_text(
+        f"""version: 1
+decisions:
+  - id: "{fid}"
+    component_ref: "tool:invoked"
+    state: "not_affected"
+    justification: "protected_at_runtime"
+    detail: "Expired in 2021"
+    owner: "secops@example.com"
+    expires_at: "2021-01-01T00:00:00Z"
+""",
+        encoding="utf-8",
+    )
+    loaded = load_vex_decisions(decisions_file)
+    doc = VEXGenerator(decisions=loaded).generate(bom)
+    by_comp = {v["affects"][0]["ref"]: v for v in doc["vulnerabilities"]}
+    assert by_comp["tool:invoked"]["analysis"]["state"] == "in_triage"
+    assert "Expired operator VEX decision" in by_comp["tool:invoked"]["analysis"]["detail"]
+
+
+def test_operator_vex_decisions_active_and_duplicate_refused(tmp_path):
     bom = _three_component_bom()
     fid_active = finding_id("tool:never-loaded", "unpinned_tool", "Tool definition is unpinned")
     fid_expired = finding_id("tool:invoked", "unpinned_tool", "Tool definition is unpinned")
@@ -103,38 +235,79 @@ decisions:
     doc = VEXGenerator(decisions=loaded, reference_time=ref_time).generate(bom)
 
     by_comp = {v["affects"][0]["ref"]: v for v in doc["vulnerabilities"]}
-    active_analysis = by_comp["tool:never-loaded"]["analysis"]
-    assert active_analysis["state"] == "not_affected"
-    assert active_analysis["justification"] == "protected_at_runtime"
-    assert "secops@example.com" in active_analysis["detail"]
-
-    expired_analysis = by_comp["tool:invoked"]["analysis"]
-    assert expired_analysis["state"] == "in_triage"
-    assert "Expired operator VEX decision" in expired_analysis["detail"]
-    assert "justification" not in expired_analysis
-
+    assert by_comp["tool:never-loaded"]["analysis"]["state"] == "not_affected"
+    assert by_comp["tool:invoked"]["analysis"]["state"] == "in_triage"
     meta_props = {p["name"]: p["value"] for p in doc["metadata"].get("properties", [])}
     assert meta_props["nexus-symbiote:expiredVexDecisions"] == "1"
 
+    # Conflicting / duplicate (id, component_ref) decisions must be refused.
+    dup_file = tmp_path / "dup-decisions.yaml"
+    dup_file.write_text(
+        f"""version: 1
+decisions:
+  - id: "{fid_active}"
+    component_ref: "tool:never-loaded"
+    state: "not_affected"
+    detail: "First"
+    owner: "a@example.com"
+    expires_at: "2027-01-01T00:00:00Z"
+  - id: "{fid_active}"
+    component_ref: "tool:never-loaded"
+    state: "exploitable"
+    detail: "Second"
+    owner: "b@example.com"
+    expires_at: "2027-01-01T00:00:00Z"
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(VEXDecisionError, match="duplicate VEX decision"):
+        load_vex_decisions(dup_file)
 
-def test_vex_decisions_refuses_file_inside_project_root_and_symlinks(tmp_path):
-    project_dir = tmp_path / "repo"
-    project_dir.mkdir()
-    inside_file = project_dir / "decisions.yaml"
-    inside_file.write_text("version: 1\ndecisions: []\n", encoding="utf-8")
 
+def test_vex_confinement_refuses_in_repo_without_project_root_symlinks_and_hardlinks(
+    tmp_path, monkeypatch
+):
+    repo_dir = tmp_path / "repo"
+    (repo_dir / ".git").mkdir(parents=True)
+    bom_in_repo = repo_dir / "aibom.json"
+    _three_component_bom().save(bom_in_repo)
+
+    dec_in_repo = repo_dir / "decisions.yaml"
+    dec_in_repo.write_text("version: 1\ndecisions: []\n", encoding="utf-8")
+
+    # Even WITHOUT --project-root, a decisions file inside the inventory's git repo is refused.
     with pytest.raises(VEXDecisionError, match="outside the scanned project"):
-        load_vex_decisions(inside_file, project_root=project_dir)
+        load_vex_decisions(dec_in_repo, inventory_path=bom_in_repo)
 
-    outside_file = tmp_path / "outside.yaml"
+    # Even when inventory is elsewhere, running with cwd inside the repo refuses repo decisions.
+    monkeypatch.chdir(repo_dir)
+    with pytest.raises(VEXDecisionError, match="outside the scanned project"):
+        load_vex_decisions(dec_in_repo)
+    monkeypatch.chdir(tmp_path)
+
+    # Trace evidence inside repo is refused too.
+    trace_in_repo = repo_dir / "trace.json"
+    trace_in_repo.write_text(json.dumps({"invoked": []}), encoding="utf-8")
+    with pytest.raises(VEXDecisionError, match="outside the scanned project"):
+        load_execution_evidence(trace_in_repo, inventory_path=bom_in_repo, allow_unsigned=True)
+
+    # Symlink and hard-linked decisions files are refused.
+    outside_dir = tmp_path / "operator"
+    outside_dir.mkdir()
+    outside_file = outside_dir / "outside.yaml"
     outside_file.write_text("version: 1\ndecisions: []\n", encoding="utf-8")
-    symlink = tmp_path / "link.yaml"
+    symlink = outside_dir / "link.yaml"
     symlink.symlink_to(outside_file)
     with pytest.raises(VEXDecisionError):
         load_vex_decisions(symlink)
 
+    hardlink = outside_dir / "hardlink.yaml"
+    os.link(outside_file, hardlink)
+    with pytest.raises(VEXDecisionError, match="hard links"):
+        load_vex_decisions(hardlink)
 
-def test_vex_cli_links_advisories_and_validates_cyclonedx(tmp_path):
+
+def test_vex_cli_requires_dsse_attestation_links_live_advisories_and_verifies_sha256(tmp_path):
     pkg = RegistryEntryComponent(
         bom_ref="pkg:pypi:transformers@4.35.0",
         name="transformers",
@@ -142,58 +315,115 @@ def test_vex_cli_links_advisories_and_validates_cyclonedx(tmp_path):
         registry_type="pypi",
         package_url="pkg:pypi/transformers@4.35.0",
     )
-    bom_path = tmp_path / "aibom.json"
-    AIBOM(components=[pkg]).save(bom_path)
+    art_dir = tmp_path / "artifacts"
+    op_dir = tmp_path / "operator"
+    art_dir.mkdir()
+    op_dir.mkdir()
 
-    adv_report = tmp_path / "advisories.json"
-    adv_report.write_text(
+    bom_path = art_dir / "aibom.json"
+    AIBOM(components=[pkg]).save(bom_path)
+    inv_sha = hash_bytes(bom_path.read_bytes())
+
+    # Live advisories format uses component_ref + advisory_id + inventory_sha256.
+    live_adv = art_dir / "live-advisories.json"
+    live_adv.write_text(
         json.dumps(
             {
+                "inventory_sha256": inv_sha,
                 "advisories": [
                     {
-                        "id": "CVE-2024-99999",
-                        "aliases": ["GHSA-aaaa-bbbb-cccc"],
-                        "bom_ref": "pkg:pypi:transformers@4.35.0",
-                        "severity": "critical",
-                        "summary": "Planted transformers CVE",
-                        "offline": True,
-                        "in_kev": True,
-                        "kev_sources": ["cisa-kev"],
-                        "epss_score": 0.91,
+                        "component_ref": "pkg:pypi:transformers@4.35.0",
+                        "advisory_id": "GHSA-live-1234-5678",
+                        "ecosystem": "PyPI",
+                        "version": "4.35.0",
                     }
-                ]
+                ],
             }
         ),
         encoding="utf-8",
     )
-    trace_file = tmp_path / "trace.json"
+
+    # Mismatched inventory_sha256 on advisories must fail closed.
+    wrong_adv = art_dir / "wrong-advisories.json"
+    wrong_adv.write_text(
+        json.dumps({"inventory_sha256": "sha256:" + "0" * 64, "advisories": []}),
+        encoding="utf-8",
+    )
+    with pytest.raises(VEXDecisionError, match="inventory_sha256"):
+        load_advisory_report(wrong_adv, expected_inventory_sha256=inv_sha)
+
+    # Real trace-diff format with inputs.inventory.sha256 + reconciliation.matched.
+    trace_file = art_dir / "trace-diff.json"
     trace_file.write_text(
-        json.dumps({"invoked": ["pkg:pypi:transformers@4.35.0"]}),
+        json.dumps(
+            {
+                "inputs": {"inventory": {"sha256": inv_sha}},
+                "reconciliation": {
+                    "matched": [
+                        {"kind": "package", "inventory_ref": "pkg:pypi:transformers@4.35.0"}
+                    ],
+                    "unobserved": [],
+                },
+            }
+        ),
         encoding="utf-8",
     )
 
     runner = CliRunner()
-    res = runner.invoke(
+    # Unsigned trace evidence is refused by default!
+    res_unsigned = runner.invoke(
+        main,
+        ["vex", str(bom_path), "--advisories", str(live_adv), "--trace-evidence", str(trace_file)],
+    )
+    assert res_unsigned.exit_code != 0
+    assert "--trace-attestation" in res_unsigned.output
+
+    # Signed trace evidence via DSSE Ed25519 attestation succeeds!
+    att_file = art_dir / "trace-diff.att.json"
+    pub_file = op_dir / "trace-signer.pub"
+    _sign_trace_file(trace_file, att_file, pub_file)
+
+    res_signed = runner.invoke(
         main,
         [
             "vex",
             str(bom_path),
             "--advisories",
-            str(adv_report),
+            str(live_adv),
             "--trace-evidence",
             str(trace_file),
+            "--trace-attestation",
+            str(att_file),
+            "--trusted-key",
+            str(pub_file),
         ],
     )
-    assert res.exit_code == 0, res.output
-    doc = json.loads(res.output)
+    assert res_signed.exit_code == 0, res_signed.output
+    doc = json.loads(res_signed.output)
     assert doc["bomFormat"] == "CycloneDX"
     assert doc["specVersion"] == "1.7"
     assert len(doc["vulnerabilities"]) == 1
     vuln = doc["vulnerabilities"][0]
-    assert vuln["id"] == "CVE-2024-99999"
-    assert vuln["ratings"] == [{"severity": "critical"}]
+    assert vuln["id"] == "GHSA-live-1234-5678"
     assert vuln["analysis"]["state"] == "exploitable"
     props = {p["name"]: p["value"] for p in vuln["properties"]}
-    assert props["nexus-symbiote:inKev"] == "true"
-    assert props["nexus-symbiote:kevSources"] == "cisa-kev"
     assert props["nexus-symbiote:executionOutcome"] == "invoked"
+    assert props["nexus-symbiote:assurance"] == "osv-advisory-match"
+
+    # Tampering with trace evidence after signing fails verification.
+    trace_file.write_text(trace_file.read_text(encoding="utf-8") + " ", encoding="utf-8")
+    res_tampered = runner.invoke(
+        main,
+        [
+            "vex",
+            str(bom_path),
+            "--trace-evidence",
+            str(trace_file),
+            "--trace-attestation",
+            str(att_file),
+            "--trusted-key",
+            str(pub_file),
+        ],
+    )
+    assert res_tampered.exit_code != 0
+    assert "attestation verification failed" in res_tampered.output.lower()

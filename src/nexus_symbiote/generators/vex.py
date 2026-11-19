@@ -40,6 +40,17 @@ _SERIAL = re.compile(
     r"urn:uuid:([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
 )
 _CDX_SEVERITIES = frozenset({"critical", "high", "medium", "low", "info", "none", "unknown"})
+_NON_SUPPRESSIBLE_CATEGORIES = frozenset(
+    {
+        "hook_commands",
+        "settings_environment",
+        "credential_exposure",
+        "serialization_format",
+        "permission_scope",
+        "hidden_content",
+        "trust_remote_code",
+    }
+)
 
 
 def finding_id(component_ref: str, category: str, detail: str) -> str:
@@ -61,9 +72,11 @@ def _resolve_analysis(
     ref_time: datetime | None,
     props: dict[str, str],
     expired_warnings: list[str],
+    severity: str = "unknown",
+    category: str | None = None,
+    in_kev: bool = False,
 ) -> dict[str, Any]:
     analysis: dict[str, Any] = {"state": "in_triage", "detail": default_detail}
-
     decision = decisions.lookup(vuln_id, component_ref) if decisions is not None else None
     if decision is not None:
         if (
@@ -77,7 +90,6 @@ def _resolve_analysis(
                 "reverted to in_triage."
             )
             expired_warnings.append(warning)
-            analysis["state"] = "in_triage"
             analysis["detail"] = f"{warning} {default_detail}"
             props["nexus-symbiote:vexDecisionStatus"] = "expired-reverted"
             props["nexus-symbiote:vexDecisionOwner"] = decision.owner
@@ -94,29 +106,39 @@ def _resolve_analysis(
     elif execution_evidence is not None:
         outcome = execution_evidence.outcome_for(component_ref)
         if outcome == "declared-never-loaded":
-            analysis["state"] = "not_affected"
-            analysis["justification"] = "code_not_reachable"
+            props["nexus-symbiote:executionOutcome"] = outcome
+            if in_kev or severity == "critical" or category in _NON_SUPPRESSIBLE_CATEGORIES:
+                analysis["detail"] = (
+                    "Execution-bound (reported): declared-never-loaded cannot suppress critical, "
+                    f"KEV, or static-execution findings without an expiring operator decision. {default_detail}"
+                )
+                props["nexus-symbiote:suppressionBlocked"] = "true"
+            else:
+                analysis["state"] = "not_affected"
+                analysis["justification"] = "code_not_reachable"
+                analysis["detail"] = (
+                    "Execution-bound (reported): component was declared but never loaded in "
+                    f"runtime execution evidence. {default_detail}"
+                )
+        elif outcome == "unobserved":
+            props["nexus-symbiote:executionOutcome"] = outcome
             analysis["detail"] = (
-                "Execution-bound (reported): component is declared in the inventory but was "
-                f"never observed or loaded in runtime trace evidence. {default_detail}"
+                "Execution-bound (reported): unobserved in runtime trace spans; absence of "
+                f"telemetry does not prove unreachability. {default_detail}"
             )
-            props["nexus-symbiote:executionOutcome"] = "declared-never-loaded"
         elif outcome == "invoked":
+            props["nexus-symbiote:executionOutcome"] = outcome
             analysis["state"] = "exploitable"
             analysis["response"] = ["update"]
             analysis["detail"] = (
-                "Execution-bound (reported): component was invoked in runtime trace evidence. "
-                f"{default_detail}"
+                f"Execution-bound (reported): component was invoked in runtime trace evidence. {default_detail}"
             )
-            props["nexus-symbiote:executionOutcome"] = "invoked"
         elif outcome == "shadowed":
-            analysis["state"] = "in_triage"
+            props["nexus-symbiote:executionOutcome"] = outcome
             analysis["detail"] = (
                 "Execution-bound (reported): component is shadowed by another tool or server "
                 f"definition; manual triage required. {default_detail}"
             )
-            props["nexus-symbiote:executionOutcome"] = "shadowed"
-
     if timestamp:
         analysis["lastUpdated"] = timestamp
     return analysis
@@ -151,9 +173,7 @@ class VEXGenerator(Generator):
         stamp = bom.metadata.timestamp
         timestamp = stamp.isoformat() if stamp is not None else None
         ref_time = (
-            resolve_reference_time(self._reference_time, stamp)
-            if self._decisions is not None
-            else None
+            resolve_reference_time(self._reference_time) if self._decisions is not None else None
         )
         vulnerabilities: list[dict[str, Any]] = []
         components: list[dict[str, Any]] = []
@@ -207,6 +227,8 @@ class VEXGenerator(Generator):
                     ref_time=ref_time,
                     props=props,
                     expired_warnings=expired_warnings,
+                    severity=risk.severity.value,
+                    category=risk.category,
                 )
                 vulnerabilities.append(
                     {
@@ -221,12 +243,15 @@ class VEXGenerator(Generator):
                     }
                 )
 
-        for adv in sorted(
-            self._advisories,
-            key=lambda a: (str(a.get("bom_ref", "")), str(a.get("id", ""))),
-        ):
-            adv_id = adv.get("id")
-            comp_ref = adv.get("bom_ref")
+        def _adv_key(entry: dict[str, Any]) -> tuple[str, str]:
+            return (
+                str(entry.get("component_ref") or entry.get("bom_ref") or ""),
+                str(entry.get("advisory_id") or entry.get("id") or ""),
+            )
+
+        for adv in sorted(self._advisories, key=_adv_key):
+            adv_id = adv.get("advisory_id") or adv.get("id")
+            comp_ref = adv.get("component_ref") or adv.get("bom_ref")
             if not isinstance(adv_id, str) or not adv_id or not isinstance(comp_ref, str):
                 continue
             adv_comp = comp_by_ref.get(comp_ref)
@@ -246,17 +271,16 @@ class VEXGenerator(Generator):
                     "offline-advisory-match" if adv.get("offline") else "osv-advisory-match"
                 ),
             }
-            aliases = adv.get("aliases")
-            if isinstance(aliases, list) and aliases:
+            if isinstance(adv.get("aliases"), list) and adv["aliases"]:
                 props["nexus-symbiote:aliases"] = ",".join(
-                    str(a) for a in aliases if isinstance(a, str)
+                    str(a) for a in adv["aliases"] if isinstance(a, str)
                 )
-            if adv.get("in_kev"):
+            in_kev = bool(adv.get("in_kev"))
+            if in_kev:
                 props["nexus-symbiote:inKev"] = "true"
-                kev_sources = adv.get("kev_sources")
-                if isinstance(kev_sources, list) and kev_sources:
+                if isinstance(adv.get("kev_sources"), list) and adv["kev_sources"]:
                     props["nexus-symbiote:kevSources"] = ",".join(
-                        str(s) for s in kev_sources if isinstance(s, str)
+                        str(s) for s in adv["kev_sources"] if isinstance(s, str)
                     )
             if isinstance(adv.get("epss_score"), (int, float)):
                 props["nexus-symbiote:epssScore"] = f"{float(adv['epss_score']):.6f}"
@@ -273,6 +297,8 @@ class VEXGenerator(Generator):
                 ref_time=ref_time,
                 props=props,
                 expired_warnings=expired_warnings,
+                severity=sev,
+                in_kev=in_kev,
             )
             vulnerabilities.append(
                 {

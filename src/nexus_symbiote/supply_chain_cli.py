@@ -526,22 +526,39 @@ def register_supply_chain_commands(main: click.Group) -> None:
     @click.option(
         "--project-root",
         type=click.Path(exists=True, file_okay=False, path_type=Path),
-        help="Scanned project root used to refuse --decisions files stored inside the checkout.",
+        help="Scanned project root used to refuse policy and trace files stored inside the checkout.",
     )
     @click.option(
         "--advisories",
         "advisories_path",
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
-        help="Link matched advisories from an advisories report JSON into the VEX document.",
+        help="Link matched advisories from a live or offline advisories report JSON bound to this AIBOM.",
     )
     @click.option(
         "--trace-evidence",
         "trace_evidence_path",
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
         help=(
-            "Runtime trace or execution-evidence JSON yielding execution-bound VEX outcomes "
-            "(declared-never-loaded, invoked, shadowed)."
+            "trace-diff or execution-evidence JSON bound to this AIBOM; requires "
+            "--trace-attestation with --trusted-key unless --allow-unsigned-trace-evidence is set."
         ),
+    )
+    @click.option(
+        "--trace-attestation",
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        help="Ed25519 DSSE attestation envelope authenticating --trace-evidence.",
+    )
+    @click.option(
+        "--trusted-key",
+        "trusted_keys",
+        multiple=True,
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        help="Trusted Ed25519 public key PEM outside the scanned project (repeatable; used with --trace-attestation).",
+    )
+    @click.option(
+        "--allow-unsigned-trace-evidence",
+        is_flag=True,
+        help="Explicitly accept unsigned --trace-evidence without --trace-attestation.",
     )
     def vex(
         aibom_path: Path,
@@ -550,8 +567,12 @@ def register_supply_chain_commands(main: click.Group) -> None:
         project_root: Path | None,
         advisories_path: Path | None,
         trace_evidence_path: Path | None,
+        trace_attestation: Path | None,
+        trusted_keys: tuple[Path, ...],
+        allow_unsigned_trace_evidence: bool,
     ) -> None:
         """Export schema-validated VEX findings with optional decisions, advisories, and trace evidence."""
+        from nexus_symbiote.core.hashing import hash_bytes
         from nexus_symbiote.generators.vex import VEXGenerator
         from nexus_symbiote.vex_decisions import (
             load_advisory_report,
@@ -559,21 +580,54 @@ def register_supply_chain_commands(main: click.Group) -> None:
             load_vex_decisions,
         )
 
+        if (
+            trace_attestation is not None or trusted_keys or allow_unsigned_trace_evidence
+        ) and trace_evidence_path is None:
+            raise click.UsageError(
+                "--trace-attestation, --trusted-key, and --allow-unsigned-trace-evidence require --trace-evidence"
+            )
+        if trace_attestation is not None and allow_unsigned_trace_evidence:
+            raise click.UsageError(
+                "--trace-attestation and --allow-unsigned-trace-evidence contradict each other"
+            )
+
         _refuse_source_overwrite(output, aibom_path)
-        bom = _load_inventory(aibom_path)
+        try:
+            bom, inv_bytes = AIBOM.load_with_bytes(aibom_path)
+        except NativeFormatError as exc:
+            raise click.ClickException(
+                f"{neutralize(aibom_path)} is not a valid native AIBOM file. {neutralize(exc)}"
+            ) from exc
+        except (OSError, ValueError, TypeError, RecursionError) as exc:
+            raise click.ClickException(
+                f"{neutralize(aibom_path)} is not a valid native AIBOM file."
+            ) from exc
+        inv_sha = hash_bytes(inv_bytes)
         try:
             loaded_decisions = (
-                load_vex_decisions(decisions_path, project_root=project_root)
+                load_vex_decisions(
+                    decisions_path, project_root=project_root, inventory_path=aibom_path
+                )
                 if decisions_path is not None
                 else None
             )
             loaded_trace = (
-                load_execution_evidence(trace_evidence_path)
+                load_execution_evidence(
+                    trace_evidence_path,
+                    project_root=project_root,
+                    inventory_path=aibom_path,
+                    expected_inventory_sha256=inv_sha,
+                    attestation_path=trace_attestation,
+                    trusted_key_paths=trusted_keys,
+                    allow_unsigned=allow_unsigned_trace_evidence,
+                )
                 if trace_evidence_path is not None
                 else None
             )
             loaded_advisories = (
-                load_advisory_report(advisories_path)[0] if advisories_path is not None else None
+                load_advisory_report(advisories_path, expected_inventory_sha256=inv_sha)[0]
+                if advisories_path is not None
+                else None
             )
             text = VEXGenerator(
                 decisions=loaded_decisions,
@@ -657,7 +711,15 @@ def register_supply_chain_commands(main: click.Group) -> None:
         kev_paths: tuple[Path, ...],
         epss_path: Path | None,
     ) -> None:
-        """Query OSV (live) or an offline OSV bundle for exact PyPI/npm package URLs."""
+        """Live (or offline with --offline-db): query OSV for exact PyPI/npm package URLs.
+
+        Live mode sends each package's ecosystem, normalized name and exact version to
+        api.osv.dev, including packages from private registries unless excluded. With
+        --offline-db, matching runs locally against an operator-supplied OSV bundle with
+        optional --kev and --epss catalogs and no network I/O. Exits 1 when an advisory is
+        found (unless --no-fail-on-advisory) or when not every package in scope was looked
+        up, including when none was; with --dry-run (live), only when the report lists an error.
+        """
         if (kev_paths or epss_path is not None) and offline_db is None:
             raise click.ClickException("--kev and --epss require --offline-db")
         if not dry_run and offline_db is None:
@@ -686,6 +748,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
                     kev_paths=kev_paths,
                     epss_path=epss_path,
                     exclude=exclude,
+                    exclude_private_origins=exclude_private_origins,
                     inventory_sha256=hash_bytes(data),
                 )
                 payload = report.to_dict()
@@ -702,7 +765,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 payload = report.to_dict()
         except (OSError, ValueError) as exc:
             raise click.ClickException(neutralize(exc)) from exc
-        text = json.dumps(payload, indent=2)
+        text = json.dumps(payload, indent=2, allow_nan=False)
         if output:
             write_cli_output(output, text)
         else:

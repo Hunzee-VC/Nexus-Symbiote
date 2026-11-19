@@ -1,18 +1,12 @@
 """Offline advisory matching with provenance, alias deduplication, and KEV/EPSS enrichment.
 
 Matches exact pinned PyPI and npm package identities in an AgentBOM against an
-operator-supplied offline OSV bundle (JSON file or directory of OSV JSON files)
-without opening any network socket.
-
-Security properties:
-- Every input file is opened with ``open_regular_file`` (no symlinks, regular files
-  only) and bounded in size and record count.
-- Alias pairs (for example a ``CVE-*`` record and a ``GHSA-*`` record that name each
-  other in ``aliases``) are collapsed via union-find so each vulnerability appears once
-  per affected component with its canonical ID and full alias list.
-- Optional offline CISA/ENISA KEV and EPSS catalogs enrich matched advisories; a
-  KEV-listed advisory elevates severity to ``critical`` while recording the base
-  severity and naming the KEV source.
+operator-supplied offline OSV bundle (JSON file or directory) without network I/O.
+All files are opened with ``open_regular_file`` (no symlinks), bounded with explicit
+``max_bytes``, indexed by ``(ecosystem, normalized_package)`` for linear lookup, and
+evaluated by order-independent OSV version intervals (skipping ``withdrawn`` records
+and ``GIT`` ranges, honoring ``introduced`` including ``"0"``/``0``, ``fixed``,
+``last_affected``, ``limit``, and partial npm SemVer).
 """
 
 from __future__ import annotations
@@ -20,6 +14,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import math
 import os
 import re
 from collections.abc import Iterable
@@ -32,10 +27,11 @@ from packaging.version import InvalidVersion, Version
 from nexus_symbiote import __version__
 from nexus_symbiote.advisories import (
     MAX_ADVISORIES,
-    MAX_COMPONENTS,
     AdvisoryReport,
     _excluded,
+    _in_scope,
     _normalize,
+    _origin_exclusion,
     mcp_package_identity,
     package_identity,
 )
@@ -47,18 +43,14 @@ MAX_DB_BYTES = 32 * 1024 * 1024
 MAX_DB_FILES = 10_000
 MAX_DB_RECORDS = 100_000
 MAX_CATALOG_BYTES = 16 * 1024 * 1024
+MAX_OFFLINE_COMPONENTS = 50_000
 
 _SEMVER_RE = re.compile(
-    r"^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"^v?(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*))?(?:\.(0|[1-9][0-9]*))?"
     r"(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$"
 )
-_SEVERITY_ORDER: dict[str, int] = {
-    "critical": 0,
-    "high": 1,
-    "medium": 2,
-    "low": 3,
-    "unknown": 4,
-}
+_SUPPORTED_RANGE_TYPES = frozenset({"ECOSYSTEM", "SEMVER"})
+_SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "unknown": 4}
 
 
 @dataclass(frozen=True)
@@ -94,17 +86,12 @@ def _semver_key(raw: str) -> tuple[int, int, int, int, tuple[tuple[int, int | st
     match = _SEMVER_RE.fullmatch(raw.strip())
     if match is None:
         return None
-    major, minor, patch = int(match[1]), int(match[2]), int(match[3])
+    major, minor, patch = int(match[1]), int(match[2] or 0), int(match[3] or 0)
     pre = match[4]
     if not pre:
         return (major, minor, patch, 1, ())
-    parts: list[tuple[int, int | str]] = []
-    for token in pre.split("."):
-        if token.isdigit():
-            parts.append((0, int(token)))
-        else:
-            parts.append((1, token))
-    return (major, minor, patch, 0, tuple(parts))
+    parts = tuple((0, int(tok)) if tok.isdigit() else (1, tok) for tok in pre.split("."))
+    return (major, minor, patch, 0, parts)
 
 
 def _compare_versions(ecosystem: str, left: str, right: str) -> int | None:
@@ -122,23 +109,30 @@ def _compare_versions(ecosystem: str, left: str, right: str) -> int | None:
     return None
 
 
+def _parse_epss_unit(raw: object, field_name: str) -> float:
+    """Validate that an EPSS score or percentile is a finite float in [0.0, 1.0]."""
+    if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
+        raise ValueError(f"EPSS {field_name} must be a finite number in [0, 1]")
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"EPSS {field_name} must be a finite number in [0, 1]") from exc
+    if not math.isfinite(value) or not (0.0 <= value <= 1.0):
+        raise ValueError(f"EPSS {field_name} must be a finite number in [0, 1]")
+    return value
+
+
 def _extract_severity(record: dict[str, Any]) -> str:
     db_spec = record.get("database_specific")
-    if isinstance(db_spec, dict):
-        raw = db_spec.get("severity")
+    candidates = [
+        db_spec.get("severity") if isinstance(db_spec, dict) else None,
+        record.get("severity"),
+    ]
+    for raw in candidates:
         if isinstance(raw, str):
-            norm = raw.strip().lower()
-            if norm == "moderate":
-                return "medium"
+            norm = "medium" if raw.strip().lower() == "moderate" else raw.strip().lower()
             if norm in _SEVERITY_ORDER:
                 return norm
-    raw_sev = record.get("severity")
-    if isinstance(raw_sev, str):
-        norm = raw_sev.strip().lower()
-        if norm == "moderate":
-            return "medium"
-        if norm in _SEVERITY_ORDER:
-            return norm
     return "unknown"
 
 
@@ -154,7 +148,7 @@ def _parse_osv_records(payload: object) -> list[_ParsedAdvisory]:
 
     parsed: list[_ParsedAdvisory] = []
     for item in items:
-        if not isinstance(item, dict):
+        if not isinstance(item, dict) or item.get("withdrawn"):
             continue
         rec_id = item.get("id")
         if not isinstance(rec_id, str) or not rec_id.strip():
@@ -165,9 +159,8 @@ def _parse_osv_records(payload: object) -> list[_ParsedAdvisory]:
             if isinstance(raw_aliases, list)
             else ()
         )
-        summary = item.get("summary")
-        if not isinstance(summary, str):
-            summary = ""
+        raw_summary = item.get("summary")
+        summary = raw_summary.strip() if isinstance(raw_summary, str) else ""
         raw_affected = item.get("affected")
         affected = (
             tuple(a for a in raw_affected if isinstance(a, dict))
@@ -175,13 +168,7 @@ def _parse_osv_records(payload: object) -> list[_ParsedAdvisory]:
             else ()
         )
         parsed.append(
-            _ParsedAdvisory(
-                record_id=rec_id.strip(),
-                aliases=aliases,
-                summary=summary.strip(),
-                severity=_extract_severity(item),
-                affected=affected,
-            )
+            _ParsedAdvisory(rec_id.strip(), aliases, summary, _extract_severity(item), affected)
         )
     return parsed
 
@@ -194,9 +181,8 @@ def load_offline_advisory_db(path: Path) -> tuple[list[_ParsedAdvisory], str]:
         records: list[_ParsedAdvisory] = []
         total_bytes = 0
         manifest_lines: list[str] = []
-        entries = sorted(os.scandir(path), key=lambda e: e.name)
         file_count = 0
-        for entry in entries:
+        for entry in sorted(os.scandir(path), key=lambda e: e.name):
             if not entry.name.endswith(".json"):
                 continue
             if entry.is_symlink():
@@ -207,7 +193,7 @@ def load_offline_advisory_db(path: Path) -> tuple[list[_ParsedAdvisory], str]:
             data = _read_bounded_bytes(Path(entry.path), MAX_DB_BYTES - total_bytes, entry.name)
             total_bytes += len(data)
             manifest_lines.append(f"{entry.name}:{hash_bytes(data)}")
-            payload = parse_json_strict(data.decode("utf-8"))
+            payload = parse_json_strict(data.decode("utf-8"), max_bytes=MAX_DB_BYTES)
             records.extend(_parse_osv_records(payload))
             if len(records) > MAX_DB_RECORDS:
                 raise ValueError(f"Offline advisory DB exceeds {MAX_DB_RECORDS} records")
@@ -215,8 +201,7 @@ def load_offline_advisory_db(path: Path) -> tuple[list[_ParsedAdvisory], str]:
         return records, digest
 
     data = _read_bounded_bytes(path, MAX_DB_BYTES, "Offline advisory DB")
-    payload = parse_json_strict(data.decode("utf-8"))
-    records = _parse_osv_records(payload)
+    records = _parse_osv_records(parse_json_strict(data.decode("utf-8"), max_bytes=MAX_DB_BYTES))
     if len(records) > MAX_DB_RECORDS:
         raise ValueError(f"Offline advisory DB exceeds {MAX_DB_RECORDS} records")
     return records, hash_bytes(data)
@@ -225,13 +210,14 @@ def load_offline_advisory_db(path: Path) -> tuple[list[_ParsedAdvisory], str]:
 def load_kev_catalog(path: Path) -> tuple[dict[str, list[_KEVEntry]], str]:
     """Load an offline CISA or ENISA KEV JSON catalog."""
     data = _read_bounded_bytes(path, MAX_CATALOG_BYTES, "KEV catalog")
-    payload = parse_json_strict(data.decode("utf-8"))
+    payload = parse_json_strict(data.decode("utf-8"), max_bytes=MAX_CATALOG_BYTES)
     if not isinstance(payload, dict):
         raise ValueError("KEV catalog must be a JSON object")
     default_source = payload.get("source")
     if not isinstance(default_source, str) or not default_source.strip():
-        title = str(payload.get("title", "")).lower()
-        default_source = "enisa-kev" if "enisa" in title else "cisa-kev"
+        default_source = (
+            "enisa-kev" if "enisa" in str(payload.get("title", "")).lower() else "cisa-kev"
+        )
     raw_entries = payload.get("vulnerabilities")
     if raw_entries is None:
         raw_entries = payload.get("entries", [])
@@ -245,117 +231,176 @@ def load_kev_catalog(path: Path) -> tuple[dict[str, list[_KEVEntry]], str]:
         raw_id = entry.get("cveID") or entry.get("id") or entry.get("cve")
         if not isinstance(raw_id, str) or not raw_id.strip():
             continue
-        source = entry.get("source")
-        src_name = source.strip() if isinstance(source, str) and source.strip() else default_source
+        src = entry.get("source")
+        src_name = src.strip() if isinstance(src, str) and src.strip() else default_source
         date_added = entry.get("dateAdded") or entry.get("date_added")
         index.setdefault(raw_id.strip().upper(), []).append(
-            _KEVEntry(
-                source=src_name,
-                date_added=date_added.strip() if isinstance(date_added, str) else None,
-            )
+            _KEVEntry(src_name, date_added.strip() if isinstance(date_added, str) else None)
         )
     return index, hash_bytes(data)
 
 
 def load_epss_catalog(path: Path) -> tuple[dict[str, _EPSSEntry], str]:
-    """Load an offline EPSS CSV or JSON catalog."""
+    """Load an offline EPSS CSV or JSON catalog with strict finite [0, 1] validation."""
     data = _read_bounded_bytes(path, MAX_CATALOG_BYTES, "EPSS catalog")
     text = data.decode("utf-8")
     index: dict[str, _EPSSEntry] = {}
     if text.lstrip().startswith("{"):
-        payload = parse_json_strict(text)
+        payload = parse_json_strict(text, max_bytes=MAX_CATALOG_BYTES)
         if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
             raise ValueError("EPSS JSON catalog must be an object with a 'data' array")
         for row in payload["data"]:
             if not isinstance(row, dict):
                 continue
-            cve = row.get("cve")
-            epss = row.get("epss")
-            if not isinstance(cve, str) or epss is None:
+            cve, epss, pct = row.get("cve"), row.get("epss"), row.get("percentile")
+            if not isinstance(cve, str) or not cve.strip() or epss is None:
                 continue
-            pct = row.get("percentile")
             index[cve.strip().upper()] = _EPSSEntry(
-                score=float(epss),
-                percentile=float(pct) if pct is not None else None,
+                _parse_epss_unit(epss, "score"),
+                _parse_epss_unit(pct, "percentile") if pct is not None else None,
             )
         return index, hash_bytes(data)
 
     lines = [
         line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")
     ]
-    reader = csv.DictReader(io.StringIO("\n".join(lines)))
-    for row in reader:
-        cve = row.get("cve")
-        epss = row.get("epss")
-        if not cve or not epss:
+    for row in csv.DictReader(io.StringIO("\n".join(lines))):
+        cve, epss, pct = row.get("cve"), row.get("epss"), row.get("percentile")
+        if not cve or not cve.strip() or not epss or not epss.strip():
             continue
-        pct = row.get("percentile")
         index[cve.strip().upper()] = _EPSSEntry(
-            score=float(epss),
-            percentile=float(pct) if pct else None,
+            _parse_epss_unit(epss.strip(), "score"),
+            _parse_epss_unit(pct.strip(), "percentile") if pct and pct.strip() else None,
         )
     return index, hash_bytes(data)
 
 
-def _matches_affected(
-    affected: dict[str, Any], ecosystem: str, normalized_name: str, version: str
-) -> tuple[bool, list[str]]:
-    pkg = affected.get("package")
-    if not isinstance(pkg, dict):
+def _range_matches(ecosystem: str, version: str, rng: dict[str, Any]) -> tuple[bool, list[str]]:
+    """Evaluate one OSV range by version intervals (order-independent per OSV spec)."""
+    raw_type = rng.get("type")
+    if raw_type is not None and (
+        not isinstance(raw_type, str) or raw_type.upper() not in _SUPPORTED_RANGE_TYPES
+    ):
         return False, []
-    pkg_eco = pkg.get("ecosystem")
-    pkg_name = pkg.get("name")
-    if not isinstance(pkg_eco, str) or not isinstance(pkg_name, str):
-        return False, []
-    if pkg_eco.lower() != ecosystem.lower():
-        return False, []
-    kind = "pypi" if ecosystem == "PyPI" else "npm"
-    if _normalize(kind, pkg_name) != normalized_name:
+    events = rng.get("events")
+    if not isinstance(events, list):
         return False, []
 
+    has_zero_intro = False
+    intros: list[str] = []
+    fixed_versions: list[str] = []
+    last_affected: list[str] = []
+    limits: list[str] = []
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        if "introduced" in ev:
+            raw_intro = ev["introduced"]
+            if raw_intro == "0" or (
+                isinstance(raw_intro, int) and not isinstance(raw_intro, bool) and raw_intro == 0
+            ):
+                has_zero_intro = True
+            elif isinstance(raw_intro, str) and raw_intro.strip():
+                intros.append(raw_intro.strip())
+        elif "fixed" in ev and isinstance(ev["fixed"], str) and ev["fixed"].strip():
+            fixed_versions.append(ev["fixed"].strip())
+        elif (
+            "last_affected" in ev
+            and isinstance(ev["last_affected"], str)
+            and ev["last_affected"].strip()
+        ):
+            last_affected.append(ev["last_affected"].strip())
+        elif "limit" in ev and isinstance(ev["limit"], str) and ev["limit"].strip():
+            limits.append(ev["limit"].strip())
+
+    if any(
+        (c := _compare_versions(ecosystem, version, lim)) is not None and c >= 0 for lim in limits
+    ):
+        return False, []
+
+    best_intro: str | None = None
+    found_intro = has_zero_intro
+    for intro in intros:
+        cmp_v = _compare_versions(ecosystem, intro, version)
+        if cmp_v is None or cmp_v > 0:
+            continue
+        found_intro = True
+        if best_intro is None or (
+            (cb := _compare_versions(ecosystem, intro, best_intro)) is not None and cb > 0
+        ):
+            best_intro = intro
+    if not found_intro:
+        return False, []
+
+    for fix in fixed_versions:
+        cmp_v = _compare_versions(ecosystem, fix, version)
+        if cmp_v is None or cmp_v > 0:
+            continue
+        if best_intro is None or (
+            (ci := _compare_versions(ecosystem, best_intro, fix)) is not None and ci <= 0
+        ):
+            return False, []
+
+    for last in last_affected:
+        cmp_v = _compare_versions(ecosystem, last, version)
+        if cmp_v is None or cmp_v >= 0:
+            continue
+        if best_intro is None or (
+            (ci := _compare_versions(ecosystem, best_intro, last)) is not None and ci <= 0
+        ):
+            return False, []
+
+    relevant_fixes = [
+        fix
+        for fix in fixed_versions
+        if (cf := _compare_versions(ecosystem, fix, version)) is not None and cf > 0
+    ]
+    return True, relevant_fixes
+
+
+def _matches_affected_version(
+    affected: dict[str, Any], ecosystem: str, version: str
+) -> tuple[bool, list[str]]:
+    """Evaluate version lists and OSV ranges for an already-package-matched affected block."""
     fixed_versions: list[str] = []
     matched = False
     raw_versions = affected.get("versions")
-    if isinstance(raw_versions, list):
-        for ver in raw_versions:
-            if isinstance(ver, str) and _compare_versions(ecosystem, version, ver) == 0:
-                matched = True
-                break
-
+    if isinstance(raw_versions, list) and any(
+        isinstance(ver, str) and _compare_versions(ecosystem, version, ver) == 0
+        for ver in raw_versions
+    ):
+        matched = True
     raw_ranges = affected.get("ranges")
     if isinstance(raw_ranges, list):
         for rng in raw_ranges:
             if not isinstance(rng, dict):
                 continue
-            events = rng.get("events")
-            if not isinstance(events, list):
-                continue
-            in_range = False
-            for ev in events:
-                if not isinstance(ev, dict):
-                    continue
-                if "introduced" in ev and isinstance(ev["introduced"], str):
-                    intro = ev["introduced"]
-                    if intro == "0":
-                        in_range = True
-                    else:
-                        cmp_val = _compare_versions(ecosystem, version, intro)
-                        if cmp_val is not None and cmp_val >= 0:
-                            in_range = True
-                elif "fixed" in ev and isinstance(ev["fixed"], str):
-                    fixed = ev["fixed"]
-                    fixed_versions.append(fixed)
-                    cmp_val = _compare_versions(ecosystem, version, fixed)
-                    if cmp_val is not None and cmp_val >= 0:
-                        in_range = False
-                elif "last_affected" in ev and isinstance(ev["last_affected"], str):
-                    cmp_val = _compare_versions(ecosystem, version, ev["last_affected"])
-                    if cmp_val is not None and cmp_val > 0:
-                        in_range = False
+            in_range, rng_fixed = _range_matches(ecosystem, version, rng)
             if in_range:
                 matched = True
-
+                fixed_versions.extend(rng_fixed)
     return matched, sorted(set(fixed_versions))
+
+
+def _build_package_index(
+    records: list[_ParsedAdvisory],
+) -> dict[tuple[str, str], list[tuple[_ParsedAdvisory, dict[str, Any]]]]:
+    """Index OSV affected blocks by ``(ecosystem.lower(), normalized_name)`` for O(1) lookup."""
+    index: dict[tuple[str, str], list[tuple[_ParsedAdvisory, dict[str, Any]]]] = {}
+    for adv in records:
+        for aff in adv.affected:
+            pkg = aff.get("package")
+            if not isinstance(pkg, dict):
+                continue
+            pkg_eco, pkg_name = pkg.get("ecosystem"), pkg.get("name")
+            if not isinstance(pkg_eco, str) or not isinstance(pkg_name, str):
+                continue
+            eco_lower = pkg_eco.strip().lower()
+            if eco_lower in {"pypi", "npm"}:
+                index.setdefault((eco_lower, _normalize(eco_lower, pkg_name.strip())), []).append(
+                    (adv, aff)
+                )
+    return index
 
 
 def _deduplicate_matches(
@@ -370,25 +415,18 @@ def _deduplicate_matches(
             node = parent[node]
         return node
 
-    def union(a: str, b: str) -> None:
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            if ra < rb:
-                parent[rb] = ra
-            else:
-                parent[ra] = rb
-
     for adv, _ in matches:
         ids = [adv.record_id, *adv.aliases]
         for ident in ids:
             parent.setdefault(ident, ident)
         for ident in ids[1:]:
-            union(ids[0], ident)
+            ra, rb = find(ids[0]), find(ident)
+            if ra != rb:
+                parent[max(ra, rb)] = min(ra, rb)
 
     grouped: dict[str, list[tuple[_ParsedAdvisory, list[str]]]] = {}
     for adv, fixed in matches:
-        root = find(adv.record_id)
-        grouped.setdefault(root, []).append((adv, fixed))
+        grouped.setdefault(find(adv.record_id), []).append((adv, fixed))
 
     merged: list[dict[str, Any]] = []
     for items in grouped.values():
@@ -406,14 +444,13 @@ def _deduplicate_matches(
                 summaries.append(adv.summary)
             if _SEVERITY_ORDER[adv.severity] < _SEVERITY_ORDER[best_severity]:
                 best_severity = adv.severity
-
         cves = sorted(i for i in all_ids if i.upper().startswith("CVE-"))
         primary_id = cves[0] if cves else sorted(all_ids)[0]
-        aliases = sorted(i for i in all_ids if i != primary_id)
         merged.append(
             {
                 "id": primary_id,
-                "aliases": aliases,
+                "advisory_id": primary_id,
+                "aliases": sorted(i for i in all_ids if i != primary_id),
                 "matched_ids": sorted(matched_ids),
                 "severity": best_severity,
                 "base_severity": best_severity,
@@ -432,10 +469,19 @@ def match_offline_advisories(
     kev_paths: Iterable[Path] = (),
     epss_path: Path | None = None,
     exclude: Iterable[str] = (),
+    exclude_private_origins: bool = False,
     inventory_sha256: str | None = None,
 ) -> tuple[AdvisoryReport, dict[str, Any]]:
     """Match pinned packages in ``bom`` against an offline OSV DB with KEV/EPSS enrichment."""
+    patterns = list(exclude)
+    if any(not isinstance(p, str) or not p or len(p) > 256 for p in patterns):
+        raise ValueError("exclusion patterns must be 1 to 256 characters")
+    if any("*" in p[:-1] for p in patterns):
+        raise ValueError("an exclusion pattern may hold '*' only as its last character")
+
     records, db_digest = load_offline_advisory_db(db_path)
+    pkg_index = _build_package_index(records)
+
     kev_index: dict[str, list[_KEVEntry]] = {}
     kev_provenance: list[dict[str, str]] = []
     for kpath in kev_paths:
@@ -450,112 +496,104 @@ def match_offline_advisories(
         epss_index, epss_digest = load_epss_catalog(epss_path)
         epss_provenance = {"path": epss_path.name, "sha256": epss_digest}
 
-    patterns = tuple(exclude)
-    report = AdvisoryReport(
-        tool_version=__version__,
-        inventory_sha256=inventory_sha256,
-        dry_run=False,
-    )
-
-    targets: list[tuple[str, str, str, str]] = []
-    for comp in sorted(bom.components, key=lambda c: c.bom_ref):
-        if isinstance(comp, RegistryEntryComponent):
-            if comp.registry_type not in {"pypi", "npm"}:
-                report.components_skipped += 1
-                report.skipped.append({"bom_ref": comp.bom_ref, "reason": "unsupported ecosystem"})
-                continue
-            try:
-                eco, name, version = package_identity(comp)
-            except ValueError as exc:
-                report.components_skipped += 1
-                report.skipped.append({"bom_ref": comp.bom_ref, "reason": str(exc)})
-                continue
-        elif isinstance(comp, MCPServerComponent):
-            if not getattr(comp, "package_url", None):
-                continue
-            try:
-                eco, name, version = mcp_package_identity(comp)
-            except ValueError as exc:
-                report.components_skipped += 1
-                report.skipped.append({"bom_ref": comp.bom_ref, "reason": str(exc)})
-                continue
-        else:
-            continue
-
-        kind = "pypi" if eco == "PyPI" else "npm"
-        if _excluded(kind, name, patterns):
-            report.components_excluded += 1
-            report.excluded.append({"bom_ref": comp.bom_ref, "package": name, "ecosystem": eco})
-            continue
-        targets.append((comp.bom_ref, eco, name, version))
-
-    if len(targets) > MAX_COMPONENTS:
-        report.errors.append(
-            f"Package component limit exceeded ({len(targets)} > {MAX_COMPONENTS})"
-        )
-        provenance = {
-            "offline": True,
-            "db_sha256": db_digest,
-            "kev_catalogs": kev_provenance,
-            "epss_catalog": epss_provenance,
-        }
-        return report, provenance
-
-    for bom_ref, eco, name, version in targets:
-        report.components_checked += 1
-        report.queries.append(
-            {"bom_ref": bom_ref, "ecosystem": eco, "package": name, "version": version}
-        )
-        raw_matches: list[tuple[_ParsedAdvisory, list[str]]] = []
-        for adv in records:
-            for aff in adv.affected:
-                is_match, fixed = _matches_affected(aff, eco, name, version)
-                if is_match:
-                    raw_matches.append((adv, fixed))
-                    break
-
-        for entry in _deduplicate_matches(raw_matches):
-            if len(report.advisories) >= MAX_ADVISORIES:
-                report.errors.append(f"Advisory report limit reached ({MAX_ADVISORIES})")
-                break
-            lookup_ids = [entry["id"].upper(), *(a.upper() for a in entry["aliases"])]
-            kev_hits: list[_KEVEntry] = []
-            for lid in lookup_ids:
-                kev_hits.extend(kev_index.get(lid, ()))
-            if kev_hits:
-                sources = sorted({h.source for h in kev_hits})
-                dates = sorted(h.date_added for h in kev_hits if h.date_added)
-                entry["in_kev"] = True
-                entry["kev_sources"] = sources
-                if dates:
-                    entry["kev_date_added"] = dates[0]
-                if entry["severity"] != "critical":
-                    entry["severity"] = "critical"
-                    entry["severity_elevated_by"] = sources[0]
-            else:
-                entry["in_kev"] = False
-
-            for lid in lookup_ids:
-                epss_hit = epss_index.get(lid)
-                if epss_hit is not None:
-                    entry["epss_score"] = epss_hit.score
-                    if epss_hit.percentile is not None:
-                        entry["epss_percentile"] = epss_hit.percentile
-                    break
-
-            entry["bom_ref"] = bom_ref
-            entry["ecosystem"] = eco
-            entry["package"] = name
-            entry["version"] = version
-            entry["offline"] = True
-            entry["db_sha256"] = db_digest
-            report.advisories.append(entry)
-
-    provenance = {
+    provenance: dict[str, Any] = {
         "offline": True,
         "db_sha256": db_digest,
         "records_loaded": len(records),
         "kev_catalogs": kev_provenance,
         "epss_catalog": epss_provenance,
     }
+    report = AdvisoryReport(
+        tool_version=__version__, inventory_sha256=inventory_sha256, dry_run=False
+    )
+
+    targets: list[tuple[str, str, str, str]] = []
+    for comp in sorted(bom.components, key=lambda c: c.bom_ref):
+        kind = _in_scope(comp)
+        if kind is None:
+            continue
+        if not kind:
+            report.components_skipped += 1
+            report.skipped.append(
+                {"component_ref": comp.bom_ref, "reason": "ecosystem is not queried"}
+            )
+            continue
+        try:
+            if isinstance(comp, RegistryEntryComponent):
+                eco, name, version = package_identity(comp)
+            elif isinstance(comp, MCPServerComponent):
+                eco, name, version = mcp_package_identity(comp)
+            else:
+                continue
+        except (ValueError, TypeError, UnicodeError):
+            report.errors.append(f"{comp.bom_ref}: exact package identity unavailable")
+            continue
+        reason = (
+            "excluded by the operator"
+            if _excluded(kind, name, patterns)
+            else _origin_exclusion(comp, kind)
+            if exclude_private_origins
+            else None
+        )
+        if reason is not None:
+            report.components_excluded += 1
+            report.excluded.append({"component_ref": comp.bom_ref, "reason": reason})
+            continue
+        targets.append((comp.bom_ref, eco, name, version))
+
+    if len(targets) > MAX_OFFLINE_COMPONENTS:
+        report.errors.append(
+            f"Package component limit exceeded ({len(targets)} > {MAX_OFFLINE_COMPONENTS})"
+        )
+        return report, provenance
+
+    for bom_ref, eco, name, version in targets:
+        report.components_checked += 1
+        report.queries.append(
+            {"component_ref": bom_ref, "ecosystem": eco, "name": name, "version": version}
+        )
+        matched_by_adv: dict[str, tuple[_ParsedAdvisory, list[str]]] = {}
+        for adv, aff in pkg_index.get((eco.lower(), name), ()):
+            is_match, fixed = _matches_affected_version(aff, eco, version)
+            if is_match:
+                existing = matched_by_adv.get(adv.record_id)
+                if existing is None:
+                    matched_by_adv[adv.record_id] = (adv, list(fixed))
+                else:
+                    existing[1].extend(fixed)
+        raw_matches = [(adv, sorted(set(fx))) for adv, fx in matched_by_adv.values()]
+        for entry in _deduplicate_matches(raw_matches):
+            if len(report.advisories) >= MAX_ADVISORIES:
+                report.errors.append(f"Advisory report limit reached ({MAX_ADVISORIES})")
+                break
+            lookup_ids = [entry["id"].upper(), *(a.upper() for a in entry["aliases"])]
+            kev_hits = [hit for lid in lookup_ids for hit in kev_index.get(lid, ())]
+            entry["in_kev"] = bool(kev_hits)
+            if kev_hits:
+                sources = sorted({h.source for h in kev_hits})
+                dates = sorted(h.date_added for h in kev_hits if h.date_added)
+                entry["kev_sources"] = sources
+                if dates:
+                    entry["kev_date_added"] = dates[0]
+                if entry["severity"] != "critical":
+                    entry["severity"] = "critical"
+                    entry["severity_elevated_by"] = sources[0]
+            for lid in lookup_ids:
+                if (epss_hit := epss_index.get(lid)) is not None:
+                    entry["epss_score"] = epss_hit.score
+                    if epss_hit.percentile is not None:
+                        entry["epss_percentile"] = epss_hit.percentile
+                    break
+            entry.update(
+                {
+                    "component_ref": bom_ref,
+                    "bom_ref": bom_ref,
+                    "ecosystem": eco,
+                    "package": name,
+                    "version": version,
+                    "offline": True,
+                    "db_sha256": db_digest,
+                }
+            )
+            report.advisories.append(entry)
     return report, provenance

@@ -1071,7 +1071,10 @@ nexus-symbiote vex [OPTIONS] AIBOM_PATH
 | Option | Description |
 |---|---|
 | `-o`, `--output` `PATH` | Write the VEX document to this file instead of standard output. |
-| `--decisions` `PATH` | Operator-owned VEX decisions YAML/JSON stored outside the scanned project; expired decisions revert to `in_triage` with a warning. |
-| `--project-root` `PATH` | Scanned project root used to refuse `--decisions` files stored inside the checkout. |
-| `--advisories` `PATH` | Link matched advisories from an `advisories` report JSON into the VEX document. |
-| `--trace-evidence` `PATH` | Runtime trace or execution-evidence JSON yielding execution-bound VEX outcomes (`declared-never-loaded`, `invoked`, `shadowed`). |
+| `--decisions` `PATH` | Operator-owned VEX decisions YAML/JSON stored outside the scanned project and enclosing git trees; expired decisions revert to `in_triage` against wall-clock UTC time. |
+| `--project-root` `PATH` | Scanned project root used to refuse policy and trace files stored inside the checkout. |
+| `--advisories` `PATH` | Link matched advisories from a live or offline `advisories` report JSON bound to this AIBOM's SHA-256 into the VEX document. |
+| `--trace-evidence` `PATH` | `trace-diff` or execution-evidence JSON bound to this AIBOM's SHA-256 (`unobserved` stays `in_triage`; critical, KEV, and static-execution findings cannot be suppressed without an expiring operator decision). Requires `--trace-attestation` with `--trusted-key` unless `--allow-unsigned-trace-evidence` is set. |
+| `--trace-attestation` `PATH` | Ed25519 DSSE attestation envelope authenticating `--trace-evidence`. |
+| `--trusted-key` `PATH` | Trusted Ed25519 public key PEM outside the scanned project (repeatable; used with `--trace-attestation`). |
+| `--allow-unsigned-trace-evidence` | Explicitly accept unsigned `--trace-evidence` without `--trace-attestation`. |
