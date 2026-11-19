@@ -25,6 +25,7 @@ PY_IMPORT = "from mcp.server.fastmcp import FastMCP\n"
 PY_TOOL = "@mcp.tool()\ndef read_note() -> str:\n    return ''\n"
 LONG = "n" * (MAX_SERVER_NAME_CHARS + 1)
 TOKEN = "ghp_" + "SYNTHETICSENTINEL" + "0" * 19
+KEY = "sk-ant-api03-" + "A" * 95
 
 
 def _scan(root: Path, files: dict[str, str | bytes]):
@@ -121,6 +122,7 @@ def test_every_spelling_of_a_literal_typescript_name_is_read(tmp_path, options):
         "{ name: '..' }",
         "{ name: 'oct\\101al' }",
         f"{{ name: '{TOKEN}' }}",
+        f"{{ name: '{KEY}' }}",
     ],
     ids=[
         "template-substitution",
@@ -147,6 +149,7 @@ def test_every_spelling_of_a_literal_typescript_name_is_read(tmp_path, options):
         "punctuation-only",
         "legacy-octal-escape",
         "token-shaped",
+        "key-shaped",
     ],
 )
 def test_a_typescript_name_computed_or_outside_the_form_keeps_the_binding(tmp_path, options):
@@ -257,6 +260,7 @@ def test_a_python_server_is_named_by_its_literal_name(tmp_path, constructor):
         "FastMCP('line\\nbreak')",
         "FastMCP('bidi\\u202eevil')",
         f"FastMCP('{TOKEN}')",
+        f"FastMCP('{KEY}')",
     ],
     ids=[
         "f-string",
@@ -274,6 +278,7 @@ def test_a_python_server_is_named_by_its_literal_name(tmp_path, constructor):
         "newline",
         "bidi-override",
         "token-shaped",
+        "key-shaped",
     ],
 )
 def test_a_python_name_computed_or_outside_the_form_keeps_the_binding(tmp_path, constructor):
@@ -319,6 +324,7 @@ def test_two_python_servers_with_one_literal_name_keep_distinct_references(tmp_p
         ("caf\u00e9", None),
         ("sk-learn-classifier", "sk-learn-classifier"),
         (TOKEN, None),
+        (KEY, None),
         (b"bytes", None),
         (None, None),
         (7, None),

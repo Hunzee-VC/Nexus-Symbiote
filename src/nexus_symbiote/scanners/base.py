@@ -105,7 +105,9 @@ def declared_server_name(literal: object) -> str | None:
         return None
     if _SERVER_NAME.fullmatch(literal) is None:
         return None
-    return literal if redact_text(literal, identifier=True) == literal else None
+    if redact_text(literal) != literal or redact_text(literal, identifier=True) != literal:
+        return None
+    return literal
 
 
 def project_relative(root: Path) -> Callable[[str], str]:
