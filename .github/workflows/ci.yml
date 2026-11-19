@@ -317,7 +317,8 @@ jobs:
             printf 'Use the configured tools.\n' > "$fixtures/$fixture/CLAUDE.md"
             printf 'name: Demo\ninstructions: [CLAUDE.md]\n' > "$fixtures/$fixture/agent.yaml"
           done
-          printf 'unsafe-format-fixture' > "$fixtures/failing/models/classifier.pkl"
+          # A protocol 4 pickle: the collector rates a pickle-family name by its content.
+          printf '\200\004N.' > "$fixtures/failing/models/classifier.pkl"
           # Workflow commands in names the inventory prints: a legacy set-output aimed
           # at the upload paths and annotations carrying a marker the next job looks for.
           # The Action pre-seeds every output in GITHUB_OUTPUT, which the runner applies
@@ -327,8 +328,8 @@ jobs:
             '    provider: example' \
             '    requested_ref: "x ##[set-output name=sarif_path]/etc/hostname%0A ::set-output name=aibom_path::/etc/hostname"' \
             > "$fixtures/hostile/agent.yaml"
-          printf 'unsafe' > "$fixtures/hostile/models/##[warning]symbiote-injected-annotation.pkl"
-          printf 'unsafe' > "$fixtures/hostile/models/::warning::symbiote-injected-annotation.pkl"
+          printf '\200\004N.' > "$fixtures/hostile/models/##[warning]symbiote-injected-annotation.pkl"
+          printf '\200\004N.' > "$fixtures/hostile/models/::warning::symbiote-injected-annotation.pkl"
       - name: Passing fixture
         id: passing
         uses: ./

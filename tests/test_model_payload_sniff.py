@@ -28,6 +28,7 @@ from nexus_symbiote.scanners.model import (
     NUMPY_OBJECT_ARRAY,
     PICKLE_FRAME_TAIL,
     PICKLE_NAME_UNCALLED,
+    PICKLE_NAME_UNEVIDENCED,
     PICKLE_UNREAD,
     ZIP_DIRECTORY_UNREAD,
     ZIP_MEMBER_UNREAD,
@@ -121,11 +122,17 @@ def test_renamed_pickle_and_object_arrays_are_critical(tmp_path: Path) -> None:
     assert archive.serialization_format == "zip-archive"
 
 
-def test_a_suffix_list_file_is_still_rated_without_a_recognized_stream(tmp_path: Path) -> None:
+def test_a_suffix_list_file_is_unknown_without_a_recognized_stream(tmp_path: Path) -> None:
     (tmp_path / "model.pkl").write_bytes(b"not a pickle")
     component = _component(tmp_path, "model.pkl")
     assert component is not None
-    assert component.serialization_safety is UNSAFE
+    assert component.serialization_safety is SerializationSafety.UNKNOWN
+    assert component.properties["format_inspection"] == PICKLE_NAME_UNEVIDENCED
+    assert not _critical(component)
+    assert any(
+        risk.severity is RiskSeverity.HIGH and risk.category == "serialization_format_unknown"
+        for risk in component.risks
+    )
 
 
 def test_a_pickle_longer_or_shorter_than_the_sample_is_found_by_the_shared_recognizer(
@@ -589,7 +596,12 @@ def test_a_protocol_5_pickle_of_a_large_buffer_is_unknown_by_content(tmp_path: P
     for relative in ("array.dat", "models/array"):
         assert found[relative].serialization_safety is SerializationSafety.UNKNOWN
         assert found[relative].properties["format_inspection"] == PICKLE_NAME_UNCALLED
+    # The pickle a bound left unrated is pickle evidence under a pickle-family name.
     assert found["array.pt"].serialization_safety is UNSAFE
+    assert found["array.pt"].properties["format_inspection"] == (
+        "Potential code-executing loader format (pickle opcode stream that resolves an "
+        "importable name and, within the inspection limits, never uses it)"
+    )
 
 
 def test_a_binary_pickle_with_no_callable_before_the_bound_is_unknown(tmp_path: Path) -> None:
