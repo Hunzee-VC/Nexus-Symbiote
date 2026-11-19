@@ -16,18 +16,22 @@ All three trees sit at benchmarks/aibom-bench and every pair conflicts on README
 
 A second agent re-derived the numbers below from its own scans and counts, without the
 first one's working files. Every count, score, rank and path statement it could run held,
-apart from the two corrections in items 2 and 3. Item 1 was then confirmed a third time by
-reading tree A's committed outputs.
+apart from the two corrections in items 2 and 3. Item 1 was then checked a third time
+against tree A's committed outputs and labels, which narrowed it: the credits follow tree
+A's own rule.
 
-1. **Tree A's counts for SymBiote are upper bounds.** Its scorer credits a labelled item
-   when the item's token occurs anywhere in the tool's output. Three of SymBiote's credits
-   are not a record of that item. `rag.qdrant` matches only the container image entry
-   `qdrant/qdrant:v1.12.1`, which is credited again as `img.qdrant`. `rag.weaviate`, on
-   corpus B, matches only the npm entry `weaviate-client`. `prompt.relocated-claude-md`
-   matches only a scan-failure line that says the file "is not inventoried". Counted by
-   record, SymBiote identifies 36 of 76 and 16 of 53 components, and vector stores are 2 of 3
-   and 0 of 2, where T2 and T3 row 16 give tree A's stored 3 of 3 and 1 of 2. The roadmap on
-   tree A's branch lists vector-store 3 of 3 and 1 of 2 as a level to hold.
+1. **In tree A, three of SymBiote's credits come from a record of another type.** Tree A's
+   labels allow it: `rag.qdrant` lists `docker-compose.yml` as a source and `rag.weaviate`
+   lists `package.json`, each matched by the product name, and the relocated `claude.md` is
+   credited for "detection or an explicit evasion finding". What SymBiote's output holds
+   is the container image `qdrant/qdrant:v1.12.1` (credited again as `img.qdrant`), the npm
+   package `weaviate-client`, and a scan-failure line that says the relocated file "is not
+   inventoried". It holds no retrieval-store record for Qdrant or Weaviate and no prompt
+   record for that file. Counted by records of the item's own type, SymBiote identifies 36
+   of 76 and 16 of 53 components, and vector stores are 2 of 3 and 0 of 2, where T2 and T3
+   row 16 give tree A's stored 3 of 3 and 1 of 2. This matters where a class count becomes
+   a floor for one collector: the roadmap on tree A's branch assigns the vector-store row
+   to SymBiote's `rag` collector.
 2. **Correction to T4.** On tree A's corpus B, 0.247 is the `cdxgen -t mcp` entry. Plain
    cdxgen is 0.200, which is below Trusera's 0.239, not above it.
 3. **Correction to T6.** A search over every grouping of tree B's 20 kinds finds 86 that
@@ -69,7 +73,7 @@ the session that wrote tree B:
 
 | Tree | For | Against |
 |---|---|---|
-| A | The only one a third party can rescore from committed raw outputs; its branch's roadmap cites it | Its matcher needs the tightening in item 1; it does not measure the pair |
+| A | The only one a third party can rescore from committed raw outputs; its branch's roadmap cites it | A class count can rest on records of another type (item 1); it does not measure the pair |
 | B | The only one wired into the test suite; measures ShadowScan and the pair | Ten of its 100 points are assessed, and raters judge its risk and drift verdicts; it commits no raw tool outputs |
 | C | Every point is computed; seeded, with a positive control | No test in the suite; its branch carries 19 paths outside the benchmark |
 
