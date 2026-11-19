@@ -140,8 +140,8 @@ that another version adds or renames stays unmapped until the mapping is reviewe
 | ShadowScan kind | Becomes | Condition, or why it is a gap |
 | --- | --- | --- |
 | `agent` | `agent` | Any resource type but `mcp-tool`. Autonomy is recorded as unknown. |
-| `framework-usage` | `agent` | Resource type `project` only: a project that uses an agent framework or a model SDK. Autonomy is recorded as unknown. |
-| `agent-config` | `ide-agent` | Resource type `coding-agent-config` only: one coding-agent product configured in one project. `ide_type` and `permission_mode` stay unset and no configuration file is listed. |
+| `framework-usage` | `agent` | Resource type `project` only: a project that uses an agent framework, a model SDK or only the MCP SDK, in which ShadowScan saw no agent indicator. Autonomy is recorded as unknown. |
+| `agent-config` | `ide-agent` | Resource type `coding-agent-config` only: one coding-agent signature in one project, which is a product such as Claude Code or an instruction convention such as an `AGENTS.md` file or a set of `SKILL.md` files. `ide_type` and `permission_mode` stay unset and no configuration file is listed. |
 | `mcp-server` | `mcp-server`, or `tool` for resource type `mcp-tool` | A tool is recorded without a server association. |
 | `local-model` | `model` | Model weights that ShadowScan found stored for a local runtime. |
 | `secret`, `token` | Gap | A credential is never a component. ShadowScan's own CycloneDX export leaves both kinds out. |
@@ -156,17 +156,28 @@ component, not as a removed and an added one. The kind ShadowScan gave stays in
 `shadowscan:kind` and in the label, such as "ShadowScan framework-usage
 af2459bd4b84".
 
-Other ShadowScan connectors use the two resource-bound kinds for other things.
-`framework-usage` is also a lockfile that lists AI packages (`lockfile-inventory`),
-an agent constructed in one source file (`source-agent`), an incomplete agent card
-(`agent-manifest`), a set of Salesforce prompt templates (`prompt-templates`) and a
-process with model-runtime indicators (`process/model-runtime-indicator`).
-`agent-config` is also a GitLab Duo group
-setting (`platform-setting`), GitHub Copilot billing (`copilot-billing`), a
+The importer reads the kind and the resource type and nothing else, so the component
+type is no narrower than that pair. A project that only implements or configures an
+MCP server is a `framework-usage` finding of resource type `project`, and becomes an
+`agent`: `agent` in CycloneDX, an AI package in SPDX and a declared agent in
+`trace-diff`, beside the `mcp-server` and `tool` components that the local collectors
+may record for the same directory. An `AGENTS.md` file or a set of `SKILL.md` files
+is an `agent-config` finding of resource type `coding-agent-config`, and becomes an
+`ide-agent`, beside the `skill-package` components that the local collectors record
+for the same files.
+
+Other ShadowScan connectors use the two resource-bound kinds for other things. For
+example, `framework-usage` is also a lockfile that lists AI packages
+(`lockfile-inventory`), an agent constructed in one source file (`source-agent`), an
+incomplete agent card (`agent-manifest`, or `a2a-agent-card` on an endpoint), a set
+of Salesforce prompt templates (`prompt-templates`) and a process with model-runtime
+indicators (`process/model-runtime-indicator`). `agent-config` is also a GitLab Duo
+group setting (`platform-setting`), GitHub Copilot billing (`copilot-billing`), a
 ServiceNow configuration without its parent (`unresolved-parent-configuration`), an
 agent configuration or an editor extension on an endpoint (`agent-config`,
-`ide-extension`) and a registry skill (`agent-registry-skill`). Recording those as
-agents or IDE agents would be a wrong claim, so any other resource type of the two
+`ide-extension`), a registry skill (`agent-registry-skill`) and a skill record in an
+AWS registry (`agent-registry-record`, `agentcore-registry-record`). None of those is
+a project or a coding-agent signature in one, so any other resource type of the two
 kinds, a missing one included, stays unmapped. The projected resource type is
 recorded in `shadowscan:resource-type`, from the importer's own table. In a
 CycloneDX report an entry whose `type` or `group` contradicts its
@@ -479,14 +490,21 @@ digests are not authentication; `validate --project` compares them with the
 local report as it does the exact digest. Text output prints the note under
 Notes; `--json-output` lists it in `metadata_changes`.
 
-A changed projection profile alone keeps the content digests comparable. The first
-`diff` from a version 5 inventory to a version 6 inventory of the same report raises
-a medium alert for every component the earlier inventory imported
+A changed projection profile keeps the report's content digest comparable, but not
+a component's finding digest: `diff` compares finding digests only between two
+inventories of one projection profile. The first `diff` from a version 5 inventory to
+a version 6 inventory of the same report file raises a medium alert for every
+component the earlier inventory imported
 ("properties.shadowscan:projection-profile changed."), and reports each newly
 projected finding as an added component, at medium or at its ShadowScan rating when
-that is higher. When entries are still unmapped it also raises two high alerts, "New
-ShadowScan projection limitations" and "New coverage gaps", because version 6 words
-both lines differently, although fewer entries are unmapped.
+that is higher. When ShadowScan ran again between the two scans, which is the usual
+case in a pipeline, the alert for each previously imported component is high instead
+("properties.shadowscan:report-sha256 changed."), although the same `diff` notes that
+the report's normalized content is unchanged. When entries are still unmapped it also
+raises two high alerts, "New ShadowScan projection limitations" and "New coverage
+gaps", because version 6 words both lines differently, although fewer entries are
+unmapped. `validate --project`, `risk --project` and `verify-discovery --projection`
+refuse a version 5 inventory, because each compares it with the current projection.
 
 Between two version 6 inventories the coverage gap changes only when the set of
 unmapped kinds does, and the limitation whenever a count does. A changed line is a

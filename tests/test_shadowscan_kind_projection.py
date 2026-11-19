@@ -3,11 +3,13 @@
 Producer contract reviewed at ShadowScan 0.1.4, commit
 2b80f199659a8de17ea9c7792c07940d5b747d72. connectors/code/project_findings.py reports a
 project as kind=framework-usage with resource_type=project, and connectors/common.py
-gives the same finding kind=agent once it carries an agent indicator. One coding-agent
-product configured in one project is kind=agent-config with
-resource_type=coding-agent-config. Other connectors use both kinds for a lockfile, a
-platform setting or a registry skill; those stay unmapped. The synthetic reports below
-carry hostile metadata. fixtures/shadowscan/README.md describes the real one.
+gives the same finding kind=agent once it carries an agent indicator. The project may
+use an agent framework, a model SDK or only the MCP SDK. One coding-agent signature in
+one project is kind=agent-config with resource_type=coding-agent-config: a product such
+as Claude Code, or an instruction convention such as AGENTS.md or a set of SKILL.md
+files. Other connectors use both kinds for a lockfile, a platform setting or a registry
+record; those stay unmapped. The synthetic reports below carry hostile metadata.
+fixtures/shadowscan/README.md describes the real one.
 """
 
 import hashlib
@@ -49,9 +51,12 @@ TWINS = [
     ("agent-config", "agent-config"),
     ("agent-config", "ide-extension"),
     ("agent-config", "agent-registry-skill"),
+    ("agent-config", "agent-registry-record"),
+    ("agent-config", "agentcore-registry-record"),
     ("agent-config", "project"),
     ("agent-config", "Coding-Agent-Config"),
     ("agent-config", "coding-agent-config "),
+    ("agent-config", "coding-agent-config/x"),
     ("agent-config", ""),
     ("agent-config", None),
     ("framework-usage", "lockfile-inventory"),
@@ -59,8 +64,11 @@ TWINS = [
     ("framework-usage", "agent-manifest"),
     ("framework-usage", "prompt-templates"),
     ("framework-usage", "process/model-runtime-indicator"),
+    ("framework-usage", "a2a-agent-card"),
     ("framework-usage", "coding-agent-config"),
     ("framework-usage", "Project"),
+    ("framework-usage", "project "),
+    ("framework-usage", "project/x"),
     ("framework-usage", ""),
     ("framework-usage", None),
 ]
@@ -168,11 +176,11 @@ def validation(root, inventory):
     return [*args, "--no-project-policy", "--allow-unsigned-discovery"]
 
 
-def with_findings(report, *kinds):
+def with_findings(report, *kinds, resource_type=None):
     """The real report with one more finding of each kind, and a summary that agrees."""
     data = json.loads(report)
     for number, kind in enumerate(kinds):
-        data["findings"].append(finding(kind, ident=f"ss-twin-{number}"))
+        data["findings"].append(finding(kind, resource_type, ident=f"ss-twin-{number}"))
     summary = data["summary"]
     summary["total"] += len(kinds)
     summary["by_surface"]["code"] += len(kinds)
@@ -278,12 +286,32 @@ def test_the_bound_resource_type_is_projected_from_every_report_form(
 
 
 @pytest.mark.parametrize(("kind", "resource_type"), TWINS)
-def test_any_other_resource_type_of_the_two_kinds_stays_unmapped(kind, resource_type):
+def test_any_other_resource_type_of_the_two_kinds_stays_unmapped(tmp_path, kind, resource_type):
     for report in (native(finding(kind, resource_type)), cyclonedx(entry(kind, resource_type))):
         result = parse(report)
         assert result.components == []
         assert result.unmapped_indexes == [0]
         assert result.unmapped_kinds == {f"{kind} (unprojected form)": 1}
+        gap = f"ShadowScan report contains unmapped entries: {kind} (unprojected form)"
+        assert gap in scan_gaps(tmp_path, report)
+
+
+@pytest.mark.parametrize(("kind", "resource_type"), sorted(BOUND.items()))
+@pytest.mark.parametrize("spelling", ["upper", "title", "leading space", "trailing space"])
+def test_another_spelling_of_the_two_kinds_is_not_read_as_the_kind(kind, resource_type, spelling):
+    written = {
+        "upper": kind.upper(),
+        "title": kind.title(),
+        "leading space": " " + kind,
+        "trailing space": kind + " ",
+    }[spelling]
+    for report in (
+        native(finding(written, resource_type)),
+        cyclonedx(entry(written, resource_type)),
+    ):
+        result = parse(report)
+        assert result.components == []
+        assert result.unmapped_kinds == {"unrecognized kind": 1}
 
 
 @pytest.mark.parametrize("kind", sorted(BOUND))
@@ -491,6 +519,33 @@ def test_the_first_diff_from_projection_v5_alerts_as_documented(runner, tmp_path
     ]
 
 
+def test_the_first_diff_from_projection_v5_alerts_high_when_shadowscan_ran_again(runner, tmp_path):
+    first = with_findings(REPORT.read_bytes(), "infra")
+    older = as_projection_v5(merged(runner, tmp_path, "first", first))
+    again = json.loads(first)
+    again["started_at"] = again["finished_at"] = "2026-11-20T08:00:00+00:00"
+    newer = merged(runner, tmp_path, "again", json.dumps(again).encode())
+    report = AIBOMDiffer().diff(AIBOM.model_validate(older), AIBOM.model_validate(newer))
+    assert sorted(
+        (c.component_type, c.severity, *c.details) for c in report.components_modified
+    ) == [
+        (
+            component_type,
+            "high",
+            "properties.shadowscan:report-sha256 changed.",
+            "properties.shadowscan:projection-profile changed.",
+        )
+        for component_type in ("agent", "mcp-server")
+    ]
+    assert "ShadowScan report regenerated; normalized content unchanged." in [
+        change["detail"] for change in report.metadata_changes
+    ]
+    same_profile = AIBOMDiffer().diff(
+        AIBOM.model_validate(merged(runner, tmp_path, "same", first)), AIBOM.model_validate(newer)
+    )
+    assert not same_profile.components_modified and not same_profile.security_alerts
+
+
 def test_the_coverage_gap_changes_with_the_set_of_unmapped_kinds_and_the_limitation_with_a_count(
     runner, tmp_path
 ):
@@ -568,19 +623,34 @@ def test_the_cyclonedx_report_of_the_same_tree_projects_the_same_findings():
     assert all(path.startswith("/work/agent-framework-demo") for path in paths) and paths
 
 
-def test_one_unmapped_finding_still_closes_the_merged_gate_and_is_named(runner, tmp_path):
-    root = project(tmp_path, with_findings(REPORT.read_bytes(), "infra"))
+@pytest.mark.parametrize(
+    ("kind", "resource_type", "label"),
+    [
+        pytest.param("infra", None, "infra", id="a-kind-that-is-a-gap"),
+        pytest.param(
+            "framework-usage",
+            "lockfile-inventory",
+            "framework-usage (unprojected form)",
+            id="a-projected-kind-in-another-form",
+        ),
+    ],
+)
+def test_one_unmapped_finding_still_closes_the_merged_gate_and_is_named(
+    runner, tmp_path, kind, resource_type, label
+):
+    report = with_findings(REPORT.read_bytes(), kind, resource_type=resource_type)
+    root = project(tmp_path, report)
     output = tmp_path / "bom.json"
     result = runner.invoke(main, ["scan", str(root), "--no-project-policy", "-o", str(output)])
     assert result.exit_code == 1, result.output
-    assert "excluded: ShadowScan report contains unmapped entries: infra" in result.output
+    assert f"excluded: ShadowScan report contains unmapped entries: {label}" in result.output
     bom = AIBOM.load(output)
     claim = bom.metadata.completeness
     assert claim.scanner_status["shadowscan"] == "partial"
     assert (claim.source_unmapped_count, claim.source_unmapped_indexes) == (1, [4])
-    assert claim.surfaces_excluded == ["ShadowScan report contains unmapped entries: infra"]
+    assert claim.surfaces_excluded == [f"ShadowScan report contains unmapped entries: {label}"]
     assert (
-        "1 source entries were not mapped into BOM components (infra: 1)"
+        f"1 source entries were not mapped into BOM components ({label}: 1)"
         in claim.source_projection_limitations
     )
     assert len([c for c in bom.components if c.bom_ref.startswith("shadowscan:")]) == 4

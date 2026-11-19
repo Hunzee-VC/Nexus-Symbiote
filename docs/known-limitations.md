@@ -1327,15 +1327,22 @@ A way around a limit that its entry does not describe is worth a
   ShadowScan 0.1.4 reports for a `uv.lock` that lists an AI package, and so does every
   `secret`, `token`, `infra`, identity, grant and run-time finding. One unmapped entry keeps
   the default scan, validate and risk gates closed, so a code report with a credential, an
-  infrastructure file or such a lockfile still does not pass. An imported `agent` or
-  `ide-agent` carries a digest-based label and no `ide_type`, `permission_mode`, framework or
-  autonomy, and is not linked to the configuration the local collectors read from the same
-  files. Its ShadowScan rating counts in `risk` as `shadowscan-heuristic`, where it can repeat
-  what the local collectors already rate on those files, and a `critical` rating closes the
-  default risk gate by itself unless `risk.ignore_categories` lists `shadowscan-heuristic`.
+  infrastructure file or such a lockfile still does not pass. The component type is no
+  narrower than the kind and resource type: a project that only implements or configures an
+  MCP server is imported as an `agent`, and an `AGENTS.md` file or a set of `SKILL.md` files
+  as an `ide-agent`, beside what the local collectors record for the same files. An imported
+  `agent` or `ide-agent` carries a digest-based label and no `ide_type`, `permission_mode`,
+  framework or autonomy, and is not linked to the configuration the local collectors read from
+  the same files. Its ShadowScan rating counts in `risk` as `shadowscan-heuristic`, where it
+  can repeat what the local collectors already rate on those files, and a `critical` rating
+  closes the default risk gate by itself unless `risk.ignore_categories` lists
+  `shadowscan-heuristic`.
   `trace-diff` treats each imported agent as a declared agent, matched by its label, and lists
-  it as unobserved when no trace names it. The mapping was reviewed against ShadowScan 0.1.4 at
-  commit 2b80f19 only; see
+  it as unobserved when no trace names it. `graph` counts each imported agent and IDE agent
+  among the 200 sources it searches for exposure paths, in name order, so a report with some
+  two hundred of them can leave a repository agent unsearched; the view says how many it left
+  out, and `--focus` on the agent shows its paths. The mapping was reviewed against ShadowScan
+  0.1.4 at commit 2b80f19 only; see
   [what each ShadowScan kind becomes](shadowscan-integration.md#what-each-shadowscan-kind-becomes).
 - **`verify-discovery --bundle` checks direct imports only.** It accepts only a BOM
   written by `import-shadowscan`. For a merged `scan` BOM, use the signature policy
