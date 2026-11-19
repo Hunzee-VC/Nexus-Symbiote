@@ -1,0 +1,1 @@
+/aibom-run/venvs/nexus/bin/nexus-symbiote scan /aibom-run/work/nexus-symbiote/corpus -f spdx -o /aibom-run/results2/nexus-symbiote/spdx/bom.spdx.json 

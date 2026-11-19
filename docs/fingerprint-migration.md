@@ -127,6 +127,21 @@ Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a server that declares one carries 
 launch values are unbound for it, even between identical inventories. Set the key
 on both collections to compare those values, or review and accept the alert.
 
+## Pickle-family inspection evidence
+
+A pickle-family file (`.pkl`, `.pt`, `.bin` and the other names listed in
+[model integrity](model-integrity.md#model-files-and-references)) is rated by its
+inspected content, and `properties.format_inspection` names what was recognized,
+where it named the loader before. So `diff` against an inventory collected before
+the upgrade reports every pickle-family file once as modified: at medium,
+`properties.format_inspection changed`, for a file that keeps its rating, as a
+recognized pickle does; at high for a file whose rating moved from
+`unsafe-code-execution` to `unknown`, with the critical `serialization_format`
+finding removed and the high `serialization_format_unknown` finding added, as a
+zero-filled `embeddings.bin` does. `validate --project` against such an inventory
+reports each of those files as a missing or mismatched local component and fails.
+Recollect and review the baseline once after upgrading.
+
 ## SARIF rule identifiers
 
 0.1.0 keyed SARIF rules by category (`nexus_symbiote/<category>`) and raised a
