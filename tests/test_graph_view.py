@@ -319,6 +319,25 @@ def test_each_path_is_a_shortest_one_whichever_route_is_found_first():
     ]
 
 
+def test_a_source_that_has_no_path_is_the_first_left_unsearched():
+    def routes(view):
+        return sorted([view.nodes[index].ref for index in path.nodes] for path in view.paths)
+
+    # An imported discovery report can add hundreds of agents that no edge leaves.
+    alone = [
+        AgentComponent(bom_ref=f"a{index:04d}", name=f"a{index:04d}")
+        for index in range(MAX_SOURCES + 50)
+    ]
+    wired = AgentComponent(bom_ref="y", name="y", tool_refs=["t0000"])
+    rated = AgentComponent(bom_ref="z", name="z", risks=[finding(RiskSeverity.CRITICAL)])
+    capped = view_of(AIBOM(components=[*alone, wired, rated, *sink_tools(1)]))
+    assert (capped.sources, capped.sources_omitted) == (MAX_SOURCES + 52, 52)
+    assert routes(capped) == [["y", "t0000"], ["z"]]
+    few = alone[: MAX_SOURCES - 2]
+    whole = view_of(AIBOM(components=[*few, wired, rated, *sink_tools(1)]))
+    assert whole.sources_omitted == 0 and routes(whole) == routes(capped)
+
+
 def test_a_source_that_is_itself_a_sink_has_a_path_of_length_zero():
     agent = IDEAgentComponent(
         bom_ref="ide",

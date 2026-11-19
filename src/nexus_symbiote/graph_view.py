@@ -411,6 +411,8 @@ def _exposure(
     rank = {node.index: rank for rank, node in enumerate(sorted(nodes, key=attrgetter("ref")))}
     weight = [node.weight for node in nodes]
     sources = [node.index for node in nodes if node.type in _SOURCE_TYPES]
+    # A source with no outgoing edge that is no sink has no path: the first left unsearched.
+    sources.sort(key=lambda source: not (adjacency[source] or weight[source]))
     kept = sources[:MAX_SOURCES]
     best: list[tuple[int, int, int, int, int, int]] = []
     total = 0
