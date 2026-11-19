@@ -140,3 +140,33 @@ def test_diff_alerts_for_removed_deny_widened_sandbox_and_activation_scope(tmp_p
     assert "sandbox_egress_widened" in alert_types
     assert "scope_widened" in alert_types
     assert AIBOMDiffer  # sanity import
+
+
+def test_deny_rules_and_sandbox_domains_are_published_redacted(tmp_path: Path) -> None:
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text(
+        json.dumps(
+            {
+                "permissions": {
+                    "deny": [
+                        "Bash(curl -H 'X-Pin: 482913' x)",
+                        "Bash(curl https://evil.example/x?pin=482913)",
+                        "WebFetch",
+                    ]
+                },
+                "sandbox": {
+                    "network": {"allowedDomains": ["https://user:482913@api.example", "a.example"]}
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = IDEAgentScanner().scan(tmp_path)
+    claude = next(c for c in result.components if c.bom_ref == "ide-agent:claude-code")
+    assert "482913" not in claude.model_dump_json()
+    assert claude.properties["deny_rules"] == [
+        "Bash(curl https://evil.example)",
+        "Bash(curl)",
+        "WebFetch",
+    ]
+    assert "a.example" in claude.properties["sandbox_allowed_domains"]

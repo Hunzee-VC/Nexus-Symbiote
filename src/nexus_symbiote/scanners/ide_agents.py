@@ -2790,10 +2790,19 @@ class IDEAgentScanner(Scanner):
         }
         if counts:
             properties["declared_permission_rule_counts"] = counts
-        deny_rules = extract_deny_rules(merged)
+        # Rules and domains are published as the settings digest projects them, so the
+        # inventory does not carry a value the redacted digest withholds.
+        deny_rules = sorted(
+            {_rule_text(rule, unkeyed=False) for rule in extract_deny_rules(merged)}
+        )
         if deny_rules:
             properties["deny_rules"] = deny_rules
-        sandbox_domains = extract_sandbox_allowed_domains(merged)
+        sandbox_domains = sorted(
+            {
+                _projected_text(domain, unkeyed=False)
+                for domain in extract_sandbox_allowed_domains(merged)
+            }
+        )
         if sandbox_domains:
             properties["sandbox_allowed_domains"] = sandbox_domains
         default_mode = (
