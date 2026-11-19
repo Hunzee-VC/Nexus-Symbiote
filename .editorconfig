@@ -50,3 +50,16 @@ charset = unset
 end_of_line = unset
 trim_trailing_whitespace = false
 insert_final_newline = false
+
+# Recorded tool outputs and vendored schemas keep their exact bytes
+[benchmarks/aibom-bench/results/**]
+charset = unset
+end_of_line = unset
+trim_trailing_whitespace = false
+insert_final_newline = false
+
+[benchmarks/aibom-bench/schemas/**]
+charset = unset
+end_of_line = unset
+trim_trailing_whitespace = false
+insert_final_newline = false

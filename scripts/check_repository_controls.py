@@ -141,7 +141,7 @@ def _fetch(repo: str, path: str, token: str) -> Any:
         },
     )
     opener = build_opener(ProxyHandler({}), HTTPSHandler(context=_tls_context()), _NoRedirect())
-    with opener.open(request, timeout=15) as response:  # noqa: S310 - fixed HTTPS API origin
+    with opener.open(request, timeout=15) as response:
         raw = response.read(MAX_RESPONSE_BYTES + 1)
     if len(raw) > MAX_RESPONSE_BYTES:
         raise ValueError("GitHub response exceeds the size limit")

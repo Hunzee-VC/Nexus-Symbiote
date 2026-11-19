@@ -416,7 +416,7 @@ def test_a_pickle_that_imports_a_module_with_any_file_name_is_critical(
     lab.mkdir()
     (lab / (module.decode() + ".py")).write_text("open('IMPORTED', 'w').write('yes')\nrun = len\n")
     (lab / "w.bin").write_bytes(data)
-    subprocess.run(  # noqa: S603
+    subprocess.run(
         [sys.executable, "-c", "import pickle; pickle.load(open('w.bin', 'rb'))"],
         cwd=lab,
         capture_output=True,
@@ -884,7 +884,7 @@ def _runs_exec(data: bytes) -> bool:
     try:
         for _ in range(8):
             pickle.load(stream)  # noqa: S301 - the test's own bytes
-    except Exception:  # noqa: BLE001, S110 - the loader fails after the call
+    except Exception:  # noqa: S110 - the loader fails after the call
         pass
     hit = getattr(builtins, "HIT", 0)
     del builtins.HIT  # type: ignore[attr-defined]
@@ -1042,7 +1042,7 @@ def _calls_anything(data: bytes) -> bool:
     for _ in range(8):
         try:
             _Unpickler(stream).load()
-        except Exception:  # noqa: BLE001 - the stream fails where pickle.load does
+        except Exception:
             break
     return bool(called)
 
@@ -1122,7 +1122,7 @@ def _finds_a_class(data: bytes) -> bool:
     for _ in range(8):
         try:
             _Unpickler(stream).load()
-        except Exception:  # noqa: BLE001 - the stream fails where pickle.load does
+        except Exception:
             break
     return bool(found)
 
@@ -1330,7 +1330,7 @@ def _oracle_walk(
         unpickler.log = log
         try:
             unpickler.load()
-        except Exception:  # noqa: BLE001 - pickle.load stops at any exception
+        except Exception:
             walk.append(("called" if log.called else "error", log.resolved, None))
             break
         if log.called:
@@ -1627,7 +1627,7 @@ def _changes_what_it_resolved(data: bytes) -> bool:
     for _ in range(8):
         try:
             _Unpickler(stream).load()
-        except Exception:  # noqa: BLE001 - the stream fails where pickle.load does
+        except Exception:
             break
     return bool(target) or bool(len(resolved))
 
@@ -1738,7 +1738,7 @@ def test_a_global_cut_by_the_sample_that_may_import_is_unknown(
     lab.mkdir()
     (lab / (module.decode() + ".py")).write_text("open('IMPORTED', 'w').write('yes')\nrun = len\n")
     (lab / "w.bin").write_bytes(data)
-    subprocess.run(  # noqa: S603
+    subprocess.run(
         [sys.executable, "-c", "import pickle; pickle.load(open('w.bin', 'rb'))"],
         cwd=lab,
         capture_output=True,
@@ -1780,7 +1780,7 @@ def _runs_with(data: bytes, encoding: str) -> bool:
 
     try:
         _Unpickler(io.BytesIO(data), encoding=encoding).load()
-    except Exception:  # noqa: BLE001, S110 - pickle.load stops at any exception
+    except Exception:  # noqa: S110 - pickle.load stops at any exception
         pass
     return bool(called)
 
@@ -1838,7 +1838,7 @@ def _torch_legacy_runs(data: bytes) -> bool:
         unpickler = _Unpickler(stream, encoding="utf-8")
         unpickler.persistent_load = _legacy_persistent_load  # type: ignore[assignment]
         unpickler.load()
-    except Exception:  # noqa: BLE001, S110 - torch.load stops at any exception
+    except Exception:  # noqa: S110 - torch.load stops at any exception
         pass
     return bool(called)
 

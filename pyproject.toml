@@ -142,6 +142,19 @@ select = [
     "PLE2513",
     "PLE2514",
     "PLE2515",
+    "RUF100",
+    "ERA",
+    "T10",
+    "G",
+    "LOG",
+    "EXE",
+    "ICN",
+    "INT",
+    "TID",
+    "YTT",
+    "ASYNC",
+    "PGH",
+    "FA",
 ]
 ignore = ["S101", "UP042", "E501", "SIM102", "SIM105"]
 
@@ -156,7 +169,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --tb=short -p pytester"
+addopts = "-v --tb=short -p pytester --strict-markers --strict-config"
 # A test that runs longer fails with its traceback (tests/conftest.py); the thread dump
 # comes first. CI sets a tighter limit. Mark a known slow test with
 # @pytest.mark.timeout(seconds).

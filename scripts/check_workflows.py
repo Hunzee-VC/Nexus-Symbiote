@@ -1471,7 +1471,7 @@ def check(path: Path) -> list[str]:
                 if key == "uses" and isinstance(child, str) and not child.startswith("./"):
                     if not PIN.fullmatch(child):
                         errors.append(f"{path}: Action must be pinned to a commit: {child}")
-                if key == "run" and isinstance(child, str) and "${{" in child:
+                if key in ("run", "shell") and isinstance(child, str) and "${{" in child:
                     errors.append(f"{path}: pass expressions through env, never shell source")
                 visit(child)
         elif isinstance(value, list):

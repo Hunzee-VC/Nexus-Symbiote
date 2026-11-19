@@ -48,3 +48,6 @@ src/nexus_symbiote/generators/schemas/vendor/*/*.jsonld -diff
 benchmarks/fixtures/** -text
 benchmarks/inventory/fixtures/** -text
 tests/fixtures/** -text
+# Recorded outputs of other tools and the schemas they were scored against.
+benchmarks/aibom-bench/results/** -text linguist-generated
+benchmarks/aibom-bench/schemas/** -text linguist-vendored

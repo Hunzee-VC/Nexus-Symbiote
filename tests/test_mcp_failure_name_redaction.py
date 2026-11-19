@@ -12,7 +12,7 @@ from nexus_symbiote.scanners.mcp import MCPScanner
 
 TOKEN = "ghp_" + "A" * 36
 SECRET = "KnownOnlyFromSource42"  # noqa: S105 - synthetic fixture
-SHADOWED = "ShadowedKnownSource42"  # noqa: S105 - synthetic fixture
+SHADOWED = "ShadowedKnownSource42"
 
 
 def _failure(tmp_path, name, config, other=None):

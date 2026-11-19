@@ -68,14 +68,15 @@ The package validates exports against pinned vendored schemas. The `cyclonedx` e
 From the locked development environment:
 
 ```bash
-python -m pytest
+python -m pytest --strict-skips
 ruff check src tests scripts
 ruff format --check src tests scripts
 mypy src/nexus_symbiote scripts
 python scripts/check_workflows.py
 python scripts/check_repository_hygiene.py
+python scripts/check_locks.py
 python scripts/check_security_regressions.py --out security-regressions.json
-python -m pytest --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=json:coverage.json
+python -m pytest --strict-skips --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=json:coverage.json
 python scripts/check_coverage.py coverage.json
 ```
 

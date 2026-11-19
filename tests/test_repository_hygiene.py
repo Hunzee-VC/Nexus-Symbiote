@@ -331,3 +331,38 @@ def test_tracked_repository_passes_its_own_owner_check():
     files = [Path(value) for value in listing.stdout.decode().split("\0") if value]
     assert hygiene.owner_issues(root, files) == []
     assert hygiene.hidden_character_issues(root, files) == []
+
+
+def test_tracked_text_follows_the_whitespace_rules_of_editorconfig(tmp_path):
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "tests/fixtures").mkdir(parents=True)
+    cases = {
+        "clean.py": b"a = 1\n",
+        "docs/break.md": b"hard break  \nnext\n",
+        "tests/fixtures/raw.txt": b"kept \r\nas recorded",
+        "image.bin": b"\x00\x01 \r",
+        "empty.txt": b"",
+        "open.py": b"a = 1",
+        "crlf.yml": b"a: 1\r\n",
+        "bom.toml": b"\xef\xbb\xbfa = 1\n",
+        "space.py": b"a = 1 \nb = 2\n",
+    }
+    for name, data in cases.items():
+        (tmp_path / name).write_bytes(data)
+    issues = hygiene.format_issues(tmp_path, [Path(name) for name in cases])
+    assert issues == [
+        "open.py: does not end with a newline",
+        "crlf.yml: has a carriage return; end lines with a line feed",
+        "bom.toml: starts with a byte order mark",
+        "space.py:1: trailing whitespace",
+    ]
+
+
+def test_the_format_exemptions_match_editorconfig():
+    text = (Path(__file__).parents[1] / ".editorconfig").read_text(encoding="utf-8")
+    exempt = {
+        line[1:-4]
+        for line, following in zip(text.splitlines(), text.splitlines()[1:], strict=False)
+        if line.startswith("[") and line.endswith("/**]") and following == "charset = unset"
+    }
+    assert exempt == {prefix.as_posix() for prefix in hygiene.FORMAT_EXEMPT_PREFIXES}

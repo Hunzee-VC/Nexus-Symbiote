@@ -45,7 +45,7 @@ def test_report_shows_origin_and_path_digest_never_the_endpoint_path(monkeypatch
     from tests.test_live_inventory import REAL_DISCOVER, server
     from tests.test_live_mcp import ORIGIN, FixtureTransport
 
-    sentinel = "path-credential-sentinel-0123456789"  # noqa: S105 - synthetic fixture
+    sentinel = "path-credential-sentinel-0123456789"
     endpoint = f"{ORIGIN}/api/mcp/s/{sentinel}/mcp"
 
     def fixture(url: str, **kwargs):

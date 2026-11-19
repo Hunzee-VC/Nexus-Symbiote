@@ -13,7 +13,7 @@ import pytest
 from nexus_symbiote.generators.validation import validate_cyclonedx
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from environment_sbom import build_sbom  # noqa: E402
+from environment_sbom import build_sbom
 
 LINUX = {
     "implementation_name": "cpython",

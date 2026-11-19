@@ -64,7 +64,7 @@ def changed_lines(
 def _top_level() -> str:
     """The working tree's top: numstat prints root-relative paths, and every pathspec and
     tree lookup must read them from there, whatever directory the script starts in."""
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],  # noqa: S607
         check=True,
         capture_output=True,

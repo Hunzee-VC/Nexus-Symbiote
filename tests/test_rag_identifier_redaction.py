@@ -18,8 +18,8 @@ BASE: dict[str, Any] = {
     "source_uris": ["docs/notes.md"],
 }
 USER_PASSWORD = "nspass:NsSecret00"  # noqa: S105 - synthetic fixture
-ASSIGNMENT = "qdrant pass=CollSecret44"  # noqa: S105 - synthetic fixture
-BEARER = "Bearer AbCdEf0123456789XYZ"  # noqa: S105 - synthetic fixture
+ASSIGNMENT = "qdrant pass=CollSecret44"
+BEARER = "Bearer AbCdEf0123456789XYZ"
 # Assembled at run time so the source holds no token-shaped literal.
 GITHUB_TOKEN = "".join(("gh", "p_", "A1b2C3d4E5f6G7h8I9j0", "K1l2M3n4O5p6Q7r8S9t0"))
 BARE_TOKEN = "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"  # noqa: S105 - synthetic fixture

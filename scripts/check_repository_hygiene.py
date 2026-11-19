@@ -57,6 +57,16 @@ _BLANK = frozenset({0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x2800, 0x3164, 0xFF
 # Dated audits record what was inspected under the owner live at the time.
 # Rewriting their links would falsify the record rather than fix a stale one.
 OWNER_EXEMPT_PREFIXES = (Path("docs/audits"),)
+# The directories .editorconfig exempts: fixtures, recorded outputs and vendored
+# schemas keep their exact bytes.
+FORMAT_EXEMPT_PREFIXES = (
+    Path("benchmarks/fixtures"),
+    Path("benchmarks/inventory/fixtures"),
+    Path("benchmarks/aibom-bench/results"),
+    Path("benchmarks/aibom-bench/schemas"),
+    Path("tests/fixtures"),
+    VENDOR,
+)
 
 
 def read_file(root: Path, relative: Path) -> bytes:
@@ -198,6 +208,37 @@ def hidden_character_issues(root: Path, files: list[Path]) -> list[str]:
                     f"{relative}:{number}: invisible character {', '.join(found)}; "
                     "write it as an escape"
                 )
+    return errors
+
+
+def format_issues(root: Path, files: list[Path]) -> list[str]:
+    """Hold tracked text to the whitespace rules .editorconfig states.
+
+    An editor that follows .editorconfig rewrites a file that breaks them on its next
+    save, which turns a one-line change into a diff of the whole file.
+    """
+    errors = []
+    for relative in files:
+        if any(prefix in relative.parents for prefix in FORMAT_EXEMPT_PREFIXES):
+            continue
+        try:
+            data = read_file(root, relative)
+        except (OSError, ValueError):
+            continue
+        if not data or b"\0" in data[:8192]:
+            continue
+        if data.startswith(b"\xef\xbb\xbf"):
+            errors.append(f"{relative}: starts with a byte order mark")
+        if b"\r" in data:
+            errors.append(f"{relative}: has a carriage return; end lines with a line feed")
+        if not data.endswith(b"\n"):
+            errors.append(f"{relative}: does not end with a newline")
+        if relative.suffix == ".md":
+            continue
+        for number, line in enumerate(data.split(b"\n"), 1):
+            if line != line.rstrip(b" \t"):
+                errors.append(f"{relative}:{number}: trailing whitespace")
+                break
     return errors
 
 
@@ -408,6 +449,7 @@ def main() -> int:
         errors = [
             *source_issues(root, files),
             *hidden_character_issues(root, files),
+            *format_issues(root, files),
             *owner_issues(root, files),
             *self_link_issues(root, files),
             *readme_link_issues(root),

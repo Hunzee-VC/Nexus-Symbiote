@@ -186,7 +186,7 @@ def test_a_missing_namespace_or_launcher_never_starts_the_pinned_program(
 
 
 def test_a_finished_pid_is_not_remembered_as_namespaced() -> None:
-    proc = subprocess.Popen(["/bin/true"], start_new_session=True)  # noqa: S603
+    proc = subprocess.Popen(["/bin/true"], start_new_session=True)
     proc.wait(timeout=5)
     pinned_process._NAMESPACED.add(proc.pid)
     pinned_process.terminate_process_group(proc)
@@ -196,12 +196,12 @@ def test_a_finished_pid_is_not_remembered_as_namespaced() -> None:
 def test_teardown_leaves_the_exit_status_of_another_child() -> None:
     # Code elsewhere in the process, such as the validation worker, trusts its child's
     # exit status; reaping every zombie child would turn this 3 into 0.
-    other = subprocess.Popen([sys.executable, "-c", "raise SystemExit(3)"])  # noqa: S603
+    other = subprocess.Popen([sys.executable, "-c", "raise SystemExit(3)"])
     if hasattr(os, "waitid"):
         os.waitid(os.P_PID, other.pid, os.WEXITED | os.WNOWAIT)
     else:  # pragma: no cover - macOS before Python 3.13
         time.sleep(1)
-    proc = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)  # noqa: S603
+    proc = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)
     try:
         pinned_process.terminate_process_group(proc)
     finally:
@@ -212,7 +212,7 @@ def test_teardown_leaves_the_exit_status_of_another_child() -> None:
 def test_a_forgotten_pid_is_swept_again_when_reused(monkeypatch: pytest.MonkeyPatch) -> None:
     swept: list[int] = []
     monkeypatch.setattr(pinned_process, "_kill_descendants", swept.append)
-    proc = subprocess.Popen(["/bin/true"], start_new_session=True)  # noqa: S603
+    proc = subprocess.Popen(["/bin/true"], start_new_session=True)
     proc.wait(timeout=5)
     pinned_process._NAMESPACED.add(proc.pid)
     pinned_process.terminate_process_group(proc)
@@ -532,7 +532,7 @@ def test_the_launcher_group_is_killed_when_the_sweep_fails(
 
     monkeypatch.setattr(pinned_process, "_kill_descendants", fail)
     monkeypatch.setattr(pinned_process.os, "killpg", record)
-    proc = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)  # noqa: S603
+    proc = subprocess.Popen(["/bin/sleep", "30"], start_new_session=True)
     try:
         with pytest.raises(RuntimeError, match="sweep failed"):
             pinned_process.terminate_process_group(proc)
@@ -1212,7 +1212,7 @@ def test_the_status_reader_returns_the_fields_of_a_live_and_a_reaped_process() -
     assert fields is not None
     assert fields["State"][0] in {"R", "S"}
     assert fields["PPid"] == str(os.getppid())
-    proc = subprocess.Popen(["/bin/true"])  # noqa: S603
+    proc = subprocess.Popen(["/bin/true"])
     proc.wait(timeout=5)
     assert pinned_process._status(proc.pid) is None
 
@@ -2042,7 +2042,7 @@ def test_the_session_sweep_does_not_count_an_ended_leader(
 ) -> None:
     # The unreaped wrapper leads the session; signalling its zombie in each pass made
     # every teardown scan /proc eight times.
-    leader = subprocess.Popen(["/bin/true"], start_new_session=True)  # noqa: S603
+    leader = subprocess.Popen(["/bin/true"], start_new_session=True)
     try:
         os.waitid(os.P_PID, leader.pid, os.WEXITED | os.WNOWAIT)
         signalled: list[int] = []
@@ -2059,7 +2059,7 @@ def test_the_drain_reads_the_proc_scan_fallback_only_a_few_times(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Without the kernel's children list every read is a scan of all of /proc.
-    stopped = subprocess.Popen(["/bin/sleep", "30"])  # noqa: S603
+    stopped = subprocess.Popen(["/bin/sleep", "30"])
     try:
         os.kill(stopped.pid, signal.SIGSTOP)
         reads: list[int] = []
@@ -2312,7 +2312,7 @@ def test_opt_out_teardown_leaves_the_exit_status_of_another_child(tmp_path: Path
     # Code elsewhere in the process, such as the validation worker, trusts its child's
     # exit status. A sweep that reaped zombie children of this process, looking for a
     # clone(CLONE_PARENT) child, would turn this 3 into 0. Ported from #228.
-    other = subprocess.Popen([sys.executable, "-c", "raise SystemExit(3)"])  # noqa: S603
+    other = subprocess.Popen([sys.executable, "-c", "raise SystemExit(3)"])
     os.waitid(os.P_PID, other.pid, os.WEXITED | os.WNOWAIT)
     marker = tmp_path / "pid"
     command, digest = _clone_parent_launcher(tmp_path, marker)
@@ -2576,7 +2576,7 @@ def test_the_session_sweep_targets_only_a_session_the_launch_leads(
         assert pinned_process._OPT_OUT[proc.pid][0] == proc.pid != os.getsid(0)
     finally:
         _release_spawned(proc)
-    inherited = subprocess.Popen(["/bin/sleep", "30"])  # noqa: S603
+    inherited = subprocess.Popen(["/bin/sleep", "30"])
     try:
         assert os.getsid(inherited.pid) == os.getsid(0)
         signalled: list[int] = []

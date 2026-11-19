@@ -88,6 +88,13 @@ def test_a_reviewed_workflow_passes(repository, capsys):
         (("# v7.0.1", ""), "full version comment"),
         (("# v7.0.1", "# v6.0.0"), "older than its floor"),
         (("echo safe", "echo ${{ github.head_ref }}"), "never shell source"),
+        (
+            (
+                "echo safe\n",
+                'echo safe\n        shell: bash -c "echo ${{ github.head_ref }}; {0}"\n',
+            ),
+            "never shell source",
+        ),
     ],
 )
 def test_privileged_triggers_write_tokens_and_unbounded_jobs_are_rejected(

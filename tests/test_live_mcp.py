@@ -448,7 +448,7 @@ def test_bearer_token_passed_only_to_transport_and_redacted_from_echoed_metadata
 @pytest.mark.parametrize("echo_session", [False, True])
 def test_extension_field_names_do_not_expose_bearer_or_session_in_evidence(echo_session):
     token = "sensitive-bearer-token-12345"  # noqa: S105 - synthetic fixture
-    session = "opaque-sensitive-session-67890"  # noqa: S105 - synthetic fixture
+    session = "opaque-sensitive-session-67890"
     raw_tool = {**tool(), f"ext-{token}": "value"}
     if echo_session:
         raw_tool[f"ext-{session}"] = "value"
