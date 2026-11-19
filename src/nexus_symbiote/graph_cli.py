@@ -103,6 +103,78 @@ def register_graph_commands(main: click.Group) -> None:
             err=True,
         )
 
+    @main.command("export-policy")
+    @click.argument("inventory", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+    @click.option(
+        "--format",
+        "policy_format",
+        type=click.Choice(["cedar", "rego", "json"]),
+        default="cedar",
+        show_default=True,
+        help="Target authorization policy language.",
+    )
+    @click.option(
+        "--verified-only/--include-declared",
+        default=True,
+        show_default=True,
+        help="Allowlist only observed/verified components with pinned digests, or include declared entries.",
+    )
+    @click.option(
+        "--project",
+        type=click.Path(exists=True, file_okay=False, path_type=Path),
+        default=None,
+        help="Reconcile INVENTORY against this project before exporting a --verified-only policy.",
+    )
+    @click.option(
+        "--signature-policy",
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        default=None,
+        help="Explicit operator signer policy JSON for model verification; requires --project.",
+    )
+    @click.option(
+        "--require-attestation",
+        "attestation_envelope",
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        default=None,
+        help="Verify a reviewed DSSE inventory attestation envelope for INVENTORY; requires --trusted-key.",
+    )
+    @click.option(
+        "--trusted-key",
+        "trusted_keys",
+        multiple=True,
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        help="Trusted Ed25519 public key PEM for --require-attestation (repeatable).",
+    )
+    @click.option(
+        "-o",
+        "--output",
+        type=click.Path(path_type=Path),
+        help="Write the policy to this file instead of standard output.",
+    )
+    def export_policy(
+        inventory: Path,
+        policy_format: str,
+        verified_only: bool,
+        project: Path | None,
+        signature_policy: Path | None,
+        attestation_envelope: Path | None,
+        trusted_keys: tuple[Path, ...],
+        output: Path | None,
+    ) -> None:
+        """Export a default-deny Cedar, Rego, or JSON runtime allowlist from an inventory."""
+        from nexus_symbiote.policy_export import run_export_policy
+
+        run_export_policy(
+            inventory,
+            policy_format=policy_format,
+            verified_only=verified_only,
+            project=project,
+            signature_policy=signature_policy,
+            attestation_envelope=attestation_envelope,
+            trusted_keys=trusted_keys,
+            output=output,
+        )
+
 
 def _load_inventory(path: str | Path) -> AIBOM:
     # The error names the class of problem; it never quotes the document.

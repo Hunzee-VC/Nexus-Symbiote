@@ -90,6 +90,9 @@ REASONS: dict[str, str] = {
         "The inventory names a transport that is neither stdio nor a remote MCP transport "
         "(sse, streamable-http, http), so the server cannot be verified."
     ),
+    "invalid-transport-evidence": (
+        "Supplied transport evidence is not a complete live MCP endpoint observation for this server."
+    ),
     "internal-error": "The pinned observation stopped on an unexpected internal error.",
 }
 
@@ -203,9 +206,33 @@ class LiveVerifyReport:
             )
         )
 
+    @property
+    def all_servers_verified(self) -> bool:
+        return self.complete and self.servers_skipped == 0 and not self.has_drift
+
+    @property
+    def verification_scope(self) -> str:
+        if not self.complete:
+            return "incomplete"
+        if self.has_drift:
+            return "drifted"
+        if self.servers_skipped == 0:
+            return "all-servers"
+        has_stdio_verified = any(
+            r.status == "verified" and r.transport in ("stdio", None) for r in self.results
+        )
+        has_remote_verified = any(
+            r.status == "verified" and r.transport in REMOTE_TRANSPORTS for r in self.results
+        )
+        return (
+            "partial-stdio-only" if (has_stdio_verified and not has_remote_verified) else "partial"
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "complete": self.complete,
+            "all_servers_verified": self.all_servers_verified,
+            "verification_scope": self.verification_scope,
             "servers_checked": self.servers_checked,
             "servers_reachable": self.servers_reachable,
             "servers_skipped": self.servers_skipped,
@@ -305,11 +332,247 @@ def _declaration(observation: PinnedObservation) -> _Declaration:
     return declaration
 
 
+def _canonical_https_origin(url: str | None) -> tuple[str, str, int] | None:
+    from urllib.parse import urlsplit
+
+    if (
+        not isinstance(url, str)
+        or not url
+        or "\\" in url
+        or any(ch <= " " or ch == "\x7f" for ch in url)
+    ):
+        return None
+    try:
+        parts = urlsplit(url)
+        scheme = parts.scheme.lower()
+        host = parts.hostname
+        port = parts.port
+    except ValueError:
+        return None
+    if scheme != "https" or not host or parts.username is not None or parts.password is not None:
+        return None
+    return scheme, host.lower(), (443 if port is None else port)
+
+
+def _is_valid_endpoint_observation_bom(evidence_bom: AIBOM) -> bool:
+    from nexus_symbiote.core.enums import AssuranceLevel
+
+    if validate_graph(evidence_bom):
+        return False
+    completeness = evidence_bom.metadata.completeness
+    if (
+        completeness is None
+        or completeness.scope != "mcp-endpoint-observation"
+        or completeness.assurance_level != AssuranceLevel.OBSERVED
+        or completeness.scanner_status.get("live-mcp") != "complete"
+    ):
+        return False
+    servers = [c for c in evidence_bom.components if isinstance(c, MCPServerComponent)]
+    return len(servers) == 1
+
+
+def _reconstruct_observed_descriptor(obs_tool: ToolComponent) -> dict[str, Any]:
+    desc: dict[str, Any] = {
+        "name": obs_tool.name,
+        "description": obs_tool.description_text or "",
+        "inputSchema": obs_tool.input_schema
+        if isinstance(obs_tool.input_schema, dict)
+        else {"type": "object"},
+    }
+    if obs_tool.annotations:
+        desc["annotations"] = dict(obs_tool.annotations)
+    for prop_name, field_name in (
+        ("mcp_title", "title"),
+        ("mcp_output_schema", "outputSchema"),
+        ("mcp_meta", "_meta"),
+    ):
+        if prop_name in obs_tool.properties:
+            desc[field_name] = obs_tool.properties[prop_name]
+    return desc
+
+
+def _verify_remote_evidence(
+    bom: AIBOM,
+    server: MCPServerComponent,
+    observed_bom: AIBOM,
+    observed_server: MCPServerComponent,
+    result: ServerVerifyResult,
+) -> bool:
+    """Compare an approved remote server against a recorded discover-mcp observation."""
+    from nexus_symbiote.core.enums import AssuranceLevel
+
+    server_claim = observed_server.claims.get("server_declaration")
+    if (
+        observed_server.assurance_level != AssuranceLevel.OBSERVED
+        or observed_server.properties.get("collection_mode") != "live-observation"
+        or server_claim is None
+        or server_claim.assurance != AssuranceLevel.OBSERVED
+        or server_claim.collector != "live-mcp"
+        or server_claim.method != "https-mcp-initialize"
+    ):
+        result.reason = "invalid-transport-evidence"
+        result.error = REASONS["invalid-transport-evidence"]
+        return False
+    obs_origin = _canonical_https_origin(observed_server.endpoint_url)
+    claim_origin = _canonical_https_origin(server_claim.locator)
+    obs_ep_hash = observed_server.properties.get("observed_endpoint_hash")
+    if obs_origin is None or claim_origin != obs_origin or not isinstance(obs_ep_hash, str):
+        result.reason = "invalid-transport-evidence"
+        result.error = REASONS["invalid-transport-evidence"]
+        return False
+    try:
+        normalize_digest(obs_ep_hash, "sha256")
+    except ValueError:
+        result.reason = "invalid-transport-evidence"
+        result.error = REASONS["invalid-transport-evidence"]
+        return False
+    if server.endpoint_url and server.endpoint_url != "[redacted]":
+        expected_origin = _canonical_https_origin(server.endpoint_url)
+        if expected_origin is None or expected_origin != obs_origin:
+            result.reason = "invalid-transport-evidence"
+            result.error = REASONS["invalid-transport-evidence"]
+            return False
+    expected_ep_hash = server.properties.get("observed_endpoint_hash")
+    if expected_ep_hash is not None and expected_ep_hash != obs_ep_hash:
+        result.reason = "invalid-transport-evidence"
+        result.error = REASONS["invalid-transport-evidence"]
+        return False
+
+    approved = [
+        t
+        for t in bom.components
+        if isinstance(t, ToolComponent) and t.mcp_server_ref == server.bom_ref
+    ]
+    by_name = {t.name: t for t in approved}
+    if len(by_name) != len(approved):
+        result.reason = "ambiguous-approved-tools"
+        result.error = REASONS["ambiguous-approved-tools"]
+        return False
+    observed_tools = [
+        t
+        for t in observed_bom.components
+        if isinstance(t, ToolComponent) and t.mcp_server_ref == observed_server.bom_ref
+    ]
+    obs_by_name = {t.name: t for t in observed_tools}
+    if len(obs_by_name) != len(observed_tools):
+        result.reason = "invalid-descriptor"
+        result.error = REASONS["invalid-descriptor"]
+        return False
+    decl_hash_raw = observed_server.properties.get("observed_declaration_hash")
+    ident_hash_raw = observed_server.properties.get("observed_identity_hash")
+    if not isinstance(decl_hash_raw, str) or not isinstance(ident_hash_raw, str):
+        result.reason = "invalid-transport-evidence"
+        result.error = REASONS["invalid-transport-evidence"]
+        return False
+    try:
+        d_alg, d_dig = normalize_digest(decl_hash_raw, "sha256")
+        i_alg, i_dig = normalize_digest(ident_hash_raw, "sha256")
+        decl_hash = f"{d_alg}:{d_dig}"
+        ident_hash = f"{i_alg}:{i_dig}"
+    except ValueError:
+        result.reason = "invalid-transport-evidence"
+        result.error = REASONS["invalid-transport-evidence"]
+        return False
+    result.reachable, result.status = True, "verified"
+    proto = observed_server.properties.get("observed_protocol_version")
+    result.protocol_version = proto if isinstance(proto, str) else None
+    result.declaration_hash = decl_hash
+    result.declaration = {
+        key: observed_server.properties[f"observed_{key}"]
+        for key in _SHOWN_DECLARATION_KEYS
+        if f"observed_{key}" in observed_server.properties
+    }
+    recorded = server.properties.get("observed_declaration_hash")
+    if recorded is not None:
+        result.declaration_status = "match" if recorded == decl_hash else "changed"
+    elif any(
+        observed_server.properties.get(f"observed_{key}")
+        for key in ("instructions", "prompts", "resource_templates")
+    ) or any(t.properties.get("descriptor_fields_outside_profile") for t in observed_tools):
+        result.declaration_status = "new"
+    else:
+        result.declaration_status = "match"
+    result.identity_hash = ident_hash
+    recorded_identity = server.properties.get("observed_identity_hash")
+    if recorded_identity is None:
+        result.identity_status = "unrecorded"
+    else:
+        result.identity_status = "match" if recorded_identity == ident_hash else "changed"
+    fingerprints: dict[str, str] = {}
+    for name, obs_tool in sorted(obs_by_name.items()):
+        tool_claim = obs_tool.claims.get("tool_definition")
+        if (
+            obs_tool.assurance_level != AssuranceLevel.OBSERVED
+            or obs_tool.properties.get("collection_mode") != "live-observation"
+            or tool_claim is None
+            or tool_claim.assurance != AssuranceLevel.OBSERVED
+            or tool_claim.collector != "live-mcp"
+            or tool_claim.method != "https-mcp-tools-list"
+            or obs_tool.definition_hash_version != TOOL_DEFINITION_HASH_VERSION
+            or not obs_tool.definition_hash
+        ):
+            result.reason = "invalid-descriptor"
+            result.error = REASONS["invalid-descriptor"]
+            result.reachable, result.status = False, "failed"
+            result.tool_findings.clear()
+            return False
+        try:
+            alg, digest = normalize_digest(obs_tool.definition_hash, "sha256")
+            fp = f"{alg}:{digest}"
+        except ValueError:
+            result.reason = "invalid-descriptor"
+            result.error = REASONS["invalid-descriptor"]
+            result.reachable, result.status = False, "failed"
+            result.tool_findings.clear()
+            return False
+        fingerprints[name] = fp
+        old = by_name.get(name)
+        previous = None
+        if old is None:
+            status = "new"
+        elif old.definition_hash_version != TOOL_DEFINITION_HASH_VERSION or not old.definition_hash:
+            status = "unverifiable"
+        else:
+            try:
+                old_alg, old_digest = normalize_digest(old.definition_hash, "sha256")
+                previous = f"{old_alg}:{old_digest}"
+                status = "match" if previous == fp else "changed"
+            except ValueError:
+                status = "unverifiable"
+        unprofiled = obs_tool.properties.get("descriptor_fields_outside_profile") or ()
+        result.tool_findings.append(
+            LiveToolFinding(
+                name,
+                fp,
+                status,
+                descriptor=_reconstruct_observed_descriptor(obs_tool),
+                previous_hash=previous if status == "changed" else None,
+                display_differs=bool(obs_tool.properties.get("displayed_descriptor_differs")),
+                observed_hash=obs_tool.properties.get("observed_descriptor_hash"),
+                unprofiled_fields=tuple(str(x) for x in unprofiled)
+                if isinstance(unprofiled, list | tuple)
+                else (),
+            )
+        )
+    for old in approved:
+        if old.name not in obs_by_name:
+            result.tool_findings.append(LiveToolFinding(old.name, old.definition_hash, "missing"))
+    result.live_schema_hash = hash_canonical(
+        {
+            "profile": TOOL_DEFINITION_HASH_VERSION,
+            "tools": dict(sorted(fingerprints.items())),
+        }
+    )
+    return True
+
+
 def verify_mcp_servers(
     bom: AIBOM,
     config_lookup: dict[str, dict[str, Any]] | None = None,
     *,
     trusted_launchers: dict[str, dict[str, str]] | None = None,
+    transport_evidence: list[AIBOM] | tuple[AIBOM, ...] = (),
+    require_transport_evidence: bool = False,
 ) -> LiveVerifyReport:
     """Bind collection to the exact server reference in an independent launch policy."""
     report = LiveVerifyReport()
@@ -323,6 +586,25 @@ def verify_mcp_servers(
         )
         return report
     launchers = trusted_launchers or {}
+    evidence_by_ref: dict[str, tuple[AIBOM, MCPServerComponent]] = {}
+    duplicate_evidence_refs: set[str] = set()
+    for evidence_bom in transport_evidence:
+        if not _is_valid_endpoint_observation_bom(evidence_bom):
+            report.results.append(
+                ServerVerifyResult(
+                    server_name="[transport-evidence]",
+                    server_ref="[transport-evidence]",
+                    reason="invalid-transport-evidence",
+                    error=REASONS["invalid-transport-evidence"],
+                )
+            )
+            return report
+        for comp in evidence_bom.components:
+            if isinstance(comp, MCPServerComponent):
+                if comp.bom_ref in evidence_by_ref:
+                    duplicate_evidence_refs.add(comp.bom_ref)
+                else:
+                    evidence_by_ref[comp.bom_ref] = (evidence_bom, comp)
     for server in bom.components:
         if not isinstance(server, MCPServerComponent):
             continue
@@ -334,6 +616,22 @@ def verify_mcp_servers(
         # The label comes from the checkout; the operator's pin and a recorded command do not.
         pinned = server.bom_ref in launchers
         if remote and not server.command and not pinned:
+            if server.bom_ref in duplicate_evidence_refs:
+                report.servers_checked += 1
+                result.status, result.reason = "failed", "invalid-transport-evidence"
+                result.error = REASONS["invalid-transport-evidence"]
+                continue
+            if server.bom_ref in evidence_by_ref:
+                report.servers_checked += 1
+                obs_bom, obs_server = evidence_by_ref[server.bom_ref]
+                if _verify_remote_evidence(bom, server, obs_bom, obs_server, result):
+                    report.servers_reachable += 1
+                continue
+            if require_transport_evidence:
+                report.servers_checked += 1
+                result.status, result.reason = "failed", "remote-transport"
+                result.error = REASONS["remote-transport"]
+                continue
             result.status, result.reason = "not-verifiable", "remote-transport"
             result.error = REASONS["remote-transport"]
             report.servers_skipped += 1

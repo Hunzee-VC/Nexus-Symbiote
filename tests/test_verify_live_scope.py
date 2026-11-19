@@ -665,3 +665,207 @@ def test_descriptor_checks_share_the_session_deadline(tmp_path, monkeypatch):
     started = time.monotonic()
     assert _reason(tmp_path, launcher(tmp_path, tools=tools)) == "deadline"
     assert time.monotonic() - started < 4
+
+
+def test_require_transport_evidence_and_recorded_remote_observations(tmp_path, monkeypatch):
+    from nexus_symbiote import supply_chain_cli
+    from nexus_symbiote.live.inventory import observation_inventory
+    from nexus_symbiote.scanners.live_mcp import DiscoveryResult, ObservedTool, check_served_tool
+
+    if any(p.stat().st_uid not in {0, os.geteuid()} for p in (tmp_path, *tmp_path.parents)):
+        monkeypatch.setattr(supply_chain_cli, "_check_launch_policy", lambda *_a, **_kw: None)
+
+    policy = launcher(tmp_path)
+    bom = inventory(remote=True)
+    # Without --require-transport-evidence, remote server is skipped (partial-stdio-only).
+    partial = verify_mcp_servers(bom, trusted_launchers=policy)
+    assert partial.complete and not partial.all_servers_verified
+    assert partial.verification_scope == "partial-stdio-only"
+
+    # With --require-transport-evidence and no evidence, verification fails closed.
+    strict_failed = verify_mcp_servers(
+        bom, trusted_launchers=policy, require_transport_evidence=True
+    )
+    assert not strict_failed.complete and not strict_failed.all_servers_verified
+    assert strict_failed.verification_scope == "incomplete"
+    failed, _, _ = invoke(tmp_path, bom, policy, "--require-transport-evidence", "--json-output")
+    assert failed.exit_code == 1
+    failed_doc = json.loads(failed.stdout)
+    assert failed_doc["complete"] is False
+    assert failed_doc["all_servers_verified"] is False
+    assert failed_doc["verification_scope"] == "incomplete"
+
+    # Supplying matching --transport-evidence verifies both stdio and remote servers.
+    checked_ticket = check_served_tool(
+        {"name": "open_ticket", "description": "Open ticket", "inputSchema": {"type": "object"}}
+    )
+    obs = DiscoveryResult(
+        endpoint="https://mcp.example.com/mcp",
+        complete=True,
+        observed_at="2026-11-18T12:00:00Z",
+        protocol_version="2025-06-18",
+        server_info={"name": "tickets", "version": "1"},
+        server_capabilities={"tools": {}},
+        identity_hash="sha256:" + "a" * 64,
+        declaration_hash="sha256:" + "b" * 64,
+        tools=[
+            ObservedTool(
+                name="open_ticket",
+                descriptor=checked_ticket.display,
+                definition_hash=checked_ticket.observed_hash,
+                fingerprint=checked_ticket.fingerprint,
+            )
+        ],
+    )
+    obs_bom = observation_inventory(obs, server_ref="mcp:tickets")
+    obs_path = tmp_path / "tickets-observed.json"
+    obs_bom.save(obs_path)
+
+    # Approve open_ticket on mcp:tickets in bom so it matches without drift.
+    remote_srv = bom.get_component("mcp:tickets")
+    assert isinstance(remote_srv, MCPServerComponent)
+    remote_srv.properties["observed_declaration_hash"] = obs.declaration_hash
+    remote_srv.properties["observed_identity_hash"] = obs.identity_hash
+    bom.add_component(
+        ToolComponent(
+            bom_ref="tool:open_ticket",
+            name="open_ticket",
+            mcp_server_ref="mcp:tickets",
+            description_text="Open ticket",
+            input_schema={"type": "object"},
+            definition_hash=checked_ticket.fingerprint,
+            definition_hash_version=TOOL_DEFINITION_HASH_VERSION,
+        )
+    )
+
+    # Unattested --transport-evidence is rejected at the CLI boundary.
+    unattested, _, _ = invoke(
+        tmp_path,
+        bom,
+        policy,
+        "--require-transport-evidence",
+        "--transport-evidence",
+        str(obs_path),
+        "--json-output",
+    )
+    assert unattested.exit_code == 2
+    assert "requires a matching --transport-evidence-attestation" in unattested.output
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    key_dir = tmp_path / "keys"
+    key_dir.mkdir(mode=0o700)
+    priv = Ed25519PrivateKey.generate()
+    priv_path = key_dir / "obs.key"
+    priv_path.write_bytes(
+        priv.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    priv_path.chmod(0o600)
+    pub_path = key_dir / "obs.pub"
+    pub_path.write_bytes(
+        priv.public_key().public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+    )
+    pub_path.chmod(0o600)
+    att_path = tmp_path / "tickets-observed.att.json"
+    assert (
+        CliRunner()
+        .invoke(
+            main,
+            [
+                "attest",
+                str(obs_path),
+                "--key",
+                str(priv_path),
+                "--purpose",
+                "generated",
+                "--out",
+                str(att_path),
+            ],
+        )
+        .exit_code
+        == 0
+    )
+
+    verified, _, _ = invoke(
+        tmp_path,
+        bom,
+        policy,
+        "--require-transport-evidence",
+        "--transport-evidence",
+        str(obs_path),
+        "--transport-evidence-attestation",
+        str(att_path),
+        "--trusted-key",
+        str(pub_path),
+        "--json-output",
+    )
+    assert verified.exit_code == 0, verified.output
+    verified_doc = json.loads(verified.stdout)
+    assert verified_doc["complete"] is True
+    assert verified_doc["all_servers_verified"] is True
+    assert verified_doc["verification_scope"] == "all-servers"
+    assert verified_doc["servers_skipped"] == 0
+    assert "transport_evidence_sha256" in verified_doc["inputs"]
+
+    # Forged static-scan BOM signed as transport evidence must be rejected by _verify_remote_evidence.
+    static_bom = AIBOM(
+        components=[
+            MCPServerComponent(
+                bom_ref="mcp:tickets",
+                name="tickets",
+                transport="streamable-http",
+                endpoint_url="https://mcp.example.com/mcp",
+            )
+        ]
+    )
+    forged_ev = verify_mcp_servers(
+        bom,
+        trusted_launchers=policy,
+        transport_evidence=[static_bom],
+        require_transport_evidence=True,
+    )
+    assert not forged_ev.complete and not forged_ev.all_servers_verified
+    assert forged_ev.verification_scope == "incomplete"
+
+    # Drift sets all_servers_verified=False and verification_scope="drifted".
+    drifted_bom = bom.model_copy(deep=True)
+    drifted_srv = drifted_bom.get_component("mcp:tickets")
+    assert isinstance(drifted_srv, MCPServerComponent)
+    drifted_srv.properties["observed_identity_hash"] = "sha256:" + "f" * 64
+    drifted_rep = verify_mcp_servers(
+        drifted_bom,
+        trusted_launchers=policy,
+        transport_evidence=[obs_bom],
+        require_transport_evidence=True,
+    )
+    assert drifted_rep.complete and drifted_rep.has_drift
+    assert drifted_rep.all_servers_verified is False
+    assert drifted_rep.verification_scope == "drifted"
+
+    # When one remote server is verified via transport_evidence and a second remote server
+    # is skipped (without --require-transport-evidence), verification_scope is "partial"
+    # rather than "partial-stdio-only".
+    two_remote_bom = bom.model_copy(deep=True)
+    two_remote_bom.add_component(
+        MCPServerComponent(
+            bom_ref="mcp:other",
+            name="other",
+            transport="streamable-http",
+            endpoint_url="https://other.example.com",
+        )
+    )
+    mixed_partial = verify_mcp_servers(
+        two_remote_bom,
+        trusted_launchers=policy,
+        transport_evidence=[obs_bom],
+    )
+    assert mixed_partial.complete and not mixed_partial.all_servers_verified
+    assert mixed_partial.verification_scope == "partial"
