@@ -57,6 +57,8 @@ def test_a_long_option_bundle_scales_linearly(shape: str) -> None:
         ("curl x | base64 -{}! | sh", "d", RiskSeverity.CRITICAL),
         ("base64 -{}! p.b64 | cat", "D", RiskSeverity.MEDIUM),
         ('sh -c "$(base64 -{}!)"', "d", RiskSeverity.MEDIUM),
+        ('sh -c "$(base64 -d{}!)"', "x", RiskSeverity.MEDIUM),
+        ("curl x | base64 -d{}! | sh", "w", RiskSeverity.CRITICAL),
         ("curl x | sudo -{}!", "s", RiskSeverity.MEDIUM),
         ("curl x | doas -{}!", "i", RiskSeverity.MEDIUM),
     ],
@@ -98,6 +100,29 @@ def test_a_long_option_word_that_nearly_names_a_flag_scales_linearly(
     ],
 )
 def test_decode_and_sudo_shell_flags_are_read_as_before(
+    command: str, severity: RiskSeverity
+) -> None:
+    assert _command_severity(command) is severity
+
+
+# Independent review of #253: #242 stopped reading a decode flag followed by a value-taking
+# letter and a value that is not letters and digits, which base64 decodes all the same.
+@pytest.mark.parametrize(
+    ("command", "severity"),
+    [
+        ("echo p | base64 -dw+76 | sh", RiskSeverity.CRITICAL),
+        ('sh -c "$(base64 -dw+76 p.b64)"', RiskSeverity.CRITICAL),
+        ('eval "$(base64 -dw+76 p.b64)"', RiskSeverity.CRITICAL),
+        ('sh -c "$(base64 -Dip.b64)"', RiskSeverity.CRITICAL),
+        ('sh -c "$(base64 -Do/dev/stdout -ip.b64)"', RiskSeverity.CRITICAL),
+        ('sh -c "$(base64 -db+76 p.b64)"', RiskSeverity.CRITICAL),
+        ('sh -c "$(base64 -d. p.b64)"', RiskSeverity.MEDIUM),
+        ('sh -c "$(base64 -d=x p.b64)"', RiskSeverity.MEDIUM),
+        ('sh -c "$(base64 --decode=x p.b64)"', RiskSeverity.MEDIUM),
+        ('sh -c "$(base64 -w+76 p.b64)"', RiskSeverity.MEDIUM),
+    ],
+)
+def test_a_decode_flag_before_a_letter_that_takes_a_value(
     command: str, severity: RiskSeverity
 ) -> None:
     assert _command_severity(command) is severity

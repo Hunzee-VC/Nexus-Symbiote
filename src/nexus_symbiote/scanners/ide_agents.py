@@ -713,9 +713,11 @@ _PREFIX_REDIR = re.compile(r"\d*(?:<<-|<<<|<<|<>|>>|>&|&>|[<>])")
 # `base64` decodes with `-d` or `-D`, alone or in a bundle such as `-di`, or `--decode`,
 # which GNU getopt also takes abbreviated, anywhere among its arguments. The letters
 # before the flag's leave it out, so a long bundle that ends in another character is
-# read once, not once for each `d` in it.
+# read once, not once for each `d` in it. A letter after it that takes a value (GNU's
+# `-w`, macOS's `-b`, `-i` and `-o`) ends the bundle with any value: `-dw+76`.
 _BASE64_DECODE = re.compile(
-    r"-[A-CE-Za-ce-z0-9]*[dD][A-Za-z0-9]*|(?i:--d(?:e(?:c(?:o(?:de?)?)?)?)?)"
+    r"-[A-CE-Za-ce-z0-9]*[dD][A-Za-z0-9]*(?:[biow][\s\S]*)?"
+    r"|(?i:--d(?:e(?:c(?:o(?:de?)?)?)?)?)"
 )
 # `sudo -s`, `-i`, alone or in a bundle such as `-Es`, or their long forms; the letters
 # before the flag's leave it out for the same reason.

