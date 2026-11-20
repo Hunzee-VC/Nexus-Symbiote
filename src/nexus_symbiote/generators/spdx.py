@@ -50,6 +50,7 @@ from nexus_symbiote.generators.validation import (
     require_valid,
     spdx_errors,
 )
+from nexus_symbiote.utils.secrets import redact_text
 
 PROJECTION = "spdx-3.0.1/3"
 PROJECTION_V4 = "spdx-3.0.1/4"
@@ -222,7 +223,9 @@ class SPDXGenerator(Generator):
             raise ValueError("SPDX author option requires projection_version=4")
         self._namespace = None if namespace is None else _validated_namespace(namespace)
         self._projection_version = projection_version
-        cleaned_author = _comment_text(author.strip())[:200] if author and author.strip() else None
+        cleaned_author = (
+            _comment_text(redact_text(author.strip()))[:200] if author and author.strip() else None
+        )
         self._author = cleaned_author
 
     def generate(self, aibom: AIBOM) -> dict[str, Any]:
@@ -267,7 +270,11 @@ class SPDXGenerator(Generator):
             author_names = sorted(
                 {
                     *([self._author] if self._author else []),
-                    *(_comment_text(a.strip())[:200] for a in aibom.metadata.authors if a.strip()),
+                    *(
+                        _comment_text(redact_text(a.strip()))[:200]
+                        for a in aibom.metadata.authors
+                        if a.strip()
+                    ),
                 }
             )
             for author_name in author_names:
@@ -330,7 +337,7 @@ class SPDXGenerator(Generator):
             for key in sorted(edge_values)
         ]
 
-        from nexus_symbiote.spdx_profiles import clean_license_identifier
+        from nexus_symbiote.spdx_profiles import spdx_license_expression
 
         license_elements: dict[str, dict[str, Any]] = {}
         license_relationships: list[dict[str, Any]] = []
@@ -341,10 +348,11 @@ class SPDXGenerator(Generator):
             src_comp = comp_by_spdx_id[component["spdxId"]]
             declared_lic: str | None = None
             if v4:
-                raw_lic = src_comp.properties.get("declared_license") or getattr(
-                    src_comp, "license", None
+                raw_lic = getattr(src_comp, "license", None) or src_comp.properties.get(
+                    "declared_license"
                 )
-                declared_lic = clean_license_identifier(raw_lic)
+                # Free text stays in the native extension; SPDX gets NoAssertion.
+                declared_lic = spdx_license_expression(raw_lic)
             for kind in ("hasDeclaredLicense", "hasConcludedLicense"):
                 if kind == "hasDeclaredLicense" and declared_lic:
                     lic_id = ids.element("license-expression", declared_lic)
@@ -484,6 +492,8 @@ class SPDXGenerator(Generator):
             "spdxId": ids.element("component", comp.bom_ref),
             "creationInfo": ids.creation,
             "name": comp.name,
+            # Projection 3 pins this key position; projection 4 refills it below.
+            "extension": None,
         }
         package = package_identifier(comp)
         if package.value is not None:
@@ -557,12 +567,11 @@ class SPDXGenerator(Generator):
                 if isinstance(rel_ts, str) and rel_ts:
                     element["releaseTime"] = rel_ts
                     declared_fields.append("releaseTime")
-                dl_loc = comp.properties.get("declared_download_location") or getattr(
-                    comp, "source_uri", None
-                )
+                observed_loc = getattr(comp, "source_uri", None)
+                dl_loc = observed_loc or comp.properties.get("declared_download_location")
                 if isinstance(dl_loc, str) and dl_loc:
                     element["software_downloadLocation"] = dl_loc
-                    if comp.properties.get("declared_download_location"):
+                    if not observed_loc:
                         declared_fields.append("software_downloadLocation")
                 avail = comp.properties.get("declared_availability")
                 if isinstance(avail, str) and avail:

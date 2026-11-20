@@ -6,6 +6,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Final
 from urllib.parse import urlsplit, urlunsplit
@@ -23,7 +24,7 @@ from nexus_symbiote.core.models import (
 )
 from nexus_symbiote.policy import parse_yaml_mapping
 from nexus_symbiote.utils.confined import ConfinedCollection
-from nexus_symbiote.utils.secrets import REDACTED, redact_text
+from nexus_symbiote.utils.secrets import REDACTED, redact_text, redact_url
 from nexus_symbiote.utils.terminal import neutralize
 
 MAX_AGENT_YAML_BYTES: Final[int] = 256 * 1024
@@ -34,6 +35,7 @@ _RFC3339_RE: Final[re.Pattern[str]] = re.compile(
     re.ASCII,
 )
 _SAFE_LICENSE_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9.()+\- ]{1,128}", re.ASCII)
+_LICENSE_REF_RE: Final[re.Pattern[str]] = re.compile(r"LicenseRef-[A-Za-z0-9.-]+", re.ASCII)
 _SAFE_URL_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:https|s3|gs|hf|oci)://[^\s<>\"'\\]+",
     re.ASCII,
@@ -176,6 +178,9 @@ def _clean_url(value: Any) -> str | None:
         return None
     if parts.username or parts.password or "@" in parts.netloc:
         return None
+    # A token-shaped host is a secret even though the path check below passes.
+    if redact_url(candidate) == "[redacted-url]":
+        return None
     if parts.path and REDACTED in redact_text(parts.path):
         return None
     rebuilt = urlunsplit((scheme, parts.netloc, parts.path, "", ""))
@@ -204,6 +209,36 @@ def clean_license_identifier(value: Any) -> str | None:
     if REDACTED in redacted:
         return None
     return redacted if _SAFE_LICENSE_RE.fullmatch(redacted) else None
+
+
+@lru_cache(maxsize=1)
+def spdx_license_ids() -> frozenset[str]:
+    """SPDX license and exception ids from the vendored, digest-checked CycloneDX enum."""
+    from nexus_symbiote.generators.validation import _schema
+
+    return frozenset(_schema("cyclonedx/spdx.schema.json")["enum"])
+
+
+def spdx_license_expression(value: Any) -> str | None:
+    """Return the value only if it is an SPDX expression over listed ids or LicenseRef-s."""
+    cleaned = clean_license_identifier(value)
+    if cleaned is None:
+        return None
+    depth, expect_operand = 0, True
+    for tok in re.findall(r"[()]|[^\s()]+", cleaned):
+        if tok == "(" and expect_operand:
+            depth += 1
+        elif tok == ")" and not expect_operand and depth:
+            depth -= 1
+        elif tok in {"AND", "OR", "WITH"} and not expect_operand:
+            expect_operand = True
+        elif expect_operand and (
+            tok.removesuffix("+") in spdx_license_ids() or _LICENSE_REF_RE.fullmatch(tok)
+        ):
+            expect_operand = False
+        else:
+            return None
+    return None if expect_operand or depth else cleaned
 
 
 def _conflict_risk(field_name: str, component_name: str, locator: str) -> RiskAssessment:
@@ -399,12 +434,16 @@ def apply_agent_yaml_declarations(
                     _apply_version_declaration(ds_comp, ds_ver, locator, notices)
                 if ds_sup:
                     _apply_supplier_declaration(ds_comp, ds_sup, locator, notices)
-                if ds_lic:
-                    if ds_comp.license and ds_comp.license != ds_lic:
-                        ds_comp.risks.append(_conflict_risk("license", ds_name, locator))
-                        notices.append(f"{ds_comp.bom_ref}: license conflict with {locator}")
-                    elif ds_comp.assurance_level == AssuranceLevel.DECLARED and not ds_comp.license:
-                        ds_comp.license = ds_lic
+                if ds_lic and ds_comp.license and ds_comp.license != ds_lic:
+                    ds_comp.risks.append(_conflict_risk("license", ds_name, locator))
+                    notices.append(f"{ds_comp.bom_ref}: license conflict with {locator}")
+                    ds_lic = None
+                if ds_uri and ds_comp.source_uri and ds_comp.source_uri != ds_uri:
+                    ds_comp.risks.append(_conflict_risk("source_uri", ds_name, locator))
+                    notices.append(f"{ds_comp.bom_ref}: source_uri conflict with {locator}")
+                    ds_uri = None
+                if ds_lic and ds_comp.assurance_level == AssuranceLevel.DECLARED:
+                    ds_comp.license = ds_comp.license or ds_lic
             else:
                 digest_id = hashlib.sha256(ds_name.encode("utf-8")).hexdigest()[:16]
                 ds_comp = DataSourceComponent(
@@ -518,13 +557,20 @@ def apply_agent_yaml_declarations(
                     for ds_ref_name in ds_list[:50]:
                         clean_ds = _clean_text(ds_ref_name, max_len=200)
                         if clean_ds and clean_ds in dataset_refs_by_name:
-                            edge = DependencyEdge(
-                                source_ref=m_comp.bom_ref,
-                                target_ref=dataset_refs_by_name[clean_ds],
-                                relationship="trained-on",
-                            )
-                            if edge not in aibom.dependencies:
-                                aibom.dependencies.append(edge)
+                            target = dataset_refs_by_name[clean_ds]
+                            if not any(
+                                (e.source_ref, e.target_ref, e.relationship)
+                                == (m_comp.bom_ref, target, "trained-on")
+                                for e in aibom.dependencies
+                            ):
+                                aibom.dependencies.append(
+                                    DependencyEdge(
+                                        source_ref=m_comp.bom_ref,
+                                        target_ref=target,
+                                        relationship="trained-on",
+                                        assurance_level="declared",
+                                    )
+                                )
             m_comp.properties["declaration_source_sha256"] = doc_digest
             _record_claim(m_comp, "model", locator)
 

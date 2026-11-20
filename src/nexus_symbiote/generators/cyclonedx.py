@@ -318,6 +318,12 @@ class CycloneDXGenerator(Generator):
             composition.get("aggregate") for composition in view.get("compositions", [])
         ] == ["unknown"]:
             del view["compositions"]
+        # cyclonedx-python-lib also drops modelCard on read. Accept only the loss of
+        # every modelCard, so an edited or partly removed card still conflicts.
+        if not any("modelCard" in c for c in document.get("components", [])):
+            view["components"] = [
+                {k: v for k, v in c.items() if k != "modelCard"} for c in view["components"]
+            ]
         return view
 
     @classmethod
@@ -473,7 +479,11 @@ class CycloneDXGenerator(Generator):
         comp_by_ref: dict[str, AnyComponent] | None = None,
         outgoing_edges: Any = (),
     ) -> dict[str, Any]:
-        from nexus_symbiote.spdx_profiles import clean_license_identifier
+        from nexus_symbiote.spdx_profiles import (
+            clean_license_identifier,
+            spdx_license_expression,
+            spdx_license_ids,
+        )
 
         result = standard_component(comp)
         if comp.supplier:
@@ -489,18 +499,23 @@ class CycloneDXGenerator(Generator):
             result["evidence"] = {"occurrences": [occurrence]}
         if self._projection_version == 3:
             observed_lic = clean_license_identifier(getattr(comp, "license", None))
-            declared_lic = clean_license_identifier(comp.properties.get("declared_license"))
-            if observed_lic:
-                result["licenses"] = [{"license": {"name": observed_lic}}]
-            elif declared_lic:
-                result["licenses"] = [
-                    {"license": {"name": declared_lic, "acknowledgement": "declared"}}
-                ]
-            dl = comp.properties.get("declared_download_location") or getattr(
-                comp, "source_uri", None
-            )
+            lic = observed_lic or clean_license_identifier(comp.properties.get("declared_license"))
+            if lic:
+                ack = {} if observed_lic else {"acknowledgement": "declared"}
+                expr = spdx_license_expression(lic)
+                if expr is None:
+                    result["licenses"] = [{"license": {"name": lic} | ack}]
+                elif expr in spdx_license_ids():
+                    result["licenses"] = [{"license": {"id": expr} | ack}]
+                else:
+                    result["licenses"] = [{"expression": expr} | ack]
+            observed_dl = getattr(comp, "source_uri", None)
+            dl = observed_dl or comp.properties.get("declared_download_location")
             if isinstance(dl, str) and _is_uri(dl):
-                result["externalReferences"] = [{"type": "distribution", "url": dl}]
+                ref = {"type": "distribution", "url": dl}
+                result["externalReferences"] = [
+                    ref if observed_dl else ref | {"comment": "declared by producer"}
+                ]
             if isinstance(comp, ModelComponent) and comp_by_ref is not None:
                 ancestors: list[dict[str, Any]] = []
                 seen_ancestors: set[str] = set()

@@ -317,7 +317,7 @@ def test_cyclonedx_projection_v3_standard_fields_schema_and_roundtrip() -> None:
             {"location": "models/support.safetensors", "line": 42}
         ]
         assert tuned["licenses"] == [
-            {"license": {"name": "Apache-2.0", "acknowledgement": "declared"}}
+            {"license": {"id": "Apache-2.0", "acknowledgement": "declared"}}
         ]
         assert tuned["pedigree"]["ancestors"] == [
             {"type": "machine-learning-model", "name": "llama-3-8b", "version": "3.0.0"}

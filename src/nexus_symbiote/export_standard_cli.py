@@ -11,6 +11,7 @@ from nexus_symbiote.core.aibom import AIBOM, ContentSerialError, NativeFormatErr
 from nexus_symbiote.policy import PolicyError
 from nexus_symbiote.spdx_profiles import apply_agent_yaml_declarations
 from nexus_symbiote.supply_chain_cli import _refuse_source_overwrite
+from nexus_symbiote.utils.secrets import redact_text
 from nexus_symbiote.utils.terminal import echo_line, json_text, neutralize, write_cli_output
 
 
@@ -149,7 +150,7 @@ def export_standard_cmd(
     if author:
         seen = set(bom.metadata.authors)
         for item in author:
-            cleaned = neutralize(item.strip())
+            cleaned = neutralize(redact_text(item.strip()))
             if cleaned and cleaned not in seen:
                 bom.metadata.authors.append(cleaned)
                 seen.add(cleaned)
