@@ -171,10 +171,16 @@ Collection shares the MCP scanner's pinned filesystem root, path exclusions and
 I/O budgets. It traverses no symbolic links. The text read to find candidate files
 counts toward the MCP collector's [`source-scan-bytes`
 budget](collection-limits.md#limits), 64 MiB by default. Each parsed file is also
-bounded by `syntax-bytes` (256 KiB) and `ts-nodes` (20,000 syntax nodes), by 1,000
-registration calls, and by a 250 ms native parse timeout and a 2 s analysis
-deadline, which grow in proportion when an operator raises `syntax-bytes` or
-`ts-nodes`. Declaration files (`.d.ts`, `.d.mts`, `.d.cts`), test files
+bounded by `syntax-bytes` (256 KiB), `ts-nodes` (20,000 syntax nodes) and 1,000
+registration calls. No deadline applies to the analysis. One parse may take 250 ms
+of processor time, which grows in proportion when an operator raises `syntax-bytes`
+and which a busy machine does not use up; this is the bound of earlier releases, now counted
+as processor time rather than on the clock. It is for a file the grammar cannot
+parse, whose recovery is unbounded by size; a file that parses takes well under a
+second, and ordinary source reaches the node limit first. See
+[the TypeScript parse time limit](collection-limits.md#the-typescript-parse-time-limit).
+
+Declaration files (`.d.ts`, `.d.mts`, `.d.cts`), test files
 (`.test.` or `.spec.` before any of these suffixes), generated build directories and
 directories named `docs`, `benchmarks` or `examples` are outside this collector's
 supported scope. Limits, invalid TypeScript, absent or incompatible parser

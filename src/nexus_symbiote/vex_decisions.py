@@ -1,0 +1,436 @@
+"""Operator VEX decisions, execution-bound trace outcomes, and advisory report loading.
+
+Enforces CycloneDX 1.7 VEX security invariants:
+- Operator VEX decisions, trusted keys, and trace evidence are regular files (no symlinks
+  or hard-linked policy files) stored outside the scanned project and enclosing git trees.
+- Non-``in_triage`` decisions require ``owner`` and timezone-aware ``expires_at``, evaluated
+  against wall-clock UTC time (never inventory timestamps or ``SOURCE_DATE_EPOCH``). Duplicate
+  ``(id, component_ref)`` entries are refused.
+- Trace evidence requires a verified Ed25519 DSSE attestation by default (unless
+  ``allow_unsigned=True``), verifies ``inventory_sha256``, reads real ``trace-diff`` output
+  (``reconciliation.matched``/``unobserved`` via ``inventory_ref``), and separates
+  ``unobserved`` telemetry from ``declared_never_loaded``.
+"""
+
+from __future__ import annotations
+
+import hmac
+import os
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Literal
+
+import yaml
+from cryptography.exceptions import UnsupportedAlgorithm
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from nexus_symbiote.core.hashing import hash_bytes, open_regular_file, parse_json_strict
+
+MAX_DECISIONS_BYTES = 4 * 1024 * 1024
+MAX_DECISIONS = 5_000
+MAX_REPORT_BYTES = 16 * 1024 * 1024
+MAX_KEY_BYTES = 64 * 1024
+
+VEXState = Literal["not_affected", "exploitable", "resolved", "false_positive", "in_triage"]
+VEXJustification = Literal[
+    "code_not_present",
+    "code_not_reachable",
+    "requires_configuration",
+    "requires_dependency",
+    "requires_environment",
+    "protected_by_compiler",
+    "protected_at_runtime",
+    "protected_at_perimeter",
+    "protected_by_mitigating_control",
+]
+
+
+class VEXDecisionError(ValueError):
+    """Raised when an operator VEX decision, trace evidence, or advisory file is unsafe or invalid."""
+
+
+class VEXDecisionEntry(BaseModel):
+    """One operator-authored triage decision for a finding or advisory."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=256)
+    component_ref: str | None = Field(default=None, max_length=1024)
+    state: VEXState
+    justification: VEXJustification | None = None
+    detail: str = Field(min_length=1, max_length=2048)
+    owner: str = Field(min_length=1, max_length=256)
+    expires_at: datetime | None = None
+
+    @field_validator("id", "detail", "owner")
+    @classmethod
+    def _clean_text(cls, value: str) -> str:
+        if not value.strip() or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in value):
+            raise ValueError("must be a non-empty string without control characters")
+        return value.strip()
+
+    @field_validator("expires_at")
+    @classmethod
+    def _require_timezone(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("expires_at must include an explicit UTC or timezone offset")
+        return value.astimezone(UTC) if value is not None else None
+
+    @model_validator(mode="after")
+    def _validate_policy_rules(self) -> VEXDecisionEntry:
+        if self.state != "in_triage" and self.expires_at is None:
+            raise ValueError("non-in_triage VEX decisions must specify expires_at")
+        if self.justification is not None and self.state != "not_affected":
+            raise ValueError("justification is only valid when state is 'not_affected'")
+        return self
+
+
+class VEXDecisionSet(BaseModel):
+    """Versioned container for operator VEX decisions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: Literal[1] = 1
+    decisions: list[VEXDecisionEntry] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_unique_targets(self) -> VEXDecisionSet:
+        seen: set[tuple[str, str | None]] = set()
+        for entry in self.decisions:
+            key = (entry.id, entry.component_ref)
+            if key in seen:
+                raise ValueError(
+                    f"duplicate VEX decision for ({entry.id!r}, {entry.component_ref!r})"
+                )
+            seen.add(key)
+        return self
+
+
+@dataclass(frozen=True)
+class LoadedVEXDecisions:
+    """Validated operator VEX decisions with file digest provenance."""
+
+    entries: tuple[VEXDecisionEntry, ...]
+    sha256: str
+
+    def lookup(self, vuln_id: str, component_ref: str) -> VEXDecisionEntry | None:
+        """Return component-scoped decision first, then global."""
+        global_match: VEXDecisionEntry | None = None
+        for entry in self.entries:
+            if entry.id != vuln_id:
+                continue
+            if entry.component_ref == component_ref:
+                return entry
+            if entry.component_ref is None and global_match is None:
+                global_match = entry
+        return global_match
+
+
+@dataclass(frozen=True)
+class ExecutionEvidence:
+    """Execution-bound component classification derived from runtime trace evidence."""
+
+    invoked_refs: frozenset[str]
+    declared_never_loaded_refs: frozenset[str]
+    unobserved_refs: frozenset[str]
+    shadowed_refs: frozenset[str]
+    sha256: str
+    attested: bool = False
+
+    def outcome_for(self, component_ref: str) -> str | None:
+        """Return 'shadowed', 'invoked', 'declared-never-loaded', 'unobserved', or None."""
+        if component_ref in self.shadowed_refs:
+            return "shadowed"
+        if component_ref in self.invoked_refs:
+            return "invoked"
+        if component_ref in self.declared_never_loaded_refs:
+            return "declared-never-loaded"
+        if component_ref in self.unobserved_refs:
+            return "unobserved"
+        return None
+
+
+def resolve_reference_time(explicit_now: datetime | None = None) -> datetime:
+    """Resolve expiry reference time using explicit test clock or current UTC wall clock."""
+    if explicit_now is not None:
+        if explicit_now.tzinfo is None:
+            raise VEXDecisionError("Reference time must be timezone-aware")
+        return explicit_now.astimezone(UTC)
+    return datetime.now(UTC)
+
+
+def _repository_roots(path: Path) -> list[Path]:
+    return [candidate for candidate in (path, *path.parents) if os.path.lexists(candidate / ".git")]
+
+
+def _safe_stat(path: Path) -> os.stat_result | None:
+    try:
+        return path.stat()
+    except OSError:
+        return None
+
+
+def _ensure_outside_project(
+    file_path: Path,
+    project_root: Path | None,
+    *,
+    inventory_path: Path | None = None,
+    forbid_inventory_dir: bool = False,
+    label: str = "Operator VEX decisions file",
+) -> None:
+    resolved_file = file_path.resolve()
+    untrusted: list[Path] = []
+    if project_root is not None:
+        resolved_root = project_root.resolve()
+        untrusted.append(resolved_root)
+        untrusted.extend(_repository_roots(resolved_root))
+    if inventory_path is not None:
+        inv_dir = inventory_path.resolve().parent
+        untrusted.extend(_repository_roots(inv_dir))
+        if forbid_inventory_dir:
+            untrusted.append(inv_dir)
+    untrusted.extend(_repository_roots(Path.cwd().resolve()))
+
+    msg = f"{label} must live outside the scanned project and enclosing git repositories"
+    if any(resolved_file.is_relative_to(root) for root in untrusted):
+        raise VEXDecisionError(msg)
+    if os.name == "posix" and untrusted:
+        untrusted_ids = {
+            (st.st_dev, st.st_ino) for root in untrusted if (st := _safe_stat(root)) is not None
+        }
+        if any(
+            (st.st_dev, st.st_ino) in untrusted_ids
+            for parent in resolved_file.parents
+            if (st := _safe_stat(parent)) is not None
+        ):
+            raise VEXDecisionError(msg)
+
+
+def _read_regular_bytes(
+    path: Path, max_bytes: int, label: str, *, single_link: bool = False
+) -> bytes:
+    try:
+        with open_regular_file(path) as handle:
+            if single_link and os.name == "posix" and os.fstat(handle.fileno()).st_nlink != 1:
+                raise VEXDecisionError(f"{label} must not have additional hard links")
+            raw = handle.read(max_bytes + 1)
+    except OSError as exc:
+        raise VEXDecisionError(f"Cannot safely read {label.lower()}: {exc}") from exc
+    if len(raw) > max_bytes:
+        raise VEXDecisionError(f"{label} exceeds {max_bytes} bytes")
+    return raw
+
+
+def load_vex_decisions(
+    path: Path,
+    *,
+    project_root: Path | None = None,
+    inventory_path: Path | None = None,
+) -> LoadedVEXDecisions:
+    """Load and validate an operator-owned VEX decisions YAML or JSON file."""
+    _ensure_outside_project(
+        path,
+        project_root,
+        inventory_path=inventory_path,
+        forbid_inventory_dir=True,
+        label="Operator VEX decisions file",
+    )
+    raw = _read_regular_bytes(path, MAX_DECISIONS_BYTES, "VEX decisions file", single_link=True)
+    text = raw.decode("utf-8")
+    try:
+        payload: Any = (
+            parse_json_strict(text, max_bytes=MAX_DECISIONS_BYTES)
+            if path.suffix.lower() == ".json" or text.lstrip().startswith("{")
+            else yaml.safe_load(text)
+        )
+    except (ValueError, yaml.YAMLError) as exc:
+        raise VEXDecisionError(f"Invalid VEX decisions syntax: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise VEXDecisionError(
+            "VEX decisions file must be a mapping with 'version' and 'decisions'"
+        )
+    if isinstance(payload.get("decisions"), list) and len(payload["decisions"]) > MAX_DECISIONS:
+        raise VEXDecisionError(f"VEX decisions file exceeds {MAX_DECISIONS} entries")
+    try:
+        model = VEXDecisionSet.model_validate(payload)
+    except Exception as exc:
+        raise VEXDecisionError(f"Invalid VEX decisions schema: {exc}") from exc
+    return LoadedVEXDecisions(entries=tuple(model.decisions), sha256=hash_bytes(raw))
+
+
+def _load_trusted_keys(key_paths: Sequence[Path]) -> dict[str, Ed25519PublicKey]:
+    from nexus_symbiote.runtime import key_id
+
+    ring: dict[str, Ed25519PublicKey] = {}
+    for key_path in key_paths:
+        raw = _read_regular_bytes(key_path, MAX_KEY_BYTES, "Trusted key file", single_link=True)
+        try:
+            public = serialization.load_pem_public_key(raw)
+        except (ValueError, TypeError, UnsupportedAlgorithm) as exc:
+            raise VEXDecisionError("Trusted key could not be loaded as Ed25519 PEM") from exc
+        if not isinstance(public, Ed25519PublicKey):
+            raise VEXDecisionError("Only Ed25519 public keys are supported")
+        ring[key_id(public)] = public
+    return ring
+
+
+def _verify_trace_attestation(
+    trace_bytes: bytes,
+    attestation_path: Path,
+    trusted_key_paths: Sequence[Path],
+    *,
+    project_root: Path | None,
+    inventory_path: Path | None,
+) -> None:
+    from nexus_symbiote.attestation import (
+        MAX_ENVELOPE_BYTES,
+        AttestationError,
+        parse_envelope,
+        verify_attestation,
+    )
+
+    if not trusted_key_paths:
+        raise VEXDecisionError("--trace-attestation requires at least one --trusted-key")
+    for kpath in trusted_key_paths:
+        _ensure_outside_project(
+            kpath,
+            project_root,
+            inventory_path=inventory_path,
+            forbid_inventory_dir=True,
+            label="Trusted key file",
+        )
+    env_bytes = _read_regular_bytes(attestation_path, MAX_ENVELOPE_BYTES, "Trace attestation")
+    ring = _load_trusted_keys(trusted_key_paths)
+    try:
+        verify_attestation(
+            parse_envelope(env_bytes),
+            trace_bytes,
+            trusted_keys=ring,
+            purpose="generated",
+            match="bytes",
+        )
+    except AttestationError as exc:
+        raise VEXDecisionError(f"Trace evidence attestation verification failed: {exc}") from exc
+
+
+def _extract_refs(items: object) -> set[str]:
+    refs: set[str] = set()
+    if not isinstance(items, list):
+        return refs
+    for item in items:
+        if isinstance(item, str) and item.strip():
+            refs.add(item.strip())
+        elif isinstance(item, dict):
+            for key in ("inventory_ref", "bom_ref", "component_ref", "ref"):
+                val = item.get(key)
+                if isinstance(val, str) and val.strip():
+                    refs.add(val.strip())
+                    break
+    return refs
+
+
+def _trace_inventory_sha256(payload: dict[str, Any]) -> str | None:
+    top = payload.get("inventory_sha256")
+    if isinstance(top, str) and top.strip():
+        return top.strip()
+    inputs = payload.get("inputs")
+    inv = inputs.get("inventory") if isinstance(inputs, dict) else None
+    sha = inv.get("sha256") if isinstance(inv, dict) else None
+    return sha.strip() if isinstance(sha, str) and sha.strip() else None
+
+
+def load_execution_evidence(
+    path: Path,
+    *,
+    project_root: Path | None = None,
+    inventory_path: Path | None = None,
+    expected_inventory_sha256: str | None = None,
+    attestation_path: Path | None = None,
+    trusted_key_paths: Sequence[Path] = (),
+    allow_unsigned: bool = False,
+) -> ExecutionEvidence:
+    """Load execution-bound trace evidence from a ``trace-diff`` or execution-evidence JSON report."""
+    if attestation_path is None and not allow_unsigned:
+        raise VEXDecisionError(
+            "Trace evidence requires --trace-attestation with --trusted-key "
+            "(or explicit --allow-unsigned-trace-evidence)"
+        )
+    _ensure_outside_project(
+        path,
+        project_root,
+        inventory_path=inventory_path,
+        forbid_inventory_dir=attestation_path is None,
+        label="Trace evidence file",
+    )
+    raw = _read_regular_bytes(path, MAX_REPORT_BYTES, "Trace evidence file")
+    attested = False
+    if attestation_path is not None:
+        _verify_trace_attestation(
+            raw,
+            attestation_path,
+            trusted_key_paths,
+            project_root=project_root,
+            inventory_path=inventory_path,
+        )
+        attested = True
+
+    payload = parse_json_strict(raw.decode("utf-8"), max_bytes=MAX_REPORT_BYTES)
+    if not isinstance(payload, dict):
+        raise VEXDecisionError("Trace evidence file must be a JSON object")
+
+    recorded_sha = _trace_inventory_sha256(payload)
+    if expected_inventory_sha256 is not None:
+        if recorded_sha is None:
+            raise VEXDecisionError("Trace evidence is missing inventory_sha256 binding")
+        if not hmac.compare_digest(recorded_sha, expected_inventory_sha256):
+            raise VEXDecisionError(
+                "Trace evidence inventory_sha256 does not match the supplied AIBOM"
+            )
+
+    rec_map = payload["reconciliation"] if isinstance(payload.get("reconciliation"), dict) else {}
+    invoked = (
+        _extract_refs(payload.get("invoked"))
+        | _extract_refs(payload.get("matched"))
+        | _extract_refs(rec_map.get("matched"))
+    )
+    declared_never_loaded = _extract_refs(payload.get("declared_never_loaded"))
+    unobserved = _extract_refs(payload.get("unobserved")) | _extract_refs(rec_map.get("unobserved"))
+    shadowed = (
+        _extract_refs(payload.get("shadowed"))
+        | _extract_refs(payload.get("shadowed_refs"))
+        | _extract_refs(rec_map.get("shadowed"))
+    )
+    return ExecutionEvidence(
+        invoked_refs=frozenset(invoked),
+        declared_never_loaded_refs=frozenset(declared_never_loaded - invoked - shadowed),
+        unobserved_refs=frozenset(unobserved - invoked - shadowed - declared_never_loaded),
+        shadowed_refs=frozenset(shadowed),
+        sha256=hash_bytes(raw),
+        attested=attested,
+    )
+
+
+def load_advisory_report(
+    path: Path,
+    *,
+    expected_inventory_sha256: str | None = None,
+) -> tuple[list[dict[str, Any]], str]:
+    """Load an advisory report JSON produced by ``advisories`` (live or offline)."""
+    raw = _read_regular_bytes(path, MAX_REPORT_BYTES, "Advisory report")
+    payload = parse_json_strict(raw.decode("utf-8"), max_bytes=MAX_REPORT_BYTES)
+    if not isinstance(payload, dict) or not isinstance(payload.get("advisories"), list):
+        raise VEXDecisionError("Advisory report must be a JSON object with an 'advisories' array")
+    recorded_sha = payload.get("inventory_sha256")
+    if expected_inventory_sha256 is not None:
+        if not isinstance(recorded_sha, str) or not recorded_sha.strip():
+            raise VEXDecisionError("Advisory report is missing inventory_sha256 binding")
+        if not hmac.compare_digest(recorded_sha.strip(), expected_inventory_sha256):
+            raise VEXDecisionError(
+                "Advisory report inventory_sha256 does not match the supplied AIBOM"
+            )
+    advisories = [item for item in payload["advisories"] if isinstance(item, dict)]
+    return advisories, hash_bytes(raw)

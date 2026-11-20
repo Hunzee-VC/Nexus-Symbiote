@@ -93,6 +93,7 @@ _DISTINCT_SHAPES = (
     r"|shppa_[0-9a-fA-F]{32}|dapi[0-9a-f]{32}|xapp-[\w-]{20,}+|PMAK-[0-9a-f]{24}-[0-9a-f]{34}"
     # A Doppler service token may name its config first: dp.st.<config>.<token>.
     r"|dp\.(?:pt|ct|sa|scim|audit|st(?:\.[a-z0-9_-]{2,35}+)?)\.[A-Za-z0-9]{40,}+"
+    r"|sk-ant-[\w-]{20,}+"
 )
 # A JWT can fail only at its first dot, so it starts only at a word boundary: started
 # after every "_" its first segment would be rescanned once per position.

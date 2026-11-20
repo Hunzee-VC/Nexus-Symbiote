@@ -70,7 +70,7 @@ from nexus_symbiote.utils.terminal import neutralize
 
 PREDICATE_TYPE = "https://github.com/Hunzee-VC/Nexus-Symbiote/attestation/inventory/v1"
 NATIVE_FORMAT = "nexus-symbiote-aibom"
-Purpose = Literal["generated", "reviewed"]
+Purpose = Literal["generated", "reviewed", "policy"]
 SubjectFormat = Literal["nexus-symbiote-aibom", "other"]
 Match = Literal["bytes", "content"]
 MAX_SUBJECT_NAME_CHARACTERS = 255

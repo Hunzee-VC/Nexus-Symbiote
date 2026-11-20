@@ -149,6 +149,8 @@ def ci_workflow():
         ("action-annotations", "symbiote-injected-annotation"),
         ("action-annotations", "set-output"),
         ("verified", "sys.exit(bool(failed))"),
+        ("offline-invariant", "requirements-ci.lock"),
+        ("offline-invariant", "unshare --net"),
     ],
 )
 def test_a_gate_job_hollowed_out_under_its_name_is_rejected(tmp_path, job, command):
@@ -366,6 +368,54 @@ def test_dropping_a_verification_job_from_verified_ci_is_rejected(tmp_path):
     path = tmp_path / "ci.yml"
     path.write_text(yaml.safe_dump(workflow))
     assert any("Verified CI" in error for error in checker.check(path))
+
+
+def test_the_offline_invariant_job_is_a_prerequisite_of_verified_ci(tmp_path):
+    workflow = ci_workflow()
+    verified = workflow["jobs"]["verified"]
+    assert "offline-invariant" in verified["needs"]
+    expected = re.search(r"^expected = (\{.*\})$", verified["steps"][0]["run"], re.M)
+    assert expected is not None
+    assert set(yaml.safe_load(expected[1])) == set(verified["needs"])
+    assert not (ROOT / ".github/workflows/offline-invariant.yml").exists()
+
+    verified["needs"].remove("offline-invariant")
+    path = tmp_path / "ci.yml"
+    path.write_text(yaml.safe_dump(workflow))
+    assert any("Verified CI must always aggregate" in error for error in checker.check(path))
+
+    del workflow["jobs"]["offline-invariant"]
+    path.write_text(yaml.safe_dump(workflow))
+    errors = checker.check(path)
+    assert any("required job offline-invariant is missing" in error for error in errors)
+    assert any("Verified CI must always aggregate" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ('"$OFFLINE_PYTHON" -m pytest', 'true || "$OFFLINE_PYTHON" -m pytest'),
+        ("unshare --net bash", "unshare --net --help bash"),
+        ("unshare --net bash", "bash"),
+        ("--strict-skips ", ""),
+        ("errno.ENETUNREACH", "errno.ETIMEDOUT"),
+        ("--preserve-env=CI,", "--preserve-env="),
+        ('| tee "$PYTEST_LOG"', '| tee "$PYTEST_LOG" || true'),
+    ],
+)
+def test_the_offline_invariant_step_is_held_to_its_reviewed_text(tmp_path, old, new):
+    errors = workflow_errors(
+        tmp_path, "ci.yml", edit_run("offline-invariant", "-m pytest", old, new)
+    )
+    assert any("offline-invariant" in e for e in errors), errors
+
+
+def test_the_offline_invariant_environment_is_held_to_its_reviewed_value(tmp_path):
+    def change(jobs):
+        step_running(jobs["offline-invariant"], "unshare --net")["env"]["EXTRA"] = "1"
+
+    errors = workflow_errors(tmp_path, "ci.yml", change)
+    assert any("runs unshare --net other than in its reviewed step" in e for e in errors), errors
 
 
 def test_removing_the_action_jobs_with_their_verified_ci_entries_is_rejected(tmp_path):
@@ -775,8 +825,8 @@ def test_the_pull_request_size_step_is_a_protected_gate(tmp_path):
         edit_run(
             "quality",
             "scripts/check_pull_request_size.py",
-            '"origin/$PR_BASE"',
-            '"origin/$PR_BASE" || true',
+            '"$MERGE_SHA^1"',
+            '"$MERGE_SHA^1" || true',
         ),
     )
     assert any(
@@ -809,9 +859,11 @@ def test_naming_the_job_environment_files_ahead_of_a_gate_is_rejected(tmp_path, 
 @pytest.mark.parametrize(
     "old,new",
     [
-        ('"origin/$PR_BASE"', '"origin/$PR_BASE" --limit 99999999'),
-        ('--base "origin/$PR_BASE"', "--base HEAD"),
-        ('--base "origin/$PR_BASE"', "--numstat-file /dev/null"),
+        ('"$MERGE_SHA^1"', '"$MERGE_SHA^1" --limit 99999999'),
+        ('--base "$MERGE_SHA^1"', "--base HEAD"),
+        ('--base "$MERGE_SHA^1"', "--numstat-file /dev/null"),
+        # The base branch's current tip, which moves while the job waits for a runner.
+        ('--base "$MERGE_SHA^1"', '--base "origin/main"'),
     ],
 )
 def test_the_pull_request_size_arguments_are_pinned(tmp_path, old, new):
@@ -821,10 +873,10 @@ def test_the_pull_request_size_arguments_are_pinned(tmp_path, old, new):
     assert any("scripts/check_pull_request_size.py other than" in e for e in errors), errors
 
 
-def test_the_pull_request_size_base_comes_from_the_pull_request(tmp_path):
+def test_the_pull_request_size_base_comes_from_the_merge_commit(tmp_path):
     def change(jobs):
         step_running(jobs["quality"], "scripts/check_pull_request_size.py")["env"] = {
-            "PR_BASE": "${{ github.head_ref }}"
+            "MERGE_SHA": "${{ github.event.pull_request.head.sha }}"
         }
 
     errors = workflow_errors(tmp_path, "ci.yml", change)
