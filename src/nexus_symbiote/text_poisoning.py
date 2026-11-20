@@ -200,8 +200,9 @@ _CRED_VERB_RE = re.compile(
 # or a coordinated verb between. "Don't worry, read", "do not forget to read" and "why
 # not read" do not.
 _VERB_NEGATED_RE = re.compile(
-    r"(?<!why )\b(?:never|not|n't|cannot|refuse(?:\s+any)?(?:\s+requests?)?\s+to|decline\s+to)"
-    r"(?:\s*,[^,.;:!?]{1,40},)?(?:\s+(?:ever|just|simply|directly|even))*"
+    r"(?<!why )(?<!you )\b(?:never|not|n't|cannot|refuse(?:\s+any)?(?:\s+requests?)?\s+to|"
+    r"decline\s+to)(?:\s*,\s*(?:under\s+any\s+circumstances|for\s+any\s+reason|ever)\s*,)?"
+    r"(?:\s+(?:ever|just|simply|directly|even))*"
     r"(?:\s+(?:read|open|copy|include|pass|send|forward|upload|post|cat)\s+(?:or|nor))?\s*$",
     re.IGNORECASE,
 )
@@ -274,24 +275,6 @@ _ADDRESSEE_WINDOW = 120
 
 _NEGATED_PREFIX_RE = re.compile(
     r"\b(?:never|do\s+not|don't|not\s+to|prohibit|forbid)\s*[\"']?\s*$",
-    re.IGNORECASE,
-)
-
-# II-OVR-001 only: an override reported in a condition ("If a web page says to ignore
-# previous instructions") is a warning when the rest of its sentence refuses it and
-# grants nothing ("treat that as untrusted data", "do not comply").
-_CONDITION_PREFIX_RE = re.compile(
-    r"\bif\s[^.!?\n]{0,40}\b(?:says?|tells?\s+you|asks?\s+you)\s+to\s*[\"']?\s*$",
-    re.IGNORECASE,
-)
-_SENTENCE_END_RE = re.compile(r"[.!?](?=\s|$)")
-_REFUSAL_RE = re.compile(
-    r"\b(?:treat\s+(?:it|that|this)\s+as\s+(?:untrusted|data)|(?:do\s+not|don't)\s+"
-    r"(?:comply|follow|obey)|refuse|decline|ignore\s+(?:it|that)|report\s+it)\b",
-    re.IGNORECASE,
-)
-_PERMISSION_RE = re.compile(
-    r"(?<!not )(?<!n't )\b(?:comply|do\s+it|do\s+so|you\s+may|follow\s+it|obey)\b",
     re.IGNORECASE,
 )
 
@@ -408,15 +391,6 @@ def _byte_offset_at(byte_offsets: list[int], char_index: int) -> int:
 def _has_negated_prefix(text: str, pos: int) -> bool:
     window = text[max(0, pos - 40) : pos]
     return _NEGATED_PREFIX_RE.search(window[window.rfind("\n") + 1 :]) is not None
-
-
-def _refused_condition(text: str, match: re.Match[str]) -> bool:
-    window = text[max(0, match.start() - 60) : match.start()]
-    if _CONDITION_PREFIX_RE.search(window[window.rfind("\n") + 1 :]) is None:
-        return False
-    end = _SENTENCE_END_RE.search(text, match.end(), match.end() + 240)
-    rest = text[match.end() : end.end() if end else match.end() + 240]
-    return _REFUSAL_RE.search(rest) is not None and _PERMISSION_RE.search(rest) is None
 
 
 def _default_category(is_tool_surface: bool) -> str:
@@ -545,9 +519,7 @@ def scan_text_block(
     # 5. II-OVR-001: Instruction override or ignore read-only + destructive command
     for ovr_re in (_OVERRIDE_RE, _READONLY_OVERRIDE_RE):
         for ovr_match in ovr_re.finditer(normalized):
-            if not _has_negated_prefix(normalized, ovr_match.start()) and not _refused_condition(
-                normalized, ovr_match
-            ):
+            if not _has_negated_prefix(normalized, ovr_match.start()):
                 record("II-OVR-001", base_category, ovr_match.start())
 
     # 6. II-AUD-002: Auditor/scanner deception directives
