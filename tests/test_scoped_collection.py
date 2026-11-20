@@ -167,7 +167,10 @@ def test_repository_baseline_refuses_actual_collection_gaps(tmp_path, gap):
     elif gap == "unmapped":
         assert claim.source_unmapped_count == 1
         assert claim.source_unmapped_indexes == [0]
-        assert "ShadowScan report contains unmapped entries" in claim.surfaces_excluded
+        assert (
+            "ShadowScan report contains unmapped entries: runtime-process"
+            in claim.surfaces_excluded
+        )
     elif gap == "cyclonedx":
         assert "ShadowScan CycloneDX source is a lossy projection" in claim.surfaces_excluded
     else:

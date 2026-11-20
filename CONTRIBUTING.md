@@ -18,7 +18,7 @@ python3 -m venv .venv
 python -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock
 python -m pip install --no-deps --no-build-isolation -e .
 python -m pip check
-python -m pytest --strict-skips
+python -m pytest -n auto --dist worksteal --strict-skips
 ruff check src tests scripts
 ruff format --check src tests scripts
 mypy src/nexus_symbiote scripts
@@ -26,7 +26,7 @@ python scripts/check_workflows.py
 python scripts/check_repository_hygiene.py
 python scripts/check_locks.py
 python scripts/check_security_regressions.py --out security-regressions.json
-python -m pytest --strict-skips --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=json:coverage.json
+python -m pytest -n auto --dist worksteal --strict-skips --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=json:coverage.json
 python scripts/check_coverage.py coverage.json
 python -m build --no-isolation
 python -m twine check --strict dist/*
@@ -39,6 +39,8 @@ python -m twine check --strict dist/*
 `tests/conftest.py` gives every test a clean environment: the variables the tool, the Action runner and the gate scripts read (`NEXUS_SYMBIOTE_*`, `SYMBIOTE_*`, `SHADOWSCAN_*`, `GITHUB_*`, `RUNNER_*`, `GH_TOKEN`, the Actions token variables, `SOURCE_DATE_EPOCH`, the CI markers that the unsigned-discovery gate reads, such as `CI`, and color, width and terminal settings) are removed, and `HOME` and the XDG directories point at a private temporary directory. A test that leaves an operating mode enforced fails. Use the `runner` fixture for a `CliRunner` and `tests/support.py`'s `load_script` (or the `load_script` fixture) to import a script from `scripts/`; do not import one test module from another.
 
 Each test has a time limit and fails with its traceback when it hangs, instead of using up the CI job's budget: `test_timeout` in `pyproject.toml` (300 seconds, for loaded development machines), tightened to 120 seconds in CI (240 under coverage). Mark a known slow test with `@pytest.mark.timeout(seconds)`, and give every `subprocess.run` in a test its own `timeout` as well. To show that parsing a hostile input stays linear, compare two input sizes with `tests.support.scaling_ratio` instead of asserting a duration: a busy runner or coverage tracing slows both sizes alike.
+
+CI's test, dependency-floor and coverage jobs and the `make` test targets run the suite on one pytest-xdist worker per core (`-n auto --dist worksteal`): each worker starts with a contiguous share of the tests in collection order, and an idle worker takes tests from the longest queue. The same tests run, and the clean environment, the time limit, the skip accounting and `no_cover` apply in every worker (`tests/test_suite_infrastructure.py` runs them in workers). A test therefore shares the machine with others and does not always run after its file neighbours: it must not depend on what another test left behind, on a fixed port or on a fixed path, and a wall-clock bound must hold on a busy machine, which is one more reason to measure CPU time or use `scaling_ratio`. A test that fails only in parallel has an isolation defect: fix the test instead of selecting it out. With `-vv` a parallel run prints each test's ID when it starts and `[gwN] ... PASSED <id>` when it ends, so the tests a killed run was inside are the IDs with no result line, and a skip's reason appears only in the skip accounting. To run in one process, for a debugger or `--durations=0`, leave the two options out (`make test PYTEST_PARALLEL=`).
 
 The suite has a time budget as well, counted per change: the tests one pull request adds take at most 60 seconds in total without coverage. Measure them with `python -m pytest --durations=0` and state the figure in the pull request. A suite that documents its own budget is held to that budget instead; a hostile-corpus suite, for example, states how long its corpus may take, and the pull request gives that budget and the measured time. Coverage tracing makes a test about twice as slow (1.6 to 2.7 times in CI), so mark a black-box test that runs the CLI in a subprocess, a test that builds a large hostile input such as a decompression or nesting bomb, and a `scaling_ratio` test with `@pytest.mark.no_cover` when it takes more than 2 seconds: it still runs in every job, only without tracing. Never leave tests out of a CI job with `-m` or `-k`; only the dependency-floor job and Dependency health's newest-releases job leave out the `locked_only` tests, because the versions they install are not the locked ones those tests compare against.
 
@@ -96,7 +98,17 @@ Keep a pull request under 1,500 changed lines outside `tests/` and `benchmarks/`
 
 During the interim single-maintainer period (see [repository controls](docs/repository-controls.md)), keep every change on a pull request, up to date with `main` before it merges, and leave behavior- or security-changing pull requests open for a soak window of at least 24 hours before merging; re-read the full rendered diff after `Verified CI` completes and treat it as the reviewed artifact. Small documentation-only fixes may merge once CI is green. High-volume days of self-merged reviews are where defects slip through; the soak window is the control that compensates for the absent second reviewer. Fill in the pull request's review record: who reviewed the diff, when, and how. Publication repeats the soak mechanically: the release workflow refuses to publish to PyPI until the release commit has been on `main` for 24 hours (see [releasing](docs/releasing.md)).
 
+Name the roadmap item the change implements and any recorded decision it relies on, as the pull-request template asks, and check that no open pull request already implements the same item. Label the pull request as the [label guide](docs/labels.md) describes: at least one type label, at least one area label and, while it is open, exactly one review-state label. When work moves from one pull request to another, update both descriptions so that each lists only what its diff contains.
+
 A pull request that rewrites a whole file from an old branch can silently revert changes merged since. Resolve conflicts against current `main`, never by taking your side wholesale, and check that the diff removes nothing you did not mean to remove; `scripts/check_workflows.py` also refuses an action pin older than its recorded floor and a gate job that lost its command.
+
+### How a pull request merges
+
+- **One at a time.** Bring `main` into the branch with a merge commit; never rebase or force-push a branch someone else may hold. Wait for `Verified CI` on that head, then merge. Every other open branch is then behind `main` again.
+- **The merge commit.** Since #236 (2026-11-16), `main` has taken each pull request as a merge commit named after it, `<title> (#N)`. Before that, most pull requests were squash-merged (the integrations #202, #203, #226 and #227 were merge commits), and the [2026-11-03 review](docs/audits/closed-pr-review-2026-11-03.md#findings) records how a squash merge silently reverted #99. `git log --first-parent main` lists one commit per pull request merged directly; the constituents of an integration pull request appear only under its merge commit.
+- **Labels gate the merge.** From 2026-11-19, a pull request merges only with `review: verified` at its current head and without `do-not-merge`. The [label guide](docs/labels.md) gives what each label requires.
+- **Integration pull requests.** An integration pull request carries several reviewed pull requests at their reviewed heads, and the 1,500-line cap applies to it as a whole. Target each constituent at `main`, so that GitHub records it as merged when the integration lands. Otherwise, close each one by hand with a comment naming the integration's merge commit, and label it `superseded`.
+- **Recording.** The [pull-request reviews](docs/README.md#project-records) under `docs/audits/` record how each pull request reached `main`.
 
 ## AI-assisted contributions
 

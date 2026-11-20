@@ -100,6 +100,7 @@ _DISTINCT_SHAPES = (
     # stamp that is not a lower-case word, and an HMAC: not plugin.module.Class names.
     r"|(?<![A-Za-z0-9])[MNO](?=[A-Za-z0-9]{0,26}[0-9])[A-Za-z0-9]{23,27}"
     r"\.(?![A-Za-z][a-z]{5}\.)[\w-]{6}\.[\w-]{27,38}(?![\w-])"
+    r"|sk-ant-[\w-]{20,}+"
 )
 # A JWT can fail only at its first dot, so it starts only at a word boundary: started
 # after every "_" its first segment would be rescanned once per position.

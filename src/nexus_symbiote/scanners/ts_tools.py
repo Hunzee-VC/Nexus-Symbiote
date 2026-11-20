@@ -20,8 +20,10 @@ it cannot parse, or that it reads as type syntax where JavaScript reads a compar
 is a gap rather than a failure.
 
 The tree-sitter runtime and grammar are native code and parse the file in this
-process, bounded by the source size, a native parse timeout, a node limit and an
-analysis deadline. They are not isolated in a separate process.
+process, bounded by the source size and a node limit. A limit on the processor time
+of one parse remains as a backstop for input the grammar cannot parse, whose parse
+no size bounds; how busy the machine is does not count toward it. They are not
+isolated in a separate process.
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import quote, unquote
 
 if TYPE_CHECKING:
-    from tree_sitter import Node, Parser
+    from tree_sitter import Node, Parser, Tree
 
 from nexus_symbiote import limits
 from nexus_symbiote.core.hashing import hash_bytes
@@ -85,10 +87,27 @@ SOURCE_MARKERS = (SDK_MARKER, *_CLASS_MARKERS, *_MODULE_MARKERS)
 # mark as UTF-16 (bun only the little-endian form), and any other file as UTF-8.
 UTF16_BYTE_ORDER_MARKS = {codecs.BOM_UTF16_LE: "utf-16-le", codecs.BOM_UTF16_BE: "utf-16-be"}
 MAX_REGISTRATIONS = 1_000
-# Time bounds for the default size limits; they grow in proportion when an
-# operator raises syntax-bytes or ts-nodes, so a larger file is not refused for time.
+# The processor time one parse may use, the bound releases up to 0.2.0 set as wall-clock time
+# and scaled the same way: a file whose parse needs more is refused. It bounds only
+# the parse, because the analysis after it is linear in the nodes ts-nodes bounds. A
+# busy machine does not use it up, and the one-time load of the native parser before
+# the first parse does not count toward it.
 MAX_PARSE_SECONDS = 0.25
-MAX_ANALYSIS_SECONDS = 2.0
+# The parser can be stopped only after an interval of wall-clock time. The interval
+# equals the processor budget, which is the wall-clock deadline used before, so a parse
+# the grammar cannot end reaches, in one attempt, exactly the point it was stopped at,
+# and uses no more time or memory. The interval does not grow between attempts.
+_PARSE_INTERVAL = 1.0
+# Attempts before a file is refused for want of its processor time. A parse the clock
+# stops while the machine held it up is retried from the beginning a few times, which
+# absorbs a brief scheduling stall, so that a small server is still collected. Each
+# attempt costs at most one budget.
+_PARSE_ATTEMPTS = 3
+# A stopped parse that had at least this share of its budget as processor time was not
+# held up: another attempt would spend the same again, so it is refused at once. An idle
+# machine measures just under the whole budget, never all of it, because the processor
+# clock leaves out the moments the thread did not run.
+_HELD_UP_SHARE = 0.5
 
 LAUNCHED = "MCP server launched from application code; launcher not inventoried"
 REACHED = "MCP server reached from application code; endpoint not inventoried"
@@ -367,7 +386,6 @@ class _Index:
     scopes: dict[int, Node]
     hoists: dict[int, Node]
     erased: set[int]
-    deadline: float
 
     def parent(self, node: Node | None) -> Node | None:
         return None if node is None else self.parents.get(node.id)
@@ -381,20 +399,14 @@ class _Index:
         scope = self.scope(node)
         return None if scope is None else self.hoists.get(scope.id)
 
-    def check_deadline(self) -> None:
-        if time.monotonic() >= self.deadline:
-            raise _RefusedError("TypeScript analysis exceeded its time limit")
 
-
-def _index(root: Node, limit: Bound, deadline: float) -> _Index:
-    index = _Index([], {}, {}, {}, set(), deadline)
+def _index(root: Node, limit: Bound) -> _Index:
+    index = _Index([], {}, {}, {}, set())
     pending: list[tuple[Node, Node | None]] = [(root, None)]
     while pending:
         node, parent = pending.pop()
         if len(index.nodes) >= limit.value:
             raise _RefusedError(limit.exceeded())
-        if not len(index.nodes) % 1024:
-            index.check_deadline()
         index.nodes.append(node)
         if parent is not None:
             index.parents[node.id] = parent
@@ -562,9 +574,7 @@ def _bindings(index: _Index, root: Node) -> _Declarations:
             # Which declaration a use names is unknown, so nothing built from it is followed.
             found.gaps.append((at, _UNSUPPORTED_BINDING))
 
-    for position, node in enumerate(index.nodes):
-        if not position % 1024:
-            index.check_deadline()
+    for node in index.nodes:
         parent = index.parent(node)
         at_root = parent is not None and parent.id == root.id
         if node.type == "import_statement" and at_root:
@@ -620,7 +630,7 @@ class _Resolver:
     binding a reference names cannot.
     """
 
-    def __init__(self, index: _Index, root: Node, bindings: dict[tuple[int, str], object]) -> None:
+    def __init__(self, root: Node, bindings: dict[tuple[int, str], object]) -> None:
         self.bindings = bindings
         self._targets: dict[int, tuple[int, str]] = {}
         declared: dict[int, list[str]] = {}
@@ -628,7 +638,6 @@ class _Resolver:
             declared.setdefault(scope_id, []).append(name)
         active: dict[str, list[tuple[int, str]]] = {}
         pending: list[tuple[Node, bool]] = [(root, False)]
-        visited = 0
         while pending:
             node, leaving = pending.pop()
             names = declared.get(node.id, ())
@@ -636,9 +645,6 @@ class _Resolver:
                 for name in names:
                     active[name].pop()
                 continue
-            visited += 1
-            if not visited % 1024:
-                index.check_deadline()
             if node.type in {"identifier", "shorthand_property_identifier"}:
                 stack = active.get(_name(node))
                 if stack:
@@ -803,9 +809,7 @@ def _sdk_uses(index: _Index, root: Node, found: _Declarations, resolver: _Resolv
         for (scope, name), value in found.bindings.items()
         if scope == root.id and (value == "sdk" or isinstance(value, (_Namespace, _Launcher)))
     }
-    for position, node in enumerate(index.nodes):
-        if not position % 1024:
-            index.check_deadline()
+    for node in index.nodes:
         if node.id in index.erased:
             continue
         if node.type == "call_expression":
@@ -923,7 +927,7 @@ def _parser(seconds: float, jsx: bool) -> Parser:
     from tree_sitter_typescript import language_tsx, language_typescript
 
     # The pinned 0.25 binding's callback parse path crashes for this grammar.
-    # Its supported native timeout bounds parsing without invoking callbacks.
+    # Its supported native timeout stops a parse without invoking callbacks.
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", DeprecationWarning)
@@ -936,23 +940,61 @@ def _parser(seconds: float, jsx: bool) -> Parser:
         raise ImportError("incompatible TypeScript parser binding") from exc
 
 
+def _processor_time() -> float:
+    """The parsing thread's processor time, or a refusal where the clock is unavailable.
+
+    The bound on a parse is processor time so that a busy machine does not use it up.
+    Without that clock the parse cannot be bounded safely, so the file is refused
+    rather than parsed under the wall clock, which refused small files on a loaded machine.
+    """
+    if not hasattr(time, "thread_time"):  # pragma: no cover - present on Linux and macOS
+        raise _RefusedError("TypeScript parsing cannot be bounded on this platform")
+    return time.thread_time()
+
+
+def _parse(source: bytes, jsx: bool, seconds: float) -> Tree:
+    """Parse within ``seconds`` of the parsing thread's processor time.
+
+    The binding stops a parse only after an interval of wall-clock time, which passes
+    whether or not the parser runs, so the interval only returns control for the
+    processor time to be read. The interval equals the budget, the wall-clock deadline
+    used before, so one attempt reaches the point a runaway parse was stopped at. A
+    parse the interval stops when the parser has had less than ``_HELD_UP_SHARE`` of its
+    budget starts again from the beginning, up to ``_PARSE_ATTEMPTS`` times, because a
+    resumed parse can build a different tree. A stopped parse that had that share, and
+    one that reaches its processor time, finished or not, is refused. Load alone does
+    not use the budget up, though a parse that never gets its processor time within the
+    attempts is refused, and a slower machine reaches the budget on a smaller file. The
+    one-time load of the native parser does not count, because the clock is read after it.
+    """
+    interval = _PARSE_INTERVAL * seconds
+    for _ in range(_PARSE_ATTEMPTS):
+        parser = _parser(interval, jsx)
+        started = _processor_time()
+        try:
+            tree: Tree | None = parser.parse(source)
+        except ValueError:
+            # How the binding reports that the interval ended first.
+            tree = None
+        spent = _processor_time() - started
+        # Free the parser's native arena before the next attempt builds another, so a
+        # retried parse holds no more memory at once than a single parse does.
+        del parser
+        if tree is not None and spent < seconds:
+            return tree
+        if spent >= seconds * _HELD_UP_SHARE:
+            break
+    raise _RefusedError("TypeScript parsing exceeded its time limit")
+
+
 def _collect_source(
     content: bytes, path: Path, result: ScanResult, known: KnownValues | None
 ) -> None:
     text = source_text(content)
     # The parser reads UTF-8; the file digest stays that of the bytes as stored.
     source = content if content[:2] not in UTF16_BYTE_ORDER_MARKS else text.encode("utf-8")
-    settings = limits.current()
-    nodes = limits.bound("ts-nodes")
-    parse_seconds = MAX_PARSE_SECONDS * max(
-        1.0, settings.syntax_bytes / limits.DEFAULTS.syntax_bytes
-    )
-    analysis_seconds = MAX_ANALYSIS_SECONDS * max(1.0, nodes.value / limits.DEFAULTS.ts_nodes)
-    deadline = time.monotonic() + parse_seconds
-    parser = _parser(parse_seconds, _JSX.get(path.suffix, False))
-    tree = parser.parse(source)
-    if tree is None or time.monotonic() >= deadline:
-        raise _RefusedError("TypeScript parsing exceeded its time limit")
+    scale = max(1.0, limits.current().syntax_bytes / limits.DEFAULTS.syntax_bytes)
+    tree = _parse(source, _JSX.get(path.suffix, False), MAX_PARSE_SECONDS * scale)
     root = tree.root_node
     location = path.as_posix()
     javascript = path.suffix in _JAVASCRIPT
@@ -961,7 +1003,7 @@ def _collect_source(
             result.surfaces_excluded.append(f"{location}: {_UNPARSED_JAVASCRIPT}")
             return
         raise _RefusedError("invalid TypeScript syntax")
-    index = _index(root, nodes, time.monotonic() + analysis_seconds)
+    index = _index(root, limits.bound("ts-nodes"))
     if javascript:
         # JavaScript reads `a < b > (c)` as two comparisons, TypeScript as a call.
         reading = next((node for node in index.nodes if node.type == "type_arguments"), None)
@@ -972,7 +1014,7 @@ def _collect_source(
             return
     found = _bindings(index, root)
     bindings = found.bindings
-    resolver = _Resolver(index, root, bindings)
+    resolver = _Resolver(root, bindings)
     _sdk_uses(index, root, found, resolver)
     found.gaps.sort(key=lambda gap: (gap[0].start_byte, gap[1]))
     result.surfaces_excluded.extend(
