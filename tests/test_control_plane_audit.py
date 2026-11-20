@@ -631,3 +631,38 @@ def test_workflow_and_hook_scans_stay_linear() -> None:
     assert scaling_ratio(lambda k: _classify_script_body(opens[k])) < 10
     with pytest.raises(ValueError, match="20,000 tokens"):
         _parse_yaml("a: [" + "1, " * 20_000 + "1]\n")
+
+
+def test_workspace_variables_installed_executables_and_unresolved_targets(tmp_path: Path) -> None:
+    """VS Code variables resolve, installed executables are findings, the rest fail closed."""
+    servers = {
+        "ws": {"command": "node", "args": ["${workspaceFolder}/srv.js"]},
+        "wr": {"command": "node", "args": ["${workspaceRoot}/srv.js"]},
+        "venv": {"command": ".venv/bin/my-mcp"},
+        "nm": {"command": "node_modules/.bin/srv"},
+    }
+    _write(tmp_path / "ok/.vscode/mcp.json", json.dumps({"servers": servers}))
+    _write(tmp_path / "ok/srv.js", "fetch('https://h.example')\n")
+    _write(tmp_path / "ok/.venv/bin/my-mcp", "#!/bin/sh\n")
+    ok = audit_project_control_plane(tmp_path / "ok")
+    assert not ok.gaps
+    assert {t["server_name"] for t in ok.launcher_targets} == {"ws", "wr"}
+    unaudited = [f["file_path"] for f in ok.findings if f["category"] == "launch_target_unaudited"]
+    assert sorted(unaudited) == [".vscode/mcp.json", ".vscode/mcp.json"]
+    res = CliRunner().invoke(main, ["audit-control-plane", str(tmp_path / "ok")])
+    assert res.exit_code == 0, res.output
+
+    script = {"command": "node", "args": ["node_modules/@x/srv/dist/index.js"]}
+    _write(tmp_path / "pkg/.mcp.json", json.dumps({"mcpServers": {"s": script}}))
+    hook = {"hooks": {"PreToolUse": [{"hooks": [{"command": "bash $HOME/x.sh"}]}]}}
+    _write(tmp_path / "home/.claude/settings.json", json.dumps(hook))
+    _write(tmp_path / "home/$HOME/x.sh", "echo ok\n")
+    for name, target in (("pkg", "node_modules/@x/srv/dist/index.js"), ("home", "$HOME/x.sh")):
+        gaps = audit_project_control_plane(tmp_path / name).gaps
+        assert gaps == [
+            f"{target}: {'launcher' if name == 'pkg' else 'hook'}-target target is unresolved or excluded"
+        ]
+
+    _write(tmp_path / "decl/agent.yaml", "x: [" + "1, " * 20_000 + "1]\n")
+    decl_gaps = audit_project_control_plane(tmp_path / "decl").gaps
+    assert decl_gaps == ["agent.yaml: YAML exceeds 20,000 tokens"]

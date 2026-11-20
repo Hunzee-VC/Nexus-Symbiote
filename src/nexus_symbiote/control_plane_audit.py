@@ -65,6 +65,7 @@ def _as_dict(val: Any) -> dict[str, Any]:
 
 BRIDGE_PACKAGES = _words("mcp-remote supergateway mcp-proxy @modelcontextprotocol/server-proxy")
 RUNTIME_LAUNCHERS = _words("node python python3 sh bash zsh deno bun tsx uvx npx")
+INSTALLED_BIN_DIRS = _tup("node_modules/.bin/ .venv/bin/ venv/bin/")
 SCRIPT_SUFFIXES = _tup(".sh .py .js .mjs .cjs .ts .rb .pl")
 CODE_EXEC_HOSTED_TOOLS = _words("code_interpreter computer_use bash local_shell code_execution")
 UNTRUSTED_CI_TRIGGERS = _words("issue_comment discussion_comment pull_request_target workflow_run")
@@ -99,6 +100,7 @@ _AUTO_APPROVE_RE = re.compile(
 _PREAMBLE_RE = re.compile(r"^\s*!(?:`([^`]+)`|\s+(.+))$")
 _HEX_40_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 _ON_KEY_RE = re.compile(r"(?m)^([ \t]*)on([ \t]*:)")
+_PROJECT_DIR_RE = re.compile(r"^\$\{?(?:CLAUDE_PROJECT_DIR|workspaceFolder|workspaceRoot)\}?/")
 _SPIFFE_RE = re.compile(r"^spiffe://[a-z0-9.-]+/[A-Za-z0-9._/-]+$")
 
 
@@ -183,7 +185,7 @@ def _classify_script_body(body: str) -> tuple[bool, bool, bool]:
 
 
 def _normalize_rel_candidate(token: str, *, allow_any_file: bool = False) -> str | None:
-    cleaned = re.sub(r"^\$\{?CLAUDE_PROJECT_DIR\}?/", "./", token.strip().strip("'\""))
+    cleaned = _PROJECT_DIR_RE.sub("./", token.strip().strip("'\""))
     if not cleaned or cleaned.startswith("-") or "://" in cleaned:
         return None
     had_dot_slash = cleaned.startswith("./")
@@ -371,6 +373,11 @@ def _bind_script_target(
     event_or_server: str,
 ) -> dict[str, Any] | None:
     before_gaps = len(summary.gaps)
+    if target_path.startswith(INSTALLED_BIN_DIRS):
+        # An installed entry point is the dependency's code, not a project script.
+        msg = f"{role} '{target_path}' is an installed executable whose body is not audited."
+        summary.flag("launch_target_unaudited", RiskSeverity.MEDIUM, msg, source_file, target_path)
+        return None
     if "$" in target_path or files.excluded(target_path):
         summary.gaps.append(f"{target_path}: {role} target is unresolved or excluded")
         return None
