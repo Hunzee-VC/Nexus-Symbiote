@@ -97,16 +97,19 @@ def verify_file_attestation(
     trusted_keys: tuple[Path, ...],
     purpose: attestation.Purpose,
     project: Path | None = None,
+    inventory: Path | None = None,
     subject_bytes: bytes | None = None,
     failure_prefix: str = "attestation verification failed",
 ) -> attestation.VerifiedAttestation:
     """Verify a DSSE inventory attestation envelope against ``subject_path``."""
-    inputs: tuple[Path, ...] = (
-        (subject_path, envelope_path, project)
-        if project is not None
-        else (subject_path, envelope_path)
-    )
-    holders = "SUBJECT, ENVELOPE, PROJECT" if project is not None else "SUBJECT, ENVELOPE"
+    roles = {
+        "SUBJECT": subject_path,
+        "ENVELOPE": envelope_path,
+        "PROJECT": project,
+        "INVENTORY": inventory,
+    }
+    named = {role: path for role, path in roles.items() if path is not None}
+    inputs, holders = tuple(named.values()), ", ".join(named)
     _check_key_placement(trusted_keys, inputs, option="--trusted-key", holders=holders)
 
     def _read_role(role: str, loader: functools.partial[Any]) -> Any:

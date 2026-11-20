@@ -138,6 +138,7 @@ class ServerVerifyResult:
     declaration: dict[str, Any] | None = field(default=None, repr=False)
     identity_hash: str | None = None
     identity_status: str | None = None  # "match" | "changed" | "unrecorded"
+    transport_evidence: dict[str, str] | None = None
 
     @property
     def rug_pull_detected(self) -> bool:
@@ -164,6 +165,7 @@ class ServerVerifyResult:
             "declaration_status": self.declaration_status,
             "identity_hash": self.identity_hash,
             "identity_status": self.identity_status,
+            **({"transport_evidence": self.transport_evidence} if self.transport_evidence else {}),
             "tools": [
                 {
                     "name": f.name,
@@ -354,6 +356,21 @@ def _canonical_https_origin(url: str | None) -> tuple[str, str, int] | None:
     return scheme, host.lower(), (443 if port is None else port)
 
 
+def _refuse(result: ServerVerifyResult, reason: str) -> bool:
+    result.reason, result.error = reason, REASONS[reason]
+    return False
+
+
+def _valid_digest(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        alg, digest = normalize_digest(value, "sha256")
+    except ValueError:
+        return None
+    return f"{alg}:{digest}"
+
+
 def _is_valid_endpoint_observation_bom(evidence_bom: AIBOM) -> bool:
     from nexus_symbiote.core.enums import AssuranceLevel
 
@@ -409,35 +426,23 @@ def _verify_remote_evidence(
         or server_claim.assurance != AssuranceLevel.OBSERVED
         or server_claim.collector != "live-mcp"
         or server_claim.method != "https-mcp-initialize"
+        or server_claim.observed_at is None
     ):
-        result.reason = "invalid-transport-evidence"
-        result.error = REASONS["invalid-transport-evidence"]
-        return False
+        return _refuse(result, "invalid-transport-evidence")
     obs_origin = _canonical_https_origin(observed_server.endpoint_url)
-    claim_origin = _canonical_https_origin(server_claim.locator)
-    obs_ep_hash = observed_server.properties.get("observed_endpoint_hash")
-    if obs_origin is None or claim_origin != obs_origin or not isinstance(obs_ep_hash, str):
-        result.reason = "invalid-transport-evidence"
-        result.error = REASONS["invalid-transport-evidence"]
-        return False
-    try:
-        normalize_digest(obs_ep_hash, "sha256")
-    except ValueError:
-        result.reason = "invalid-transport-evidence"
-        result.error = REASONS["invalid-transport-evidence"]
-        return False
-    if server.endpoint_url and server.endpoint_url != "[redacted]":
-        expected_origin = _canonical_https_origin(server.endpoint_url)
-        if expected_origin is None or expected_origin != obs_origin:
-            result.reason = "invalid-transport-evidence"
-            result.error = REASONS["invalid-transport-evidence"]
-            return False
+    endpoint_hash = _valid_digest(observed_server.properties.get("observed_endpoint_hash"))
+    # The bom_ref does not change with the URL, and the scanner withholds an endpoint it
+    # cannot read unambiguously ("[redacted]"), so only the inventory's own origin, and
+    # its recorded full-URL digest when present, bind the evidence to this server.
     expected_ep_hash = server.properties.get("observed_endpoint_hash")
-    if expected_ep_hash is not None and expected_ep_hash != obs_ep_hash:
-        result.reason = "invalid-transport-evidence"
-        result.error = REASONS["invalid-transport-evidence"]
-        return False
-
+    if (
+        obs_origin is None
+        or _canonical_https_origin(server_claim.locator) != obs_origin
+        or _canonical_https_origin(server.endpoint_url) != obs_origin
+        or endpoint_hash is None
+        or (expected_ep_hash is not None and _valid_digest(expected_ep_hash) != endpoint_hash)
+    ):
+        return _refuse(result, "invalid-transport-evidence")
     approved = [
         t
         for t in bom.components
@@ -445,9 +450,7 @@ def _verify_remote_evidence(
     ]
     by_name = {t.name: t for t in approved}
     if len(by_name) != len(approved):
-        result.reason = "ambiguous-approved-tools"
-        result.error = REASONS["ambiguous-approved-tools"]
-        return False
+        return _refuse(result, "ambiguous-approved-tools")
     observed_tools = [
         t
         for t in observed_bom.components
@@ -455,25 +458,33 @@ def _verify_remote_evidence(
     ]
     obs_by_name = {t.name: t for t in observed_tools}
     if len(obs_by_name) != len(observed_tools):
-        result.reason = "invalid-descriptor"
-        result.error = REASONS["invalid-descriptor"]
-        return False
-    decl_hash_raw = observed_server.properties.get("observed_declaration_hash")
-    ident_hash_raw = observed_server.properties.get("observed_identity_hash")
-    if not isinstance(decl_hash_raw, str) or not isinstance(ident_hash_raw, str):
-        result.reason = "invalid-transport-evidence"
-        result.error = REASONS["invalid-transport-evidence"]
-        return False
-    try:
-        d_alg, d_dig = normalize_digest(decl_hash_raw, "sha256")
-        i_alg, i_dig = normalize_digest(ident_hash_raw, "sha256")
-        decl_hash = f"{d_alg}:{d_dig}"
-        ident_hash = f"{i_alg}:{i_dig}"
-    except ValueError:
-        result.reason = "invalid-transport-evidence"
-        result.error = REASONS["invalid-transport-evidence"]
-        return False
+        return _refuse(result, "invalid-descriptor")
+    decl_hash = _valid_digest(observed_server.properties.get("observed_declaration_hash"))
+    ident_hash = _valid_digest(observed_server.properties.get("observed_identity_hash"))
+    if decl_hash is None or ident_hash is None:
+        return _refuse(result, "invalid-transport-evidence")
+    fingerprints: dict[str, str] = {}
+    for name, obs_tool in sorted(obs_by_name.items()):
+        tool_claim = obs_tool.claims.get("tool_definition")
+        fp = _valid_digest(obs_tool.definition_hash)
+        if (
+            obs_tool.assurance_level != AssuranceLevel.OBSERVED
+            or obs_tool.properties.get("collection_mode") != "live-observation"
+            or tool_claim is None
+            or tool_claim.assurance != AssuranceLevel.OBSERVED
+            or tool_claim.collector != "live-mcp"
+            or tool_claim.method != "https-mcp-tools-list"
+            or obs_tool.definition_hash_version != TOOL_DEFINITION_HASH_VERSION
+            or fp is None
+        ):
+            return _refuse(result, "invalid-descriptor")
+        fingerprints[name] = fp
     result.reachable, result.status = True, "verified"
+    result.transport_evidence = {
+        "endpoint_binding": "origin" if expected_ep_hash is None else "full-url",
+        "observed_endpoint_hash": endpoint_hash,
+        "observed_at": server_claim.observed_at.isoformat(),
+    }
     proto = observed_server.properties.get("observed_protocol_version")
     result.protocol_version = proto if isinstance(proto, str) else None
     result.declaration_hash = decl_hash
@@ -498,34 +509,8 @@ def _verify_remote_evidence(
         result.identity_status = "unrecorded"
     else:
         result.identity_status = "match" if recorded_identity == ident_hash else "changed"
-    fingerprints: dict[str, str] = {}
     for name, obs_tool in sorted(obs_by_name.items()):
-        tool_claim = obs_tool.claims.get("tool_definition")
-        if (
-            obs_tool.assurance_level != AssuranceLevel.OBSERVED
-            or obs_tool.properties.get("collection_mode") != "live-observation"
-            or tool_claim is None
-            or tool_claim.assurance != AssuranceLevel.OBSERVED
-            or tool_claim.collector != "live-mcp"
-            or tool_claim.method != "https-mcp-tools-list"
-            or obs_tool.definition_hash_version != TOOL_DEFINITION_HASH_VERSION
-            or not obs_tool.definition_hash
-        ):
-            result.reason = "invalid-descriptor"
-            result.error = REASONS["invalid-descriptor"]
-            result.reachable, result.status = False, "failed"
-            result.tool_findings.clear()
-            return False
-        try:
-            alg, digest = normalize_digest(obs_tool.definition_hash, "sha256")
-            fp = f"{alg}:{digest}"
-        except ValueError:
-            result.reason = "invalid-descriptor"
-            result.error = REASONS["invalid-descriptor"]
-            result.reachable, result.status = False, "failed"
-            result.tool_findings.clear()
-            return False
-        fingerprints[name] = fp
+        fp = fingerprints[name]
         old = by_name.get(name)
         previous = None
         if old is None:
@@ -873,6 +858,10 @@ def record_candidate(bom: AIBOM, report: LiveVerifyReport) -> None:
                     result.declaration or {}, result.declaration_hash, result.identity_hash
                 )
             )
+            if result.transport_evidence:
+                # Later evidence then binds the full URL, not only the origin.
+                endpoint_hash = result.transport_evidence["observed_endpoint_hash"]
+                server.properties["observed_endpoint_hash"] = endpoint_hash
 
 
 def observed_tool_properties(

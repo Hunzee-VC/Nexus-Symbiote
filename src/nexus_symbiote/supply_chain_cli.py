@@ -302,6 +302,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         untrusted_roots = [
             project_path.resolve(),
             *_repository_roots(project_path.resolve()),
+            *_repository_roots(inventory_path.resolve().parent),
         ]
         for ev_path, att_path in zip(
             transport_evidence, transport_evidence_attestations, strict=True
@@ -313,7 +314,8 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 resolved_ev = candidate_path.resolve()
                 if any(resolved_ev.is_relative_to(root) for root in untrusted_roots):
                     raise click.UsageError(
-                        f"{flag_name} must lie outside --project and any repository enclosing --project"
+                        f"{flag_name} must lie outside --project and any repository enclosing "
+                        "--project or AIBOM_PATH"
                     )
                 try:
                     if resolved_ev == inventory_path.resolve() or os.path.samefile(
@@ -361,6 +363,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 trusted_keys=trusted_keys,
                 purpose=effective_purpose,
                 project=project_path,
+                inventory=inventory_path,
                 subject_bytes=ev_bytes,
                 failure_prefix="transport evidence attestation failed",
             )
