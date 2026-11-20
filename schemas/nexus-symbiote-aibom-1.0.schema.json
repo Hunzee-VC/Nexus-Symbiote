@@ -3177,7 +3177,7 @@
             }
           ],
           "default": null,
-          "description": "system-prompt, planner, instruction, rules-file, skill-definition, subagent, imported-instruction",
+          "description": "system-prompt, planner, instruction, rules-file, skill-definition, subagent, imported-instruction, template",
           "title": "Prompt Type"
         },
         "content_hash": {

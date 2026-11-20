@@ -64,7 +64,7 @@ _SDK_IMPORT = re.compile(
 
 # Test, build output, documentation and example trees are not searched, so code
 # that only illustrates an SDK never fails the collector.
-_EXCLUDED_DIRECTORIES = frozenset(
+SOURCE_SEARCH_SKIPPED = frozenset(
     {"tests", "test", "dist", "build", "docs", "benchmarks", "examples"}
 )
 # The launcher and server class names below are markers too, so a file that reaches
@@ -567,14 +567,14 @@ class _Kind:
 
 
 def _python_source(path: Path) -> bool:
-    return path.suffix == ".py" and not _EXCLUDED_DIRECTORIES.intersection(path.parts)
+    return path.suffix == ".py" and not SOURCE_SEARCH_SKIPPED.intersection(path.parts)
 
 
 def _script_source(suffix: str) -> Callable[[Path], bool]:
     def eligible(path: Path) -> bool:
         return (
             path.suffix == suffix
-            and not _EXCLUDED_DIRECTORIES.intersection(path.parts)
+            and not SOURCE_SEARCH_SKIPPED.intersection(path.parts)
             and not path.name.endswith(NOT_SOURCE_NAMES)
         )
 

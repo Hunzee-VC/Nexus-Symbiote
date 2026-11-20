@@ -18,6 +18,10 @@ from nexus_symbiote.scanners.prompt import (
     INSTRUCTION_DIRECTORIES,
     INSTRUCTION_FILES,
     NESTED_INSTRUCTION_NAMES,
+    PROMPT_DIRECTORY_NAME,
+    PROMPT_FILE_SUFFIXES,
+    PROMPT_SEARCH_SKIPPED,
+    PROMPT_TEXT_SUFFIXES,
     SKILL_DIRECTORIES,
 )
 from nexus_symbiote.scanners.rag import (
@@ -54,6 +58,10 @@ def _row(collector: str) -> str:
                 *NESTED_INSTRUCTION_NAMES,
                 *INSTRUCTION_DIRECTORIES,
                 *SKILL_DIRECTORIES,
+                PROMPT_DIRECTORY_NAME,
+                *(f"*{suffix}" for suffix in PROMPT_FILE_SUFFIXES),
+                *PROMPT_SEARCH_SKIPPED,
+                *PROMPT_TEXT_SUFFIXES,
             ],
         ),
         ("rag", [*RAG_CONFIG_PATTERNS, *ENV_FILES, *GUARDRAIL_CONFIG_FILES, *NEMO_CONFIG_NAMES]),
