@@ -1,26 +1,29 @@
 """Deterministic linear-time text-poisoning and prompt-injection rules.
 
-Runs offline across discovered tool schemas, prompt/instruction files, A2A
-cards, and assistant configurations using confined descriptor-relative reads.
-Every rule uses bounded lexical scans (worst-case O(N)), normalizes away
-invisible format characters (Unicode category Cf) before matching, preserves
-all existing inventory components and digests, and never emits raw matched
-payload text or secret values into findings.
+Runs offline over the text of collected components: tool descriptions and schemas,
+agent cards, and the instruction, skill, tool and configuration files that the
+selected collectors recorded as component sources. It reads no other file. Every
+rule is a bounded lexical scan, so the pass is O(N) in the scanned text. Default-
+ignorable code points are removed and the rest is NFKC-normalized before matching,
+with a map back to UTF-8 byte offsets. Findings are appended to the owning existing
+components; matched payload text and secret values are never written into them.
 """
 
 from __future__ import annotations
 
-import json
+import itertools
 import re
+import sys
 import unicodedata
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import RiskSeverity
+from nexus_symbiote.core.hashing import parse_json_strict
 from nexus_symbiote.core.models import (
     A2AServerComponent,
     AgentComponent,
@@ -31,6 +34,7 @@ from nexus_symbiote.core.models import (
     SkillPackageComponent,
     ToolComponent,
 )
+from nexus_symbiote.scanners.prompt import _HIDDEN
 from nexus_symbiote.utils.confined import ConfinedCollection
 from nexus_symbiote.utils.terminal import neutralize
 
@@ -45,8 +49,8 @@ _MAX_TAG_BODY_CHARS = 800
 _MAX_COMMENT_BODY_CHARS = 1_200
 _MAX_JSON_DEPTH = 32
 _MAX_JSON_STRINGS = 4_096
+_MAX_WHERE_CHARS = 160
 
-_TEST_TOP_DIRS = frozenset({"test", "tests", "__tests__"})
 _CREDENTIAL_NAME_HINTS = (".env", "secret", "credential", "id_rsa", "id_ed25519", ".netrc")
 _CREDENTIAL_SUFFIXES = frozenset({".key", ".pem", ".p12", ".pfx", ".kdbx"})
 
@@ -63,36 +67,6 @@ _COMPONENT_SOURCE_SUFFIXES = frozenset(
         ".mjs",
         ".cjs",
         ".py",
-    }
-)
-_INSTRUCTION_ROOT_FILES = frozenset(
-    {
-        "claude.md",
-        "claude.local.md",
-        "agents.md",
-        "agents.override.md",
-        "gemini.md",
-        "codex.md",
-        ".cursorrules",
-        ".clinerules",
-        ".windsurfrules",
-        "system_prompt.txt",
-        "system_prompt.md",
-    }
-)
-_INSTRUCTION_DIRS = frozenset(
-    {
-        ".claude",
-        ".cursor",
-        ".windsurf",
-        ".clinerules",
-        ".roo",
-        ".kiro",
-        ".codex",
-        ".agents",
-        ".gemini",
-        "skills",
-        "prompts",
     }
 )
 _SIDE_CHANNEL_PARAM_NAMES = frozenset(
@@ -114,25 +88,27 @@ _SIDE_CHANNEL_PARAM_NAMES = frozenset(
         "comment",
     }
 )
+# Typographic apostrophes fold to ASCII so that "Don’t tell" reads as "Don't tell".
+_APOSTROPHES = {"‘": "'", "’": "'"}
 
 _DIRECTIVE_TAG_OPEN_RE = re.compile(
-    r"<(important|system|instructions|instruction|hidden|secret|override)\b[^>]{0,120}>",
+    r"<((?:important|system|instructions?|hidden|secret|override)[\w-]{0,40})\b[^>]{0,120}>",
     re.IGNORECASE,
 )
+_CLOSE_TAG_RE = re.compile(r"</\s*([\w-]{1,60})\s*>")
 
 _TAG_EXFIL_ACTION_RE = re.compile(
     r"(?:"
-    r"before\s+calling|"
     r"never\s+tell|do\s+not\s+tell|don't\s+tell|"
     r"do\s+not\s+mention|don't\s+mention|without\s+telling|"
     r"hide\s+(?:this|it)\s+from|"
     r"ignore\s+(?:read[- ]only|all|previous|prior|above|safety)|"
     r"disregard\s+(?:all|previous|prior|above)|"
-    r"\boverride\b|"
     r"\b(?:drop\s+table|delete\s+from|truncate\s+table|alter\s+table|rm\s+-rf)\b|"
     r"--export-tokens|"
     r"\b(?:read|include|pass|send|forward|upload|post|exfiltrate|export)\b.{0,80}"
-    r"(?:~/\.ssh|~/\.aws|\bid_rsa\b|\bid_ed25519\b|credentials|\.netrc|\.npmrc|\.pypirc|\.env|parameter|field|https?://)"
+    r"(?:\.ssh\b|~/\.aws|\bid_(?:rsa|dsa|ecdsa|ed25519)\b|credentials|\.netrc|\.npmrc|\.pypirc|"
+    r"\.env|https?://)"
     r")",
     re.IGNORECASE | re.DOTALL,
 )
@@ -143,10 +119,10 @@ _COMMENT_ATTACK_RE = re.compile(
     r"(?:instructions?|directives?|rules?|constraints?|prompts?)\b|"
     r"\bapprove\s+every\b|"
     r"\bbypass\s+(?:all\s+|any\s+)?(?:approval|check|validation|review|safety)\b|"
-    r"\b(?:forward|send|exfiltrate|export|post|upload)\b.{0,80}https?://|"
+    r"\b(?:forward|send|exfiltrate|export|upload)\b.{0,80}https?://|"
     r"--export-tokens|"
-    r"\b(?:read|copy|include|pass)\b.{0,60}(?:~/\.ssh|~/\.aws|\bid_rsa\b|credentials)|"
-    r"\b(?:drop\s+table|delete\s+from|rm\s+-rf)\b|"
+    r"\b(?:read|copy|include|pass)\b.{0,60}(?:\.ssh\b|~/\.aws|\bid_rsa\b|credentials)|"
+    r"\b(?:drop\s+table|delete\s+from)\b|"
     r"\b(?:never\s+tell|do\s+not\s+mention(?:\s+this)?)\b.{0,40}\busers?\b"
     r")",
     re.IGNORECASE | re.DOTALL,
@@ -161,15 +137,28 @@ _CONCEAL_RE = re.compile(
     r"without\s+telling|without\s+informing|"
     r"hide\s+(?:this|it)\s+from"
     r")\s+(?:to\s+)?(?:the\s+)?(?:end[- ]?)?users?\b"
-    r"(?!\s+(?:any\s+|their\s+|our\s+|your\s+)?"
+    # "Never tell the user to ..." gives the user advice; it hides nothing from them.
+    r"(?!\s+to\b|\s+(?:any\s+|their\s+|our\s+|your\s+)?"
     r"(?:private|secret|sensitive|confidential|credential|credentials|key|keys|token|tokens|password|passwords|secrets)\b)",
     re.IGNORECASE,
 )
 
 _CRED_PATH_RE = re.compile(
-    r"(?:~/\.ssh(?:/[a-z0-9._-]+)?|~/\.aws/credentials|"
-    r"\bid_rsa\b|\bid_ed25519\b|\.aws/credentials\b|\.netrc\b|"
+    r"(?:(?:~|\$HOME|/home/[\w.-]+|/Users/[\w.-]+|/root)/\.ssh(?:/[a-z0-9._-]+)?|"
+    r"~/\.aws/credentials|\bid_(?:rsa|dsa|ecdsa|ed25519)\b|\.aws/credentials\b|\.netrc\b|"
     r"\.git-credentials\b|\.pypirc\b|\.npmrc\b)",
+    re.IGNORECASE,
+)
+
+# The credential path must be the object of a read or relay verb, as in "read ~/.ssh/id_rsa"
+# or "include the contents of ~/.aws/credentials"; a negation counts only when it governs
+# that verb ("do not read ~/.ssh/id_rsa"), not anywhere near the path.
+_CRED_VERB_BEFORE_RE = re.compile(
+    r"\b(?P<neg>(?:never|not|don't|avoid|cannot)\s+)?"
+    r"(?:read|cat|open|load|copy|include|pass|send|forward|upload|post|append|exfiltrate|"
+    r"export|embed|attach|dump|print)\s+"
+    r"(?:(?:the|its|your|their|all|any|every|contents?|of|from|file|files|data|keys?|private|"
+    r"secret|at|in|out)\s+){0,4}[`'\"(\[]?$",
     re.IGNORECASE,
 )
 
@@ -180,15 +169,6 @@ _CRED_RELAY_WINDOW_RE = re.compile(
     r"\bbefore\s+calling\b.{0,80}\bread\b"
     r")",
     re.IGNORECASE | re.DOTALL,
-)
-
-_CRED_BENIGN_GUARD_RE = re.compile(
-    r"(?:"
-    r"\blists?\s+ssh\s+keys\b|"
-    r"\b(?:never|do\s+not|don't|avoid|must\s+not|cannot)\s+"
-    r"(?:read|pass|include|send|forward|print|expose|show|display|upload|export|commit|log)\b"
-    r")",
-    re.IGNORECASE,
 )
 
 _EXFIL_URL_RE = re.compile(
@@ -208,7 +188,7 @@ _OVERRIDE_RE = re.compile(
     r"disregard\s+(?:all\s+|any\s+|the\s+)?(?:previous|prior|above|earlier|preceding|system)\s+"
     r"(?:(?:safety|security|guardrail)\s+)?(?:instructions?|directives?|rules?|constraints?|prompts?)|"
     r"forget\s+(?:all\s+|everything\s+)?(?:you\s+were\s+told|previous\s+instructions?|prior\s+instructions?)|"
-    r"override\s+(?:all\s+|the\s+)?(?:system\s+prompt|previous\s+instructions?|prior\s+instructions?|safety\s+rules?|approval\s+checks?)"
+    r"override\s+(?:all\s+|the\s+)?(?:system\s+prompt|safety\s+rules?|approval\s+checks?)"
     r")\b",
     re.IGNORECASE,
 )
@@ -219,25 +199,32 @@ _READONLY_OVERRIDE_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-_DESTRUCTIVE_SQL_OR_SHELL_RE = re.compile(
-    r"\b(?:drop\s+table|delete\s+from|truncate\s+table|alter\s+table|rm\s+-rf)\b",
-    re.IGNORECASE,
-)
-
+_SUBJECT = r"(?:this\s+|the\s+)?(?:repository|repo|codebase|project|agent|it)"
+_VERDICT = r"(?:compliant|clean|safe|benign|low[- ]risk|passing)"
 _AUDITOR_DECEIT_RE = re.compile(
     r"\b(?:"
     r"note\s+to\s+(?:any\s+)?(?:automated\s+)?(?:auditor|auditors|reviewer|reviewers|ai\s+reviewer|scanner|scanners|security\s+tool)|"
-    r"(?:report|mark|treat|classify|declare)\s+(?:this\s+|the\s+)?(?:repository|repo|codebase|project|agent|it)\s+as\s+"
-    r"(?:compliant|clean|safe|benign|low[- ]risk|passing)|"
-    r"(?:suppress|hide|omit|skip)\s+(?:all\s+|any\s+)?(?:security\s+)?(?:findings|warnings|risks|alerts|vulnerabilities|mcp\s+servers?)|"
+    rf"(?:report|classify|declare)\s+{_SUBJECT}\s+as\s+{_VERDICT}|"
     r"this\s+(?:repository|repo|project|codebase)\s+contains\s+no\s+"
     r"(?:mcp\s+servers?|models?|secrets?|vulnerabilities|risks)\b.{0,120}\b(?:report|compliant|safe|clean)"
     r")\b",
     re.IGNORECASE | re.DOTALL,
 )
+# Directives that ordinary build instructions also use ("suppress warnings in CI logs")
+# count only when an auditor or scanner is addressed near them.
+_AUDITOR_DIRECTIVE_RE = re.compile(
+    rf"\b(?:(?:mark|treat)\s+{_SUBJECT}\s+as\s+{_VERDICT}|"
+    r"(?:suppress|hide|omit|skip)\s+(?:all\s+|any\s+)?(?:security\s+)?"
+    r"(?:findings|warnings|risks|alerts|vulnerabilities|mcp\s+servers?))\b",
+    re.IGNORECASE,
+)
+_AUDITOR_ADDRESSEE_RE = re.compile(
+    r"\b(?:auditors?|reviewers?|scanners?|security\s+tools?)\b", re.IGNORECASE
+)
+_ADDRESSEE_WINDOW = 120
 
 _NEGATED_PREFIX_RE = re.compile(
-    r"\b(?:never|do\s+not|don't|not\s+to|prohibit|forbid|example:|rejected:|fixture:)\s*[\"']?\s*$",
+    r"\b(?:never|do\s+not|don't|not\s+to|prohibit|forbid)\s*[\"']?\s*$",
     re.IGNORECASE,
 )
 
@@ -264,7 +251,11 @@ _RULE_DESCRIPTIONS: dict[str, str] = {
 
 @dataclass(frozen=True)
 class TextPoisoningHit:
-    """Single deterministic finding produced by the text-poisoning rule pack."""
+    """Single deterministic finding produced by the text-poisoning rule pack.
+
+    ``byte_offset`` counts UTF-8 bytes from the start of the scanned text: the file,
+    or, when ``where`` names a JSON pointer or component field, that string.
+    """
 
     rule_id: str
     category: str
@@ -272,6 +263,7 @@ class TextPoisoningHit:
     byte_offset: int
     surface: str
     summary: str
+    where: str = ""
 
 
 ComponentWithRisks = (
@@ -282,6 +274,23 @@ ComponentWithRisks = (
     | SkillPackageComponent
     | A2AServerComponent
     | IDEAgentComponent
+)
+_COMPONENT_KINDS = (
+    AgentComponent,
+    MCPServerComponent,
+    ToolComponent,
+    PromptComponent,
+    SkillPackageComponent,
+    A2AServerComponent,
+    IDEAgentComponent,
+)
+_ATTRIBUTION_PRIORITY = (
+    ToolComponent,
+    PromptComponent,
+    SkillPackageComponent,
+    A2AServerComponent,
+    MCPServerComponent,
+    IDEAgentComponent,
 )
 
 
@@ -298,21 +307,26 @@ def _utf8_width(ch: str) -> int:
 
 
 def normalize_for_lexical_scan(text: str) -> tuple[str, list[int]]:
-    """Strip invisible Unicode format (Cf) characters in one O(N) pass.
+    """Remove default-ignorable code points and NFKC-fold the rest in one O(N) pass.
 
-    Returns the stripped string plus a list mapping each stripped-string character
-    index back to the original UTF-8 byte offset in ``text``.
+    Each character is folded on its own, so fullwidth or compatibility forms of
+    markup (``＜IMPORTANT＞``) read as ASCII. Returns the folded string plus a list
+    mapping each of its characters back to the UTF-8 byte offset in ``text`` of the
+    character it came from.
     """
-    stripped_chars: list[str] = []
+    folded: list[str] = []
     byte_offsets: list[int] = []
     byte_pos = 0
     for ch in text:
-        ch_bytes = _utf8_width(ch)
-        if unicodedata.category(ch) != "Cf":
-            stripped_chars.append(ch)
+        if ch < "\x80":
+            folded.append(ch)
             byte_offsets.append(byte_pos)
-        byte_pos += ch_bytes
-    return "".join(stripped_chars), byte_offsets
+        elif unicodedata.category(ch) != "Cf" and _HIDDEN.match(ch) is None:
+            for part in _APOSTROPHES.get(ch) or unicodedata.normalize("NFKC", ch):
+                folded.append(part)
+                byte_offsets.append(byte_pos)
+        byte_pos += _utf8_width(ch)
+    return "".join(folded), byte_offsets
 
 
 def _byte_offset_at(byte_offsets: list[int], char_index: int) -> int:
@@ -330,26 +344,30 @@ def _default_category(is_tool_surface: bool) -> str:
     return CATEGORY_TOOL_POISONING if is_tool_surface else CATEGORY_INSTRUCTION_INJECTION
 
 
-def _record_hit(
-    hits: list[TextPoisoningHit],
-    max_hits: int,
-    *,
-    rule_id: str,
-    category: str,
-    byte_offset: int,
-    surface: str,
-) -> None:
-    if len(hits) < max_hits:
-        hits.append(
-            TextPoisoningHit(
-                rule_id=rule_id,
-                category=category,
-                severity=RiskSeverity.HIGH,
-                byte_offset=byte_offset,
-                surface=surface,
-                summary=_RULE_DESCRIPTIONS[rule_id],
-            )
-        )
+def _directive_tag_bodies(normalized: str) -> Iterator[tuple[int, str]]:
+    """Yield ``(tag start, body)`` for each directive tag, in O(N) overall.
+
+    A body ends at its matching close tag, at the next directive tag, or after
+    ``_MAX_TAG_BODY_CHARS``, so bodies never overlap and each character is read by at
+    most one close-tag search. Tag names are compared case-insensitively on the short
+    names alone, never by lowercasing the text, which can change its length.
+    """
+    pending: re.Match[str] | None = None
+    opens = _DIRECTIVE_TAG_OPEN_RE.finditer(normalized)
+    for following in itertools.chain(opens, (None,)):
+        if pending is not None:
+            start = pending.end()
+            limit = min(len(normalized), start + _MAX_TAG_BODY_CHARS)
+            if following is not None:
+                limit = min(limit, following.start())
+            end = limit
+            tag = pending.group(1).lower()
+            for close in _CLOSE_TAG_RE.finditer(normalized, start, limit):
+                if close.group(1).lower() == tag:
+                    end = close.start()
+                    break
+            yield pending.start(), normalized[start:end]
+        pending = following
 
 
 def scan_text_block(
@@ -358,6 +376,7 @@ def scan_text_block(
     surface: str,
     is_tool_surface: bool = False,
     max_hits: int = 64,
+    where: str = "",
 ) -> list[TextPoisoningHit]:
     """Scan a single text string using deterministic O(N) lexical rules."""
     if not text:
@@ -370,29 +389,26 @@ def scan_text_block(
     hits: list[TextPoisoningHit] = []
     base_category = _default_category(is_tool_surface)
 
-    # 1. TP-TAG-001: Directive tags containing coercive/exfiltration/override payload
-    for tag_match in _DIRECTIVE_TAG_OPEN_RE.finditer(normalized):
-        tag_name = tag_match.group(1).lower()
-        body_start = tag_match.end()
-        close_marker = f"</{tag_name}>"
-        close_idx = normalized.lower().find(
-            close_marker, body_start, body_start + _MAX_TAG_BODY_CHARS
-        )
-        body_end = (
-            close_idx if close_idx != -1 else min(len(normalized), body_start + _MAX_TAG_BODY_CHARS)
-        )
-        body = normalized[body_start:body_end]
-        if _TAG_EXFIL_ACTION_RE.search(body) is not None and not _has_negated_prefix(
-            normalized, tag_match.start()
-        ):
-            _record_hit(
-                hits,
-                max_hits,
-                rule_id="TP-TAG-001",
-                category=base_category,
-                byte_offset=_byte_offset_at(byte_offsets, tag_match.start()),
-                surface=surface,
+    def record(rule_id: str, category: str, char_index: int) -> None:
+        if len(hits) < max_hits:
+            hits.append(
+                TextPoisoningHit(
+                    rule_id=rule_id,
+                    category=category,
+                    severity=RiskSeverity.HIGH,
+                    byte_offset=_byte_offset_at(byte_offsets, char_index),
+                    surface=surface,
+                    summary=_RULE_DESCRIPTIONS[rule_id],
+                    where=where,
+                )
             )
+
+    # 1. TP-TAG-001: Directive tags containing coercive/exfiltration/override payload
+    for tag_start, body in _directive_tag_bodies(normalized):
+        if _TAG_EXFIL_ACTION_RE.search(body) is not None and not _has_negated_prefix(
+            normalized, tag_start
+        ):
+            record("TP-TAG-001", base_category, tag_start)
 
     # 2. TP-CMT-001: HTML comments carrying override, exfil, or secret-read directives
     search_pos = 0
@@ -403,92 +419,49 @@ def scan_text_block(
             if cmt_end != -1
             else min(len(normalized), cmt_start + 4 + _MAX_COMMENT_BODY_CHARS)
         )
-        comment_body = normalized[cmt_start + 4 : stop]
-        if _COMMENT_ATTACK_RE.search(comment_body) is not None:
-            _record_hit(
-                hits,
-                max_hits,
-                rule_id="TP-CMT-001",
-                category=base_category,
-                byte_offset=_byte_offset_at(byte_offsets, cmt_start),
-                surface=surface,
-            )
+        if _COMMENT_ATTACK_RE.search(normalized[cmt_start + 4 : stop]) is not None:
+            record("TP-CMT-001", base_category, cmt_start)
         search_pos = stop
 
     # 3. TP-CRED-002: Sensitive credential path relay or exfiltration URL directive
     for cred_match in _CRED_PATH_RE.finditer(normalized):
+        verb = _CRED_VERB_BEFORE_RE.search(
+            normalized, max(0, cred_match.start() - 80), cred_match.start()
+        )
+        if verb is None or verb.group("neg"):
+            continue
         win_start = max(0, cred_match.start() - 120)
         win_end = min(len(normalized), cred_match.end() + 120)
-        window = normalized[win_start:win_end]
-        if _CRED_BENIGN_GUARD_RE.search(window) is not None:
-            continue
-        if _CRED_RELAY_WINDOW_RE.search(window) is not None:
-            _record_hit(
-                hits,
-                max_hits,
-                rule_id="TP-CRED-002",
-                category=base_category,
-                byte_offset=_byte_offset_at(byte_offsets, cred_match.start()),
-                surface=surface,
-            )
+        if _CRED_RELAY_WINDOW_RE.search(normalized, win_start, win_end) is not None:
+            record("TP-CRED-002", base_category, cred_match.start())
 
     for exfil_match in _EXFIL_URL_RE.finditer(normalized):
         if not _has_negated_prefix(normalized, exfil_match.start()):
-            _record_hit(
-                hits,
-                max_hits,
-                rule_id="TP-CRED-002",
-                category=base_category,
-                byte_offset=_byte_offset_at(byte_offsets, exfil_match.start()),
-                surface=surface,
-            )
+            record("TP-CRED-002", base_category, exfil_match.start())
 
     # 4. TP-CONCEAL-003: Concealment instructions ("never tell the user", "do not mention this to the user")
     for conceal_match in _CONCEAL_RE.finditer(normalized):
         if not _has_negated_prefix(normalized, conceal_match.start()):
-            _record_hit(
-                hits,
-                max_hits,
-                rule_id="TP-CONCEAL-003",
-                category=base_category,
-                byte_offset=_byte_offset_at(byte_offsets, conceal_match.start()),
-                surface=surface,
-            )
+            record("TP-CONCEAL-003", base_category, conceal_match.start())
 
     # 5. II-OVR-001: Instruction override or ignore read-only + destructive command
-    override_cat = base_category if is_tool_surface else CATEGORY_INSTRUCTION_INJECTION
-    for ovr_match in _OVERRIDE_RE.finditer(normalized):
-        if not _has_negated_prefix(normalized, ovr_match.start()):
-            _record_hit(
-                hits,
-                max_hits,
-                rule_id="II-OVR-001",
-                category=override_cat,
-                byte_offset=_byte_offset_at(byte_offsets, ovr_match.start()),
-                surface=surface,
-            )
-    for ro_match in _READONLY_OVERRIDE_RE.finditer(normalized):
-        if not _has_negated_prefix(normalized, ro_match.start()):
-            _record_hit(
-                hits,
-                max_hits,
-                rule_id="II-OVR-001",
-                category=override_cat,
-                byte_offset=_byte_offset_at(byte_offsets, ro_match.start()),
-                surface=surface,
-            )
+    for ovr_re in (_OVERRIDE_RE, _READONLY_OVERRIDE_RE):
+        for ovr_match in ovr_re.finditer(normalized):
+            if not _has_negated_prefix(normalized, ovr_match.start()):
+                record("II-OVR-001", base_category, ovr_match.start())
 
     # 6. II-AUD-002: Auditor/scanner deception directives
     for aud_match in _AUDITOR_DECEIT_RE.finditer(normalized):
         if not _has_negated_prefix(normalized, aud_match.start()):
-            _record_hit(
-                hits,
-                max_hits,
-                rule_id="II-AUD-002",
-                category=CATEGORY_INSTRUCTION_INJECTION,
-                byte_offset=_byte_offset_at(byte_offsets, aud_match.start()),
-                surface=surface,
-            )
+            record("II-AUD-002", CATEGORY_INSTRUCTION_INJECTION, aud_match.start())
+    for aud_match in _AUDITOR_DIRECTIVE_RE.finditer(normalized):
+        addressed = _AUDITOR_ADDRESSEE_RE.search(
+            normalized,
+            max(0, aud_match.start() - _ADDRESSEE_WINDOW),
+            aud_match.end() + _ADDRESSEE_WINDOW,
+        )
+        if addressed is not None and not _has_negated_prefix(normalized, aud_match.start()):
+            record("II-AUD-002", CATEGORY_INSTRUCTION_INJECTION, aud_match.start())
 
     return hits
 
@@ -519,6 +492,38 @@ def extract_json_text_entries(
             for idx, item in enumerate(node):
                 child = f"{prefix}[{idx}]"
                 queue.append((child, item, depth + 1))
+    return results
+
+
+_Scopes = tuple[tuple[str, dict[str, Any]], ...]
+
+
+def _json_strings_with_scopes(data: object) -> list[tuple[str, str, _Scopes]]:
+    """``(JSON pointer, string, enclosing scopes)`` for each nonblank string, bounded.
+
+    A scope is an enclosing object with a label that can name a component: its own
+    ``name`` string, or the key it is stored under (``mcpServers.<name>``). Scopes are
+    listed innermost first.
+    """
+    results: list[tuple[str, str, _Scopes]] = []
+    queue: deque[tuple[str, object, int, _Scopes]] = deque([("", data, 0, ())])
+    while queue and len(results) < _MAX_JSON_STRINGS:
+        pointer, node, depth, scopes = queue.popleft()
+        if depth > _MAX_JSON_DEPTH:
+            continue
+        if isinstance(node, str):
+            if node.strip():
+                results.append((pointer, node, scopes))
+        elif isinstance(node, dict):
+            label = node.get("name")
+            inner = ((label, node), *scopes) if isinstance(label, str) else scopes
+            for key, val in node.items():
+                child = f"{pointer}/{key.replace('~', '~0').replace('/', '~1')}"
+                outer = ((key, val), *inner) if isinstance(val, dict) else inner
+                queue.append((child, val, depth + 1, outer))
+        elif isinstance(node, list):
+            for idx, item in enumerate(node):
+                queue.append((f"{pointer}/{idx}", item, depth + 1, scopes))
     return results
 
 
@@ -561,57 +566,40 @@ def check_sidenote_tool_schema(
 ) -> list[TextPoisoningHit]:
     """Detect Sidenote cross-property escalation on tool schemas and annotations.
 
+    Both checks need a tool-poisoning hit in the tool's own text; destructive keywords
+    alone are not one, since a read-only tool may list the statements it rejects.
     Flags:
-    1) A tool declaring ``readOnlyHint=True`` or ``destructiveHint=False`` while its
-       text carries destructive SQL/shell or coercive exfiltration directives.
-    2) A declared parameter (especially side-channel fields like ``note``, ``debug``,
-       ``query``, ``telemetry``, ``context``, ``metadata``) targeted by a credential/exfil
-       directive in the tool description or schema text.
+    1) A tool declaring ``readOnlyHint=True`` or ``destructiveHint=False`` whose text
+       carries a poisoning directive.
+    2) A declared side-channel parameter (``note``, ``debug``, ``query``, ``context``,
+       ``metadata`` ...) that the tool's text names beside such a directive.
+    The finding is located at the poisoning hit that triggered it.
     """
-    normalized, byte_offsets = normalize_for_lexical_scan(combined_text)
-    if not normalized:
+    poison = next((h for h in existing_hits if h.category == CATEGORY_TOOL_POISONING), None)
+    if poison is None:
         return []
-
     ann = annotations or {}
-    claims_benign = ann.get("readOnlyHint") is True or ann.get("destructiveHint") is False
-    has_destructive = _DESTRUCTIVE_SQL_OR_SHELL_RE.search(normalized) is not None
-    has_poison_hit = any(h.category == CATEGORY_TOOL_POISONING for h in existing_hits)
-
-    if claims_benign and (has_destructive or has_poison_hit):
-        match = _DESTRUCTIVE_SQL_OR_SHELL_RE.search(normalized)
-        offset = (
-            _byte_offset_at(byte_offsets, match.start())
-            if match
-            else (existing_hits[0].byte_offset if existing_hits else 0)
+    flagged = ann.get("readOnlyHint") is True or ann.get("destructiveHint") is False
+    if not flagged:
+        normalized, _ = normalize_for_lexical_scan(combined_text)
+        flagged = any(
+            re.search(rf"\b{re.escape(prop)}\b", normalized, re.IGNORECASE) is not None
+            for prop in sorted(_collect_schema_property_names(schema))
+            if prop.lower() in _SIDE_CHANNEL_PARAM_NAMES
         )
-        return [
-            TextPoisoningHit(
-                rule_id="TP-SIDENOTE-004",
-                category=CATEGORY_TOOL_POISONING,
-                severity=RiskSeverity.HIGH,
-                byte_offset=offset,
-                surface=surface,
-                summary=_RULE_DESCRIPTIONS["TP-SIDENOTE-004"],
-            )
-        ]
-
-    prop_names = _collect_schema_property_names(schema)
-    suspicious_props = {p for p in prop_names if p.lower() in _SIDE_CHANNEL_PARAM_NAMES}
-    if suspicious_props and has_poison_hit:
-        for prop in sorted(suspicious_props):
-            prop_re = re.compile(rf"\b{re.escape(prop)}\b", re.IGNORECASE)
-            if (m := prop_re.search(normalized)) is not None:
-                return [
-                    TextPoisoningHit(
-                        rule_id="TP-SIDENOTE-004",
-                        category=CATEGORY_TOOL_POISONING,
-                        severity=RiskSeverity.HIGH,
-                        byte_offset=_byte_offset_at(byte_offsets, m.start()),
-                        surface=surface,
-                        summary=_RULE_DESCRIPTIONS["TP-SIDENOTE-004"],
-                    )
-                ]
-    return []
+    if not flagged:
+        return []
+    return [
+        TextPoisoningHit(
+            rule_id="TP-SIDENOTE-004",
+            category=CATEGORY_TOOL_POISONING,
+            severity=RiskSeverity.HIGH,
+            byte_offset=poison.byte_offset,
+            surface=surface,
+            summary=_RULE_DESCRIPTIONS["TP-SIDENOTE-004"],
+            where=poison.where,
+        )
+    ]
 
 
 def _is_credential_path(rel_path: str) -> bool:
@@ -625,39 +613,25 @@ def _is_credential_path(rel_path: str) -> bool:
     return any(hint in name_lower or f"/{hint}" in lower for hint in _CREDENTIAL_NAME_HINTS)
 
 
-def _is_test_path(rel_path: str) -> bool:
-    parts = PurePosixPath(rel_path).parts
-    return bool(parts) and parts[0].lower() in _TEST_TOP_DIRS
+def _priority_key(component: ComponentWithRisks) -> tuple[int, str]:
+    rank = next(
+        (i for i, kind in enumerate(_ATTRIBUTION_PRIORITY) if isinstance(component, kind)),
+        len(_ATTRIBUTION_PRIORITY),
+    )
+    return rank, component.bom_ref
 
 
-def _is_supplemental_surface(rel_path: str) -> bool:
-    posix = PurePosixPath(rel_path)
-    lower = posix.as_posix().lower()
-    name_lower = posix.name.lower()
-    suffix = posix.suffix.lower()
+def _fallback_component(
+    candidates: list[ComponentWithRisks], root_agent: ComponentWithRisks | None
+) -> ComponentWithRisks | None:
+    """The owner of text that no single tool in a shared source can be shown to own.
 
-    if name_lower in _INSTRUCTION_ROOT_FILES:
-        return True
-    if suffix == ".json":
-        if "tool" in lower or "schema" in lower or "assistant" in lower:
-            return True
-        if ".well-known/" in lower or name_lower in {"agent-card.json", "agent.json"}:
-            return True
-    if (
-        posix.parts
-        and posix.parts[0].lower() in _INSTRUCTION_DIRS
-        and suffix in _TEXT_DECLARATION_SUFFIXES
-    ):
-        return True
-    if suffix == ".md" and name_lower in {
-        "skill.md",
-        "claude.md",
-        "agents.md",
-        "gemini.md",
-        "codex.md",
-    }:
-        return True
-    return bool(name_lower.endswith(".prompt.md") or name_lower.endswith(".tool.json"))
+    Such text never goes to one of several tools, which would blame a sibling.
+    """
+    if len(candidates) == 1:
+        return candidates[0]
+    others = [c for c in candidates if not isinstance(c, ToolComponent)]
+    return min(others, key=_priority_key) if others else root_agent
 
 
 def _attribute_source_component(
@@ -688,22 +662,7 @@ def _attribute_source_component(
                     best_tool = tool
         if best_tool is not None:
             return best_tool
-
-    _priority = (
-        ToolComponent,
-        PromptComponent,
-        SkillPackageComponent,
-        A2AServerComponent,
-        MCPServerComponent,
-        IDEAgentComponent,
-    )
-    return min(
-        candidates,
-        key=lambda cand: next(
-            (idx for idx, kind in enumerate(_priority) if isinstance(cand, kind)),
-            len(_priority),
-        ),
-    )
+    return _fallback_component(candidates, fallback)
 
 
 _MD_COMMENT_LINE_RE = re.compile(
@@ -713,20 +672,24 @@ _MD_COMMENT_LINE_RE = re.compile(
 
 
 def _mask_hidden_markdown_markup(text: str) -> str:
-    """Replace hidden HTML/PI/reference comments with spaces while keeping length."""
-    chars = list(text)
+    """Blank hidden HTML/PI/reference comments, keeping every UTF-8 byte offset.
+
+    Each masked character becomes as many spaces as it has UTF-8 bytes, so offsets
+    measured in the masked text are offsets in the file.
+    """
+    masked = bytearray(len(text))
     for open_tok, close_tok in (("<!--", "-->"), ("<?", "?>")):
         pos = 0
         while (start := text.find(open_tok, pos)) != -1:
             end = text.find(close_tok, start + len(open_tok), start + 4096)
             stop = end + len(close_tok) if end != -1 else min(len(text), start + 4096)
-            for idx in range(start, stop):
-                chars[idx] = " "
+            masked[start:stop] = b"\x01" * (stop - start)
             pos = stop
     for match in _MD_COMMENT_LINE_RE.finditer(text):
-        for idx in range(match.start(), match.end()):
-            chars[idx] = " "
-    return "".join(chars)
+        masked[match.start() : match.end()] = b"\x01" * (match.end() - match.start())
+    return "".join(
+        " " * _utf8_width(ch) if flag else ch for ch, flag in zip(text, masked, strict=True)
+    )
 
 
 def _append_consolidated_risks(
@@ -742,31 +705,29 @@ def _append_consolidated_risks(
 
     added = 0
     for (category, surface), group in sorted(grouped.items()):
-        ordered_rules: list[str] = []
-        seen_rules: set[str] = set()
-        for h in group:
-            if h.rule_id not in seen_rules:
-                seen_rules.add(h.rule_id)
-                ordered_rules.append(h.rule_id)
-        primary_rule = ordered_rules[0]
-        earliest_offset = min(h.byte_offset for h in group)
         dedup_key = (component.bom_ref, category, surface)
         if dedup_key in seen_keys:
             continue
         seen_keys.add(dedup_key)
-
-        safe_surface = neutralize(surface)
-        safe_name = neutralize(component.name)
-        severity = max(
-            (h.severity for h in group),
-            key=lambda s: ("info", "low", "medium", "high", "critical").index(s.value),
+        # The first location of each rule, so each offset is that of the rule printed beside
+        # it; TP-SIDENOTE-004 shares its trigger's location and is listed after it.
+        firsts: dict[str, TextPoisoningHit] = {}
+        order = sorted(
+            group,
+            key=lambda h: (h.where, h.byte_offset, h.rule_id == "TP-SIDENOTE-004", h.rule_id),
         )
-        rules_label = ", ".join(ordered_rules)
-        summary_desc = group[0].summary
+        for h in order:
+            firsts.setdefault(h.rule_id, h)
+        located = [
+            f"{h.rule_id} at byte_offset={h.byte_offset}"
+            + (f" of {neutralize(h.where)[:_MAX_WHERE_CHARS]}" if h.where else "")
+            for h in firsts.values()
+        ]
+        first = next(iter(firsts.values()))
         detail = (
-            f"Surface '{safe_surface}' ({safe_name}) matched rule {primary_rule} "
-            f"[{rules_label}] at byte_offset={earliest_offset} (pack={RULE_PACK_VERSION}): "
-            f"{summary_desc}. Matched payload text is withheld."
+            f"Surface '{neutralize(surface)}' ({neutralize(component.name)}) matched "
+            f"{'; '.join(located)} (pack={RULE_PACK_VERSION}): {first.summary}. "
+            "Matched payload text is withheld."
         )
         recommendation = (
             "Remove coercive tags, override directives, hidden instructions, or credential-relay "
@@ -774,15 +735,154 @@ def _append_consolidated_risks(
         )
         component.risks.append(
             RiskAssessment(
-                severity=severity,
+                severity=RiskSeverity.HIGH,
                 category=category,
                 detail=detail,
                 recommendation=recommendation,
-                references=[f"{_RULE_REFERENCE_PREFIX}{rid}" for rid in ordered_rules],
+                references=[f"{_RULE_REFERENCE_PREFIX}{rid}" for rid in firsts],
             )
         )
         added += 1
     return added
+
+
+def _scan_component_fields(comp: ComponentWithRisks) -> list[TextPoisoningHit]:
+    if isinstance(comp, ToolComponent):
+        surface = comp.source_path or comp.name
+        hits: list[TextPoisoningHit] = []
+        parts: list[str] = []
+        fields = [("description", comp.description_text), ("description", comp.description)]
+        fields += [
+            (f"input_schema.{path}", val)
+            for path, val in extract_json_text_entries(comp.input_schema)
+        ]
+        for field, text in fields:
+            if text:
+                parts.append(text)
+                hits.extend(
+                    scan_text_block(text, surface=surface, is_tool_surface=True, where=field)
+                )
+        return hits + check_sidenote_tool_schema(
+            comp.input_schema,
+            "\n".join(parts),
+            comp.annotations,
+            surface=surface,
+            existing_hits=hits,
+        )
+    if isinstance(comp, A2AServerComponent):
+        surface = comp.source_path or comp.agent_card_path or comp.name
+        texts = [("description", comp.description)]
+        texts += [(f"skills_declared[{i}]", s) for i, s in enumerate(comp.skills_declared)]
+        return [
+            hit
+            for field, text in texts
+            if text
+            for hit in scan_text_block(text, surface=surface, is_tool_surface=True, where=field)
+        ]
+    if comp.description:
+        return scan_text_block(
+            comp.description,
+            surface=comp.source_path or comp.name,
+            is_tool_surface=isinstance(comp, MCPServerComponent),
+            where="description",
+        )
+    return []
+
+
+def _scan_json_source(
+    rel_path: str,
+    parsed: object,
+    comps: list[ComponentWithRisks],
+    root_agent: AgentComponent | None,
+) -> list[tuple[ComponentWithRisks, list[TextPoisoningHit]]]:
+    """Scan each string of a JSON source and give its hits to the component that holds it.
+
+    A string belongs to the innermost enclosing object whose ``name`` (or key) names a
+    component recorded for this file, so a poisoned tool's text is never charged to a
+    sibling tool declared beside it.
+    """
+    by_name: dict[str, ComponentWithRisks] = {}
+    for comp in sorted(comps, key=_priority_key):
+        by_name.setdefault(comp.name, comp)
+    fallback = _fallback_component(comps, root_agent) if comps else root_agent
+    groups: dict[str, tuple[ComponentWithRisks, dict[str, Any] | None, list[TextPoisoningHit]]]
+    groups = {}
+    texts: dict[str, list[str]] = {}
+    for pointer, value, scopes in _json_strings_with_scopes(parsed):
+        owner = next(((by_name[label], node) for label, node in scopes if label in by_name), None)
+        target, node = owner if owner is not None else (fallback, None)
+        if target is None:
+            continue
+        is_tool = isinstance(target, (ToolComponent, A2AServerComponent, MCPServerComponent))
+        group = groups.setdefault(target.bom_ref, (target, node, []))
+        if group[1] is None and node is not None:
+            group = groups[target.bom_ref] = (target, node, group[2])
+        group[2].extend(
+            scan_text_block(value, surface=rel_path, is_tool_surface=is_tool, where=pointer)
+        )
+        texts.setdefault(target.bom_ref, []).append(value)
+    results: list[tuple[ComponentWithRisks, list[TextPoisoningHit]]] = []
+    for ref, (target, node, hits) in groups.items():
+        if isinstance(target, ToolComponent) and node is not None:
+            schema = next(
+                (node[k] for k in ("inputSchema", "input_schema", "parameters") if k in node),
+                None,
+            )
+            ann = node.get("annotations")
+            hits = hits + check_sidenote_tool_schema(
+                schema if isinstance(schema, dict) else None,
+                "\n".join(texts[ref]),
+                ann if isinstance(ann, dict) else None,
+                surface=rel_path,
+                existing_hits=hits,
+            )
+        results.append((target, hits))
+    return results
+
+
+def _scan_text_source(
+    rel_path: str,
+    raw_text: str,
+    comps: list[ComponentWithRisks],
+    root_agent: AgentComponent | None,
+) -> list[tuple[ComponentWithRisks, list[TextPoisoningHit]]]:
+    suffix = PurePosixPath(rel_path).suffix.lower()
+    is_tool_ctx = any(
+        isinstance(c, (ToolComponent, A2AServerComponent, MCPServerComponent)) for c in comps
+    )
+    scan_input = raw_text
+    if (
+        not is_tool_ctx
+        and suffix in {".md", ".mdc", ".markdown"}
+        and any(
+            r.category == "hidden_markup" and r.severity == RiskSeverity.HIGH
+            for comp in comps
+            for r in comp.risks
+        )
+    ):
+        scan_input = _mask_hidden_markdown_markup(raw_text)
+    hits = scan_text_block(scan_input, surface=rel_path, is_tool_surface=is_tool_ctx)
+    raw_bytes = raw_text.encode("utf-8") if hits else b""
+    by_target: dict[str, tuple[ComponentWithRisks, list[TextPoisoningHit]]] = {}
+    for h in hits:
+        chosen = _attribute_source_component(raw_text, raw_bytes, h.byte_offset, comps, root_agent)
+        if chosen is not None:
+            by_target.setdefault(chosen.bom_ref, (chosen, []))[1].append(h)
+    return list(by_target.values())
+
+
+def _source_candidates(
+    components_by_path: dict[str, list[ComponentWithRisks]],
+) -> Iterator[str]:
+    for rel_path, comps in sorted(components_by_path.items()):
+        suffix = PurePosixPath(rel_path).suffix.lower()
+        if suffix not in _COMPONENT_SOURCE_SUFFIXES or _is_credential_path(rel_path):
+            continue
+        if suffix not in _TEXT_DECLARATION_SUFFIXES and any(
+            isinstance(c, SkillPackageComponent) and c.skill_type == "skill-resource" for c in comps
+        ):
+            continue
+        yield rel_path
 
 
 def apply_text_poisoning_rules(
@@ -796,266 +896,85 @@ def apply_text_poisoning_rules(
 ) -> int:
     """Run deterministic text-poisoning & injection rules across an assembled AIBOM.
 
-    Inspects in-memory component descriptions and schemas, plus safely opened
-    repository component sources and declared schema/prompt/assistant files when
-    ``root`` is provided. Appends ``RiskAssessment`` findings directly to owning
-    existing components without creating synthetic components or altering component
-    hashes.
+    Inspects in-memory component descriptions and schemas and, when ``root`` is given,
+    the repository files that collected components name as their source or agent card,
+    read through confined descriptor-relative opens. No other file is read, so a
+    collector that was not selected adds no surface. Findings are appended to existing
+    components; no component is created and no hash changes. A surface the rules cannot
+    process is recorded in ``failures``, never raised.
     """
+    components: list[ComponentWithRisks] = [
+        c for c in aibom.components if isinstance(c, _COMPONENT_KINDS)
+    ]
     components_by_path: dict[str, list[ComponentWithRisks]] = {}
-    tools_by_name: dict[str, list[ToolComponent]] = {}
-    root_agent: AgentComponent | None = None
+    for comp in components:
+        paths = [comp.source_path]
+        if isinstance(comp, A2AServerComponent):
+            paths.append(comp.agent_card_path)
+        for path in dict.fromkeys(paths):
+            if path and "://" not in path:
+                components_by_path.setdefault(path, []).append(comp)
+    agents = [c for c in components if isinstance(c, AgentComponent)]
+    root_agent = min(agents, key=lambda a: a.bom_ref) if agents else None
     seen_keys: set[tuple[str, str, str]] = set()
-    added = 0
-
-    for comp in aibom.components:
-        if not isinstance(
-            comp,
-            (
-                AgentComponent,
-                MCPServerComponent,
-                ToolComponent,
-                PromptComponent,
-                SkillPackageComponent,
-                A2AServerComponent,
-                IDEAgentComponent,
-            ),
-        ):
-            continue
-        if isinstance(comp, AgentComponent) and root_agent is None:
-            root_agent = comp
-        if isinstance(comp, ToolComponent):
-            tools_by_name.setdefault(comp.name, []).append(comp)
-        if comp.source_path and "://" not in comp.source_path:
-            components_by_path.setdefault(comp.source_path, []).append(comp)
-        if (
-            isinstance(comp, A2AServerComponent)
-            and comp.agent_card_path
-            and "://" not in comp.agent_card_path
-        ):
-            components_by_path.setdefault(comp.agent_card_path, []).append(comp)
-
-    # Phase 1: In-memory component text & JSON-schema inspection
-    for comp in aibom.components:
-        if isinstance(comp, ToolComponent):
-            surface = comp.source_path or comp.name
-            hits: list[TextPoisoningHit] = []
-            parts: list[str] = []
-            for text in (comp.description_text, comp.description):
-                if text:
-                    parts.append(text)
-                    hits.extend(scan_text_block(text, surface=surface, is_tool_surface=True))
-            for _field_path, val in extract_json_text_entries(comp.input_schema):
-                parts.append(val)
-                hits.extend(scan_text_block(val, surface=surface, is_tool_surface=True))
-            sidenote_hits = check_sidenote_tool_schema(
-                comp.input_schema,
-                "\n".join(parts),
-                comp.annotations,
-                surface=surface,
-                existing_hits=hits,
-            )
-            added += _append_consolidated_risks(comp, [*hits, *sidenote_hits], seen_keys=seen_keys)
-        elif isinstance(comp, A2AServerComponent):
-            surface = comp.source_path or comp.agent_card_path or comp.name
-            hits = []
-            for text in (comp.description, *comp.skills_declared):
-                if text:
-                    hits.extend(scan_text_block(text, surface=surface, is_tool_surface=True))
-            added += _append_consolidated_risks(comp, hits, seen_keys=seen_keys)
-        elif isinstance(
-            comp,
-            (
-                PromptComponent,
-                SkillPackageComponent,
-                MCPServerComponent,
-                IDEAgentComponent,
-                AgentComponent,
-            ),
-        ):
-            if comp.description:
-                surface = comp.source_path or comp.name
-                is_tool = isinstance(comp, MCPServerComponent)
-                hits = scan_text_block(comp.description, surface=surface, is_tool_surface=is_tool)
-                added += _append_consolidated_risks(comp, hits, seen_keys=seen_keys)
-
-    if root is None or not root.is_dir():
-        return added
-
-    # Phase 2: Confined repository file inspection (component sources + supplemental schemas/prompts)
     own_failures: list[str] = []
     own_exclusions: list[str] = []
     scanned_rel_paths: set[str] = set()
+    added = 0
 
-    with ConfinedCollection(
-        root, own_failures, own_exclusions, exclude_paths=exclude_paths
-    ) as files:
-        candidate_paths: list[tuple[str, bool]] = []
-        seen_candidates: set[str] = set()
+    def failed(subject: str, exc: Exception) -> None:
+        own_failures.append(
+            f"{neutralize(subject)}: text-poisoning rules could not be applied "
+            f"({type(exc).__name__})"
+        )
 
-        for rel_path, comps in sorted(components_by_path.items()):
-            posix = PurePosixPath(rel_path)
-            if posix.suffix.lower() not in _COMPONENT_SOURCE_SUFFIXES:
-                continue
-            if any(
-                isinstance(c, SkillPackageComponent) and c.skill_type == "skill-resource"
-                for c in comps
-            ):
-                if posix.suffix.lower() not in _TEXT_DECLARATION_SUFFIXES:
+    # Source files first: their findings carry file byte offsets or JSON pointers, which
+    # the in-memory fields scanned after them cannot give for the same component.
+    if root is not None and root.is_dir():
+        with ConfinedCollection(
+            root, own_failures, own_exclusions, exclude_paths=exclude_paths
+        ) as files:
+            for rel_path in _source_candidates(components_by_path):
+                if files.excluded(rel_path):
                     continue
-            if rel_path not in seen_candidates:
-                seen_candidates.add(rel_path)
-                candidate_paths.append((rel_path, True))
-
-        for path_obj in files.iter_files():
-            rel_path = path_obj.as_posix()
-            if (
-                rel_path in seen_candidates
-                or _is_test_path(rel_path)
-                or _is_credential_path(rel_path)
-            ):
-                continue
-            if _is_supplemental_surface(rel_path):
-                seen_candidates.add(rel_path)
-                candidate_paths.append((rel_path, False))
-
-        for rel_path, from_component in candidate_paths:
-            if _is_credential_path(rel_path) or files.excluded(rel_path):
-                continue
-            if files.regular_file(rel_path) is None:
-                continue
-            suffix = PurePosixPath(rel_path).suffix.lower()
-            comps = components_by_path.get(rel_path, [])
-            is_tool_ctx = any(
-                isinstance(c, (ToolComponent, A2AServerComponent, MCPServerComponent))
-                for c in comps
-            )
-
-            raw_text = files.read_text(rel_path, missing_ok=True)
-            if raw_text is None:
-                continue
-            scanned_rel_paths.add(rel_path)
-            if not from_component and _is_test_path(rel_path):
-                continue
-
-            raw_bytes = raw_text.encode("utf-8")
-
-            if suffix == ".json":
-                parsed: Any = None
+                raw_text = files.read_text(rel_path, missing_ok=True)
+                if raw_text is None:
+                    continue
+                scanned_rel_paths.add(rel_path)
+                comps = components_by_path[rel_path]
                 try:
-                    from nexus_symbiote.core.hashing import MAX_JSON_NESTING, json_nesting_exceeds
-
-                    if not json_nesting_exceeds(raw_text, MAX_JSON_NESTING):
-                        parsed = json.loads(raw_text)
-                except (ValueError, RecursionError):
-                    parsed = None
-
-                is_json_tool = is_tool_ctx or any(
-                    tok in rel_path.lower()
-                    for tok in ("tool", "schema", "agent-card", "agent.json", ".well-known")
-                )
-                json_hits: list[TextPoisoningHit] = []
-                if isinstance(parsed, dict):
-                    entries = extract_json_text_entries(parsed)
-                    for _, val in entries:
-                        json_hits.extend(
-                            scan_text_block(val, surface=rel_path, is_tool_surface=is_json_tool)
-                        )
-                    maybe_fn = parsed.get("function")
-                    fn_obj: dict[str, Any] = maybe_fn if isinstance(maybe_fn, dict) else parsed
-                    schema_node = (
-                        fn_obj.get("inputSchema")
-                        or fn_obj.get("parameters")
-                        or parsed.get("inputSchema")
-                        or parsed.get("parameters")
+                    parsed: object = None
+                    if rel_path.lower().endswith(".json"):
+                        try:
+                            parsed = parse_json_strict(raw_text, max_bytes=sys.maxsize)
+                        except (ValueError, RecursionError, TypeError):
+                            # Includes duplicate keys: the raw text holds every value.
+                            parsed = None
+                    owned = (
+                        _scan_json_source(rel_path, parsed, comps, root_agent)
+                        if isinstance(parsed, (dict, list))
+                        else _scan_text_source(rel_path, raw_text, comps, root_agent)
                     )
-                    fn_ann = fn_obj.get("annotations")
-                    parsed_ann = parsed.get("annotations")
-                    ann_node: dict[str, Any] | None = (
-                        fn_ann
-                        if isinstance(fn_ann, dict)
-                        else (parsed_ann if isinstance(parsed_ann, dict) else None)
-                    )
-                    if isinstance(schema_node, dict) or ann_node is not None:
-                        json_hits.extend(
-                            check_sidenote_tool_schema(
-                                schema_node if isinstance(schema_node, dict) else None,
-                                "\n".join(val for _, val in entries),
-                                ann_node,
-                                surface=rel_path,
-                                existing_hits=json_hits,
-                            )
-                        )
-                    target_comp: ComponentWithRisks | None = None
-                    if comps:
-                        target_comp = _attribute_source_component(
-                            raw_text,
-                            raw_bytes,
-                            json_hits[0].byte_offset if json_hits else 0,
-                            comps,
-                            root_agent,
-                        )
-                    else:
-                        named = (
-                            fn_obj.get("name")
-                            if isinstance(fn_obj.get("name"), str)
-                            else parsed.get("name")
-                        )
-                        if isinstance(named, str) and named in tools_by_name:
-                            target_comp = tools_by_name[named][0]
-                        elif root_agent is not None:
-                            target_comp = root_agent
-                    if target_comp is not None and json_hits:
-                        added += _append_consolidated_risks(
-                            target_comp, json_hits, seen_keys=seen_keys
-                        )
-                else:
-                    hits = scan_text_block(raw_text, surface=rel_path, is_tool_surface=is_json_tool)
-                    target_comp = _attribute_source_component(
-                        raw_text, raw_bytes, hits[0].byte_offset if hits else 0, comps, root_agent
-                    )
-                    if target_comp is not None and hits:
-                        added += _append_consolidated_risks(target_comp, hits, seen_keys=seen_keys)
-                continue
+                    for target, hits in owned:
+                        added += _append_consolidated_risks(target, hits, seen_keys=seen_keys)
+                except (ValueError, RecursionError) as exc:
+                    failed(rel_path, exc)
 
-            scan_input = raw_text
-            if (
-                not is_tool_ctx
-                and suffix in {".md", ".mdc", ".markdown"}
-                and any(
-                    r.category == "hidden_markup" and r.severity == RiskSeverity.HIGH
-                    for comp in comps
-                    for r in comp.risks
-                )
-            ):
-                scan_input = _mask_hidden_markdown_markup(raw_text)
-            hits = scan_text_block(scan_input, surface=rel_path, is_tool_surface=is_tool_ctx)
-            if not hits:
-                continue
-            hits_by_target: dict[str, tuple[ComponentWithRisks, list[TextPoisoningHit]]] = {}
-            for h in hits:
-                chosen = _attribute_source_component(
-                    raw_text, raw_bytes, h.byte_offset, comps, root_agent
-                )
-                if chosen is None:
-                    continue
-                bucket = hits_by_target.setdefault(chosen.bom_ref, (chosen, []))
-                bucket[1].append(h)
-            for chosen, target_hits in hits_by_target.values():
-                added += _append_consolidated_risks(chosen, target_hits, seen_keys=seen_keys)
+    for comp in components:
+        try:
+            added += _append_consolidated_risks(
+                comp, _scan_component_fields(comp), seen_keys=seen_keys
+            )
+        except (ValueError, RecursionError) as exc:
+            failed(comp.bom_ref, exc)
 
     if surfaces is not None:
         surfaces.extend(sorted(scanned_rel_paths))
-    if failures is not None:
-        existing_failures = set(failures)
-        for msg in own_failures:
-            if msg not in existing_failures:
-                failures.append(msg)
-                existing_failures.add(msg)
-    if exclusions is not None:
-        existing_exclusions = set(exclusions)
-        for msg in own_exclusions:
-            if msg not in existing_exclusions:
-                exclusions.append(msg)
-                existing_exclusions.add(msg)
+    for target_list, own in ((failures, own_failures), (exclusions, own_exclusions)):
+        if target_list is not None:
+            known = set(target_list)
+            for msg in own:
+                if msg not in known:
+                    target_list.append(msg)
+                    known.add(msg)
     return added
