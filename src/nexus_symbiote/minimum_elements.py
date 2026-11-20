@@ -27,6 +27,7 @@ from typing import Any
 
 from nexus_symbiote import __version__
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.collection import CITED_EVIDENCE_CLAIM
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import (
     A2AClientComponent,
@@ -1550,7 +1551,12 @@ def _subject_outcome(element: Element, rule: _SubjectRule, located: _Located) ->
         return _Outcome(MISSING, native=tuple(native), reasons=("not-identified",))
     if rule.read is None:
         return _Outcome(MISSING, native=tuple(native), reasons=("no-standard-field",))
-    if element.id == f"{MODELS.id}/model-name" and imported_discovery_component(located.native):
+    if (
+        element.id == f"{MODELS.id}/model-name"
+        and imported_discovery_component(located.native)
+        # A model named from cited evidence carries the identifier a scan read, not a label.
+        and CITED_EVIDENCE_CLAIM not in located.native.claims
+    ):
         return _Outcome(MISSING, reasons=("synthetic-name",))
     assert located.exported is not None
     basis = _basis(located.native, measured=rule.measured)
