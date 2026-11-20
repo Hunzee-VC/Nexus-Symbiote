@@ -332,3 +332,13 @@ wrote. The components, findings and relationships are otherwise the same. Re-bas
 `diff --fail-on-alert` against an older baseline reports the changed recommendation text on each
 such finding and nothing else.
 
+## Upgrade attribution (`--expect-upgrade`)
+
+When upgrading Nexus SymBiote across a documented profile transition (`0.1.0` or
+`0.2.0`), `nexus-symbiote diff baseline.json candidate.json --expect-upgrade FROM_VERSION`
+partitions alerts caused *exclusively* by the static list of serializer and profile
+transitions since `FROM_VERSION` into `tool_upgrade_changes` while keeping genuine
+supply-chain drift (added or removed components, changed commands or endpoints,
+altered tool definitions, or any component where a profile transition co-occurs
+with a content change) in `security_alerts`. Re-collect and re-approve the baseline
+once the upgrade diff has been reviewed.

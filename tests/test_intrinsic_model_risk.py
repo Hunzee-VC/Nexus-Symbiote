@@ -40,6 +40,12 @@ def imported_model(**fields) -> AIBOM:
             "invalid_safetensors",
             "high",
         ),
+        # A file named as SafeTensors whose header did not establish the format.
+        (
+            {"properties": {"named_format": "safe-tensors"}, "serialization_safety": "unknown"},
+            "invalid_safetensors",
+            "high",
+        ),
     ],
 )
 def test_stripping_imported_findings_does_not_clear_model_facts(fields, category, severity):
@@ -84,6 +90,8 @@ def test_lower_declared_severity_cannot_downgrade_intrinsic_critical_fact():
         {"serialization_format": "safe-tensors", "serialization_safety": "safe"},
         {"trust_remote_code": False},
         {"provider": "hosted-provider", "requested_alias": "latest"},
+        {"properties": {"named_format": "llama.cpp"}},
+        {"properties": {"named_format": 7}},
     ],
 )
 def test_absent_security_facts_do_not_invent_these_findings(fields):
