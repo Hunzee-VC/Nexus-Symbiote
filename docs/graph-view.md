@@ -34,6 +34,9 @@ The view restates the inventory. It shows:
   `incomplete`, as [standard exports](standard-exports.md) state it, the verdict
   `risk` and `validate` reach (`complete`, `partial` or `unknown`), the number of scan
   failures and excluded surfaces, and up to 20 coverage gaps with the number left out.
+  The gaps state each distinct collection failure once, ending in `(recorded N times)`
+  when several collectors recorded it, and the collectors that are not complete as one
+  gap per state, while the number of scan failures counts every record.
 
 It does not show runtime reachability or effective authority. Every edge of a static
 scan is a repository association: that an agent's repository configures a server does

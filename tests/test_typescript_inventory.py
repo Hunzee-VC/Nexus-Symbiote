@@ -206,7 +206,7 @@ def test_ambient_declarations_record_no_server_or_tool(tmp_path):
         + '  server.tool("phantom", {}, handler);\n}\n',
     )
     servers = [c.name for c in result.components if isinstance(c, MCPServerComponent)]
-    assert servers == ["server"] and [t.name for t in _tools(result)] == ["read"]
+    assert servers == ["demo"] and [t.name for t in _tools(result)] == ["read"]
 
 
 def test_method_names_bind_nothing_inside_the_method(tmp_path):
@@ -218,7 +218,7 @@ def test_method_names_bind_nothing_inside_the_method(tmp_path):
         + 'class Plugin { server() { server.tool("read", {}, handler); } }\n',
     )
     servers = [c for c in result.components if isinstance(c, MCPServerComponent)]
-    assert sorted(server.name for server in servers) == ["inner", "server"]
+    assert sorted(server.name for server in servers) == ["demo", "inner"]
     assert [t.name for t in _tools(result)] == ["read"]
     assert not result.surfaces_excluded and not result.scan_failures
 

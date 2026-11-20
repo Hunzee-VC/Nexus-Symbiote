@@ -1,0 +1,1654 @@
+{
+  "metadata": {
+    "spec_version": "1.1.0",
+    "serial_number": "urn:uuid:3da5fa23-f799-55a7-babf-d86903516c9d",
+    "version": 1,
+    "timestamp": "2023-11-14T22:13:20Z",
+    "tool_name": "nexus-symbiote",
+    "tool_version": "0.2.0",
+    "tool_vendor": "aisecnomad",
+    "authors": [],
+    "completeness": {
+      "scope": "repository",
+      "surfaces_scanned": [
+        ".clinerules",
+        ".env.local",
+        ".windsurf/mcp_config.json",
+        ".windsurfrules",
+        "Dockerfile",
+        "a2a: Python SDK references (heuristic)",
+        "artifacts/churn.onnx",
+        "artifacts/churn.pt",
+        "artifacts/intent.tflite",
+        "config/claude_desktop_config.json",
+        "hf-cache/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/config.json",
+        "hf-cache/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/model.safetensors",
+        "mcp/analytics-server/src/server.ts",
+        "package.json",
+        "rag: Python vector-store imports (heuristic)",
+        "requirements-train.txt",
+        "shadowscan-report (no report found)",
+        "vendor/pkg/.cursor/mcp.json"
+      ],
+      "surfaces_excluded": [
+        ".zed/settings.json: MCP client configuration not inventoried"
+      ],
+      "scan_failures": [
+        "artifacts/escape.onnx: symlink target is outside the collection root",
+        "infra/secret-link: symlink target is absolute",
+        "artifacts/escape.onnx: symlink target is outside the collection root",
+        "infra/secret-link: symlink target is absolute",
+        "artifacts/escape.onnx: symlink target is outside the collection root",
+        "infra/secret-link: symlink target is absolute",
+        "artifacts/escape.onnx: symlink target is outside the collection root",
+        "infra/secret-link: symlink target is absolute",
+        "artifacts/escape.onnx: symlink target is outside the collection root",
+        "infra/secret-link: symlink target is absolute",
+        "artifacts/escape.onnx: symlink target is outside the collection root",
+        "infra/secret-link: symlink target is absolute"
+      ],
+      "timestamp": "2023-11-14T22:13:20Z",
+      "assurance_level": "observed",
+      "collectors_requested": [
+        "mcp",
+        "model",
+        "prompt",
+        "rag",
+        "registry",
+        "shadowscan",
+        "a2a",
+        "ide_agents"
+      ],
+      "collectors_completed": [
+        "registry",
+        "shadowscan"
+      ],
+      "unobserved_surfaces": [
+        "runtime",
+        "effective-identity",
+        "effective-authorization",
+        "live-tools",
+        "network"
+      ],
+      "exclusions": [
+        "**/.git",
+        "**/.venv",
+        "**/__pycache__",
+        "**/node_modules",
+        "**/venv",
+        ".git",
+        ".venv",
+        "__pycache__",
+        "node_modules"
+      ],
+      "source_unmapped_count": 0,
+      "source_unmapped_indexes": [],
+      "discovery_verification": {
+        "status": "not-applicable",
+        "method": "none",
+        "repository": "unknown",
+        "commit": "unknown",
+        "report_time": "unknown"
+      },
+      "scanner_status": {
+        "shadowscan": "complete",
+        "mcp": "failed",
+        "model": "failed",
+        "prompt": "failed",
+        "rag": "failed",
+        "registry": "complete",
+        "a2a": "failed",
+        "ide_agents": "failed"
+      }
+    },
+    "policy_source": "built-in",
+    "policy_weakened": []
+  },
+  "components": [
+    {
+      "bom_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "component_type": "agent",
+      "name": "repository",
+      "description": "Repository agent definition inferred from configuration",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "observed",
+      "properties": {
+        "identity_source": "repository-path",
+        "runtime_use": "unknown"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "repository-assembler",
+          "locator": ".",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        },
+        "deployment": {
+          "assurance": "declared",
+          "method": "not-collected",
+          "scope": "runtime",
+          "evidence_refs": [],
+          "unknown_reason": "Repository scan cannot identify a running workload"
+        }
+      },
+      "deployment_status": "unknown",
+      "data_refs": [],
+      "skill_refs": [],
+      "model_refs": [
+        "model:artifacts/churn.onnx",
+        "model:artifacts/churn.pt",
+        "model:artifacts/intent.tflite",
+        "model:hf-cache/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/model.safetensors"
+      ],
+      "tool_refs": [
+        "mcp-server:5a60ad07edb3bd2533010780885ba0ea880daf47b79fa61bebbd513ad32e40f7",
+        "mcp-server:5cfeef353a799fdf2900763d3efec2b1957c6a5d8e6e72bc58c7991b1cfe4b86",
+        "mcp-server:0f9cb69fe7f0ebcaef7d9ea3143a974bf6b8e97d80e62774533372ab1b032158",
+        "mcp-server:a36f69b676d9da6b5f83ea7d7a1174e3220dd8f2a5b788742c7ef80e3087cd89",
+        "mcp-source:mcp%2Fanalytics-server%2Fsrc%2Fserver.ts:server:3:116",
+        "tool:mcp-source:mcp%2Fanalytics-server%2Fsrc%2Fserver.ts:server:3:116/run_sql",
+        "tool:mcp-source:mcp%2Fanalytics-server%2Fsrc%2Fserver.ts:server:3:116/export_report"
+      ],
+      "memory_refs": [],
+      "prompt_refs": [
+        "prompt:.clinerules",
+        "prompt:.windsurfrules"
+      ],
+      "guardrail_refs": [],
+      "sub_agent_refs": [],
+      "authorizations": [],
+      "risks": [],
+      "autonomy_level": null
+    },
+    {
+      "bom_ref": "ide-agent:cline",
+      "component_type": "ide-agent",
+      "name": "cline",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": ".clinerules",
+      "properties": {
+        "collection_mode": "static-project-configuration",
+        "mcp_config_paths": [],
+        "permission_evidence": "declaration-only",
+        "effective_authorization_verified": false,
+        "permission_policy_limitations": [
+          "User and managed settings, workspace trust, per-session flags and runtime controls were not observed.",
+          "Deny and ask rules may narrow declared allow rules.",
+          "Project/local starting-mode declarations may be ignored by the host or version."
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "ide_agents",
+          "locator": ".clinerules",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "ide_type": "cline",
+      "config_files": [
+        ".clinerules"
+      ],
+      "mcp_server_refs": [],
+      "prompt_refs": [],
+      "risks": []
+    },
+    {
+      "bom_ref": "ide-agent:windsurf",
+      "component_type": "ide-agent",
+      "name": "windsurf",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": ".windsurfrules",
+      "properties": {
+        "collection_mode": "static-project-configuration",
+        "mcp_config_paths": [],
+        "permission_evidence": "declaration-only",
+        "effective_authorization_verified": false,
+        "permission_policy_limitations": [
+          "User and managed settings, workspace trust, per-session flags and runtime controls were not observed.",
+          "Deny and ask rules may narrow declared allow rules.",
+          "Project/local starting-mode declarations may be ignored by the host or version."
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "ide_agents",
+          "locator": ".windsurfrules",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "ide_type": "windsurf",
+      "config_files": [
+        ".windsurfrules"
+      ],
+      "mcp_server_refs": [],
+      "prompt_refs": [],
+      "risks": []
+    },
+    {
+      "bom_ref": "mcp-client:claude-desktop",
+      "component_type": "mcp-client",
+      "name": "claude-desktop MCP client",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": "config/claude_desktop_config.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "config_paths": [
+          "config/claude_desktop_config.json"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": "config/claude_desktop_config.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "host_application": "claude-desktop",
+      "server_refs": [
+        "mcp-server:0f9cb69fe7f0ebcaef7d9ea3143a974bf6b8e97d80e62774533372ab1b032158",
+        "mcp-server:5cfeef353a799fdf2900763d3efec2b1957c6a5d8e6e72bc58c7991b1cfe4b86"
+      ],
+      "config_path": "config/claude_desktop_config.json",
+      "risks": []
+    },
+    {
+      "bom_ref": "mcp-client:cursor",
+      "component_type": "mcp-client",
+      "name": "cursor MCP client",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": "vendor/pkg/.cursor/mcp.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "config_paths": [
+          "vendor/pkg/.cursor/mcp.json"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": "vendor/pkg/.cursor/mcp.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "host_application": "cursor",
+      "server_refs": [
+        "mcp-server:a36f69b676d9da6b5f83ea7d7a1174e3220dd8f2a5b788742c7ef80e3087cd89"
+      ],
+      "config_path": "vendor/pkg/.cursor/mcp.json",
+      "risks": []
+    },
+    {
+      "bom_ref": "mcp-client:sdk",
+      "component_type": "mcp-client",
+      "name": "MCP SDK client (code-detected)",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": "mcp/analytics-server/src/server.ts",
+      "properties": {
+        "collection_mode": "static-source-reference",
+        "source_paths": [
+          "mcp/analytics-server/src/server.ts"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": "mcp/analytics-server/src/server.ts",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "host_application": "sdk",
+      "server_refs": [],
+      "risks": []
+    },
+    {
+      "bom_ref": "mcp-client:windsurf",
+      "component_type": "mcp-client",
+      "name": "windsurf MCP client",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "declared",
+      "source_path": ".windsurf/mcp_config.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "config_paths": [
+          ".windsurf/mcp_config.json"
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": ".windsurf/mcp_config.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "host_application": "windsurf",
+      "server_refs": [
+        "mcp-server:5a60ad07edb3bd2533010780885ba0ea880daf47b79fa61bebbd513ad32e40f7"
+      ],
+      "config_path": ".windsurf/mcp_config.json",
+      "risks": []
+    },
+    {
+      "bom_ref": "mcp-server:0f9cb69fe7f0ebcaef7d9ea3143a974bf6b8e97d80e62774533372ab1b032158",
+      "component_type": "mcp-server",
+      "name": "supabase",
+      "hashes": {},
+      "trust_tier": "third-party-unsigned",
+      "assurance_level": "declared",
+      "source_path": "config/claude_desktop_config.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "launch_arguments_redacted": true,
+        "endpoint_credentials_omitted": false,
+        "declared_fields": [
+          "args",
+          "command"
+        ],
+        "launcher": "npx",
+        "packages": [
+          {
+            "identity": "npm:@supabase/mcp-server-supabase",
+            "version": null,
+            "pinned": false,
+            "pin": null
+          }
+        ],
+        "package_sources": [
+          "working-directory=[unresolved]"
+        ],
+        "source_values_bound": false,
+        "static_config_hash": "sha256:113a95dbad133130fc9a23967fc3fd90ca100362c1aa84dbb4d7869069108808",
+        "static_config_hash_profile": "nexus-symbiote/mcp-static-config/v4"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": "config/claude_desktop_config.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "***",
+        "***",
+        "***",
+        "***"
+      ],
+      "env": {},
+      "tool_count": 0,
+      "tool_refs": [],
+      "version_pinned": false,
+      "risks": [
+        {
+          "severity": "high",
+          "category": "version_pinning",
+          "detail": "MCP server 'supabase' uses an unpinned package reference (arguments omitted).",
+          "recommendation": "Pin to an exact version and store a hash of the tool schema.",
+          "references": []
+        },
+        {
+          "severity": "medium",
+          "category": "package_source",
+          "detail": "MCP server 'supabase' resolves packages through a non-default source (working-directory); package name and version do not establish identity.",
+          "recommendation": "Review that registry or index, and pin an artifact digest or integrity hash.",
+          "references": []
+        },
+        {
+          "severity": "medium",
+          "category": "local_process",
+          "detail": "MCP server 'supabase' uses stdio transport (local process).",
+          "recommendation": "Ensure the command binary is integrity-checked.",
+          "references": []
+        },
+        {
+          "severity": "low",
+          "category": "completeness",
+          "detail": "MCP server 'supabase' values not bound in this inventory: launch arguments.",
+          "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "mcp-server:5a60ad07edb3bd2533010780885ba0ea880daf47b79fa61bebbd513ad32e40f7",
+      "component_type": "mcp-server",
+      "name": "sequential-thinking",
+      "hashes": {},
+      "trust_tier": "third-party-unsigned",
+      "assurance_level": "declared",
+      "source_path": ".windsurf/mcp_config.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "launch_arguments_redacted": true,
+        "endpoint_credentials_omitted": false,
+        "declared_fields": [
+          "args",
+          "command"
+        ],
+        "launcher": "npx",
+        "packages": [
+          {
+            "identity": "npm:@modelcontextprotocol/server-sequential-thinking",
+            "version": null,
+            "pinned": false,
+            "pin": null
+          }
+        ],
+        "source_values_bound": false,
+        "static_config_hash": "sha256:9ee208d06840fc214a588fce022f98ebfbcabc1fd6fb075b8beb056350d0ba7c",
+        "static_config_hash_profile": "nexus-symbiote/mcp-static-config/v4"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": ".windsurf/mcp_config.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "transport": "stdio",
+      "command": "npx",
+      "launcher_package": "npm:@modelcontextprotocol/server-sequential-thinking",
+      "args": [
+        "***",
+        "***"
+      ],
+      "env": {},
+      "tool_count": 0,
+      "tool_refs": [],
+      "version_pinned": false,
+      "risks": [
+        {
+          "severity": "high",
+          "category": "version_pinning",
+          "detail": "MCP server 'sequential-thinking' uses an unpinned package reference (arguments omitted).",
+          "recommendation": "Pin to an exact version and store a hash of the tool schema.",
+          "references": []
+        },
+        {
+          "severity": "medium",
+          "category": "local_process",
+          "detail": "MCP server 'sequential-thinking' uses stdio transport (local process).",
+          "recommendation": "Ensure the command binary is integrity-checked.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "mcp-server:5cfeef353a799fdf2900763d3efec2b1957c6a5d8e6e72bc58c7991b1cfe4b86",
+      "component_type": "mcp-server",
+      "name": "notion",
+      "version": "1.8.1",
+      "hashes": {},
+      "trust_tier": "third-party-unsigned",
+      "assurance_level": "declared",
+      "source_path": "config/claude_desktop_config.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "launch_arguments_redacted": true,
+        "endpoint_credentials_omitted": false,
+        "declared_fields": [
+          "args",
+          "command",
+          "env"
+        ],
+        "launcher": "npx",
+        "packages": [
+          {
+            "identity": "npm:@notionhq/notion-mcp-server",
+            "version": "1.8.1",
+            "pinned": true,
+            "pin": "version"
+          }
+        ],
+        "package_sources": [
+          "working-directory=[unresolved]"
+        ],
+        "source_values_bound": false,
+        "static_config_hash": "sha256:3ca8bd1d4d25deca7af730638414693e0d48fd8eda70cef1fe4b00d8aff38e8c",
+        "static_config_hash_profile": "nexus-symbiote/mcp-static-config/v4"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": "config/claude_desktop_config.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "***",
+        "***"
+      ],
+      "env": {
+        "NOTION_TOKEN": "***"
+      },
+      "tool_count": 0,
+      "tool_refs": [],
+      "version_pinned": true,
+      "risks": [
+        {
+          "severity": "medium",
+          "category": "transitive_resolution",
+          "detail": "MCP server 'notion' pins its package but resolves dependencies at launch without a lockfile.",
+          "recommendation": "Vendor a lockfile-installed server, or launch an image by digest.",
+          "references": []
+        },
+        {
+          "severity": "medium",
+          "category": "package_source",
+          "detail": "MCP server 'notion' resolves packages through a non-default source (working-directory); package name and version do not establish identity.",
+          "recommendation": "Review that registry or index, and pin an artifact digest or integrity hash.",
+          "references": []
+        },
+        {
+          "severity": "medium",
+          "category": "local_process",
+          "detail": "MCP server 'notion' uses stdio transport (local process).",
+          "recommendation": "Ensure the command binary is integrity-checked.",
+          "references": []
+        },
+        {
+          "severity": "low",
+          "category": "completeness",
+          "detail": "MCP server 'notion' values not bound in this inventory: launch arguments; environment values.",
+          "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "mcp-server:a36f69b676d9da6b5f83ea7d7a1174e3220dd8f2a5b788742c7ef80e3087cd89",
+      "component_type": "mcp-server",
+      "name": "vendored-x",
+      "hashes": {},
+      "trust_tier": "third-party-unsigned",
+      "assurance_level": "declared",
+      "source_path": "vendor/pkg/.cursor/mcp.json",
+      "properties": {
+        "collection_mode": "static-config",
+        "launch_arguments_redacted": true,
+        "endpoint_credentials_omitted": false,
+        "declared_fields": [
+          "args",
+          "command"
+        ],
+        "launcher": "local",
+        "source_values_bound": false,
+        "static_config_hash": "sha256:7f1951b3828e0c41ae98b367a5204fc98d4228120d30229bbc2dc8f79276b04b",
+        "static_config_hash_profile": "nexus-symbiote/mcp-static-config/v4"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": "vendor/pkg/.cursor/mcp.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "***"
+      ],
+      "env": {},
+      "tool_count": 0,
+      "tool_refs": [],
+      "risks": [
+        {
+          "severity": "medium",
+          "category": "local_process",
+          "detail": "MCP server 'vendored-x' uses stdio transport (local process).",
+          "recommendation": "Ensure the command binary is integrity-checked.",
+          "references": []
+        },
+        {
+          "severity": "low",
+          "category": "completeness",
+          "detail": "MCP server 'vendored-x' values not bound in this inventory: launch arguments.",
+          "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "mcp-source:mcp%2Fanalytics-server%2Fsrc%2Fserver.ts:server:3:116",
+      "component_type": "mcp-server",
+      "name": "server",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "mcp/analytics-server/src/server.ts",
+      "properties": {
+        "declaration_line": 3,
+        "method": "typescript-ast",
+        "collection_mode": "static-source-declaration",
+        "runtime_registration": "unknown"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": "mcp/analytics-server/src/server.ts",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "args": [],
+      "env": {},
+      "tool_count": 2,
+      "tool_refs": [
+        "tool:mcp-source:mcp%2Fanalytics-server%2Fsrc%2Fserver.ts:server:3:116/run_sql",
+        "tool:mcp-source:mcp%2Fanalytics-server%2Fsrc%2Fserver.ts:server:3:116/export_report"
+      ],
+      "risks": []
+    },
+    {
+      "bom_ref": "model:artifacts/churn.onnx",
+      "component_type": "model",
+      "name": "artifacts/churn.onnx",
+      "hashes": {
+        "sha256": "sha256:594e3630b20cf4e318fabfea47fe69cc2e4e3eea2956121afa6e8a7ea165f675"
+      },
+      "trust_tier": "unknown",
+      "assurance_level": "observed",
+      "source_path": "artifacts/churn.onnx",
+      "properties": {
+        "format_inspection": "No bounded structural validator for this format/loader"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "model",
+          "locator": "artifacts/churn.onnx",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "model_type": "foundation",
+      "serialization_format": "onnx",
+      "serialization_safety": "unknown",
+      "signing_status": "signature-not-found",
+      "risks": [
+        {
+          "severity": "high",
+          "category": "serialization_format_unknown",
+          "detail": "Model 'churn.onnx' format/loader safety could not be established.",
+          "recommendation": "Validate the actual container and the specific loader before admission.",
+          "references": []
+        },
+        {
+          "severity": "high",
+          "category": "signing_status",
+          "detail": "Model 'churn.onnx' has no verified artifact-bound signature (signature-not-found).",
+          "recommendation": "Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.",
+          "references": [
+            "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md"
+          ]
+        }
+      ]
+    },
+    {
+      "bom_ref": "model:artifacts/churn.pt",
+      "component_type": "model",
+      "name": "artifacts/churn.pt",
+      "hashes": {
+        "sha256": "sha256:1c9ae219b64ba6cbab16f0e755d2d640ebae1e1a771fd65539bac1b81d86e6b0"
+      },
+      "trust_tier": "unknown",
+      "assurance_level": "observed",
+      "source_path": "artifacts/churn.pt",
+      "properties": {
+        "format_inspection": "Potential code-executing loader format"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "model",
+          "locator": "artifacts/churn.pt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "model_type": "foundation",
+      "serialization_format": "pytorch",
+      "serialization_safety": "unsafe-code-execution",
+      "signing_status": "signature-not-found",
+      "risks": [
+        {
+          "severity": "critical",
+          "category": "serialization_format",
+          "detail": "Model 'churn.pt' has evidence of a potentially code-executing serialization or loader.",
+          "recommendation": "Convert to SafeTensors. Block pickle/pt/pth in production.",
+          "references": [
+            "https://huggingface.co/blog/safetensors-security-audit"
+          ]
+        },
+        {
+          "severity": "high",
+          "category": "signing_status",
+          "detail": "Model 'churn.pt' has no verified artifact-bound signature (signature-not-found).",
+          "recommendation": "Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.",
+          "references": [
+            "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md"
+          ]
+        }
+      ]
+    },
+    {
+      "bom_ref": "model:artifacts/intent.tflite",
+      "component_type": "model",
+      "name": "artifacts/intent.tflite",
+      "hashes": {
+        "sha256": "sha256:7a5d2fa44d4bbe4f7ef68e0e6f7ba38c40d32bad0475502ffb37f4dcb58af4f3"
+      },
+      "trust_tier": "unknown",
+      "assurance_level": "observed",
+      "source_path": "artifacts/intent.tflite",
+      "properties": {
+        "format_inspection": "No bounded structural validator for this format/loader"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "model",
+          "locator": "artifacts/intent.tflite",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "model_type": "foundation",
+      "serialization_format": "tensorflow-lite",
+      "serialization_safety": "unknown",
+      "signing_status": "signature-not-found",
+      "risks": [
+        {
+          "severity": "high",
+          "category": "serialization_format_unknown",
+          "detail": "Model 'intent.tflite' format/loader safety could not be established.",
+          "recommendation": "Validate the actual container and the specific loader before admission.",
+          "references": []
+        },
+        {
+          "severity": "high",
+          "category": "signing_status",
+          "detail": "Model 'intent.tflite' has no verified artifact-bound signature (signature-not-found).",
+          "recommendation": "Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.",
+          "references": [
+            "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md"
+          ]
+        }
+      ]
+    },
+    {
+      "bom_ref": "model:hf-cache/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/model.safetensors",
+      "component_type": "model",
+      "name": "hf-cache/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/model.safetensors",
+      "hashes": {
+        "sha256": "sha256:ce7603b60bc1d8c4d372a164a50a6f8a8b01288e688daf0d1d9c8d658f7df401"
+      },
+      "trust_tier": "unknown",
+      "assurance_level": "observed",
+      "source_path": "hf-cache/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/model.safetensors",
+      "properties": {
+        "format_inspection": "Bounded SafeTensors header, shapes and offsets checked",
+        "config_files": [
+          {
+            "path": "hf-cache/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/config.json",
+            "sha256": "sha256:9e2584d1de91df4c6c4e9bf643245c08c0164204cc0ced72a26e4b4b4305f613"
+          }
+        ]
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "model",
+          "locator": "hf-cache/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/model.safetensors",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "model_type": "foundation",
+      "serialization_format": "safe-tensors",
+      "serialization_safety": "safe",
+      "signing_status": "signature-not-found",
+      "tensor_inventory_hash": "sha256:6379fbdb82f553bf01acb327a8a2c632cca326765f09919474afe1200fb616bd",
+      "safetensors_header_hash": "sha256:03327b463c88d90567e5992e2d3fc2d9e37c214244f8a66dc5ee7f73bf5180e3",
+      "risks": [
+        {
+          "severity": "high",
+          "category": "signing_status",
+          "detail": "Model 'model.safetensors' has no verified artifact-bound signature (signature-not-found).",
+          "recommendation": "Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet.",
+          "references": [
+            "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md"
+          ]
+        }
+      ]
+    },
+    {
+      "bom_ref": "prompt:.clinerules",
+      "component_type": "prompt-template",
+      "name": ".clinerules",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "observed",
+      "source_path": ".clinerules",
+      "properties": {},
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "prompt",
+          "locator": ".clinerules",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "prompt_type": "rules-file",
+      "content_hash": "sha256:d2827d1375ba9fc25c8531fae27e17586b6d7ba649220bc9fefd06682e020ffc",
+      "risks": []
+    },
+    {
+      "bom_ref": "prompt:.windsurfrules",
+      "component_type": "prompt-template",
+      "name": ".windsurfrules",
+      "hashes": {},
+      "trust_tier": "internal-unverified",
+      "assurance_level": "observed",
+      "source_path": ".windsurfrules",
+      "properties": {},
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "prompt",
+          "locator": ".windsurfrules",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "prompt_type": "rules-file",
+      "content_hash": "sha256:389d26e0f8ccc239bdf0529fcc2044542608274fd8c2a6596ebaed000c3aad72",
+      "risks": []
+    },
+    {
+      "bom_ref": "registry:npm/@ai-sdk/google",
+      "component_type": "registry-entry",
+      "name": "@ai-sdk/google",
+      "version": "^2.0.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "package.json",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_version": "^2.0.0"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "package.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "registry_type": "npm",
+      "risks": [
+        {
+          "severity": "medium",
+          "category": "version_pinning",
+          "detail": "npm package '@ai-sdk/google' has a nonexact declared reference: ^2.0.0",
+          "recommendation": "Resolve and verify an immutable artifact with lockfile integrity evidence.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "registry:npm/@ai-sdk/openai",
+      "component_type": "registry-entry",
+      "name": "@ai-sdk/openai",
+      "version": "^2.0.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "package.json",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_version": "^2.0.0"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "package.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "registry_type": "npm",
+      "risks": [
+        {
+          "severity": "medium",
+          "category": "version_pinning",
+          "detail": "npm package '@ai-sdk/openai' has a nonexact declared reference: ^2.0.0",
+          "recommendation": "Resolve and verify an immutable artifact with lockfile integrity evidence.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "registry:npm/@anthropic-ai/sdk",
+      "component_type": "registry-entry",
+      "name": "@anthropic-ai/sdk",
+      "version": "0.65.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "package.json",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_version": "0.65.0"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "package.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:npm/%40anthropic-ai/sdk@0.65.0",
+      "registry_type": "npm",
+      "risks": []
+    },
+    {
+      "bom_ref": "registry:npm/@langchain/community",
+      "component_type": "registry-entry",
+      "name": "@langchain/community",
+      "version": "^0.3.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "package.json",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_version": "^0.3.0"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "package.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "registry_type": "npm",
+      "risks": [
+        {
+          "severity": "medium",
+          "category": "version_pinning",
+          "detail": "npm package '@langchain/community' has a nonexact declared reference: ^0.3.0",
+          "recommendation": "Resolve and verify an immutable artifact with lockfile integrity evidence.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "registry:npm/@mistralai/mistralai",
+      "component_type": "registry-entry",
+      "name": "@mistralai/mistralai",
+      "version": "^1.5.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "package.json",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_version": "^1.5.0"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "package.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "registry_type": "npm",
+      "risks": [
+        {
+          "severity": "medium",
+          "category": "version_pinning",
+          "detail": "npm package '@mistralai/mistralai' has a nonexact declared reference: ^1.5.0",
+          "recommendation": "Resolve and verify an immutable artifact with lockfile integrity evidence.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "registry:npm/@openai/agents",
+      "component_type": "registry-entry",
+      "name": "@openai/agents",
+      "version": "^0.1.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "package.json",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_version": "^0.1.0"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "package.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "registry_type": "npm",
+      "risks": [
+        {
+          "severity": "medium",
+          "category": "version_pinning",
+          "detail": "npm package '@openai/agents' has a nonexact declared reference: ^0.1.0",
+          "recommendation": "Resolve and verify an immutable artifact with lockfile integrity evidence.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "registry:npm/ai",
+      "component_type": "registry-entry",
+      "name": "ai",
+      "version": "^5.0.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "package.json",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_version": "^5.0.0"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "package.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "registry_type": "npm",
+      "risks": [
+        {
+          "severity": "medium",
+          "category": "version_pinning",
+          "detail": "npm package 'ai' has a nonexact declared reference: ^5.0.0",
+          "recommendation": "Resolve and verify an immutable artifact with lockfile integrity evidence.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "registry:npm/langchain",
+      "component_type": "registry-entry",
+      "name": "langchain",
+      "version": "^0.3.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "package.json",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_version": "^0.3.0"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "package.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "registry_type": "npm",
+      "risks": [
+        {
+          "severity": "medium",
+          "category": "version_pinning",
+          "detail": "npm package 'langchain' has a nonexact declared reference: ^0.3.0",
+          "recommendation": "Resolve and verify an immutable artifact with lockfile integrity evidence.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "registry:npm/weaviate-client",
+      "component_type": "registry-entry",
+      "name": "weaviate-client",
+      "version": "^3.5.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "package.json",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_version": "^3.5.0"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "package.json",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "registry_type": "npm",
+      "risks": [
+        {
+          "severity": "medium",
+          "category": "version_pinning",
+          "detail": "npm package 'weaviate-client' has a nonexact declared reference: ^3.5.0",
+          "recommendation": "Resolve and verify an immutable artifact with lockfile integrity evidence.",
+          "references": []
+        }
+      ]
+    },
+    {
+      "bom_ref": "registry:pypi/onnxruntime",
+      "component_type": "registry-entry",
+      "name": "onnxruntime",
+      "version": "==1.23.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "requirements-train.txt",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_requirement": "onnxruntime==1.23.0"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "requirements-train.txt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:pypi/onnxruntime@1.23.0",
+      "registry_type": "pypi",
+      "registry_uri": "https://pypi.org",
+      "risks": []
+    },
+    {
+      "bom_ref": "registry:pypi/torch",
+      "component_type": "registry-entry",
+      "name": "torch",
+      "version": "==2.8.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "requirements-train.txt",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_requirement": "torch==2.8.0"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "requirements-train.txt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:pypi/torch@2.8.0",
+      "registry_type": "pypi",
+      "registry_uri": "https://pypi.org",
+      "risks": []
+    },
+    {
+      "bom_ref": "registry:pypi/transformers",
+      "component_type": "registry-entry",
+      "name": "transformers",
+      "version": "==4.57.0",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "requirements-train.txt",
+      "properties": {
+        "collection_mode": "manifest-reference",
+        "registry_origin_verified": false,
+        "requested_requirement": "transformers==4.57.0"
+      },
+      "claims": {
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "registry",
+          "locator": "requirements-train.txt",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "package_url": "pkg:pypi/transformers@4.57.0",
+      "registry_type": "pypi",
+      "registry_uri": "https://pypi.org",
+      "risks": []
+    },
+    {
+      "bom_ref": "tool:mcp-source:mcp%2Fanalytics-server%2Fsrc%2Fserver.ts:server:3:116/export_report",
+      "component_type": "tool",
+      "name": "export_report",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "mcp/analytics-server/src/server.ts",
+      "properties": {
+        "declaration_line": 5,
+        "method": "typescript-ast",
+        "collection_mode": "static-source-declaration",
+        "registration_source_sha256": "sha256:a629e47084a220f02de51e7c421ad27788eb4c9378b94a92b46e6e591e15eb8d",
+        "source_sha256": "sha256:1303d9cf86b1c781b53dc267f2d69d5761f48249804dcb6fdededd5b82f943c7"
+      },
+      "claims": {
+        "tool_definition": {
+          "assurance": "declared",
+          "method": "not-collected",
+          "scope": "source-declaration",
+          "evidence_refs": [],
+          "unknown_reason": "Only the literal registration name was collected; the effective descriptor is unobserved"
+        },
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": "mcp/analytics-server/src/server.ts",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "mcp_server_ref": "mcp-source:mcp%2Fanalytics-server%2Fsrc%2Fserver.ts:server:3:116",
+      "annotations": {},
+      "risks": []
+    },
+    {
+      "bom_ref": "tool:mcp-source:mcp%2Fanalytics-server%2Fsrc%2Fserver.ts:server:3:116/run_sql",
+      "component_type": "tool",
+      "name": "run_sql",
+      "hashes": {},
+      "trust_tier": "unknown",
+      "assurance_level": "declared",
+      "source_path": "mcp/analytics-server/src/server.ts",
+      "properties": {
+        "declaration_line": 4,
+        "method": "typescript-ast",
+        "collection_mode": "static-source-declaration",
+        "registration_source_sha256": "sha256:977a5bba27bc177b0733ace9767c906823c34ad0cd1518979d05dc740d351854",
+        "source_sha256": "sha256:1303d9cf86b1c781b53dc267f2d69d5761f48249804dcb6fdededd5b82f943c7"
+      },
+      "claims": {
+        "tool_definition": {
+          "assurance": "declared",
+          "method": "not-collected",
+          "scope": "source-declaration",
+          "evidence_refs": [],
+          "unknown_reason": "Only the literal registration name was collected; the effective descriptor is unobserved"
+        },
+        "repository_presence": {
+          "assurance": "observed",
+          "method": "filesystem-inventory",
+          "scope": "repository",
+          "collector": "mcp",
+          "locator": "mcp/analytics-server/src/server.ts",
+          "observed_at": "2023-11-14T22:13:20Z",
+          "evidence_refs": []
+        }
+      },
+      "mcp_server_ref": "mcp-source:mcp%2Fanalytics-server%2Fsrc%2Fserver.ts:server:3:116",
+      "annotations": {},
+      "risks": []
+    }
+  ],
+  "dependencies": [
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "ide-agent:cline",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "ide-agent:windsurf",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-client:claude-desktop",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-client:cursor",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-client:sdk",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-client:windsurf",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-server:0f9cb69fe7f0ebcaef7d9ea3143a974bf6b8e97d80e62774533372ab1b032158",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-server:5a60ad07edb3bd2533010780885ba0ea880daf47b79fa61bebbd513ad32e40f7",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-server:5cfeef353a799fdf2900763d3efec2b1957c6a5d8e6e72bc58c7991b1cfe4b86",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-server:a36f69b676d9da6b5f83ea7d7a1174e3220dd8f2a5b788742c7ef80e3087cd89",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "mcp-source:mcp%2Fanalytics-server%2Fsrc%2Fserver.ts:server:3:116",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "tool:mcp-source:mcp%2Fanalytics-server%2Fsrc%2Fserver.ts:server:3:116/export_report",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "tool:mcp-source:mcp%2Fanalytics-server%2Fsrc%2Fserver.ts:server:3:116/run_sql",
+      "relationship": "configured-with",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "prompt:.clinerules",
+      "relationship": "reads-instructions",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "prompt:.windsurfrules",
+      "relationship": "reads-instructions",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "model:artifacts/churn.onnx",
+      "relationship": "uses-model",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "model:artifacts/churn.pt",
+      "relationship": "uses-model",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "model:artifacts/intent.tflite",
+      "relationship": "uses-model",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "model:hf-cache/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/model.safetensors",
+      "relationship": "uses-model",
+      "assurance_level": "declared",
+      "conditions": "repository association; runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:npm/@ai-sdk/google",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:npm/@ai-sdk/openai",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:npm/@anthropic-ai/sdk",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:npm/@langchain/community",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:npm/@mistralai/mistralai",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:npm/@openai/agents",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:npm/ai",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:npm/langchain",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:npm/weaviate-client",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:pypi/onnxruntime",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:pypi/torch",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "agent:repository:cdb4ee2aea69cc6a83331bbe",
+      "target_ref": "registry:pypi/transformers",
+      "relationship": "depends-on",
+      "assurance_level": "declared",
+      "conditions": "repository manifest dependency; installed artifact, runtime use and authority unobserved"
+    },
+    {
+      "source_ref": "mcp-source:mcp%2Fanalytics-server%2Fsrc%2Fserver.ts:server:3:116",
+      "target_ref": "tool:mcp-source:mcp%2Fanalytics-server%2Fsrc%2Fserver.ts:server:3:116/export_report",
+      "relationship": "provides-tool",
+      "assurance_level": "declared"
+    },
+    {
+      "source_ref": "mcp-source:mcp%2Fanalytics-server%2Fsrc%2Fserver.ts:server:3:116",
+      "target_ref": "tool:mcp-source:mcp%2Fanalytics-server%2Fsrc%2Fserver.ts:server:3:116/run_sql",
+      "relationship": "provides-tool",
+      "assurance_level": "declared"
+    }
+  ]
+}
