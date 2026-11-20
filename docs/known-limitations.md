@@ -5,7 +5,7 @@ and what to do about each limit. For how findings are classified, such as when a
 `.bin` file is critical or which characters count as hidden, see
 [known false-positive and false-negative classes](security-model.md#known-false-positive-and-false-negative-classes).
 The list that shipped with 0.1.0 is in
-[its security policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/v0.1.0/SECURITY.md#known-limitations-in-010).
+[its security policy](https://github.com/aisecnomad/Nexus-Symbiote/blob/v0.1.0/SECURITY.md#known-limitations-in-010).
 
 For the collectors, each limit has one of three effects on a gate:
 

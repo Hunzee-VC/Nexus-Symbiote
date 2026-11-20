@@ -250,3 +250,14 @@ do not certify semantic equivalence or admission authority.
 
 Static MCP configuration source binding is a separate versioned contract. See
 [source reconciliation and snapshot migration](verification-source-binding.md).
+
+## Documentation links in findings
+
+Model-integrity findings carry a link to `docs/model-integrity.md` in the repository that
+publishes this tool. When the repository's canonical owner changed to the aisecnomad account
+(CHANGELOG, Unreleased), that link changed with it, so an inventory that holds a model-integrity
+finding has a different content digest and serial number from the one the previous owner's build
+wrote. The components, findings and relationships are otherwise the same. Re-baseline once; a
+`diff --fail-on-alert` against an older baseline reports the changed recommendation text on each
+such finding and nothing else.
+

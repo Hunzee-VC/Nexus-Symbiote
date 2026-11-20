@@ -301,7 +301,7 @@ keep working; configure one of the two.
 
 ```yaml
 repos:
-  - repo: https://github.com/Hunzee-VC/Nexus-Symbiote
+  - repo: https://github.com/aisecnomad/Nexus-Symbiote
     rev: <reviewed-40-character-commit-sha>
     hooks:
       - id: nexus-symbiote-scan
