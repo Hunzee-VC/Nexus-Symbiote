@@ -1,0 +1,1 @@
+/aibom-run/venvs/ai-finder/bin/ai-finder scan /aibom-run/work/ai-finder/corpus -r -f spdx --spdx-v3 -o /aibom-run/resultsB/ai-finder/spdx/bom.spdx.json 

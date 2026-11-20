@@ -151,13 +151,13 @@ def test_repository_controls_tls_strict_json_and_proxy_isolation(
             controls._fetch(bad_repo, "branches/main", "tok")
     for bad_token in ("", "tok\x00bad", "tok\nbad", "tok\rbad"):
         with pytest.raises(ValueError, match="GitHub token"):
-            controls._fetch("Hunzee-VC/Nexus-Symbiote", "branches/main", bad_token)
+            controls._fetch("aisecnomad/Nexus-Symbiote", "branches/main", bad_token)
 
     captured_handlers: list[Any] = []
 
     class FakeOpener:
         def open(self, request: Any, timeout: int = 15) -> io.BytesIO:
-            assert request.full_url == "https://api.github.com/repos/Hunzee-VC/Nexus-Symbiote/x"
+            assert request.full_url == "https://api.github.com/repos/aisecnomad/Nexus-Symbiote/x"
             assert timeout == 15
             return io.BytesIO(b'{"status": "ok"}')
 
@@ -167,7 +167,7 @@ def test_repository_controls_tls_strict_json_and_proxy_isolation(
 
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
     monkeypatch.setattr(controls, "build_opener", fake_build_opener)
-    assert controls._fetch("Hunzee-VC/Nexus-Symbiote", "x", "valid-token") == {"status": "ok"}
+    assert controls._fetch("aisecnomad/Nexus-Symbiote", "x", "valid-token") == {"status": "ok"}
     proxy_handlers = [h for h in captured_handlers if isinstance(h, ProxyHandler)]
     assert len(proxy_handlers) == 1
     assert proxy_handlers[0].proxies == {}

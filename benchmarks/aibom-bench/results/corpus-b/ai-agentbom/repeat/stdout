@@ -1,0 +1,16 @@
+Wrote /aibom-run/resultsB/ai-agentbom/repeat/agentbom.json
+Wrote /aibom-run/resultsB/ai-agentbom/repeat/agentbom.md
+Wrote /aibom-run/resultsB/ai-agentbom/repeat/agentbom.cdx.json
+Wrote /aibom-run/resultsB/ai-agentbom/repeat/agentbom.mmd
+Wrote /aibom-run/resultsB/ai-agentbom/repeat/agentbom.sarif
+Risk: high (65/100)
+
+Reports written to: /aibom-run/resultsB/ai-agentbom/repeat/
+
+Next:
+  Open HTML report:
+    agentbom scan /aibom-run/work/ai-agentbom/corpus --output-dir /aibom-run/resultsB/ai-agentbom/repeat --html --open
+
+  Start policy review:
+    agentbom init
+    agentbom scan /aibom-run/work/ai-agentbom/corpus --output-dir /aibom-run/resultsB/ai-agentbom/repeat --policy agentbom.toml --html --open

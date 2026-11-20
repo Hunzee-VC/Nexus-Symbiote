@@ -1,0 +1,5 @@
+[1;35mNotice: Generating an SBOM without a lockfile is risky and non-deterministic. Consider generating and committing the lockfile to your repository to ensure reproducible builds and SBOMs.[0m
+[1;35mNotice: Generating an SBOM without a lockfile is risky and non-deterministic. Consider generating and committing the lockfile to your repository to ensure reproducible builds and SBOMs.[0m
+npm install has failed. Generated SBOM will be empty or with a lower precision.
+[1;35mNotice: Running python command without '-S' argument. Only run cdxgen in trusted directories to prevent auto-executing local scripts.[0m
+[1;35mNotice: pip/uv install invoked without '--only-binary'. This allows executing untrusted setup.py scripts. Only run cdxgen in trusted directories.[0m

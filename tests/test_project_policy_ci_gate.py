@@ -22,7 +22,7 @@ def _project(root: Path, policy: str) -> Path:
     root.mkdir()
     (root / ".nexus-symbiote.yaml").write_text(policy)
     (root / "models").mkdir()
-    (root / "models" / "classifier.pkl").write_bytes(b"unsafe-format-fixture")
+    (root / "models" / "classifier.pkl").write_bytes(b"\x80\x04N.")
     return root
 
 

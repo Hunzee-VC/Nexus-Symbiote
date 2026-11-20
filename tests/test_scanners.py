@@ -77,7 +77,7 @@ class TestModelScanner:
     def test_scan_pickle_flags_risk(self, tmp_path):
         model_dir = tmp_path / "unsafe_model"
         model_dir.mkdir()
-        (model_dir / "model.pkl").write_bytes(b"\x00" * 100)
+        (model_dir / "model.pkl").write_bytes(b"\x80\x04N.")
 
         scanner = ModelScanner()
         result = scanner.scan(tmp_path)

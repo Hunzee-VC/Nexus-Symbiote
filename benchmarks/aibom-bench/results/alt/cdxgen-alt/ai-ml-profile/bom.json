@@ -1,0 +1,1697 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "serialNumber": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-18T10:34:56Z",
+    "tools": {
+      "components": [
+        {
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "version": "12.9.2",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@12.9.2",
+          "type": "application",
+          "bom-ref": "pkg:npm/@cyclonedx/cdxgen@12.9.2",
+          "publisher": "OWASP Foundation",
+          "authors": [
+            {
+              "name": "OWASP Foundation"
+            }
+          ]
+        }
+      ]
+    },
+    "authors": [
+      {
+        "name": "OWASP Foundation"
+      }
+    ],
+    "lifecycles": [
+      {
+        "phase": "build"
+      }
+    ],
+    "component": {
+      "name": "acme-support-agent",
+      "version": "1.4.0",
+      "properties": [
+        {
+          "name": "cdx:pypi:requiresPython",
+          "value": ">=3.12"
+        },
+        {
+          "name": "SrcFile",
+          "value": "/aibom-run/work/cdxgen-alt/corpus/pyproject.toml"
+        }
+      ],
+      "type": "application",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/acme-support-agent@1.4.0",
+      "purl": "pkg:pypi/acme-support-agent@1.4.0"
+    },
+    "properties": [
+      {
+        "name": "cdx:bom:componentTypes",
+        "value": "huggingface\\nnpm\\npypi"
+      },
+      {
+        "name": "cdx:bom:componentNamespaces",
+        "value": "@acme\\nai\\nazure-openai\\ncardiffnlp\\nhuggingface\\nlocal\\nmodels\\nollama"
+      },
+      {
+        "name": "cdx:bom:componentSrcFiles",
+        "value": "aibom-run/work/cdxgen-alt/corpus/node_modules/@acme/legacy-tool/package.json\\naibom-run/work/cdxgen-alt/corpus/requirements.txt"
+      }
+    ]
+  },
+  "components": [
+    {
+      "group": "@acme",
+      "name": "legacy-tool",
+      "version": "0.0.9",
+      "scope": "optional",
+      "purl": "pkg:npm/%40acme/legacy-tool@0.0.9",
+      "type": "library",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:npm/@acme/legacy-tool@0.0.9"
+    },
+    {
+      "group": "",
+      "name": "Modelfile",
+      "version": "",
+      "scope": "optional",
+      "type": "file",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/urn:file:ai:Modelfile",
+      "tags": [
+        "ai",
+        "model-config-file",
+        "modelfile",
+        "ollama"
+      ]
+    },
+    {
+      "group": "ollama",
+      "name": "llama3.2:3b",
+      "version": "",
+      "scope": "optional",
+      "purl": "pkg:npm/ollama/llama3.2:3b",
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:ollama:llama3.2:3b",
+      "tags": [
+        "ai",
+        "machine-learning-model",
+        "modelfile",
+        "ollama"
+      ]
+    },
+    {
+      "group": "",
+      "name": "acme-intent-tiny.Q8_0.gguf",
+      "version": "",
+      "scope": "optional",
+      "type": "file",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/urn:file:ai:models/llm/acme-intent-tiny.Q8_0.gguf",
+      "tags": [
+        "ai",
+        "gguf",
+        "model-artifact-file"
+      ]
+    },
+    {
+      "group": "local",
+      "name": "acme-intent-tiny",
+      "version": "",
+      "scope": "optional",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0",
+            "url": "https://opensource.org/licenses/Apache-2.0",
+            "properties": [
+              {
+                "name": "cdx:license:category",
+                "value": "Permissive"
+              },
+              {
+                "name": "cdx:license:foss",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:osiApproved",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:fsfLibre",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:deprecated",
+                "value": "false"
+              }
+            ]
+          }
+        }
+      ],
+      "purl": "pkg:npm/local/acme-intent-tiny",
+      "pedigree": {
+        "notes": "Detected variants: quantized"
+      },
+      "modelCard": {
+        "modelParameters": {
+          "architectureFamily": "llama"
+        }
+      },
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:local:acme-intent-tiny",
+      "tags": [
+        "ai",
+        "gguf",
+        "local-model",
+        "machine-learning-model",
+        "quantized"
+      ]
+    },
+    {
+      "group": "azure-openai",
+      "name": "gpt-3.5-turbo",
+      "version": "",
+      "scope": "optional",
+      "purl": "pkg:npm/azure-openai/gpt-3.5-turbo",
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:gpt-3.5-turbo",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ]
+    },
+    {
+      "group": "azure-openai",
+      "name": "claude-sonnet-4-5",
+      "version": "",
+      "scope": "optional",
+      "purl": "pkg:npm/azure-openai/claude-sonnet-4-5",
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:claude-sonnet-4-5",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ]
+    },
+    {
+      "group": "cardiffnlp",
+      "name": "twitter-roberta-base-sentiment-latest",
+      "version": "",
+      "scope": "optional",
+      "purl": "pkg:huggingface/cardiffnlp/twitter-roberta-base-sentiment-latest",
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:huggingface/cardiffnlp/twitter-roberta-base-sentiment-latest",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ]
+    },
+    {
+      "group": "azure-openai",
+      "name": "claude-haiku-4-5",
+      "version": "",
+      "scope": "optional",
+      "purl": "pkg:npm/azure-openai/claude-haiku-4-5",
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:claude-haiku-4-5",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ]
+    },
+    {
+      "group": "azure-openai",
+      "name": "distilbert-base-uncased",
+      "version": "",
+      "scope": "optional",
+      "purl": "pkg:npm/azure-openai/distilbert-base-uncased",
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:distilbert-base-uncased",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ]
+    },
+    {
+      "group": "azure-openai",
+      "name": "distilbert-base-uncased-finetuned-sst-2-english",
+      "version": "",
+      "scope": "optional",
+      "purl": "pkg:npm/azure-openai/distilbert-base-uncased-finetuned-sst-2-english",
+      "pedigree": {
+        "notes": "Detected variants: fine-tuned"
+      },
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:distilbert-base-uncased-finetuned-sst-2-english",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ]
+    },
+    {
+      "group": "models",
+      "name": "classifier",
+      "version": "",
+      "scope": "optional",
+      "purl": "pkg:huggingface/models/classifier",
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:huggingface/models/classifier",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ]
+    },
+    {
+      "group": "ai",
+      "name": "distilbert-base-uncased",
+      "version": "",
+      "scope": "optional",
+      "purl": "pkg:npm/ai/distilbert-base-uncased",
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:ai:distilbert-base-uncased",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ]
+    },
+    {
+      "group": "",
+      "name": "AGENTS.md",
+      "version": "",
+      "scope": "optional",
+      "type": "file",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/urn:file:ai:AGENTS.md",
+      "tags": [
+        "ai",
+        "prompt-config",
+        "prompt-config-file"
+      ]
+    },
+    {
+      "group": "",
+      "name": "promptfooconfig.yaml",
+      "version": "",
+      "scope": "optional",
+      "type": "file",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/urn:file:ai:evals/promptfooconfig.yaml",
+      "tags": [
+        "ai",
+        "prompt-config",
+        "prompt-config-file"
+      ]
+    },
+    {
+      "group": "",
+      "name": "refund_policy.txt",
+      "version": "",
+      "scope": "optional",
+      "type": "file",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/urn:file:ai:prompts/refund_policy.txt",
+      "tags": [
+        "ai",
+        "prompt-config",
+        "prompt-config-file"
+      ]
+    },
+    {
+      "group": "",
+      "name": "system.md",
+      "version": "",
+      "scope": "optional",
+      "type": "file",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/urn:file:ai:prompts/system.md",
+      "tags": [
+        "ai",
+        "prompt-config",
+        "prompt-config-file"
+      ]
+    },
+    {
+      "group": "",
+      "name": "audit-tool-call.sh",
+      "version": "",
+      "scope": "optional",
+      "type": "file",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/urn:file:ai:scripts/audit-tool-call.sh",
+      "tags": [
+        "ai",
+        "prompt-config",
+        "prompt-config-file"
+      ]
+    },
+    {
+      "group": "",
+      "name": "refund.sh",
+      "version": "",
+      "scope": "optional",
+      "type": "file",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/urn:file:ai:scripts/refund.sh",
+      "tags": [
+        "ai",
+        "prompt-config",
+        "prompt-config-file"
+      ]
+    },
+    {
+      "group": "acme",
+      "name": "support-tickets",
+      "version": "",
+      "scope": "optional",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://huggingface.co/datasets/acme/support-tickets"
+        }
+      ],
+      "data": [
+        {
+          "type": "dataset",
+          "name": "acme/support-tickets",
+          "contents": {
+            "url": "https://huggingface.co/datasets/acme/support-tickets"
+          }
+        }
+      ],
+      "type": "data",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:huggingface/acme/support-tickets?repository_url=https%3A%2F%2Fhuggingface.co%2Fdatasets",
+      "tags": [
+        "ai",
+        "data",
+        "dataset",
+        "huggingface"
+      ]
+    },
+    {
+      "group": "huggingface",
+      "name": "classifier",
+      "version": "",
+      "scope": "optional",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0",
+            "url": "https://opensource.org/licenses/Apache-2.0",
+            "properties": [
+              {
+                "name": "cdx:license:category",
+                "value": "Permissive"
+              },
+              {
+                "name": "cdx:license:foss",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:osiApproved",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:fsfLibre",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:deprecated",
+                "value": "false"
+              }
+            ]
+          }
+        }
+      ],
+      "purl": "pkg:npm/huggingface/classifier",
+      "modelCard": {
+        "modelParameters": {
+          "architectureFamily": "distilbert",
+          "modelArchitecture": "DistilBertForSequenceClassification",
+          "datasets": [
+            {
+              "ref": "pkg:huggingface/acme/support-tickets?repository_url=https%3A%2F%2Fhuggingface.co%2Fdatasets"
+            }
+          ]
+        }
+      },
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:huggingface:classifier",
+      "tags": [
+        "ai",
+        "huggingface",
+        "machine-learning-model",
+        "model-repo"
+      ]
+    },
+    {
+      "group": "",
+      "name": "anthropic",
+      "version": "0.69.0",
+      "scope": "required",
+      "purl": "pkg:pypi/anthropic@0.69.0",
+      "type": "library",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/anthropic@0.69.0"
+    },
+    {
+      "group": "",
+      "name": "openai",
+      "version": "1.109.1",
+      "scope": "required",
+      "purl": "pkg:pypi/openai@1.109.1",
+      "type": "library",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/openai@1.109.1"
+    },
+    {
+      "group": "",
+      "name": "langchain",
+      "version": "0.3.27",
+      "scope": "optional",
+      "purl": "pkg:pypi/langchain@0.3.27",
+      "type": "framework",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/langchain@0.3.27",
+      "tags": [
+        "framework"
+      ]
+    },
+    {
+      "group": "",
+      "name": "langchain-anthropic",
+      "version": "0.3.19",
+      "scope": "required",
+      "purl": "pkg:pypi/langchain-anthropic@0.3.19",
+      "type": "framework",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/langchain-anthropic@0.3.19",
+      "tags": [
+        "framework"
+      ]
+    },
+    {
+      "group": "",
+      "name": "langchain-core",
+      "version": "0.3.76",
+      "scope": "required",
+      "purl": "pkg:pypi/langchain-core@0.3.76",
+      "type": "framework",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/langchain-core@0.3.76",
+      "tags": [
+        "framework"
+      ]
+    },
+    {
+      "group": "",
+      "name": "langgraph",
+      "version": "0.6.7",
+      "scope": "required",
+      "purl": "pkg:pypi/langgraph@0.6.7",
+      "type": "library",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/langgraph@0.6.7"
+    },
+    {
+      "group": "",
+      "name": "mcp",
+      "version": "1.16.0",
+      "scope": "optional",
+      "purl": "pkg:pypi/mcp@1.16.0",
+      "type": "library",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/mcp@1.16.0",
+      "tags": [
+        "mcp",
+        "mcp-sdk",
+        "official-mcp-sdk",
+        "trusted-source"
+      ]
+    },
+    {
+      "group": "",
+      "name": "transformers",
+      "version": "4.57.0",
+      "scope": "required",
+      "purl": "pkg:pypi/transformers@4.57.0",
+      "type": "library",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/transformers@4.57.0"
+    },
+    {
+      "group": "",
+      "name": "torch",
+      "version": "2.8.0",
+      "scope": "optional",
+      "purl": "pkg:pypi/torch@2.8.0",
+      "type": "library",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/torch@2.8.0"
+    },
+    {
+      "group": "",
+      "name": "sentence-transformers",
+      "version": "5.1.1",
+      "scope": "required",
+      "purl": "pkg:pypi/sentence-transformers@5.1.1",
+      "type": "library",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/sentence-transformers@5.1.1"
+    },
+    {
+      "group": "",
+      "name": "chromadb",
+      "version": "1.1.0",
+      "scope": "required",
+      "purl": "pkg:pypi/chromadb@1.1.0",
+      "type": "library",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/chromadb@1.1.0"
+    },
+    {
+      "group": "",
+      "name": "datasets",
+      "version": "4.1.1",
+      "scope": "required",
+      "purl": "pkg:pypi/datasets@4.1.1",
+      "type": "library",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/datasets@4.1.1"
+    },
+    {
+      "group": "",
+      "name": "boto3",
+      "version": "1.40.49",
+      "scope": "required",
+      "purl": "pkg:pypi/boto3@1.40.49",
+      "type": "framework",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/boto3@1.40.49",
+      "tags": [
+        "framework"
+      ]
+    },
+    {
+      "group": "",
+      "name": "pinecone",
+      "version": "7.3.0",
+      "scope": "required",
+      "purl": "pkg:pypi/pinecone@7.3.0",
+      "type": "library",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/pinecone@7.3.0"
+    },
+    {
+      "group": "",
+      "name": "safetensors",
+      "version": "0.6.2",
+      "scope": "optional",
+      "purl": "pkg:pypi/safetensors@0.6.2",
+      "type": "library",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/safetensors@0.6.2"
+    },
+    {
+      "group": "",
+      "name": "langchain-acme-utils",
+      "version": "0.3.1",
+      "scope": "optional",
+      "purl": "pkg:pypi/langchain-acme-utils@0.3.1",
+      "type": "framework",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/langchain-acme-utils@0.3.1",
+      "tags": [
+        "framework"
+      ]
+    },
+    {
+      "group": "ollama",
+      "name": "llama3.2:3b",
+      "version": "",
+      "purl": "pkg:pypi/ollama/llama3.2:3b",
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:ollama:llama3.2:3b",
+      "tags": [
+        "ai",
+        "machine-learning-model",
+        "modelfile",
+        "ollama"
+      ]
+    },
+    {
+      "group": "local",
+      "name": "acme-intent-tiny",
+      "version": "",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0",
+            "url": "https://opensource.org/licenses/Apache-2.0",
+            "properties": [
+              {
+                "name": "cdx:license:category",
+                "value": "Permissive"
+              },
+              {
+                "name": "cdx:license:foss",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:osiApproved",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:fsfLibre",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:deprecated",
+                "value": "false"
+              }
+            ]
+          }
+        }
+      ],
+      "purl": "pkg:pypi/local/acme-intent-tiny",
+      "pedigree": {
+        "notes": "Detected variants: quantized"
+      },
+      "modelCard": {
+        "modelParameters": {
+          "architectureFamily": "llama"
+        }
+      },
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:local:acme-intent-tiny",
+      "tags": [
+        "ai",
+        "gguf",
+        "local-model",
+        "machine-learning-model",
+        "quantized"
+      ]
+    },
+    {
+      "group": "azure-openai",
+      "name": "gpt-3.5-turbo",
+      "version": "",
+      "purl": "pkg:pypi/azure-openai/gpt-3.5-turbo",
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:gpt-3.5-turbo",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ]
+    },
+    {
+      "group": "azure-openai",
+      "name": "claude-sonnet-4-5",
+      "version": "",
+      "purl": "pkg:pypi/azure-openai/claude-sonnet-4-5",
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:claude-sonnet-4-5",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ]
+    },
+    {
+      "group": "azure-openai",
+      "name": "claude-haiku-4-5",
+      "version": "",
+      "purl": "pkg:pypi/azure-openai/claude-haiku-4-5",
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:claude-haiku-4-5",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ]
+    },
+    {
+      "group": "azure-openai",
+      "name": "distilbert-base-uncased",
+      "version": "",
+      "purl": "pkg:pypi/azure-openai/distilbert-base-uncased",
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:distilbert-base-uncased",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ]
+    },
+    {
+      "group": "azure-openai",
+      "name": "distilbert-base-uncased-finetuned-sst-2-english",
+      "version": "",
+      "purl": "pkg:pypi/azure-openai/distilbert-base-uncased-finetuned-sst-2-english",
+      "pedigree": {
+        "notes": "Detected variants: fine-tuned"
+      },
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:distilbert-base-uncased-finetuned-sst-2-english",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ]
+    },
+    {
+      "group": "ai",
+      "name": "distilbert-base-uncased",
+      "version": "",
+      "purl": "pkg:pypi/ai/distilbert-base-uncased",
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:ai:distilbert-base-uncased",
+      "tags": [
+        "ai",
+        "machine-learning-model"
+      ]
+    },
+    {
+      "group": "huggingface",
+      "name": "classifier",
+      "version": "",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0",
+            "url": "https://opensource.org/licenses/Apache-2.0",
+            "properties": [
+              {
+                "name": "cdx:license:category",
+                "value": "Permissive"
+              },
+              {
+                "name": "cdx:license:foss",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:osiApproved",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:fsfLibre",
+                "value": "true"
+              },
+              {
+                "name": "cdx:license:deprecated",
+                "value": "false"
+              }
+            ]
+          }
+        }
+      ],
+      "purl": "pkg:pypi/huggingface/classifier",
+      "modelCard": {
+        "modelParameters": {
+          "architectureFamily": "distilbert",
+          "modelArchitecture": "DistilBertForSequenceClassification",
+          "datasets": [
+            {
+              "ref": "pkg:huggingface/acme/support-tickets?repository_url=https%3A%2F%2Fhuggingface.co%2Fdatasets"
+            }
+          ]
+        }
+      },
+      "type": "machine-learning-model",
+      "bom-ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:huggingface:classifier",
+      "tags": [
+        "ai",
+        "huggingface",
+        "machine-learning-model",
+        "model-repo"
+      ]
+    }
+  ],
+  "services": [
+    {
+      "bom-ref": "urn:service:ai:ollama:ollama-service",
+      "group": "ollama",
+      "name": "ollama-service",
+      "provider": {
+        "name": "ollama"
+      },
+      "version": "observed",
+      "endpoints": [
+        "http://localhost:11434/"
+      ],
+      "properties": [
+        {
+          "name": "cdx:ai:kind",
+          "value": "inference-service"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "llama3.2:3b"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "llama"
+        },
+        {
+          "name": "cdx:ai:modelCount",
+          "value": "1"
+        },
+        {
+          "name": "cdx:ai:modelSelection",
+          "value": "explicit"
+        },
+        {
+          "name": "cdx:ai:deployment",
+          "value": "implicit"
+        },
+        {
+          "name": "cdx:ai:transportSecurity",
+          "value": "unknown"
+        },
+        {
+          "name": "cdx:ai:runtime",
+          "value": "ollama"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "high"
+        },
+        {
+          "name": "cdx:ai:reviewNeeded",
+          "value": "true"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "classifier"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "claude-haiku-4-5"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "claude-sonnet-4-5"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "distilbert-base-uncased"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "distilbert-base-uncased-finetuned-sst-2-english"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "gpt-3.5-turbo"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "twitter-roberta-base-sentiment-latest"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "classifier"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "claude"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "distilbert"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "gpt"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "twitter"
+        },
+        {
+          "name": "cdx:ai:modelCount",
+          "value": "7"
+        },
+        {
+          "name": "cdx:ai:deployment",
+          "value": "local"
+        },
+        {
+          "name": "cdx:ai:transportSecurity",
+          "value": "local-only"
+        }
+      ],
+      "tags": [
+        "ai"
+      ]
+    },
+    {
+      "bom-ref": "urn:service:ai:azure-openai:azure-openai-service",
+      "group": "azure-openai",
+      "name": "Azure OpenAI API",
+      "provider": {
+        "name": "azure-openai"
+      },
+      "version": "observed",
+      "endpoints": [
+        "https://acme-eastus.openai.azure.com/"
+      ],
+      "properties": [
+        {
+          "name": "cdx:ai:kind",
+          "value": "inference-service"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "classifier"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "claude-haiku-4-5"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "claude-sonnet-4-5"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "distilbert-base-uncased"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "distilbert-base-uncased-finetuned-sst-2-english"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "gpt-3.5-turbo"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "twitter-roberta-base-sentiment-latest"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "classifier"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "claude"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "distilbert"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "gpt"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "twitter"
+        },
+        {
+          "name": "cdx:ai:modelCount",
+          "value": "7"
+        },
+        {
+          "name": "cdx:ai:modelSelection",
+          "value": "explicit"
+        },
+        {
+          "name": "cdx:ai:deployment",
+          "value": "remote"
+        },
+        {
+          "name": "cdx:ai:transportSecurity",
+          "value": "https"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "high"
+        }
+      ],
+      "tags": [
+        "ai"
+      ]
+    },
+    {
+      "bom-ref": "urn:service:ai:ai:ai-service",
+      "group": "ai",
+      "name": "ai-service",
+      "provider": {
+        "name": "ai"
+      },
+      "version": "observed",
+      "endpoints": [],
+      "properties": [
+        {
+          "name": "cdx:ai:kind",
+          "value": "inference-service"
+        },
+        {
+          "name": "cdx:ai:source",
+          "value": "source-code-analysis"
+        },
+        {
+          "name": "cdx:ai:modelId",
+          "value": "distilbert-base-uncased"
+        },
+        {
+          "name": "cdx:ai:modelFamily",
+          "value": "distilbert"
+        },
+        {
+          "name": "cdx:ai:modelCount",
+          "value": "1"
+        },
+        {
+          "name": "cdx:ai:modelSelection",
+          "value": "explicit"
+        },
+        {
+          "name": "cdx:ai:deployment",
+          "value": "implicit"
+        },
+        {
+          "name": "cdx:ai:transportSecurity",
+          "value": "unknown"
+        },
+        {
+          "name": "cdx:ai:runtime",
+          "value": "transformers"
+        },
+        {
+          "name": "cdx:ai:confidence",
+          "value": "high"
+        }
+      ],
+      "tags": [
+        "ai"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/urn:file:ai:Modelfile",
+      "dependsOn": [
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:ollama:llama3.2:3b"
+      ]
+    },
+    {
+      "ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/urn:file:ai:models/llm/acme-intent-tiny.Q8_0.gguf",
+      "dependsOn": [
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:local:acme-intent-tiny"
+      ]
+    },
+    {
+      "ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/urn:service:ai:ollama:ollama-service",
+      "dependsOn": [
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:claude-haiku-4-5",
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:claude-sonnet-4-5",
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:distilbert-base-uncased",
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:distilbert-base-uncased-finetuned-sst-2-english",
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:gpt-3.5-turbo",
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:ollama:llama3.2:3b",
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:huggingface/cardiffnlp/twitter-roberta-base-sentiment-latest",
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:huggingface/models/classifier",
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/urn:file:ai:Modelfile"
+      ]
+    },
+    {
+      "ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/urn:service:ai:azure-openai:azure-openai-service",
+      "dependsOn": [
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:claude-haiku-4-5",
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:claude-sonnet-4-5",
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:distilbert-base-uncased",
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:distilbert-base-uncased-finetuned-sst-2-english",
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:azure-openai:gpt-3.5-turbo",
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:huggingface/cardiffnlp/twitter-roberta-base-sentiment-latest",
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:huggingface/models/classifier"
+      ]
+    },
+    {
+      "ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/urn:service:ai:ai:ai-service",
+      "dependsOn": [
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:ai:distilbert-base-uncased"
+      ]
+    },
+    {
+      "ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/cdxgen:ai:model:huggingface:classifier",
+      "dependsOn": [
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:huggingface/acme/support-tickets?repository_url=https%3A%2F%2Fhuggingface.co%2Fdatasets"
+      ]
+    },
+    {
+      "ref": "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/acme-support-agent@1.4.0",
+      "dependsOn": []
+    }
+  ],
+  "formulation": [
+    {
+      "bom-ref": "936c3417-fac8-490f-a0eb-39d43b0cc49a",
+      "components": [
+        {
+          "name": "pip",
+          "version": "26.2.2",
+          "purl": "pkg:pypi/pip@26.2.2",
+          "type": "library",
+          "bom-ref": "pkg:pypi/pip@26.2.2",
+          "scope": "excluded",
+          "evidence": {
+            "identity": {
+              "field": "purl",
+              "confidence": 1,
+              "methods": [
+                {
+                  "technique": "instrumentation",
+                  "confidence": 1,
+                  "value": "/tmp/cdxgen-venv-9XXjCA"
+                }
+              ]
+            }
+          },
+          "properties": [
+            {
+              "name": "SrcFile",
+              "value": "/aibom-run/work/cdxgen-alt/corpus/pyproject.toml"
+            }
+          ]
+        },
+        {
+          "type": "file",
+          "name": ".git",
+          "version": "a",
+          "bom-ref": "gitoid:blob:sha1:a",
+          "omniborId": [
+            "gitoid:blob:sha1:a"
+          ],
+          "swhid": [
+            "swh:1:rev:a"
+          ]
+        },
+        {
+          "type": "platform",
+          "name": "java",
+          "version": "openjdk 21.0.13.0.3 2026-10-24",
+          "description": "openjdk 21.0.13.0.3 2026-10-24\nOpenJDK Runtime Environment (build 21.0.13.0.3+1-1-24.04.1-Ubuntu)\nOpenJDK 64-Bit Server VM (build 21.0.13.0.3+1-1-24.04.1-Ubuntu, mixed mode, sharing)\n\nPicked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts -Djavax.net.ssl.trustStoreType=JKS -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=45945 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|api.anthropic.com|api-staging.anthropic.com|api-pr-preview.anthropic.com|mcp-proxy.anthropic.com|mcp-proxy-staging.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=\nPicked up _JAVA_OPTIONS: -XX:+UnlockDiagnosticVMOptions -XX:DisableIntrinsic=_base64_encodeBlock,_base64_decodeBlock",
+          "properties": [
+            {
+              "name": "java:modules",
+              "value": "java.base@21.0.13.0.3, java.compiler@21.0.13.0.3, java.datatransfer@21.0.13.0.3, java.desktop@21.0.13.0.3, java.instrument@21.0.13.0.3, java.logging@21.0.13.0.3, java.management@21.0.13.0.3, java.management.rmi@21.0.13.0.3, java.naming@21.0.13.0.3, java.net.http@21.0.13.0.3, java.prefs@21.0.13.0.3, java.rmi@21.0.13.0.3, java.scripting@21.0.13.0.3, java.se@21.0.13.0.3, java.security.jgss@21.0.13.0.3, java.security.sasl@21.0.13.0.3, java.smartcardio@21.0.13.0.3, java.sql@21.0.13.0.3, java.sql.rowset@21.0.13.0.3, java.transaction.xa@21.0.13.0.3, java.xml@21.0.13.0.3, java.xml.crypto@21.0.13.0.3, jdk.accessibility@21.0.13.0.3, jdk.attach@21.0.13.0.3, jdk.charsets@21.0.13.0.3, jdk.compiler@21.0.13.0.3, jdk.crypto.cryptoki@21.0.13.0.3, jdk.crypto.ec@21.0.13.0.3, jdk.dynalink@21.0.13.0.3, jdk.editpad@21.0.13.0.3, jdk.hotspot.agent@21.0.13.0.3, jdk.httpserver@21.0.13.0.3, jdk.incubator.vector@21.0.13.0.3, jdk.internal.ed@21.0.13.0.3, jdk.internal.jvmstat@21.0.13.0.3, jdk.internal.le@21.0.13.0.3, jdk.internal.opt@21.0.13.0.3, jdk.internal.vm.ci@21.0.13.0.3, jdk.internal.vm.compiler@21.0.13.0.3, jdk.internal.vm.compiler.management@21.0.13.0.3, jdk.jartool@21.0.13.0.3, jdk.javadoc@21.0.13.0.3, jdk.jcmd@21.0.13.0.3, jdk.jconsole@21.0.13.0.3, jdk.jdeps@21.0.13.0.3, jdk.jdi@21.0.13.0.3, jdk.jdwp.agent@21.0.13.0.3, jdk.jfr@21.0.13.0.3, jdk.jlink@21.0.13.0.3, jdk.jpackage@21.0.13.0.3, jdk.jshell@21.0.13.0.3, jdk.jsobject@21.0.13.0.3, jdk.jstatd@21.0.13.0.3, jdk.localedata@21.0.13.0.3, jdk.management@21.0.13.0.3, jdk.management.agent@21.0.13.0.3, jdk.management.jfr@21.0.13.0.3, jdk.naming.dns@21.0.13.0.3, jdk.naming.rmi@21.0.13.0.3, jdk.net@21.0.13.0.3, jdk.nio.mapmode@21.0.13.0.3, jdk.random@21.0.13.0.3, jdk.sctp@21.0.13.0.3, jdk.security.auth@21.0.13.0.3, jdk.security.jgss@21.0.13.0.3, jdk.unsupported@21.0.13.0.3, jdk.unsupported.desktop@21.0.13.0.3, jdk.xml.dom@21.0.13.0.3, jdk.zipfs@21.0.13.0.3, , Picked up JAVA_TOOL_OPTIONS: -Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts -Djavax.net.ssl.trustStoreType=JKS -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=45945 -Dhttp.nonProxyHosts=localhost|127.0.0.1|::1|127.*|0.*|::|169.254.*|api.anthropic.com|api-staging.anthropic.com|api-pr-preview.anthropic.com|mcp-proxy.anthropic.com|mcp-proxy-staging.anthropic.com|registry.npmjs.org|jsr.io|npm.jsr.io|pypi.org|files.pythonhosted.org|index.crates.io|proxy.golang.org|host.docker.internal|10.*|172.16.*|172.17.*|172.18.*|172.19.*|172.20.*|172.21.*|172.22.*|172.23.*|172.24.*|172.25.*|172.26.*|172.27.*|172.28.*|172.29.*|172.30.*|172.31.*|192.168.*|100.64.0.0/10|*.svc.cluster.local|*.svc.cluster.local -Djdk.http.auth.tunneling.disabledSchemes= -Djdk.http.auth.proxying.disabledSchemes=, Picked up _JAVA_OPTIONS: -XX:+UnlockDiagnosticVMOptions -XX:DisableIntrinsic=_base64_encodeBlock,_base64_decodeBlock"
+            }
+          ]
+        },
+        {
+          "type": "platform",
+          "name": "python",
+          "version": "3.13.18",
+          "description": "pip 24.0 from /usr/lib/python3/dist-packages/pip (python 3.13)"
+        },
+        {
+          "type": "platform",
+          "name": "Node.js",
+          "version": "22.23.5",
+          "components": [
+            {
+              "name": "linux-vdso.so.1",
+              "type": "library",
+              "scope": "excluded",
+              "purl": "pkg:generic/linux-vdso.so.1#linux-vdso.so.1",
+              "bom-ref": "pkg:generic/linux-vdso.so.1"
+            },
+            {
+              "name": "libdl.so.2",
+              "type": "library",
+              "scope": "excluded",
+              "purl": "pkg:generic/libdl.so.2#/lib/x86_64-linux-gnu/libdl.so.2",
+              "bom-ref": "pkg:generic/libdl.so.2"
+            },
+            {
+              "name": "libpthread.so.0",
+              "type": "library",
+              "scope": "excluded",
+              "purl": "pkg:generic/libpthread.so.0#/lib/x86_64-linux-gnu/libpthread.so.0",
+              "bom-ref": "pkg:generic/libpthread.so.0"
+            },
+            {
+              "name": "libm.so.6",
+              "type": "library",
+              "scope": "excluded",
+              "purl": "pkg:generic/libm.so.6#/lib/x86_64-linux-gnu/libm.so.6",
+              "bom-ref": "pkg:generic/libm.so.6"
+            },
+            {
+              "name": "libgcc_s.so.1",
+              "type": "library",
+              "scope": "excluded",
+              "purl": "pkg:generic/libgcc_s.so.1#/lib/x86_64-linux-gnu/libgcc_s.so.1",
+              "bom-ref": "pkg:generic/libgcc_s.so.1"
+            },
+            {
+              "name": "libc.so.6",
+              "type": "library",
+              "scope": "excluded",
+              "purl": "pkg:generic/libc.so.6#/lib/x86_64-linux-gnu/libc.so.6",
+              "bom-ref": "pkg:generic/libc.so.6"
+            },
+            {
+              "name": "ld-linux-x86-64.so.2",
+              "type": "library",
+              "scope": "excluded",
+              "purl": "pkg:generic/ld-linux-x86-64.so.2#/lib64/ld-linux-x86-64.so.2",
+              "bom-ref": "pkg:generic/ld-linux-x86-64.so.2"
+            }
+          ],
+          "description": "npm: 10.9.9\n\n(node:443) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.\n(Use `node --trace-warnings ...` to show where the warning was created)"
+        },
+        {
+          "type": "platform",
+          "name": "gcc",
+          "version": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+          "description": "install: /usr/lib/gcc/x86_64-linux-gnu/13/\\nprograms: =/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/13/:/usr/libexec/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/bin/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/bin/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/bin/\\nlibraries: =/usr/lib/gcc/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/lib/x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/lib/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/13/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../../lib/:/lib/x86_64-linux-gnu/13/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/13/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../../x86_64-linux-gnu/lib/:/usr/lib/gcc/x86_64-linux-gnu/13/../../../:/lib/:/usr/lib/"
+        },
+        {
+          "type": "platform",
+          "name": "rustc",
+          "version": "rustc 1.97.0 (2d8144b78 2026-07-07)",
+          "description": "cargo 1.97.0 (c980f4866 2026-06-30)"
+        },
+        {
+          "type": "platform",
+          "name": "go",
+          "version": "go version go1.24.7 linux/amd64"
+        },
+        {
+          "type": "platform",
+          "name": "ruby",
+          "version": "ruby 3.3.6 (2024-11-05 revision 75015d4c1f) [x86_64-linux]"
+        },
+        {
+          "type": "platform",
+          "name": "php",
+          "version": "8.3.6",
+          "cpe": "cpe:2.3:a:php:php:8.3.6:*:*:*:*:*:*:*",
+          "purl": "pkg:generic/php@8.3.6"
+        },
+        {
+          "type": "platform",
+          "name": "composer",
+          "version": "2.8.12",
+          "cpe": "cpe:2.3:a:getcomposer:composer:2.8.12:*:*:*:*:*:*:*",
+          "purl": "pkg:generic/composer@2.8.12"
+        },
+        {
+          "bom-ref": "pkg:github/actions/checkout@v4",
+          "type": "application",
+          "group": "actions",
+          "name": "checkout",
+          "version": "v4",
+          "purl": "pkg:github/actions/checkout@v4",
+          "properties": [
+            {
+              "name": "SrcFile",
+              "value": "/aibom-run/work/cdxgen-alt/corpus/.github/workflows/agent-review.yml"
+            },
+            {
+              "name": "cdx:github:workflow:name",
+              "value": "agent-review"
+            },
+            {
+              "name": "cdx:github:workflow:file",
+              "value": "/aibom-run/work/cdxgen-alt/corpus/.github/workflows/agent-review.yml"
+            },
+            {
+              "name": "cdx:github:job:name",
+              "value": "review"
+            },
+            {
+              "name": "cdx:github:job:runner",
+              "value": "ubuntu-latest"
+            },
+            {
+              "name": "cdx:github:action:uses",
+              "value": "actions/checkout@v4"
+            },
+            {
+              "name": "cdx:github:action:versionPinningType",
+              "value": "tag"
+            },
+            {
+              "name": "cdx:github:action:isShaPinned",
+              "value": "false"
+            },
+            {
+              "name": "cdx:actions:isOfficial",
+              "value": "true"
+            },
+            {
+              "name": "cdx:actions:isVerified",
+              "value": "false"
+            },
+            {
+              "name": "cdx:github:checkout:persistCredentials",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:step:hasSensitiveOperations",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:step:sensitiveOperations",
+              "value": "checkout-persist-credentials"
+            },
+            {
+              "name": "cdx:github:job:hasExplicitPermissionsBlock",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:job:hasWritePermissions",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:job:hasIdTokenWrite",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:job:writeScopes",
+              "value": "id-token,pull-requests"
+            },
+            {
+              "name": "cdx:github:workflow:hasExplicitPermissionsBlock",
+              "value": "false"
+            },
+            {
+              "name": "cdx:github:workflow:hasAnyExplicitPermissionsBlock",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:workflow:hasWritePermissions",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:workflow:hasIdTokenWrite",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:workflow:writeScopes",
+              "value": "id-token,pull-requests"
+            },
+            {
+              "name": "cdx:github:workflow:triggers",
+              "value": "pull_request"
+            },
+            {
+              "name": "cdx:github:workflow:hasPullRequestTrigger",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:workflow:workflowDispatchReceiverAliases",
+              "value": "agent-review,agent-review.yml,/aibom-run/work/cdxgen-alt/corpus/.github/workflows/agent-review.yml"
+            }
+          ],
+          "scope": "required",
+          "evidence": {
+            "identity": [
+              {
+                "field": "purl",
+                "confidence": 0.5,
+                "methods": [
+                  {
+                    "technique": "source-code-analysis",
+                    "confidence": 0.5,
+                    "value": "/aibom-run/work/cdxgen-alt/corpus/.github/workflows/agent-review.yml"
+                  }
+                ]
+              }
+            ]
+          },
+          "isExternal": true
+        },
+        {
+          "bom-ref": "pkg:github/anthropics/claude-code-action@v1",
+          "type": "application",
+          "group": "anthropics",
+          "name": "claude-code-action",
+          "version": "v1",
+          "purl": "pkg:github/anthropics/claude-code-action@v1",
+          "properties": [
+            {
+              "name": "SrcFile",
+              "value": "/aibom-run/work/cdxgen-alt/corpus/.github/workflows/agent-review.yml"
+            },
+            {
+              "name": "cdx:github:workflow:name",
+              "value": "agent-review"
+            },
+            {
+              "name": "cdx:github:workflow:file",
+              "value": "/aibom-run/work/cdxgen-alt/corpus/.github/workflows/agent-review.yml"
+            },
+            {
+              "name": "cdx:github:job:name",
+              "value": "review"
+            },
+            {
+              "name": "cdx:github:job:runner",
+              "value": "ubuntu-latest"
+            },
+            {
+              "name": "cdx:github:action:uses",
+              "value": "anthropics/claude-code-action@v1"
+            },
+            {
+              "name": "cdx:github:action:versionPinningType",
+              "value": "tag"
+            },
+            {
+              "name": "cdx:github:action:isShaPinned",
+              "value": "false"
+            },
+            {
+              "name": "cdx:actions:isOfficial",
+              "value": "false"
+            },
+            {
+              "name": "cdx:actions:isVerified",
+              "value": "false"
+            },
+            {
+              "name": "cdx:github:job:hasExplicitPermissionsBlock",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:job:hasWritePermissions",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:job:hasIdTokenWrite",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:job:writeScopes",
+              "value": "id-token,pull-requests"
+            },
+            {
+              "name": "cdx:github:workflow:hasExplicitPermissionsBlock",
+              "value": "false"
+            },
+            {
+              "name": "cdx:github:workflow:hasAnyExplicitPermissionsBlock",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:workflow:hasWritePermissions",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:workflow:hasIdTokenWrite",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:workflow:writeScopes",
+              "value": "id-token,pull-requests"
+            },
+            {
+              "name": "cdx:github:workflow:triggers",
+              "value": "pull_request"
+            },
+            {
+              "name": "cdx:github:workflow:hasPullRequestTrigger",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:workflow:workflowDispatchReceiverAliases",
+              "value": "agent-review,agent-review.yml,/aibom-run/work/cdxgen-alt/corpus/.github/workflows/agent-review.yml"
+            }
+          ],
+          "scope": "required",
+          "evidence": {
+            "identity": [
+              {
+                "field": "purl",
+                "confidence": 0.5,
+                "methods": [
+                  {
+                    "technique": "source-code-analysis",
+                    "confidence": 0.5,
+                    "value": "/aibom-run/work/cdxgen-alt/corpus/.github/workflows/agent-review.yml"
+                  }
+                ]
+              }
+            ]
+          },
+          "isExternal": true
+        }
+      ],
+      "workflows": [
+        {
+          "bom-ref": "f6d0e926-8059-4737-9409-8db277733faa",
+          "uid": "f6d0e926-8059-4737-9409-8db277733faa",
+          "name": "agent-review",
+          "taskTypes": [
+            "build"
+          ],
+          "tasks": [
+            {
+              "bom-ref": "a8422d36-4d6e-4a5e-8ad8-65feec52ad46",
+              "uid": "a8422d36-4d6e-4a5e-8ad8-65feec52ad46",
+              "name": "review",
+              "taskTypes": [
+                "build"
+              ],
+              "steps": [
+                {
+                  "name": "actions/checkout@v4",
+                  "commands": [
+                    {
+                      "executed": "actions/checkout@v4"
+                    }
+                  ]
+                },
+                {
+                  "name": "anthropics/claude-code-action@v1",
+                  "commands": [
+                    {
+                      "executed": "anthropics/claude-code-action@v1"
+                    }
+                  ]
+                }
+              ],
+              "properties": [
+                {
+                  "name": "cdx:github:job:name",
+                  "value": "review"
+                },
+                {
+                  "name": "cdx:github:job:runner",
+                  "value": "ubuntu-latest"
+                },
+                {
+                  "name": "cdx:github:job:hasExplicitPermissionsBlock",
+                  "value": "true"
+                },
+                {
+                  "name": "cdx:github:job:hasWritePermissions",
+                  "value": "true"
+                },
+                {
+                  "name": "cdx:github:job:hasIdTokenWrite",
+                  "value": "true"
+                },
+                {
+                  "name": "cdx:github:job:writeScopes",
+                  "value": "id-token,pull-requests"
+                },
+                {
+                  "name": "cdx:github:workflow:hasExplicitPermissionsBlock",
+                  "value": "false"
+                },
+                {
+                  "name": "cdx:github:workflow:hasAnyExplicitPermissionsBlock",
+                  "value": "true"
+                },
+                {
+                  "name": "cdx:github:workflow:hasWritePermissions",
+                  "value": "true"
+                },
+                {
+                  "name": "cdx:github:workflow:hasIdTokenWrite",
+                  "value": "true"
+                },
+                {
+                  "name": "cdx:github:workflow:writeScopes",
+                  "value": "id-token,pull-requests"
+                },
+                {
+                  "name": "cdx:github:workflow:triggers",
+                  "value": "pull_request"
+                },
+                {
+                  "name": "cdx:github:workflow:hasPullRequestTrigger",
+                  "value": "true"
+                },
+                {
+                  "name": "cdx:github:workflow:workflowDispatchReceiverAliases",
+                  "value": "agent-review,agent-review.yml,/aibom-run/work/cdxgen-alt/corpus/.github/workflows/agent-review.yml"
+                }
+              ]
+            }
+          ],
+          "properties": [
+            {
+              "name": "cdx:github:workflow:file",
+              "value": "/aibom-run/work/cdxgen-alt/corpus/.github/workflows/agent-review.yml"
+            },
+            {
+              "name": "cdx:github:workflow:name",
+              "value": "agent-review"
+            },
+            {
+              "name": "cdx:github:workflow:hasExplicitPermissionsBlock",
+              "value": "false"
+            },
+            {
+              "name": "cdx:github:workflow:hasAnyExplicitPermissionsBlock",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:workflow:hasWritePermissions",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:workflow:hasIdTokenWrite",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:workflow:writeScopes",
+              "value": "id-token,pull-requests"
+            },
+            {
+              "name": "cdx:github:workflow:triggers",
+              "value": "pull_request"
+            },
+            {
+              "name": "cdx:github:workflow:hasPullRequestTrigger",
+              "value": "true"
+            },
+            {
+              "name": "cdx:github:workflow:workflowDispatchReceiverAliases",
+              "value": "agent-review,agent-review.yml,/aibom-run/work/cdxgen-alt/corpus/.github/workflows/agent-review.yml"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "annotations": [
+    {
+      "bom-ref": "metadata-annotations",
+      "subjects": [
+        "urn:uuid:0b9993ff-dfa9-4d02-91a0-0d31e5d6dbae/1/pkg:pypi/acme-support-agent@1.4.0"
+      ],
+      "annotator": {
+        "component": {
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "version": "12.9.2",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@12.9.2",
+          "type": "application",
+          "bom-ref": "pkg:npm/@cyclonedx/cdxgen@12.9.2",
+          "publisher": "OWASP Foundation",
+          "authors": [
+            {
+              "name": "OWASP Foundation"
+            }
+          ]
+        }
+      },
+      "timestamp": "2026-11-18T10:34:57Z",
+      "text": "This AI Bill-of-Materials (AI-BOM) document was created on Wednesday, November 18, 2026 with cdxgen. The data was captured during the build lifecycle phase. The document describes an application named 'acme-support-agent' with version '1.4.0'. It inventories 20 AI model(s), 3 AI service(s), and 1 dataset(s). Recorded training or evaluation datasets include acme/support-tickets. Pedigree information is captured for 4 model(s), which helps reviewers trace upstream bases and downstream variants. Detected model variants include quantized, fine-tuned, so modified artifacts remain visible in the BOM. Usage references span 3 provider or runtime endpoint(s), including ollama, azure-openai, ai. There are 46 components. 3 package type(s) and 8 purl namespaces are described in the document under components. Further, there is a formulation section with components, workflows and steps for reproducibility."
+    }
+  ]
+}

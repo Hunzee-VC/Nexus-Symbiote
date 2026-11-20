@@ -1,0 +1,606 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "config/claude_desktop_config.json",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "High-risk MCP server notion exposes secrets_env_access"
+          },
+          "properties": {
+            "agentbom.mcp_server": "notion",
+            "problem.severity": "high",
+            "security-severity": "8.0"
+          },
+          "ruleId": "mcp.high_risk_server.notion",
+          "ruleIndex": 0
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "config/claude_desktop_config.json",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "High-risk MCP server supabase exposes database_access, secrets_env_access"
+          },
+          "properties": {
+            "agentbom.mcp_server": "supabase",
+            "problem.severity": "high",
+            "security-severity": "8.0"
+          },
+          "ruleId": "mcp.high_risk_server.supabase",
+          "ruleIndex": 1
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "config/claude_desktop_config.json",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "high-risk MCP server detected without policy restrictions: notion"
+          },
+          "properties": {
+            "problem.severity": "high",
+            "security-severity": "8.0"
+          },
+          "ruleId": "policy.high_risk_mcp_server_detected_without_policy_restrictions_notion",
+          "ruleIndex": 2
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "config/claude_desktop_config.json",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "high-risk MCP server detected without policy restrictions: supabase"
+          },
+          "properties": {
+            "problem.severity": "high",
+            "security-severity": "8.0"
+          },
+          "ruleId": "policy.high_risk_mcp_server_detected_without_policy_restrictions_supabase",
+          "ruleIndex": 3
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "config/claude_desktop_config.json",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            },
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "vendor/pkg/.cursor/mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "MCP config detected without policy documentation"
+          },
+          "properties": {
+            "problem.severity": "medium",
+            "security-severity": "5.0"
+          },
+          "ruleId": "policy.mcp_config_detected_without_policy_documentation",
+          "ruleIndex": 4
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "prompts/system.prompt.md",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "prompt file detected without security policy"
+          },
+          "properties": {
+            "problem.severity": "low",
+            "security-severity": "2.0"
+          },
+          "ruleId": "policy.prompt_file_detected_without_security_policy",
+          "ruleIndex": 5
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "config/claude_desktop_config.json",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            },
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "vendor/pkg/.cursor/mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "langchain reaches mcp_tool_invocation with high risk"
+          },
+          "properties": {
+            "problem.severity": "high",
+            "security-severity": "8.0"
+          },
+          "ruleId": "reachable.mcp_tool_invocation",
+          "ruleIndex": 6
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "repository",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "high-risk MCP server detected"
+          },
+          "properties": {
+            "problem.severity": "high",
+            "security-severity": "8.0"
+          },
+          "ruleId": "risk.high",
+          "ruleIndex": 7
+        },
+        {
+          "level": "note",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "repository",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "prompt files detected without a policy file"
+          },
+          "properties": {
+            "problem.severity": "low",
+            "security-severity": "2.0"
+          },
+          "ruleId": "risk.low",
+          "ruleIndex": 8
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".continue/config.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 7
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Possible SLACK_BOT_TOKEN value"
+          },
+          "properties": {
+            "agentbom.secret_provider": "generic",
+            "problem.severity": "high",
+            "security-severity": "8.0"
+          },
+          "ruleId": "secret_leak.generic.token",
+          "ruleIndex": 9
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".env.local",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Possible OPENAI_API_KEY value"
+          },
+          "properties": {
+            "agentbom.secret_provider": "openai",
+            "problem.severity": "critical",
+            "security-severity": "9.0"
+          },
+          "ruleId": "secret_leak.openai.api_key",
+          "ruleIndex": 10
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/vlcak27/agentbom",
+          "name": "AgentBOM",
+          "rules": [
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "AgentBOM classifies MCP server risk from JSON configuration metadata such as command, package, args, transport, and env variable names."
+              },
+              "help": {
+                "text": "AgentBOM classifies MCP server risk from JSON configuration metadata such as command, package, args, transport, and env variable names.\n\nRemediation: Remove the MCP server, restrict it with policy and sandboxing, or replace it with a narrower server."
+              },
+              "id": "mcp.high_risk_server.notion",
+              "name": "High-risk MCP server: notion",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "high",
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "MCP server notion has high-risk tool exposure."
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "AgentBOM classifies MCP server risk from JSON configuration metadata such as command, package, args, transport, and env variable names."
+              },
+              "help": {
+                "text": "AgentBOM classifies MCP server risk from JSON configuration metadata such as command, package, args, transport, and env variable names.\n\nRemediation: Remove the MCP server, restrict it with policy and sandboxing, or replace it with a narrower server."
+              },
+              "id": "mcp.high_risk_server.supabase",
+              "name": "High-risk MCP server: supabase",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "high",
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "MCP server supabase has high-risk tool exposure."
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "Policy findings indicate missing controls or custom policy violations for AI agent behavior."
+              },
+              "help": {
+                "text": "Policy findings indicate missing controls or custom policy violations for AI agent behavior.\n\nRemediation: Update repository policy, add required controls, or reduce the capability that triggered the policy finding."
+              },
+              "id": "policy.high_risk_mcp_server_detected_without_policy_restrictions_notion",
+              "name": "high-risk MCP server detected without policy restrictions: notion",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "high",
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "Policy finding detected by AgentBOM."
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "Policy findings indicate missing controls or custom policy violations for AI agent behavior."
+              },
+              "help": {
+                "text": "Policy findings indicate missing controls or custom policy violations for AI agent behavior.\n\nRemediation: Update repository policy, add required controls, or reduce the capability that triggered the policy finding."
+              },
+              "id": "policy.high_risk_mcp_server_detected_without_policy_restrictions_supabase",
+              "name": "high-risk MCP server detected without policy restrictions: supabase",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "high",
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "Policy finding detected by AgentBOM."
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "fullDescription": {
+                "text": "Policy findings indicate missing controls or custom policy violations for AI agent behavior."
+              },
+              "help": {
+                "text": "Policy findings indicate missing controls or custom policy violations for AI agent behavior.\n\nRemediation: Update repository policy, add required controls, or reduce the capability that triggered the policy finding."
+              },
+              "id": "policy.mcp_config_detected_without_policy_documentation",
+              "name": "MCP config detected without policy documentation",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "medium",
+                "security-severity": "5.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "Policy finding detected by AgentBOM."
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "fullDescription": {
+                "text": "Policy findings indicate missing controls or custom policy violations for AI agent behavior."
+              },
+              "help": {
+                "text": "Policy findings indicate missing controls or custom policy violations for AI agent behavior.\n\nRemediation: Update repository policy, add required controls, or reduce the capability that triggered the policy finding."
+              },
+              "id": "policy.prompt_file_detected_without_security_policy",
+              "name": "prompt file detected without security policy",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "low",
+                "security-severity": "2.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "Policy finding detected by AgentBOM."
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "Reachability findings connect detected models, frameworks, or tool configuration to sensitive capabilities using deterministic static evidence."
+              },
+              "help": {
+                "text": "Reachability findings connect detected models, frameworks, or tool configuration to sensitive capabilities using deterministic static evidence.\n\nRemediation: Constrain or remove the reachable capability, isolate it behind an explicit approval or sandbox boundary, and document expected use in repository policy."
+              },
+              "id": "reachable.mcp_tool_invocation",
+              "name": "Reachable capability: mcp_tool_invocation",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "high",
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "An agent actor appears able to reach mcp_tool_invocation."
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "AgentBOM emits aggregate risk findings when static analysis detects repository-level patterns that require security review."
+              },
+              "help": {
+                "text": "AgentBOM emits aggregate risk findings when static analysis detects repository-level patterns that require security review.\n\nRemediation: Review the detailed AgentBOM JSON and Markdown output, then reduce exposed agent capabilities or document compensating controls."
+              },
+              "id": "risk.high",
+              "name": "High aggregate risk",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "high",
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "high-risk MCP server detected"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "fullDescription": {
+                "text": "AgentBOM emits aggregate risk findings when static analysis detects repository-level patterns that require security review."
+              },
+              "help": {
+                "text": "AgentBOM emits aggregate risk findings when static analysis detects repository-level patterns that require security review.\n\nRemediation: Review the detailed AgentBOM JSON and Markdown output, then reduce exposed agent capabilities or document compensating controls."
+              },
+              "id": "risk.low",
+              "name": "Low aggregate risk",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "low",
+                "security-severity": "2.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "prompt files detected without a policy file"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "AgentBOM detected a likely AI/API credential value with deterministic offline pattern matching. The value is redacted from all outputs."
+              },
+              "help": {
+                "text": "AgentBOM detected a likely AI/API credential value with deterministic offline pattern matching. The value is redacted from all outputs.\n\nRemediation: Value redacted. Remove the key and rotate it."
+              },
+              "id": "secret_leak.generic.token",
+              "name": "Possible SLACK_BOT_TOKEN value",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "high",
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "Possible SLACK_BOT_TOKEN value"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "AgentBOM detected a likely AI/API credential value with deterministic offline pattern matching. The value is redacted from all outputs."
+              },
+              "help": {
+                "text": "AgentBOM detected a likely AI/API credential value with deterministic offline pattern matching. The value is redacted from all outputs.\n\nRemediation: Value redacted. Remove the key and rotate it."
+              },
+              "id": "secret_leak.openai.api_key",
+              "name": "Possible OPENAI_API_KEY value",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "critical",
+                "security-severity": "9.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "Possible OPENAI_API_KEY value"
+              }
+            }
+          ],
+          "semanticVersion": "0.8.0"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}
