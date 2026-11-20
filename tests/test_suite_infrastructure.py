@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -291,6 +292,32 @@ def test_a_skip_in_a_parallel_worker_fails_a_strict_run(suite):
         result.stdout.fnmatch_lines([f"UNEXPECTED: {line}"])
     result.stdout.fnmatch_lines(["--strict-skips: unexpected skips fail this run"])
     assert suite.runpytest_subprocess("-p", "no:cacheprovider", "-n", "2").ret == 0
+
+
+def test_a_no_cover_test_runs_untraced_in_a_parallel_worker(suite, monkeypatch):
+    suite.makepyfile(
+        """
+        import os
+
+        import coverage
+        import pytest
+
+        @pytest.mark.no_cover
+        def test_untraced():
+            assert os.environ["PYTEST_XDIST_WORKER"].startswith("gw")
+            assert coverage.Coverage.current() is None
+
+        def test_traced():
+            assert coverage.Coverage.current() is not None
+        """
+    )
+    # Under the coverage job this process is traced too, and a child that inherited these
+    # would start a collector of its own beneath the one this test is about.
+    for name in [n for n in os.environ if n.startswith(("COV_CORE_", "COVERAGE_"))]:
+        monkeypatch.delenv(name)
+    options = ("--cov=nexus_symbiote", "--cov-report=")
+    result = suite.runpytest_subprocess("-p", "no:cacheprovider", "-n", "2", *options)
+    result.assert_outcomes(passed=2)
 
 
 def test_every_subprocess_a_test_starts_has_its_own_timeout():
