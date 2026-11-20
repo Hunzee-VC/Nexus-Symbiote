@@ -1418,3 +1418,88 @@ def test_re_review_regressions_n1_to_n5_and_ecosystem_ranges(tmp_path: Path) -> 
         encoding="utf-8",
     )
     assert import_foreign_sbom(eco_sbom, target_aibom=eco_base).conflict_count == 0
+
+
+def _cdx(path: Path, *components: dict[str, object]) -> Path:
+    doc = {"bomFormat": "CycloneDX", "specVersion": "1.6", "components": list(components)}
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    return path
+
+
+def test_import_sbom_project_binds_weights_over_file_bytes_and_names_a_skipped_one(
+    tmp_path: Path,
+) -> None:
+    proj = tmp_path / "proj"
+    (proj / "models").mkdir(parents=True)
+    weights = b"\x07" * (5 * 1024 * 1024)
+    (proj / "models" / "w.bin").write_bytes(weights)
+    model = {"type": "machine-learning-model", "name": "w", "version": "1"}
+    sha = hashlib.sha256(weights).hexdigest()
+    hashed = _cdx(
+        tmp_path / "hashed.json", {**model, "hashes": [{"alg": "SHA-256", "content": sha}]}
+    )
+    out = tmp_path / "out.json"
+    runner = CliRunner()
+
+    def run(*args: str) -> tuple[int, str]:
+        res = runner.invoke(main, [*args, "--project", str(proj), "-o", str(out), "--json-output"])
+        return res.exit_code, res.output
+
+    code, text = run("import-sbom", str(hashed))
+    assert code == 0, text
+    assert '"bound_local_count": 1' in text
+    assert '"scan_failure_count": 0' in text
+
+    code, text = run("--limit", "model-bytes=1MiB", "import-sbom", str(hashed))
+    assert code == 0, text
+    assert '"bound_local_count": 0' in text
+    assert "Warning: models/w.bin: exceeds model-bytes; not hashed, so left unbound" in text
+    written = AIBOM.load(out)
+    assert written.metadata.completeness is not None
+    assert written.metadata.completeness.scan_failures == [
+        "models/w.bin: exceeds model-bytes; not hashed, so left unbound"
+    ]
+    assert all("declared_digest_local_match" not in c.properties for c in written.components)
+
+    code, text = run("--limit", "model-total-bytes=1MiB", "import-sbom", str(hashed))
+    assert code == 1
+    assert "Collection limit exceeded under --project: models/w.bin: model-total-bytes" in text
+
+    unhashed = _cdx(tmp_path / "unhashed.json", model)
+    code, text = run("--limit", "model-total-bytes=1MiB", "import-sbom", str(unhashed))
+    assert code == 0, text
+    assert '"scan_failure_count": 0' in text
+
+
+def test_import_sbom_entry_without_purl_conflicts_with_any_ecosystem(tmp_path: Path) -> None:
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "requirements.txt").write_text("openai==1.0.0\n", encoding="utf-8")
+    base = tmp_path / "base.json"
+    runner = CliRunner()
+    assert runner.invoke(main, ["scan", str(proj), "-o", str(base)]).exit_code == 0
+    local = [c for c in AIBOM.load(base).components if c.name == "openai"]
+    assert [c.version for c in local] == ["==1.0.0"]
+
+    bare = _cdx(tmp_path / "bare.json", {"name": "openai", "version": "2.0.0"})
+    res = runner.invoke(main, ["import-sbom", str(bare), "--into", str(base), "--json-output"])
+    assert res.exit_code == 0, res.output
+    assert '"conflict_count": 1' in res.output
+
+    summary = import_foreign_sbom(bare, target_aibom=AIBOM.load(base))
+    assert summary.conflict_count == 1
+    flagged = {c.bom_ref for c in summary.aibom.components if c.risks}
+    assert flagged == {local[0].bom_ref, summary.conflicts[0].split(": ")[0]}
+    assert all(r.category == "source_conflict" for c in summary.aibom.components for r in c.risks)
+
+    # The same disagreement inside one document, in either order.
+    npm = {"name": "openai", "version": "4.2.0", "purl": "pkg:npm/openai@4.2.0"}
+    pypi = {"name": "openai", "version": "1.0.0", "purl": "pkg:pypi/openai@1.0.0"}
+    none = {"name": "openai", "version": "2.0.0"}
+    for order, expected in (([pypi, none], 1), ([none, pypi], 1), ([pypi, npm], 0)):
+        doc = _cdx(tmp_path / "mixed.json", *order)
+        assert import_foreign_sbom(doc).conflict_count == expected, order
+
+    # An agreeing entry without a purl is no conflict.
+    same = _cdx(tmp_path / "same.json", {"name": "openai", "version": "1.0.0"})
+    assert import_foreign_sbom(same, target_aibom=AIBOM.load(base)).conflict_count == 0

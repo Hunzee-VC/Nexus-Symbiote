@@ -16,6 +16,7 @@ from packaging.requirements import InvalidRequirement, Requirement
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
+from nexus_symbiote import limits
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel, RiskSeverity, TrustTier
 from nexus_symbiote.core.hashing import hash_bytes, open_regular_file, parse_json_strict
@@ -353,23 +354,26 @@ def _extract_spdx_entries(doc: dict[str, Any]) -> tuple[str, list[dict[str, Any]
     raise ValueError("unrecognized foreign SBOM format (expected CycloneDX or SPDX JSON)")
 
 
-def _local_digest_index(project_root: Path | None) -> tuple[dict[str, str], list[str]]:
+def _digest_index(project_root: Path | None, wanted: bool) -> tuple[dict[str, str], list[str]]:
     by_digest: dict[str, str] = {}
     failures: list[str] = []
     if project_root is None:
         return by_digest, failures
-    with ConfinedCollection(project_root, failures) as files:
+    cap, total = limits.bound("model-bytes"), limits.bound("model-total-bytes")
+    with ConfinedCollection(project_root, failures, max_total_bytes=total) as files:
         for rel_path in files.iter_files():
             rel_posix = rel_path.as_posix()
             p = PurePosixPath(rel_posix)
             if p.suffix.lower() not in _ALL_ARTIFACT_EXTS or credential_shaped(rel_posix):
                 continue
-            if any(part.lower() in _HIDDEN_SECRET_DIRS for part in p.parts[:-1]):
+            if not wanted or any(part.lower() in _HIDDEN_SECRET_DIRS for part in p.parts[:-1]):
                 continue
             found = files.regular_file(rel_posix)
             if found is None or found[0] != rel_path or found[1] < 8:
                 continue
-            if digest := files.hash_file(rel_posix):
+            if found[1] > cap.value:
+                files._fail(rel_posix, f"exceeds {cap.name}; not hashed, so left unbound")
+            elif digest := files.hash_file(rel_posix, max_bytes=cap):
                 by_digest.setdefault(digest, rel_posix)
     return by_digest, failures
 
@@ -434,12 +438,14 @@ def import_foreign_sbom(
         source_format, entries = _extract_spdx_entries(parsed)
 
     bom = target_aibom.model_copy(deep=True) if target_aibom is not None else AIBOM()
-    digest_index, local_failures = _local_digest_index(project_root)
+    hashed = any(e["sha256"] for e in entries)
+    digest_index, local_failures = _digest_index(project_root, hashed)
     existing_refs = {c.bom_ref for c in bom.components}
 
     buckets: dict[str, _IdentityBucket] = {}
     for existing in bom.components:
-        keys_for_existing = [f"name:{_comp_eco(existing)}:{_norm_pkg(existing.name)}"]
+        ecos = (_comp_eco(existing), "*")
+        keys_for_existing = [f"name:{e}:{_norm_pkg(existing.name)}" for e in ecos]
         if isinstance(existing, RegistryEntryComponent) and existing.package_url:
             keys_for_existing.append(f"purl:{existing.package_url.split('@')[0].lower()}")
         for k in dict.fromkeys(keys_for_existing):
@@ -506,10 +512,10 @@ def import_foreign_sbom(
         sha256_val: str | None = entry["sha256"]
         eco = _ENTRY_ECO_MAP.get(entry["type"]) or _purl_eco(clean_purl) or "any"
 
-        cand_keys = [f"name:{eco}:{_norm_pkg(_clean_str(raw_name))}"]
-        if clean_purl:
-            cand_keys.insert(0, f"purl:{clean_purl.split('@')[0].lower()}")
-        cand_keys = list(dict.fromkeys(cand_keys))
+        nm = _norm_pkg(_clean_str(raw_name))
+        pk = [f"purl:{clean_purl.split('@')[0].lower()}"] if clean_purl else []
+        cand_keys = pk + [f"name:{e}:{nm}" for e in (("*",) if eco == "any" else (eco, "any"))]
+        rec_keys = pk + [f"name:{e}:{nm}" for e in (eco, "*")]
 
         cand_file = digest_index.get(sha256_val) if sha256_val else None
         allowed_exts = _KIND_EXT_MAP.get(entry["type"], _PKG_EXTS)
@@ -574,8 +580,8 @@ def import_foreign_sbom(
                             )
                         )
 
-        for k in cand_keys:
-            bucket = buckets[k]
+        for k in rec_keys:
+            bucket = buckets.setdefault(k, _IdentityBucket())
             if clean_ver:
                 _record_bucket_item(
                     bucket.versions, clean_ver, comp_ref, "extra_version_conflicts", bucket
