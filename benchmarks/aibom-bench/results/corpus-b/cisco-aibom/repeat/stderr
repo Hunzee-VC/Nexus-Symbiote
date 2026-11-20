@@ -1,0 +1,3 @@
+Model catalog fetch failed from https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json: [Errno 101] Network is unreachable
+Model catalog fetch failed from https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json: [Errno 101] Network is unreachable
+OSV batch query failed: [Errno 101] Network is unreachable

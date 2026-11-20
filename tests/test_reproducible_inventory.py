@@ -741,7 +741,7 @@ def _project_with_suppressed_pickle(tmp_path: Path, expires: str) -> Path:
     project = tmp_path / "project"
     (project / "models").mkdir(parents=True)
     (project / "AGENTS.md").write_text("Use read-only tools.\n")
-    (project / "models" / "classifier.pkl").write_bytes(b"model bytes")
+    (project / "models" / "classifier.pkl").write_bytes(b"\x80\x04N.")
     inventory = tmp_path / "unsuppressed.json"
     _invoke("scan", str(project), "--no-project-policy", "--report-only", "-o", str(inventory))
     (fingerprint,) = [

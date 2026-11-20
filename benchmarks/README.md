@@ -17,3 +17,13 @@ Detection metrics include TP, FP, TN, FN, precision, recall, F1, specificity, an
 Credential disclosure and collection-failure coverage are control contracts, reported separately from detection metrics. Their outcomes must not inflate TP/TN. The plaintext fixture secret is a public synthetic sentinel; tests check that this literal is absent from actual native, CycloneDX, SPDX, and SARIF exports.
 
 The corpus is intentionally finite. Blind spots include real signed provider bundles, undocumented hosted-model revisions, deployed endpoint authentication, runtime revocation races, multi-tenant retrieval ACLs, framework diversity, and adversarial obfuscation beyond these fixtures. Expanding the corpus requires reviewed labels, independent fixture hashes, negative controls, and a documented sampling rationale. A perfect result on this corpus is not a safety or completeness certificate.
+
+## AIBOM-Bench
+
+`aibom-bench/` is a separate, tool-agnostic benchmark for AI bill-of-materials
+tools: a generated ground-truth corpus of an agentic project, a scored
+specification ([SPEC.md](aibom-bench/SPEC.md)), a runner that traces each
+tool, and a graded report of ten tools ([REPORT.md](aibom-bench/REPORT.md)).
+Unlike the corpus above, it does compare tools, and its report says for every
+score whether it was verified by a run, read from source, or taken from
+documentation.

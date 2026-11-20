@@ -1,0 +1,1 @@
+/aibom-run/tools/cdxgen/node_modules/.bin/cdxgen -t ai -r --include-formulation --no-install-deps --spec-version 1.7 --json-pretty --bom-audit --bom-audit-categories ai-bom -o /aibom-run/resultsB/cdxgen/network/bom.json /aibom-run/work/cdxgen/corpus 

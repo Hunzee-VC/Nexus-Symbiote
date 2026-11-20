@@ -1,0 +1,1 @@
+/aibom-run/venvs/ai-bom/bin/ai-bom scan /aibom-run/work/trusera-ai-bom/corpus --deep --quiet --no-telemetry -f json -o /aibom-run/results2/trusera-ai-bom/repeat/report.json 
