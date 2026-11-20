@@ -2251,9 +2251,9 @@ def _text_credentials(text: str) -> list[str]:
 # Nodes of one configuration document read for the values a declared name must not hold.
 _KNOWN_VALUE_NODES = 1 << 17
 # Maps whose values a client passes to a server or sends with its requests, and which
-# no record publishes: environments, headers and Codex's query parameters and
-# `shell_environment_policy.set`.
-_VALUE_MAPS = frozenset({"env", "headers", "http_headers", "query_params", "set"})
+# no record publishes: environments (opencode's `environment` too), headers and Codex's
+# query parameters and `shell_environment_policy.set`.
+_VALUE_MAPS = frozenset({"env", "environment", "headers", "http_headers", "query_params", "set"})
 # Settings whose `env` the host applies to every process it starts, MCP servers too.
 _HOST_SETTINGS = frozenset(
     {(".claude", "settings.json"), (".claude", "settings.local.json"), (".cursor", "settings.json")}
@@ -2392,7 +2392,7 @@ class MCPScanner(Scanner):
         parsed: dict[str, tuple[Any, list[str]]] = {}
         for path in paths:
             dialect = _dialect(path)
-            data = self._read_dialect(files, dialect, result, parsed)
+            data = self._read_dialect(files, dialect, result, parsed, known)
             if data is None:
                 continue
             found_any = True
@@ -2547,6 +2547,7 @@ class MCPScanner(Scanner):
         dialect: McpDialect,
         result: ScanResult,
         parsed: dict[str, tuple[Any, list[str]]],
+        known: KnownValues | None = None,
     ) -> Any:
         if dialect.syntax == "json":
             return files.read_json(dialect.path, missing_ok=True)
@@ -2579,6 +2580,9 @@ class MCPScanner(Scanner):
             result.scan_failures.append(f"{dialect.path}: invalid {syntax}")
             return None
         if dialect.shape == "opencode" and _opencode_substitution_outside_values(text):
+            # Parsed but not read: its values are unknown, so no source name may be published.
+            if known is not None:
+                known.refuse()
             result.scan_failures.append(
                 f"{dialect.path}: opencode substitution outside one string value; the "
                 "configuration depends on the environment and is not inventoried"
