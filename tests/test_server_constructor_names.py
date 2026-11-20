@@ -913,3 +913,54 @@ def test_an_opencode_file_refused_for_a_substitution_keeps_every_binding(tmp_pat
     result = _scan(tmp_path, {"opencode.json": refused, "src/server.ts": source})
     assert any("opencode substitution outside one string value" in f for f in result.scan_failures)
     assert [server.name for server in _servers(result)] == ["server"]
+
+
+# `--flag=value` is read by the launcher analysis only: _configured_values reads a
+# `--flag value` pair, a credential-named field and a value map, none of which this is.
+# Each case leaks without `known.add(values)` in `_scan_dialects`; the two dropped
+# Continue entries also leak when dropped entries do not feed it.
+_INLINE = f"--api-key={CONFIGURED}"
+LAUNCHER_ONLY_IN_CLIENT_DIALECTS = {
+    "opencode-command-list": {
+        "opencode.json": json.dumps(
+            {"mcp": {"notes": {"type": "local", "command": ["node", "n.js", _INLINE]}}}
+        )
+    },
+    "zed-command-object": {
+        ".zed/settings.json": json.dumps(
+            {"context_servers": {"notes": {"command": {"path": "node", "args": ["n.js", _INLINE]}}}}
+        )
+    },
+    "continue-server": {
+        ".continue/mcpServers/notes.yaml": "mcpServers:\n  - name: notes\n    command: node\n"
+        f"    args: [n.js, {_INLINE}]\n"
+    },
+    "continue-dropped-duplicate-entry": {
+        ".continue/config.yaml": "mcpServers:\n  - name: notes\n    command: node\n"
+        "  - name: notes\n    command: node\n"
+        f"    args: [n.js, {_INLINE}]\n"
+    },
+    "continue-dropped-unnamed-entry": {
+        ".continue/config.yaml": f"mcpServers:\n  - command: node\n    args: [n.js, {_INLINE}]\n"
+    },
+    "junie-server": {
+        ".junie/mcp/mcp.json": json.dumps(
+            {"mcpServers": {"notes": {"command": "node", "args": ["n.js", _INLINE]}}}
+        )
+    },
+}
+
+
+@pytest.mark.parametrize("language", sorted(SECRET_SOURCES))
+@pytest.mark.parametrize(
+    "files",
+    list(LAUNCHER_ONLY_IN_CLIENT_DIALECTS.values()),
+    ids=list(LAUNCHER_ONLY_IN_CLIENT_DIALECTS),
+)
+def test_a_launcher_credential_of_a_client_dialect_never_becomes_a_server_name(
+    tmp_path, language, files
+):
+    relative, source, binding = SECRET_SOURCES[language]
+    text, names = _native(tmp_path, {**files, relative: source(f"notes-{CONFIGURED}")})
+    assert binding in names
+    assert text.count(CONFIGURED) == 0
