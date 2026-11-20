@@ -237,6 +237,12 @@ def test_ci_and_make_run_the_suite_with_the_same_parallel_options():
     for job in ("test", "floor", "coverage"):
         runs = [s["run"] for s in workflow["jobs"][job]["steps"] if "pytest" in s.get("run", "")]
         assert len(runs) == 1 and runs[0].count(f"python -m pytest {PARALLEL} ") == 1
+    offline = [
+        s["run"]
+        for s in workflow["jobs"]["offline-invariant"]["steps"]
+        if "-m pytest" in s.get("run", "")
+    ]
+    assert len(offline) == 1 and offline[0].count(f'"$OFFLINE_PYTHON" -m pytest {PARALLEL} ') == 1
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
     assert f"\nPYTEST_PARALLEL = {PARALLEL}\n" in makefile
     recipes = [line for line in makefile.splitlines() if " -m pytest " in line]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -10,9 +11,24 @@ from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from nexus_symbiote.cli import main
-from nexus_symbiote.core.aibom import AIBOM
+from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
 from nexus_symbiote.core.enums import ComponentType
-from nexus_symbiote.core.models import AgentComponent, CapabilityDeclaration
+from nexus_symbiote.core.models import NATIVE_SPEC_VERSION, AgentComponent, CapabilityDeclaration
+
+# Committed SHA-256 pins per NATIVE_SPEC_VERSION (R1.0.0-rc.1-1). Any edit to the
+# native schema without bumping NATIVE_SPEC_VERSION and registering its new digest fails CI.
+PINNED_NATIVE_SCHEMA_BYTES_SHA256: dict[str, str] = {
+    "1.1.0": "26a807f88c758ef7580bd80d90048ab66fe6aba969b243e93e7d3aee052b4796",
+}
+PINNED_NATIVE_SCHEMA_CANONICAL_SHA256: dict[str, str] = {
+    "1.1.0": "376731d03329869d0869274514028f41c11d36289034e931613d97f53f7445bf",
+}
+
+
+def _schema_digests(schema_bytes: bytes) -> tuple[str, str]:
+    parsed = json.loads(schema_bytes.decode("utf-8"))
+    canonical = json.dumps(parsed, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(schema_bytes).hexdigest(), hashlib.sha256(canonical).hexdigest()
 
 
 @pytest.mark.locked_only
@@ -21,6 +37,37 @@ def test_native_schema_matches_runtime():
         (Path(__file__).parents[1] / "schemas/nexus-symbiote-aibom-1.0.schema.json").read_text()
     )
     assert schema == AIBOM.model_json_schema()
+
+
+def test_native_schema_digest_pinned_per_spec_version():
+    schema_path = Path(__file__).parents[1] / "schemas/nexus-symbiote-aibom-1.0.schema.json"
+    schema_bytes = schema_path.read_bytes()
+    bytes_sha, canon_sha = _schema_digests(schema_bytes)
+    assert NATIVE_SPEC_VERSION in PINNED_NATIVE_SCHEMA_CANONICAL_SHA256, (
+        f"NATIVE_SPEC_VERSION {NATIVE_SPEC_VERSION!r} has no pinned schema digest"
+    )
+    assert bytes_sha == PINNED_NATIVE_SCHEMA_BYTES_SHA256[NATIVE_SPEC_VERSION], (
+        "schemas/nexus-symbiote-aibom-1.0.schema.json changed without bumping "
+        "NATIVE_SPEC_VERSION in core/models.py and pinning its digest"
+    )
+    assert canon_sha == PINNED_NATIVE_SCHEMA_CANONICAL_SHA256[NATIVE_SPEC_VERSION]
+
+    mutated = json.loads(schema_bytes.decode("utf-8"))
+    mutated["description"] = "mutated-without-version-bump"
+    _, mutated_sha = _schema_digests(json.dumps(mutated).encode("utf-8"))
+    assert mutated_sha != PINNED_NATIVE_SCHEMA_CANONICAL_SHA256[NATIVE_SPEC_VERSION]
+
+
+@pytest.mark.parametrize("future_version", ["1.2.0", "1.99.0", "2.0.0"])
+def test_unsupported_future_minor_or_major_spec_version_fails_closed(tmp_path, future_version):
+    doc = AIBOM().to_dict()
+    doc["metadata"]["spec_version"] = future_version
+    path = tmp_path / "future.json"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(NativeFormatError):
+        AIBOM.load(path)
+    with pytest.raises(ValidationError):
+        AIBOM.model_validate(doc)
 
 
 def test_native_schema_preserves_unknowns():
