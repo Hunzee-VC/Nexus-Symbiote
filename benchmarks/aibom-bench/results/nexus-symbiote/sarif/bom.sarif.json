@@ -1,0 +1,1757 @@
+{
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "nexus-symbiote",
+          "version": "0.2.0",
+          "informationUri": "https://github.com/Hunzee-VC/Nexus-Symbiote",
+          "rules": [
+            {
+              "id": "nexus_symbiote/bidi_override/critical",
+              "shortDescription": {
+                "text": "Bidirectional override in instructions (critical)"
+              },
+              "fullDescription": {
+                "text": "An instruction file contains bidirectional control characters that can make text read differently from how it is processed."
+              },
+              "help": {
+                "text": "An instruction file contains bidirectional control characters that can make text read differently from how it is processed. The finding comes from the Nexus SymBiote inventory. Review the component named in the result and its recommendation, which the result's properties carry. Findings describe declarations in the repository; they do not establish exploitability."
+              },
+              "helpUri": "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md#sarif-for-github-code-scanning",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "security-severity": "9.5",
+                "tags": [
+                  "security",
+                  "external/cwe/cwe-451",
+                  "external/cwe/cwe-1427",
+                  "external/owasp-llm-top-10-2025/llm01",
+                  "external/owasp-agentic-top-10/asi01",
+                  "external/owasp-llm-top-10-2026/llm01",
+                  "external/mitre-atlas/aml.t0068",
+                  "external/nist-ai-rmf/measure-2.7"
+                ],
+                "precision": "medium"
+              }
+            },
+            {
+              "id": "nexus_symbiote/completeness/low",
+              "shortDescription": {
+                "text": "Incomplete declaration (low)"
+              },
+              "fullDescription": {
+                "text": "A declaration lacks information the inventory needs to detect changes."
+              },
+              "help": {
+                "text": "A declaration lacks information the inventory needs to detect changes. The finding comes from the Nexus SymBiote inventory. Review the component named in the result and its recommendation, which the result's properties carry. Findings describe declarations in the repository; they do not establish exploitability."
+              },
+              "helpUri": "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md#sarif-for-github-code-scanning",
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "security-severity": "2.0",
+                "tags": [
+                  "security",
+                  "external/nist-ai-rmf/govern-1.6"
+                ],
+                "precision": "medium"
+              }
+            },
+            {
+              "id": "nexus_symbiote/hidden_markup/high",
+              "shortDescription": {
+                "text": "Comments in instructions (high)"
+              },
+              "fullDescription": {
+                "text": "An instruction file contains HTML or Markdown comments, which rendered views hide and agents read."
+              },
+              "help": {
+                "text": "An instruction file contains HTML or Markdown comments, which rendered views hide and agents read. The finding comes from the Nexus SymBiote inventory. Review the component named in the result and its recommendation, which the result's properties carry. Findings describe declarations in the repository; they do not establish exploitability."
+              },
+              "helpUri": "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md#sarif-for-github-code-scanning",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "external/owasp-llm-top-10-2025/llm01",
+                  "external/owasp-agentic-top-10/asi01",
+                  "external/owasp-llm-top-10-2026/llm01",
+                  "external/mitre-atlas/aml.t0068",
+                  "external/nist-ai-rmf/measure-2.7"
+                ],
+                "precision": "medium"
+              }
+            },
+            {
+              "id": "nexus_symbiote/hook_commands/medium",
+              "shortDescription": {
+                "text": "Hook commands (medium)"
+              },
+              "fullDescription": {
+                "text": "IDE agent settings declare hook commands that run automatically on agent events."
+              },
+              "help": {
+                "text": "IDE agent settings declare hook commands that run automatically on agent events. The finding comes from the Nexus SymBiote inventory. Review the component named in the result and its recommendation, which the result's properties carry. Findings describe declarations in the repository; they do not establish exploitability."
+              },
+              "helpUri": "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md#sarif-for-github-code-scanning",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "security-severity": "5.0",
+                "tags": [
+                  "security",
+                  "external/owasp-agentic-top-10/asi05",
+                  "external/mitre-atlas/aml.t0142",
+                  "external/nist-ai-rmf/measure-2.7"
+                ],
+                "precision": "medium"
+              }
+            },
+            {
+              "id": "nexus_symbiote/instruction_layering/low",
+              "shortDescription": {
+                "text": "Layered instruction files (low)"
+              },
+              "fullDescription": {
+                "text": "An IDE agent reads instructions from more than one location."
+              },
+              "help": {
+                "text": "An IDE agent reads instructions from more than one location. The finding comes from the Nexus SymBiote inventory. Review the component named in the result and its recommendation, which the result's properties carry. Findings describe declarations in the repository; they do not establish exploitability."
+              },
+              "helpUri": "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md#sarif-for-github-code-scanning",
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "security-severity": "2.0",
+                "tags": [
+                  "security",
+                  "external/owasp-llm-top-10-2025/llm01",
+                  "external/owasp-agentic-top-10/asi01",
+                  "external/owasp-llm-top-10-2026/llm01",
+                  "external/nist-ai-rmf/measure-2.7"
+                ],
+                "precision": "medium"
+              }
+            },
+            {
+              "id": "nexus_symbiote/invisible_characters/high",
+              "shortDescription": {
+                "text": "Invisible characters in instructions (high)"
+              },
+              "fullDescription": {
+                "text": "An instruction file contains invisible Unicode characters that can carry hidden instructions."
+              },
+              "help": {
+                "text": "An instruction file contains invisible Unicode characters that can carry hidden instructions. The finding comes from the Nexus SymBiote inventory. Review the component named in the result and its recommendation, which the result's properties carry. Findings describe declarations in the repository; they do not establish exploitability."
+              },
+              "helpUri": "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md#sarif-for-github-code-scanning",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "external/cwe/cwe-451",
+                  "external/cwe/cwe-1427",
+                  "external/owasp-llm-top-10-2025/llm01",
+                  "external/owasp-agentic-top-10/asi01",
+                  "external/owasp-llm-top-10-2026/llm01",
+                  "external/mitre-atlas/aml.t0068",
+                  "external/nist-ai-rmf/measure-2.7"
+                ],
+                "precision": "medium"
+              }
+            },
+            {
+              "id": "nexus_symbiote/local_process/medium",
+              "shortDescription": {
+                "text": "Local MCP server process (medium)"
+              },
+              "fullDescription": {
+                "text": "An MCP server runs as a local process whose executable the inventory does not verify."
+              },
+              "help": {
+                "text": "An MCP server runs as a local process whose executable the inventory does not verify. The finding comes from the Nexus SymBiote inventory. Review the component named in the result and its recommendation, which the result's properties carry. Findings describe declarations in the repository; they do not establish exploitability."
+              },
+              "helpUri": "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md#sarif-for-github-code-scanning",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "security-severity": "5.0",
+                "tags": [
+                  "security",
+                  "external/owasp-agentic-top-10/asi07",
+                  "external/mitre-atlas/aml.t0010.005",
+                  "external/nist-ai-rmf/measure-2.7"
+                ],
+                "precision": "medium"
+              }
+            },
+            {
+              "id": "nexus_symbiote/mutable_image_tag/medium",
+              "shortDescription": {
+                "text": "Mutable image tag (medium)"
+              },
+              "fullDescription": {
+                "text": "A container image is referenced by a tag rather than a digest; the tag can be moved to different image content."
+              },
+              "help": {
+                "text": "A container image is referenced by a tag rather than a digest; the tag can be moved to different image content. The finding comes from the Nexus SymBiote inventory. Review the component named in the result and its recommendation, which the result's properties carry. Findings describe declarations in the repository; they do not establish exploitability."
+              },
+              "helpUri": "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md#sarif-for-github-code-scanning",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "security-severity": "5.0",
+                "tags": [
+                  "security",
+                  "external/cwe/cwe-829",
+                  "external/owasp-llm-top-10-2025/llm03",
+                  "external/owasp-agentic-top-10/asi04",
+                  "external/owasp-llm-top-10-2026/llm04",
+                  "external/mitre-atlas/aml.t0010.004",
+                  "external/nist-ai-rmf/manage-3.1"
+                ],
+                "precision": "medium"
+              }
+            },
+            {
+              "id": "nexus_symbiote/rag_discovery/info",
+              "shortDescription": {
+                "text": "Undeclared retrieval source (info)"
+              },
+              "fullDescription": {
+                "text": "A vector store or retrieval source is referenced without a declared configuration."
+              },
+              "help": {
+                "text": "A vector store or retrieval source is referenced without a declared configuration. The finding comes from the Nexus SymBiote inventory. Review the component named in the result and its recommendation, which the result's properties carry. Findings describe declarations in the repository; they do not establish exploitability."
+              },
+              "helpUri": "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md#sarif-for-github-code-scanning",
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "security-severity": "0.0",
+                "tags": [
+                  "security",
+                  "external/owasp-llm-top-10-2025/llm08",
+                  "external/owasp-agentic-top-10/asi06",
+                  "external/owasp-llm-top-10-2026/llm09",
+                  "external/nist-ai-rmf/govern-1.6"
+                ],
+                "precision": "medium"
+              }
+            },
+            {
+              "id": "nexus_symbiote/serialization_format/critical",
+              "shortDescription": {
+                "text": "Unsafe model serialization (critical)"
+              },
+              "fullDescription": {
+                "text": "A model artifact uses a format or loader that can execute code or evaluate templates when the model is loaded."
+              },
+              "help": {
+                "text": "A model artifact uses a format or loader that can execute code or evaluate templates when the model is loaded. The finding comes from the Nexus SymBiote inventory. Review the component named in the result and its recommendation, which the result's properties carry. Findings describe declarations in the repository; they do not establish exploitability."
+              },
+              "helpUri": "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md#sarif-for-github-code-scanning",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "security-severity": "9.5",
+                "tags": [
+                  "security",
+                  "external/cwe/cwe-502",
+                  "external/owasp-llm-top-10-2025/llm03",
+                  "external/owasp-agentic-top-10/asi04",
+                  "external/owasp-agentic-top-10/asi05",
+                  "external/owasp-llm-top-10-2026/llm04",
+                  "external/mitre-atlas/aml.t0011.000",
+                  "external/nist-ai-rmf/manage-3.2"
+                ],
+                "precision": "medium"
+              }
+            },
+            {
+              "id": "nexus_symbiote/serialization_format_unknown/high",
+              "shortDescription": {
+                "text": "Unknown model serialization safety (high)"
+              },
+              "fullDescription": {
+                "text": "The safety of a model artifact's format or loader could not be established."
+              },
+              "help": {
+                "text": "The safety of a model artifact's format or loader could not be established. The finding comes from the Nexus SymBiote inventory. Review the component named in the result and its recommendation, which the result's properties carry. Findings describe declarations in the repository; they do not establish exploitability."
+              },
+              "helpUri": "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md#sarif-for-github-code-scanning",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "external/cwe/cwe-502",
+                  "external/owasp-llm-top-10-2025/llm03",
+                  "external/owasp-agentic-top-10/asi04",
+                  "external/owasp-llm-top-10-2026/llm04",
+                  "external/mitre-atlas/aml.t0011.000",
+                  "external/nist-ai-rmf/manage-3.2"
+                ],
+                "precision": "medium"
+              }
+            },
+            {
+              "id": "nexus_symbiote/signing_status/high",
+              "shortDescription": {
+                "text": "Unsigned model artifact (high)"
+              },
+              "fullDescription": {
+                "text": "A model artifact has no verified signature bound to its bytes."
+              },
+              "help": {
+                "text": "A model artifact has no verified signature bound to its bytes. The finding comes from the Nexus SymBiote inventory. Review the component named in the result and its recommendation, which the result's properties carry. Findings describe declarations in the repository; they do not establish exploitability."
+              },
+              "helpUri": "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md#sarif-for-github-code-scanning",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "external/cwe/cwe-345",
+                  "external/owasp-llm-top-10-2025/llm03",
+                  "external/owasp-agentic-top-10/asi04",
+                  "external/owasp-llm-top-10-2026/llm04",
+                  "external/mitre-atlas/aml.t0010.003",
+                  "external/nist-ai-rmf/manage-3.2"
+                ],
+                "precision": "medium"
+              }
+            },
+            {
+              "id": "nexus_symbiote/transitive_resolution/medium",
+              "shortDescription": {
+                "text": "Dependencies resolved at launch (medium)"
+              },
+              "fullDescription": {
+                "text": "An MCP server pins its package version, but the package runner resolves that package's dependencies when the server starts, without a lockfile."
+              },
+              "help": {
+                "text": "An MCP server pins its package version, but the package runner resolves that package's dependencies when the server starts, without a lockfile. The finding comes from the Nexus SymBiote inventory. Review the component named in the result and its recommendation, which the result's properties carry. Findings describe declarations in the repository; they do not establish exploitability."
+              },
+              "helpUri": "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md#sarif-for-github-code-scanning",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "security-severity": "5.0",
+                "tags": [
+                  "security",
+                  "external/cwe/cwe-829",
+                  "external/owasp-llm-top-10-2025/llm03",
+                  "external/owasp-agentic-top-10/asi04",
+                  "external/owasp-llm-top-10-2026/llm04",
+                  "external/mitre-atlas/aml.t0109",
+                  "external/nist-ai-rmf/manage-3.1"
+                ],
+                "precision": "medium"
+              }
+            },
+            {
+              "id": "nexus_symbiote/version_pinning/high",
+              "shortDescription": {
+                "text": "Unpinned version (high)"
+              },
+              "fullDescription": {
+                "text": "A dependency, MCP server package or container image is declared without an exact version or digest, so what runs can change without a change to the repository."
+              },
+              "help": {
+                "text": "A dependency, MCP server package or container image is declared without an exact version or digest, so what runs can change without a change to the repository. The finding comes from the Nexus SymBiote inventory. Review the component named in the result and its recommendation, which the result's properties carry. Findings describe declarations in the repository; they do not establish exploitability."
+              },
+              "helpUri": "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md#sarif-for-github-code-scanning",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "external/cwe/cwe-829",
+                  "external/owasp-llm-top-10-2025/llm03",
+                  "external/owasp-agentic-top-10/asi04",
+                  "external/owasp-llm-top-10-2026/llm04",
+                  "external/mitre-atlas/aml.t0109",
+                  "external/nist-ai-rmf/manage-3.1"
+                ],
+                "precision": "medium"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "nexus_symbiote/completeness/low",
+          "level": "note",
+          "message": {
+            "text": "A2A agent 'Acme Support Agent' values not bound in this inventory: endpoint URL beyond its exported origin."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/public/.well-known/agent-card.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "0f666abd03b8aedabffb261702296f9ce8695ae9611fee7ef8385dbd10b908eb",
+            "primaryLocationLineHash": "0f666abd03b8aeda:1"
+          },
+          "properties": {
+            "component_ref": "a2a-server:Acme Support Agent",
+            "trust_tier": "internal-unverified",
+            "severity": "low",
+            "location_source": "component",
+            "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values."
+          },
+          "ruleIndex": 1
+        },
+        {
+          "ruleId": "nexus_symbiote/completeness/low",
+          "level": "note",
+          "message": {
+            "text": "IDE agent 'claude-code' settings values not bound in this inventory: the redacted values of .claude/settings.json."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.claude/settings.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "e6d58b5ca7d50b7f86d76e84a05f10406487c371f6e53c73d0fa4f394d576b19",
+            "primaryLocationLineHash": "e6d58b5ca7d50b7f:1"
+          },
+          "properties": {
+            "component_ref": "ide-agent:claude-code",
+            "trust_tier": "internal-unverified",
+            "severity": "low",
+            "location_source": "component",
+            "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values."
+          },
+          "ruleIndex": 1
+        },
+        {
+          "ruleId": "nexus_symbiote/hook_commands/medium",
+          "level": "warning",
+          "message": {
+            "text": "IDE agent 'claude-code' declares 1 hook command(s) that run automatically on agent events."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.claude/settings.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "a5c1b93291a3a74c9d310c54f90ea30ba0d8479bf05d39fb3f2ef86b081ef388",
+            "primaryLocationLineHash": "a5c1b93291a3a74c:1"
+          },
+          "properties": {
+            "component_ref": "ide-agent:claude-code",
+            "trust_tier": "internal-unverified",
+            "severity": "medium",
+            "location_source": "component",
+            "recommendation": "Review this setting and approve its exact value."
+          },
+          "ruleIndex": 3
+        },
+        {
+          "ruleId": "nexus_symbiote/instruction_layering/low",
+          "level": "note",
+          "message": {
+            "text": "IDE agent 'cursor' has multiple declared instruction locations."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.cursorrules",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "08fc6d20aaadf033f9c8710ef2f6666318a12508211f1a91ce2c802fa8a9ffc5",
+            "primaryLocationLineHash": "08fc6d20aaadf033:1"
+          },
+          "properties": {
+            "component_ref": "ide-agent:cursor",
+            "trust_tier": "internal-unverified",
+            "severity": "low",
+            "location_source": "component",
+            "recommendation": "Document loading order, modification authority and approved digests."
+          },
+          "ruleIndex": 4
+        },
+        {
+          "ruleId": "nexus_symbiote/completeness/low",
+          "level": "note",
+          "message": {
+            "text": "IDE agent 'gemini' settings values not bound in this inventory: the redacted values of .gemini/settings.json."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/GEMINI.md",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "2b4b9a07366f29d0c0c7f09d35f2d5842517d02d37c67fadd4f5f442276d0e5a",
+            "primaryLocationLineHash": "2b4b9a07366f29d0:1"
+          },
+          "properties": {
+            "component_ref": "ide-agent:gemini",
+            "trust_tier": "internal-unverified",
+            "severity": "low",
+            "location_source": "component",
+            "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values."
+          },
+          "ruleIndex": 1
+        },
+        {
+          "ruleId": "nexus_symbiote/completeness/low",
+          "level": "note",
+          "message": {
+            "text": "MCP server 'filesystem' values not bound in this inventory: launch arguments."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "a7cc45f88e8598e39828b10da334d79a8bc299043b51b898326f75233079c65d",
+            "primaryLocationLineHash": "a7cc45f88e8598e3:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:0cce754229178ca3019e16245a00c1016bf99b36a416d0c1d85a865ddc2d4f4e",
+            "trust_tier": "third-party-unsigned",
+            "severity": "low",
+            "location_source": "component",
+            "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values."
+          },
+          "ruleIndex": 1
+        },
+        {
+          "ruleId": "nexus_symbiote/local_process/medium",
+          "level": "warning",
+          "message": {
+            "text": "MCP server 'filesystem' uses stdio transport (local process)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "295e1bec0428d14605c5ae48b41cde605f71c29e46f8d39569d8aa198bc0dbf5",
+            "primaryLocationLineHash": "295e1bec0428d146:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:0cce754229178ca3019e16245a00c1016bf99b36a416d0c1d85a865ddc2d4f4e",
+            "trust_tier": "third-party-unsigned",
+            "severity": "medium",
+            "location_source": "component",
+            "recommendation": "Ensure the command binary is integrity-checked."
+          },
+          "ruleIndex": 6
+        },
+        {
+          "ruleId": "nexus_symbiote/transitive_resolution/medium",
+          "level": "warning",
+          "message": {
+            "text": "MCP server 'filesystem' pins its package but resolves dependencies at launch without a lockfile."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "93b7a7f49406ecf790d5472af4dd67b52443a05357b42f7bf5f0e040543e646d",
+            "primaryLocationLineHash": "93b7a7f49406ecf7:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:0cce754229178ca3019e16245a00c1016bf99b36a416d0c1d85a865ddc2d4f4e",
+            "trust_tier": "third-party-unsigned",
+            "severity": "medium",
+            "location_source": "component",
+            "recommendation": "Vendor a lockfile-installed server, or launch an image by digest."
+          },
+          "ruleIndex": 12
+        },
+        {
+          "ruleId": "nexus_symbiote/completeness/low",
+          "level": "note",
+          "message": {
+            "text": "MCP server 'sqlite' values not bound in this inventory: launch arguments."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.vscode/mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "dce6c69fa30ccb6b07856d2267d76ce1a68cb6edd3a0a0f548c7f17a42caf6f3",
+            "primaryLocationLineHash": "dce6c69fa30ccb6b:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:0ebbf02c2ef1e115f8445d5eb9853fbbedb2d2d3778ab4df96073ed665b5f34d",
+            "trust_tier": "third-party-unsigned",
+            "severity": "low",
+            "location_source": "component",
+            "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values."
+          },
+          "ruleIndex": 1
+        },
+        {
+          "ruleId": "nexus_symbiote/local_process/medium",
+          "level": "warning",
+          "message": {
+            "text": "MCP server 'sqlite' uses stdio transport (local process)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.vscode/mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "8d566c0daea268fe1f1f29ffbca7c35bd02252bf0a084c417594138f003e3602",
+            "primaryLocationLineHash": "8d566c0daea268fe:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:0ebbf02c2ef1e115f8445d5eb9853fbbedb2d2d3778ab4df96073ed665b5f34d",
+            "trust_tier": "third-party-unsigned",
+            "severity": "medium",
+            "location_source": "component",
+            "recommendation": "Ensure the command binary is integrity-checked."
+          },
+          "ruleIndex": 6
+        },
+        {
+          "ruleId": "nexus_symbiote/transitive_resolution/medium",
+          "level": "warning",
+          "message": {
+            "text": "MCP server 'sqlite' pins its package but resolves dependencies at launch without a lockfile."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.vscode/mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "43bb7018d2ab875256d96391f26296f06003835b54c05c901cc3220e94bac39c",
+            "primaryLocationLineHash": "43bb7018d2ab8752:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:0ebbf02c2ef1e115f8445d5eb9853fbbedb2d2d3778ab4df96073ed665b5f34d",
+            "trust_tier": "third-party-unsigned",
+            "severity": "medium",
+            "location_source": "component",
+            "recommendation": "Vendor a lockfile-installed server, or launch an image by digest."
+          },
+          "ruleIndex": 12
+        },
+        {
+          "ruleId": "nexus_symbiote/completeness/low",
+          "level": "note",
+          "message": {
+            "text": "MCP server 'slack' values not bound in this inventory: endpoint path and query."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.gemini/settings.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "ca39fd009c61e971698623767d3ea6b09bf1bafda2cec7c19aff7dd98fc659a0",
+            "primaryLocationLineHash": "ca39fd009c61e971:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:3263889520201b938c02c2694649f99e56a8e09161b9964f55186af27399b1ad",
+            "trust_tier": "third-party-unsigned",
+            "severity": "low",
+            "location_source": "component",
+            "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values."
+          },
+          "ruleIndex": 1
+        },
+        {
+          "ruleId": "nexus_symbiote/completeness/low",
+          "level": "note",
+          "message": {
+            "text": "MCP server 'github' values not bound in this inventory: launch arguments; environment values."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "e62f2ac3a7757e3b5af664fc205898e2752a180dbe5a19b326b51b69ab770b64",
+            "primaryLocationLineHash": "e62f2ac3a7757e3b:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:3fbfd7787a7542d632d309995f1d7ad97c71c419488f3755fe2871ba8d8fb4eb",
+            "trust_tier": "third-party-unsigned",
+            "severity": "low",
+            "location_source": "component",
+            "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values."
+          },
+          "ruleIndex": 1
+        },
+        {
+          "ruleId": "nexus_symbiote/local_process/medium",
+          "level": "warning",
+          "message": {
+            "text": "MCP server 'github' uses stdio transport (local process)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "2e0de4a618fa155d603cbbf8d15e761f632e514998a8b22567b6c3b8dddaede2",
+            "primaryLocationLineHash": "2e0de4a618fa155d:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:3fbfd7787a7542d632d309995f1d7ad97c71c419488f3755fe2871ba8d8fb4eb",
+            "trust_tier": "third-party-unsigned",
+            "severity": "medium",
+            "location_source": "component",
+            "recommendation": "Ensure the command binary is integrity-checked."
+          },
+          "ruleIndex": 6
+        },
+        {
+          "ruleId": "nexus_symbiote/completeness/low",
+          "level": "note",
+          "message": {
+            "text": "MCP server 'remote-crm' values not bound in this inventory: header values; endpoint path and query."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "5db872c7a920926dc82fd4c135d97e71b062ac1d58f728877081d5324431b9e7",
+            "primaryLocationLineHash": "5db872c7a920926d:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:bd771aa146767c63b3bd0ab0d2843d77d0decc2a36e8a77db43da6d8febd4833",
+            "trust_tier": "third-party-unsigned",
+            "severity": "low",
+            "location_source": "component",
+            "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values."
+          },
+          "ruleIndex": 1
+        },
+        {
+          "ruleId": "nexus_symbiote/local_process/medium",
+          "level": "warning",
+          "message": {
+            "text": "MCP server 'browser\ufffd\\[2K\ufffd\\[1;32m\\[verified\\]\ufffd\\[0m' uses stdio transport (local process)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.cursor/mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "b14fc2cae037b9dcf88455424c369719ccf9f821bcb79091437a1abbe5b46f6e",
+            "primaryLocationLineHash": "b14fc2cae037b9dc:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:caa03812ec0f73faeef20d0f675ad578adec6861d634134f64c889f1f7079c0f",
+            "trust_tier": "third-party-unsigned",
+            "severity": "medium",
+            "location_source": "component",
+            "recommendation": "Ensure the command binary is integrity-checked."
+          },
+          "ruleIndex": 6
+        },
+        {
+          "ruleId": "nexus_symbiote/version_pinning/high",
+          "level": "error",
+          "message": {
+            "text": "MCP server 'browser\ufffd\\[2K\ufffd\\[1;32m\\[verified\\]\ufffd\\[0m' uses an unpinned package reference (arguments omitted)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.cursor/mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "bd37dc8856b4dd9a2942290dfc133ac030e8a98b0ac046daa225baf6c747bafb",
+            "primaryLocationLineHash": "bd37dc8856b4dd9a:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:caa03812ec0f73faeef20d0f675ad578adec6861d634134f64c889f1f7079c0f",
+            "trust_tier": "third-party-unsigned",
+            "severity": "high",
+            "location_source": "component",
+            "recommendation": "Pin to an exact version and store a hash of the tool schema."
+          },
+          "ruleIndex": 13
+        },
+        {
+          "ruleId": "nexus_symbiote/completeness/low",
+          "level": "note",
+          "message": {
+            "text": "MCP server 'filesystem' values not bound in this inventory: launch arguments."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.gemini/settings.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "c6b0dc37755d5222673d4fe68da9d26c903adeb2c9f7c0f2cd2a26ce8631b905",
+            "primaryLocationLineHash": "c6b0dc37755d5222:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:e37ae79bbad5a2f5937669a336cb72e182b2d23d2f8c693eb6aeef3d2ff0dc25",
+            "trust_tier": "third-party-unsigned",
+            "severity": "low",
+            "location_source": "component",
+            "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values."
+          },
+          "ruleIndex": 1
+        },
+        {
+          "ruleId": "nexus_symbiote/local_process/medium",
+          "level": "warning",
+          "message": {
+            "text": "MCP server 'filesystem' uses stdio transport (local process)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.gemini/settings.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "4f38da595f58f386ed69a18bf796a0b732b00b71183c9a100c2060e7fa9585c5",
+            "primaryLocationLineHash": "4f38da595f58f386:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:e37ae79bbad5a2f5937669a336cb72e182b2d23d2f8c693eb6aeef3d2ff0dc25",
+            "trust_tier": "third-party-unsigned",
+            "severity": "medium",
+            "location_source": "component",
+            "recommendation": "Ensure the command binary is integrity-checked."
+          },
+          "ruleIndex": 6
+        },
+        {
+          "ruleId": "nexus_symbiote/transitive_resolution/medium",
+          "level": "warning",
+          "message": {
+            "text": "MCP server 'filesystem' pins its package but resolves dependencies at launch without a lockfile."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.gemini/settings.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "3a9d605b2bd675a3c5b1294245a55713b4a3654624af47aa4bfe6cdafa8883e1",
+            "primaryLocationLineHash": "3a9d605b2bd675a3:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:e37ae79bbad5a2f5937669a336cb72e182b2d23d2f8c693eb6aeef3d2ff0dc25",
+            "trust_tier": "third-party-unsigned",
+            "severity": "medium",
+            "location_source": "component",
+            "recommendation": "Vendor a lockfile-installed server, or launch an image by digest."
+          },
+          "ruleIndex": 12
+        },
+        {
+          "ruleId": "nexus_symbiote/completeness/low",
+          "level": "note",
+          "message": {
+            "text": "MCP server 'postgres' values not bound in this inventory: environment values."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "ff9e901b8a1adf7bcf3b86b7a6a0537e3f65d6cd5f3110b187253ec51fa4e845",
+            "primaryLocationLineHash": "ff9e901b8a1adf7b:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:e8c8e6c3a3348d5eded17b4e6b3ac9b45c6f40a64e464b480081308f0d25c7c0",
+            "trust_tier": "third-party-unsigned",
+            "severity": "low",
+            "location_source": "component",
+            "recommendation": "Set NEXUS_SYMBIOTE_SOURCE_BINDING_KEY during collection to detect changes to these values."
+          },
+          "ruleIndex": 1
+        },
+        {
+          "ruleId": "nexus_symbiote/local_process/medium",
+          "level": "warning",
+          "message": {
+            "text": "MCP server 'postgres' uses stdio transport (local process)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "4012cebc4dcadea583c7af2fb85a53bcf676fb149311b1b592e19dd8ba9f39b2",
+            "primaryLocationLineHash": "4012cebc4dcadea5:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:e8c8e6c3a3348d5eded17b4e6b3ac9b45c6f40a64e464b480081308f0d25c7c0",
+            "trust_tier": "third-party-unsigned",
+            "severity": "medium",
+            "location_source": "component",
+            "recommendation": "Ensure the command binary is integrity-checked."
+          },
+          "ruleIndex": 6
+        },
+        {
+          "ruleId": "nexus_symbiote/version_pinning/high",
+          "level": "error",
+          "message": {
+            "text": "MCP server 'postgres' uses an unpinned package reference (arguments omitted)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "7921b2e7d3641481fed82ef3384354e022d12222a33d0c76c8315582ebf0f7b5",
+            "primaryLocationLineHash": "7921b2e7d3641481:1"
+          },
+          "properties": {
+            "component_ref": "mcp-server:e8c8e6c3a3348d5eded17b4e6b3ac9b45c6f40a64e464b480081308f0d25c7c0",
+            "trust_tier": "third-party-unsigned",
+            "severity": "high",
+            "location_source": "component",
+            "recommendation": "Pin to an exact version and store a hash of the tool schema."
+          },
+          "ruleIndex": 13
+        },
+        {
+          "ruleId": "nexus_symbiote/serialization_format/critical",
+          "level": "error",
+          "message": {
+            "text": "Model 'embeddings.bin' has evidence of a potentially code-executing serialization or loader."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/data/raw/embeddings.bin",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "d24f1ce6e913ea11da2d1f914f742397c7ae2dafeb55bf2dddf40bafedc673db",
+            "primaryLocationLineHash": "d24f1ce6e913ea11:1"
+          },
+          "properties": {
+            "component_ref": "model:data/raw/embeddings.bin",
+            "trust_tier": "unknown",
+            "severity": "critical",
+            "location_source": "component",
+            "recommendation": "Convert to SafeTensors. Block pickle/pt/pth in production."
+          },
+          "ruleIndex": 9
+        },
+        {
+          "ruleId": "nexus_symbiote/signing_status/high",
+          "level": "error",
+          "message": {
+            "text": "Model 'embeddings.bin' has no verified artifact-bound signature (signature-not-found)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/data/raw/embeddings.bin",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "0d05156e6da2eda58088432a229d17894f17f9c5d951e76b15a1e2badf9d0dda",
+            "primaryLocationLineHash": "0d05156e6da2eda5:1"
+          },
+          "properties": {
+            "component_ref": "model:data/raw/embeddings.bin",
+            "trust_tier": "unknown",
+            "severity": "high",
+            "location_source": "component",
+            "recommendation": "Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet."
+          },
+          "ruleIndex": 11
+        },
+        {
+          "ruleId": "nexus_symbiote/signing_status/high",
+          "level": "error",
+          "message": {
+            "text": "Model 'model.safetensors' has no verified artifact-bound signature (signature-not-found)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/models/classifier/model.safetensors",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "21f98d60585805187690bc5bee20d45e5f91dc9e4e165c8dddbdbf60bf60dd35",
+            "primaryLocationLineHash": "21f98d6058580518:1"
+          },
+          "properties": {
+            "component_ref": "model:models/classifier/model.safetensors",
+            "trust_tier": "unknown",
+            "severity": "high",
+            "location_source": "component",
+            "recommendation": "Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet."
+          },
+          "ruleIndex": 11
+        },
+        {
+          "ruleId": "nexus_symbiote/serialization_format/critical",
+          "level": "error",
+          "message": {
+            "text": "Model 'intent.pkl' has evidence of a potentially code-executing serialization or loader."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/models/legacy/intent.pkl",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "bb07e468db3ac2b33ac9cb7046956fab16287324163cf3416effd9902d87f9ea",
+            "primaryLocationLineHash": "bb07e468db3ac2b3:1"
+          },
+          "properties": {
+            "component_ref": "model:models/legacy/intent.pkl",
+            "trust_tier": "unknown",
+            "severity": "critical",
+            "location_source": "component",
+            "recommendation": "Convert to SafeTensors. Block pickle/pt/pth in production."
+          },
+          "ruleIndex": 9
+        },
+        {
+          "ruleId": "nexus_symbiote/signing_status/high",
+          "level": "error",
+          "message": {
+            "text": "Model 'intent.pkl' has no verified artifact-bound signature (signature-not-found)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/models/legacy/intent.pkl",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "df12add47bf486136a9d6000c19344ba65ad92d6d6a2b5e59d79b8b876a3faec",
+            "primaryLocationLineHash": "df12add47bf48613:1"
+          },
+          "properties": {
+            "component_ref": "model:models/legacy/intent.pkl",
+            "trust_tier": "unknown",
+            "severity": "high",
+            "location_source": "component",
+            "recommendation": "Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet."
+          },
+          "ruleIndex": 11
+        },
+        {
+          "ruleId": "nexus_symbiote/serialization_format/critical",
+          "level": "error",
+          "message": {
+            "text": "Model 'intent.pt' has evidence of a potentially code-executing serialization or loader."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/models/legacy/intent.pt",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "e154b084860dd562efd1d79c72a3a02d4d8f02c3fd8585a872ee8e7a7762425b",
+            "primaryLocationLineHash": "e154b084860dd562:1"
+          },
+          "properties": {
+            "component_ref": "model:models/legacy/intent.pt",
+            "trust_tier": "unknown",
+            "severity": "critical",
+            "location_source": "component",
+            "recommendation": "Convert to SafeTensors. Block pickle/pt/pth in production."
+          },
+          "ruleIndex": 9
+        },
+        {
+          "ruleId": "nexus_symbiote/signing_status/high",
+          "level": "error",
+          "message": {
+            "text": "Model 'intent.pt' has no verified artifact-bound signature (signature-not-found)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/models/legacy/intent.pt",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "421b7bfc634b7bc8fd445ed35343e84695a2032e5742bfe95e41542b496df9f7",
+            "primaryLocationLineHash": "421b7bfc634b7bc8:1"
+          },
+          "properties": {
+            "component_ref": "model:models/legacy/intent.pt",
+            "trust_tier": "unknown",
+            "severity": "high",
+            "location_source": "component",
+            "recommendation": "Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet."
+          },
+          "ruleIndex": 11
+        },
+        {
+          "ruleId": "nexus_symbiote/serialization_format_unknown/high",
+          "level": "error",
+          "message": {
+            "text": "Model 'acme-intent-tiny.Q8_0.gguf' format/loader safety could not be established."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/models/llm/acme-intent-tiny.Q8_0.gguf",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "643e85265ab9334b82bb6266123c963113d9411f54f7782eb43ddd8615496e81",
+            "primaryLocationLineHash": "643e85265ab9334b:1"
+          },
+          "properties": {
+            "component_ref": "model:models/llm/acme-intent-tiny.Q8_0.gguf",
+            "trust_tier": "unknown",
+            "severity": "high",
+            "location_source": "component",
+            "recommendation": "Validate the actual container and the specific loader before admission."
+          },
+          "ruleIndex": 10
+        },
+        {
+          "ruleId": "nexus_symbiote/signing_status/high",
+          "level": "error",
+          "message": {
+            "text": "Model 'acme-intent-tiny.Q8_0.gguf' has no verified artifact-bound signature (signature-not-found)."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/models/llm/acme-intent-tiny.Q8_0.gguf",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "cf2e415f64baad16d6f2304e9beade634738b9099fc5c5f5a43c55f51de15b0b",
+            "primaryLocationLineHash": "cf2e415f64baad16:1"
+          },
+          "properties": {
+            "component_ref": "model:models/llm/acme-intent-tiny.Q8_0.gguf",
+            "trust_tier": "unknown",
+            "severity": "high",
+            "location_source": "component",
+            "recommendation": "Pin the SHA-256 of every weight file in an operator signature policy, or sign each one with a Sigstore message signature (sigstore sign) and name its bundle and signer there. OpenSSF Model Signing (DSSE) bundles are not verified yet."
+          },
+          "ruleIndex": 11
+        },
+        {
+          "ruleId": "nexus_symbiote/rag_discovery/info",
+          "level": "note",
+          "message": {
+            "text": "Vector store 'pinecone' referenced by environment variable names."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.env",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "aaf155305eb31818c58074207174560c9c2d171296e899875da35028853dab32",
+            "primaryLocationLineHash": "aaf155305eb31818:1"
+          },
+          "properties": {
+            "component_ref": "rag:env-pinecone",
+            "trust_tier": "unknown",
+            "severity": "info",
+            "location_source": "component",
+            "recommendation": "Document this reference and its deployment-specific provenance."
+          },
+          "ruleIndex": 8
+        },
+        {
+          "ruleId": "nexus_symbiote/rag_discovery/info",
+          "level": "note",
+          "message": {
+            "text": "Vector store library 'chroma' imported in Python code."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/src/agent/retrieval.py",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "4306ac1f7a993065852ac32877012a28970cd6a6665a03b55285513d4b1847c9",
+            "primaryLocationLineHash": "4306ac1f7a993065:1"
+          },
+          "properties": {
+            "component_ref": "rag:import-chroma",
+            "trust_tier": "unknown",
+            "severity": "info",
+            "location_source": "component",
+            "recommendation": "Document whether this reference is used by the deployment."
+          },
+          "ruleIndex": 8
+        },
+        {
+          "ruleId": "nexus_symbiote/rag_discovery/info",
+          "level": "note",
+          "message": {
+            "text": "Vector store library 'pinecone' imported in Python code."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/src/agent/retrieval.py",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "aa3252030d2d152a966b1ba19e6a1165dcd61aadfe912665834452c02d9440d9",
+            "primaryLocationLineHash": "aa3252030d2d152a:1"
+          },
+          "properties": {
+            "component_ref": "rag:import-pinecone",
+            "trust_tier": "unknown",
+            "severity": "info",
+            "location_source": "component",
+            "recommendation": "Document whether this reference is used by the deployment."
+          },
+          "ruleIndex": 8
+        },
+        {
+          "ruleId": "nexus_symbiote/version_pinning/high",
+          "level": "error",
+          "message": {
+            "text": "Docker image 'ollama/ollama:latest' lacks an immutable digest pin."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/docker-compose.yml",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "bf0b357f92cb28609f71be0a41a97be80896dd3b1353db8644de722dd4573496",
+            "primaryLocationLineHash": "bf0b357f92cb2860:1"
+          },
+          "properties": {
+            "component_ref": "registry:docker/ollama/ollama:latest",
+            "trust_tier": "unknown",
+            "severity": "high",
+            "location_source": "component",
+            "recommendation": "Pin to a SHA256 artifact digest and verify its provenance."
+          },
+          "ruleIndex": 13
+        },
+        {
+          "ruleId": "nexus_symbiote/mutable_image_tag/medium",
+          "level": "warning",
+          "message": {
+            "text": "Docker image 'qdrant/qdrant:v1.12.1' lacks an immutable digest pin."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/docker-compose.yml",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "91b6f281f1f03880614d3ae99ede21d0cf7b7dca1143707ea2bdc8caf87aa479",
+            "primaryLocationLineHash": "91b6f281f1f03880:1"
+          },
+          "properties": {
+            "component_ref": "registry:docker/qdrant/qdrant:v1.12.1",
+            "trust_tier": "unknown",
+            "severity": "medium",
+            "location_source": "component",
+            "recommendation": "Pin to a SHA256 artifact digest and verify its provenance."
+          },
+          "ruleIndex": 7
+        },
+        {
+          "ruleId": "nexus_symbiote/bidi_override/critical",
+          "level": "error",
+          "message": {
+            "text": "'.claude/skills/refund-approver/SKILL.md' contains bidirectional override characters: RIGHT-TO-LEFT OVERRIDE (U+202E) x1. Bidi overrides can make malicious instructions appear as benign text."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.claude/skills/refund-approver/SKILL.md",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "eea9d4d1946caaa7b0af4bdf9d5b78fab56e13c0c859f0966cbf013bec41c0d0",
+            "primaryLocationLineHash": "eea9d4d1946caaa7:1"
+          },
+          "properties": {
+            "component_ref": "skill:.claude/skills/refund-approver/SKILL.md",
+            "trust_tier": "internal-unverified",
+            "severity": "critical",
+            "location_source": "component",
+            "recommendation": "Remove all bidirectional override characters immediately."
+          },
+          "ruleIndex": 0
+        },
+        {
+          "ruleId": "nexus_symbiote/hidden_markup/high",
+          "level": "error",
+          "message": {
+            "text": "'.claude/skills/refund-approver/SKILL.md' contains 1 HTML or Markdown comment(s) (173 characters of HTML comments) that rendered views hide and agents read. At least one comment contains an instruction, a URL or a home-directory path."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.claude/skills/refund-approver/SKILL.md",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "d214940c317bd8d5489c1a0eecf717a20bf09c318f90efc273fb87a7801b7296",
+            "primaryLocationLineHash": "d214940c317bd8d5:1"
+          },
+          "properties": {
+            "component_ref": "skill:.claude/skills/refund-approver/SKILL.md",
+            "trust_tier": "internal-unverified",
+            "severity": "high",
+            "location_source": "component",
+            "recommendation": "Review comment text in the raw file; move notes out of agent instructions."
+          },
+          "ruleIndex": 2
+        },
+        {
+          "ruleId": "nexus_symbiote/invisible_characters/high",
+          "level": "error",
+          "message": {
+            "text": "'.claude/skills/refund-approver/SKILL.md' contains invisible Unicode characters: ZERO WIDTH SPACE (U+200B) x1. These are invisible in most editors and may alter LLM behavior."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "corpus/.claude/skills/refund-approver/SKILL.md",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "nexus_symbiote/v1": "d752f729d8a6d08527dd9622daf0e3cb1364317e33458a2189f0cab8809789ed",
+            "primaryLocationLineHash": "d752f729d8a6d085:1"
+          },
+          "properties": {
+            "component_ref": "skill:.claude/skills/refund-approver/SKILL.md",
+            "trust_tier": "internal-unverified",
+            "severity": "high",
+            "location_source": "component",
+            "recommendation": "Remove all zero-width characters or document their purpose."
+          },
+          "ruleIndex": 5
+        }
+      ],
+      "invocations": [
+        {
+          "executionSuccessful": false,
+          "toolExecutionNotifications": [
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: config/secrets-link: symlink target is absolute"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n: depth limit of 32 exceeded; raise it with --limit depth=N"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: models/escape.gguf: symlink target is outside the collection root"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: .codex/config.toml: invalid TOML"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: config/secrets-link: symlink target is absolute"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n: depth limit of 32 exceeded; raise it with --limit depth=N"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: models/escape.gguf: symlink target is outside the collection root"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: config/secrets-link: symlink target is absolute"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n: depth limit of 32 exceeded; raise it with --limit depth=N"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: models/escape.gguf: symlink target is outside the collection root"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: services/billing/claude.md: case variant of services/billing/CLAUDE.md is the active file on case-insensitive file systems and is not inventoried"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: rag: conflicting duplicate component rag:env-pinecone"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: config/secrets-link: symlink target is absolute"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n: depth limit of 32 exceeded; raise it with --limit depth=N"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: models/escape.gguf: symlink target is outside the collection root"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: config/secrets-link: symlink target is absolute"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n: depth limit of 32 exceeded; raise it with --limit depth=N"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: models/escape.gguf: symlink target is outside the collection root"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: .codex/config.toml: invalid TOML"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: config/secrets-link: symlink target is absolute"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n: depth limit of 32 exceeded; raise it with --limit depth=N"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collection failure: models/escape.gguf: symlink target is outside the collection root"
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collector a2a failed."
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collector ide_agents failed."
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collector mcp failed."
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collector model failed."
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collector prompt failed."
+              }
+            },
+            {
+              "level": "error",
+              "message": {
+                "text": "Collector rag failed."
+              }
+            },
+            {
+              "level": "warning",
+              "message": {
+                "text": "Collection coverage is incomplete: this run does not cover every surface."
+              }
+            }
+          ],
+          "endTimeUtc": "2023-11-14T22:13:20Z"
+        }
+      ],
+      "properties": {
+        "coverage": "incomplete"
+      }
+    }
+  ]
+}

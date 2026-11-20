@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: Hunzee-VC/Nexus-Symbiote@<reviewed-40-character-commit-sha>
+      - uses: aisecnomad/Nexus-Symbiote@<reviewed-40-character-commit-sha>
         with:
           scan-path: .
           output-file: agentbom.json
@@ -53,7 +53,7 @@ Write the signer policy outside the workspace from a trusted source, such as a r
         env:
           SIGNER_POLICY: ${{ vars.NEXUS_SYMBIOTE_SIGNER_POLICY }}
         run: printf '%s' "$SIGNER_POLICY" > "$RUNNER_TEMP/signers.json"
-      - uses: Hunzee-VC/Nexus-Symbiote@<reviewed-40-character-commit-sha>
+      - uses: aisecnomad/Nexus-Symbiote@<reviewed-40-character-commit-sha>
         with:
           scan-path: .
           signature-policy: ${{ runner.temp }}/signers.json

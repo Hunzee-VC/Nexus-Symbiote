@@ -1,0 +1,1956 @@
+{
+  "capabilities": [
+    {
+      "confidence": "medium",
+      "name": "cloud",
+      "path": "pyproject.toml"
+    },
+    {
+      "confidence": "low",
+      "name": "cloud",
+      "path": "requirements.txt"
+    },
+    {
+      "confidence": "high",
+      "name": "cloud",
+      "path": "src/agent/llm.py"
+    }
+  ],
+  "capability_graph": {
+    "edges": [
+      {
+        "source": "framework:langchain",
+        "target": "capability:cloud_access",
+        "type": "enables"
+      },
+      {
+        "source": "framework:langchain",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:langchain",
+        "target": "capability:mcp_tool_invocation",
+        "type": "enables"
+      },
+      {
+        "source": "framework:langchain",
+        "target": "capability:mcp_tool_invocation",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:langchain",
+        "target": "reachable_capability:langchain:cloud_access:pyproject.toml",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:langchain",
+        "target": "reachable_capability:langchain:cloud_access:src/agent/llm.py",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:langchain",
+        "target": "reachable_capability:langchain:mcp_tool_invocation:.cursor/mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:langchain",
+        "target": "reachable_capability:langchain:mcp_tool_invocation:.mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:langchain",
+        "target": "reachable_capability:langchain:mcp_tool_invocation:deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:langgraph",
+        "target": "capability:cloud_access",
+        "type": "enables"
+      },
+      {
+        "source": "framework:langgraph",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:langgraph",
+        "target": "capability:mcp_tool_invocation",
+        "type": "enables"
+      },
+      {
+        "source": "framework:langgraph",
+        "target": "capability:mcp_tool_invocation",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:langgraph",
+        "target": "reachable_capability:langgraph:cloud_access:pyproject.toml",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:langgraph",
+        "target": "reachable_capability:langgraph:mcp_tool_invocation:.cursor/mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:langgraph",
+        "target": "reachable_capability:langgraph:mcp_tool_invocation:.mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:langgraph",
+        "target": "reachable_capability:langgraph:mcp_tool_invocation:deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:browser\u001b[2K\u001b[1;32m[verified]\u001b[0m",
+        "target": "capability:mcp_tool_invocation",
+        "type": "exposes"
+      },
+      {
+        "source": "mcp_server:browser\u001b[2K\u001b[1;32m[verified]\u001b[0m",
+        "target": "mcp_risk:browser_network_access",
+        "type": "risk"
+      },
+      {
+        "source": "mcp_server:browser\u001b[2K\u001b[1;32m[verified]\u001b[0m",
+        "target": "reachable_capability:langchain:mcp_tool_invocation:.cursor/mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:browser\u001b[2K\u001b[1;32m[verified]\u001b[0m",
+        "target": "reachable_capability:langgraph:mcp_tool_invocation:.cursor/mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:deep-nested",
+        "target": "capability:mcp_tool_invocation",
+        "type": "exposes"
+      },
+      {
+        "source": "mcp_server:deep-nested",
+        "target": "mcp_risk:unknown_custom_server",
+        "type": "risk"
+      },
+      {
+        "source": "mcp_server:deep-nested",
+        "target": "reachable_capability:langchain:mcp_tool_invocation:deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:deep-nested",
+        "target": "reachable_capability:langgraph:mcp_tool_invocation:deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:filesystem",
+        "target": "capability:mcp_tool_invocation",
+        "type": "exposes"
+      },
+      {
+        "source": "mcp_server:filesystem",
+        "target": "mcp_risk:filesystem_access",
+        "type": "risk"
+      },
+      {
+        "source": "mcp_server:filesystem",
+        "target": "reachable_capability:langchain:mcp_tool_invocation:.mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:filesystem",
+        "target": "reachable_capability:langgraph:mcp_tool_invocation:.mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:github",
+        "target": "capability:mcp_tool_invocation",
+        "type": "exposes"
+      },
+      {
+        "source": "mcp_server:github",
+        "target": "mcp_risk:secrets_env_access",
+        "type": "risk"
+      },
+      {
+        "source": "mcp_server:github",
+        "target": "reachable_capability:langchain:mcp_tool_invocation:.mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:github",
+        "target": "reachable_capability:langgraph:mcp_tool_invocation:.mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:postgres",
+        "target": "capability:mcp_tool_invocation",
+        "type": "exposes"
+      },
+      {
+        "source": "mcp_server:postgres",
+        "target": "mcp_risk:browser_network_access",
+        "type": "risk"
+      },
+      {
+        "source": "mcp_server:postgres",
+        "target": "mcp_risk:database_access",
+        "type": "risk"
+      },
+      {
+        "source": "mcp_server:postgres",
+        "target": "mcp_risk:secrets_env_access",
+        "type": "risk"
+      },
+      {
+        "source": "mcp_server:postgres",
+        "target": "reachable_capability:langchain:mcp_tool_invocation:.mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:postgres",
+        "target": "reachable_capability:langgraph:mcp_tool_invocation:.mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:remote-crm",
+        "target": "capability:mcp_tool_invocation",
+        "type": "exposes"
+      },
+      {
+        "source": "mcp_server:remote-crm",
+        "target": "mcp_risk:browser_network_access",
+        "type": "risk"
+      },
+      {
+        "source": "mcp_server:remote-crm",
+        "target": "reachable_capability:langchain:mcp_tool_invocation:.mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:remote-crm",
+        "target": "reachable_capability:langgraph:mcp_tool_invocation:.mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "model:claude-haiku-4.5",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "model:claude-haiku-4.5",
+        "target": "provider:anthropic",
+        "type": "uses"
+      },
+      {
+        "source": "model:claude-haiku-4.5",
+        "target": "provider:ollama",
+        "type": "uses"
+      },
+      {
+        "source": "model:claude-haiku-4.5",
+        "target": "provider:openai",
+        "type": "uses"
+      },
+      {
+        "source": "model:claude-haiku-4.5",
+        "target": "reachable_capability:claude-haiku-4.5:cloud_access:requirements.txt",
+        "type": "reaches"
+      },
+      {
+        "source": "model:claude-haiku-4.5",
+        "target": "reachable_capability:claude-haiku-4.5:cloud_access:src/agent/llm.py",
+        "type": "reaches"
+      },
+      {
+        "source": "model:claude-sonnet-4.5",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "model:claude-sonnet-4.5",
+        "target": "provider:anthropic",
+        "type": "uses"
+      },
+      {
+        "source": "model:claude-sonnet-4.5",
+        "target": "provider:ollama",
+        "type": "uses"
+      },
+      {
+        "source": "model:claude-sonnet-4.5",
+        "target": "provider:openai",
+        "type": "uses"
+      },
+      {
+        "source": "model:claude-sonnet-4.5",
+        "target": "reachable_capability:claude-sonnet-4.5:cloud_access:requirements.txt",
+        "type": "reaches"
+      },
+      {
+        "source": "model:claude-sonnet-4.5",
+        "target": "reachable_capability:claude-sonnet-4.5:cloud_access:src/agent/llm.py",
+        "type": "reaches"
+      },
+      {
+        "source": "model:gpt-4o-mini",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "model:gpt-4o-mini",
+        "target": "provider:anthropic",
+        "type": "uses"
+      },
+      {
+        "source": "model:gpt-4o-mini",
+        "target": "provider:ollama",
+        "type": "uses"
+      },
+      {
+        "source": "model:gpt-4o-mini",
+        "target": "provider:openai",
+        "type": "uses"
+      },
+      {
+        "source": "model:gpt-4o-mini",
+        "target": "reachable_capability:gpt-4o-mini:cloud_access:requirements.txt",
+        "type": "reaches"
+      },
+      {
+        "source": "model:gpt-4o-mini",
+        "target": "reachable_capability:gpt-4o-mini:cloud_access:src/agent/llm.py",
+        "type": "reaches"
+      },
+      {
+        "source": "model:llama3.2",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "model:llama3.2",
+        "target": "provider:anthropic",
+        "type": "uses"
+      },
+      {
+        "source": "model:llama3.2",
+        "target": "provider:ollama",
+        "type": "uses"
+      },
+      {
+        "source": "model:llama3.2",
+        "target": "provider:openai",
+        "type": "uses"
+      },
+      {
+        "source": "model:llama3.2",
+        "target": "reachable_capability:llama3.2:cloud_access:requirements.txt",
+        "type": "reaches"
+      },
+      {
+        "source": "model:llama3.2",
+        "target": "reachable_capability:llama3.2:cloud_access:src/agent/llm.py",
+        "type": "reaches"
+      },
+      {
+        "source": "model:o4-mini",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "model:o4-mini",
+        "target": "reachable_capability:o4-mini:cloud_access:requirements.txt",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:claude-haiku-4.5:cloud_access:requirements.txt",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:claude-haiku-4.5:cloud_access:src/agent/llm.py",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:claude-sonnet-4.5:cloud_access:requirements.txt",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:claude-sonnet-4.5:cloud_access:src/agent/llm.py",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:gpt-4o-mini:cloud_access:requirements.txt",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:gpt-4o-mini:cloud_access:src/agent/llm.py",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:langchain:cloud_access:pyproject.toml",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:langchain:cloud_access:src/agent/llm.py",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:langchain:mcp_tool_invocation:.cursor/mcp.json",
+        "target": "capability:mcp_tool_invocation",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:langchain:mcp_tool_invocation:.mcp.json",
+        "target": "capability:mcp_tool_invocation",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:langchain:mcp_tool_invocation:deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json",
+        "target": "capability:mcp_tool_invocation",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:langgraph:cloud_access:pyproject.toml",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:langgraph:mcp_tool_invocation:.cursor/mcp.json",
+        "target": "capability:mcp_tool_invocation",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:langgraph:mcp_tool_invocation:.mcp.json",
+        "target": "capability:mcp_tool_invocation",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:langgraph:mcp_tool_invocation:deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json",
+        "target": "capability:mcp_tool_invocation",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:llama3.2:cloud_access:requirements.txt",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:llama3.2:cloud_access:src/agent/llm.py",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:o4-mini:cloud_access:requirements.txt",
+        "target": "capability:cloud_access",
+        "type": "reaches"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "capability:cloud",
+        "name": "cloud",
+        "type": "capability"
+      },
+      {
+        "id": "capability:cloud_access",
+        "name": "cloud_access",
+        "type": "capability"
+      },
+      {
+        "id": "capability:mcp_tool_invocation",
+        "name": "mcp_tool_invocation",
+        "type": "capability"
+      },
+      {
+        "id": "framework:langchain",
+        "name": "langchain",
+        "type": "framework"
+      },
+      {
+        "id": "framework:langgraph",
+        "name": "langgraph",
+        "type": "framework"
+      },
+      {
+        "id": "mcp_risk:browser_network_access",
+        "name": "browser_network_access",
+        "type": "mcp_risk"
+      },
+      {
+        "id": "mcp_risk:database_access",
+        "name": "database_access",
+        "type": "mcp_risk"
+      },
+      {
+        "id": "mcp_risk:filesystem_access",
+        "name": "filesystem_access",
+        "type": "mcp_risk"
+      },
+      {
+        "id": "mcp_risk:secrets_env_access",
+        "name": "secrets_env_access",
+        "type": "mcp_risk"
+      },
+      {
+        "id": "mcp_risk:unknown_custom_server",
+        "name": "unknown_custom_server",
+        "type": "mcp_risk"
+      },
+      {
+        "id": "mcp_server:browser\u001b[2K\u001b[1;32m[verified]\u001b[0m",
+        "name": "browser\u001b[2K\u001b[1;32m[verified]\u001b[0m",
+        "type": "mcp_server"
+      },
+      {
+        "id": "mcp_server:deep-nested",
+        "name": "deep-nested",
+        "type": "mcp_server"
+      },
+      {
+        "id": "mcp_server:filesystem",
+        "name": "filesystem",
+        "type": "mcp_server"
+      },
+      {
+        "id": "mcp_server:github",
+        "name": "github",
+        "type": "mcp_server"
+      },
+      {
+        "id": "mcp_server:postgres",
+        "name": "postgres",
+        "type": "mcp_server"
+      },
+      {
+        "id": "mcp_server:remote-crm",
+        "name": "remote-crm",
+        "type": "mcp_server"
+      },
+      {
+        "id": "model:claude-haiku-4.5",
+        "name": "claude-haiku-4.5",
+        "type": "model"
+      },
+      {
+        "id": "model:claude-sonnet-4.5",
+        "name": "claude-sonnet-4.5",
+        "type": "model"
+      },
+      {
+        "id": "model:gpt-4o-mini",
+        "name": "gpt-4o-mini",
+        "type": "model"
+      },
+      {
+        "id": "model:llama3.2",
+        "name": "llama3.2",
+        "type": "model"
+      },
+      {
+        "id": "model:o4-mini",
+        "name": "o4-mini",
+        "type": "model"
+      },
+      {
+        "id": "prompt:AGENTS.md",
+        "name": "AGENTS.md",
+        "type": "prompt"
+      },
+      {
+        "id": "prompt:CLAUDE.md",
+        "name": "CLAUDE.md",
+        "type": "prompt"
+      },
+      {
+        "id": "prompt:prompts/system.md",
+        "name": "prompts/system.md",
+        "type": "prompt"
+      },
+      {
+        "id": "provider:anthropic",
+        "name": "anthropic",
+        "type": "provider"
+      },
+      {
+        "id": "provider:ollama",
+        "name": "ollama",
+        "type": "provider"
+      },
+      {
+        "id": "provider:openai",
+        "name": "openai",
+        "type": "provider"
+      },
+      {
+        "id": "reachable_capability:claude-haiku-4.5:cloud_access:requirements.txt",
+        "name": "claude-haiku-4.5 -> cloud_access",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:claude-haiku-4.5:cloud_access:src/agent/llm.py",
+        "name": "claude-haiku-4.5 -> cloud_access",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:claude-sonnet-4.5:cloud_access:requirements.txt",
+        "name": "claude-sonnet-4.5 -> cloud_access",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:claude-sonnet-4.5:cloud_access:src/agent/llm.py",
+        "name": "claude-sonnet-4.5 -> cloud_access",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:gpt-4o-mini:cloud_access:requirements.txt",
+        "name": "gpt-4o-mini -> cloud_access",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:gpt-4o-mini:cloud_access:src/agent/llm.py",
+        "name": "gpt-4o-mini -> cloud_access",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:langchain:cloud_access:pyproject.toml",
+        "name": "langchain -> cloud_access",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:langchain:cloud_access:src/agent/llm.py",
+        "name": "langchain -> cloud_access",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:langchain:mcp_tool_invocation:.cursor/mcp.json",
+        "name": "langchain -> mcp_tool_invocation",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:langchain:mcp_tool_invocation:.mcp.json",
+        "name": "langchain -> mcp_tool_invocation",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:langchain:mcp_tool_invocation:deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json",
+        "name": "langchain -> mcp_tool_invocation",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:langgraph:cloud_access:pyproject.toml",
+        "name": "langgraph -> cloud_access",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:langgraph:mcp_tool_invocation:.cursor/mcp.json",
+        "name": "langgraph -> mcp_tool_invocation",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:langgraph:mcp_tool_invocation:.mcp.json",
+        "name": "langgraph -> mcp_tool_invocation",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:langgraph:mcp_tool_invocation:deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json",
+        "name": "langgraph -> mcp_tool_invocation",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:llama3.2:cloud_access:requirements.txt",
+        "name": "llama3.2 -> cloud_access",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:llama3.2:cloud_access:src/agent/llm.py",
+        "name": "llama3.2 -> cloud_access",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:o4-mini:cloud_access:requirements.txt",
+        "name": "o4-mini -> cloud_access",
+        "type": "reachable_capability"
+      }
+    ]
+  },
+  "dependencies": [
+    {
+      "category": "provider_sdk",
+      "confidence": "medium",
+      "name": "anthropic",
+      "path": "pyproject.toml"
+    },
+    {
+      "category": "provider_sdk",
+      "confidence": "medium",
+      "name": "openai",
+      "path": "pyproject.toml"
+    },
+    {
+      "category": "ai_framework",
+      "confidence": "medium",
+      "name": "langchain",
+      "path": "pyproject.toml"
+    },
+    {
+      "category": "ai_framework",
+      "confidence": "medium",
+      "name": "langgraph",
+      "path": "pyproject.toml"
+    },
+    {
+      "category": "mcp",
+      "confidence": "medium",
+      "name": "mcp",
+      "path": "pyproject.toml"
+    },
+    {
+      "category": "provider_sdk",
+      "confidence": "low",
+      "name": "anthropic",
+      "path": "requirements.txt"
+    },
+    {
+      "category": "provider_sdk",
+      "confidence": "low",
+      "name": "openai",
+      "path": "requirements.txt"
+    },
+    {
+      "category": "ai_framework",
+      "confidence": "low",
+      "name": "langchain",
+      "path": "requirements.txt"
+    },
+    {
+      "category": "ai_framework",
+      "confidence": "low",
+      "name": "langgraph",
+      "path": "requirements.txt"
+    },
+    {
+      "category": "mcp",
+      "confidence": "low",
+      "name": "mcp",
+      "path": "requirements.txt"
+    },
+    {
+      "category": "provider_sdk",
+      "confidence": "medium",
+      "name": "@anthropic-ai/sdk",
+      "path": "mcp-server/package.json"
+    }
+  ],
+  "frameworks": [
+    {
+      "confidence": "medium",
+      "name": "langchain",
+      "path": "pyproject.toml"
+    },
+    {
+      "confidence": "medium",
+      "name": "langgraph",
+      "path": "pyproject.toml"
+    },
+    {
+      "confidence": "high",
+      "name": "langgraph",
+      "path": "src/agent/graph.py"
+    },
+    {
+      "confidence": "high",
+      "name": "langchain",
+      "path": "src/agent/llm.py"
+    },
+    {
+      "confidence": "high",
+      "name": "langchain",
+      "path": "src/agent/tools.py"
+    }
+  ],
+  "generated_by": "agentbom",
+  "mcp_servers": [
+    {
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem@2025.8.21",
+        "./data/faq"
+      ],
+      "command": "npx",
+      "confidence": "medium",
+      "kind": "server",
+      "name": "filesystem",
+      "package": "@modelcontextprotocol/server-filesystem@2025.8.21",
+      "parse_status": "parsed",
+      "path": ".mcp.json",
+      "rationale": [
+        "server name or package suggests filesystem access"
+      ],
+      "risk": "high",
+      "risk_categories": [
+        "filesystem_access"
+      ],
+      "transport": "stdio"
+    },
+    {
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "[redacted]"
+      ],
+      "command": "docker",
+      "confidence": "medium",
+      "env": [
+        "GITHUB_PERSONAL_ACCESS_TOKEN"
+      ],
+      "kind": "server",
+      "name": "github",
+      "package": "docker",
+      "parse_status": "parsed",
+      "path": ".mcp.json",
+      "rationale": [
+        "server declares environment variables: GITHUB_PERSONAL_ACCESS_TOKEN"
+      ],
+      "risk": "high",
+      "risk_categories": [
+        "secrets_env_access"
+      ],
+      "transport": "stdio"
+    },
+    {
+      "args": [
+        "mcp-server-postgres@latest"
+      ],
+      "command": "uvx",
+      "confidence": "medium",
+      "env": [
+        "DATABASE_URL"
+      ],
+      "kind": "server",
+      "name": "postgres",
+      "package": "mcp-server-postgres@latest",
+      "parse_status": "parsed",
+      "path": ".mcp.json",
+      "rationale": [
+        "server name or config suggests browser or network access",
+        "server name or package suggests database access",
+        "server declares environment variables: DATABASE_URL"
+      ],
+      "risk": "high",
+      "risk_categories": [
+        "browser_network_access",
+        "database_access",
+        "secrets_env_access"
+      ],
+      "transport": "stdio"
+    },
+    {
+      "confidence": "medium",
+      "kind": "server",
+      "name": "remote-crm",
+      "parse_status": "parsed",
+      "path": ".mcp.json",
+      "rationale": [
+        "server name or config suggests browser or network access"
+      ],
+      "risk": "medium",
+      "risk_categories": [
+        "browser_network_access"
+      ],
+      "transport": "http"
+    },
+    {
+      "args": [
+        "@playwright/mcp"
+      ],
+      "command": "npx",
+      "confidence": "medium",
+      "kind": "server",
+      "name": "browser\u001b[2K\u001b[1;32m[verified]\u001b[0m",
+      "package": "@playwright/mcp",
+      "parse_status": "parsed",
+      "path": ".cursor/mcp.json",
+      "rationale": [
+        "server name or config suggests browser or network access"
+      ],
+      "risk": "medium",
+      "risk_categories": [
+        "browser_network_access"
+      ],
+      "transport": "stdio"
+    },
+    {
+      "confidence": "medium",
+      "kind": "config_file",
+      "name": "mcp.json",
+      "parse_status": "invalid_json",
+      "path": ".vscode/mcp.json",
+      "rationale": [
+        "MCP config could not be parsed as JSON"
+      ],
+      "risk": "low",
+      "risk_categories": [
+        "unknown_custom_server"
+      ]
+    },
+    {
+      "args": [
+        "deep-mcp@1.0.0"
+      ],
+      "command": "npx",
+      "confidence": "medium",
+      "kind": "server",
+      "name": "deep-nested",
+      "package": "deep-mcp@1.0.0",
+      "parse_status": "parsed",
+      "path": "deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json",
+      "rationale": [
+        "custom or unknown MCP server: deep-mcp@1.0.0"
+      ],
+      "risk": "low",
+      "risk_categories": [
+        "unknown_custom_server"
+      ],
+      "transport": "stdio"
+    }
+  ],
+  "models": [
+    {
+      "confidence": "medium",
+      "evidence": "o4-mini",
+      "name": "o4-mini",
+      "source_file": ".codex/config.toml",
+      "type": "model"
+    },
+    {
+      "confidence": "medium",
+      "evidence": "claude-sonnet-4-5",
+      "name": "claude-sonnet-4.5",
+      "source_file": "evals/promptfooconfig.yaml",
+      "type": "model"
+    },
+    {
+      "confidence": "medium",
+      "evidence": "gpt-4o-mini",
+      "name": "gpt-4o-mini",
+      "source_file": "evals/promptfooconfig.yaml",
+      "type": "model"
+    },
+    {
+      "confidence": "high",
+      "evidence": "claude-sonnet-4-5",
+      "name": "claude-sonnet-4.5",
+      "source_file": "src/agent/llm.py",
+      "type": "model"
+    },
+    {
+      "confidence": "high",
+      "evidence": "gpt-4o-mini",
+      "name": "gpt-4o-mini",
+      "source_file": "src/agent/llm.py",
+      "type": "model"
+    },
+    {
+      "confidence": "high",
+      "evidence": "llama3.2",
+      "name": "llama3.2",
+      "source_file": "src/agent/llm.py",
+      "type": "model"
+    },
+    {
+      "confidence": "high",
+      "evidence": "claude-haiku-4-5",
+      "name": "claude-haiku-4.5",
+      "source_file": "src/agent/llm.py",
+      "type": "model"
+    }
+  ],
+  "policy_findings": [],
+  "prompts": [
+    {
+      "confidence": "low",
+      "path": "AGENTS.md",
+      "type": "prompt"
+    },
+    {
+      "confidence": "low",
+      "path": "CLAUDE.md",
+      "type": "prompt"
+    },
+    {
+      "confidence": "low",
+      "path": "prompts/system.md",
+      "type": "prompt"
+    }
+  ],
+  "providers": [
+    {
+      "confidence": "medium",
+      "name": "ollama",
+      "path": "docker-compose.yml"
+    },
+    {
+      "confidence": "medium",
+      "name": "openai",
+      "path": "pyproject.toml"
+    },
+    {
+      "confidence": "medium",
+      "name": "anthropic",
+      "path": "pyproject.toml"
+    },
+    {
+      "confidence": "medium",
+      "name": "anthropic",
+      "path": ".github/workflows/agent-review.yml"
+    },
+    {
+      "confidence": "medium",
+      "name": "openai",
+      "path": "evals/promptfooconfig.yaml"
+    },
+    {
+      "confidence": "medium",
+      "name": "anthropic",
+      "path": "evals/promptfooconfig.yaml"
+    },
+    {
+      "confidence": "medium",
+      "name": "anthropic",
+      "path": "mcp-server/package.json"
+    },
+    {
+      "confidence": "high",
+      "name": "openai",
+      "path": "src/agent/llm.py"
+    },
+    {
+      "confidence": "high",
+      "name": "anthropic",
+      "path": "src/agent/llm.py"
+    },
+    {
+      "confidence": "high",
+      "name": "ollama",
+      "path": "src/agent/llm.py"
+    },
+    {
+      "confidence": "high",
+      "name": "openai",
+      "path": "src/agent/retrieval.py"
+    }
+  ],
+  "reachable_capabilities": [
+    {
+      "capability": "cloud_access",
+      "confidence": "medium",
+      "confidence_score": 90,
+      "mitigations": [],
+      "paths": [
+        "network_execution"
+      ],
+      "rationale": [
+        "framework langchain can reach cloud_access in pyproject.toml because the actor and capability evidence are in the same source file.",
+        "Reachability path evidence: network_execution."
+      ],
+      "reachable_from": "langchain",
+      "risk": "medium",
+      "source_file": "pyproject.toml"
+    },
+    {
+      "capability": "cloud_access",
+      "confidence": "medium",
+      "confidence_score": 90,
+      "mitigations": [],
+      "paths": [
+        "network_execution"
+      ],
+      "rationale": [
+        "framework langgraph can reach cloud_access in pyproject.toml because the actor and capability evidence are in the same source file.",
+        "Reachability path evidence: network_execution."
+      ],
+      "reachable_from": "langgraph",
+      "risk": "medium",
+      "source_file": "pyproject.toml"
+    },
+    {
+      "capability": "cloud_access",
+      "confidence": "low",
+      "confidence_score": 70,
+      "mitigations": [],
+      "paths": [
+        "network_execution"
+      ],
+      "rationale": [
+        "model o4-mini can reach cloud_access in requirements.txt because the repository contains an agent actor and capability evidence in separate files.",
+        "Reachability path evidence: network_execution."
+      ],
+      "reachable_from": "o4-mini",
+      "risk": "medium",
+      "source_file": "requirements.txt"
+    },
+    {
+      "capability": "cloud_access",
+      "confidence": "low",
+      "confidence_score": 70,
+      "mitigations": [],
+      "paths": [
+        "network_execution"
+      ],
+      "rationale": [
+        "model claude-sonnet-4.5 can reach cloud_access in requirements.txt because the repository contains an agent actor and capability evidence in separate files.",
+        "Reachability path evidence: network_execution."
+      ],
+      "reachable_from": "claude-sonnet-4.5",
+      "risk": "medium",
+      "source_file": "requirements.txt"
+    },
+    {
+      "capability": "cloud_access",
+      "confidence": "low",
+      "confidence_score": 70,
+      "mitigations": [],
+      "paths": [
+        "network_execution"
+      ],
+      "rationale": [
+        "model gpt-4o-mini can reach cloud_access in requirements.txt because the repository contains an agent actor and capability evidence in separate files.",
+        "Reachability path evidence: network_execution."
+      ],
+      "reachable_from": "gpt-4o-mini",
+      "risk": "medium",
+      "source_file": "requirements.txt"
+    },
+    {
+      "capability": "cloud_access",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mitigations": [],
+      "paths": [
+        "network_execution"
+      ],
+      "rationale": [
+        "model claude-sonnet-4.5 can reach cloud_access in requirements.txt because the repository contains an agent actor and capability evidence in separate files.",
+        "Reachability path evidence: network_execution."
+      ],
+      "reachable_from": "claude-sonnet-4.5",
+      "risk": "medium",
+      "source_file": "requirements.txt"
+    },
+    {
+      "capability": "cloud_access",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mitigations": [],
+      "paths": [
+        "network_execution"
+      ],
+      "rationale": [
+        "model gpt-4o-mini can reach cloud_access in requirements.txt because the repository contains an agent actor and capability evidence in separate files.",
+        "Reachability path evidence: network_execution."
+      ],
+      "reachable_from": "gpt-4o-mini",
+      "risk": "medium",
+      "source_file": "requirements.txt"
+    },
+    {
+      "capability": "cloud_access",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mitigations": [],
+      "paths": [
+        "network_execution"
+      ],
+      "rationale": [
+        "model llama3.2 can reach cloud_access in requirements.txt because the repository contains an agent actor and capability evidence in separate files.",
+        "Reachability path evidence: network_execution."
+      ],
+      "reachable_from": "llama3.2",
+      "risk": "medium",
+      "source_file": "requirements.txt"
+    },
+    {
+      "capability": "cloud_access",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mitigations": [],
+      "paths": [
+        "network_execution"
+      ],
+      "rationale": [
+        "model claude-haiku-4.5 can reach cloud_access in requirements.txt because the repository contains an agent actor and capability evidence in separate files.",
+        "Reachability path evidence: network_execution."
+      ],
+      "reachable_from": "claude-haiku-4.5",
+      "risk": "medium",
+      "source_file": "requirements.txt"
+    },
+    {
+      "capability": "cloud_access",
+      "confidence": "high",
+      "confidence_score": 100,
+      "mitigations": [
+        "human approval control"
+      ],
+      "paths": [
+        "prompt_input",
+        "network_execution"
+      ],
+      "rationale": [
+        "model claude-sonnet-4.5 can reach cloud_access in src/agent/llm.py because the actor and capability evidence are in the same source file.",
+        "Reachability path evidence: prompt_input, network_execution.",
+        "Mitigating signal present, but risk is retained for review: human approval control."
+      ],
+      "reachable_from": "claude-sonnet-4.5",
+      "risk": "medium",
+      "source_file": "src/agent/llm.py"
+    },
+    {
+      "capability": "cloud_access",
+      "confidence": "high",
+      "confidence_score": 100,
+      "mitigations": [
+        "human approval control"
+      ],
+      "paths": [
+        "prompt_input",
+        "network_execution"
+      ],
+      "rationale": [
+        "model gpt-4o-mini can reach cloud_access in src/agent/llm.py because the actor and capability evidence are in the same source file.",
+        "Reachability path evidence: prompt_input, network_execution.",
+        "Mitigating signal present, but risk is retained for review: human approval control."
+      ],
+      "reachable_from": "gpt-4o-mini",
+      "risk": "medium",
+      "source_file": "src/agent/llm.py"
+    },
+    {
+      "capability": "cloud_access",
+      "confidence": "high",
+      "confidence_score": 100,
+      "mitigations": [
+        "human approval control"
+      ],
+      "paths": [
+        "prompt_input",
+        "network_execution"
+      ],
+      "rationale": [
+        "model llama3.2 can reach cloud_access in src/agent/llm.py because the actor and capability evidence are in the same source file.",
+        "Reachability path evidence: prompt_input, network_execution.",
+        "Mitigating signal present, but risk is retained for review: human approval control."
+      ],
+      "reachable_from": "llama3.2",
+      "risk": "medium",
+      "source_file": "src/agent/llm.py"
+    },
+    {
+      "capability": "cloud_access",
+      "confidence": "high",
+      "confidence_score": 100,
+      "mitigations": [
+        "human approval control"
+      ],
+      "paths": [
+        "prompt_input",
+        "network_execution"
+      ],
+      "rationale": [
+        "model claude-haiku-4.5 can reach cloud_access in src/agent/llm.py because the actor and capability evidence are in the same source file.",
+        "Reachability path evidence: prompt_input, network_execution.",
+        "Mitigating signal present, but risk is retained for review: human approval control."
+      ],
+      "reachable_from": "claude-haiku-4.5",
+      "risk": "medium",
+      "source_file": "src/agent/llm.py"
+    },
+    {
+      "capability": "cloud_access",
+      "confidence": "high",
+      "confidence_score": 100,
+      "mitigations": [
+        "human approval control"
+      ],
+      "paths": [
+        "prompt_input",
+        "network_execution"
+      ],
+      "rationale": [
+        "framework langchain can reach cloud_access in src/agent/llm.py because the actor and capability evidence are in the same source file.",
+        "Reachability path evidence: prompt_input, network_execution.",
+        "Mitigating signal present, but risk is retained for review: human approval control."
+      ],
+      "reachable_from": "langchain",
+      "risk": "medium",
+      "source_file": "src/agent/llm.py"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "browser\u001b[2K\u001b[1;32m[verified]\u001b[0m",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or config suggests browser or network access"
+      ],
+      "reachable_from": "langchain",
+      "risk": "medium",
+      "risk_categories": [
+        "browser_network_access"
+      ],
+      "source_file": ".cursor/mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "browser\u001b[2K\u001b[1;32m[verified]\u001b[0m",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or config suggests browser or network access"
+      ],
+      "reachable_from": "langgraph",
+      "risk": "medium",
+      "risk_categories": [
+        "browser_network_access"
+      ],
+      "source_file": ".cursor/mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "browser\u001b[2K\u001b[1;32m[verified]\u001b[0m",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or config suggests browser or network access"
+      ],
+      "reachable_from": "langgraph",
+      "risk": "medium",
+      "risk_categories": [
+        "browser_network_access"
+      ],
+      "source_file": ".cursor/mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "browser\u001b[2K\u001b[1;32m[verified]\u001b[0m",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or config suggests browser or network access"
+      ],
+      "reachable_from": "langchain",
+      "risk": "medium",
+      "risk_categories": [
+        "browser_network_access"
+      ],
+      "source_file": ".cursor/mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "filesystem",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or package suggests filesystem access"
+      ],
+      "reachable_from": "langchain",
+      "risk": "high",
+      "risk_categories": [
+        "filesystem_access"
+      ],
+      "source_file": ".mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "filesystem",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or package suggests filesystem access"
+      ],
+      "reachable_from": "langgraph",
+      "risk": "high",
+      "risk_categories": [
+        "filesystem_access"
+      ],
+      "source_file": ".mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "filesystem",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or package suggests filesystem access"
+      ],
+      "reachable_from": "langgraph",
+      "risk": "high",
+      "risk_categories": [
+        "filesystem_access"
+      ],
+      "source_file": ".mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "filesystem",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or package suggests filesystem access"
+      ],
+      "reachable_from": "langchain",
+      "risk": "high",
+      "risk_categories": [
+        "filesystem_access"
+      ],
+      "source_file": ".mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "github",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server declares environment variables: GITHUB_PERSONAL_ACCESS_TOKEN"
+      ],
+      "reachable_from": "langchain",
+      "risk": "high",
+      "risk_categories": [
+        "secrets_env_access"
+      ],
+      "source_file": ".mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "github",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server declares environment variables: GITHUB_PERSONAL_ACCESS_TOKEN"
+      ],
+      "reachable_from": "langgraph",
+      "risk": "high",
+      "risk_categories": [
+        "secrets_env_access"
+      ],
+      "source_file": ".mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "github",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server declares environment variables: GITHUB_PERSONAL_ACCESS_TOKEN"
+      ],
+      "reachable_from": "langgraph",
+      "risk": "high",
+      "risk_categories": [
+        "secrets_env_access"
+      ],
+      "source_file": ".mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "github",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server declares environment variables: GITHUB_PERSONAL_ACCESS_TOKEN"
+      ],
+      "reachable_from": "langchain",
+      "risk": "high",
+      "risk_categories": [
+        "secrets_env_access"
+      ],
+      "source_file": ".mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "postgres",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or config suggests browser or network access",
+        "server name or package suggests database access",
+        "server declares environment variables: DATABASE_URL"
+      ],
+      "reachable_from": "langchain",
+      "risk": "high",
+      "risk_categories": [
+        "browser_network_access",
+        "database_access",
+        "secrets_env_access"
+      ],
+      "source_file": ".mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "postgres",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or config suggests browser or network access",
+        "server name or package suggests database access",
+        "server declares environment variables: DATABASE_URL"
+      ],
+      "reachable_from": "langgraph",
+      "risk": "high",
+      "risk_categories": [
+        "browser_network_access",
+        "database_access",
+        "secrets_env_access"
+      ],
+      "source_file": ".mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "postgres",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or config suggests browser or network access",
+        "server name or package suggests database access",
+        "server declares environment variables: DATABASE_URL"
+      ],
+      "reachable_from": "langgraph",
+      "risk": "high",
+      "risk_categories": [
+        "browser_network_access",
+        "database_access",
+        "secrets_env_access"
+      ],
+      "source_file": ".mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "postgres",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or config suggests browser or network access",
+        "server name or package suggests database access",
+        "server declares environment variables: DATABASE_URL"
+      ],
+      "reachable_from": "langchain",
+      "risk": "high",
+      "risk_categories": [
+        "browser_network_access",
+        "database_access",
+        "secrets_env_access"
+      ],
+      "source_file": ".mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "remote-crm",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or config suggests browser or network access"
+      ],
+      "reachable_from": "langchain",
+      "risk": "medium",
+      "risk_categories": [
+        "browser_network_access"
+      ],
+      "source_file": ".mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "remote-crm",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or config suggests browser or network access"
+      ],
+      "reachable_from": "langgraph",
+      "risk": "medium",
+      "risk_categories": [
+        "browser_network_access"
+      ],
+      "source_file": ".mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "remote-crm",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or config suggests browser or network access"
+      ],
+      "reachable_from": "langgraph",
+      "risk": "medium",
+      "risk_categories": [
+        "browser_network_access"
+      ],
+      "source_file": ".mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "remote-crm",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or config suggests browser or network access"
+      ],
+      "reachable_from": "langchain",
+      "risk": "medium",
+      "risk_categories": [
+        "browser_network_access"
+      ],
+      "source_file": ".mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "deep-nested",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "custom or unknown MCP server: deep-mcp@1.0.0"
+      ],
+      "reachable_from": "langchain",
+      "risk": "low",
+      "risk_categories": [
+        "unknown_custom_server"
+      ],
+      "source_file": "deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "deep-nested",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "custom or unknown MCP server: deep-mcp@1.0.0"
+      ],
+      "reachable_from": "langgraph",
+      "risk": "low",
+      "risk_categories": [
+        "unknown_custom_server"
+      ],
+      "source_file": "deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "deep-nested",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "custom or unknown MCP server: deep-mcp@1.0.0"
+      ],
+      "reachable_from": "langgraph",
+      "risk": "low",
+      "risk_categories": [
+        "unknown_custom_server"
+      ],
+      "source_file": "deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "deep-nested",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "custom or unknown MCP server: deep-mcp@1.0.0"
+      ],
+      "reachable_from": "langchain",
+      "risk": "low",
+      "risk_categories": [
+        "unknown_custom_server"
+      ],
+      "source_file": "deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json"
+    }
+  ],
+  "repository": "/aibom-run/work/ai-agentbom/corpus",
+  "repository_risk": {
+    "rationale": [
+      "high-risk reachable capability detected: mcp_tool_invocation",
+      "secret references were detected"
+    ],
+    "score": 50,
+    "severity": "high"
+  },
+  "risks": [
+    {
+      "reason": "network, database, or cloud capability detected",
+      "severity": "medium"
+    },
+    {
+      "reason": "high-risk MCP server detected",
+      "severity": "high"
+    }
+  ],
+  "schema_version": "0.1.0",
+  "secret_leak_findings": [
+    {
+      "category": "api_key",
+      "confidence": "high",
+      "line": 1,
+      "path": ".env",
+      "provider": "anthropic",
+      "redacted_evidence": "ANTHROPIC_API_KEY = [REDACTED]",
+      "severity": "critical",
+      "suggested_action": "Value redacted. Remove the key and rotate it.",
+      "title": "Possible Anthropic API key value"
+    },
+    {
+      "category": "api_key",
+      "confidence": "high",
+      "line": 2,
+      "path": ".env",
+      "provider": "openai",
+      "redacted_evidence": "OPENAI_API_KEY = [REDACTED]",
+      "severity": "critical",
+      "suggested_action": "Value redacted. Remove the key and rotate it.",
+      "title": "Possible OpenAI API key value"
+    },
+    {
+      "category": "token",
+      "confidence": "high",
+      "line": 22,
+      "path": ".mcp.json",
+      "provider": "github",
+      "redacted_evidence": "github credential value [REDACTED]",
+      "severity": "critical",
+      "suggested_action": "Value redacted. Remove the key and rotate it.",
+      "title": "Possible GitHub token value"
+    },
+    {
+      "category": "token",
+      "confidence": "high",
+      "line": 3,
+      "path": ".env",
+      "provider": "huggingface",
+      "redacted_evidence": "HF_TOKEN = [REDACTED]",
+      "severity": "high",
+      "suggested_action": "Value redacted. Remove the key and rotate it.",
+      "title": "Possible HF_TOKEN value"
+    },
+    {
+      "category": "token",
+      "confidence": "medium",
+      "line": 6,
+      "path": ".codex/config.toml",
+      "provider": "generic",
+      "redacted_evidence": "JIRA_TOKEN = [REDACTED]",
+      "severity": "high",
+      "suggested_action": "Value redacted. Remove the key and rotate it.",
+      "title": "Possible JIRA_TOKEN value"
+    },
+    {
+      "category": "api_key",
+      "confidence": "medium",
+      "line": 4,
+      "path": ".env",
+      "provider": "generic",
+      "redacted_evidence": "PINECONE_API_KEY = [REDACTED]",
+      "severity": "high",
+      "suggested_action": "Value redacted. Remove the key and rotate it.",
+      "title": "Possible PINECONE_API_KEY value"
+    },
+    {
+      "category": "api_key",
+      "confidence": "medium",
+      "line": 5,
+      "path": ".env",
+      "provider": "generic",
+      "redacted_evidence": "AWS_ACCESS_KEY_ID = [REDACTED]",
+      "severity": "high",
+      "suggested_action": "Value redacted. Remove the key and rotate it.",
+      "title": "Possible AWS_ACCESS_KEY_ID value"
+    },
+    {
+      "category": "api_key",
+      "confidence": "medium",
+      "line": 6,
+      "path": ".env",
+      "provider": "generic",
+      "redacted_evidence": "AWS_SECRET_ACCESS_KEY = [REDACTED]",
+      "severity": "high",
+      "suggested_action": "Value redacted. Remove the key and rotate it.",
+      "title": "Possible AWS_SECRET_ACCESS_KEY value"
+    }
+  ],
+  "secret_references": [
+    {
+      "confidence": "low",
+      "name": "ANTHROPIC_API_KEY",
+      "path": ".env"
+    },
+    {
+      "confidence": "low",
+      "name": "AWS_SECRET_ACCESS_KEY",
+      "path": ".env"
+    },
+    {
+      "confidence": "low",
+      "name": "HF_TOKEN",
+      "path": ".env"
+    },
+    {
+      "confidence": "low",
+      "name": "OPENAI_API_KEY",
+      "path": ".env"
+    },
+    {
+      "confidence": "low",
+      "name": "PINECONE_API_KEY",
+      "path": ".env"
+    },
+    {
+      "confidence": "low",
+      "name": "ANTHROPIC_API_KEY",
+      "path": ".env.example"
+    },
+    {
+      "confidence": "low",
+      "name": "HF_TOKEN",
+      "path": ".env.example"
+    },
+    {
+      "confidence": "low",
+      "name": "OPENAI_API_KEY",
+      "path": ".env.example"
+    },
+    {
+      "confidence": "low",
+      "name": "PINECONE_API_KEY",
+      "path": ".env.example"
+    },
+    {
+      "confidence": "medium",
+      "name": "GITHUB_PERSONAL_ACCESS_TOKEN",
+      "path": ".mcp.json"
+    },
+    {
+      "confidence": "medium",
+      "name": "JIRA_TOKEN",
+      "path": ".codex/config.toml"
+    },
+    {
+      "confidence": "medium",
+      "name": "ANTHROPIC_API_KEY",
+      "path": ".github/workflows/agent-review.yml"
+    },
+    {
+      "confidence": "medium",
+      "name": "ANTHROPIC_TOKEN",
+      "path": ".github/workflows/agent-review.yml"
+    },
+    {
+      "confidence": "high",
+      "name": "MAX_NEW_TOKENS",
+      "path": "src/agent/guardrails.py"
+    },
+    {
+      "confidence": "high",
+      "name": "ANTHROPIC_API_KEY",
+      "path": "src/agent/llm.py"
+    },
+    {
+      "confidence": "high",
+      "name": "INTENT_TOKENIZER",
+      "path": "src/agent/llm.py"
+    },
+    {
+      "confidence": "high",
+      "name": "MAX_TOKENS",
+      "path": "src/agent/llm.py"
+    },
+    {
+      "confidence": "high",
+      "name": "OPENAI_API_KEY",
+      "path": "src/agent/retrieval.py"
+    },
+    {
+      "confidence": "high",
+      "name": "PINECONE_API_KEY",
+      "path": "src/agent/retrieval.py"
+    }
+  ]
+}

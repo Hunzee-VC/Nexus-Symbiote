@@ -15,6 +15,7 @@ from typing import Any
 
 import click
 
+from nexus_symbiote.core.coverage import failure_reason, group_failures
 from nexus_symbiote.utils.terminal import neutralize, safe_line
 
 ReportLine = tuple[str, str | None]
@@ -78,7 +79,7 @@ def _shown(value: object, spec: str = ".0f") -> str:
     return "?" if not math.isfinite(number) else format(number, spec)
 
 
-def _more(count: int, label: str, field: str, *, recorded: bool) -> ReportLine:
+def _more(count: int, label: str, field: str, *, recorded: bool, what: str = "") -> ReportLine:
     """How many items a list left out, and where the inventory keeps all of them."""
     where = (
         f" in metadata.completeness.{field}"
@@ -86,7 +87,12 @@ def _more(count: int, label: str, field: str, *, recorded: bool) -> ReportLine:
         else "; this run keeps no inventory: scan with -o FILE records them all under "
         f"metadata.completeness.{field}"
     )
-    return (f"  - {label}: {count} more{where}", None)
+    return (f"  - {label}: {count} more{what}{where}", None)
+
+
+def listed_failures(failures: Iterable[str]) -> list[str]:
+    """The inventory's failures as a gate lists them: each distinct one once."""
+    return [failure_reason(failure, records) for failure, records in group_failures(failures)]
 
 
 def gate_reason_lines(
@@ -101,9 +107,12 @@ def gate_reason_lines(
 
     This is the one gate-reason report, for scan, risk, baseline and the Action: each
     reason, the findings at or above the severity cutoff and the score with its
-    threshold, then the collectors not run, the first collection failures and excluded
-    surfaces, and how many more the inventory records under metadata.completeness.
-    ``recorded`` is false when the run keeps no inventory (scan --check, baseline).
+    threshold, then the collectors not run, the first distinct collection failures and
+    excluded surfaces, and how many more the inventory records under
+    metadata.completeness. A failure the inventory records more than once, as every
+    walking collector that meets the same escaping symlink does, is one line that says
+    how many records it has. ``recorded`` is false when the run keeps no inventory
+    (scan --check, baseline).
     """
     lines: list[ReportLine] = []
     reasons = [str(reason) for reason in document.get("gate_reasons") or []]
@@ -134,13 +143,18 @@ def gate_reason_lines(
         lines.append(
             (safe_line("  - not collected: ", names, " (coverage needs every collector)"), None)
         )
+    distinct = listed_failures(failures)
     lines.extend(
-        (safe_line("  - collection: ", failure), None) for failure in failures[:MAX_SHOWN_FAILURES]
+        (safe_line("  - collection: ", failure), None) for failure in distinct[:MAX_SHOWN_FAILURES]
     )
-    if len(failures) > MAX_SHOWN_FAILURES:
+    if len(distinct) > MAX_SHOWN_FAILURES:
         lines.append(
             _more(
-                len(failures) - MAX_SHOWN_FAILURES, "collection", "scan_failures", recorded=recorded
+                len(distinct) - MAX_SHOWN_FAILURES,
+                "collection",
+                "scan_failures",
+                recorded=recorded,
+                what=" distinct failures",
             )
         )
     lines.extend((safe_line("  - excluded: ", surface), None) for surface in excluded[:LISTED])
@@ -247,7 +261,7 @@ def risk_report_lines(
     listed = [] if passed else [str(failure) for failure in failures]
     lines.extend(gate_reason_lines(document, listed))
     # Coverage gaps restate collection failures; list only what the failures do not say.
-    known = set(listed)
+    known = set(listed_failures(listed))
     gaps = [str(gap) for gap in document.get("coverage_gaps") or [] if str(gap) not in known]
     lines.extend((safe_line("  - coverage gap: ", gap), None) for gap in gaps[:LISTED])
     if len(gaps) > LISTED:
@@ -565,11 +579,23 @@ def diff_report_lines(document: Mapping[str, Any]) -> list[ReportLine]:
 
 
 def _attributed(records: Mapping[str, Sequence[str]]) -> list[str]:
-    """Each message with the collector (or check) that recorded it, unless it says so."""
+    """Each distinct message once, with the collectors (or checks) that recorded it.
+
+    A message that names its only collector itself, such as a shadowscan report
+    problem, is not attributed again. The collectors are named in alphabetical order,
+    so a failure six walking collectors record reads the same whatever their run order.
+    """
+    recorded: dict[str, list[str]] = {}
+    for name, messages in records.items():
+        for message in map(str, messages):
+            names = recorded.setdefault(message, [])
+            if name not in names:
+                names.append(name)
     return [
-        message if message.startswith(f"{name}: ") else f"{message} (from {name})"
-        for name, messages in records.items()
-        for message in map(str, messages)
+        message
+        if len(names) == 1 and message.startswith(f"{names[0]}: ")
+        else f"{message} (from {', '.join(sorted(names))})"
+        for message, names in recorded.items()
     ]
 
 

@@ -735,7 +735,7 @@ def test_bound_imports_downgrade_only_evidence_the_import_could_not_carry(tmp_pa
 
 def test_bound_imports_keep_the_observed_unsafe_verdict_without_a_recorded_digest(tmp_path):
     # The import records no digest; the verdict comes from the local bytes all the same.
-    (tmp_path / "weights.bin").write_bytes(b"\0" * 64)
+    (tmp_path / "weights.bin").write_bytes(b"\x80\x04N.")
     imported = ModelComponent(
         bom_ref="shadowscan:m",
         name="m",

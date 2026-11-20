@@ -1,0 +1,1 @@
+sh -c cd\ \"\$1\"\ \&\&\ exec\ \"\$0\"\ scan\ -p\ .\ --offline\ --no-scan\ --scan-prompts\ --enforce\ --full-analysis\ -f\ json\ -o\ \"\$2/report.json\" /aibom-run/venvs/agent-bom/bin/agent-bom /aibom-run/work/agent-bom-alt/corpus /aibom-run/results3/agent-bom-alt/ambient-cwd 
