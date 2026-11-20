@@ -1938,10 +1938,44 @@ def test_spiffe_workload_identity_and_tool_definition_hash_correlation(tmp_path)
                 "gen_ai.operation.name": "invoke_agent",
                 "gen_ai.agent.name": "plain",
                 "peer.identity": "spiffe://example.org/ns/prod/sa/plain",
-            }
+            },
+            kind=3,
         ),
     )
     unpinned_matched = {e["inventory_ref"]: e for e in unpinned_ev["reconciliation"]["matched"]}
     assert unpinned_matched["tool:plain"]["definition_hash_matched"] is None
     assert unpinned_matched["agent:plain"]["workload_identity_matched"] is None
     assert unpinned_ev["gate"]["passed"] is True
+
+
+def test_a_caller_span_does_not_lend_its_identity_to_the_agent_it_invokes(tmp_path):
+    declared = "spiffe://example.org/sa/support"
+    agent = AgentComponent(
+        bom_ref="agent:support",
+        name="support",
+        workload_identity=declared,
+        properties={"identity_source": "agent.yaml"},
+    )
+    own = {"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "support"}
+    document = otlp_export(otlp_span({**own, "spiffe.id": declared}, kind=2))
+    caller = otlp_export(
+        otlp_span(own, kind=3),
+        resource={"service.name": "orchestrator", "spiffe.id": "spiffe://example.org/sa/orch"},
+    )
+    document["resourceSpans"] += caller["resourceSpans"]
+    evidence = collect(_inventory(tmp_path, agent), [_trace(tmp_path, document)])
+    [entry] = evidence["reconciliation"]["matched"]
+    assert entry["reported_workload_identities"] == [declared]
+    assert entry["workload_identity_matched"] is True
+    assert evidence["gate"]["passed"] is True
+
+    mtls = {**own, "spiffe.id": declared, "peer.identity": "spiffe://example.org/sa/orch"}
+    server_side = _evidence(tmp_path, [agent], otlp_span(mtls, kind=2))
+    assert server_side["reconciliation"]["matched"][0]["workload_identity_matched"] is True
+    callee = _evidence(
+        tmp_path,
+        [agent],
+        otlp_span({**own, "peer.identity": "spiffe://x.example/sa/rogue"}, kind=3),
+    )
+    assert callee["reconciliation"]["matched"][0]["workload_identity_matched"] is False
+    assert callee["gate"]["passed"] is False

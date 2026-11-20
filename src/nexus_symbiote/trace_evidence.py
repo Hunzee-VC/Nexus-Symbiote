@@ -288,13 +288,15 @@ class Observations:
         if isinstance(detail, str) and detail not in item.details:
             self._record(span)
             item.details.add(detail)
-        for id_key in ("spiffe.id", "peer.identity"):
-            w_id = span.attributes.get(id_key)
-            if isinstance(w_id, Unreadable):
-                item.unreadable_workload_identities += 1
-            elif isinstance(w_id, str) and w_id not in item.workload_identities:
-                self._record(span)
-                item.workload_identities.add(w_id)
+        # A CLIENT or PRODUCER span names the component it calls: its own (and its
+        # resource's) spiffe.id is the caller's, and only peer.identity is the callee's.
+        id_key = "peer.identity" if span.kind in (3, 4) else "spiffe.id"
+        w_id = span.attributes.get(id_key)
+        if isinstance(w_id, Unreadable):
+            item.unreadable_workload_identities += 1
+        elif isinstance(w_id, str) and w_id not in item.workload_identities:
+            self._record(span)
+            item.workload_identities.add(w_id)
         if kind == "tool":
             t_hash = span.attributes.get("gen_ai.tool.definition_hash")
             if isinstance(t_hash, Unreadable):
