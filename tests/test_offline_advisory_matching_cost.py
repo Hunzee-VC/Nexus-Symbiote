@@ -15,6 +15,8 @@ import json
 import random
 from collections import Counter
 from dataclasses import replace
+from datetime import UTC, datetime
+from functools import partial
 from typing import Any
 
 import pytest
@@ -30,6 +32,12 @@ from nexus_symbiote.core.models import RegistryEntryComponent
 from tests.support import scaling_ratio
 
 _SUPPORTED_RANGE_TYPES = frozenset({"ECOSYSTEM", "SEMVER"})
+
+# #296 rates the feed's age against the caller's clock. These tests date every record
+# now, so a feed-age error never stands in for the matching behaviour under test.
+NOW = datetime.now(UTC)
+MODIFIED = NOW.strftime("%Y-%m-%dT%H:%M:%SZ")
+_match_offline_advisories = partial(offline.match_offline_advisories, now=NOW)
 
 
 def _reference_compare(ecosystem: str, left: str, right: str) -> int | None:
@@ -474,6 +482,7 @@ def test_a_random_bundle_gives_the_report_pairwise_matching_gave(tmp_path, monke
                 "id": f"GHSA-{index:04d}",
                 "aliases": [f"CVE-2026-{rng.randint(0, 150):04d}"] if rng.random() < 0.5 else [],
                 "summary": f"summary {index}",
+                "modified": MODIFIED,
                 "affected": affected,
             }
         )
@@ -490,7 +499,7 @@ def test_a_random_bundle_gives_the_report_pairwise_matching_gave(tmp_path, monke
                     continue
                 components.append(component)
 
-    report, _ = offline.match_offline_advisories(AIBOM(components=components), db_path=db_file)
+    report, _ = _match_offline_advisories(AIBOM(components=components), db_path=db_file)
 
     assert report.components_checked == len(components) > 400
     parsed = offline._parse_osv_records(records)
@@ -546,6 +555,7 @@ def test_a_random_bundle_gives_the_report_pairwise_matching_gave(tmp_path, monke
 def _range_record(index: int, events: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
     return {
         "id": f"GHSA-{index:06d}",
+        "modified": MODIFIED,
         "affected": [
             {
                 "package": {"ecosystem": "PyPI", "name": "victim"},
@@ -576,7 +586,7 @@ def test_advisories_that_do_not_match_cost_no_comparison_per_component(tmp_path)
 
     def run(scale: int) -> None:
         bom, db_file = inputs[scale]
-        report, _ = offline.match_offline_advisories(bom, db_path=db_file)
+        report, _ = _match_offline_advisories(bom, db_path=db_file)
         assert report.complete is True
         assert report.components_checked == 60 * scale
         assert report.advisories == []
@@ -602,13 +612,13 @@ def test_matches_beyond_the_budget_stop_with_one_error(tmp_path):
     bom, db_file = _matching_inputs(tmp_path, components=5, advisories=4)
 
     with limits.applied(replace(limits.DEFAULTS, advisory_matches=20)):
-        report, _ = offline.match_offline_advisories(bom, db_path=db_file)
+        report, _ = _match_offline_advisories(bom, db_path=db_file)
     assert report.complete is True
     assert len(report.advisories) == 5
     assert all(len(entry["matched_ids"]) == 4 for entry in report.advisories)
 
     with limits.applied(replace(limits.DEFAULTS, advisory_matches=19)):
-        report, _ = offline.match_offline_advisories(bom, db_path=db_file)
+        report, _ = _match_offline_advisories(bom, db_path=db_file)
     assert report.errors == [
         "Offline advisory matching stopped: advisory-matches limit of 19 exceeded; "
         "raise it with --limit advisory-matches=N"
@@ -647,7 +657,7 @@ def test_errors_past_the_report_cap_spend_no_budget(tmp_path):
     bom = AIBOM(components=[_component("victim", f"1.{i}.0") for i in range(50)])
 
     with limits.applied(replace(limits.DEFAULTS, advisory_matches=1)):
-        report, _ = offline.match_offline_advisories(bom, db_path=db_file)
+        report, _ = _match_offline_advisories(bom, db_path=db_file)
     assert report.components_checked == 50
     assert len(report.errors) == offline.MAX_OFFLINE_ERRORS + 1
     assert report.errors[0] == (
@@ -666,7 +676,7 @@ def test_a_range_with_many_events_spends_the_budget_before_it_is_evaluated(tmp_p
     db_file.write_text(json.dumps([_range_record(0, events)]), encoding="utf-8")
     bom = AIBOM(components=[_component("victim", "5.10.3"), _component("victim", "5.11.3")])
 
-    report, _ = offline.match_offline_advisories(bom, db_path=db_file)
+    report, _ = _match_offline_advisories(bom, db_path=db_file)
     assert report.complete is True
     assert [entry["version"] for entry in report.advisories] == ["5.10.3"]
     assert report.advisories[0]["fixed_versions"] == sorted(
@@ -674,7 +684,7 @@ def test_a_range_with_many_events_spends_the_budget_before_it_is_evaluated(tmp_p
     )
 
     with limits.applied(replace(limits.DEFAULTS, advisory_matches=1_000)):
-        report, _ = offline.match_offline_advisories(bom, db_path=db_file)
+        report, _ = _match_offline_advisories(bom, db_path=db_file)
     assert report.advisories == []
     assert len(report.errors) == 1
     assert report.complete is False
