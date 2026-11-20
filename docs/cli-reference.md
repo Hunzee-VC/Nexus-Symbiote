@@ -60,7 +60,7 @@ change them. See [collection limits](collection-limits.md).
 | [`blast-radius`](#blast-radius) | offline | List agents and components associated with one component |
 | [`graph`](#graph) | offline | Write a self-contained HTML or JSON view of an inventory's associations, risk classes and exposure paths |
 | [`baseline`](#baseline) | offline | Write an unsigned snapshot only if the scan gate passes |
-| [`vex`](#vex) | offline | Export findings as a VEX document with status `in_triage` |
+| [`vex`](#vex) | offline | Export schema-validated VEX findings with optional operator decisions, advisories and trace evidence |
 | [`crosswalk`](#crosswalk) | offline | Map findings to OWASP, MITRE ATLAS, NIST AI RMF, EU AI Act, ISO/IEC 42001 and CWE entries |
 | [`minimum-elements`](#minimum-elements) | offline | Report which G7 AI SBOM minimum elements an AgentBOM's CycloneDX export carries, and how to supply the missing ones |
 | [`verify-artifact`](#verify-artifact) | offline | Check a file's SHA-256, and optionally its Sigstore bundle |
@@ -336,6 +336,9 @@ nexus-symbiote advisories [OPTIONS] AIBOM_PATH
 | `--exclude` `NAME` | Never send this package name to OSV; a trailing `*` matches a prefix, and a `*` anywhere else is refused. Names are compared as PyPI normalizes them, and in any case (repeatable). |
 | `--exclude-private-origins` | Send only packages whose lockfile resolution records the public PyPI or npm registry. A Python package that no `uv.lock` or `poetry.lock` resolves has no recorded origin, so it is withheld; withhold private names with `--exclude` instead to keep public ones checked. |
 | `--dry-run` | List the package identities that would be sent, without contacting OSV (works offline). |
+| `--offline-db` `PATH` | Match exact pinned PyPI/npm packages offline against an OSV JSON bundle or directory without contacting `api.osv.dev`; deduplicates alias pairs and records bundle SHA-256 provenance. A directory is read flat, and one with a subdirectory is refused, as is a bundle with no records, with an entry that is not an OSV record, or with two different records under one id. A package whose ecosystem the bundle holds no record for is an error, so the report is not complete, as is a record for the package with malformed `affected` data or an unparsable `introduced` (at most 100 such errors are listed, then a count). A `fixed`, `last_affected` or `limit` the version parser rejects is not an error: the advisory matches unless the lower bound excludes the version, the version is at or above every `limit` while all limits parse and none is `*`, or a parsable bound does and event order puts no rejected bound in the version's interval, and when no exact `versions` entry or other range decides the match it carries `range_undecidable: true` and up to 16 `undecidable_bounds` (64 characters each). Like any match it fails this command; an operator decision passed to `vex --decisions` records its triage there, and the `vex` export marks it `rangeUndecidable`. |
+| `--kev` `PATH` | Offline CISA/ENISA KEV JSON catalog used with `--offline-db` to elevate matched advisories to `critical` with source provenance (repeatable). A catalog with no entries is refused. |
+| `--epss` `PATH` | Offline EPSS CSV/JSON catalog used with `--offline-db` to attach EPSS scores and percentiles. A catalog with no entries is refused. |
 
 The command sends each package's ecosystem, normalized name and exact version to
 `https://api.osv.dev/v1/querybatch`, including packages resolved from a private
@@ -1097,7 +1100,7 @@ kept.
 
 ### `vex`
 
-Export schema-validated findings in triage, without asserting exploitability.
+Export schema-validated VEX findings with optional operator decisions, advisories, and trace evidence.
 
 ```text
 nexus-symbiote vex [OPTIONS] AIBOM_PATH
@@ -1106,3 +1109,10 @@ nexus-symbiote vex [OPTIONS] AIBOM_PATH
 | Option | Description |
 |---|---|
 | `-o`, `--output` `PATH` | Write the VEX document to this file instead of standard output. |
+| `--decisions` `PATH` | Operator-owned VEX decisions YAML/JSON stored outside the scanned project and enclosing git trees; expired decisions revert to `in_triage` against wall-clock UTC time. |
+| `--project-root` `PATH` | Scanned project root used to refuse policy and trace files stored inside the checkout. |
+| `--advisories` `PATH` | Link matched advisories from a live or offline `advisories` report JSON bound to this AIBOM's SHA-256 into the VEX document. |
+| `--trace-evidence` `PATH` | `trace-diff` or execution-evidence JSON bound to this AIBOM's SHA-256 (`unobserved` and `invoked` stay `in_triage`; critical, KEV, and static-execution findings cannot be suppressed without an expiring operator decision). Requires `--trace-attestation` with `--trusted-key` unless `--allow-unsigned-trace-evidence` is set. |
+| `--trace-attestation` `PATH` | Ed25519 DSSE attestation envelope authenticating `--trace-evidence`. |
+| `--trusted-key` `PATH` | Trusted Ed25519 public key PEM outside the scanned project (repeatable; used with `--trace-attestation`). |
+| `--allow-unsigned-trace-evidence` | Explicitly accept unsigned `--trace-evidence` without `--trace-attestation`. |
