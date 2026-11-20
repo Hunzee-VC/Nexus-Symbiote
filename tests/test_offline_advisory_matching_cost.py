@@ -286,6 +286,14 @@ def _random_block(rng: random.Random, ecosystem: str) -> dict[str, Any]:
                 events += [{"introduced": cuts[2]}, {"last_affected": cuts[3]}]
                 bad = {rng.choice(["fixed", "last_affected"]): rng.choice(_UNPARSEABLE[ecosystem])}
                 events.insert(rng.randint(0, len(events)), bad)
+            elif 0.3 <= roll < 0.4:
+                # Several limits: a version below any of them is in range, and a "*" or an
+                # unparsable one keeps every version in range (the latter flagged).
+                pool = [*_PARSEABLE[ecosystem], "*", " * ", *_UNPARSEABLE[ecosystem][:2]]
+                events = [{"introduced": rng.choice([*_PARSEABLE[ecosystem], "0"])}]
+                events += [{"limit": rng.choice(pool)} for _ in range(rng.randint(2, 3))]
+                events += [{"fixed": rng.choice(_PARSEABLE[ecosystem])}] * rng.randint(0, 1)
+                rng.shuffle(events)
             entry: dict[str, Any] = {"events": events}
             kind = rng.choice(["ECOSYSTEM", "SEMVER", "semver", None, None, "GIT", 7])
             if kind is not None:
