@@ -71,14 +71,18 @@ never count as the local subject that `validate --project` and `risk --project`
 require. ShadowScan risk and shadow
 flags remain source-reported heuristics; an inventory mismatch is not proof of
 unauthorized activity. Output contains report and source-ID digests and indexes,
-not raw source descriptions, locations or snippets. Both artifacts may still be
-sensitive and must be handled accordingly.
+not raw source descriptions, locations or snippets. The exceptions belong to a model
+that a merged scan names from cited evidence: its identifier, the locations the scan
+read it at and the report's signal label; see
+[models named from cited evidence](#models-named-from-cited-evidence). Both artifacts
+may still be sensitive and must be handled accordingly.
 
-The projection profile `nexus-symbiote/shadowscan-projection/v4` identifies the
+The projection profile `nexus-symbiote/shadowscan-projection/v5` identifies the
 SymBiote mapping, not a ShadowScan report schema or authenticated producer
-version. Each projected component records the exact report digest
+version. Each component projected from a finding records the exact report digest
 (`shadowscan:report-sha256`) and a content digest of its own source finding
-(`shadowscan:finding-sha256`, see below). CycloneDX `dependsOn` edges are copied
+(`shadowscan:finding-sha256`, see below); a model named from cited evidence records
+neither. CycloneDX `dependsOn` edges are copied
 only when both endpoints map to components. They remain declared, source-reported
 relationships, with the dependency-array index recorded on the edge; the BOM
 metadata binds them to the report digest. Unmapped endpoint
@@ -100,7 +104,9 @@ Version 1 projections used the server type for these findings, and version 2
 recorded the exact report digest on CycloneDX edges and had no finding digest.
 Version 3 resolved a CycloneDX entry whose type or group contradicts its
 `shadowscan:kind`, such as kind `agent` on a `machine-learning-model`, by
-precedence; version 4 leaves it unmapped.
+precedence; version 4 leaves it unmapped. Version 5 adds the models a merged scan
+names from cited evidence; a standalone import projects the same components as
+version 4.
 Retain the original importer to reproduce or verify an older projection, then
 regenerate inventories with the current profile and review them before comparison or
 approval. Producer schema and version changes require compatibility testing; the
@@ -115,6 +121,177 @@ coverage and provenance: `scan -f sarif` and `import-shadowscan -f sarif` refuse
 such an inventory, the GitHub Action skips its SARIF upload with a warning, and the
 `vex` command omits imported findings and records how many it omitted in the
 property `nexus-symbiote:omittedImportedFindings`.
+
+## Models named from cited evidence
+
+A ShadowScan code report cites where it saw a model identifier: an evidence entry
+whose `signal` starts with `model:`, with a `location` of `path:line` and the
+identifier in `attributes.value`. A merged `scan` re-reads that file and line with
+its own confined reader and adds a model component when the identifier stands there.
+The report says where to look; the name recorded is what the scan read.
+
+```sh
+shadowscan code /path/to/repository --format json -o /path/to/repository/shadowscan.json
+nexus-symbiote scan /path/to/repository --no-project-policy -o merged.json
+```
+
+For a report that cites `gpt-4o-mini-2024-07-18` at `services/api/llm.py:28`, and a
+file that holds `MODEL = "gpt-4o-mini-2024-07-18"` on that line, the inventory gains
+this component, shown without its properties:
+
+```json
+{
+  "bom_ref": "shadowscan:model:27bebe765c6e794efc03c584ab67ed05b9724cc0e62e41567db465dc3379aa41",
+  "component_type": "model",
+  "name": "gpt-4o-mini-2024-07-18",
+  "trust_tier": "unknown",
+  "assurance_level": "declared",
+  "claims": {
+    "cited_evidence": {
+      "assurance": "declared",
+      "method": "cited-line-reread",
+      "scope": "repository",
+      "collector": "shadowscan",
+      "locator": "services/api/llm.py:28",
+      "evidence_refs": ["services/api/llm.py:28"]
+    }
+  }
+}
+```
+
+The component stays an imported claim: declared assurance, unknown trust, and never
+the local subject that `validate --project` requires. The `cited_evidence` claim
+records that the scan read the identifier at that location (method
+`cited-line-reread`). It is `declared`, as a hosted-model alias in `agent.yaml` is:
+an identifier in a source line measures no model, so neither the import nor the
+re-read raises assurance, and the component fails
+`validate.minimum_assurance_level: observed` unless `validate --project` binds it to
+the report. The claim does not show that code calls the model, which provider serves
+it or which revision answers. The component has no `source_path` and no digest: the
+cited file is not the model's weight file, and an unkeyed digest of a small source
+file would let anyone holding the inventory confirm a guess of its content.
+
+### When an identifier is named
+
+All of these must hold.
+
+- **The cited file is one the scan may read.** Its path is a relative POSIX path of at
+  most 256 characters inside the project, without `.` or `..` segments, and the
+  confined reader can read it as UTF-8 within the operator's `file-bytes` and
+  `source-scan-bytes` limits. A path under `.git`, `node_modules`, `__pycache__`,
+  `.venv` or `venv`, and a path the collection policy excludes, is not read. A file
+  [named as holding credentials](verification-source-binding.md#files-named-as-holding-credentials), such as
+  `.env`, `id_rsa`, `server.pem` or `secrets/token.txt`, or a link that leads to one,
+  is not read.
+- **The cited file is not itself a scan result.** A JSON file whose top-level object
+  has a `bomFormat`, `spdxVersion`, `@graph`, `runs`, `findings` or `components` key
+  is a bill of materials or a scan report: CycloneDX, SPDX, SARIF, a ShadowScan
+  report, a native inventory or a risk report. So is a top-level array that holds an
+  object with `bomFormat`, `spdxVersion` or `@graph`; the other three names are
+  ordinary words in a list of rows and do not count there. Text that starts as JSON
+  and is not one JSON value, for example with a duplicate key, a trailing comma, a
+  comment or a second document after the first, is read for the same keys in the same
+  places, so it is neither let through as a report nor refused for a key nested
+  deeper. Such a file repeats the identifiers a scan found, so it confirms none. The
+  report cannot confirm its own citations, and an inventory kept in the tree, such as
+  a drift baseline, cannot keep a model named after its source line is deleted.
+- **The cited line holds the identifier as a whole identifier.** The line is at most
+  4,096 characters. Text may not continue the identifier: `gpt-4o` is not named from
+  `gpt-4o-mini`, `qwen2.5-coder` from `qwen2.5-coder:7b`, or `cohere` from
+  `cohere/rerank-english-v3.0`. A namespace before it is allowed, so
+  `claude-sonnet-4-5-20250929` is named from `anthropic/claude-sonnet-4-5-20250929`.
+  Lines are counted by line feeds.
+- **The identifier is model-shaped.** It is 2 to 128 characters of ASCII letters,
+  digits and `._:/@+-`, starts and ends with a letter or digit, and contains a letter.
+- **An Amazon Bedrock resource name is a model's.** A report can label any resource
+  name as model evidence: ShadowScan 0.1.4 does so for a guardrail name in Terraform.
+  An identifier that starts with `arn:aws:bedrock:`, in any partition, is named only
+  when its resource is a `foundation-model`, `inference-profile`,
+  `application-inference-profile`, `provisioned-model`, `custom-model` or
+  `imported-model`. A guardrail, agent, knowledge-base or flow name is counted as
+  unconfirmed. This is the only check on what an identifier names.
+- **Nothing reads as a credential.** The identifier and the signal label must pass
+  the scan's own redactor unchanged, and the identifier must still stand on the cited
+  line after that line is redacted, so one assigned to a name such as `API_TOKEN` is
+  withheld. A value can also follow its key on a later line. A line that holds one
+  value and no key of its own is therefore read together with the line before it, as
+  a value follows `Authorization: Bearer`, and as the value of each key that opens it
+  within the eight lines above. A line opens a value when it is a key and its mark
+  with nothing after them but a YAML block indicator, an opening bracket or a comment:
+  `password:`, `password: >-`, `"credentials": [`, `export const credentials = [`,
+  `token =  # rotated`. Blank lines, comment lines and other single values, such as
+  list entries, may lie in between. The redactor decides which keys name a credential,
+  and it reads names broadly: a list below `requires_token:` or `cache_key = (` is
+  withheld as a value on the same line as that key always was. What the lines hold
+  decides all of this, not which identifier a report cites there, so the order of a
+  report's citations does not change what is withheld. A line with a key and a value
+  of its own, such as `model: gpt-4o-mini` below `credentials:`, is read alone, and so
+  is a line of several words.
+
+The scan records only an identifier that the report states and the repository
+holds at the cited line. It never extends the cited text, so a report cannot make a
+scan copy other text from a file into the inventory.
+
+### What is recorded
+
+One component is recorded for each identifier as written; the same model written as
+`anthropic/claude-sonnet-4-5-20250929` and as `claude-sonnet-4-5-20250929` is two
+components. The claim's `locator` is the first location in path and line order and
+its `evidence_refs` list up to 16 locations, fewer when their paths hold characters
+that the inventory writes as escapes: the listed locations take at most 4,256 bytes
+as written, which one location always fits.
+
+| Property | Value |
+| --- | --- |
+| `shadowscan:signals` | The report's `model:` labels for the identifier, such as `model:provider.openai`: at most four parts of 24 lowercase letters and digits, a source-reported label. The first 16 in order are listed |
+| `shadowscan:signals-unlisted` | The number of labels past the 16 listed; absent when all are listed |
+| `shadowscan:evidence-unlisted` | The number of confirmed locations that are not listed; absent when all are listed |
+| `shadowscan:kind`, `shadowscan:projection-profile`, `collection_mode` | `model`, the projection profile and `imported-unverified-report`, as on every imported component |
+
+`minimum-elements` counts the identifier as the model's name, on an imported basis. An
+imported finding of kind `local-model` still carries a digest-based label, which it
+does not count as a name.
+
+Evidence the scan does not confirm stays in the report. The projection limitations
+count it, for example "3 model evidence entries were not confirmed at a cited file
+and line; they are not named". ShadowScan reports some identifiers by a matched
+prefix, such as `qwen2.5-` for `qwen2.5-coder:7b`; those are counted, not named. At
+most 500 models are named for one report, in identifier order; the rest are counted
+as "confirmed model identifiers past the bound of 500 are not named". These counts
+alone do not close the default gate. Two conditions are scan failures: cited files
+that do not fit the `source-scan-bytes` limit, which names the limit, and cited
+lines past the 1 MiB of text that the scan checks for credentials, "ShadowScan cited
+lines exceed the text checked for credentials; the rest were not confirmed". At most
+10,000 `model:` evidence entries have their identifier and label read by the
+redactor, whether or not they are then kept; the entries after that are counted as
+unconfirmed. An entry without a usable location or identifier is counted as
+unconfirmed too and does not use up that number.
+
+### Validation and drift
+
+`validate --project` reproduces these components from the report and the files
+beneath the project root, and a project that validated without the report's model
+evidence validates with it. When a cited line no longer holds its identifier, the
+recorded model is reported as "Unexpected discovery report component" and
+validation fails; scan again to record the current state.
+
+`diff` compares the cited files, not the line numbers, because a line moves with
+every edit above it. A model whose lines shift, or that gains a location in a file
+it was already cited in, is unchanged. One cited in another file is a high alert on
+its component ("claims changed"), and one that is no longer cited is a removed
+component. A rerun that changes only the report's run times raises no alert.
+
+A standalone `import-shadowscan` has no project root, reads no project file and
+names no model. CycloneDX reports carry no evidence entries. Findings of other
+kinds are not named this way; see the limits below.
+
+> [!WARNING]
+> Anyone who can write the report and a file in the checkout can add a model
+> component by citing that file. The component shows that the text is in the
+> repository at that line. Treat it as a lead to review, as the declared assurance
+> says, and require a signed report in CI. A scan result in a format the rule above
+> does not recognize, such as a Markdown or HTML report kept in the tree, can still
+> confirm an identifier.
 
 ## Import and policy gates
 
@@ -139,11 +316,20 @@ dropped.
 | Native findings, or CycloneDX components and services | 10,000 |
 | CycloneDX dependency edges | 10,000 |
 | Finding identifiers, CycloneDX `bom-ref` and dependency references | 4,096 characters |
+| Model evidence entries examined in a merged scan | 10,000 |
+| Cited path length | 256 characters |
+| Cited line length | 4,096 characters |
+| Locations listed for one model | 16, and 4,256 bytes as the inventory writes them |
+| Signal labels listed for one model | 16 |
+| Models named for one report | 500 |
+| Lines above a cited value searched for the key that opens it | 8 |
+| Text the redactor reads for cited lines: each line, the line before a single value, and the key that opens it | 1 MiB |
 
 A report within these limits can still yield an inventory larger than the 16 MiB
 that `validate`, `risk`, `diff` and the other commands read. A merged `scan` reaches
 it at roughly 8,000 to 9,000 findings that each carry a risk level, fewer when they
-are also flagged as shadow; a standalone import of 10,000 such findings stays below
+are also flagged as shadow or when the report also cites many models, whose
+components stay under 6 MiB; a standalone import of 10,000 such findings stays below
 it. Individual connector counts can
 precede filtering or deduplication and can legitimately differ from the final
 array.
@@ -230,7 +416,7 @@ written by an earlier version may have no content digests or an older projection
 profile. The first comparison after an upgrade then falls back to the exact report
 digest, which raises a high alert when the report bytes differ, and raises a medium
 alert for every imported component, even when the report bytes are unchanged,
-because the new inventory adds the content digests, the v4 projection profile and
+because the new inventory adds the content digests, the current projection profile and
 the per-component finding digests. Later comparisons use the content digests. The content
 digests are not authentication; `validate --project` compares them with the
 local report as it does the exact digest. Text output prints the note under

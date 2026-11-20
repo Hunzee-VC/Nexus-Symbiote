@@ -86,6 +86,32 @@ def test_a_pull_requests_own_gitattributes_cannot_hide_its_changes(
     assert "42 lines" in capsys.readouterr().out
 
 
+def test_the_merge_commits_first_parent_counts_only_the_pull_request(
+    repository: Path, monkeypatch, capsys
+) -> None:
+    # CI measures the merge commit against its first parent. The base branch can move
+    # while the job waits for a runner: against the moved tip, the commits merged since
+    # would count as the pull request's own.
+    _git(repository, "checkout", "-q", "-b", "feature")
+    (repository / "src" / "b.py").write_text("".join(f"b{i} = {i}\n" for i in range(10)))
+    _git(repository, "add", "-A")
+    _git(repository, "commit", "-q", "-m", "pull request")
+    _git(repository, "checkout", "-q", "main")
+    _git(repository, "merge", "-q", "--no-ff", "-m", "merge", "feature")
+    merge = _git(repository, "rev-parse", "HEAD").strip()
+    _git(repository, "checkout", "-q", "-b", "moved", "HEAD^1")
+    (repository / "src" / "c.py").write_text("".join(f"c{i} = {i}\n" for i in range(90)))
+    _git(repository, "add", "-A")
+    _git(repository, "commit", "-q", "-m", "merged meanwhile")
+    moved = _git(repository, "rev-parse", "HEAD").strip()
+    _git(repository, "checkout", "-q", "--detach", merge)
+    monkeypatch.chdir(repository)
+    assert checker.main(["--base", f"{merge}^1", "--limit", "20"]) == 0
+    assert "10 lines" in capsys.readouterr().out
+    assert checker.main(["--base", moved, "--limit", "20"]) == 1
+    assert "100 lines" in capsys.readouterr().out
+
+
 def test_a_move_out_of_tests_counts_at_its_destination(
     repository: Path, monkeypatch, capsys
 ) -> None:

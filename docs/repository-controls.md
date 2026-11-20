@@ -40,11 +40,11 @@ GitHub plan and repository Administration permission can apply it with:
 
 ```sh
 # Solo-maintainer interim: no required review, same enforced status check
-gh api --method PUT repos/Hunzee-VC/Nexus-Symbiote/branches/main/protection \
+gh api --method PUT repos/aisecnomad/Nexus-Symbiote/branches/main/protection \
   --input config/github-main-protection-interim.json
 
 # Full target configuration, once a second reviewer is available
-gh api --method PUT repos/Hunzee-VC/Nexus-Symbiote/branches/main/protection \
+gh api --method PUT repos/aisecnomad/Nexus-Symbiote/branches/main/protection \
   --input config/github-main-protection.json
 ```
 
@@ -52,7 +52,7 @@ Do not place an administrative token in CI. The publication preflight uses
 only repository contents-read and Actions-read permissions:
 
 ```sh
-python scripts/check_repository_controls.py --repo Hunzee-VC/Nexus-Symbiote --branch main --sha "$GITHUB_SHA" --publish pypi
+python scripts/check_repository_controls.py --repo aisecnomad/Nexus-Symbiote --branch main --sha "$GITHUB_SHA" --publish pypi
 ```
 
 The preflight requires `GH_TOKEN` or `GITHUB_TOKEN`. It checks GitHub's live
@@ -99,7 +99,7 @@ described above, which the workflow token is never shown. The SHA defaults to `G
 local invocations must supply their reviewed commit explicitly. The preflight does
 not audit approval counts, force-push and deletion settings or package-index
 ownership; an administrator must review those separately, for example with
-`gh api repos/Hunzee-VC/Nexus-Symbiote/branches/main/protection`. It checks live state
+`gh api repos/aisecnomad/Nexus-Symbiote/branches/main/protection`. It checks live state
 during the build; it does not lock GitHub settings or cancel a candidate after later
 administrative changes. Review the exact run and current controls at the environment
 approval. Candidate builds remain available while controls are being configured;
@@ -115,7 +115,7 @@ Repository rulesets do not substitute for this configuration. The preflight read
 the classic branch-protection metadata that GitHub reports on the branch, so a
 ruleset, however strict, cannot satisfy it. A ruleset whose target list is empty
 applies to no branch at all, even when its enforcement is `active`. Check what
-actually applies to `main` with `gh api repos/Hunzee-VC/Nexus-Symbiote/rules/branches/main`.
+actually applies to `main` with `gh api repos/aisecnomad/Nexus-Symbiote/rules/branches/main`.
 
 ## Security acceptance evidence
 
@@ -222,14 +222,14 @@ gate job need the same line-by-line reading. All of these checks live in
 files a pull request can change; read changes to them line by line.
 
 The OpenSSF Scorecard workflow publishes the repository's
-[Scorecard results](https://scorecard.dev/viewer/?uri=github.com/Hunzee-VC/Nexus-Symbiote)
+[Scorecard results](https://scorecard.dev/viewer/?uri=github.com/aisecnomad/Nexus-Symbiote)
 weekly and on every push to `main`, and uploads them to code scanning. It is an
 external, repeatable view of these controls, not a gate.
 
 ## Operator prerequisites
 
 Status of the controls tracked in
-[issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74), as observed
+[issue #74](https://github.com/aisecnomad/Nexus-Symbiote/issues/74), as observed
 through the GitHub API on 2026-11-06, with what the 0.1.0 publication on 2026-11-08
 established. Re-check live settings before relying on any row; this table is a
 dated record, not enforcement. The publication preflight now checks the immutable tag
@@ -239,14 +239,14 @@ ruleset's bypass list is the exception, which only the administrator check can r
 
 | Control | Observed state | Required action |
 | --- | --- | --- |
-| Hosted CI matrix and CodeQL | Passing on `main` at `3ad53a25`: CI and Code Quality green (observed 2026-11-12). The earlier failures were a runtime-validation CPU budget and real dependency advisories, fixed in [#97](https://github.com/Hunzee-VC/Nexus-Symbiote/pull/97) and [#98](https://github.com/Hunzee-VC/Nexus-Symbiote/pull/98) | None; keep `Verified CI` required |
+| Hosted CI matrix and CodeQL | Passing on `main` at `3ad53a25`: CI and Code Quality green (observed 2026-11-12). The earlier failures were a runtime-validation CPU budget and real dependency advisories, fixed in [#97](https://github.com/aisecnomad/Nexus-Symbiote/pull/97) and [#98](https://github.com/aisecnomad/Nexus-Symbiote/pull/98) | None; keep `Verified CI` required |
 | Branch protection on `main` | The interim configuration was applied on 2026-11-06: `Verified CI` is required, bound to the GitHub Actions app, on an up-to-date branch and for administrators too; conversations must be resolved; force pushes and deletion are disabled; no review is required | Switch to the full configuration once a second reviewer exists |
 | Repository ruleset `main` | Retargeted on 2026-11-06 to the default branch, where its deletion, non-fast-forward, CodeQL (high or higher), pull-request (no approvals required; the extra approval for unattributed changes is enabled), code-quality, secret-scanning-resolution and Copilot-review rules now apply. Its required-checks list is empty: classic protection supplies the `Verified CI` requirement | Keep it alongside classic protection, which is the only thing the preflight reads |
 | Private vulnerability reporting | Enabled | None |
 | Secret scanning and push protection | Enabled | None |
 | `testpypi` and `pypi` environments | Both exist with @aisecnomad as the required reviewer, *Prevent self-review* off because there is a single maintainer (see [releasing](releasing.md)), and deployments limited to `main`. On 2026-11-06 administrators could bypass the protection rules; whether that was turned off before 0.1.0 was not recorded. Checked at publication | Turn off administrator bypass before the next publication, which is refused otherwise; turn on *Prevent self-review* once a second reviewer exists |
 | Trusted publishers | Confirmed by the 0.1.0 uploads on 2026-11-08: the OIDC uploads to TestPyPI (01:04 UTC) and PyPI (01:28 UTC) succeeded, and the PyPI files carry provenance naming `release.yml` and the `pypi` environment | None |
-| Release tags `v*` | `v0.1.0` (signed, annotated, on `d8c54e4`) was created on 2026-11-09, after publication. Whether the release-tag ruleset was applied first was not recorded; without it, anyone with write access can move or delete the tag. The README's verified-release install requires the wheel's attestation to name the commit the tag points at. That stops a plain tag move, but not a move to a second commit that differs only in its lock file: candidate runs are attested without approval. Only the immutable-tag ruleset keeps the tag on the published commit. Checked at publication, except who may bypass it | Confirm with `gh api repos/Hunzee-VC/Nexus-Symbiote/rulesets`; apply the [immutable-tag rule](../config/github-release-tag-ruleset.json) if it is missing, which the next publication otherwise refuses, and the [creation-only rule](../config/github-release-tag-creation-ruleset.json), which limits who may create a `v*` tag; see [apply the outstanding controls](#apply-the-outstanding-controls) |
+| Release tags `v*` | `v0.1.0` (signed, annotated, on `d8c54e4`) was created on 2026-11-09, after publication. Whether the release-tag ruleset was applied first was not recorded; without it, anyone with write access can move or delete the tag. The README's verified-release install requires the wheel's attestation to name the commit the tag points at. That stops a plain tag move, but not a move to a second commit that differs only in its lock file: candidate runs are attested without approval. Only the immutable-tag ruleset keeps the tag on the published commit. Checked at publication, except who may bypass it | Confirm with `gh api repos/aisecnomad/Nexus-Symbiote/rulesets`; apply the [immutable-tag rule](../config/github-release-tag-ruleset.json) if it is missing, which the next publication otherwise refuses, and the [creation-only rule](../config/github-release-tag-creation-ruleset.json), which limits who may create a `v*` tag; see [apply the outstanding controls](#apply-the-outstanding-controls) |
 
 The repository is public, so branch protection, rulesets, artifact attestations
 and environment protection are available on every GitHub plan; the
@@ -275,22 +275,22 @@ matching rule applies, and the old one would still block all creation. For a
 missing rule, use `POST .../rulesets` instead of `PUT .../rulesets/<id>`.
 
 ```sh
-gh api repos/Hunzee-VC/Nexus-Symbiote/rulesets --jq '.[] | {id, name, target, enforcement}'
+gh api repos/aisecnomad/Nexus-Symbiote/rulesets --jq '.[] | {id, name, target, enforcement}'
 
 # 1. Set this to the reviewed existing "release tags" ID from the listing.
 : "${IMMUTABILITY_RULESET_ID:?Set the existing release tags ruleset ID}"
-gh api --method PUT "repos/Hunzee-VC/Nexus-Symbiote/rulesets/$IMMUTABILITY_RULESET_ID" \
+gh api --method PUT "repos/aisecnomad/Nexus-Symbiote/rulesets/$IMMUTABILITY_RULESET_ID" \
   --input config/github-release-tag-ruleset.json
 
 # 2. Create the separate creation rule only if it is absent.
 #    If it exists, PUT its reviewed ID instead; do not create duplicates.
-gh api --method POST repos/Hunzee-VC/Nexus-Symbiote/rulesets \
+gh api --method POST repos/aisecnomad/Nexus-Symbiote/rulesets \
   --input config/github-release-tag-creation-ruleset.json
 
 # 3. Confirm the publication preflight accepts the immutable-tag rule,
 #    its empty bypass list, and the testpypi environment.
 GH_TOKEN="$(gh auth token)" python scripts/check_repository_controls.py \
-  --repo Hunzee-VC/Nexus-Symbiote --branch main --sha "$(git rev-parse origin/main)" \
+  --repo aisecnomad/Nexus-Symbiote --branch main --sha "$(git rev-parse origin/main)" \
   --publish testpypi --verify-bypass-actors
 ```
 
@@ -325,13 +325,13 @@ These are not applied by a merge. An administrator has to run them. Until a seco
 
 ```sh
 # Require signed commits on main. Confirm contributors can sign before turning this on.
-gh api --method POST repos/Hunzee-VC/Nexus-Symbiote/branches/main/protection/required_signatures
+gh api --method POST repos/aisecnomad/Nexus-Symbiote/branches/main/protection/required_signatures
 
 # Delete the head branch when a pull request merges.
-gh api --method PATCH repos/Hunzee-VC/Nexus-Symbiote -f delete_branch_on_merge=true
+gh api --method PATCH repos/aisecnomad/Nexus-Symbiote -f delete_branch_on_merge=true
 ```
 
-Add the second reviewer to the organization, to `.github/CODEOWNERS`, to [MAINTAINERS.md](../MAINTAINERS.md), and to the PyPI project, then apply [the full protection profile](../config/github-main-protection.json). Do not invent an account to satisfy the file.
+Add the second reviewer to the repository as a collaborator, to `.github/CODEOWNERS`, to [MAINTAINERS.md](../MAINTAINERS.md), and to the PyPI project, then apply [the full protection profile](../config/github-main-protection.json). Do not invent an account to satisfy the file.
 
 ### Clean up merged branches
 
