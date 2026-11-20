@@ -589,6 +589,60 @@ def test_an_unclosed_or_oversized_grant_is_still_a_grant(tmp_path: Path) -> None
         assert _classes(base, head) == ["tool_grant_changed"], added
 
 
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        ("Use Bash(" + "a" * 600 + ")", "Use Bash(" + "b" * 600 + " rm -rf /)"),
+        ("Use Bash(" + "a" * 600, "Use Bash(" + "a" * 599 + "b"),
+        ("Use Bash(curl:* safe", "Use Bash(curl:* evil"),
+        ("Use Bash(" + "a" * 600 + ")", "Use Bash(" + "a" * 600),
+        ("Use mcp__" + "a" * 600, "Use mcp__" + "a" * 599 + "b"),
+    ],
+)
+def test_a_change_inside_an_over_bound_grant_is_reported(
+    tmp_path: Path, before: str, after: str
+) -> None:
+    # A long harmless grant added in one pull request and changed in the next was invisible:
+    # both sides collapsed to the bare tool name.
+    base = tmp_path / "base"
+    head = tmp_path / "head"
+    _write(base, "CLAUDE.md", f"# A\n\n{before}\n")
+    _write(head, "CLAUDE.md", f"# A\n\n{after}\n")
+    assert _classes(base, head) == ["tool_grant_changed"]
+    result = CliRunner().invoke(
+        main,
+        ["diff-instructions", str(base), str(head), "--fail-on-change", "--json-output"],
+    )
+    assert result.exit_code == 1, result.output
+    assert "tool_grant_changed" in result.output
+    assert "aaaa" not in result.output and "bbbb" not in result.output
+
+
+def test_an_unchanged_over_bound_grant_raises_nothing(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    head = tmp_path / "head"
+    grants = "Use Bash(" + "a" * 600 + ") and Read(" + "b" * 600 + "\n\nmcp__" + "c" * 600
+    _write(base, "CLAUDE.md", f"# A\n\n{grants}\n")
+    _write(head, "CLAUDE.md", f"# A\n\nReworded intro.\n\n{grants}\n")
+    assert _classes(base, head) == []
+    result = CliRunner().invoke(
+        main, ["diff-instructions", str(base), str(head), "--fail-on-change"]
+    )
+    assert result.exit_code == 0, result.output
+
+
+@pytest.mark.parametrize(
+    "unit",
+    ["Bash(" + "a" * 600 + ")\n", "Bash(" + "a" * 600 + " ", "mcp__" + "a" * 600 + " "],
+)
+def test_over_bound_grants_take_linear_time(unit: str) -> None:
+    def run(scale: int) -> None:
+        text = unit * (100 * scale)
+        _extract_block_signals((("paragraph", text), ("fence", text)))
+
+    assert scaling_ratio(run) < 10
+
+
 def test_aligning_repeated_blocks_takes_linear_time() -> None:
     def run(scale: int) -> None:
         pairs = 1500 * scale

@@ -34,6 +34,7 @@ import click
 import yaml
 
 from nexus_symbiote import limits
+from nexus_symbiote.core.hashing import hash_bytes
 from nexus_symbiote.policy import PolicyError, parse_yaml_mapping
 from nexus_symbiote.scanners.credential_files import (
     MARKDOWN_SUFFIXES,
@@ -71,8 +72,10 @@ MAX_SHOW_TEXT_CHARS = 4096
 # for the whole report: without it a 4 MiB file asks for more than a gigabyte of output.
 MAX_SHOW_TEXT_TOTAL = 1024 * 1024
 TEXT_WITHHELD = "[text withheld: --show-text output limit reached]"
-# Longest tool argument or MCP tool name read as one grant; a longer or unclosed one is
-# reported under the bare tool name, so no match scans to the end of the block.
+# Longest tool argument or MCP tool name kept as written. A longer or unclosed one is kept as
+# the digest of its whole text up to the closing parenthesis or the end of the line: the bare
+# tool name hid every later change to it, and the digest keeps a secret in a grant out of memory
+# and output. Its match consumes that text, so no character is scanned twice.
 _MAX_GRANT_CHARS = 512
 
 _FRONTMATTER_RE = re.compile(
@@ -101,13 +104,15 @@ _GRANT_VERB_PREFIX = (
 )
 _TOOL_GRANT_RE = re.compile(
     rf"\b(?:{_PARAM_TOOLS})\([^)\n]{{0,{_MAX_GRANT_CHARS}}}\)"
+    rf"|\b(?P<long_tool>{_PARAM_TOOLS})(?P<long_arg>\([^)\r\n]*\)?)"
+    rf"|\bmcp__(?P<long_mcp>[A-Za-z0-9_.-]{{{_MAX_GRANT_CHARS + 1},}})"
     rf"|\bmcp__[A-Za-z0-9_.-]{{1,{_MAX_GRANT_CHARS}}}(?:\([^)\n]{{0,{_MAX_GRANT_CHARS}}}\))?\b"
     r"|\bmcp__"
-    r"|^[ \t]*allowed[-_]tools[ \t]*:[ \t]*(.+)$"
+    r"|^[ \t]*allowed[-_]tools[ \t]*:[ \t]*(?P<list>.+)$"
     rf"|(?<![A-Za-z0-9_])(?:{_UNAMBIGUOUS_BARE_TOOLS})(?![A-Za-z0-9_])"
-    rf"|`({_CONTEXT_BARE_TOOLS})`"
-    rf"|(?i:{_GRANT_VERB_PREFIX})({_CONTEXT_BARE_TOOLS})\b"
-    rf"|\b({_CONTEXT_BARE_TOOLS})\s+(?i:tools?|permissions?)\b",
+    rf"|`(?P<quoted>{_CONTEXT_BARE_TOOLS})`"
+    rf"|(?i:{_GRANT_VERB_PREFIX})(?P<verb>{_CONTEXT_BARE_TOOLS})\b"
+    rf"|\b(?P<noun>{_CONTEXT_BARE_TOOLS})\s+(?i:tools?|permissions?)\b",
     re.MULTILINE,
 )
 
@@ -359,6 +364,10 @@ def _frontmatter_grants(meta: Mapping[str, Any]) -> frozenset[str]:
     return frozenset(grants)
 
 
+def _grant_digest(text: str) -> str:
+    return hash_bytes(text.encode("utf-8", "surrogatepass"))
+
+
 def _extract_block_signals(
     blocks: tuple[tuple[str, str], ...],
 ) -> tuple[
@@ -385,26 +394,21 @@ def _extract_block_signals(
 
         for match in _TOOL_GRANT_RE.finditer(block_text):
             loc = (idx, _line_of(match.start()))
-            if match.group(1) is not None:
-                for tok in _tool_list(match.group(1)):
+            if match.group("list") is not None:
+                for tok in _tool_list(match.group("list")):
                     tools.add(tok)
                     tool_locs.setdefault(tok, []).append(loc)
-            elif match.group(2) is not None:
-                tok = match.group(2)
-                tools.add(tok)
-                tool_locs.setdefault(tok, []).append(loc)
-            elif match.group(3) is not None:
-                tok = match.group(3)
-                tools.add(tok)
-                tool_locs.setdefault(tok, []).append(loc)
-            elif match.group(4) is not None:
-                tok = match.group(4)
-                tools.add(tok)
-                tool_locs.setdefault(tok, []).append(loc)
+                continue
+            if match.group("long_tool") is not None:
+                tok = f"{match.group('long_tool')}({_grant_digest(match.group('long_arg'))})"
+            elif match.group("long_mcp") is not None:
+                tok = f"mcp__({_grant_digest(match.group('long_mcp'))})"
             else:
-                tok = match.group(0).strip()
-                tools.add(tok)
-                tool_locs.setdefault(tok, []).append(loc)
+                tok = match.group("quoted") or match.group("verb") or match.group("noun")
+                if tok is None:
+                    tok = match.group(0).strip()
+            tools.add(tok)
+            tool_locs.setdefault(tok, []).append(loc)
 
         if kind not in {"fence", "indented"}:
             at_tokens = _import_tokens(block_text)
