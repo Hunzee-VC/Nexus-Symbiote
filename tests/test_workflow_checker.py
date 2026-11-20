@@ -775,8 +775,8 @@ def test_the_pull_request_size_step_is_a_protected_gate(tmp_path):
         edit_run(
             "quality",
             "scripts/check_pull_request_size.py",
-            '"origin/$PR_BASE"',
-            '"origin/$PR_BASE" || true',
+            '"$MERGE_SHA^1"',
+            '"$MERGE_SHA^1" || true',
         ),
     )
     assert any(
@@ -809,9 +809,11 @@ def test_naming_the_job_environment_files_ahead_of_a_gate_is_rejected(tmp_path, 
 @pytest.mark.parametrize(
     "old,new",
     [
-        ('"origin/$PR_BASE"', '"origin/$PR_BASE" --limit 99999999'),
-        ('--base "origin/$PR_BASE"', "--base HEAD"),
-        ('--base "origin/$PR_BASE"', "--numstat-file /dev/null"),
+        ('"$MERGE_SHA^1"', '"$MERGE_SHA^1" --limit 99999999'),
+        ('--base "$MERGE_SHA^1"', "--base HEAD"),
+        ('--base "$MERGE_SHA^1"', "--numstat-file /dev/null"),
+        # The base branch's current tip, which moves while the job waits for a runner.
+        ('--base "$MERGE_SHA^1"', '--base "origin/main"'),
     ],
 )
 def test_the_pull_request_size_arguments_are_pinned(tmp_path, old, new):
@@ -821,10 +823,10 @@ def test_the_pull_request_size_arguments_are_pinned(tmp_path, old, new):
     assert any("scripts/check_pull_request_size.py other than" in e for e in errors), errors
 
 
-def test_the_pull_request_size_base_comes_from_the_pull_request(tmp_path):
+def test_the_pull_request_size_base_comes_from_the_merge_commit(tmp_path):
     def change(jobs):
         step_running(jobs["quality"], "scripts/check_pull_request_size.py")["env"] = {
-            "PR_BASE": "${{ github.head_ref }}"
+            "MERGE_SHA": "${{ github.event.pull_request.head.sha }}"
         }
 
     errors = workflow_errors(tmp_path, "ci.yml", change)
