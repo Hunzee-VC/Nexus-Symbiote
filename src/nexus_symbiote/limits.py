@@ -135,7 +135,7 @@ class CollectionLimits:
     file_bytes: int = 4 * MIB
     total_bytes: int = 32 * MIB
     entries: int = 100_000
-    depth: int = 32
+    depth: int = 64
     model_bytes: int = 64 * GIB
     model_total_bytes: int = 256 * GIB
     source_scan_bytes: int = 64 * MIB

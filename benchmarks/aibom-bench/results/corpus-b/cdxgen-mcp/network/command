@@ -1,0 +1,1 @@
+/aibom-run/tools/cdxgen/node_modules/.bin/cdxgen -t ai -t mcp -r --include-formulation --no-install-deps --spec-version 1.7 --json-pretty -o /aibom-run/resultsB/cdxgen-mcp/network/bom.json /aibom-run/work/cdxgen-mcp/corpus 

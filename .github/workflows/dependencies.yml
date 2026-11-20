@@ -91,7 +91,8 @@ jobs:
     name: Newest releases in the declared ranges
     if: github.event_name != 'schedule' || github.event.schedule == '43 4 * * 2'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # The floor job's suite after an eager-upgrade install: the same budget as that job.
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
