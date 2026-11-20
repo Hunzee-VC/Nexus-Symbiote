@@ -302,7 +302,7 @@ keep working; configure one of the two.
 
 ```yaml
 repos:
-  - repo: https://github.com/Hunzee-VC/Nexus-Symbiote
+  - repo: https://github.com/aisecnomad/Nexus-Symbiote
     rev: <reviewed-40-character-commit-sha>
     hooks:
       - id: nexus-symbiote-scan
@@ -663,8 +663,13 @@ the top 15 findings, each followed by its `fingerprint:` line (`--json-output` l
 `Gate: FAILED` it lists, one `  - ` line each, every reason, such as
 `finding at or above critical` or `collection coverage is unknown or incomplete`, the
 findings that tripped the severity cutoff, the score with the threshold it was compared
-with, the first 20 of the inventory's collection failures (and how many more
-`metadata.completeness.scan_failures` holds), its other coverage gaps, and how many
+with, the first 20 distinct collection failures the inventory records (a failure
+several collectors recorded, such as a symbolic link leaving the root, is one line
+ending in `(recorded N times)`, and the line after the twentieth says how many more
+distinct failures `metadata.completeness.scan_failures` holds; see
+[known limitations](known-limitations.md#every-collector) for what the grouping cannot
+say), its other coverage gaps, among them
+one line per state naming the collectors that are not complete, and how many
 findings the project policy suppressed, and each suppression that no longer matches
 its changed finding. When unsigned ShadowScan evidence was accepted,
 the report says `Discovery producer: not verified (unsigned evidence accepted)`.

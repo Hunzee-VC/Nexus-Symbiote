@@ -108,7 +108,7 @@ SARIF_HELP = (
     "nothing, and a result does not establish exploitability."
 )
 SARIF_HELP_URI = (
-    "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/trace-evidence.md#sarif"
+    "https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/trace-evidence.md#sarif"
 )
 _LOCAL_TRANSPORTS = ("pipe", "unix")
 _DEFAULT_PORTS = {"http": 80, "https": 443, "ws": 80, "wss": 443}
@@ -1039,7 +1039,7 @@ def sarif_document(document: Mapping[str, Any], anchor: str) -> dict[str, Any]:
                     "driver": {
                         "name": "nexus-symbiote",
                         "version": __version__,
-                        "informationUri": "https://github.com/Hunzee-VC/Nexus-Symbiote",
+                        "informationUri": "https://github.com/aisecnomad/Nexus-Symbiote",
                         "rules": [
                             SARIFGenerator._rule(
                                 rule_id,

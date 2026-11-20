@@ -1,0 +1,5112 @@
+{
+ "agent-bom": {
+  "d1": {
+   "anchor": 2,
+   "class_recall": {
+    "a2a": null,
+    "agent-config": 0.0,
+    "ci-agent": 1.0,
+    "container": 1.0,
+    "dataset": 0.286,
+    "guardrail": 0.0,
+    "mcp-server": 0.333,
+    "model": 0.6,
+    "model-file": 0.889,
+    "package": 0.8,
+    "prompt": 0.818,
+    "skill": null,
+    "tool": 0.8,
+    "training": 0.5,
+    "vector-store": 0.667
+   },
+   "components": {
+    "ci.codex-action": {
+     "detected": true,
+     "matched": "codex-action",
+     "override": null,
+     "soft": false
+    },
+    "data.demo1": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "data.dvc": {
+     "detected": true,
+     "matched": "events.dvc",
+     "override": null,
+     "soft": false
+    },
+    "data.retention": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "data.s3-events": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.churn-pt": {
+     "detected": true,
+     "matched": "churn.pt",
+     "override": null,
+     "soft": false
+    },
+    "file.hf-snapshot-safetensors": {
+     "detected": true,
+     "matched": "model.safetensors",
+     "override": null,
+     "soft": false
+    },
+    "file.model-card": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "file.onnx": {
+     "detected": true,
+     "matched": "churn.onnx",
+     "override": null,
+     "soft": false
+    },
+    "file.tflite": {
+     "detected": true,
+     "matched": "intent.tflite",
+     "override": null,
+     "soft": false
+    },
+    "guard.bedrock-guardrail": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "ide.n8n-workflow": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "ide.openai-assistant": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "img.mcp-slack": {
+     "detected": true,
+     "matched": "mcp/slack:latest",
+     "override": null,
+     "soft": true
+    },
+    "img.node-base": {
+     "detected": true,
+     "matched": "node:22-alpine",
+     "override": null,
+     "soft": false
+    },
+    "img.vllm": {
+     "detected": true,
+     "matched": "vllm/vllm-openai",
+     "override": null,
+     "soft": false
+    },
+    "mcp.continue-slack": {
+     "detected": true,
+     "matched": "mcp/slack",
+     "override": null,
+     "soft": false
+    },
+    "mcp.notion": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.own-analytics": {
+     "detected": true,
+     "matched": "analytics-server/src/server.ts",
+     "override": null,
+     "soft": false
+    },
+    "mcp.sequential": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.supabase": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.zed-fetch": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gemini-2.5-pro": {
+     "detected": true,
+     "matched": "gemini-2.5-pro",
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4.1-assistant": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4.1-mini": {
+     "detected": true,
+     "matched": "gpt-4.1-mini",
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4o-dated": {
+     "detected": true,
+     "matched": "gpt-4o-2024-08-06",
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4o-mini-n8n": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.mistral-7b-vllm": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.mistral-large": {
+     "detected": true,
+     "matched": "mistral-large-latest",
+     "override": null,
+     "soft": false
+    },
+    "model.mlflow-registered": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.nova-pro": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.o3-mini": {
+     "detected": true,
+     "matched": "(?<![A-Za-z0-9-])o3-mini",
+     "override": null,
+     "soft": false
+    },
+    "model.qwen": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.text-embedding-3-large": {
+     "detected": true,
+     "matched": "text-embedding-3-large",
+     "override": null,
+     "soft": false
+    },
+    "pkg.ai-sdk": {
+     "detected": true,
+     "matched": "@ai-sdk/openai",
+     "override": null,
+     "soft": false
+    },
+    "pkg.go-openai": {
+     "detected": true,
+     "matched": "go-openai",
+     "override": null,
+     "soft": false
+    },
+    "pkg.mcp-sdk": {
+     "detected": true,
+     "matched": "@modelcontextprotocol/sdk",
+     "override": null,
+     "soft": false
+    },
+    "pkg.openai-agents": {
+     "detected": true,
+     "matched": "@openai/agents",
+     "override": null,
+     "soft": false
+    },
+    "pkg.transformers": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.assistant-instructions": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.clinerules": {
+     "detected": true,
+     "matched": "\\.clinerules(?!/)",
+     "override": null,
+     "soft": false
+    },
+    "prompt.inline-instructions": {
+     "detected": true,
+     "matched": "Never expose raw user ids",
+     "override": null,
+     "soft": true
+    },
+    "prompt.judge-yaml": {
+     "detected": true,
+     "matched": "judge.yaml",
+     "override": null,
+     "soft": false
+    },
+    "prompt.llms-txt": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.system-prompt": {
+     "detected": true,
+     "matched": "system.prompt.md",
+     "override": null,
+     "soft": false
+    },
+    "prompt.windsurfrules": {
+     "detected": true,
+     "matched": ".windsurfrules",
+     "override": null,
+     "soft": false
+    },
+    "rag.file-search": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "rag.weaviate": {
+     "detected": true,
+     "matched": "weaviate",
+     "override": null,
+     "soft": false
+    },
+    "tool.assistant-code-interpreter": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "tool.export_report": {
+     "detected": true,
+     "matched": "export_report",
+     "override": null,
+     "soft": false
+    },
+    "tool.run_sql": {
+     "detected": true,
+     "matched": "run_sql",
+     "override": null,
+     "soft": false
+    },
+    "train.mlflow": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "train.notebook": {
+     "detected": true,
+     "matched": "train_churn.ipynb",
+     "override": null,
+     "soft": false
+    }
+   },
+   "decoy_penalty": 0.5,
+   "decoys": {
+    "decoy.comment-model": {
+     "kind": "hard",
+     "reported": true
+    },
+    "decoy.readme-mcp": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.readme-model": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.vendored-mcp": {
+     "kind": "soft",
+     "reported": false
+    }
+   },
+   "score": 1.5,
+   "weighted_recall": 0.575
+  },
+  "d2": {
+   "digests_present": {},
+   "pins_present": {
+    "img.vllm": true,
+    "mcp.notion": false,
+    "mcp.zed-fetch": false,
+    "model.qwen.revision": false
+   }
+  },
+  "d5": {
+   "finding_hints": {
+    "F01": {
+     "hints_in_outputs": [
+      "latest"
+     ],
+     "hints_in_stderr_only": [
+      "unpinned"
+     ],
+     "title": "Floating MCP versions"
+    },
+    "F03": {
+     "hints_in_outputs": [
+      "secret",
+      "token",
+      "credential"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Credentials in agent config"
+    },
+    "F04": {
+     "hints_in_outputs": [
+      "pickle",
+      "deserializ"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Pickle-based artifact"
+    },
+    "F05": {
+     "hints_in_outputs": [
+      "poison",
+      "injection"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Tool-description poisoning"
+    },
+    "F07": {
+     "hints_in_outputs": [
+      "control",
+      "escape"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Hidden characters"
+    },
+    "F08": {
+     "hints_in_outputs": [
+      "remote",
+      "sse",
+      "url"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Remote MCP endpoint"
+    },
+    "F11": {
+     "hints_in_outputs": [
+      "symlink",
+      "outside"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Symlink escapes recorded"
+    },
+    "F12": {
+     "hints_in_outputs": [
+      "revision",
+      "main"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Dataset revision floating"
+    }
+   }
+  },
+  "d6": {
+   "etc_passwd_in_outputs": [],
+   "neutralization": {
+    "json_escaped_esc_files": [],
+    "raw_esc_files": [],
+    "raw_rlo_files": [],
+    "raw_zwsp_files": []
+   },
+   "secret_leaks_in_outputs": [],
+   "secret_leaks_in_stderr": [],
+   "stderr_raw_esc": false
+  },
+  "d7": {
+   "determinism": {
+    "byte_identical": [
+     "report.json"
+    ],
+    "differ": [],
+    "identical_after_normalization": []
+   },
+   "network_vs_airgap_equal": {
+    "report.json": false,
+    "stdout": true
+   }
+  },
+  "modes": {
+   "airgap": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "1",
+    "home_writes": [
+     "./.agent-bom/local-analytics.sqlite"
+    ],
+    "outputs": {
+     "report.json": 264015,
+     "stdout": 0
+    },
+    "schema": [],
+    "seconds": 1.17
+   },
+   "cyclonedx": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "1",
+    "home_writes": [
+     "./.agent-bom/local-analytics.sqlite"
+    ],
+    "outputs": {
+     "bom.cdx.json": 49390,
+     "stdout": 0
+    },
+    "schema": [
+     {
+      "component_types": {
+       "application": 11,
+       "data": 2,
+       "library": 17,
+       "machine-learning-model": 5
+      },
+      "components": 35,
+      "dependencies": 11,
+      "error_count": 0,
+      "file": "bom.cdx.json",
+      "first_errors": [],
+      "has_annotations": false,
+      "has_compositions": true,
+      "has_formulation": true,
+      "kind": "cyclonedx-1.6",
+      "services": 1,
+      "valid": true,
+      "vulnerabilities": 0,
+      "with_evidence": 0,
+      "with_hashes": 0,
+      "with_modelcard": 5,
+      "with_properties": 35,
+      "with_purl": 4
+     }
+    ],
+    "seconds": 1.27
+   },
+   "network": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "1",
+    "home_writes": [
+     "./.agent-bom/local-analytics.sqlite"
+    ],
+    "outputs": {
+     "report.json": 851447,
+     "stdout": 0
+    },
+    "schema": [],
+    "seconds": 15.82,
+    "strace": {
+     "available": true,
+     "etc_passwd_opens": 0,
+     "execve": {
+      "/aibom-run/venvs/agent-bom/bin/agent-bom": 1,
+      "/usr/bin/docker": 1,
+      "/usr/bin/git": 2
+     },
+     "execve_from_corpus": [],
+     "inet_connects": {
+      "AF_INET 127.0.0.1:43589 ret=-1": 13
+     },
+     "large_file_opens": 0,
+     "nonloopback_connects": {},
+     "proxy_port": "33205",
+     "symlink_opens": [],
+     "unix_connects": {
+      "/var/run/docker.sock ret=-1": 5
+     }
+    }
+   },
+   "repeat": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "1",
+    "home_writes": [
+     "./.agent-bom/local-analytics.sqlite"
+    ],
+    "outputs": {
+     "report.json": 264015,
+     "stdout": 0
+    },
+    "schema": [],
+    "seconds": 1.09
+   },
+   "sarif": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "1",
+    "home_writes": [
+     "./.agent-bom/local-analytics.sqlite"
+    ],
+    "outputs": {
+     "bom.sarif.json": 24931,
+     "stdout": 0
+    },
+    "schema": [
+     {
+      "error_count": 0,
+      "file": "bom.sarif.json",
+      "first_errors": [],
+      "kind": "sarif-2.1.0",
+      "results": 20,
+      "results_with_location": 20,
+      "rules": 19,
+      "valid": true
+     }
+    ],
+    "seconds": 1.28
+   },
+   "skills": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [],
+    "outputs": {
+     "stdout": 927
+    },
+    "schema": [],
+    "seconds": 0.49
+   },
+   "spdx": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "1",
+    "home_writes": [
+     "./.agent-bom/local-analytics.sqlite"
+    ],
+    "outputs": {
+     "bom.spdx.json": 47221,
+     "stdout": 0
+    },
+    "schema": [
+     {
+      "ai_profile": false,
+      "dataset_profile": false,
+      "error_count": 0,
+      "file": "bom.spdx.json",
+      "first_errors": [],
+      "flat_document": false,
+      "kind": "spdx-3",
+      "node_types": {
+       "Annotation": 81,
+       "CreationInfo": 1,
+       "Relationship": 25,
+       "SpdxDocument": 1,
+       "Tool": 1,
+       "software_Package": 28
+      },
+      "valid": true
+     }
+    ],
+    "seconds": 1.3
+   }
+  }
+ },
+ "ai-agentbom": {
+  "d1": {
+   "anchor": 1,
+   "class_recall": {
+    "a2a": null,
+    "agent-config": 0.5,
+    "ci-agent": 0.0,
+    "container": 0.0,
+    "dataset": 0.0,
+    "guardrail": 0.0,
+    "mcp-server": 0.333,
+    "model": 0.65,
+    "model-file": 0.0,
+    "package": 0.6,
+    "prompt": 0.455,
+    "skill": null,
+    "tool": 0.0,
+    "training": 0.0,
+    "vector-store": 0.0
+   },
+   "components": {
+    "ci.codex-action": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "data.demo1": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "data.dvc": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "data.retention": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "data.s3-events": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.churn-pt": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.hf-snapshot-safetensors": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.model-card": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "file.onnx": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.tflite": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "guard.bedrock-guardrail": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "ide.n8n-workflow": {
+     "detected": true,
+     "matched": "weekly-digest",
+     "override": null,
+     "soft": false
+    },
+    "ide.openai-assistant": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "img.mcp-slack": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "img.node-base": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "img.vllm": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.continue-slack": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.notion": {
+     "detected": true,
+     "matched": "notion-mcp-server",
+     "override": null,
+     "soft": false
+    },
+    "mcp.own-analytics": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.sequential": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.supabase": {
+     "detected": true,
+     "matched": "mcp-server-supabase",
+     "override": null,
+     "soft": false
+    },
+    "mcp.zed-fetch": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gemini-2.5-pro": {
+     "detected": true,
+     "matched": "gemini-2.5-pro",
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4.1-assistant": {
+     "detected": true,
+     "matched": "gpt-4\\.1(?!-mini)",
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4.1-mini": {
+     "detected": true,
+     "matched": "gpt-4.1-mini",
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4o-dated": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4o-mini-n8n": {
+     "detected": true,
+     "matched": "gpt-4o-mini",
+     "override": null,
+     "soft": true
+    },
+    "model.mistral-7b-vllm": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.mistral-large": {
+     "detected": true,
+     "matched": "mistral-large-latest",
+     "override": null,
+     "soft": false
+    },
+    "model.mlflow-registered": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.nova-pro": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.o3-mini": {
+     "detected": true,
+     "matched": "(?<![A-Za-z0-9-])o3-mini",
+     "override": null,
+     "soft": false
+    },
+    "model.qwen": {
+     "detected": true,
+     "matched": "Qwen2.5-0.5B-Instruct",
+     "override": null,
+     "soft": false
+    },
+    "model.text-embedding-3-large": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.ai-sdk": {
+     "detected": true,
+     "matched": "@ai-sdk/openai",
+     "override": null,
+     "soft": false
+    },
+    "pkg.go-openai": {
+     "detected": true,
+     "matched": "go-openai",
+     "override": null,
+     "soft": false
+    },
+    "pkg.mcp-sdk": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.openai-agents": {
+     "detected": true,
+     "matched": "@openai/agents",
+     "override": null,
+     "soft": false
+    },
+    "pkg.transformers": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.assistant-instructions": {
+     "detected": true,
+     "matched": "assistant.json",
+     "override": null,
+     "soft": true
+    },
+    "prompt.clinerules": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.inline-instructions": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.judge-yaml": {
+     "detected": true,
+     "matched": "judge.yaml",
+     "override": null,
+     "soft": false
+    },
+    "prompt.llms-txt": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.system-prompt": {
+     "detected": true,
+     "matched": "system.prompt.md",
+     "override": null,
+     "soft": false
+    },
+    "prompt.windsurfrules": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "rag.file-search": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "rag.weaviate": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "tool.assistant-code-interpreter": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "tool.export_report": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "tool.run_sql": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "train.mlflow": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "train.notebook": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    }
+   },
+   "decoy_penalty": 0.75,
+   "decoys": {
+    "decoy.comment-model": {
+     "kind": "hard",
+     "reported": true
+    },
+    "decoy.readme-mcp": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.readme-model": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.vendored-mcp": {
+     "kind": "soft",
+     "reported": true
+    }
+   },
+   "score": 0.25,
+   "weighted_recall": 0.254
+  },
+  "d2": {
+   "digests_present": {},
+   "pins_present": {
+    "img.vllm": false,
+    "mcp.notion": true,
+    "mcp.zed-fetch": false,
+    "model.qwen.revision": true
+   }
+  },
+  "d5": {
+   "finding_hints": {
+    "F01": {
+     "hints_in_outputs": [
+      "latest"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Floating MCP versions"
+    },
+    "F03": {
+     "hints_in_outputs": [
+      "secret",
+      "token",
+      "credential"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Credentials in agent config"
+    },
+    "F04": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Pickle-based artifact"
+    },
+    "F05": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Tool-description poisoning"
+    },
+    "F07": {
+     "hints_in_outputs": [
+      "control"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Hidden characters"
+    },
+    "F08": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Remote MCP endpoint"
+    },
+    "F11": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Symlink escapes recorded"
+    },
+    "F12": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Dataset revision floating"
+    }
+   }
+  },
+  "d6": {
+   "etc_passwd_in_outputs": [],
+   "neutralization": {
+    "json_escaped_esc_files": [],
+    "raw_esc_files": [],
+    "raw_rlo_files": [],
+    "raw_zwsp_files": []
+   },
+   "secret_leaks_in_outputs": [],
+   "secret_leaks_in_stderr": [],
+   "stderr_raw_esc": false
+  },
+  "d7": {
+   "determinism": {
+    "byte_identical": [
+     "agentbom.cdx.json",
+     "agentbom.json",
+     "agentbom.md",
+     "agentbom.mmd",
+     "agentbom.sarif"
+    ],
+    "differ": [],
+    "identical_after_normalization": []
+   },
+   "network_vs_airgap_equal": {
+    "agentbom.cdx.json": true,
+    "agentbom.json": true,
+    "agentbom.md": true,
+    "agentbom.mmd": true,
+    "agentbom.sarif": true,
+    "stdout": false
+   }
+  },
+  "modes": {
+   "airgap": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [],
+    "outputs": {
+     "agentbom.cdx.json": 10320,
+     "agentbom.json": 27173,
+     "agentbom.md": 10070,
+     "agentbom.mmd": 9844,
+     "agentbom.sarif": 21967,
+     "stdout": 708
+    },
+    "schema": [
+     {
+      "component_types": {
+       "framework": 3,
+       "library": 7,
+       "machine-learning-model": 8,
+       "platform": 3
+      },
+      "components": 21,
+      "dependencies": 0,
+      "error_count": 1,
+      "file": "agentbom.cdx.json",
+      "first_errors": [
+       "serialNumber: 'urn:uuid:agentbom-aibom-run-work-ai-agentbom-corpus' does not match '^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'"
+      ],
+      "has_annotations": false,
+      "has_compositions": false,
+      "has_formulation": false,
+      "kind": "cyclonedx-1.5",
+      "services": 0,
+      "valid": false,
+      "vulnerabilities": 0,
+      "with_evidence": 0,
+      "with_hashes": 0,
+      "with_modelcard": 0,
+      "with_properties": 21,
+      "with_purl": 0
+     },
+     {
+      "error_count": 0,
+      "file": "agentbom.sarif",
+      "first_errors": [],
+      "kind": "sarif-2.1.0",
+      "results": 11,
+      "results_with_location": 11,
+      "rules": 11,
+      "valid": true
+     }
+    ],
+    "seconds": 0.07
+   },
+   "network": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [],
+    "outputs": {
+     "agentbom.cdx.json": 10320,
+     "agentbom.json": 27173,
+     "agentbom.md": 10070,
+     "agentbom.mmd": 9844,
+     "agentbom.sarif": 21967,
+     "stdout": 716
+    },
+    "schema": [
+     {
+      "component_types": {
+       "framework": 3,
+       "library": 7,
+       "machine-learning-model": 8,
+       "platform": 3
+      },
+      "components": 21,
+      "dependencies": 0,
+      "error_count": 1,
+      "file": "agentbom.cdx.json",
+      "first_errors": [
+       "serialNumber: 'urn:uuid:agentbom-aibom-run-work-ai-agentbom-corpus' does not match '^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'"
+      ],
+      "has_annotations": false,
+      "has_compositions": false,
+      "has_formulation": false,
+      "kind": "cyclonedx-1.5",
+      "services": 0,
+      "valid": false,
+      "vulnerabilities": 0,
+      "with_evidence": 0,
+      "with_hashes": 0,
+      "with_modelcard": 0,
+      "with_properties": 21,
+      "with_purl": 0
+     },
+     {
+      "error_count": 0,
+      "file": "agentbom.sarif",
+      "first_errors": [],
+      "kind": "sarif-2.1.0",
+      "results": 11,
+      "results_with_location": 11,
+      "rules": 11,
+      "valid": true
+     }
+    ],
+    "seconds": 0.21,
+    "strace": {
+     "available": true,
+     "etc_passwd_opens": 0,
+     "execve": {
+      "/aibom-run/venvs/ai-agentbom/bin/agentbom": 1
+     },
+     "execve_from_corpus": [],
+     "inet_connects": {},
+     "large_file_opens": 0,
+     "nonloopback_connects": {},
+     "proxy_port": "33205",
+     "symlink_opens": [],
+     "unix_connects": {}
+    }
+   },
+   "repeat": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [],
+    "outputs": {
+     "agentbom.cdx.json": 10320,
+     "agentbom.json": 27173,
+     "agentbom.md": 10070,
+     "agentbom.mmd": 9844,
+     "agentbom.sarif": 21967,
+     "stdout": 708
+    },
+    "schema": [
+     {
+      "component_types": {
+       "framework": 3,
+       "library": 7,
+       "machine-learning-model": 8,
+       "platform": 3
+      },
+      "components": 21,
+      "dependencies": 0,
+      "error_count": 1,
+      "file": "agentbom.cdx.json",
+      "first_errors": [
+       "serialNumber: 'urn:uuid:agentbom-aibom-run-work-ai-agentbom-corpus' does not match '^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'"
+      ],
+      "has_annotations": false,
+      "has_compositions": false,
+      "has_formulation": false,
+      "kind": "cyclonedx-1.5",
+      "services": 0,
+      "valid": false,
+      "vulnerabilities": 0,
+      "with_evidence": 0,
+      "with_hashes": 0,
+      "with_modelcard": 0,
+      "with_properties": 21,
+      "with_purl": 0
+     },
+     {
+      "error_count": 0,
+      "file": "agentbom.sarif",
+      "first_errors": [],
+      "kind": "sarif-2.1.0",
+      "results": 11,
+      "results_with_location": 11,
+      "rules": 11,
+      "valid": true
+     }
+    ],
+    "seconds": 0.09
+   }
+  }
+ },
+ "ai-finder": {
+  "d1": {
+   "anchor": 0,
+   "class_recall": {
+    "a2a": null,
+    "agent-config": 0.0,
+    "ci-agent": 0.0,
+    "container": 0.0,
+    "dataset": 0.0,
+    "guardrail": 0.0,
+    "mcp-server": 0.667,
+    "model": 0.1,
+    "model-file": 0.667,
+    "package": 0.6,
+    "prompt": 0.0,
+    "skill": null,
+    "tool": 0.0,
+    "training": 0.0,
+    "vector-store": 0.0
+   },
+   "components": {
+    "ci.codex-action": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "data.demo1": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "data.dvc": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "data.retention": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "data.s3-events": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.churn-pt": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.hf-snapshot-safetensors": {
+     "detected": true,
+     "matched": "model.safetensors",
+     "override": null,
+     "soft": false
+    },
+    "file.model-card": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "file.onnx": {
+     "detected": true,
+     "matched": "churn.onnx",
+     "override": null,
+     "soft": false
+    },
+    "file.tflite": {
+     "detected": true,
+     "matched": "intent.tflite",
+     "override": null,
+     "soft": false
+    },
+    "guard.bedrock-guardrail": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "ide.n8n-workflow": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "ide.openai-assistant": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "img.mcp-slack": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "img.node-base": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "img.vllm": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.continue-slack": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.notion": {
+     "detected": true,
+     "matched": "notion-mcp-server",
+     "override": null,
+     "soft": false
+    },
+    "mcp.own-analytics": {
+     "detected": true,
+     "matched": "analytics-mcp",
+     "override": null,
+     "soft": false
+    },
+    "mcp.sequential": {
+     "detected": true,
+     "matched": "server-sequential-thinking",
+     "override": null,
+     "soft": false
+    },
+    "mcp.supabase": {
+     "detected": true,
+     "matched": "mcp-server-supabase",
+     "override": null,
+     "soft": false
+    },
+    "mcp.zed-fetch": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gemini-2.5-pro": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4.1-assistant": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4.1-mini": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4o-dated": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4o-mini-n8n": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.mistral-7b-vllm": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.mistral-large": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.mlflow-registered": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.nova-pro": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.o3-mini": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.qwen": {
+     "detected": true,
+     "matched": "Qwen2.5-0.5B-Instruct",
+     "override": null,
+     "soft": false
+    },
+    "model.text-embedding-3-large": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.ai-sdk": {
+     "detected": true,
+     "matched": "@ai-sdk/openai",
+     "override": null,
+     "soft": false
+    },
+    "pkg.go-openai": {
+     "detected": true,
+     "matched": "go-openai",
+     "override": null,
+     "soft": false
+    },
+    "pkg.mcp-sdk": {
+     "detected": true,
+     "matched": "@modelcontextprotocol/sdk",
+     "override": null,
+     "soft": false
+    },
+    "pkg.openai-agents": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.transformers": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.assistant-instructions": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.clinerules": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.inline-instructions": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.judge-yaml": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.llms-txt": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.system-prompt": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.windsurfrules": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "rag.file-search": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "rag.weaviate": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "tool.assistant-code-interpreter": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "tool.export_report": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "tool.run_sql": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "train.mlflow": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "train.notebook": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    }
+   },
+   "decoy_penalty": 0.25,
+   "decoys": {
+    "decoy.comment-model": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.readme-mcp": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.readme-model": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.vendored-mcp": {
+     "kind": "soft",
+     "reported": true
+    }
+   },
+   "score": 0.0,
+   "weighted_recall": 0.197
+  },
+  "d2": {
+   "digests_present": {},
+   "pins_present": {
+    "img.vllm": false,
+    "mcp.notion": true,
+    "mcp.zed-fetch": false,
+    "model.qwen.revision": true
+   }
+  },
+  "d5": {
+   "finding_hints": {
+    "F01": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Floating MCP versions"
+    },
+    "F03": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Credentials in agent config"
+    },
+    "F04": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Pickle-based artifact"
+    },
+    "F05": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Tool-description poisoning"
+    },
+    "F07": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Hidden characters"
+    },
+    "F08": {
+     "hints_in_outputs": [
+      "sse",
+      "url"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Remote MCP endpoint"
+    },
+    "F11": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Symlink escapes recorded"
+    },
+    "F12": {
+     "hints_in_outputs": [
+      "main"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Dataset revision floating"
+    }
+   }
+  },
+  "d6": {
+   "etc_passwd_in_outputs": [],
+   "neutralization": {
+    "json_escaped_esc_files": [],
+    "raw_esc_files": [],
+    "raw_rlo_files": [],
+    "raw_zwsp_files": []
+   },
+   "secret_leaks_in_outputs": [],
+   "secret_leaks_in_stderr": [],
+   "stderr_raw_esc": false
+  },
+  "d7": {
+   "determinism": {
+    "byte_identical": [],
+    "differ": [],
+    "identical_after_normalization": [
+     "report.json"
+    ]
+   },
+   "network_vs_airgap_equal": {
+    "report.json": true,
+    "stdout": true
+   }
+  },
+  "modes": {
+   "airgap": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [
+     "./.ai-finder/kb/ai-finder.db",
+     "./.config/producttelemetry/ai-finder/client_id",
+     "./.config/producttelemetry/ai-finder/pending_events.json"
+    ],
+    "outputs": {
+     "report.json": 14626,
+     "stdout": 0
+    },
+    "schema": [],
+    "seconds": 1.14
+   },
+   "cyclonedx": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [
+     "./.ai-finder/kb/ai-finder.db",
+     "./.config/producttelemetry/ai-finder/client_id",
+     "./.config/producttelemetry/ai-finder/pending_events.json"
+    ],
+    "outputs": {
+     "bom.cdx.json": 14185,
+     "stdout": 0
+    },
+    "schema": [
+     {
+      "component_types": {
+       "application": 5,
+       "library": 10,
+       "machine-learning-model": 3
+      },
+      "components": 18,
+      "dependencies": 0,
+      "error_count": 3,
+      "file": "bom.cdx.json",
+      "first_errors": [
+       "components/15/modelCard/modelParameters: Additional properties are not allowed ('learningType' was unexpected)",
+       "components/16/modelCard/modelParameters: Additional properties are not allowed ('learningType' was unexpected)",
+       "components/17/modelCard/modelParameters: Additional properties are not allowed ('learningType' was unexpected)"
+      ],
+      "has_annotations": false,
+      "has_compositions": false,
+      "has_formulation": false,
+      "kind": "cyclonedx-1.6",
+      "services": 0,
+      "valid": false,
+      "vulnerabilities": 0,
+      "with_evidence": 18,
+      "with_hashes": 3,
+      "with_modelcard": 3,
+      "with_properties": 8,
+      "with_purl": 15
+     }
+    ],
+    "seconds": 1.12
+   },
+   "network": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [
+     "./.ai-finder/kb/ai-finder.db",
+     "./.config/producttelemetry/ai-finder/client_id",
+     "./.config/producttelemetry/ai-finder/pending_events.json"
+    ],
+    "outputs": {
+     "report.json": 14627,
+     "stdout": 0
+    },
+    "schema": [],
+    "seconds": 5.4,
+    "strace": {
+     "available": true,
+     "etc_passwd_opens": 0,
+     "execve": {
+      "/aibom-run/venvs/ai-finder/bin/ai-finder": 1
+     },
+     "execve_from_corpus": [],
+     "inet_connects": {
+      "AF_INET 127.0.0.1:43589 ret=-1": 6
+     },
+     "large_file_opens": 0,
+     "nonloopback_connects": {},
+     "proxy_port": "33205",
+     "symlink_opens": [],
+     "unix_connects": {}
+    }
+   },
+   "repeat": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [
+     "./.ai-finder/kb/ai-finder.db",
+     "./.config/producttelemetry/ai-finder/client_id",
+     "./.config/producttelemetry/ai-finder/pending_events.json"
+    ],
+    "outputs": {
+     "report.json": 14626,
+     "stdout": 0
+    },
+    "schema": [],
+    "seconds": 1.12
+   },
+   "spdx": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [
+     "./.ai-finder/kb/ai-finder.db",
+     "./.config/producttelemetry/ai-finder/client_id",
+     "./.config/producttelemetry/ai-finder/pending_events.json"
+    ],
+    "outputs": {
+     "bom.spdx.json": 9405,
+     "stdout": 0
+    },
+    "schema": [
+     {
+      "ai_profile": true,
+      "dataset_profile": false,
+      "error_count": 3,
+      "file": "bom.spdx.json",
+      "first_errors": [
+       "@context: 'https://spdx.org/rdf/3.0.1/spdx-context.jsonld' was expected",
+       ": {'@context': 'https://spdx.github.io/spdx-spec/v3.0.1/rdf/spdx-context.jsonld', '@graph': [{'type': 'SpdxDocument', 'spdxId': 'urn:spdx:document-af6f0ef6c550', ",
+       ": Unevaluated properties are not allowed ('@graph' was unexpected)"
+      ],
+      "flat_document": false,
+      "kind": "spdx-3",
+      "node_types": {
+       "SpdxDocument": 1,
+       "agent_Tool": 1,
+       "ai_AIPackage": 3,
+       "software_Package": 15
+      },
+      "valid": false
+     }
+    ],
+    "seconds": 1.06
+   }
+  }
+ },
+ "cdxgen": {
+  "d1": {
+   "anchor": 0,
+   "class_recall": {
+    "a2a": null,
+    "agent-config": 0.0,
+    "ci-agent": 1.0,
+    "container": 0.0,
+    "dataset": 0.0,
+    "guardrail": 0.0,
+    "mcp-server": 0.0,
+    "model": 0.4,
+    "model-file": 0.0,
+    "package": 0.2,
+    "prompt": 0.455,
+    "skill": null,
+    "tool": 0.0,
+    "training": 1.0,
+    "vector-store": 0.0
+   },
+   "components": {
+    "ci.codex-action": {
+     "detected": true,
+     "matched": "codex-action",
+     "override": null,
+     "soft": false
+    },
+    "data.demo1": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "data.dvc": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "data.retention": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "data.s3-events": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.churn-pt": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.hf-snapshot-safetensors": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.model-card": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "file.onnx": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.tflite": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "guard.bedrock-guardrail": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "ide.n8n-workflow": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "ide.openai-assistant": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "img.mcp-slack": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "img.node-base": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "img.vllm": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.continue-slack": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.notion": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.own-analytics": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.sequential": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.supabase": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.zed-fetch": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gemini-2.5-pro": {
+     "detected": true,
+     "matched": "gemini-2.5-pro",
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4.1-assistant": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4.1-mini": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4o-dated": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4o-mini-n8n": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.mistral-7b-vllm": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.mistral-large": {
+     "detected": true,
+     "matched": "mistral-large-latest",
+     "override": null,
+     "soft": false
+    },
+    "model.mlflow-registered": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.nova-pro": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.o3-mini": {
+     "detected": true,
+     "matched": "(?<![A-Za-z0-9-])o3-mini",
+     "override": null,
+     "soft": false
+    },
+    "model.qwen": {
+     "detected": true,
+     "matched": "Qwen2.5-0.5B-Instruct",
+     "override": null,
+     "soft": false
+    },
+    "model.text-embedding-3-large": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.ai-sdk": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.go-openai": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.mcp-sdk": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.openai-agents": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.transformers": {
+     "detected": true,
+     "matched": "(?s)(?<![A-Za-z-])transformers.{0,80}?4\\.57\\.0",
+     "override": null,
+     "soft": false
+    },
+    "prompt.assistant-instructions": {
+     "detected": true,
+     "matched": "assistant.json",
+     "override": null,
+     "soft": true
+    },
+    "prompt.clinerules": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.inline-instructions": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.judge-yaml": {
+     "detected": true,
+     "matched": "judge.yaml",
+     "override": null,
+     "soft": false
+    },
+    "prompt.llms-txt": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.system-prompt": {
+     "detected": true,
+     "matched": "system.prompt.md",
+     "override": null,
+     "soft": false
+    },
+    "prompt.windsurfrules": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "rag.file-search": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "rag.weaviate": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "tool.assistant-code-interpreter": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "tool.export_report": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "tool.run_sql": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "train.mlflow": {
+     "detected": true,
+     "matched": "mlflow",
+     "override": null,
+     "soft": false
+    },
+    "train.notebook": {
+     "detected": true,
+     "matched": "train_churn.ipynb",
+     "override": null,
+     "soft": false
+    }
+   },
+   "decoy_penalty": 0.0,
+   "decoys": {
+    "decoy.comment-model": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.readme-mcp": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.readme-model": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.vendored-mcp": {
+     "kind": "soft",
+     "reported": false
+    }
+   },
+   "score": 0.0,
+   "weighted_recall": 0.2
+  },
+  "d2": {
+   "digests_present": {},
+   "pins_present": {
+    "img.vllm": false,
+    "mcp.notion": false,
+    "mcp.zed-fetch": false,
+    "model.qwen.revision": true
+   }
+  },
+  "d5": {
+   "finding_hints": {
+    "F01": {
+     "hints_in_outputs": [
+      "latest"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Floating MCP versions"
+    },
+    "F03": {
+     "hints_in_outputs": [
+      "secret",
+      "token",
+      "credential"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Credentials in agent config"
+    },
+    "F04": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Pickle-based artifact"
+    },
+    "F05": {
+     "hints_in_outputs": [
+      "poison"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Tool-description poisoning"
+    },
+    "F07": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Hidden characters"
+    },
+    "F08": {
+     "hints_in_outputs": [
+      "sse",
+      "url"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Remote MCP endpoint"
+    },
+    "F11": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Symlink escapes recorded"
+    },
+    "F12": {
+     "hints_in_outputs": [
+      "revision"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Dataset revision floating"
+    }
+   }
+  },
+  "d6": {
+   "etc_passwd_in_outputs": [],
+   "neutralization": {
+    "json_escaped_esc_files": [],
+    "raw_esc_files": [],
+    "raw_rlo_files": [
+     "aibom-cli/bom.json",
+     "airgap/bom.json",
+     "network/bom.json",
+     "repeat/bom.json"
+    ],
+    "raw_zwsp_files": []
+   },
+   "secret_leaks_in_outputs": [],
+   "secret_leaks_in_stderr": [],
+   "stderr_raw_esc": false
+  },
+  "d7": {
+   "determinism": {
+    "byte_identical": [],
+    "differ": [
+     "bom.json"
+    ],
+    "identical_after_normalization": []
+   },
+   "network_vs_airgap_equal": {
+    "bom.json": false,
+    "stdout": true
+   }
+  },
+  "modes": {
+   "aibom-cli": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [
+     "./.config/go/telemetry/local/go@go1.24.7-go1.24.7-linux-amd64-2026-11-18.v1.count",
+     "./.config/go/telemetry/local/upload.token",
+     "./.config/go/telemetry/local/weekends"
+    ],
+    "outputs": {
+     "bom.json": 34375,
+     "stdout": 5743
+    },
+    "schema": [
+     {
+      "component_types": {
+       "file": 5,
+       "machine-learning-model": 5
+      },
+      "components": 10,
+      "dependencies": 4,
+      "error_count": 0,
+      "file": "bom.json",
+      "first_errors": [],
+      "has_annotations": true,
+      "has_compositions": false,
+      "has_formulation": true,
+      "kind": "cyclonedx-1.7",
+      "services": 3,
+      "valid": true,
+      "vulnerabilities": 0,
+      "with_evidence": 10,
+      "with_hashes": 0,
+      "with_modelcard": 1,
+      "with_properties": 10,
+      "with_purl": 5
+     }
+    ],
+    "seconds": 1.72
+   },
+   "airgap": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [
+     "./.config/go/telemetry/local/go@go1.24.7-go1.24.7-linux-amd64-2026-11-18.v1.count",
+     "./.config/go/telemetry/local/upload.token",
+     "./.config/go/telemetry/local/weekends"
+    ],
+    "outputs": {
+     "bom.json": 34375,
+     "stdout": 5743
+    },
+    "schema": [
+     {
+      "component_types": {
+       "file": 5,
+       "machine-learning-model": 5
+      },
+      "components": 10,
+      "dependencies": 4,
+      "error_count": 0,
+      "file": "bom.json",
+      "first_errors": [],
+      "has_annotations": true,
+      "has_compositions": false,
+      "has_formulation": true,
+      "kind": "cyclonedx-1.7",
+      "services": 3,
+      "valid": true,
+      "vulnerabilities": 0,
+      "with_evidence": 10,
+      "with_hashes": 0,
+      "with_modelcard": 1,
+      "with_properties": 10,
+      "with_purl": 5
+     }
+    ],
+    "seconds": 1.61
+   },
+   "network": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [
+     "./.config/go/telemetry/local/go@go1.24.7-go1.24.7-linux-amd64-2026-11-18.v1.count",
+     "./.config/go/telemetry/local/upload.token",
+     "./.config/go/telemetry/local/weekends"
+    ],
+    "outputs": {
+     "bom.json": 34375,
+     "stdout": 5743
+    },
+    "schema": [
+     {
+      "component_types": {
+       "file": 5,
+       "machine-learning-model": 5
+      },
+      "components": 10,
+      "dependencies": 4,
+      "error_count": 0,
+      "file": "bom.json",
+      "first_errors": [],
+      "has_annotations": true,
+      "has_compositions": false,
+      "has_formulation": true,
+      "kind": "cyclonedx-1.7",
+      "services": 3,
+      "valid": true,
+      "vulnerabilities": 0,
+      "with_evidence": 10,
+      "with_hashes": 0,
+      "with_modelcard": 1,
+      "with_properties": 10,
+      "with_purl": 5
+     }
+    ],
+    "seconds": 8.71,
+    "strace": {
+     "available": true,
+     "etc_passwd_opens": 6,
+     "execve": {
+      "/bin/sh": 3,
+      "/opt/node22/bin/node": 3,
+      "/opt/node22/bin/npm": 1,
+      "/opt/node22/bin/pnpm": 1,
+      "/root/.cargo/bin/cargo": 1,
+      "/root/.cargo/bin/rustc": 1,
+      "/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo": 1,
+      "/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc": 1,
+      "/aibom-run/tools/cdxgen/node_modules/.bin/cdxgen": 1,
+      "/usr/bin/gcc": 2,
+      "/usr/bin/git": 4,
+      "/usr/bin/grep": 1,
+      "/usr/bin/ldd": 1,
+      "/usr/bin/php": 2,
+      "/usr/bin/stty": 2,
+      "/usr/bin/sudo": 1,
+      "/usr/lib/jvm/java-21-openjdk-amd64/bin/java": 2,
+      "/usr/local/bin/composer": 1,
+      "/usr/local/bin/python": 2,
+      "/usr/local/go/bin/go": 1,
+      "/usr/local/go1.24.7/bin/go": 1
+     },
+     "execve_from_corpus": [],
+     "inet_connects": {},
+     "large_file_opens": 0,
+     "nonloopback_connects": {},
+     "proxy_port": "33205",
+     "symlink_opens": [],
+     "unix_connects": {
+      "/var/run/nscd/socket ret=-1": 10
+     }
+    }
+   },
+   "python-js": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [],
+    "outputs": {
+     "bom.json": 6399,
+     "stdout": 5631
+    },
+    "schema": [
+     {
+      "component_types": {
+       "library": 5
+      },
+      "components": 5,
+      "dependencies": 1,
+      "error_count": 0,
+      "file": "bom.json",
+      "first_errors": [],
+      "has_annotations": true,
+      "has_compositions": false,
+      "has_formulation": false,
+      "kind": "cyclonedx-1.7",
+      "services": 0,
+      "valid": true,
+      "vulnerabilities": 0,
+      "with_evidence": 5,
+      "with_hashes": 0,
+      "with_modelcard": 0,
+      "with_properties": 5,
+      "with_purl": 5
+     }
+    ],
+    "seconds": 1.12
+   },
+   "repeat": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [
+     "./.config/go/telemetry/local/go@go1.24.7-go1.24.7-linux-amd64-2026-11-18.v1.count",
+     "./.config/go/telemetry/local/upload.token",
+     "./.config/go/telemetry/local/weekends"
+    ],
+    "outputs": {
+     "bom.json": 34375,
+     "stdout": 5743
+    },
+    "schema": [
+     {
+      "component_types": {
+       "file": 5,
+       "machine-learning-model": 5
+      },
+      "components": 10,
+      "dependencies": 4,
+      "error_count": 0,
+      "file": "bom.json",
+      "first_errors": [],
+      "has_annotations": true,
+      "has_compositions": false,
+      "has_formulation": true,
+      "kind": "cyclonedx-1.7",
+      "services": 3,
+      "valid": true,
+      "vulnerabilities": 0,
+      "with_evidence": 10,
+      "with_hashes": 0,
+      "with_modelcard": 1,
+      "with_properties": 10,
+      "with_purl": 5
+     }
+    ],
+    "seconds": 1.76
+   }
+  }
+ },
+ "cdxgen-mcp": {
+  "d1": {
+   "anchor": 0,
+   "class_recall": {
+    "a2a": null,
+    "agent-config": 0.0,
+    "ci-agent": 1.0,
+    "container": 0.0,
+    "dataset": 0.0,
+    "guardrail": 0.0,
+    "mcp-server": 0.5,
+    "model": 0.4,
+    "model-file": 0.0,
+    "package": 0.2,
+    "prompt": 0.455,
+    "skill": null,
+    "tool": 0.0,
+    "training": 0.5,
+    "vector-store": 0.0
+   },
+   "components": {
+    "ci.codex-action": {
+     "detected": true,
+     "matched": "codex-action",
+     "override": null,
+     "soft": false
+    },
+    "data.demo1": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "data.dvc": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "data.retention": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "data.s3-events": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.churn-pt": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.hf-snapshot-safetensors": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.model-card": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "file.onnx": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.tflite": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "guard.bedrock-guardrail": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "ide.n8n-workflow": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "ide.openai-assistant": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "img.mcp-slack": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "img.node-base": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "img.vllm": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.continue-slack": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.notion": {
+     "detected": true,
+     "matched": "notion-mcp-server",
+     "override": null,
+     "soft": false
+    },
+    "mcp.own-analytics": {
+     "detected": true,
+     "matched": "analytics-mcp",
+     "override": null,
+     "soft": false
+    },
+    "mcp.sequential": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.supabase": {
+     "detected": true,
+     "matched": "mcp-server-supabase",
+     "override": null,
+     "soft": false
+    },
+    "mcp.zed-fetch": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gemini-2.5-pro": {
+     "detected": true,
+     "matched": "gemini-2.5-pro",
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4.1-assistant": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4.1-mini": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4o-dated": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4o-mini-n8n": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.mistral-7b-vllm": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.mistral-large": {
+     "detected": true,
+     "matched": "mistral-large-latest",
+     "override": null,
+     "soft": false
+    },
+    "model.mlflow-registered": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.nova-pro": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.o3-mini": {
+     "detected": true,
+     "matched": "(?<![A-Za-z0-9-])o3-mini",
+     "override": null,
+     "soft": false
+    },
+    "model.qwen": {
+     "detected": true,
+     "matched": "Qwen2.5-0.5B-Instruct",
+     "override": null,
+     "soft": false
+    },
+    "model.text-embedding-3-large": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.ai-sdk": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.go-openai": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.mcp-sdk": {
+     "detected": true,
+     "matched": "@modelcontextprotocol/sdk",
+     "override": null,
+     "soft": false
+    },
+    "pkg.openai-agents": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.transformers": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.assistant-instructions": {
+     "detected": true,
+     "matched": "assistant.json",
+     "override": null,
+     "soft": true
+    },
+    "prompt.clinerules": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.inline-instructions": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.judge-yaml": {
+     "detected": true,
+     "matched": "judge.yaml",
+     "override": null,
+     "soft": false
+    },
+    "prompt.llms-txt": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.system-prompt": {
+     "detected": true,
+     "matched": "system.prompt.md",
+     "override": null,
+     "soft": false
+    },
+    "prompt.windsurfrules": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "rag.file-search": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "rag.weaviate": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "tool.assistant-code-interpreter": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "tool.export_report": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "tool.run_sql": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "train.mlflow": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "train.notebook": {
+     "detected": true,
+     "matched": "train_churn.ipynb",
+     "override": null,
+     "soft": false
+    }
+   },
+   "decoy_penalty": 0.0,
+   "decoys": {
+    "decoy.comment-model": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.readme-mcp": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.readme-model": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.vendored-mcp": {
+     "kind": "soft",
+     "reported": false
+    }
+   },
+   "score": 0.0,
+   "weighted_recall": 0.247
+  },
+  "d2": {
+   "digests_present": {},
+   "pins_present": {
+    "img.vllm": false,
+    "mcp.notion": true,
+    "mcp.zed-fetch": false,
+    "model.qwen.revision": true
+   }
+  },
+  "d5": {
+   "finding_hints": {
+    "F01": {
+     "hints_in_outputs": [
+      "latest"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Floating MCP versions"
+    },
+    "F03": {
+     "hints_in_outputs": [
+      "secret",
+      "token",
+      "credential"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Credentials in agent config"
+    },
+    "F04": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Pickle-based artifact"
+    },
+    "F05": {
+     "hints_in_outputs": [
+      "poison"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Tool-description poisoning"
+    },
+    "F07": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Hidden characters"
+    },
+    "F08": {
+     "hints_in_outputs": [
+      "sse",
+      "url"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Remote MCP endpoint"
+    },
+    "F11": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Symlink escapes recorded"
+    },
+    "F12": {
+     "hints_in_outputs": [
+      "revision"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Dataset revision floating"
+    }
+   }
+  },
+  "d6": {
+   "etc_passwd_in_outputs": [],
+   "neutralization": {
+    "json_escaped_esc_files": [],
+    "raw_esc_files": [],
+    "raw_rlo_files": [
+     "airgap/bom.json",
+     "network/bom.json",
+     "repeat/bom.json"
+    ],
+    "raw_zwsp_files": []
+   },
+   "secret_leaks_in_outputs": [],
+   "secret_leaks_in_stderr": [],
+   "stderr_raw_esc": false
+  },
+  "d7": {
+   "determinism": {
+    "byte_identical": [],
+    "differ": [
+     "bom.json"
+    ],
+    "identical_after_normalization": []
+   },
+   "network_vs_airgap_equal": {
+    "bom.json": false,
+    "stdout": true
+   }
+  },
+  "modes": {
+   "airgap": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [
+     "./.config/go/telemetry/local/go@go1.24.7-go1.24.7-linux-amd64-2026-11-18.v1.count",
+     "./.config/go/telemetry/local/upload.token",
+     "./.config/go/telemetry/local/weekends"
+    ],
+    "outputs": {
+     "bom.json": 40959,
+     "stdout": 5783
+    },
+    "schema": [
+     {
+      "component_types": {
+       "file": 6,
+       "machine-learning-model": 5
+      },
+      "components": 11,
+      "dependencies": 4,
+      "error_count": 0,
+      "file": "bom.json",
+      "first_errors": [],
+      "has_annotations": true,
+      "has_compositions": false,
+      "has_formulation": true,
+      "kind": "cyclonedx-1.7",
+      "services": 6,
+      "valid": true,
+      "vulnerabilities": 0,
+      "with_evidence": 10,
+      "with_hashes": 0,
+      "with_modelcard": 1,
+      "with_properties": 11,
+      "with_purl": 5
+     }
+    ],
+    "seconds": 1.61
+   },
+   "network": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [
+     "./.config/go/telemetry/local/go@go1.24.7-go1.24.7-linux-amd64-2026-11-18.v1.count",
+     "./.config/go/telemetry/local/upload.token",
+     "./.config/go/telemetry/local/weekends"
+    ],
+    "outputs": {
+     "bom.json": 40959,
+     "stdout": 5783
+    },
+    "schema": [
+     {
+      "component_types": {
+       "file": 6,
+       "machine-learning-model": 5
+      },
+      "components": 11,
+      "dependencies": 4,
+      "error_count": 0,
+      "file": "bom.json",
+      "first_errors": [],
+      "has_annotations": true,
+      "has_compositions": false,
+      "has_formulation": true,
+      "kind": "cyclonedx-1.7",
+      "services": 6,
+      "valid": true,
+      "vulnerabilities": 0,
+      "with_evidence": 10,
+      "with_hashes": 0,
+      "with_modelcard": 1,
+      "with_properties": 11,
+      "with_purl": 5
+     }
+    ],
+    "seconds": 4.42,
+    "strace": {
+     "available": true,
+     "etc_passwd_opens": 6,
+     "execve": {
+      "/bin/sh": 3,
+      "/opt/node22/bin/node": 3,
+      "/opt/node22/bin/npm": 1,
+      "/opt/node22/bin/pnpm": 1,
+      "/root/.cargo/bin/cargo": 1,
+      "/root/.cargo/bin/rustc": 1,
+      "/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/cargo": 1,
+      "/root/.rustup/toolchains/stable-x86_64-unknown-linux-gnu/bin/rustc": 1,
+      "/aibom-run/tools/cdxgen/node_modules/.bin/cdxgen": 1,
+      "/usr/bin/gcc": 2,
+      "/usr/bin/git": 4,
+      "/usr/bin/grep": 1,
+      "/usr/bin/ldd": 1,
+      "/usr/bin/php": 2,
+      "/usr/bin/stty": 2,
+      "/usr/bin/sudo": 1,
+      "/usr/lib/jvm/java-21-openjdk-amd64/bin/java": 2,
+      "/usr/local/bin/composer": 1,
+      "/usr/local/bin/python": 2,
+      "/usr/local/go/bin/go": 1,
+      "/usr/local/go1.24.7/bin/go": 1
+     },
+     "execve_from_corpus": [],
+     "inet_connects": {},
+     "large_file_opens": 0,
+     "nonloopback_connects": {},
+     "proxy_port": "33205",
+     "symlink_opens": [],
+     "unix_connects": {
+      "/var/run/nscd/socket ret=-1": 10
+     }
+    }
+   },
+   "repeat": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [
+     "./.config/go/telemetry/local/go@go1.24.7-go1.24.7-linux-amd64-2026-11-18.v1.count",
+     "./.config/go/telemetry/local/upload.token",
+     "./.config/go/telemetry/local/weekends"
+    ],
+    "outputs": {
+     "bom.json": 40959,
+     "stdout": 5783
+    },
+    "schema": [
+     {
+      "component_types": {
+       "file": 6,
+       "machine-learning-model": 5
+      },
+      "components": 11,
+      "dependencies": 4,
+      "error_count": 0,
+      "file": "bom.json",
+      "first_errors": [],
+      "has_annotations": true,
+      "has_compositions": false,
+      "has_formulation": true,
+      "kind": "cyclonedx-1.7",
+      "services": 6,
+      "valid": true,
+      "vulnerabilities": 0,
+      "with_evidence": 10,
+      "with_hashes": 0,
+      "with_modelcard": 1,
+      "with_properties": 11,
+      "with_purl": 5
+     }
+    ],
+    "seconds": 1.64
+   }
+  }
+ },
+ "cisco-aibom": {
+  "d1": {
+   "anchor": 1,
+   "class_recall": {
+    "a2a": null,
+    "agent-config": 0.5,
+    "ci-agent": 0.0,
+    "container": 0.4,
+    "dataset": 0.571,
+    "guardrail": 0.0,
+    "mcp-server": 0.5,
+    "model": 0.7,
+    "model-file": 0.889,
+    "package": 0.6,
+    "prompt": 0.273,
+    "skill": null,
+    "tool": 0.0,
+    "training": 0.5,
+    "vector-store": 0.0
+   },
+   "components": {
+    "ci.codex-action": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "data.demo1": {
+     "detected": true,
+     "matched": "lhoestq/demo1",
+     "override": null,
+     "soft": false
+    },
+    "data.dvc": {
+     "detected": true,
+     "matched": "events.dvc",
+     "override": null,
+     "soft": false
+    },
+    "data.retention": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "data.s3-events": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.churn-pt": {
+     "detected": true,
+     "matched": "churn.pt",
+     "override": null,
+     "soft": false
+    },
+    "file.hf-snapshot-safetensors": {
+     "detected": true,
+     "matched": "model.safetensors",
+     "override": null,
+     "soft": false
+    },
+    "file.model-card": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "file.onnx": {
+     "detected": true,
+     "matched": "churn.onnx",
+     "override": null,
+     "soft": false
+    },
+    "file.tflite": {
+     "detected": true,
+     "matched": "intent.tflite",
+     "override": null,
+     "soft": false
+    },
+    "guard.bedrock-guardrail": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "ide.n8n-workflow": {
+     "detected": true,
+     "matched": "weekly-digest",
+     "override": null,
+     "soft": false
+    },
+    "ide.openai-assistant": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "img.mcp-slack": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "img.node-base": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "img.vllm": {
+     "detected": true,
+     "matched": "vllm/vllm-openai",
+     "override": null,
+     "soft": false
+    },
+    "mcp.continue-slack": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.notion": {
+     "detected": true,
+     "matched": "notion-mcp-server",
+     "override": null,
+     "soft": false
+    },
+    "mcp.own-analytics": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.sequential": {
+     "detected": true,
+     "matched": "server-sequential-thinking",
+     "override": null,
+     "soft": false
+    },
+    "mcp.supabase": {
+     "detected": true,
+     "matched": "mcp-server-supabase",
+     "override": null,
+     "soft": false
+    },
+    "mcp.zed-fetch": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gemini-2.5-pro": {
+     "detected": true,
+     "matched": "gemini-2.5-pro",
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4.1-assistant": {
+     "detected": true,
+     "matched": "gpt-4\\.1(?!-mini)",
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4.1-mini": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4o-dated": {
+     "detected": true,
+     "matched": "gpt-4o-2024-08-06",
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4o-mini-n8n": {
+     "detected": true,
+     "matched": "gpt-4o-mini",
+     "override": null,
+     "soft": true
+    },
+    "model.mistral-7b-vllm": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.mistral-large": {
+     "detected": true,
+     "matched": "mistral-large-latest",
+     "override": null,
+     "soft": false
+    },
+    "model.mlflow-registered": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.nova-pro": {
+     "detected": true,
+     "matched": "amazon.nova-pro-v1:0",
+     "override": null,
+     "soft": true
+    },
+    "model.o3-mini": {
+     "detected": true,
+     "matched": "(?<![A-Za-z0-9-])o3-mini",
+     "override": null,
+     "soft": false
+    },
+    "model.qwen": {
+     "detected": true,
+     "matched": "Qwen2.5-0.5B-Instruct",
+     "override": null,
+     "soft": false
+    },
+    "model.text-embedding-3-large": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.ai-sdk": {
+     "detected": true,
+     "matched": "@ai-sdk/openai",
+     "override": null,
+     "soft": false
+    },
+    "pkg.go-openai": {
+     "detected": true,
+     "matched": "go-openai",
+     "override": null,
+     "soft": false
+    },
+    "pkg.mcp-sdk": {
+     "detected": true,
+     "matched": "@modelcontextprotocol/sdk",
+     "override": null,
+     "soft": false
+    },
+    "pkg.openai-agents": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.transformers": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.assistant-instructions": {
+     "detected": true,
+     "matched": "assistant.json",
+     "override": null,
+     "soft": true
+    },
+    "prompt.clinerules": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.inline-instructions": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.judge-yaml": {
+     "detected": true,
+     "matched": "judge.yaml",
+     "override": null,
+     "soft": false
+    },
+    "prompt.llms-txt": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.system-prompt": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.windsurfrules": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "rag.file-search": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "rag.weaviate": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "tool.assistant-code-interpreter": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "tool.export_report": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "tool.run_sql": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "train.mlflow": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "train.notebook": {
+     "detected": true,
+     "matched": "train_churn.ipynb",
+     "override": null,
+     "soft": false
+    }
+   },
+   "decoy_penalty": 0.25,
+   "decoys": {
+    "decoy.comment-model": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.readme-mcp": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.readme-model": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.vendored-mcp": {
+     "kind": "soft",
+     "reported": true
+    }
+   },
+   "score": 0.75,
+   "weighted_recall": 0.445
+  },
+  "d2": {
+   "digests_present": {},
+   "pins_present": {
+    "img.vllm": true,
+    "mcp.notion": true,
+    "mcp.zed-fetch": false,
+    "model.qwen.revision": true
+   }
+  },
+  "d5": {
+   "finding_hints": {
+    "F01": {
+     "hints_in_outputs": [
+      "latest"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Floating MCP versions"
+    },
+    "F03": {
+     "hints_in_outputs": [
+      "secret",
+      "token",
+      "credential",
+      "api key"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Credentials in agent config"
+    },
+    "F04": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Pickle-based artifact"
+    },
+    "F05": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Tool-description poisoning"
+    },
+    "F07": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Hidden characters"
+    },
+    "F08": {
+     "hints_in_outputs": [
+      "url"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Remote MCP endpoint"
+    },
+    "F11": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Symlink escapes recorded"
+    },
+    "F12": {
+     "hints_in_outputs": [
+      "main"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Dataset revision floating"
+    }
+   }
+  },
+  "d6": {
+   "etc_passwd_in_outputs": [],
+   "neutralization": {
+    "json_escaped_esc_files": [],
+    "raw_esc_files": [],
+    "raw_rlo_files": [],
+    "raw_zwsp_files": []
+   },
+   "secret_leaks_in_outputs": [
+    {
+     "file": "airgap/tier1.json",
+     "secret": "supabase"
+    },
+    {
+     "file": "network/tier1.json",
+     "secret": "supabase"
+    },
+    {
+     "file": "repeat/tier1.json",
+     "secret": "supabase"
+    }
+   ],
+   "secret_leaks_in_stderr": [],
+   "stderr_raw_esc": false
+  },
+  "d7": {
+   "determinism": {
+    "byte_identical": [],
+    "differ": [
+     "tier1.json"
+    ],
+    "identical_after_normalization": []
+   },
+   "network_vs_airgap_equal": {
+    "stdout": true,
+    "tier1.json": false
+   }
+  },
+  "modes": {
+   "airgap": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [],
+    "outputs": {
+     "stdout": 31,
+     "tier1.json": 41829
+    },
+    "schema": [],
+    "seconds": 0.71
+   },
+   "network": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [
+     "./.aibom/cache/model/model_catalog.json"
+    ],
+    "outputs": {
+     "stdout": 31,
+     "tier1.json": 41833
+    },
+    "schema": [],
+    "seconds": 5.81,
+    "strace": {
+     "available": true,
+     "etc_passwd_opens": 1,
+     "execve": {
+      "/aibom-run/venvs/cisco-aibom/bin/python": 1
+     },
+     "execve_from_corpus": [],
+     "inet_connects": {
+      "AF_INET 127.0.0.1:43589 ret=-1": 2
+     },
+     "large_file_opens": 0,
+     "nonloopback_connects": {},
+     "proxy_port": "33205",
+     "symlink_opens": [],
+     "unix_connects": {}
+    }
+   },
+   "repeat": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [],
+    "outputs": {
+     "stdout": 31,
+     "tier1.json": 41829
+    },
+    "schema": [],
+    "seconds": 0.7
+   }
+  }
+ },
+ "nexus-symbiote": {
+  "d1": {
+   "anchor": 1,
+   "class_recall": {
+    "a2a": null,
+    "agent-config": 0.0,
+    "ci-agent": 0.0,
+    "container": 0.0,
+    "dataset": 0.0,
+    "guardrail": 0.0,
+    "mcp-server": 0.667,
+    "model": 0.1,
+    "model-file": 0.889,
+    "package": 0.6,
+    "prompt": 0.364,
+    "skill": null,
+    "tool": 0.8,
+    "training": 0.0,
+    "vector-store": 0.667
+   },
+   "components": {
+    "ci.codex-action": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "data.demo1": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "data.dvc": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "data.retention": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "data.s3-events": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.churn-pt": {
+     "detected": true,
+     "matched": "churn.pt",
+     "override": null,
+     "soft": false
+    },
+    "file.hf-snapshot-safetensors": {
+     "detected": true,
+     "matched": "model.safetensors",
+     "override": null,
+     "soft": false
+    },
+    "file.model-card": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "file.onnx": {
+     "detected": true,
+     "matched": "churn.onnx",
+     "override": null,
+     "soft": false
+    },
+    "file.tflite": {
+     "detected": true,
+     "matched": "intent.tflite",
+     "override": null,
+     "soft": false
+    },
+    "guard.bedrock-guardrail": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "ide.n8n-workflow": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "ide.openai-assistant": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "img.mcp-slack": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "img.node-base": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "img.vllm": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.continue-slack": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.notion": {
+     "detected": true,
+     "matched": "notion-mcp-server",
+     "override": null,
+     "soft": false
+    },
+    "mcp.own-analytics": {
+     "detected": true,
+     "matched": "analytics-server/src/server.ts",
+     "override": null,
+     "soft": false
+    },
+    "mcp.sequential": {
+     "detected": true,
+     "matched": "server-sequential-thinking",
+     "override": null,
+     "soft": false
+    },
+    "mcp.supabase": {
+     "detected": true,
+     "matched": "mcp-server-supabase",
+     "override": null,
+     "soft": false
+    },
+    "mcp.zed-fetch": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gemini-2.5-pro": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4.1-assistant": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4.1-mini": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4o-dated": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4o-mini-n8n": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.mistral-7b-vllm": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.mistral-large": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.mlflow-registered": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.nova-pro": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.o3-mini": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.qwen": {
+     "detected": true,
+     "matched": "Qwen2.5-0.5B-Instruct",
+     "override": null,
+     "soft": false
+    },
+    "model.text-embedding-3-large": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.ai-sdk": {
+     "detected": true,
+     "matched": "@ai-sdk/openai",
+     "override": null,
+     "soft": false
+    },
+    "pkg.go-openai": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.mcp-sdk": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.openai-agents": {
+     "detected": true,
+     "matched": "@openai/agents",
+     "override": null,
+     "soft": false
+    },
+    "pkg.transformers": {
+     "detected": true,
+     "matched": "(?s)(?<![A-Za-z-])transformers.{0,80}?4\\.57\\.0",
+     "override": null,
+     "soft": false
+    },
+    "prompt.assistant-instructions": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.clinerules": {
+     "detected": true,
+     "matched": "\\.clinerules(?!/)",
+     "override": null,
+     "soft": false
+    },
+    "prompt.inline-instructions": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.judge-yaml": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.llms-txt": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.system-prompt": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.windsurfrules": {
+     "detected": true,
+     "matched": ".windsurfrules",
+     "override": null,
+     "soft": false
+    },
+    "rag.file-search": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "rag.weaviate": {
+     "detected": true,
+     "matched": "weaviate",
+     "override": null,
+     "soft": false
+    },
+    "tool.assistant-code-interpreter": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "tool.export_report": {
+     "detected": true,
+     "matched": "export_report",
+     "override": null,
+     "soft": false
+    },
+    "tool.run_sql": {
+     "detected": true,
+     "matched": "run_sql",
+     "override": null,
+     "soft": false
+    },
+    "train.mlflow": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "train.notebook": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    }
+   },
+   "decoy_penalty": 0.25,
+   "decoys": {
+    "decoy.comment-model": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.readme-mcp": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.readme-model": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.vendored-mcp": {
+     "kind": "soft",
+     "reported": true
+    }
+   },
+   "score": 0.75,
+   "weighted_recall": 0.357
+  },
+  "d2": {
+   "digests_present": {},
+   "pins_present": {
+    "img.vllm": false,
+    "mcp.notion": true,
+    "mcp.zed-fetch": false,
+    "model.qwen.revision": true
+   }
+  },
+  "d5": {
+   "finding_hints": {
+    "F01": {
+     "hints_in_outputs": [
+      "unpinned"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Floating MCP versions"
+    },
+    "F03": {
+     "hints_in_outputs": [
+      "secret",
+      "token",
+      "credential"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Credentials in agent config"
+    },
+    "F04": {
+     "hints_in_outputs": [
+      "pickle"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Pickle-based artifact"
+    },
+    "F05": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Tool-description poisoning"
+    },
+    "F07": {
+     "hints_in_outputs": [
+      "control",
+      "escape"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Hidden characters"
+    },
+    "F08": {
+     "hints_in_outputs": [
+      "sse",
+      "url"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Remote MCP endpoint"
+    },
+    "F11": {
+     "hints_in_outputs": [
+      "symlink",
+      "outside"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Symlink escapes recorded"
+    },
+    "F12": {
+     "hints_in_outputs": [
+      "main"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Dataset revision floating"
+    }
+   }
+  },
+  "d6": {
+   "etc_passwd_in_outputs": [],
+   "neutralization": {
+    "json_escaped_esc_files": [],
+    "raw_esc_files": [],
+    "raw_rlo_files": [],
+    "raw_zwsp_files": []
+   },
+   "secret_leaks_in_outputs": [],
+   "secret_leaks_in_stderr": [],
+   "stderr_raw_esc": false
+  },
+  "d7": {
+   "determinism": {
+    "byte_identical": [
+     "bom.json"
+    ],
+    "differ": [],
+    "identical_after_normalization": []
+   },
+   "network_vs_airgap_equal": {
+    "bom.json": true,
+    "stdout": true
+   }
+  },
+  "modes": {
+   "airgap": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "1",
+    "home_writes": [],
+    "outputs": {
+     "bom.json": 59891,
+     "stdout": 0
+    },
+    "schema": [],
+    "seconds": 1.3
+   },
+   "cyclonedx": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "1",
+    "home_writes": [],
+    "outputs": {
+     "bom.cdx.json": 185855,
+     "stdout": 0
+    },
+    "schema": [
+     {
+      "component_types": {
+       "application": 11,
+       "data": 2,
+       "library": 14,
+       "machine-learning-model": 4
+      },
+      "components": 31,
+      "dependencies": 2,
+      "error_count": 0,
+      "file": "bom.cdx.json",
+      "first_errors": [],
+      "has_annotations": false,
+      "has_compositions": true,
+      "has_formulation": false,
+      "kind": "cyclonedx-1.7",
+      "services": 0,
+      "valid": true,
+      "vulnerabilities": 0,
+      "with_evidence": 31,
+      "with_hashes": 6,
+      "with_modelcard": 0,
+      "with_properties": 31,
+      "with_purl": 4
+     }
+    ],
+    "seconds": 1.44
+   },
+   "network": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "1",
+    "home_writes": [],
+    "outputs": {
+     "bom.json": 59891,
+     "stdout": 0
+    },
+    "schema": [],
+    "seconds": 6.09,
+    "strace": {
+     "available": true,
+     "etc_passwd_opens": 0,
+     "execve": {
+      "/aibom-run/venvs/nexus/bin/nexus-symbiote": 1
+     },
+     "execve_from_corpus": [],
+     "inet_connects": {},
+     "large_file_opens": 0,
+     "nonloopback_connects": {},
+     "proxy_port": "33205",
+     "symlink_opens": [],
+     "unix_connects": {}
+    }
+   },
+   "repeat": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "1",
+    "home_writes": [],
+    "outputs": {
+     "bom.json": 59891,
+     "stdout": 0
+    },
+    "schema": [],
+    "seconds": 1.27
+   },
+   "sarif": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "1",
+    "home_writes": [],
+    "outputs": {
+     "bom.sarif.json": 48726,
+     "stdout": 0
+    },
+    "schema": [
+     {
+      "error_count": 0,
+      "file": "bom.sarif.json",
+      "first_errors": [],
+      "kind": "sarif-2.1.0",
+      "results": 27,
+      "results_with_location": 27,
+      "rules": 9,
+      "valid": true
+     }
+    ],
+    "seconds": 1.21
+   },
+   "spdx": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "1",
+    "home_writes": [],
+    "outputs": {
+     "bom.spdx.json": 246118,
+     "stdout": 0
+    },
+    "schema": [
+     {
+      "ai_profile": true,
+      "dataset_profile": false,
+      "error_count": 0,
+      "file": "bom.spdx.json",
+      "first_errors": [],
+      "flat_document": false,
+      "kind": "spdx-3",
+      "node_types": {
+       "CreationInfo": 1,
+       "Relationship": 43,
+       "SoftwareAgent": 1,
+       "SpdxDocument": 1,
+       "Tool": 1,
+       "ai_AIPackage": 5,
+       "software_File": 2,
+       "software_Package": 25,
+       "software_Sbom": 1
+      },
+      "valid": true
+     }
+    ],
+    "seconds": 2.7
+   }
+  }
+ },
+ "trusera-ai-bom": {
+  "d1": {
+   "anchor": 0,
+   "class_recall": {
+    "a2a": null,
+    "agent-config": 0.0,
+    "ci-agent": 1.0,
+    "container": 0.0,
+    "dataset": 0.0,
+    "guardrail": 0.0,
+    "mcp-server": 0.167,
+    "model": 0.1,
+    "model-file": 0.889,
+    "package": 0.4,
+    "prompt": 0.0,
+    "skill": null,
+    "tool": 0.0,
+    "training": 0.5,
+    "vector-store": 0.667
+   },
+   "components": {
+    "ci.codex-action": {
+     "detected": true,
+     "matched": "codex-action",
+     "override": null,
+     "soft": false
+    },
+    "data.demo1": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "data.dvc": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "data.retention": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "data.s3-events": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "file.churn-pt": {
+     "detected": true,
+     "matched": "churn.pt",
+     "override": null,
+     "soft": false
+    },
+    "file.hf-snapshot-safetensors": {
+     "detected": true,
+     "matched": "model.safetensors",
+     "override": null,
+     "soft": false
+    },
+    "file.model-card": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "file.onnx": {
+     "detected": true,
+     "matched": "churn.onnx",
+     "override": null,
+     "soft": false
+    },
+    "file.tflite": {
+     "detected": true,
+     "matched": "intent.tflite",
+     "override": null,
+     "soft": false
+    },
+    "guard.bedrock-guardrail": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "ide.n8n-workflow": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "ide.openai-assistant": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "img.mcp-slack": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "img.node-base": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "img.vllm": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.continue-slack": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.notion": {
+     "detected": true,
+     "matched": "(?i)notion-mcp-server|\\bnotion\\b[^\\n]{0,30}\\(mcp|mcp[ _-]?server[^\\n]{0,30}\\bnotion\\b",
+     "override": null,
+     "soft": false
+    },
+    "mcp.own-analytics": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.sequential": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.supabase": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "mcp.zed-fetch": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gemini-2.5-pro": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4.1-assistant": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4.1-mini": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4o-dated": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.gpt-4o-mini-n8n": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.mistral-7b-vllm": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.mistral-large": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.mlflow-registered": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.nova-pro": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "model.o3-mini": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "model.qwen": {
+     "detected": true,
+     "matched": "Qwen2.5-0.5B-Instruct",
+     "override": null,
+     "soft": false
+    },
+    "model.text-embedding-3-large": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.ai-sdk": {
+     "detected": true,
+     "matched": "@ai-sdk/openai",
+     "override": null,
+     "soft": false
+    },
+    "pkg.go-openai": {
+     "detected": true,
+     "matched": "go-openai",
+     "override": null,
+     "soft": false
+    },
+    "pkg.mcp-sdk": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.openai-agents": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "pkg.transformers": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.assistant-instructions": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.clinerules": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.inline-instructions": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.judge-yaml": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.llms-txt": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "prompt.system-prompt": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "prompt.windsurfrules": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "rag.file-search": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "rag.weaviate": {
+     "detected": true,
+     "matched": "weaviate",
+     "override": null,
+     "soft": false
+    },
+    "tool.assistant-code-interpreter": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": true
+    },
+    "tool.export_report": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "tool.run_sql": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "train.mlflow": {
+     "detected": false,
+     "matched": null,
+     "override": null,
+     "soft": false
+    },
+    "train.notebook": {
+     "detected": true,
+     "matched": "train_churn.ipynb",
+     "override": null,
+     "soft": false
+    }
+   },
+   "decoy_penalty": 0.25,
+   "decoys": {
+    "decoy.comment-model": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.readme-mcp": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.readme-model": {
+     "kind": "hard",
+     "reported": false
+    },
+    "decoy.vendored-mcp": {
+     "kind": "soft",
+     "reported": true
+    }
+   },
+   "score": 0.0,
+   "weighted_recall": 0.239
+  },
+  "d2": {
+   "digests_present": {},
+   "pins_present": {
+    "img.vllm": false,
+    "mcp.notion": false,
+    "mcp.zed-fetch": false,
+    "model.qwen.revision": true
+   }
+  },
+  "d5": {
+   "finding_hints": {
+    "F01": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Floating MCP versions"
+    },
+    "F03": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [
+      "secret"
+     ],
+     "title": "Credentials in agent config"
+    },
+    "F04": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Pickle-based artifact"
+    },
+    "F05": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [],
+     "title": "Tool-description poisoning"
+    },
+    "F07": {
+     "hints_in_outputs": [
+      "escape"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Hidden characters"
+    },
+    "F08": {
+     "hints_in_outputs": [
+      "sse",
+      "url"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Remote MCP endpoint"
+    },
+    "F11": {
+     "hints_in_outputs": [],
+     "hints_in_stderr_only": [
+      "symlink",
+      "outside"
+     ],
+     "title": "Symlink escapes recorded"
+    },
+    "F12": {
+     "hints_in_outputs": [
+      "main"
+     ],
+     "hints_in_stderr_only": [],
+     "title": "Dataset revision floating"
+    }
+   }
+  },
+  "d6": {
+   "etc_passwd_in_outputs": [],
+   "neutralization": {
+    "json_escaped_esc_files": [],
+    "raw_esc_files": [],
+    "raw_rlo_files": [],
+    "raw_zwsp_files": []
+   },
+   "secret_leaks_in_outputs": [],
+   "secret_leaks_in_stderr": [],
+   "stderr_raw_esc": false
+  },
+  "d7": {
+   "determinism": {
+    "byte_identical": [],
+    "differ": [
+     "report.json"
+    ],
+    "identical_after_normalization": []
+   },
+   "network_vs_airgap_equal": {
+    "report.json": false,
+    "stdout": true
+   }
+  },
+  "modes": {
+   "airgap": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [],
+    "outputs": {
+     "report.json": 18994,
+     "stdout": 0
+    },
+    "schema": [
+     {
+      "component_types": {
+       "framework": 3,
+       "library": 1,
+       "machine-learning-model": 15,
+       "service": 4
+      },
+      "components": 23,
+      "dependencies": 0,
+      "error_count": 4,
+      "file": "report.json",
+      "first_errors": [
+       "components/19/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac",
+       "components/20/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac",
+       "components/21/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac"
+      ],
+      "has_annotations": false,
+      "has_compositions": false,
+      "has_formulation": false,
+      "kind": "cyclonedx-1.6",
+      "services": 0,
+      "valid": false,
+      "vulnerabilities": 0,
+      "with_evidence": 0,
+      "with_hashes": 0,
+      "with_modelcard": 0,
+      "with_properties": 23,
+      "with_purl": 23
+     }
+    ],
+    "seconds": 0.26
+   },
+   "cyclonedx": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [],
+    "outputs": {
+     "bom.cdx.json": 18994,
+     "stdout": 0
+    },
+    "schema": [
+     {
+      "component_types": {
+       "framework": 3,
+       "library": 1,
+       "machine-learning-model": 15,
+       "service": 4
+      },
+      "components": 23,
+      "dependencies": 0,
+      "error_count": 4,
+      "file": "bom.cdx.json",
+      "first_errors": [
+       "components/19/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac",
+       "components/20/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac",
+       "components/21/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac"
+      ],
+      "has_annotations": false,
+      "has_compositions": false,
+      "has_formulation": false,
+      "kind": "cyclonedx-1.6",
+      "services": 0,
+      "valid": false,
+      "vulnerabilities": 0,
+      "with_evidence": 0,
+      "with_hashes": 0,
+      "with_modelcard": 0,
+      "with_properties": 23,
+      "with_purl": 23
+     }
+    ],
+    "seconds": 0.25
+   },
+   "network": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [],
+    "outputs": {
+     "report.json": 18994,
+     "stdout": 0
+    },
+    "schema": [
+     {
+      "component_types": {
+       "framework": 3,
+       "library": 1,
+       "machine-learning-model": 15,
+       "service": 4
+      },
+      "components": 23,
+      "dependencies": 0,
+      "error_count": 4,
+      "file": "report.json",
+      "first_errors": [
+       "components/19/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac",
+       "components/20/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac",
+       "components/21/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac"
+      ],
+      "has_annotations": false,
+      "has_compositions": false,
+      "has_formulation": false,
+      "kind": "cyclonedx-1.6",
+      "services": 0,
+      "valid": false,
+      "vulnerabilities": 0,
+      "with_evidence": 0,
+      "with_hashes": 0,
+      "with_modelcard": 0,
+      "with_properties": 23,
+      "with_purl": 23
+     }
+    ],
+    "seconds": 2.65,
+    "strace": {
+     "available": true,
+     "etc_passwd_opens": 0,
+     "execve": {
+      "/aibom-run/venvs/ai-bom/bin/ai-bom": 1
+     },
+     "execve_from_corpus": [],
+     "inet_connects": {},
+     "large_file_opens": 0,
+     "nonloopback_connects": {},
+     "proxy_port": "33205",
+     "symlink_opens": [],
+     "unix_connects": {}
+    }
+   },
+   "repeat": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [],
+    "outputs": {
+     "report.json": 18994,
+     "stdout": 0
+    },
+    "schema": [
+     {
+      "component_types": {
+       "framework": 3,
+       "library": 1,
+       "machine-learning-model": 15,
+       "service": 4
+      },
+      "components": 23,
+      "dependencies": 0,
+      "error_count": 4,
+      "file": "report.json",
+      "first_errors": [
+       "components/19/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac",
+       "components/20/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac",
+       "components/21/type: 'service' is not one of ['application', 'framework', 'library', 'container', 'platform', 'operating-system', 'device', 'device-driver', 'firmware', 'file', 'mac"
+      ],
+      "has_annotations": false,
+      "has_compositions": false,
+      "has_formulation": false,
+      "kind": "cyclonedx-1.6",
+      "services": 0,
+      "valid": false,
+      "vulnerabilities": 0,
+      "with_evidence": 0,
+      "with_hashes": 0,
+      "with_modelcard": 0,
+      "with_properties": 23,
+      "with_purl": 23
+     }
+    ],
+    "seconds": 0.26
+   },
+   "sarif": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [],
+    "outputs": {
+     "bom.sarif.json": 23317,
+     "stdout": 0
+    },
+    "schema": [
+     {
+      "error_count": 0,
+      "file": "bom.sarif.json",
+      "first_errors": [],
+      "kind": "sarif-2.1.0",
+      "results": 23,
+      "results_with_location": 23,
+      "rules": 23,
+      "valid": true
+     }
+    ],
+    "seconds": 0.43
+   },
+   "spdx": {
+    "corpus_delta": {
+     "added": [],
+     "modified": [],
+     "removed": []
+    },
+    "exit": "0",
+    "home_writes": [],
+    "outputs": {
+     "bom.spdx.json": 15177,
+     "stdout": 0
+    },
+    "schema": [
+     {
+      "ai_profile": false,
+      "dataset_profile": false,
+      "error_count": 3,
+      "file": "bom.spdx.json",
+      "first_errors": [
+       "@context: 'https://spdx.org/rdf/3.0.1/spdx-context.jsonld' was expected",
+       ": {'@context': ['https://spdx.org/rdf/3.0.1/spdx-context.jsonld', 'https://trusera.dev/schemas/ai-bom/v2.jsonld'], 'type': 'SpdxDocument', 'spdxId': 'https://spdx",
+       ": Unevaluated properties are not allowed ('ai-bom:note', 'creationInfo', 'elements', 'name', 'rootElement', 'spdxId', 'type' were unexpected)"
+      ],
+      "flat_document": true,
+      "kind": "spdx-3",
+      "node_types": {
+       "SpdxDocument": 1
+      },
+      "valid": false
+     }
+    ],
+    "seconds": 0.26
+   }
+  }
+ }
+}
