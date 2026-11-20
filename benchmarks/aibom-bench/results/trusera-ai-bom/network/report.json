@@ -1,0 +1,2482 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "serialNumber": "urn:uuid:d71820ca-f3fe-4191-96ab-40b15c3b2b0c",
+  "metadata": {
+    "timestamp": "2026-11-18T10:13:39.372434+00:00",
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "ai-bom",
+          "version": "3.6.0",
+          "manufacturer": {
+            "name": "Trusera",
+            "url": [
+              "https://trusera.dev"
+            ]
+          }
+        }
+      ]
+    },
+    "properties": [
+      {
+        "name": "trusera:total_components",
+        "value": "79"
+      },
+      {
+        "name": "trusera:critical_count",
+        "value": "0"
+      },
+      {
+        "name": "trusera:high_count",
+        "value": "0"
+      },
+      {
+        "name": "trusera:medium_count",
+        "value": "6"
+      },
+      {
+        "name": "trusera:low_count",
+        "value": "73"
+      },
+      {
+        "name": "trusera:scan_duration_seconds",
+        "value": "1.98"
+      }
+    ]
+  },
+  "components": [
+    {
+      "bom-ref": "3877f81c-6e08-44d9-9c72-59e3af25ce09",
+      "type": "machine-learning-model",
+      "name": "HuggingFace (import: transformers)",
+      "description": "HuggingFace completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/training/finetune.py:6"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/huggingface (import: transformers)"
+    },
+    {
+      "bom-ref": "a9f854b1-f8e0-42b1-a9c4-0ccc762a6ec3",
+      "type": "machine-learning-model",
+      "name": "Anthropic (import: anthropic)",
+      "description": "Anthropic completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:7"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "Anthropic"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/anthropic (import: anthropic)"
+    },
+    {
+      "bom-ref": "b2126fd0-5eb6-40c9-a646-8c0ea9b145fc",
+      "type": "machine-learning-model",
+      "name": "AWS (import: boto3)",
+      "description": "AWS completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:8"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "AWS"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/aws (import: boto3)"
+    },
+    {
+      "bom-ref": "dbdfe154-43d2-4d1f-bfad-ed16fae545f6",
+      "type": "machine-learning-model",
+      "name": "LangChain (import: langchain_anthropic)",
+      "description": "LangChain orchestration",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "orchestration"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:9"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "LangChain"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/langchain (import: langchain-anthropic)"
+    },
+    {
+      "bom-ref": "00466fd3-3f15-4122-b285-74f98d436e0f",
+      "type": "machine-learning-model",
+      "name": "OpenAI (import: openai)",
+      "description": "OpenAI completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:10"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "OpenAI"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/openai (import: openai)"
+    },
+    {
+      "bom-ref": "9ffef663-e177-4ed8-a1f8-7ef736141454",
+      "type": "machine-learning-model",
+      "name": "HuggingFace (import: sentence_transformers)",
+      "description": "HuggingFace embedding",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "embedding"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:11"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/huggingface (import: sentence-transformers)"
+    },
+    {
+      "bom-ref": "d21bc3b8-0b24-4ea3-a0a3-23cb13aadf73",
+      "type": "machine-learning-model",
+      "name": "HuggingFace (import: transformers)",
+      "description": "HuggingFace completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:12"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/huggingface (import: transformers)"
+    },
+    {
+      "bom-ref": "a62ef1af-0965-456a-ae4a-ece17869ea90",
+      "type": "machine-learning-model",
+      "name": "Anthropic API call: Messages API",
+      "description": "Anthropic completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:53"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "Anthropic"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/anthropic api call: messages api"
+    },
+    {
+      "bom-ref": "cbab397d-afca-43b2-a4a1-eb96dbbb8d3e",
+      "type": "machine-learning-model",
+      "name": "Model reference: gpt-4o-mini",
+      "description": "OpenAI completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:24"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "OpenAI"
+        },
+        {
+          "name": "trusera:model_name",
+          "value": "gpt-4o-mini"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/model reference: gpt-4o-mini"
+    },
+    {
+      "bom-ref": "a94f42ac-bb33-4a52-a986-9b2692ffae58",
+      "type": "machine-learning-model",
+      "name": "Model reference: claude-sonnet-4-5",
+      "description": "Anthropic completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:20"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "Anthropic"
+        },
+        {
+          "name": "trusera:model_name",
+          "value": "claude-sonnet-4-5"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/model reference: claude-sonnet-4-5"
+    },
+    {
+      "bom-ref": "ca814626-d7be-4a71-ad05-be0ce17d0df4",
+      "type": "machine-learning-model",
+      "name": "Model reference: gpt-4o-prod",
+      "description": "OpenAI completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:29"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "OpenAI"
+        },
+        {
+          "name": "trusera:model_name",
+          "value": "gpt-4o-prod"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/model reference: gpt-4o-prod"
+    },
+    {
+      "bom-ref": "3bb819a0-63ef-402d-a9fa-f49c050c9a6d",
+      "type": "machine-learning-model",
+      "name": "Model reference: claude-haiku-4-5",
+      "description": "Anthropic completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:54"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "Anthropic"
+        },
+        {
+          "name": "trusera:model_name",
+          "value": "claude-haiku-4-5"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/model reference: claude-haiku-4-5"
+    },
+    {
+      "bom-ref": "31f518c3-8f95-41f8-bb25-7b00e9a379f4",
+      "type": "machine-learning-model",
+      "name": "LangGraph (import: langgraph)",
+      "description": "LangGraph orchestration",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "orchestration"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/graph.py:5"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "LangGraph"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/langgraph (import: langgraph)"
+    },
+    {
+      "bom-ref": "845ab737-b4a1-4549-941d-421c5bce79ec",
+      "type": "machine-learning-model",
+      "name": "LangChain (import: langchain_core)",
+      "description": "LangChain orchestration",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "orchestration"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/tools.py:5"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "LangChain"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/langchain (import: langchain-core)"
+    },
+    {
+      "bom-ref": "9ec86dbd-8a21-4bbb-bfb3-fd0fc832cfb9",
+      "type": "framework",
+      "name": "CrewAI tool_definition: lookup_customer",
+      "description": "CrewAI agent",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "agent"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/tools.py:10"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "CrewAI"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/crewai tool-definition: lookup-customer"
+    },
+    {
+      "bom-ref": "d479c726-41db-489a-97e4-bca24a1be030",
+      "type": "framework",
+      "name": "CrewAI tool_definition: issue_refund",
+      "description": "CrewAI agent",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "agent"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/tools.py:16"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "CrewAI"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/crewai tool-definition: issue-refund"
+    },
+    {
+      "bom-ref": "1322db7a-cd14-4ce7-9e73-00b90889736a",
+      "type": "framework",
+      "name": "CrewAI tool_definition: search_kb",
+      "description": "CrewAI agent",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "agent"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/tools.py:22"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "CrewAI"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/crewai tool-definition: search-kb"
+    },
+    {
+      "bom-ref": "53fe178d-e884-45ba-a5a4-84e28cae9234",
+      "type": "machine-learning-model",
+      "name": "HuggingFace (import: transformers)",
+      "description": "HuggingFace completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/guardrails.py:5"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/huggingface (import: transformers)"
+    },
+    {
+      "bom-ref": "6757c29a-f1a0-48a2-b2ff-d0e4e2726e69",
+      "type": "machine-learning-model",
+      "name": "ChromaDB (import: chromadb)",
+      "description": "ChromaDB embedding",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "embedding"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/retrieval.py:7"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "ChromaDB"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/chromadb (import: chromadb)"
+    },
+    {
+      "bom-ref": "adbfdf48-003a-4412-892e-b9e323c6289f",
+      "type": "machine-learning-model",
+      "name": "OpenAI (import: openai)",
+      "description": "OpenAI completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/retrieval.py:8"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "OpenAI"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/openai (import: openai)"
+    },
+    {
+      "bom-ref": "bd4c37fe-4bd2-4133-8b4b-38a633c1d215",
+      "type": "machine-learning-model",
+      "name": "Pinecone (import: pinecone)",
+      "description": "Pinecone embedding",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "embedding"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/retrieval.py:9"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "Pinecone"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/pinecone (import: pinecone)"
+    },
+    {
+      "bom-ref": "b72e74f0-f335-48a8-a8d1-4d26953d5fd0",
+      "type": "machine-learning-model",
+      "name": "HuggingFace (import: transformers)",
+      "description": "HuggingFace completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.claude/skills/triage-ticket/scripts/classify.py:2"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:source",
+          "value": "ast"
+        }
+      ],
+      "purl": "pkg:pypi/huggingface (import: transformers)"
+    },
+    {
+      "bom-ref": "5ba6a6a3-7b6a-4bed-8e93-2dbe6f10dfdc",
+      "type": "machine-learning-model",
+      "name": "langchain-core",
+      "description": "Unknown unknown",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "unknown"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "dependency files"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "Unknown"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/langchain-core"
+    },
+    {
+      "bom-ref": "9b8b7234-3a5c-4d54-8934-658429a95a09",
+      "type": "framework",
+      "name": "langgraph",
+      "description": "LangGraph orchestration",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "orchestration"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "dependency files"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "LangGraph"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/langgraph"
+    },
+    {
+      "bom-ref": "da32afa0-a488-4a46-9f42-6779b2b83708",
+      "type": "machine-learning-model",
+      "name": "anthropic",
+      "description": "Anthropic completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "dependency files"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "Anthropic"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/anthropic"
+    },
+    {
+      "bom-ref": "9807a581-ccf8-4192-b471-3c61d0f41010",
+      "type": "machine-learning-model",
+      "name": "boto3",
+      "description": "AWS completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "dependency files"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "AWS"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/boto3"
+    },
+    {
+      "bom-ref": "c23b2a93-944f-4c0d-afec-326bf29897ae",
+      "type": "machine-learning-model",
+      "name": "transformers",
+      "description": "HuggingFace completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "dependency files"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/transformers"
+    },
+    {
+      "bom-ref": "aba2b7b2-b75d-49de-8be2-f76d0e65cb6d",
+      "type": "machine-learning-model",
+      "name": "pinecone",
+      "description": "Pinecone embedding",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "embedding"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "dependency files"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "Pinecone"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/pinecone"
+    },
+    {
+      "bom-ref": "5dd8a170-c33c-4fd2-a502-be3a3ed9b22f",
+      "type": "framework",
+      "name": "langchain",
+      "description": "LangChain orchestration",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "orchestration"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "dependency files"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "LangChain"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/langchain"
+    },
+    {
+      "bom-ref": "ca27c361-8fa2-4a2a-aa25-8fd9805c5657",
+      "type": "machine-learning-model",
+      "name": "@anthropic-ai/sdk",
+      "description": "Anthropic completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "dependency files"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "Anthropic"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:npm/@anthropic-ai/sdk"
+    },
+    {
+      "bom-ref": "97351181-0511-49d3-a92f-d98d8d91bd06",
+      "type": "framework",
+      "name": "langchain-anthropic",
+      "description": "LangChain orchestration",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "orchestration"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "dependency files"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "LangChain"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/langchain-anthropic"
+    },
+    {
+      "bom-ref": "7afbcec2-63e8-4f78-bf1c-faa068f0b5cc",
+      "type": "machine-learning-model",
+      "name": "sentence-transformers",
+      "description": "HuggingFace embedding",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "embedding"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "dependency files"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/sentence-transformers"
+    },
+    {
+      "bom-ref": "d5c51de3-b0be-4ec8-8a83-be0c07df4751",
+      "type": "machine-learning-model",
+      "name": "chromadb",
+      "description": "ChromaDB embedding",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "embedding"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "dependency files"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "ChromaDB"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/chromadb"
+    },
+    {
+      "bom-ref": "233890b6-7874-47ae-8964-e801e57d824a",
+      "type": "library",
+      "name": "mcp",
+      "description": "MCP tool_use",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "tool_use"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "dependency files"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "MCP"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/mcp"
+    },
+    {
+      "bom-ref": "f9844901-6ba4-4e8c-97f3-0eeb634f4218",
+      "type": "machine-learning-model",
+      "name": "openai",
+      "description": "OpenAI completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "dependency files"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "OpenAI"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/openai"
+    },
+    {
+      "bom-ref": "640a089c-9a31-47eb-adac-a2fb1a956962",
+      "type": "machine-learning-model",
+      "name": "HuggingFace Transformers",
+      "description": "HuggingFace completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/training/finetune.py:6"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/huggingface transformers"
+    },
+    {
+      "bom-ref": "aec316f6-ce50-4077-8fb7-60390208bc35",
+      "type": "machine-learning-model",
+      "name": "HuggingFace Transformers Model",
+      "description": "HuggingFace completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "5"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/training/finetune.py:10"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:risk_factors",
+          "value": "Model version not pinned (+5)"
+        },
+        {
+          "name": "trusera:flags",
+          "value": "unpinned_model"
+        },
+        {
+          "name": "trusera:model_name",
+          "value": "distilbert-base-uncased"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/huggingface transformers model"
+    },
+    {
+      "bom-ref": "e5b20423-ed94-4cb5-8fb8-9c2edcc42fc6",
+      "type": "machine-learning-model",
+      "name": "Anthropic",
+      "description": "Anthropic completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:7"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "Anthropic"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/anthropic"
+    },
+    {
+      "bom-ref": "4d4d7cca-c687-4334-bd2a-20ffee1637e2",
+      "type": "machine-learning-model",
+      "name": "AWS Bedrock",
+      "description": "AWS Bedrock completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:8"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "AWS Bedrock"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/aws bedrock"
+    },
+    {
+      "bom-ref": "8ff77943-2430-446e-8950-29a9adaab43d",
+      "type": "framework",
+      "name": "LangChain",
+      "description": "LangChain orchestration",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "orchestration"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:9"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "LangChain"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/langchain"
+    },
+    {
+      "bom-ref": "7601f375-5c82-414c-9c56-5bf6e167f133",
+      "type": "machine-learning-model",
+      "name": "OpenAI",
+      "description": "OpenAI completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:10"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "OpenAI"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/openai"
+    },
+    {
+      "bom-ref": "e18e4221-cf00-44a4-b72f-9dcc6f062430",
+      "type": "machine-learning-model",
+      "name": "Azure OpenAI",
+      "description": "Azure OpenAI completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:10"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "Azure OpenAI"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/azure openai"
+    },
+    {
+      "bom-ref": "9e970b43-d2ce-4294-acbc-8bca49a4f9e3",
+      "type": "machine-learning-model",
+      "name": "HuggingFace Transformers",
+      "description": "HuggingFace completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:12"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/huggingface transformers"
+    },
+    {
+      "bom-ref": "5a1b1bfe-e8b1-461d-812b-4fcf496779f2",
+      "type": "machine-learning-model",
+      "name": "LangChain Model",
+      "description": "LangChain orchestration",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "5"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "orchestration"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:20"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "LangChain"
+        },
+        {
+          "name": "trusera:risk_factors",
+          "value": "Model version not pinned (+5)"
+        },
+        {
+          "name": "trusera:flags",
+          "value": "unpinned_model"
+        },
+        {
+          "name": "trusera:model_name",
+          "value": "claude-sonnet-4-5"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/langchain model"
+    },
+    {
+      "bom-ref": "d1da75b0-fa40-4e9c-a823-4c29ff5f48bc",
+      "type": "machine-learning-model",
+      "name": "HuggingFace Transformers Model",
+      "description": "HuggingFace completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "5"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:43"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:risk_factors",
+          "value": "Model version not pinned (+5)"
+        },
+        {
+          "name": "trusera:flags",
+          "value": "unpinned_model"
+        },
+        {
+          "name": "trusera:model_name",
+          "value": "distilbert-base-uncased"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/huggingface transformers model"
+    },
+    {
+      "bom-ref": "10d98688-8696-4f13-a38a-2467f69a9f93",
+      "type": "machine-learning-model",
+      "name": "HuggingFace Transformers Model",
+      "description": "HuggingFace completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "5"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py:49"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:risk_factors",
+          "value": "Model version not pinned (+5)"
+        },
+        {
+          "name": "trusera:flags",
+          "value": "unpinned_model"
+        },
+        {
+          "name": "trusera:model_name",
+          "value": "models/classifier"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/huggingface transformers model"
+    },
+    {
+      "bom-ref": "12872ccb-d7b8-4ae1-829f-e040518e4d46",
+      "type": "framework",
+      "name": "LangGraph",
+      "description": "LangChain orchestration",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "orchestration"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/graph.py:5"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "LangChain"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/langgraph"
+    },
+    {
+      "bom-ref": "19e6d3ac-7f60-4436-8020-26b0836d551b",
+      "type": "framework",
+      "name": "LangChain",
+      "description": "LangChain orchestration",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "orchestration"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/tools.py:5"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "LangChain"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/langchain"
+    },
+    {
+      "bom-ref": "75ccd267-6420-459b-90f5-d14b0b712f86",
+      "type": "framework",
+      "name": "CrewAI",
+      "description": "CrewAI agent",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "25"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "agent"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/tools.py:10"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "CrewAI"
+        },
+        {
+          "name": "trusera:risk_factors",
+          "value": "AI dependency not declared in project files (+25)"
+        },
+        {
+          "name": "trusera:flags",
+          "value": "shadow_ai"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/crewai"
+    },
+    {
+      "bom-ref": "fbc5fa8b-e2c5-4b28-989d-5ca9d9b4fe0d",
+      "type": "machine-learning-model",
+      "name": "HuggingFace Transformers",
+      "description": "HuggingFace completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/guardrails.py:5"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/huggingface transformers"
+    },
+    {
+      "bom-ref": "080a7f7c-6d75-4436-a564-09b2fd38e90d",
+      "type": "machine-learning-model",
+      "name": "OpenAI",
+      "description": "OpenAI completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/retrieval.py:8"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "OpenAI"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/openai"
+    },
+    {
+      "bom-ref": "0c6b4444-5b49-408d-88ef-0e7f9086a819",
+      "type": "machine-learning-model",
+      "name": "HuggingFace Transformers",
+      "description": "HuggingFace completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.claude/skills/triage-ticket/scripts/classify.py:2"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:source",
+          "value": "code"
+        }
+      ],
+      "purl": "pkg:pypi/huggingface transformers"
+    },
+    {
+      "bom-ref": "12709f80-621b-4640-adca-eb1de46e3c73",
+      "type": "container",
+      "name": "qdrant (qdrant/qdrant)",
+      "description": "Qdrant unknown",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "unknown"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/docker-compose.yml"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "Qdrant"
+        },
+        {
+          "name": "trusera:source",
+          "value": "docker"
+        }
+      ],
+      "purl": "pkg:docker/qdrant (qdrant/qdrant)@v1.12.1",
+      "version": "v1.12.1"
+    },
+    {
+      "bom-ref": "6b01f92a-c93b-4913-b6e5-2c4eb9a10293",
+      "type": "container",
+      "name": "ollama (ollama/ollama)",
+      "description": "Ollama unknown",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "unknown"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/docker-compose.yml"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "Ollama"
+        },
+        {
+          "name": "trusera:source",
+          "value": "docker"
+        }
+      ],
+      "purl": "pkg:docker/ollama (ollama/ollama)@latest",
+      "version": "latest"
+    },
+    {
+      "bom-ref": "de2df340-77e9-4695-bc4b-79c34f1382c4",
+      "type": "framework",
+      "name": "anthropics/claude-code-action (GitHub Action)",
+      "description": "GitHub Actions orchestration",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "orchestration"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.github/workflows/agent-review.yml"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "GitHub Actions"
+        },
+        {
+          "name": "trusera:source",
+          "value": "github-actions"
+        }
+      ],
+      "purl": "pkg:npm/anthropics/claude-code-action (github action)@v1",
+      "version": "v1"
+    },
+    {
+      "bom-ref": "ffcc5296-6c59-4c69-a927-e69a2c0a4931",
+      "type": "service",
+      "name": "filesystem (MCP Server)",
+      "description": "MCP Filesystem tool_use",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "tool_use"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.mcp.json"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "MCP Filesystem"
+        },
+        {
+          "name": "trusera:source",
+          "value": "mcp-config"
+        }
+      ],
+      "purl": "pkg:pypi/filesystem (mcp server)"
+    },
+    {
+      "bom-ref": "8a765282-19bf-4f9f-ad2f-323862efd33a",
+      "type": "service",
+      "name": "github (MCP Server)",
+      "description": "GitHub tool_use",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "20"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "tool_use"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.mcp.json"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "GitHub"
+        },
+        {
+          "name": "trusera:risk_factors",
+          "value": "MCP client connected to unknown server (+20)"
+        },
+        {
+          "name": "trusera:flags",
+          "value": "mcp_unknown_server"
+        },
+        {
+          "name": "trusera:source",
+          "value": "mcp-config"
+        }
+      ],
+      "purl": "pkg:pypi/github (mcp server)"
+    },
+    {
+      "bom-ref": "8f799dd7-9ace-4bd9-b979-213e7b2db0e2",
+      "type": "service",
+      "name": "postgres (MCP Server)",
+      "description": "MCP Database tool_use",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "tool_use"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.mcp.json"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "MCP Database"
+        },
+        {
+          "name": "trusera:source",
+          "value": "mcp-config"
+        }
+      ],
+      "purl": "pkg:pypi/postgres (mcp server)"
+    },
+    {
+      "bom-ref": "b6844cbb-800e-4ef3-bf34-cc3707cc4d27",
+      "type": "service",
+      "name": "browser\u001b[2K\u001b[1;32m[verified]\u001b[0m (MCP Server)",
+      "description": "MCP Browser tool_use",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "tool_use"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.cursor/mcp.json"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "MCP Browser"
+        },
+        {
+          "name": "trusera:source",
+          "value": "mcp-config"
+        }
+      ],
+      "purl": "pkg:pypi/browser\u001b[2k\u001b[1;32m[verified]\u001b[0m (mcp server)"
+    },
+    {
+      "bom-ref": "3e8f319c-ea23-4f73-9e8f-ade5b8365b9d",
+      "type": "machine-learning-model",
+      "name": "intent.pt",
+      "description": "PyTorch unknown",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "unknown"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/models/legacy/intent.pt"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "PyTorch"
+        },
+        {
+          "name": "trusera:source",
+          "value": "model-file"
+        }
+      ],
+      "purl": "pkg:pypi/intent.pt"
+    },
+    {
+      "bom-ref": "8d3609dc-aeb1-49dc-aca5-7ce5686b12c5",
+      "type": "machine-learning-model",
+      "name": "model.safetensors",
+      "description": "HuggingFace unknown",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "unknown"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/models/classifier/model.safetensors"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:source",
+          "value": "model-file"
+        }
+      ],
+      "purl": "pkg:pypi/model.safetensors"
+    },
+    {
+      "bom-ref": "cbf852cc-760f-4a28-aa26-6f273341374f",
+      "type": "machine-learning-model",
+      "name": "escape.gguf",
+      "description": "llama.cpp unknown",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "unknown"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/etc/passwd"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "llama.cpp"
+        },
+        {
+          "name": "trusera:source",
+          "value": "model-file"
+        }
+      ],
+      "purl": "pkg:pypi/escape.gguf"
+    },
+    {
+      "bom-ref": "97e6b89a-57c7-4750-bd6d-f21473a5e2e5",
+      "type": "machine-learning-model",
+      "name": "acme-intent-tiny.Q8_0.gguf",
+      "description": "llama.cpp unknown",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "unknown"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/models/llm/acme-intent-tiny.Q8_0.gguf"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "llama.cpp"
+        },
+        {
+          "name": "trusera:source",
+          "value": "model-file"
+        }
+      ],
+      "purl": "pkg:pypi/acme-intent-tiny.q8-0.gguf"
+    },
+    {
+      "bom-ref": "66d5a1b3-7b45-47d3-87d2-c5010c4e9d9c",
+      "type": "machine-learning-model",
+      "name": "embeddings.bin",
+      "description": "Anthropic unknown",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "unknown"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/data/raw/embeddings.bin"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "Anthropic"
+        },
+        {
+          "name": "trusera:source",
+          "value": "model-file"
+        }
+      ],
+      "purl": "pkg:pypi/embeddings.bin"
+    },
+    {
+      "bom-ref": "4d8b4b73-d310-4c0c-a751-9e6a5f3b81c4",
+      "type": "service",
+      "name": "Anthropic Endpoint",
+      "description": "Anthropic completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "30"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.env:1"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "Anthropic"
+        },
+        {
+          "name": "trusera:risk_factors",
+          "value": "Hardcoded API key detected (+30)"
+        },
+        {
+          "name": "trusera:flags",
+          "value": "hardcoded_api_key"
+        },
+        {
+          "name": "trusera:source",
+          "value": "network"
+        }
+      ],
+      "purl": "pkg:pypi/anthropic endpoint"
+    },
+    {
+      "bom-ref": "666de212-5bf2-45c2-99d0-b57839565c89",
+      "type": "service",
+      "name": "Anthropic API Key",
+      "description": "Anthropic completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "30"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.env:1"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "Anthropic"
+        },
+        {
+          "name": "trusera:risk_factors",
+          "value": "Hardcoded API key detected (+30)"
+        },
+        {
+          "name": "trusera:flags",
+          "value": "hardcoded_api_key"
+        },
+        {
+          "name": "trusera:source",
+          "value": "network"
+        }
+      ],
+      "purl": "pkg:pypi/anthropic api key"
+    },
+    {
+      "bom-ref": "5fafd478-60e6-41af-83fc-739f89c3fb61",
+      "type": "service",
+      "name": "OpenAI Endpoint",
+      "description": "OpenAI completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "30"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.env:2"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "OpenAI"
+        },
+        {
+          "name": "trusera:risk_factors",
+          "value": "Hardcoded API key detected (+30)"
+        },
+        {
+          "name": "trusera:flags",
+          "value": "hardcoded_api_key"
+        },
+        {
+          "name": "trusera:source",
+          "value": "network"
+        }
+      ],
+      "purl": "pkg:pypi/openai endpoint"
+    },
+    {
+      "bom-ref": "cb65c5d7-a673-4615-a2ee-47945237d35c",
+      "type": "service",
+      "name": "OpenAI API Key",
+      "description": "OpenAI completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "30"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.env:2"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "OpenAI"
+        },
+        {
+          "name": "trusera:risk_factors",
+          "value": "Hardcoded API key detected (+30)"
+        },
+        {
+          "name": "trusera:flags",
+          "value": "hardcoded_api_key"
+        },
+        {
+          "name": "trusera:source",
+          "value": "network"
+        }
+      ],
+      "purl": "pkg:pypi/openai api key"
+    },
+    {
+      "bom-ref": "8e096340-1379-4981-aefd-3a97bb90c688",
+      "type": "service",
+      "name": "HuggingFace Endpoint",
+      "description": "HuggingFace completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "30"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.env:3"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:risk_factors",
+          "value": "Hardcoded API key detected (+30)"
+        },
+        {
+          "name": "trusera:flags",
+          "value": "hardcoded_api_key"
+        },
+        {
+          "name": "trusera:source",
+          "value": "network"
+        }
+      ],
+      "purl": "pkg:pypi/huggingface endpoint"
+    },
+    {
+      "bom-ref": "0ad12156-785f-4b7d-b647-94b1f2f0137d",
+      "type": "service",
+      "name": "HuggingFace API Key",
+      "description": "HuggingFace completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "30"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.env:3"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:risk_factors",
+          "value": "Hardcoded API key detected (+30)"
+        },
+        {
+          "name": "trusera:flags",
+          "value": "hardcoded_api_key"
+        },
+        {
+          "name": "trusera:source",
+          "value": "network"
+        }
+      ],
+      "purl": "pkg:pypi/huggingface api key"
+    },
+    {
+      "bom-ref": "09b0317a-d4f5-4309-ae3a-5008aaed8332",
+      "type": "service",
+      "name": "Anthropic Endpoint",
+      "description": "Anthropic completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.env.example:1"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "Anthropic"
+        },
+        {
+          "name": "trusera:source",
+          "value": "network"
+        }
+      ],
+      "purl": "pkg:pypi/anthropic endpoint"
+    },
+    {
+      "bom-ref": "f78d72e1-53a1-47ee-a5f2-66a7821bc896",
+      "type": "service",
+      "name": "OpenAI Endpoint",
+      "description": "OpenAI completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.env.example:2"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "OpenAI"
+        },
+        {
+          "name": "trusera:source",
+          "value": "network"
+        }
+      ],
+      "purl": "pkg:pypi/openai endpoint"
+    },
+    {
+      "bom-ref": "3028f482-6486-4bf0-ae4f-0841e25078b3",
+      "type": "service",
+      "name": "HuggingFace Endpoint",
+      "description": "HuggingFace completion",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "completion"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.env.example:3"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "HuggingFace"
+        },
+        {
+          "name": "trusera:source",
+          "value": "network"
+        }
+      ],
+      "purl": "pkg:pypi/huggingface endpoint"
+    },
+    {
+      "bom-ref": "55063b04-cb6b-42b5-a7ac-0040d2f635a1",
+      "type": "service",
+      "name": "MCP Server: filesystem",
+      "description": "MCP tool_use",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "tool_use"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.mcp.json"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "MCP"
+        },
+        {
+          "name": "trusera:source",
+          "value": "network"
+        }
+      ],
+      "purl": "pkg:pypi/mcp server: filesystem"
+    },
+    {
+      "bom-ref": "35336d04-fbe2-400a-acb6-624721cdc5d0",
+      "type": "service",
+      "name": "MCP Server: github",
+      "description": "MCP tool_use",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "tool_use"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.mcp.json"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "MCP"
+        },
+        {
+          "name": "trusera:source",
+          "value": "network"
+        }
+      ],
+      "purl": "pkg:pypi/mcp server: github"
+    },
+    {
+      "bom-ref": "b61cfcdc-e81a-42e8-9912-e897e4d76c81",
+      "type": "service",
+      "name": "MCP Server: postgres",
+      "description": "MCP tool_use",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "tool_use"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.mcp.json"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "MCP"
+        },
+        {
+          "name": "trusera:source",
+          "value": "network"
+        }
+      ],
+      "purl": "pkg:pypi/mcp server: postgres"
+    },
+    {
+      "bom-ref": "90a5cf8b-1bf6-4a30-a4b0-60892acc036b",
+      "type": "service",
+      "name": "MCP Server: remote-crm",
+      "description": "MCP tool_use",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "20"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "tool_use"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.mcp.json"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "MCP"
+        },
+        {
+          "name": "trusera:risk_factors",
+          "value": "MCP client connected to unknown server (+20)"
+        },
+        {
+          "name": "trusera:flags",
+          "value": "mcp_unknown_server"
+        },
+        {
+          "name": "trusera:source",
+          "value": "network"
+        }
+      ],
+      "purl": "pkg:pypi/mcp server: remote-crm"
+    },
+    {
+      "bom-ref": "a4cece96-9563-4cd5-9027-ebf31587cae2",
+      "type": "service",
+      "name": "MCP Server: browser\u001b[2K\u001b[1;32m[verified]\u001b[0m",
+      "description": "MCP tool_use",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "tool_use"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/.cursor/mcp.json"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "MCP"
+        },
+        {
+          "name": "trusera:source",
+          "value": "network"
+        }
+      ],
+      "purl": "pkg:pypi/mcp server: browser\u001b[2k\u001b[1;32m[verified]\u001b[0m"
+    },
+    {
+      "bom-ref": "a20e60d8-07e4-4df3-99eb-02e520128052",
+      "type": "service",
+      "name": "MCP Server: deep-nested",
+      "description": "MCP tool_use",
+      "properties": [
+        {
+          "name": "trusera:risk_score",
+          "value": "0"
+        },
+        {
+          "name": "trusera:usage_type",
+          "value": "tool_use"
+        },
+        {
+          "name": "trusera:source_location",
+          "value": "/aibom-run/work/trusera-ai-bom/corpus/deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json"
+        },
+        {
+          "name": "trusera:provider",
+          "value": "MCP"
+        },
+        {
+          "name": "trusera:source",
+          "value": "network"
+        }
+      ],
+      "purl": "pkg:pypi/mcp server: deep-nested"
+    }
+  ]
+}

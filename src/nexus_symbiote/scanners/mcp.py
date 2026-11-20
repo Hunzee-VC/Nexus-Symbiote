@@ -26,6 +26,7 @@ import re
 import shlex
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, quote, unquote, urlsplit
@@ -54,6 +55,7 @@ from nexus_symbiote.core.models import (
     ToolComponent,
 )
 from nexus_symbiote.scanners.base import (
+    KnownValues,
     Scanner,
     ScanResult,
     SourceBudget,
@@ -2229,13 +2231,74 @@ def _diagnostic_values(config: dict[str, Any]) -> list[str] | None:
         elif isinstance(node, list):
             pending.extend(node)
         elif isinstance(node, str):
-            if "@" in node and "://" in node:
-                for locator in _locators(node):
-                    if "@" in locator:
-                        values.extend(_user_info(locator))
-            inline = _INLINE_ASSIGNMENT.fullmatch(node)
-            if inline is not None:
-                values.extend(secret_values({inline.group(1): inline.group(2)}))
+            values.extend(_text_credentials(node))
+    return values
+
+
+def _text_credentials(text: str) -> list[str]:
+    """URL user information in ``text``, or the credential of a `NAME=value` argument."""
+    values: list[str] = []
+    if "@" in text and "://" in text:
+        for locator in _locators(text):
+            if "@" in locator:
+                values.extend(_user_info(locator))
+    inline = _INLINE_ASSIGNMENT.fullmatch(text)
+    if inline is not None:
+        values.extend(secret_values({inline.group(1): inline.group(2)}))
+    return values
+
+
+# Nodes of one configuration document read for the values a declared name must not hold.
+_KNOWN_VALUE_NODES = 1 << 17
+# Maps whose values a client passes to a server or sends with its requests, and which
+# no record publishes: environments, headers and Codex's query parameters and
+# `shell_environment_policy.set`.
+_VALUE_MAPS = frozenset({"env", "headers", "http_headers", "query_params", "set"})
+# Settings whose `env` the host applies to every process it starts, MCP servers too.
+_HOST_SETTINGS = frozenset(
+    {(".claude", "settings.json"), (".claude", "settings.local.json"), (".cursor", "settings.json")}
+)
+
+
+def _configured_values(document: Any) -> list[str] | None:
+    """Values of a configuration document that a server name declared in source must not hold.
+
+    Beyond what a server's parsing collects: a credential-named value in any field, as
+    Codex's `experimental_bearer_token` or a server's own `apiKey`, URL user
+    information, `NAME=value` and `--flag value` arguments, and every value of at least
+    ``MIN_SECRET_LENGTH`` characters in an environment, header or parameter map, none
+    of which the inventory shows. The whole document is read, a server map that is not
+    collected too. ``None`` past ``_KNOWN_VALUE_NODES`` nodes.
+    """
+    values: list[str] = []
+    pending: list[tuple[object, Any]] = [(None, document)]
+    visited = 0
+    while pending:
+        visited += 1
+        if visited > _KNOWN_VALUE_NODES:
+            return None
+        key, node = pending.pop()
+        if isinstance(node, dict):
+            values.extend(secret_values(node))
+            if key in _VALUE_MAPS:
+                values.extend(
+                    item
+                    for item in node.values()
+                    if isinstance(item, str) and len(item) >= MIN_SECRET_LENGTH
+                )
+            pending.extend(node.items())
+        elif isinstance(node, list):
+            pending.extend((None, item) for item in node)
+            for flag, word in pairwise(node):
+                if (
+                    isinstance(flag, str)
+                    and isinstance(word, str)
+                    and _CLI_FLAG.fullmatch(flag)
+                    and secret_like(flag, word)
+                ):
+                    values.append(word)
+        elif isinstance(node, str):
+            values.extend(_text_credentials(node))
     return values
 
 
@@ -2263,9 +2326,10 @@ class MCPScanner(Scanner):
             except SourceBindingKeyError as exc:
                 key, key_error = None, str(exc)
             self._resolvers = _Resolvers(files, result, self._read_mapping)
+            known = None if config_only else KnownValues()
             try:
                 found_any = self._scan_dialects(
-                    files, result, (*MCP_CONFIG_FILES, *nested), key, key_error, clients
+                    files, result, (*MCP_CONFIG_FILES, *nested), key, key_error, clients, known
                 )
             finally:
                 self._resolvers = None
@@ -2273,8 +2337,9 @@ class MCPScanner(Scanner):
             result.surfaces_excluded.extend(
                 f"{path}: {_DIRECTORY_GAP}" for path in sorted(directory_gaps)
             )
-            if not config_only:
-                self._scan_code_mcp_clients(result, sources)
+            if known is not None:
+                self._read_host_settings(files, sources, links, known)
+                self._scan_code_mcp_clients(result, sources, known)
 
         if not found_any and not result.scan_failures and not result.surfaces_excluded:
             result.surfaces_scanned.append("mcp-config (no config files found)")
@@ -2313,8 +2378,13 @@ class MCPScanner(Scanner):
         key: bytes | None,
         key_error: str | None,
         clients: dict[str, MCPClientComponent],
+        known: KnownValues | None,
     ) -> bool:
-        """Read each client file in ``paths``; whether any of them was present."""
+        """Read each client file in ``paths``; whether any of them was present.
+
+        ``known`` gains the values of every file read that a name declared in source
+        must not publish, also of a file or server map that is not collected.
+        """
         found_any = False
         # Server references per host, sorted once at the end: sorting the union after
         # every file would cost the square of the number of nested client files.
@@ -2327,6 +2397,12 @@ class MCPScanner(Scanner):
                 continue
             found_any = True
             result.surfaces_scanned.append(dialect.path)
+            if known is not None:
+                configured = _configured_values(data)
+                if configured is None:
+                    known.refuse()
+                else:
+                    known.add(configured)
             if not isinstance(data, dict):
                 result.scan_failures.append(f"{dialect.path}: expected a configuration object")
                 continue
@@ -2334,15 +2410,17 @@ class MCPScanner(Scanner):
             if read is None:
                 continue
             entries = read.servers
+            values = self._file_secrets(
+                [*entries, *(("", config) for config in read.dropped)], dialect.shape
+            )
+            # Before either refusal below: a file that is not collected still holds them.
+            if known is not None:
+                known.add(values)
             if key_error is not None and entries:
                 result.scan_failures.append(f"{dialect.path}: {key_error}")
                 continue
             # Prepared once per file and reused for every server and diagnostic.
-            file_secrets = SecretScrubber(
-                self._file_secrets(
-                    [*entries, *(("", config) for config in read.dropped)], dialect.shape
-                )
-            )
+            file_secrets = SecretScrubber(values)
             if len(file_secrets) > MAX_SECRETS_PER_FILE:
                 result.scan_failures.append(
                     f"{dialect.path}: more than {MAX_SECRETS_PER_FILE} credential values in one "
@@ -3712,13 +3790,46 @@ class MCPScanner(Scanner):
             (host for part in path.parts[:-1] if (host := _HOST_DIRECTORIES.get(part))), None
         )
 
-    def _scan_code_mcp_clients(self, result: ScanResult, sources: list[Path]) -> None:
+    @staticmethod
+    def _read_host_settings(
+        files: ConfinedCollection, sources: list[Path], links: list[Path], known: KnownValues
+    ) -> None:
+        """Add the values of Claude Code and Cursor settings, whose `env` reaches servers.
+
+        The IDE agent collector reports these files and their failures; a file it may
+        not read whole leaves every declared name unread here instead.
+        """
+        paths = [path for path in sources if tuple(path.parts[-2:]) in _HOST_SETTINGS]
+        paths.extend(
+            link / name
+            for link in links
+            for directory, name in sorted(_HOST_SETTINGS)
+            if link.name == directory and files.regular_file(link / name) is not None
+        )
+        for path in paths:
+            found = files.regular_file(path)
+            if found is None or found[1] > files.max_file_bytes:
+                known.refuse()
+                continue
+            raw = files.read_bytes(path, missing_ok=True)
+            try:
+                configured = None if raw is None else _configured_values(_load_jsonc(raw.decode()))
+            except (UnicodeDecodeError, ValueError, RecursionError, MemoryError):
+                configured = None
+            if configured is None:
+                known.refuse()
+            else:
+                known.add(configured)
+
+    def _scan_code_mcp_clients(
+        self, result: ScanResult, sources: list[Path], known: KnownValues
+    ) -> None:
         if self._files is None:
             raise RuntimeError("_scan_code_mcp_clients called outside a _collection context")
         from nexus_symbiote.scanners.mcp_sources import collect_source_references
 
         budget = SourceBudget("MCP source references", result)
-        collect_source_references(self._files, result, sources, budget)
+        collect_source_references(self._files, result, sources, budget, known)
 
     @staticmethod
     def _tokenize_identifier(text: str) -> set[str]:

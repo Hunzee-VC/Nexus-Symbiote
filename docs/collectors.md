@@ -19,6 +19,33 @@ Every path is relative to the project root. Each collector also bounds what it r
 
 An optional [`agent.yaml` manifest](agent-manifest.md) at the project root names the agent and declares further instruction files and models.
 
+## MCP servers declared in source
+
+The `mcp` collector names a server it finds in Python, TypeScript or JavaScript
+source by the name its constructor declares as a string literal, the name clients
+see: the first argument or `name=` of `FastMCP("analytics-mcp")` or `MCPServer`,
+and `name` in the object literal given to
+`new McpServer({ name: "analytics-mcp", version: "1.0.0" })`. A name computed at
+run time, such as an f-string, a template literal with a substitution, a variable
+or a concatenation, keeps the variable the server is bound to as its name, as does
+a literal of more than 128 characters, one with characters other than ASCII
+letters, digits, `_`, `.`, `-` and single spaces between words, one without a
+letter or digit, one that redaction would change, or one that holds a value the
+scan read and does not publish. Those are the values of the MCP configuration
+files and of Claude Code and Cursor settings, whose `env` reaches every server the
+host starts: a credential in any field, such as an `env` value with no token shape,
+a server's `apiKey` or Codex's `experimental_bearer_token`, URL user information,
+and every `env`, header or query parameter value of at least 8 characters. While
+one of those files cannot be read whole, every source server keeps its variable
+([known limitations](known-limitations.md#mcp-servers-and-tools)). Every source
+server records that variable in its `binding` property and the line of its
+declaration in `declaration_line`. A TypeScript
+server's reference (`mcp-source:<path>:<name>:<line>:<offset>`) carries the name
+it is given. A Python server's reference stays `mcp-python:<path>:<variable>`,
+because a file binds each variable once while two servers in it can declare the same
+name. The [TypeScript inventory](typescript-inventory.md) page covers the
+TypeScript forms in full.
+
 ## Coding-agent settings
 
 For Claude Code, `ide_agents` records the permission mode (`bypassPermissions` is a high finding, `acceptEdits` medium), blanket grants in its allow list, how many allow, ask and deny rules and hook handlers it declares, and findings for hook commands, the `statusLine` and `fileSuggestion` commands, the credential helpers `apiKeyHelper`, `awsAuthRefresh`, `awsCredentialExport`, `gcpAuthRefresh` and `otelHeadersHelper` (each command rated as a hook command is), `env` variables that redirect the API endpoint or load code (by name only), MCP auto-approval, plugins and additional directories. It does not record the rules, commands or `env` values themselves. For Codex it records the approval and sandbox settings, for Cursor its hook commands, and for Cursor, Windsurf, Cline and Codex an `agent.permissionMode` key in their JSON settings. The MCP servers that Codex and Gemini CLI settings declare are inventoried by the `mcp` collector.
