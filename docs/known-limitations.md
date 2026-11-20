@@ -751,6 +751,11 @@ A way around a limit that its entry does not describe is worth a
   name with a digest of the declaring file; handlers imported from other modules
   are not covered. Observe the effective tools with `discover-mcp` or
   `verify-live`.
+- **Hidden characters are read in declared tool text only.** The text of each
+  entry in a `tools` array is checked for the hidden characters an instruction file
+  is checked for. A descriptor recorded by `discover-mcp --record` or
+  `verify-live --record` is not, and neither is a description in server source,
+  which is not collected. A tool's name is not part of the check.
 - **Tool digests are unkeyed.** A tool's `definition_hash` covers the declared
   descriptor, including text the exported descriptor omits, so anyone holding the
   inventory can confirm a guess of a low-entropy value withheld there.
