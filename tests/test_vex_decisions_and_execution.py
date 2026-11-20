@@ -461,3 +461,26 @@ def test_only_an_operator_decision_can_state_exploitable(tmp_path):
         for vuln in doc["vulnerabilities"]:
             assert vuln["analysis"]["state"] != "exploitable", key
             assert "response" not in vuln["analysis"], key
+
+
+def test_a_flagged_offline_match_says_its_range_was_undecidable():
+    pkg = RegistryEntryComponent(
+        bom_ref="pkg:pypi:torch@2.5.1",
+        name="torch",
+        version="2.5.1",
+        registry_type="pypi",
+        package_url="pkg:pypi/torch@2.5.1",
+    )
+    match = {"component_ref": pkg.bom_ref, "severity": "high", "offline": True}
+    advisories = [
+        {**match, "advisory_id": "PYSEC-2025-193", "range_undecidable": True},
+        {**match, "advisory_id": "PYSEC-2025-194"},
+    ]
+    doc = VEXGenerator(advisories=advisories).generate(AIBOM(components=[pkg]))
+    flags = {
+        vuln["id"]: {p["name"]: p["value"] for p in vuln["properties"]}.get(
+            "nexus-symbiote:rangeUndecidable"
+        )
+        for vuln in doc["vulnerabilities"]
+    }
+    assert flags == {"PYSEC-2025-193": "true", "PYSEC-2025-194": None}

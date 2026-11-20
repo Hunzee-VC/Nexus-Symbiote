@@ -281,6 +281,8 @@ class VEXGenerator(Generator):
                     )
             if isinstance(adv.get("epss_score"), (int, float)):
                 props["nexus-symbiote:epssScore"] = f"{float(adv['epss_score']):.6f}"
+            if adv.get("range_undecidable") is True:
+                props["nexus-symbiote:rangeUndecidable"] = "true"
             summary = plain_text(
                 str(adv.get("summary") or f"Advisory {adv_id} affecting {adv_comp.name}")
             )
