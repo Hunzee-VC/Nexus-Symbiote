@@ -116,7 +116,8 @@ jobs:
           timeout --signal=INT --kill-after=30s 75m \
             bash --noprofile --norc -e -o pipefail -c '
               python -m pytest -n auto --dist worksteal -vv --strict-skips --durations=20 \
-                -o test_timeout=240 --cov=nexus_symbiote --cov=scripts --cov-branch \
+                -o test_timeout=240 -o faulthandler_timeout=230 \
+                --cov=nexus_symbiote --cov=scripts --cov-branch \
                 --cov-report=term-missing --cov-report="json:$COVERAGE_JSON" \
                 2>&1 | tee "$PYTEST_LOG"
             '
