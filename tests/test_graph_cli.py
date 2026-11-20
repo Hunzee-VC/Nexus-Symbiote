@@ -386,6 +386,15 @@ def test_export_policy_cedar_rego_json_and_crosswalk_evidence_pack(runner, tmp_p
     )
     path = saved(tmp_path, bom)
 
+    # A model is permitted only when the caller names it as corroborated; None permits none.
+    assert "UseModel" not in render_authorization_policy(bom, "cedar")
+    corroborated = frozenset({"model:modèle-1", "model:unsafe"})
+    cedar_model = render_authorization_policy(bom, "cedar", corroborated_model_refs=corroborated)
+    assert 'NexusSymbiote::Model::"model:mod\\u{e8}le-1"' in cedar_model
+    assert "model:unsafe" not in cedar_model
+    rego_model = render_authorization_policy(bom, "rego", corroborated_model_refs=corroborated)
+    assert '"model:mod\\u00e8le-1": "' + "33" * 32 + '"' in rego_model
+
     # Usage error gates on export-policy and crosswalk.
     assert runner.invoke(main, ["export-policy", str(path), "--format", "cedar"]).exit_code == 2
     assert (

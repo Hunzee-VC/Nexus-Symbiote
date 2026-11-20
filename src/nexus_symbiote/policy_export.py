@@ -320,7 +320,7 @@ def render_authorization_policy(
         if verified_only:
             if c.signing_status not in VERIFIED_SIGNING_STATUSES or c.bom_ref in unverified_refs:
                 continue
-            if corroborated_model_refs is not None and c.bom_ref not in corroborated_model_refs:
+            if c.bom_ref not in (corroborated_model_refs or ()):
                 continue
         models.append(
             {
