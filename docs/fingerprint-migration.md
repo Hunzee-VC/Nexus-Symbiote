@@ -127,6 +127,21 @@ Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a server that declares one carries 
 launch values are unbound for it, even between identical inventories. Set the key
 on both collections to compare those values, or review and accept the alert.
 
+## Pickle-family inspection evidence
+
+A pickle-family file (`.pkl`, `.pt`, `.bin` and the other names listed in
+[model integrity](model-integrity.md#model-files-and-references)) is rated by its
+inspected content, and `properties.format_inspection` names what was recognized,
+where it named the loader before. So `diff` against an inventory collected before
+the upgrade reports every pickle-family file once as modified: at medium,
+`properties.format_inspection changed`, for a file that keeps its rating, as a
+recognized pickle does; at high for a file whose rating moved from
+`unsafe-code-execution` to `unknown`, with the critical `serialization_format`
+finding removed and the high `serialization_format_unknown` finding added, as a
+zero-filled `embeddings.bin` does. `validate --project` against such an inventory
+reports each of those files as a missing or mismatched local component and fails.
+Recollect and review the baseline once after upgrading.
+
 ## Source MCP server names
 
 An MCP server collected from source is named by the literal name its constructor
@@ -275,3 +290,14 @@ do not certify semantic equivalence or admission authority.
 
 Static MCP configuration source binding is a separate versioned contract. See
 [source reconciliation and snapshot migration](verification-source-binding.md).
+
+## Documentation links in findings
+
+Model-integrity findings carry a link to `docs/model-integrity.md` in the repository that
+publishes this tool. When the repository's canonical owner changed to the aisecnomad account
+(CHANGELOG, Unreleased), that link changed with it, so an inventory that holds a model-integrity
+finding has a different content digest and serial number from the one the previous owner's build
+wrote. The components, findings and relationships are otherwise the same. Re-baseline once; a
+`diff --fail-on-alert` against an older baseline reports the changed recommendation text on each
+such finding and nothing else.
+
