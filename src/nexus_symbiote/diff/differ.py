@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.collection import CITED_EVIDENCE_CLAIM
 from nexus_symbiote.core.enums import ComponentType, SerializationSafety, TrustTier
 from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION, canonical_json
 from nexus_symbiote.core.models import (
@@ -260,6 +261,13 @@ def _incompleteness(claim: CompletenessClaim) -> list[str]:
 
 def _semantic_value(value: Any, path: tuple[str, ...]) -> Any:
     """Ignore set ordering and fresh claim observation times, never arbitrary JSON arrays."""
+    if (
+        isinstance(value, str)
+        and path[:2] == ("claims", CITED_EVIDENCE_CLAIM)
+        and path[2:] in {("locator",), ("evidence_refs", "[]")}
+    ):
+        # A cited line moves with every edit above it; the cited file is what is compared.
+        return value.rpartition(":")[0]
     if isinstance(value, dict):
         return {
             key: _semantic_value(item, (*path, key))

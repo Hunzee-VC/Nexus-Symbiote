@@ -88,7 +88,7 @@ A suppression accepts one known false positive without switching off a whole cat
 risk:
   suppressions:
     - component_ref: "model:fixtures/firmware.bin"
-      category: "serialization_format"
+      category: "serialization_format_unknown"
       fingerprint: "sha256:<the 64 hex digits risk printed for the finding>"
       reason: "Test fixture, never loaded by the agent"
       owner: "security@example.com"

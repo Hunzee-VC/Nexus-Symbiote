@@ -1,0 +1,3 @@
+10:13:38 INFO agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+10:13:38 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+10:13:38 INFO agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.

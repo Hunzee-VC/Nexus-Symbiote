@@ -1,0 +1,1592 @@
+{
+  "@context": [
+    "https://spdx.org/rdf/3.0.1/spdx-context.jsonld",
+    "https://trusera.dev/schemas/ai-bom/v2.jsonld"
+  ],
+  "type": "SpdxDocument",
+  "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-DOCUMENT",
+  "name": "ai-bom-scan-2026-11-18T10:13:42.903097+00:00",
+  "ai-bom:note": "This document uses AI-BOM extensions (ai-bom: namespace) not yet part of the official SPDX specification.",
+  "creationInfo": {
+    "specVersion": "3.0.1",
+    "created": "2026-11-18T10:13:42.903097+00:00",
+    "createdBy": [
+      {
+        "type": "Tool",
+        "name": "ai-bom",
+        "version": "3.6.0"
+      }
+    ],
+    "createdUsing": [
+      {
+        "type": "Tool",
+        "name": "ai-bom",
+        "version": "3.6.0"
+      }
+    ]
+  },
+  "rootElement": [
+    "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-DOCUMENT"
+  ],
+  "elements": [
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-c0f7f158-e7bb-4368-9f2f-fadf84cf0bb5",
+      "name": "HuggingFace (import: transformers)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/training/finetune.py",
+        "line": 6
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-9685edfa-39b2-4519-8647-a0c6e2936d90",
+      "name": "Anthropic (import: anthropic)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "Anthropic"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 7
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-f2539058-9f3b-4b7e-b14a-ca1f25df1b01",
+      "name": "AWS (import: boto3)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "AWS"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 8
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-2fa673d3-72e0-4ff3-a9ba-3bdfbd86035d",
+      "name": "LangChain (import: langchain_anthropic)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "LangChain"
+      },
+      "ai-bom:usageType": "orchestration",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 9
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-548947b1-5263-49c7-915f-78d7163b743e",
+      "name": "OpenAI (import: openai)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "OpenAI"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 10
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-112e8290-08f2-40ec-a5d5-afe3b8fe3e1d",
+      "name": "HuggingFace (import: sentence_transformers)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:usageType": "embedding",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 11
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-36e388b7-6c69-42e1-80bf-2371d422a3b5",
+      "name": "HuggingFace (import: transformers)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 12
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-8744049b-0037-4f5b-a27d-bfcb624a71f9",
+      "name": "Anthropic API call: Messages API",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "Anthropic"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 53
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-578fe94e-5574-45da-b358-07dcffd2ba74",
+      "name": "Model reference: gpt-4o-mini",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "OpenAI"
+      },
+      "ai-bom:modelName": "gpt-4o-mini",
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "model",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 24
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-136db9d5-da85-4510-b426-2ee376c0e1a8",
+      "name": "Model reference: claude-sonnet-4-5",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "Anthropic"
+      },
+      "ai-bom:modelName": "claude-sonnet-4-5",
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "model",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 20
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-ce47b8d0-8609-4230-8725-3d5a2f93d944",
+      "name": "Model reference: gpt-4o-prod",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "OpenAI"
+      },
+      "ai-bom:modelName": "gpt-4o-prod",
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "model",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 29
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-edb508fb-c824-49bf-b088-8f0908e2de02",
+      "name": "Model reference: claude-haiku-4-5",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "Anthropic"
+      },
+      "ai-bom:modelName": "claude-haiku-4-5",
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "model",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 54
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-5b8d8903-a6ed-4d80-8095-3cd627a6685d",
+      "name": "LangGraph (import: langgraph)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "LangGraph"
+      },
+      "ai-bom:usageType": "orchestration",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/graph.py",
+        "line": 5
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-f3a90de6-87df-4f47-b4a6-665238244a93",
+      "name": "LangChain (import: langchain_core)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "LangChain"
+      },
+      "ai-bom:usageType": "orchestration",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/tools.py",
+        "line": 5
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-cf215419-b22a-4577-804d-13f4854f5c3d",
+      "name": "CrewAI tool_definition: lookup_customer",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "CrewAI"
+      },
+      "ai-bom:usageType": "agent",
+      "ai-bom:componentType": "agent_framework",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/tools.py",
+        "line": 10
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-18f5e378-2728-4bbb-9e2c-c4a1449ea962",
+      "name": "CrewAI tool_definition: issue_refund",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "CrewAI"
+      },
+      "ai-bom:usageType": "agent",
+      "ai-bom:componentType": "agent_framework",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/tools.py",
+        "line": 16
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-72ed7280-e230-44c4-b137-126c978a5f07",
+      "name": "CrewAI tool_definition: search_kb",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "CrewAI"
+      },
+      "ai-bom:usageType": "agent",
+      "ai-bom:componentType": "agent_framework",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/tools.py",
+        "line": 22
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-842b38e7-13d4-4bed-90ad-f3a91cb66264",
+      "name": "HuggingFace (import: transformers)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/guardrails.py",
+        "line": 5
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-58c1356c-e8b0-49c0-9d46-e9df21bd25ad",
+      "name": "ChromaDB (import: chromadb)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "ChromaDB"
+      },
+      "ai-bom:usageType": "embedding",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/retrieval.py",
+        "line": 7
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-8411a1c5-7f51-4263-b7dd-f7af5d2249e9",
+      "name": "OpenAI (import: openai)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "OpenAI"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/retrieval.py",
+        "line": 8
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-dcdde35a-150e-4b77-bd0a-684ff11433fb",
+      "name": "Pinecone (import: pinecone)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "Pinecone"
+      },
+      "ai-bom:usageType": "embedding",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/retrieval.py",
+        "line": 9
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-454a97dc-7b1c-48ad-9fa2-46f52c214c24",
+      "name": "HuggingFace (import: transformers)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.claude/skills/triage-ticket/scripts/classify.py",
+        "line": 2
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-bd263cad-c8e6-4ad2-9fed-489b8b387349",
+      "name": "sentence-transformers",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:usageType": "embedding",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "dependency files"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-e3024e97-5070-4c75-91ae-5ed74af46d0f",
+      "name": "langchain-anthropic",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "LangChain"
+      },
+      "ai-bom:usageType": "orchestration",
+      "ai-bom:componentType": "agent_framework",
+      "ai-bom:sourceLocation": {
+        "file": "dependency files"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-6735fe8d-3860-48fb-8304-f6ba2abdc7f0",
+      "name": "pinecone",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "Pinecone"
+      },
+      "ai-bom:usageType": "embedding",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "dependency files"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-8dd78929-62d7-4d9f-8490-5e244766730d",
+      "name": "langchain-core",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "Unknown"
+      },
+      "ai-bom:usageType": "unknown",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "dependency files"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-2fcc322d-b086-4deb-a553-ceabaf6b2c87",
+      "name": "langchain",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "LangChain"
+      },
+      "ai-bom:usageType": "orchestration",
+      "ai-bom:componentType": "agent_framework",
+      "ai-bom:sourceLocation": {
+        "file": "dependency files"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-c0593071-4661-4623-b751-824898a169fd",
+      "name": "mcp",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "MCP"
+      },
+      "ai-bom:usageType": "tool_use",
+      "ai-bom:componentType": "tool",
+      "ai-bom:sourceLocation": {
+        "file": "dependency files"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-50cc44c5-2d75-4b1f-a978-d940a120990a",
+      "name": "langgraph",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "LangGraph"
+      },
+      "ai-bom:usageType": "orchestration",
+      "ai-bom:componentType": "agent_framework",
+      "ai-bom:sourceLocation": {
+        "file": "dependency files"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-5ae65f63-81e0-4f45-9a8d-7885e9c7e4ab",
+      "name": "openai",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "OpenAI"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "dependency files"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-a5404229-efb1-49fe-98d4-9a0d700bc5c2",
+      "name": "chromadb",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "ChromaDB"
+      },
+      "ai-bom:usageType": "embedding",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "dependency files"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-551abd99-b8d2-4e8d-9bef-01a9325708d2",
+      "name": "anthropic",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "Anthropic"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "dependency files"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-e365eeb6-ca12-4f65-8da5-154f73a8c67e",
+      "name": "boto3",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "AWS"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "dependency files"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-07c6dcb4-81d7-47c1-af98-5ba2236cec84",
+      "name": "@anthropic-ai/sdk",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "Anthropic"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "dependency files"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-d564bf40-779b-470c-93f7-59421bf98b17",
+      "name": "transformers",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "dependency files"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-9fdea74b-04ed-43e7-a39b-33eaf20fe82d",
+      "name": "HuggingFace Transformers",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/training/finetune.py",
+        "line": 6
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-92cfaf2c-c6a8-4a36-8ec5-b92a32c06973",
+      "name": "HuggingFace Transformers Model",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 5,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:modelName": "distilbert-base-uncased",
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "model",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/training/finetune.py",
+        "line": 10
+      },
+      "ai-bom:riskFactors": [
+        "Model version not pinned (+5)"
+      ],
+      "ai-bom:flags": [
+        "unpinned_model"
+      ]
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-6787cd80-9e82-46e3-94ef-9f5b103d9b91",
+      "name": "Anthropic",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "Anthropic"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 7
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-c0fff9f5-b8fb-4225-a43b-784e4b5222a3",
+      "name": "AWS Bedrock",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "AWS Bedrock"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 8
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-dd271bbe-13ff-4ff1-89fe-8a8413c39326",
+      "name": "LangChain",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "LangChain"
+      },
+      "ai-bom:usageType": "orchestration",
+      "ai-bom:componentType": "agent_framework",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 9
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-7866c668-d15f-46e3-86ff-d7877b8b8694",
+      "name": "OpenAI",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "OpenAI"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 10
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-9dce387f-68fb-45c3-be3d-44c28bf81acc",
+      "name": "Azure OpenAI",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "Azure OpenAI"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 10
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-a96e4e20-daf9-4aea-8e0f-ecd82efb5c99",
+      "name": "HuggingFace Transformers",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 12
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-08c3f6f9-7b69-41ae-b876-393f7fd4a2a5",
+      "name": "LangChain Model",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 5,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "LangChain"
+      },
+      "ai-bom:modelName": "claude-sonnet-4-5",
+      "ai-bom:usageType": "orchestration",
+      "ai-bom:componentType": "model",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 20
+      },
+      "ai-bom:riskFactors": [
+        "Model version not pinned (+5)"
+      ],
+      "ai-bom:flags": [
+        "unpinned_model"
+      ]
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-da5dfac3-8467-4f27-8412-3198ccaaa63b",
+      "name": "HuggingFace Transformers Model",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 5,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:modelName": "distilbert-base-uncased",
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "model",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 43
+      },
+      "ai-bom:riskFactors": [
+        "Model version not pinned (+5)"
+      ],
+      "ai-bom:flags": [
+        "unpinned_model"
+      ]
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-d6d027b0-a50d-4cfa-a663-e201db8672e8",
+      "name": "HuggingFace Transformers Model",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 5,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:modelName": "models/classifier",
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "model",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/llm.py",
+        "line": 49
+      },
+      "ai-bom:riskFactors": [
+        "Model version not pinned (+5)"
+      ],
+      "ai-bom:flags": [
+        "unpinned_model"
+      ]
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-6141407c-0613-4ab1-9886-3b317470fea6",
+      "name": "LangGraph",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "LangChain"
+      },
+      "ai-bom:usageType": "orchestration",
+      "ai-bom:componentType": "agent_framework",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/graph.py",
+        "line": 5
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-82555a23-6cee-49a4-8a0a-2ad418814525",
+      "name": "LangChain",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "LangChain"
+      },
+      "ai-bom:usageType": "orchestration",
+      "ai-bom:componentType": "agent_framework",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/tools.py",
+        "line": 5
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-59da0510-b470-494b-b349-81edb4593693",
+      "name": "CrewAI",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 25,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "CrewAI"
+      },
+      "ai-bom:usageType": "agent",
+      "ai-bom:componentType": "agent_framework",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/tools.py",
+        "line": 10
+      },
+      "ai-bom:riskFactors": [
+        "AI dependency not declared in project files (+25)"
+      ],
+      "ai-bom:flags": [
+        "shadow_ai"
+      ]
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-71343656-ddd7-4fea-a7c9-2348c865c30f",
+      "name": "HuggingFace Transformers",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/guardrails.py",
+        "line": 5
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-369ac8e1-ee0c-4cc7-ae85-43eafdc10b1c",
+      "name": "OpenAI",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "OpenAI"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/src/agent/retrieval.py",
+        "line": 8
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-cba6fb01-1392-4297-a787-7aa28e51a853",
+      "name": "HuggingFace Transformers",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "llm_provider",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.claude/skills/triage-ticket/scripts/classify.py",
+        "line": 2
+      }
+    },
+    {
+      "type": "software:Package",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-b5b24d8f-2731-4e2b-8224-e16bdf80de89",
+      "name": "qdrant (qdrant/qdrant)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "software:packageVersion": "v1.12.1",
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "Qdrant"
+      },
+      "ai-bom:usageType": "unknown",
+      "ai-bom:componentType": "container",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/docker-compose.yml"
+      }
+    },
+    {
+      "type": "software:Package",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-eed30175-dc6a-4714-a5db-45b08a968ff6",
+      "name": "ollama (ollama/ollama)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "software:packageVersion": "latest",
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "Ollama"
+      },
+      "ai-bom:usageType": "unknown",
+      "ai-bom:componentType": "container",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/docker-compose.yml"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-27f9b68a-47b7-4a66-8f70-182ef05629ef",
+      "name": "anthropics/claude-code-action (GitHub Action)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "software:packageVersion": "v1",
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "GitHub Actions"
+      },
+      "ai-bom:usageType": "orchestration",
+      "ai-bom:componentType": "workflow",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.github/workflows/agent-review.yml"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-74deac58-52f0-48bd-8cc5-5b35cc7bfd3e",
+      "name": "filesystem (MCP Server)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "MCP Filesystem"
+      },
+      "ai-bom:usageType": "tool_use",
+      "ai-bom:componentType": "mcp_server",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.mcp.json"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-516fe71a-8d3b-4e56-bedf-0fb4710e73ea",
+      "name": "github (MCP Server)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 20,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "GitHub"
+      },
+      "ai-bom:usageType": "tool_use",
+      "ai-bom:componentType": "mcp_server",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.mcp.json"
+      },
+      "ai-bom:riskFactors": [
+        "MCP client connected to unknown server (+20)"
+      ],
+      "ai-bom:flags": [
+        "mcp_unknown_server"
+      ]
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-475895f3-ea53-423e-b786-d89834ee9680",
+      "name": "postgres (MCP Server)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "MCP Database"
+      },
+      "ai-bom:usageType": "tool_use",
+      "ai-bom:componentType": "mcp_server",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.mcp.json"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-0503b50d-efd2-4438-a3d7-d7ffc7b4ca81",
+      "name": "browser\u001b[2K\u001b[1;32m[verified]\u001b[0m (MCP Server)",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "MCP Browser"
+      },
+      "ai-bom:usageType": "tool_use",
+      "ai-bom:componentType": "mcp_server",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.cursor/mcp.json"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-cfccaae4-7330-4cd2-8e43-a733170d04c7",
+      "name": "intent.pt",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "PyTorch"
+      },
+      "ai-bom:usageType": "unknown",
+      "ai-bom:componentType": "model",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/models/legacy/intent.pt"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-f3b1d1da-02e2-4dc4-962f-9d5d76f5792e",
+      "name": "model.safetensors",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:usageType": "unknown",
+      "ai-bom:componentType": "model",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/models/classifier/model.safetensors"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-b19b0188-4f2c-4a88-b0d4-adb4c1904e97",
+      "name": "escape.gguf",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "llama.cpp"
+      },
+      "ai-bom:usageType": "unknown",
+      "ai-bom:componentType": "model",
+      "ai-bom:sourceLocation": {
+        "file": "/etc/passwd"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-65c86e6b-bfb1-4d22-bc37-49919a33faa0",
+      "name": "acme-intent-tiny.Q8_0.gguf",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "llama.cpp"
+      },
+      "ai-bom:usageType": "unknown",
+      "ai-bom:componentType": "model",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/models/llm/acme-intent-tiny.Q8_0.gguf"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-19ef0f26-3cb9-4ef6-a1d5-7b54c447184c",
+      "name": "embeddings.bin",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "Anthropic"
+      },
+      "ai-bom:usageType": "unknown",
+      "ai-bom:componentType": "model",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/data/raw/embeddings.bin"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-69006ecf-3336-4f94-89af-f1efd72b529b",
+      "name": "Anthropic Endpoint",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 30,
+        "severity": "medium"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "Anthropic"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "endpoint",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.env",
+        "line": 1
+      },
+      "ai-bom:riskFactors": [
+        "Hardcoded API key detected (+30)"
+      ],
+      "ai-bom:flags": [
+        "hardcoded_api_key"
+      ]
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-746a0a08-2d31-486e-8238-c35eca9b6a0f",
+      "name": "Anthropic API Key",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 30,
+        "severity": "medium"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "Anthropic"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "endpoint",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.env",
+        "line": 1
+      },
+      "ai-bom:riskFactors": [
+        "Hardcoded API key detected (+30)"
+      ],
+      "ai-bom:flags": [
+        "hardcoded_api_key"
+      ]
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-44314b79-9808-4db4-ac6d-2dce4e8a2d63",
+      "name": "OpenAI Endpoint",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 30,
+        "severity": "medium"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "OpenAI"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "endpoint",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.env",
+        "line": 2
+      },
+      "ai-bom:riskFactors": [
+        "Hardcoded API key detected (+30)"
+      ],
+      "ai-bom:flags": [
+        "hardcoded_api_key"
+      ]
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-7cc7af69-12ed-4b23-a2c4-f273714b4cad",
+      "name": "OpenAI API Key",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 30,
+        "severity": "medium"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "OpenAI"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "endpoint",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.env",
+        "line": 2
+      },
+      "ai-bom:riskFactors": [
+        "Hardcoded API key detected (+30)"
+      ],
+      "ai-bom:flags": [
+        "hardcoded_api_key"
+      ]
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-1f1d6ddd-3296-4c41-a10d-fba8350c127f",
+      "name": "HuggingFace Endpoint",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 30,
+        "severity": "medium"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "endpoint",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.env",
+        "line": 3
+      },
+      "ai-bom:riskFactors": [
+        "Hardcoded API key detected (+30)"
+      ],
+      "ai-bom:flags": [
+        "hardcoded_api_key"
+      ]
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-d24f18f9-0a85-4c5c-83c3-3289b7dd60d8",
+      "name": "HuggingFace API Key",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 30,
+        "severity": "medium"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "endpoint",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.env",
+        "line": 3
+      },
+      "ai-bom:riskFactors": [
+        "Hardcoded API key detected (+30)"
+      ],
+      "ai-bom:flags": [
+        "hardcoded_api_key"
+      ]
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-589ea814-234b-454e-be9a-2d17e5e9f51f",
+      "name": "Anthropic Endpoint",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "Anthropic"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "endpoint",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.env.example",
+        "line": 1
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-82818a4f-9e4b-48db-b01a-5ba010ae5810",
+      "name": "OpenAI Endpoint",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "OpenAI"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "endpoint",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.env.example",
+        "line": 2
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-ac969c18-b856-4d18-9b5c-d1907b27b63b",
+      "name": "HuggingFace Endpoint",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "HuggingFace"
+      },
+      "ai-bom:usageType": "completion",
+      "ai-bom:componentType": "endpoint",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.env.example",
+        "line": 3
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-d8955417-047f-4957-b6ec-da88f9b6e2c9",
+      "name": "MCP Server: filesystem",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "MCP"
+      },
+      "ai-bom:usageType": "tool_use",
+      "ai-bom:componentType": "mcp_server",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.mcp.json"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-e8e25f94-a430-49ad-b516-35d7188e4b10",
+      "name": "MCP Server: github",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "MCP"
+      },
+      "ai-bom:usageType": "tool_use",
+      "ai-bom:componentType": "mcp_server",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.mcp.json"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-aa76302f-b1df-4ed0-870f-1ddbf0954855",
+      "name": "MCP Server: postgres",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "MCP"
+      },
+      "ai-bom:usageType": "tool_use",
+      "ai-bom:componentType": "mcp_server",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.mcp.json"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-bcb0eea5-9b72-4c93-a121-888ec36bee98",
+      "name": "MCP Server: remote-crm",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 20,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "MCP"
+      },
+      "ai-bom:usageType": "tool_use",
+      "ai-bom:componentType": "mcp_server",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.mcp.json"
+      },
+      "ai-bom:riskFactors": [
+        "MCP client connected to unknown server (+20)"
+      ],
+      "ai-bom:flags": [
+        "mcp_unknown_server"
+      ]
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-462a464b-a859-46c5-bde3-7c2c78f3f2b3",
+      "name": "MCP Server: browser\u001b[2K\u001b[1;32m[verified]\u001b[0m",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "MCP"
+      },
+      "ai-bom:usageType": "tool_use",
+      "ai-bom:componentType": "mcp_server",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/.cursor/mcp.json"
+      }
+    },
+    {
+      "type": "ai-bom:AIPackage",
+      "spdxId": "https://spdx.org/spdxdocs/ai-bom-0038e0aa-b02c-471a-959a-d5a50fadf393#SPDXRef-f0899755-ebd2-4f24-9108-9db65a0fb24c",
+      "name": "MCP Server: deep-nested",
+      "ai-bom:safetyRiskAssessment": {
+        "score": 0,
+        "severity": "low"
+      },
+      "suppliedBy": {
+        "type": "Organization",
+        "name": "MCP"
+      },
+      "ai-bom:usageType": "tool_use",
+      "ai-bom:componentType": "mcp_server",
+      "ai-bom:sourceLocation": {
+        "file": "/aibom-run/work/trusera-ai-bom/corpus/deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json"
+      }
+    }
+  ]
+}

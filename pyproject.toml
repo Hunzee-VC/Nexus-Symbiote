@@ -16,7 +16,7 @@ license-files = [
 ]
 requires-python = ">=3.11"
 authors = [
-    { name = "Emmanuel Dahunsi", email = "immanueldahunsi@gmail.com" },
+    { name = "Emmanuel Dahunsi" },
 ]
 keywords = [
     "aibom",
@@ -83,12 +83,12 @@ all = [
 nexus-symbiote = "nexus_symbiote.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Hunzee-VC/Nexus-Symbiote"
-Repository = "https://github.com/Hunzee-VC/Nexus-Symbiote"
-Issues = "https://github.com/Hunzee-VC/Nexus-Symbiote/issues"
-Documentation = "https://github.com/Hunzee-VC/Nexus-Symbiote/tree/main/docs"
-Changelog = "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CHANGELOG.md"
-Security = "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md"
+Homepage = "https://github.com/aisecnomad/Nexus-Symbiote"
+Repository = "https://github.com/aisecnomad/Nexus-Symbiote"
+Issues = "https://github.com/aisecnomad/Nexus-Symbiote/issues"
+Documentation = "https://github.com/aisecnomad/Nexus-Symbiote/tree/main/docs"
+Changelog = "https://github.com/aisecnomad/Nexus-Symbiote/blob/main/CHANGELOG.md"
+Security = "https://github.com/aisecnomad/Nexus-Symbiote/blob/main/SECURITY.md"
 
 [dependency-groups]
 # Development tools only; never published. `make lock` resolves them with the
@@ -96,6 +96,7 @@ Security = "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/SECURITY.md"
 dev = [
     "pytest>=9.0.3,<10",
     "pytest-cov>=5.0,<8",
+    "pytest-xdist>=3.8,<4",
     "ruff>=0.4,<1",
     "mypy>=1.10,<3",
     "types-PyYAML>=6.0,<7",
@@ -115,7 +116,7 @@ core-metadata-version = "2.4"
 [tool.hatch.build.targets.sdist]
 core-metadata-version = "2.4"
 # README images are served from the repository by absolute URL; they are not build inputs.
-exclude = ["/docs/assets"]
+exclude = ["/docs/assets", "/benchmarks/aibom-bench"]
 
 [tool.ruff]
 target-version = "py311"

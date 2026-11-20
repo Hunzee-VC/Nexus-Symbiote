@@ -1,0 +1,815 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/release-2.1/sarif-2.1/schema/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "ai-bom",
+          "organization": "Trusera",
+          "version": "3.6.0",
+          "informationUri": "https://github.com/trusera/ai-bom",
+          "rules": [
+            {
+              "id": "ai-bom/aws-bedrock-model-invocation-logging-configuration.x",
+              "shortDescription": {
+                "text": "aws_bedrock_model_invocation_logging_configuration.x"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/github.com/sashabaranov/go-openai",
+              "shortDescription": {
+                "text": "github.com/sashabaranov/go-openai"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/@mistralai/mistralai",
+              "shortDescription": {
+                "text": "@mistralai/mistralai"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/langchain",
+              "shortDescription": {
+                "text": "langchain"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/@ai-sdk/openai",
+              "shortDescription": {
+                "text": "@ai-sdk/openai"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/github.com/anthropics/anthropic-sdk-go",
+              "shortDescription": {
+                "text": "github.com/anthropics/anthropic-sdk-go"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/weaviate-client",
+              "shortDescription": {
+                "text": "weaviate-client"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/@anthropic-ai/sdk",
+              "shortDescription": {
+                "text": "@anthropic-ai/sdk"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/crewai",
+              "shortDescription": {
+                "text": "CrewAI"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "helpUri": "https://github.com/trusera/ai-bom",
+              "fullDescription": {
+                "text": "AI dependency not declared in project files (+25)"
+              }
+            },
+            {
+              "id": "ai-bom/mistral",
+              "shortDescription": {
+                "text": "Mistral"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "helpUri": "https://github.com/trusera/ai-bom",
+              "fullDescription": {
+                "text": "AI dependency not declared in project files (+25)"
+              }
+            },
+            {
+              "id": "ai-bom/openai",
+              "shortDescription": {
+                "text": "OpenAI"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "helpUri": "https://github.com/trusera/ai-bom",
+              "fullDescription": {
+                "text": "AI dependency not declared in project files (+25)"
+              }
+            },
+            {
+              "id": "ai-bom/openai/codex-action-(github-action)",
+              "shortDescription": {
+                "text": "openai/codex-action (GitHub Action)"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/transformers",
+              "shortDescription": {
+                "text": "transformers"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/qwen/qwen2.5-0.5b-instruct",
+              "shortDescription": {
+                "text": "Qwen/Qwen2.5-0.5B-Instruct"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/churn.onnx",
+              "shortDescription": {
+                "text": "churn.onnx"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/escape.onnx",
+              "shortDescription": {
+                "text": "escape.onnx"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/churn.pt",
+              "shortDescription": {
+                "text": "churn.pt"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/intent.tflite",
+              "shortDescription": {
+                "text": "intent.tflite"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/model.safetensors",
+              "shortDescription": {
+                "text": "model.safetensors"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/openai-endpoint",
+              "shortDescription": {
+                "text": "OpenAI Endpoint"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/mcp-server:-notion",
+              "shortDescription": {
+                "text": "MCP Server: notion"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/mcp-server:-supabase",
+              "shortDescription": {
+                "text": "MCP Server: supabase"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            },
+            {
+              "id": "ai-bom/mcp-server:-vendored-x",
+              "shortDescription": {
+                "text": "MCP Server: vendored-x"
+              },
+              "defaultConfiguration": {
+                "level": "note"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "ai-bom/aws-bedrock-model-invocation-logging-configuration.x",
+          "ruleIndex": 0,
+          "level": "note",
+          "message": {
+            "text": "aws_bedrock_model_invocation_logging_configuration.x | provider=AWS Bedrock"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "tool",
+            "usage_type": "tool_use",
+            "source_scanner": "cloud"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "infra/bedrock.tf",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/github.com/sashabaranov/go-openai",
+          "ruleIndex": 1,
+          "level": "note",
+          "message": {
+            "text": "github.com/sashabaranov/go-openai | provider=OpenAI"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/@mistralai/mistralai",
+          "ruleIndex": 2,
+          "level": "note",
+          "message": {
+            "text": "@mistralai/mistralai | provider=Unknown"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "unknown",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/langchain",
+          "ruleIndex": 3,
+          "level": "note",
+          "message": {
+            "text": "langchain | provider=LangChain"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "agent_framework",
+            "usage_type": "orchestration",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/@ai-sdk/openai",
+          "ruleIndex": 4,
+          "level": "note",
+          "message": {
+            "text": "@ai-sdk/openai | provider=Unknown"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "unknown",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/github.com/anthropics/anthropic-sdk-go",
+          "ruleIndex": 5,
+          "level": "note",
+          "message": {
+            "text": "github.com/anthropics/anthropic-sdk-go | provider=Anthropic"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/weaviate-client",
+          "ruleIndex": 6,
+          "level": "note",
+          "message": {
+            "text": "weaviate-client | provider=Weaviate"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "embedding",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/@anthropic-ai/sdk",
+          "ruleIndex": 7,
+          "level": "note",
+          "message": {
+            "text": "@anthropic-ai/sdk | provider=Anthropic"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/crewai",
+          "ruleIndex": 8,
+          "level": "note",
+          "message": {
+            "text": "CrewAI | provider=CrewAI | flags=shadow_ai"
+          },
+          "properties": {
+            "risk_score": 25,
+            "component_type": "agent_framework",
+            "usage_type": "agent",
+            "source_scanner": "code",
+            "flags": [
+              "shadow_ai"
+            ]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent.ts",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 11
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/mistral",
+          "ruleIndex": 9,
+          "level": "note",
+          "message": {
+            "text": "Mistral | provider=Mistral | flags=shadow_ai"
+          },
+          "properties": {
+            "risk_score": 25,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code",
+            "flags": [
+              "shadow_ai"
+            ]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/rag.ts",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 5
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/openai",
+          "ruleIndex": 10,
+          "level": "note",
+          "message": {
+            "text": "OpenAI | provider=OpenAI | flags=shadow_ai"
+          },
+          "properties": {
+            "risk_score": 25,
+            "component_type": "llm_provider",
+            "usage_type": "completion",
+            "source_scanner": "code",
+            "flags": [
+              "shadow_ai"
+            ]
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "sidecar/main.go",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 5
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/openai/codex-action-(github-action)",
+          "ruleIndex": 11,
+          "level": "note",
+          "message": {
+            "text": "openai/codex-action (GitHub Action) | provider=GitHub Actions"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "workflow",
+            "usage_type": "orchestration",
+            "source_scanner": "github-actions"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".github/workflows/review.yml",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/transformers",
+          "ruleIndex": 12,
+          "level": "note",
+          "message": {
+            "text": "transformers | provider=HuggingFace"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "model",
+            "usage_type": "completion",
+            "source_scanner": "jupyter"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "notebooks/train_churn.ipynb",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/qwen/qwen2.5-0.5b-instruct",
+          "ruleIndex": 13,
+          "level": "note",
+          "message": {
+            "text": "Qwen/Qwen2.5-0.5B-Instruct | provider=HuggingFace | model=Qwen/Qwen2.5-0.5B-Instruct"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "model",
+            "usage_type": "completion",
+            "source_scanner": "jupyter"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "notebooks/train_churn.ipynb",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/churn.onnx",
+          "ruleIndex": 14,
+          "level": "note",
+          "message": {
+            "text": "churn.onnx | provider=ONNX Runtime"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "model",
+            "usage_type": "unknown",
+            "source_scanner": "model-file"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "artifacts/churn.onnx",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/escape.onnx",
+          "ruleIndex": 15,
+          "level": "note",
+          "message": {
+            "text": "escape.onnx | provider=ONNX Runtime"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "model",
+            "usage_type": "unknown",
+            "source_scanner": "model-file"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "/etc/passwd",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/churn.pt",
+          "ruleIndex": 16,
+          "level": "note",
+          "message": {
+            "text": "churn.pt | provider=PyTorch"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "model",
+            "usage_type": "unknown",
+            "source_scanner": "model-file"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "artifacts/churn.pt",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/intent.tflite",
+          "ruleIndex": 17,
+          "level": "note",
+          "message": {
+            "text": "intent.tflite | provider=TensorFlow"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "model",
+            "usage_type": "unknown",
+            "source_scanner": "model-file"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "artifacts/intent.tflite",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/model.safetensors",
+          "ruleIndex": 18,
+          "level": "note",
+          "message": {
+            "text": "model.safetensors | provider=HuggingFace"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "model",
+            "usage_type": "unknown",
+            "source_scanner": "model-file"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "hf-cache/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/model.safetensors",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/openai-endpoint",
+          "ruleIndex": 19,
+          "level": "note",
+          "message": {
+            "text": "OpenAI Endpoint | provider=OpenAI"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "endpoint",
+            "usage_type": "completion",
+            "source_scanner": "network"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".env.local",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/mcp-server:-notion",
+          "ruleIndex": 20,
+          "level": "note",
+          "message": {
+            "text": "MCP Server: notion | provider=MCP"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "mcp_server",
+            "usage_type": "tool_use",
+            "source_scanner": "network"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "config/claude_desktop_config.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/mcp-server:-supabase",
+          "ruleIndex": 21,
+          "level": "note",
+          "message": {
+            "text": "MCP Server: supabase | provider=MCP"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "mcp_server",
+            "usage_type": "tool_use",
+            "source_scanner": "network"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "config/claude_desktop_config.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "ruleId": "ai-bom/mcp-server:-vendored-x",
+          "ruleIndex": 22,
+          "level": "note",
+          "message": {
+            "text": "MCP Server: vendored-x | provider=MCP"
+          },
+          "properties": {
+            "risk_score": 0,
+            "component_type": "mcp_server",
+            "usage_type": "tool_use",
+            "source_scanner": "network"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "vendor/pkg/.cursor/mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
