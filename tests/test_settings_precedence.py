@@ -16,6 +16,7 @@ from nexus_symbiote.diff.differ import AIBOMDiffer
 from nexus_symbiote.scanners.ide_agents import IDEAgentScanner
 from nexus_symbiote.settings_precedence import (
     MAX_ACTIVATION_GLOBS,
+    MAX_INDEXED_PERMISSION_RULES,
     MAX_INLINE_MCP_SERVER_NAMES,
     MAX_OVERSIGHT_GAP_FINDINGS,
     MAX_RECORDED_DENY_RULES,
@@ -835,6 +836,53 @@ def test_long_specifier_memory_footprint_and_index_truncation() -> None:
         {"allow": ["Read", "Write", "Bash"]}, max_indexed_rules=2
     )
     assert idx_trunc is True
+
+
+def test_rules_past_the_index_cap_fail_closed_with_a_high_oversight_gap(tmp_path: Path) -> None:
+    # R1: deny is indexed first, so padding it to the cap hid `allow: ["Bash"]`.
+    proj = tmp_path / "proj_r1"
+    (proj / ".claude").mkdir(parents=True)
+    (proj / ".claude" / "settings.json").write_text(
+        json.dumps(
+            {
+                "permissions": {
+                    "deny": [f"X{i}" for i in range(MAX_INDEXED_PERMISSION_RULES)],
+                    "allow": ["Bash"],
+                    "defaultMode": "bypassPermissions",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    res = IDEAgentScanner().scan(proj)
+    claude = next(c for c in res.components if c.bom_ref == "ide-agent:claude-code")
+    gaps = [r for r in claude.risks if r.category == "oversight_gap"]
+    assert len(gaps) == 1
+    assert gaps[0].severity == RiskSeverity.HIGH
+    assert "were not evaluated" in gaps[0].detail
+    assert str(MAX_INDEXED_PERMISSION_RULES) in gaps[0].detail
+    assert claude.properties["tool_human_in_the_loop_truncated"] is True
+
+    # The finding is added to the per-tool ones and survives their 64-entry bound.
+    allow = [f"mcp__srv__delete_{i}" for i in range(MAX_OVERSIGHT_GAP_FINDINGS + 5)]
+    _, risks, _, truncated = evaluate_tool_oversight(
+        {"allow": [*allow, "Bash"]}, max_indexed_rules=len(allow)
+    )
+    assert truncated is True
+    assert len(risks) == MAX_OVERSIGHT_GAP_FINDINGS + 2
+    assert sum("were not evaluated" in r.detail for r in risks) == 1
+    assert all(r.severity == RiskSeverity.HIGH for r in risks)
+
+    # At the cap exactly nothing is dropped, and an unmodelled host stays silent.
+    _, risks, _, truncated = evaluate_tool_oversight(
+        {"allow": ["Read", "Grep"]}, max_indexed_rules=2
+    )
+    assert truncated is False
+    assert not risks
+    _, risks, _, _ = evaluate_tool_oversight(
+        {"allow": ["Read", "Bash"]}, max_indexed_rules=1, host_modelled=False
+    )
+    assert not risks
 
 
 def test_projected_text_parity_leaves_no_adjacent_scheme_pin_in_inventory(tmp_path: Path) -> None:

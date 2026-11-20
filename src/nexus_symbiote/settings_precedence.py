@@ -616,6 +616,23 @@ def evaluate_tool_oversight(
         tool_states = raw_states
 
     assessments: list[RiskAssessment] = []
+    if index.rules_truncated and host_modelled:
+        # Rules past the cap may hold the allow that auto-approves a destructive tool.
+        assessments.append(
+            RiskAssessment(
+                severity=RiskSeverity.HIGH,
+                category="oversight_gap",
+                detail=(
+                    f"'{safe_source}' declares more than {max_indexed_rules} permission rules; "
+                    "the rules past that limit were not evaluated, so a destructive or shell "
+                    "tool may resolve to auto-approval without human-in-the-loop."
+                ),
+                recommendation=(
+                    f"Reduce the permission rules to at most {max_indexed_rules} so that "
+                    "every allow, ask and deny rule is evaluated."
+                ),
+            )
+        )
     for safe_tool in gap_tools[:MAX_OVERSIGHT_GAP_FINDINGS]:
         assessments.append(
             RiskAssessment(
