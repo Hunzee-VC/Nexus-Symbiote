@@ -19,10 +19,10 @@ from nexus_symbiote.runtime import AuthorizationError, strict_json
 from nexus_symbiote.runtime_validation import ValidationBudgetError, check_json_budget
 from nexus_symbiote.scanners.base import sanitized_origin
 from nexus_symbiote.scanners.model import (
-    _GGUF_MAGIC,
     _TAR_MAGIC,
     _TAR_MAGIC_OFFSET,
     _WRAPPER_MAGIC,
+    GGUF_MAGIC,
     PICKLE_NAME_EMPTY,
     PICKLE_NAME_GGUF,
     PICKLE_NAME_UNEVIDENCED,
@@ -175,7 +175,7 @@ def _opens_no_pickle(payload: bytes) -> bool:
 def _wrapped_or_gguf(payload: bytes) -> bool:
     """Whether the scanner reads ``payload`` as a compressed or archived stream or GGUF."""
     return (
-        payload.startswith((*_WRAPPER_MAGIC, _GGUF_MAGIC))
+        payload.startswith((*_WRAPPER_MAGIC, GGUF_MAGIC))
         or _lzma_alone_header(payload)
         or payload[_TAR_MAGIC_OFFSET : _TAR_MAGIC_OFFSET + len(_TAR_MAGIC)] == _TAR_MAGIC
         or _tar_header(payload)

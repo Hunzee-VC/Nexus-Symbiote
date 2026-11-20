@@ -373,6 +373,7 @@ def onnx_external_data(read: Read, budget: InspectionBudget | None = None) -> tu
 
 # GGUF ------------------------------------------------------------------------
 
+GGUF_MAGIC = b"GGUF"
 GGUF_UNREADABLE = "GGUF metadata could not be read"
 GGUF_LIMIT = "GGUF metadata exceeds the inspection limits"
 MAX_GGUF_KEYS = 65536
@@ -429,7 +430,7 @@ def gguf_metadata(read: Read, budget: InspectionBudget | None = None) -> GGUFMet
     """Read the architecture and chat templates from a GGUF v2 or v3 header."""
     budget = budget or InspectionBudget()
     reader = _Reader(read, GGUF_UNREADABLE)
-    if reader.take(4) != b"GGUF" or reader.uint(4) not in (2, 3):
+    if reader.take(4) != GGUF_MAGIC or reader.uint(4) not in (2, 3):
         raise FormatError(GGUF_UNREADABLE)
     reader.uint(8)
     count = reader.uint(8)
