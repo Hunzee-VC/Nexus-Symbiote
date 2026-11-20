@@ -17,7 +17,7 @@ The lead maintainer is responsible for:
 - Regenerating the dependency locks and reviewing dependency updates
 - Setting project direction and roadmap priorities
 
-These are ownership responsibilities, not a claim that external CI, branch protection or publication settings are already active. See [repository controls](docs/repository-controls.md#operator-prerequisites) for verification status and the administrator runbook, and [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74) for the remediation history.
+These are ownership responsibilities, not a claim that external CI, branch protection or publication settings are already active. See [repository controls](docs/repository-controls.md#operator-prerequisites) for verification status and the administrator runbook, and [issue #74](https://github.com/aisecnomad/Nexus-Symbiote/issues/74) for the remediation history.
 
 ## Access and continuity
 
@@ -28,7 +28,7 @@ Who can act for the project today. Every row has one holder; [GOVERNANCE.md](GOV
 | Merge to `main` and administer the repository | @aisecnomad | None yet |
 | Approve the `testpypi` and `pypi` environments (publication) | @aisecnomad, the required reviewer of both | None yet |
 | Own the `nexus-symbiote` project on PyPI and TestPyPI (yank, manage trusted publishers) | The maintainer's package-index account; not recorded here | None yet |
-| Own the Hunzee-VC GitHub organization | Not recorded here | None yet |
+| Own the aisecnomad GitHub account, which owns the repository | @aisecnomad | Not possible for a personal account; see the repository administrator row |
 | Receive private vulnerability reports | Repository administrators, through GitHub's private vulnerability reporting | None yet |
 | Sign release tags | @aisecnomad | None yet |
 

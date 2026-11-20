@@ -1,0 +1,167 @@
+flowchart TD
+  classDef low fill:#eef8f0,stroke:#2e7d32,color:#123d1c
+  classDef medium fill:#fff8e1,stroke:#f9a825,color:#4a3500
+  classDef high fill:#ffebee,stroke:#c62828,color:#4a0707
+  classDef critical fill:#3b0d0d,stroke:#b71c1c,color:#ffffff
+  capability_cloud_05546487["Capability: cloud"]
+  class capability_cloud_05546487 medium
+  capability_cloud_access_c90e454a["Capability: cloud_access"]
+  class capability_cloud_access_c90e454a medium
+  capability_mcp_tool_invocation_5183a5b3["Capability: mcp_tool_invocation"]
+  class capability_mcp_tool_invocation_5183a5b3 medium
+  framework_langchain_dfbd9f75["Framework: langchain"]
+  class framework_langchain_dfbd9f75 low
+  framework_langgraph_88b48692["Framework: langgraph"]
+  class framework_langgraph_88b48692 low
+  mcp_risk_browser_network_access_63427470["MCP Risk: browser_network_access"]
+  class mcp_risk_browser_network_access_63427470 medium
+  mcp_risk_database_access_e544ba45["MCP Risk: database_access"]
+  class mcp_risk_database_access_e544ba45 medium
+  mcp_risk_filesystem_access_44f55954["MCP Risk: filesystem_access"]
+  class mcp_risk_filesystem_access_44f55954 high
+  mcp_risk_secrets_env_access_e7dd7f45["MCP Risk: secrets_env_access"]
+  class mcp_risk_secrets_env_access_e7dd7f45 high
+  mcp_risk_unknown_custom_server_486b5fef["MCP Risk: unknown_custom_server"]
+  class mcp_risk_unknown_custom_server_486b5fef low
+  mcp_server_browser_2k_1_32m_verified_0m_6dcbed3b["MCP Server: browser[2K[1;32m[verified][0m"]
+  class mcp_server_browser_2k_1_32m_verified_0m_6dcbed3b medium
+  mcp_server_deep_nested_8d12947b["MCP Server: deep-nested"]
+  class mcp_server_deep_nested_8d12947b low
+  mcp_server_filesystem_7de69349["MCP Server: filesystem"]
+  class mcp_server_filesystem_7de69349 high
+  mcp_server_github_671bb6f4["MCP Server: github"]
+  class mcp_server_github_671bb6f4 high
+  mcp_server_postgres_1987f30b["MCP Server: postgres"]
+  class mcp_server_postgres_1987f30b high
+  mcp_server_remote_crm_79bc204d["MCP Server: remote-crm"]
+  class mcp_server_remote_crm_79bc204d medium
+  model_claude_haiku_4_5_bfea9115["Model: claude-haiku-4.5"]
+  class model_claude_haiku_4_5_bfea9115 low
+  model_claude_sonnet_4_5_454c34d4["Model: claude-sonnet-4.5"]
+  class model_claude_sonnet_4_5_454c34d4 low
+  model_gpt_4o_mini_255e72b4["Model: gpt-4o-mini"]
+  class model_gpt_4o_mini_255e72b4 low
+  model_llama3_2_f7fc47a1["Model: llama3.2"]
+  class model_llama3_2_f7fc47a1 low
+  model_o4_mini_7a9dde0b["Model: o4-mini"]
+  class model_o4_mini_7a9dde0b low
+  provider_anthropic_0b89784c["Provider: anthropic"]
+  class provider_anthropic_0b89784c low
+  provider_ollama_8c1b7e12["Provider: ollama"]
+  class provider_ollama_8c1b7e12 low
+  provider_openai_a029ae0c["Provider: openai"]
+  class provider_openai_a029ae0c low
+  reachable_claude_haiku_4_5_cloud_access_requirements_txt_2a88016e["Reachable: claude-haiku-4.5 -&gt; cloud_access<br/>requirements.txt"]
+  class reachable_claude_haiku_4_5_cloud_access_requirements_txt_2a88016e medium
+  reachable_claude_haiku_4_5_cloud_access_src_agent_llm_py_8c8f00df["Reachable: claude-haiku-4.5 -&gt; cloud_access<br/>src/agent/llm.py"]
+  class reachable_claude_haiku_4_5_cloud_access_src_agent_llm_py_8c8f00df medium
+  reachable_claude_sonnet_4_5_cloud_access_requirements_txt_7ff8da0c["Reachable: claude-sonnet-4.5 -&gt; cloud_access<br/>requirements.txt"]
+  class reachable_claude_sonnet_4_5_cloud_access_requirements_txt_7ff8da0c medium
+  reachable_claude_sonnet_4_5_cloud_access_src_agent_llm_py_ea9287e0["Reachable: claude-sonnet-4.5 -&gt; cloud_access<br/>src/agent/llm.py"]
+  class reachable_claude_sonnet_4_5_cloud_access_src_agent_llm_py_ea9287e0 medium
+  reachable_gpt_4o_mini_cloud_access_requirements_txt_4c25af89["Reachable: gpt-4o-mini -&gt; cloud_access<br/>requirements.txt"]
+  class reachable_gpt_4o_mini_cloud_access_requirements_txt_4c25af89 medium
+  reachable_gpt_4o_mini_cloud_access_src_agent_llm_py_b4dbd2c6["Reachable: gpt-4o-mini -&gt; cloud_access<br/>src/agent/llm.py"]
+  class reachable_gpt_4o_mini_cloud_access_src_agent_llm_py_b4dbd2c6 medium
+  reachable_langchain_cloud_access_pyproject_toml_f534dc25["Reachable: langchain -&gt; cloud_access<br/>pyproject.toml"]
+  class reachable_langchain_cloud_access_pyproject_toml_f534dc25 medium
+  reachable_langchain_cloud_access_src_agent_llm_py_ef41918c["Reachable: langchain -&gt; cloud_access<br/>src/agent/llm.py"]
+  class reachable_langchain_cloud_access_src_agent_llm_py_ef41918c medium
+  reachable_langchain_mcp_tool_invocation_cursor_mcp_json_2669f9c3["Reachable: langchain -&gt; mcp_tool_invocation<br/>.cursor/mcp.json"]
+  class reachable_langchain_mcp_tool_invocation_cursor_mcp_json_2669f9c3 medium
+  reachable_langchain_mcp_tool_invocation_mcp_json_0e2d6d17["Reachable: langchain -&gt; mcp_tool_invocation<br/>.mcp.json"]
+  class reachable_langchain_mcp_tool_invocation_mcp_json_0e2d6d17 medium
+  reachable_langchain_mcp_tool_invocation_deep_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_mcp_json_d093ba7e["Reachable: langchain -&gt; mcp_tool_invocation<br/>deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json"]
+  class reachable_langchain_mcp_tool_invocation_deep_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_mcp_json_d093ba7e low
+  reachable_langgraph_cloud_access_pyproject_toml_a333c183["Reachable: langgraph -&gt; cloud_access<br/>pyproject.toml"]
+  class reachable_langgraph_cloud_access_pyproject_toml_a333c183 medium
+  reachable_langgraph_mcp_tool_invocation_cursor_mcp_json_0be04682["Reachable: langgraph -&gt; mcp_tool_invocation<br/>.cursor/mcp.json"]
+  class reachable_langgraph_mcp_tool_invocation_cursor_mcp_json_0be04682 medium
+  reachable_langgraph_mcp_tool_invocation_mcp_json_ddc8c15a["Reachable: langgraph -&gt; mcp_tool_invocation<br/>.mcp.json"]
+  class reachable_langgraph_mcp_tool_invocation_mcp_json_ddc8c15a medium
+  reachable_langgraph_mcp_tool_invocation_deep_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_mcp_json_8215dec9["Reachable: langgraph -&gt; mcp_tool_invocation<br/>deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json"]
+  class reachable_langgraph_mcp_tool_invocation_deep_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_mcp_json_8215dec9 low
+  reachable_llama3_2_cloud_access_requirements_txt_80d6df71["Reachable: llama3.2 -&gt; cloud_access<br/>requirements.txt"]
+  class reachable_llama3_2_cloud_access_requirements_txt_80d6df71 medium
+  reachable_llama3_2_cloud_access_src_agent_llm_py_3e710713["Reachable: llama3.2 -&gt; cloud_access<br/>src/agent/llm.py"]
+  class reachable_llama3_2_cloud_access_src_agent_llm_py_3e710713 medium
+  reachable_o4_mini_cloud_access_requirements_txt_166b08de["Reachable: o4-mini -&gt; cloud_access<br/>requirements.txt"]
+  class reachable_o4_mini_cloud_access_requirements_txt_166b08de medium
+  framework_langchain_dfbd9f75 -- enables --> capability_cloud_access_c90e454a
+  framework_langchain_dfbd9f75 -- enables --> capability_mcp_tool_invocation_5183a5b3
+  framework_langchain_dfbd9f75 -- reaches --> reachable_langchain_cloud_access_pyproject_toml_f534dc25
+  framework_langchain_dfbd9f75 -- reaches --> reachable_langchain_cloud_access_src_agent_llm_py_ef41918c
+  framework_langchain_dfbd9f75 -- reaches --> reachable_langchain_mcp_tool_invocation_cursor_mcp_json_2669f9c3
+  framework_langchain_dfbd9f75 -- reaches --> reachable_langchain_mcp_tool_invocation_deep_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_mcp_json_d093ba7e
+  framework_langchain_dfbd9f75 -- reaches --> reachable_langchain_mcp_tool_invocation_mcp_json_0e2d6d17
+  framework_langgraph_88b48692 -- enables --> capability_cloud_access_c90e454a
+  framework_langgraph_88b48692 -- enables --> capability_mcp_tool_invocation_5183a5b3
+  framework_langgraph_88b48692 -- reaches --> reachable_langgraph_cloud_access_pyproject_toml_a333c183
+  framework_langgraph_88b48692 -- reaches --> reachable_langgraph_mcp_tool_invocation_cursor_mcp_json_0be04682
+  framework_langgraph_88b48692 -- reaches --> reachable_langgraph_mcp_tool_invocation_deep_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_mcp_json_8215dec9
+  framework_langgraph_88b48692 -- reaches --> reachable_langgraph_mcp_tool_invocation_mcp_json_ddc8c15a
+  mcp_server_browser_2k_1_32m_verified_0m_6dcbed3b -- exposes --> capability_mcp_tool_invocation_5183a5b3
+  mcp_server_browser_2k_1_32m_verified_0m_6dcbed3b -- risk --> mcp_risk_browser_network_access_63427470
+  mcp_server_browser_2k_1_32m_verified_0m_6dcbed3b -- reachable --> reachable_langchain_mcp_tool_invocation_cursor_mcp_json_2669f9c3
+  mcp_server_browser_2k_1_32m_verified_0m_6dcbed3b -- reachable --> reachable_langgraph_mcp_tool_invocation_cursor_mcp_json_0be04682
+  mcp_server_deep_nested_8d12947b -- exposes --> capability_mcp_tool_invocation_5183a5b3
+  mcp_server_deep_nested_8d12947b -- risk --> mcp_risk_unknown_custom_server_486b5fef
+  mcp_server_deep_nested_8d12947b -- reachable --> reachable_langchain_mcp_tool_invocation_deep_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_mcp_json_d093ba7e
+  mcp_server_deep_nested_8d12947b -- reachable --> reachable_langgraph_mcp_tool_invocation_deep_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_mcp_json_8215dec9
+  mcp_server_filesystem_7de69349 -- exposes --> capability_mcp_tool_invocation_5183a5b3
+  mcp_server_filesystem_7de69349 -- risk --> mcp_risk_filesystem_access_44f55954
+  mcp_server_filesystem_7de69349 -- reachable --> reachable_langchain_mcp_tool_invocation_mcp_json_0e2d6d17
+  mcp_server_filesystem_7de69349 -- reachable --> reachable_langgraph_mcp_tool_invocation_mcp_json_ddc8c15a
+  mcp_server_github_671bb6f4 -- exposes --> capability_mcp_tool_invocation_5183a5b3
+  mcp_server_github_671bb6f4 -- risk --> mcp_risk_secrets_env_access_e7dd7f45
+  mcp_server_github_671bb6f4 -- reachable --> reachable_langchain_mcp_tool_invocation_mcp_json_0e2d6d17
+  mcp_server_github_671bb6f4 -- reachable --> reachable_langgraph_mcp_tool_invocation_mcp_json_ddc8c15a
+  mcp_server_postgres_1987f30b -- exposes --> capability_mcp_tool_invocation_5183a5b3
+  mcp_server_postgres_1987f30b -- risk --> mcp_risk_browser_network_access_63427470
+  mcp_server_postgres_1987f30b -- risk --> mcp_risk_database_access_e544ba45
+  mcp_server_postgres_1987f30b -- risk --> mcp_risk_secrets_env_access_e7dd7f45
+  mcp_server_postgres_1987f30b -- reachable --> reachable_langchain_mcp_tool_invocation_mcp_json_0e2d6d17
+  mcp_server_postgres_1987f30b -- reachable --> reachable_langgraph_mcp_tool_invocation_mcp_json_ddc8c15a
+  mcp_server_remote_crm_79bc204d -- exposes --> capability_mcp_tool_invocation_5183a5b3
+  mcp_server_remote_crm_79bc204d -- risk --> mcp_risk_browser_network_access_63427470
+  mcp_server_remote_crm_79bc204d -- reachable --> reachable_langchain_mcp_tool_invocation_mcp_json_0e2d6d17
+  mcp_server_remote_crm_79bc204d -- reachable --> reachable_langgraph_mcp_tool_invocation_mcp_json_ddc8c15a
+  model_claude_haiku_4_5_bfea9115 -- uses --> provider_anthropic_0b89784c
+  model_claude_haiku_4_5_bfea9115 -- uses --> provider_ollama_8c1b7e12
+  model_claude_haiku_4_5_bfea9115 -- uses --> provider_openai_a029ae0c
+  model_claude_haiku_4_5_bfea9115 -- reaches --> reachable_claude_haiku_4_5_cloud_access_requirements_txt_2a88016e
+  model_claude_haiku_4_5_bfea9115 -- reaches --> reachable_claude_haiku_4_5_cloud_access_src_agent_llm_py_8c8f00df
+  model_claude_sonnet_4_5_454c34d4 -- uses --> provider_anthropic_0b89784c
+  model_claude_sonnet_4_5_454c34d4 -- uses --> provider_ollama_8c1b7e12
+  model_claude_sonnet_4_5_454c34d4 -- uses --> provider_openai_a029ae0c
+  model_claude_sonnet_4_5_454c34d4 -- reaches --> reachable_claude_sonnet_4_5_cloud_access_requirements_txt_7ff8da0c
+  model_claude_sonnet_4_5_454c34d4 -- reaches --> reachable_claude_sonnet_4_5_cloud_access_src_agent_llm_py_ea9287e0
+  model_gpt_4o_mini_255e72b4 -- uses --> provider_anthropic_0b89784c
+  model_gpt_4o_mini_255e72b4 -- uses --> provider_ollama_8c1b7e12
+  model_gpt_4o_mini_255e72b4 -- uses --> provider_openai_a029ae0c
+  model_gpt_4o_mini_255e72b4 -- reaches --> reachable_gpt_4o_mini_cloud_access_requirements_txt_4c25af89
+  model_gpt_4o_mini_255e72b4 -- reaches --> reachable_gpt_4o_mini_cloud_access_src_agent_llm_py_b4dbd2c6
+  model_llama3_2_f7fc47a1 -- uses --> provider_anthropic_0b89784c
+  model_llama3_2_f7fc47a1 -- uses --> provider_ollama_8c1b7e12
+  model_llama3_2_f7fc47a1 -- uses --> provider_openai_a029ae0c
+  model_llama3_2_f7fc47a1 -- reaches --> reachable_llama3_2_cloud_access_requirements_txt_80d6df71
+  model_llama3_2_f7fc47a1 -- reaches --> reachable_llama3_2_cloud_access_src_agent_llm_py_3e710713
+  model_o4_mini_7a9dde0b -- reaches --> reachable_o4_mini_cloud_access_requirements_txt_166b08de
+  reachable_claude_haiku_4_5_cloud_access_requirements_txt_2a88016e -- reaches --> capability_cloud_access_c90e454a
+  reachable_claude_haiku_4_5_cloud_access_src_agent_llm_py_8c8f00df -- reaches --> capability_cloud_access_c90e454a
+  reachable_claude_sonnet_4_5_cloud_access_requirements_txt_7ff8da0c -- reaches --> capability_cloud_access_c90e454a
+  reachable_claude_sonnet_4_5_cloud_access_src_agent_llm_py_ea9287e0 -- reaches --> capability_cloud_access_c90e454a
+  reachable_gpt_4o_mini_cloud_access_requirements_txt_4c25af89 -- reaches --> capability_cloud_access_c90e454a
+  reachable_gpt_4o_mini_cloud_access_src_agent_llm_py_b4dbd2c6 -- reaches --> capability_cloud_access_c90e454a
+  reachable_langchain_cloud_access_pyproject_toml_f534dc25 -- reaches --> capability_cloud_access_c90e454a
+  reachable_langchain_cloud_access_src_agent_llm_py_ef41918c -- reaches --> capability_cloud_access_c90e454a
+  reachable_langchain_mcp_tool_invocation_cursor_mcp_json_2669f9c3 -- reaches --> capability_mcp_tool_invocation_5183a5b3
+  reachable_langchain_mcp_tool_invocation_deep_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_mcp_json_d093ba7e -- reaches --> capability_mcp_tool_invocation_5183a5b3
+  reachable_langchain_mcp_tool_invocation_mcp_json_0e2d6d17 -- reaches --> capability_mcp_tool_invocation_5183a5b3
+  reachable_langgraph_cloud_access_pyproject_toml_a333c183 -- reaches --> capability_cloud_access_c90e454a
+  reachable_langgraph_mcp_tool_invocation_cursor_mcp_json_0be04682 -- reaches --> capability_mcp_tool_invocation_5183a5b3
+  reachable_langgraph_mcp_tool_invocation_deep_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_n_mcp_json_8215dec9 -- reaches --> capability_mcp_tool_invocation_5183a5b3
+  reachable_langgraph_mcp_tool_invocation_mcp_json_ddc8c15a -- reaches --> capability_mcp_tool_invocation_5183a5b3
+  reachable_llama3_2_cloud_access_requirements_txt_80d6df71 -- reaches --> capability_cloud_access_c90e454a
+  reachable_llama3_2_cloud_access_src_agent_llm_py_3e710713 -- reaches --> capability_cloud_access_c90e454a
+  reachable_o4_mini_cloud_access_requirements_txt_166b08de -- reaches --> capability_cloud_access_c90e454a

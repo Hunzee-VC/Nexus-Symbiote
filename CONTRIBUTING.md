@@ -18,7 +18,7 @@ python3 -m venv .venv
 python -m pip install --require-hashes --only-binary=:all: -r requirements-ci.lock
 python -m pip install --no-deps --no-build-isolation -e .
 python -m pip check
-python -m pytest --strict-skips
+python -m pytest -n auto --dist worksteal --strict-skips
 ruff check src tests scripts
 ruff format --check src tests scripts
 mypy src/nexus_symbiote scripts
@@ -26,7 +26,7 @@ python scripts/check_workflows.py
 python scripts/check_repository_hygiene.py
 python scripts/check_locks.py
 python scripts/check_security_regressions.py --out security-regressions.json
-python -m pytest --strict-skips --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=json:coverage.json
+python -m pytest -n auto --dist worksteal --strict-skips --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=json:coverage.json
 python scripts/check_coverage.py coverage.json
 python -m build --no-isolation
 python -m twine check --strict dist/*
@@ -39,6 +39,10 @@ python -m twine check --strict dist/*
 `tests/conftest.py` gives every test a clean environment: the variables the tool, the Action runner and the gate scripts read (`NEXUS_SYMBIOTE_*`, `SYMBIOTE_*`, `SHADOWSCAN_*`, `GITHUB_*`, `RUNNER_*`, `GH_TOKEN`, the Actions token variables, `SOURCE_DATE_EPOCH`, the CI markers that the unsigned-discovery gate reads, such as `CI`, and color, width and terminal settings) are removed, and `HOME` and the XDG directories point at a private temporary directory. A test that leaves an operating mode enforced fails. Use the `runner` fixture for a `CliRunner` and `tests/support.py`'s `load_script` (or the `load_script` fixture) to import a script from `scripts/`; do not import one test module from another.
 
 Each test has a time limit and fails with its traceback when it hangs, instead of using up the CI job's budget: `test_timeout` in `pyproject.toml` (300 seconds, for loaded development machines), tightened to 120 seconds in CI (240 under coverage). Mark a known slow test with `@pytest.mark.timeout(seconds)`, and give every `subprocess.run` in a test its own `timeout` as well. To show that parsing a hostile input stays linear, compare two input sizes with `tests.support.scaling_ratio` instead of asserting a duration: a busy runner or coverage tracing slows both sizes alike.
+
+CI's test, dependency-floor and coverage jobs and the `make` test targets run the suite on one pytest-xdist worker per core (`-n auto --dist worksteal`): each worker starts with a contiguous share of the tests in collection order, and an idle worker takes tests from the longest queue. The same tests run, and the clean environment, the time limit, the skip accounting and `no_cover` apply in every worker (`tests/test_suite_infrastructure.py` runs them in workers). A test therefore shares the machine with others and does not always run after its file neighbours: it must not depend on what another test left behind, on a fixed port or on a fixed path, and a wall-clock bound must hold on a busy machine, which is one more reason to measure CPU time or use `scaling_ratio`. A test that fails only in parallel has an isolation defect: fix the test instead of selecting it out. With `-vv` a parallel run prints each test's ID when it starts and `[gwN] ... PASSED <id>` when it ends, so the tests a killed run was inside are the IDs with no result line, and a skip's reason appears only in the skip accounting. To run in one process, for a debugger or `--durations=0`, leave the two options out (`make test PYTEST_PARALLEL=`).
+
+The suite has a time budget as well, counted per change: the tests one pull request adds take at most 60 seconds in total without coverage. Measure them with `python -m pytest --durations=0` and state the figure in the pull request. A suite that documents its own budget is held to that budget instead; a hostile-corpus suite, for example, states how long its corpus may take, and the pull request gives that budget and the measured time. Coverage tracing makes a test about twice as slow (1.6 to 2.7 times in CI), so mark a black-box test that runs the CLI in a subprocess, a test that builds a large hostile input such as a decompression or nesting bomb, and a `scaling_ratio` test with `@pytest.mark.no_cover` when it takes more than 2 seconds: it still runs in every job, only without tracing. Never leave tests out of a CI job with `-m` or `-k`; only the dependency-floor job and Dependency health's newest-releases job leave out the `locked_only` tests, because the versions they install are not the locked ones those tests compare against.
 
 The run lists every skip with its reason. With `--strict-skips`, which CI and `make test` pass, any skip other than a host file-system difference (a case-insensitive alias that a case-sensitive file system cannot have, or a name the file system refuses) or, outside CI, a missing pip fails the run. Do not guard a required dependency with `pytest.importorskip`; import it.
 

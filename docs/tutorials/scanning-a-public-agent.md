@@ -160,7 +160,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: Hunzee-VC/Nexus-Symbiote@<reviewed-40-character-commit-sha>
+      - uses: aisecnomad/Nexus-Symbiote@<reviewed-40-character-commit-sha>
         with:
           scan-path: .
           output-file: agentbom.json
@@ -211,5 +211,5 @@ What you **do not** have, however the gate reads:
 - Read the [security model](../security-model.md) for the trust boundaries this
   tool operates on, and [runtime assurance](../runtime-assurance.md) for the
   limits of signed-snapshot evidence.
-- File issues at <https://github.com/Hunzee-VC/Nexus-Symbiote/issues> for
+- File issues at <https://github.com/aisecnomad/Nexus-Symbiote/issues> for
   collectors you need that are not listed above.
