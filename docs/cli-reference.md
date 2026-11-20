@@ -339,6 +339,7 @@ nexus-symbiote advisories [OPTIONS] AIBOM_PATH
 | `--offline-db` `PATH` | Match exact pinned PyPI/npm packages offline against an OSV JSON bundle or directory without contacting `api.osv.dev`; deduplicates alias pairs and records bundle SHA-256 provenance. A directory is read flat, and one with a subdirectory is refused, as is a bundle with no records, with an entry that is not an OSV record, or with two different records under one id. A package whose ecosystem the bundle holds no record for is an error, so the report is not complete, as is a record for the package with malformed `affected` data or an unparsable `introduced` (at most 100 such errors are listed, then a count). A `fixed`, `last_affected` or `limit` the version parser rejects is not an error: the advisory matches unless the lower bound excludes the version, the version is at or above every `limit` while all limits parse and none is `*`, or a parsable bound does and event order puts no rejected bound in the version's interval, and when no exact `versions` entry or other range decides the match it carries `range_undecidable: true` and up to 16 `undecidable_bounds` (64 characters each). Like any match it fails this command; an operator decision passed to `vex --decisions` records its triage there, and the `vex` export marks it `rangeUndecidable`. |
 | `--kev` `PATH` | Offline CISA/ENISA KEV JSON catalog used with `--offline-db` to elevate matched advisories to `critical` with source provenance (repeatable). A catalog with no entries is refused. |
 | `--epss` `PATH` | Offline EPSS CSV/JSON catalog used with `--offline-db` to attach EPSS scores and percentiles. A catalog with no entries is refused. |
+| `--max-feed-age-days` `INTEGER RANGE` | With `--offline-db`, the report is incomplete (exit 1) when the bundle's newest record, a KEV catalog's `dateReleased` or the EPSS `score_date` is missing or more than this many days old (1 to 36500; default: 30). The check cannot be turned off. |
 
 The command sends each package's ecosystem, normalized name and exact version to
 `https://api.osv.dev/v1/querybatch`, including packages resolved from a private
@@ -355,6 +356,34 @@ nothing up, so `coverage` is `none`, and it exits 1 only when a package in scope
 no exact identity or more than 500 packages would be sent. A report keeps at most
 10,000 advisories per package and 20,000 in total; beyond that, lookups end with an
 error and `coverage` is `partial`.
+
+With `--offline-db`, the answer is only as recent as the files you supply, so the
+command reads the date each feed states about itself and records it under
+`provenance`: `db_newest_record` is the newest `modified` (or, for a record without
+one, `published`) among the bundle's records, each `kev_catalogs` entry has the
+catalog's `date_released` (its `dateReleased`), and `epss_catalog` has the
+`score_date` (the `score_date:` in the CSV's leading `#` comment, or a top-level
+`score_date` in the JSON form). A date-only value counts as midnight UTC.
+`max_feed_age_days` and `feed_age_evaluated_at` (the system clock, in UTC) record
+what the dates were compared with. File modification times are never used, because a
+checkout or a copy sets them.
+
+Each feed whose date is more than `--max-feed-age-days` whole UTC days before the
+run adds one error, such as `offline advisory DB is 412 days old (newest record
+2025-10-04); limit 30`, `KEV catalog kev.json is 412 days old (dateReleased
+2025-10-04); limit 30` or `EPSS catalog epss.csv is 412 days old (score_date
+2025-10-04); limit 30`. A feed that states no date adds `... carries no ..., so its
+age is unknown`, and its provenance date is `null`; a date more than one day after
+the run adds `... is in the future`. With any of these errors `complete` is `false`
+and the command exits 1, whether or not an advisory matched. A date that is present
+but is not an RFC 3339 date or date-time (`2025-10-04`, `2025-10-04T00:00:00Z`, or
+with a numeric offset) refuses the feed: the command exits 1 without a report. No
+value turns the check off, and 0 is a usage error; to accept an old feed
+deliberately, pass a larger number, which the report records. The dates are the
+feeds' own unauthenticated statements: they detect a forgotten or outdated file, not
+one whose dates were edited, and one recent record makes a bundle count as recent
+even when the rest is old. An EPSS JSON file without a top-level `score_date`, or a
+KEV catalog without `dateReleased`, counts as undated.
 
 ### `attest`
 
