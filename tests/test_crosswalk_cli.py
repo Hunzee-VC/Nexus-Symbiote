@@ -179,7 +179,7 @@ def test_references_kept_from_the_earlier_rules_say_which_findings_they_miss(run
         '"https://agents.example.com/.well-known/agent.json"}]}',
         encoding="utf-8",
     )
-    (project / "models" / "classifier.pkl").write_bytes(b"x")
+    (project / "models" / "classifier.pkl").write_bytes(b"\x80\x04N.")
     inventory = _scan(runner, project, tmp_path / "bom.json")
     document = _json(runner, inventory, "--framework", "cwe", "--framework", "mitre-atlas-2026.10")
     findings = document["findings"]

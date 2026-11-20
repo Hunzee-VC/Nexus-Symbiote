@@ -1,0 +1,33 @@
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/self
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/infra/secret-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/artifacts/escape.onnx -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/self
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/infra/secret-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/artifacts/escape.onnx -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/self
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/infra/secret-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/artifacts/escape.onnx -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/self
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/infra/secret-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/artifacts/escape.onnx -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/self
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/infra/secret-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/artifacts/escape.onnx -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/self
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/infra/secret-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/artifacts/escape.onnx -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/self
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/infra/secret-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/artifacts/escape.onnx -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/self
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/infra/secret-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/artifacts/escape.onnx -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/self
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/infra/secret-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/artifacts/escape.onnx -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/self
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/infra/secret-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/artifacts/escape.onnx -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-ai-bom/corpus/vendor/self
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/infra/secret-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-ai-bom/corpus/artifacts/escape.onnx -> /etc/passwd

@@ -1,0 +1,757 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "High-risk MCP server filesystem exposes filesystem_access"
+          },
+          "properties": {
+            "agentbom.mcp_server": "filesystem",
+            "problem.severity": "high",
+            "security-severity": "8.0"
+          },
+          "ruleId": "mcp.high_risk_server.filesystem",
+          "ruleIndex": 0
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "High-risk MCP server github exposes secrets_env_access"
+          },
+          "properties": {
+            "agentbom.mcp_server": "github",
+            "problem.severity": "high",
+            "security-severity": "8.0"
+          },
+          "ruleId": "mcp.high_risk_server.github",
+          "ruleIndex": 1
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "High-risk MCP server postgres exposes browser_network_access, database_access, secrets_env_access"
+          },
+          "properties": {
+            "agentbom.mcp_server": "postgres",
+            "problem.severity": "high",
+            "security-severity": "8.0"
+          },
+          "ruleId": "mcp.high_risk_server.postgres",
+          "ruleIndex": 2
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "pyproject.toml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            },
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "requirements.txt",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            },
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/agent/llm.py",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "langchain reaches cloud_access with medium risk"
+          },
+          "properties": {
+            "problem.severity": "medium",
+            "security-severity": "5.0"
+          },
+          "ruleId": "reachable.cloud_access",
+          "ruleIndex": 3
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".cursor/mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            },
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            },
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "langchain reaches mcp_tool_invocation with medium risk"
+          },
+          "properties": {
+            "problem.severity": "medium",
+            "security-severity": "5.0"
+          },
+          "ruleId": "reachable.mcp_tool_invocation",
+          "ruleIndex": 4
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "repository",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "high-risk MCP server detected"
+          },
+          "properties": {
+            "problem.severity": "high",
+            "security-severity": "8.0"
+          },
+          "ruleId": "risk.high",
+          "ruleIndex": 5
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "repository",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "network, database, or cloud capability detected"
+          },
+          "properties": {
+            "problem.severity": "medium",
+            "security-severity": "5.0"
+          },
+          "ruleId": "risk.medium",
+          "ruleIndex": 6
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".env",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Possible Anthropic API key value"
+          },
+          "properties": {
+            "agentbom.secret_provider": "anthropic",
+            "problem.severity": "critical",
+            "security-severity": "9.0"
+          },
+          "ruleId": "secret_leak.anthropic.api_key",
+          "ruleIndex": 7
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".env",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 4
+                }
+              }
+            },
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".env",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 5
+                }
+              }
+            },
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".env",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 6
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Possible PINECONE_API_KEY value"
+          },
+          "properties": {
+            "agentbom.secret_provider": "generic",
+            "problem.severity": "high",
+            "security-severity": "8.0"
+          },
+          "ruleId": "secret_leak.generic.api_key",
+          "ruleIndex": 8
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".codex/config.toml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 6
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Possible JIRA_TOKEN value"
+          },
+          "properties": {
+            "agentbom.secret_provider": "generic",
+            "problem.severity": "high",
+            "security-severity": "8.0"
+          },
+          "ruleId": "secret_leak.generic.token",
+          "ruleIndex": 9
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".mcp.json",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 22
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Possible GitHub token value"
+          },
+          "properties": {
+            "agentbom.secret_provider": "github",
+            "problem.severity": "critical",
+            "security-severity": "9.0"
+          },
+          "ruleId": "secret_leak.github.token",
+          "ruleIndex": 10
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".env",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 3
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Possible HF_TOKEN value"
+          },
+          "properties": {
+            "agentbom.secret_provider": "huggingface",
+            "problem.severity": "high",
+            "security-severity": "8.0"
+          },
+          "ruleId": "secret_leak.huggingface.token",
+          "ruleIndex": 11
+        },
+        {
+          "level": "error",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".env",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 2
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "Possible OpenAI API key value"
+          },
+          "properties": {
+            "agentbom.secret_provider": "openai",
+            "problem.severity": "critical",
+            "security-severity": "9.0"
+          },
+          "ruleId": "secret_leak.openai.api_key",
+          "ruleIndex": 12
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/vlcak27/agentbom",
+          "name": "AgentBOM",
+          "rules": [
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "AgentBOM classifies MCP server risk from JSON configuration metadata such as command, package, args, transport, and env variable names."
+              },
+              "help": {
+                "text": "AgentBOM classifies MCP server risk from JSON configuration metadata such as command, package, args, transport, and env variable names.\n\nRemediation: Remove the MCP server, restrict it with policy and sandboxing, or replace it with a narrower server."
+              },
+              "id": "mcp.high_risk_server.filesystem",
+              "name": "High-risk MCP server: filesystem",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "high",
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "MCP server filesystem has high-risk tool exposure."
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "AgentBOM classifies MCP server risk from JSON configuration metadata such as command, package, args, transport, and env variable names."
+              },
+              "help": {
+                "text": "AgentBOM classifies MCP server risk from JSON configuration metadata such as command, package, args, transport, and env variable names.\n\nRemediation: Remove the MCP server, restrict it with policy and sandboxing, or replace it with a narrower server."
+              },
+              "id": "mcp.high_risk_server.github",
+              "name": "High-risk MCP server: github",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "high",
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "MCP server github has high-risk tool exposure."
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "AgentBOM classifies MCP server risk from JSON configuration metadata such as command, package, args, transport, and env variable names."
+              },
+              "help": {
+                "text": "AgentBOM classifies MCP server risk from JSON configuration metadata such as command, package, args, transport, and env variable names.\n\nRemediation: Remove the MCP server, restrict it with policy and sandboxing, or replace it with a narrower server."
+              },
+              "id": "mcp.high_risk_server.postgres",
+              "name": "High-risk MCP server: postgres",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "high",
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "MCP server postgres has high-risk tool exposure."
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "fullDescription": {
+                "text": "Reachability findings connect detected models, frameworks, or tool configuration to sensitive capabilities using deterministic static evidence."
+              },
+              "help": {
+                "text": "Reachability findings connect detected models, frameworks, or tool configuration to sensitive capabilities using deterministic static evidence.\n\nRemediation: Constrain or remove the reachable capability, isolate it behind an explicit approval or sandbox boundary, and document expected use in repository policy."
+              },
+              "id": "reachable.cloud_access",
+              "name": "Reachable capability: cloud_access",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "medium",
+                "security-severity": "5.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "An agent actor appears able to reach cloud_access."
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "fullDescription": {
+                "text": "Reachability findings connect detected models, frameworks, or tool configuration to sensitive capabilities using deterministic static evidence."
+              },
+              "help": {
+                "text": "Reachability findings connect detected models, frameworks, or tool configuration to sensitive capabilities using deterministic static evidence.\n\nRemediation: Constrain or remove the reachable capability, isolate it behind an explicit approval or sandbox boundary, and document expected use in repository policy."
+              },
+              "id": "reachable.mcp_tool_invocation",
+              "name": "Reachable capability: mcp_tool_invocation",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "medium",
+                "security-severity": "5.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "An agent actor appears able to reach mcp_tool_invocation."
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "AgentBOM emits aggregate risk findings when static analysis detects repository-level patterns that require security review."
+              },
+              "help": {
+                "text": "AgentBOM emits aggregate risk findings when static analysis detects repository-level patterns that require security review.\n\nRemediation: Review the detailed AgentBOM JSON and Markdown output, then reduce exposed agent capabilities or document compensating controls."
+              },
+              "id": "risk.high",
+              "name": "High aggregate risk",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "high",
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "high-risk MCP server detected"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "fullDescription": {
+                "text": "AgentBOM emits aggregate risk findings when static analysis detects repository-level patterns that require security review."
+              },
+              "help": {
+                "text": "AgentBOM emits aggregate risk findings when static analysis detects repository-level patterns that require security review.\n\nRemediation: Review the detailed AgentBOM JSON and Markdown output, then reduce exposed agent capabilities or document compensating controls."
+              },
+              "id": "risk.medium",
+              "name": "Medium aggregate risk",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "medium",
+                "security-severity": "5.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "network, database, or cloud capability detected"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "AgentBOM detected a likely AI/API credential value with deterministic offline pattern matching. The value is redacted from all outputs."
+              },
+              "help": {
+                "text": "AgentBOM detected a likely AI/API credential value with deterministic offline pattern matching. The value is redacted from all outputs.\n\nRemediation: Value redacted. Remove the key and rotate it."
+              },
+              "id": "secret_leak.anthropic.api_key",
+              "name": "Possible Anthropic API key value",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "critical",
+                "security-severity": "9.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "Possible Anthropic API key value"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "AgentBOM detected a likely AI/API credential value with deterministic offline pattern matching. The value is redacted from all outputs."
+              },
+              "help": {
+                "text": "AgentBOM detected a likely AI/API credential value with deterministic offline pattern matching. The value is redacted from all outputs.\n\nRemediation: Value redacted. Remove the key and rotate it."
+              },
+              "id": "secret_leak.generic.api_key",
+              "name": "Possible PINECONE_API_KEY value",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "high",
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "Possible PINECONE_API_KEY value"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "AgentBOM detected a likely AI/API credential value with deterministic offline pattern matching. The value is redacted from all outputs."
+              },
+              "help": {
+                "text": "AgentBOM detected a likely AI/API credential value with deterministic offline pattern matching. The value is redacted from all outputs.\n\nRemediation: Value redacted. Remove the key and rotate it."
+              },
+              "id": "secret_leak.generic.token",
+              "name": "Possible JIRA_TOKEN value",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "high",
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "Possible JIRA_TOKEN value"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "AgentBOM detected a likely AI/API credential value with deterministic offline pattern matching. The value is redacted from all outputs."
+              },
+              "help": {
+                "text": "AgentBOM detected a likely AI/API credential value with deterministic offline pattern matching. The value is redacted from all outputs.\n\nRemediation: Value redacted. Remove the key and rotate it."
+              },
+              "id": "secret_leak.github.token",
+              "name": "Possible GitHub token value",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "critical",
+                "security-severity": "9.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "Possible GitHub token value"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "AgentBOM detected a likely AI/API credential value with deterministic offline pattern matching. The value is redacted from all outputs."
+              },
+              "help": {
+                "text": "AgentBOM detected a likely AI/API credential value with deterministic offline pattern matching. The value is redacted from all outputs.\n\nRemediation: Value redacted. Remove the key and rotate it."
+              },
+              "id": "secret_leak.huggingface.token",
+              "name": "Possible HF_TOKEN value",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "high",
+                "security-severity": "8.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "Possible HF_TOKEN value"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "AgentBOM detected a likely AI/API credential value with deterministic offline pattern matching. The value is redacted from all outputs."
+              },
+              "help": {
+                "text": "AgentBOM detected a likely AI/API credential value with deterministic offline pattern matching. The value is redacted from all outputs.\n\nRemediation: Value redacted. Remove the key and rotate it."
+              },
+              "id": "secret_leak.openai.api_key",
+              "name": "Possible OpenAI API key value",
+              "properties": {
+                "precision": "medium",
+                "problem.severity": "critical",
+                "security-severity": "9.0",
+                "tags": [
+                  "security",
+                  "ai-agent",
+                  "attack-surface"
+                ]
+              },
+              "shortDescription": {
+                "text": "Possible OpenAI API key value"
+              }
+            }
+          ],
+          "semanticVersion": "0.8.0"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

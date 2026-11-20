@@ -2156,7 +2156,7 @@ work, script, digest, marker, abandon = Path(sys.argv[1]), sys.argv[2], sys.argv
 staged = pinned_process.stage_pinned_executable(script, digest, work)
 with pinned_process.isolation_off():
     proc = pinned_process.spawn_pinned(staged, work)
-while not os.path.exists(marker):
+while not (os.path.exists(marker) and os.path.exists(marker + ".go")):
     time.sleep(0.01)
 if abandon == "close":
     os.close(pinned_process._OPT_OUT[proc.pid][2])
@@ -2201,6 +2201,10 @@ os.kill(os.getpid(), 9)
         wrapper = pinned_process._parent(launcher)
         assert wrapper is not None
         tree = {wrapper, *pinned_process._descendant_pids(wrapper)}
+        # The host stops the tree only once the test holds every pid: without this
+        # hand-off a slow runner reads the launcher's parent after the host has
+        # already ended it.
+        marker.with_suffix(".go").touch()
         if abandon == "kill-while-stopped":
             host.wait(timeout=15)
         for pid in tree:

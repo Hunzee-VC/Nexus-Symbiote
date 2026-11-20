@@ -127,6 +127,61 @@ Without `NEXUS_SYMBIOTE_SOURCE_BINDING_KEY`, a server that declares one carries 
 launch values are unbound for it, even between identical inventories. Set the key
 on both collections to compare those values, or review and accept the alert.
 
+## Pickle-family inspection evidence
+
+A pickle-family file (`.pkl`, `.pt`, `.bin` and the other names listed in
+[model integrity](model-integrity.md#model-files-and-references)) is rated by its
+inspected content, and `properties.format_inspection` names what was recognized,
+where it named the loader before. So `diff` against an inventory collected before
+the upgrade reports every pickle-family file once as modified: at medium,
+`properties.format_inspection changed`, for a file that keeps its rating, as a
+recognized pickle does; at high for a file whose rating moved from
+`unsafe-code-execution` to `unknown`, with the critical `serialization_format`
+finding removed and the high `serialization_format_unknown` finding added, as a
+zero-filled `embeddings.bin` does. `validate --project` against such an inventory
+reports each of those files as a missing or mismatched local component and fails.
+Recollect and review the baseline once after upgrading.
+
+## Source MCP server names
+
+An MCP server collected from source is named by the literal name its constructor
+declares, `new McpServer({ name: "analytics-mcp" })` or `FastMCP("analytics-mcp")`,
+instead of the variable it is bound to; the variable is kept in the `binding`
+property. A TypeScript or JavaScript server's reference carries that name, so for
+a server with a literal name both the reference and the references of its tools
+change once: `mcp-source:src%2Fserver.ts:server:2:84` becomes
+`mcp-source:src%2Fserver.ts:analytics-mcp:2:84`, and `diff` against an earlier
+baseline reports the server and its tools as removed and added, with a high alert
+for each removal and a medium alert for each addition. The repository agent lists
+the old tool references, so it is reported as modified with a high
+`tool_refs changed` alert, and its `configured-with` relationships to the server
+and its tools and the server's `provides-tool` relationships are reported as
+removed and added. A Python server keeps its `mcp-python:<path>:<variable>`
+reference, so `diff` reports it as modified once, with `properties.binding added`
+and `name changed`. A server whose name is computed keeps its name and reference,
+and `diff` reports it as modified once, with a medium alert for
+`properties.binding added`. Recollect and review the baseline once after upgrading.
+
+Every source server gains the `binding` property, so an inventory written before
+this change no longer matches a fresh collection of its project, whether its source
+servers declare a literal or a computed name, in TypeScript, JavaScript or Python.
+Recollect it before checking it against the project: `validate <inventory> --project .`
+exits 1 with `Validation: FAILED` and an error such as
+`Missing or mismatched local component from MCP inventory: mcp-source:src%2Fserver.ts:analytics-mcp:2:84`,
+and `risk <inventory> --project .` exits 1 with
+`Risk unknown. Project reconciliation failed.` followed by the same mismatch.
+A server with a literal name is also listed as
+`Supplied component has no matching local evidence` under its earlier reference.
+
+One alert is lower than before. Renaming the variable of a TypeScript server with a
+literal name and no tools, without moving its constructor, removed one server and
+added another, with a high alert for the removal and a high
+`repository: tool_refs changed` alert; the reference now keeps the name, so `diff`
+reports a medium `properties.binding changed` alert instead. A new variable of
+another length moves the constructor, and its offset in the reference, so that
+rename still raises both high alerts. A server with tools still raises a high
+alert, for the changed registration digests of its tools.
+
 ## SARIF rule identifiers
 
 0.1.0 keyed SARIF rules by category (`nexus_symbiote/<category>`) and raised a
@@ -235,6 +290,16 @@ do not certify semantic equivalence or admission authority.
 
 Static MCP configuration source binding is a separate versioned contract. See
 [source reconciliation and snapshot migration](verification-source-binding.md).
+
+## Documentation links in findings
+
+Model-integrity findings carry a link to `docs/model-integrity.md` in the repository that
+publishes this tool. When the repository's canonical owner changed to the aisecnomad account
+(CHANGELOG, Unreleased), that link changed with it, so an inventory that holds a model-integrity
+finding has a different content digest and serial number from the one the previous owner's build
+wrote. The components, findings and relationships are otherwise the same. Re-baseline once; a
+`diff --fail-on-alert` against an older baseline reports the changed recommendation text on each
+such finding and nothing else.
 
 ## Upgrade attribution (`--expect-upgrade`)
 

@@ -1,0 +1,18 @@
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-alt/corpus/config/secrets-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-alt/corpus/models/escape.gguf -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-alt/corpus/vendor/loop
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-alt/corpus/config/secrets-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-alt/corpus/models/escape.gguf -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-alt/corpus/vendor/loop
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-alt/corpus/config/secrets-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-alt/corpus/models/escape.gguf -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-alt/corpus/vendor/loop
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-alt/corpus/config/secrets-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-alt/corpus/models/escape.gguf -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-alt/corpus/vendor/loop
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-alt/corpus/config/secrets-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-alt/corpus/models/escape.gguf -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-alt/corpus/vendor/loop
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-alt/corpus/config/secrets-link -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink outside root: /aibom-run/work/trusera-alt/corpus/models/escape.gguf -> /etc/passwd
+WARNING:ai_bom.scanners.base:Skipping symlink cycle at: /aibom-run/work/trusera-alt/corpus/vendor/loop
