@@ -25,6 +25,7 @@ from nexus_symbiote.core.models import (
 from nexus_symbiote.policy import PolicyError, parse_yaml_mapping
 from nexus_symbiote.scanners.credential_files import credential_gap, credential_shaped
 from nexus_symbiote.utils.confined import ConfinedCollection
+from nexus_symbiote.utils.jsonc import strip_jsonc
 from nexus_symbiote.utils.secrets import redact_text
 from nexus_symbiote.utils.terminal import neutralize
 
@@ -72,6 +73,7 @@ HOOK_CONFIG_FILES = _tup(
 MCP_CONFIG_FILES = _tup(
     ".mcp.json mcp.json .cursor/mcp.json .vscode/mcp.json .claude/settings.json"
 )
+JSONC_FILES = _tup(".vscode/mcp.json")
 PERMISSION_CONFIG_FILES = _tup(".claude/settings.json .claude/settings.local.json .cursor/cli.json")
 _SUMMARY_KEYS = _tup(
     "hook_targets skill_preambles launcher_targets hosted_tools ci_agents framework_agents "
@@ -109,10 +111,10 @@ def _clean(val: Any) -> str:
 def _origin_only(url_text: str) -> str:
     try:
         parsed = urlsplit(url_text.strip())
+        port_part = f":{parsed.port}" if parsed.port else ""
     except ValueError:
         return ""
     if parsed.scheme in {"http", "https"} and parsed.hostname:
-        port_part = f":{parsed.port}" if parsed.port else ""
         return f"{parsed.scheme}://{parsed.hostname}{port_part}"
     return ""
 
@@ -150,8 +152,8 @@ def _load_json_docs(
         if text is None:
             continue
         try:
-            parsed = parse_json_strict(text)
-        except ValueError as exc:
+            parsed = parse_json_strict(strip_jsonc(text) if rel_path in JSONC_FILES else text)
+        except (ValueError, RecursionError) as exc:
             gaps.append(f"{rel_path}: invalid JSON ({neutralize(str(exc))})")
             continue
         if isinstance(parsed, dict):
@@ -243,7 +245,7 @@ class ControlPlaneAuditSummary:
             _rec(
                 category=category,
                 severity=severity.value,
-                description=neutralize(description),
+                description=_clean(description),
                 file_path=file_path,
                 component_name=component_name,
             )
@@ -319,6 +321,7 @@ class ControlPlaneAuditSummary:
 
     def to_dict(self) -> dict[str, Any]:
         out = {k: getattr(self, k) for k in _SUMMARY_KEYS}
+        out["gaps"] = [_clean(g) for g in self.gaps]
         out["security_flags"] = self.findings
         out["relationships"] = [
             _rec(
@@ -346,7 +349,6 @@ def _bind_script_target(
     raw = _read_confined_bytes(files, target_path, summary.gaps)
     if raw is None:
         if len(summary.gaps) == before_gaps:
-            summary.gaps.append(f"{target_path}: referenced {role} target not found")
             summary.flag(
                 "hook_target_missing",
                 RiskSeverity.MEDIUM,
@@ -565,13 +567,10 @@ def _inspect_mcp_launchers_and_bridges(
                                     srv_ref, f"mcp-server:{sub_name}", "delegates-to", norm_cfg
                                 )
                     if not proxied:
-                        summary.gaps.append(
-                            f"{cfg_path}: bridge '{srv_name}' references unresolved config '{neutralize(config_arg)}'"
-                        )
                         summary.flag(
                             "proxied_servers_unresolved",
                             RiskSeverity.MEDIUM,
-                            f"MCP bridge '{srv_name}' config '{neutralize(config_arg)}' could not be resolved inside project.",
+                            f"MCP bridge '{srv_name}' config '{config_arg}' could not be resolved inside project.",
                             cfg_path,
                             srv_name,
                         )
@@ -610,7 +609,7 @@ def _inspect_mcp_launchers_and_bridges(
                 )
                 if resolved_ver:
                     props["version_assurance"] = "reported"
-                clean_ep = (_origin_only(endpoint_url) if endpoint_url else None) or endpoint_url
+                clean_ep = endpoint_url and (_origin_only(endpoint_url) or _clean(endpoint_url))
                 summary.add_mcp(
                     srv_name,
                     cfg_path,
@@ -626,7 +625,7 @@ def _inspect_mcp_launchers_and_bridges(
                         server_name=srv_name,
                         endpoint_url=clean_ep,
                         transport="stdio-bridged",
-                        config_path=config_arg,
+                        config_path=config_arg and _clean(config_arg),
                         source_file=cfg_path,
                         **props,
                     )

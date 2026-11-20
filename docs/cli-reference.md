@@ -1085,5 +1085,5 @@ nexus-symbiote audit-control-plane [OPTIONS] [PROJECT_PATH]
 | `--compromised-ref` `TEXT` | Component reference (`tool:exec` or `mcp-server:fs`) to compute reachable identities. |
 | `-o`, `--output` `PATH` | Write JSON audit report to a file path. |
 | `--json-output` | Emit JSON audit summary to standard output. |
-| `--fail-on-severity` `critical\|high\|medium\|low\|none` | Exit 1 when a finding or reach-rated diff alert meets or exceeds this severity (`critical` by default). |
+| `--fail-on-severity` `critical\|high\|medium\|low\|none` | Exit 1 when a finding or reach-rated diff alert meets or exceeds this severity, or when an input could not be read or parsed (`critical` by default). Unread inputs are printed as `[INCOMPLETE]` lines; `none` never fails. |
 

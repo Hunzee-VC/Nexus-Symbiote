@@ -65,7 +65,8 @@ def register_control_plane_commands(main: click.Group) -> None:
         type=click.Choice(["critical", "high", "medium", "low", "none"], case_sensitive=False),
         default="critical",
         show_default=True,
-        help="Exit 1 when a finding or reach-rated diff alert meets or exceeds this severity.",
+        help="Exit 1 when a finding or reach-rated diff alert meets or exceeds this severity, "
+        "or when an input could not be read or parsed.",
     )
     def audit_control_plane_cmd(
         project_path: Path,
@@ -110,6 +111,8 @@ def register_control_plane_commands(main: click.Group) -> None:
                 echo_line(
                     f"  [ALERT:{al['severity'].upper()}:{al['reachability_tier']}] {al['root_cause']} -> {targets}"
                 )
+            for gap in payload["gaps"]:
+                echo_line("  [INCOMPLETE] ", gap)
 
         cutoff_key = fail_on_severity.lower()
         if cutoff_key != "none":
@@ -117,5 +120,6 @@ def register_control_plane_commands(main: click.Group) -> None:
             triggered = any(
                 _SEV_ORDER.get(f["severity"], 0) >= threshold for f in summary.findings
             ) or any(_SEV_ORDER.get(a["severity"], 0) >= threshold for a in summary.reach_alerts)
-            if triggered:
+            # What could not be read or parsed may hide a finding, so it fails closed.
+            if triggered or payload["gaps"]:
                 raise click.exceptions.Exit(1)
