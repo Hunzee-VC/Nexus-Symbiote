@@ -210,10 +210,10 @@ as described below.
    bundles=(release-assets/distribution-attestation/*)   # the run retains exactly one
    gh attestation verify \
      release-assets/release-distributions/nexus_symbiote-<version>-py3-none-any.whl \
-     --repo Hunzee-VC/Nexus-Symbiote \
+     --repo aisecnomad/Nexus-Symbiote \
      --bundle "${bundles[0]}" \
      --custom-trusted-root trusted_root.jsonl \
-     --signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml \
+     --signer-workflow aisecnomad/Nexus-Symbiote/.github/workflows/release.yml \
      --source-ref refs/heads/main --source-digest <release commit SHA> \
      --deny-self-hosted-runners
    ```

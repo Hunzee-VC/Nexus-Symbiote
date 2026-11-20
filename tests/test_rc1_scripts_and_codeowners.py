@@ -583,6 +583,14 @@ def test_documented_attestation_commands_name_the_repository_and_real_checksum_p
             assert " --repo " in command or " --owner " in command, command
     assert "sha256sum -c SHA256SUMS" not in text
     assert "gh attestation trusted-root" in text
+    # Every documented verification names the owner the release workflow runs under now.
+    owners = {
+        word.split("/", 1)[0]
+        for command in commands
+        for flag, word in zip(command.split(), command.split()[1:], strict=False)
+        if flag in ("--repo", "--signer-workflow")
+    }
+    assert owners == {"aisecnomad"}, owners
 
 
 def test_staged_policy_refuses_a_trusted_key_inside_the_checkout(
