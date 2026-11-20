@@ -5,7 +5,7 @@ and what to do about each limit. For how findings are classified, such as when a
 `.bin` file is critical or which characters count as hidden, see
 [known false-positive and false-negative classes](security-model.md#known-false-positive-and-false-negative-classes).
 The list that shipped with 0.1.0 is in
-[its security policy](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/v0.1.0/SECURITY.md#known-limitations-in-010).
+[its security policy](https://github.com/aisecnomad/Nexus-Symbiote/blob/v0.1.0/SECURITY.md#known-limitations-in-010).
 
 For the collectors, each limit has one of three effects on a gate:
 
@@ -109,6 +109,17 @@ A way around a limit that its entry does not describe is worth a
   project, and the answer would hold only on the machine that scans, not on one
   that later opens the checkout. Replace the link with the file, or with a relative
   link inside the project.
+- **A repeated failure is reported once, by its exact text.** The inventory keeps
+  one record per collector, so one escaping link is six identical
+  `metadata.completeness.scan_failures` entries. `scan`, and the GitHub Action log
+  that relays it, prints it once and names the collectors that recorded it. `risk`,
+  `validate` and the `graph` view read only the inventory, which does not say which
+  collector recorded a failure, so they end the line in `(recorded N times)` and
+  name the collectors that are not complete in a separate coverage gap. Failures are
+  grouped by their exact text: two collectors that word one cause differently stay
+  two lines, and a recorded failure whose own text ends in `(recorded 2 times)` reads
+  like a grouped one. The Action's summary counts distinct failures and, when they
+  differ, the records.
 - **Hard links are ordinary files.** A hard-linked file inside the root is read like
   any other, so an inventory can describe a file that also has a name outside the
   root. See [security boundaries](../SECURITY.md#security-boundaries).
@@ -433,6 +444,11 @@ A way around a limit that its entry does not describe is worth a
   `pydantic_ai.mcp`, a client base class there, is not a gap. So a
   server built from a class a project module re-exports is a gap on the file that
   builds it, even when the re-exporting module's own server is inventoried.
+  A server whose declared name is computed, such as an f-string or a variable, or
+  outside the [supported form](collectors.md#mcp-servers-declared-in-source) is
+  named by its variable without a gap, so its inventory name can differ from the
+  name clients see. A store to the name after construction, such as
+  `mcp.name = ...` or `setattr(mcp, "name", ...)`, is not followed either.
   A `tool` decorator with a positional argument, or a keyword other than `name`,
   `title`, `description`, `tags`, `annotations`, `output_schema`, `exclude_args`,
   `meta`, `structured_output`, `icons`, `enabled`, `version`, `app`, `task`,
@@ -627,7 +643,30 @@ A way around a limit that its entry does not describe is worth a
   literal `tool` or `registerTool` call, such as `server.server`, a wrapped
   `registerTool` or the server passed to code in a file that does not name the SDK,
   which can register tools the inventory does not show; and servers built with
-  other frameworks.
+  other frameworks. A server whose declared name is computed, such as a template
+  literal with a substitution or a variable, or outside the
+  [supported form](collectors.md#mcp-servers-declared-in-source) is named by its
+  variable without a gap, so its inventory name can differ from the name clients see.
+  So can a literal name the analysis records: a store to the name after
+  construction, such as `server.name = ...` or `Object.assign(server, { name })`, is
+  not followed, nor is a `toJSON` method that a spread before the `name` entry
+  supplies, such as `{ ...defaults, name: "notes" }`. A method, getter, setter,
+  computed key that is not a string literal, `toJSON` or `__proto__` entry written
+  in the options object itself does keep the variable as the name.
+- **A configuration file not read whole keeps every source server's variable.**
+  A server name declared in source must not hold a value the scan read from an MCP
+  configuration file or from Claude Code or Cursor settings
+  ([MCP servers declared in source](collectors.md#mcp-servers-declared-in-source)).
+  When one of those files holds more than 131,072 values, each map and list counted
+  as one, or a Claude Code or Cursor settings file is not valid UTF-8 JSON with
+  comments or cannot be read, every TypeScript, JavaScript and Python server in the
+  project is named by its variable, without a gap of its own. An `env`, header or
+  query parameter value shorter than 8 characters whose name does not mark a
+  credential, such as `DEBUG=1`, is not compared, so a declared name can repeat it. A
+  credential shape glued to other text in the literal, such as `prod-sk-ant-...` or
+  `1ghp_...`, keeps the variable; a value with no shape the scrubber knows, such as a
+  32-character hexadecimal string, is kept as the name unless the scan read it from a
+  configuration file.
 - **Some directories are skipped.** Server source under directories named `build`,
   `dist`, `test`, `tests`, `docs`, `benchmarks` or `examples`, and `__tests__` for
   TypeScript and JavaScript, is skipped without a gap, and so are TypeScript
@@ -1810,6 +1849,11 @@ A way around a limit that its entry does not describe is worth a
 - **Native inventories are limited to 16 MiB.** A larger inventory, such as one with
   100,000 MCP tools, is not written: `scan` exits 1 with `Error: Inventory not
   written. The inventory exceeds the 16 MiB limit that native readers accept.`
+  A TypeScript server's declared name is written in its name, its reference, each
+  relationship to it and each of its tools' references, so long names reach the
+  limit sooner than variables did: 15,000 constructors with 128-character names in
+  30 files, an inventory of about 13 MB when servers were named by their variables,
+  is now not written.
 - **Validation work is bounded.** `validate --project` reads each artifact once per
   run and charges every read, including model inspection and signature bundles, to
   six times the `model-total-bytes` limit (1.5 TiB by default). What does not fit is

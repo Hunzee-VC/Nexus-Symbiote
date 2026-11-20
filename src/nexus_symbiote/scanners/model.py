@@ -295,7 +295,7 @@ _HUB_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}(?:/[A-Za-z0-9][A-Za-z0-9.
 _CONFIG_STRING_FIELDS = ("peft_type", "quantization_method", "quant_method")
 SIGSTORE_METHOD = "sigstore-message-signature"
 DIGEST_PIN_METHOD = "digest-pin"
-DOCUMENTATION = "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/model-integrity.md"
+DOCUMENTATION = "https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/model-integrity.md"
 UNUSED_ENTRY = "signature policy entry names no collected model weight file"
 REPORT_ENTRY_KIND = (
     "the ShadowScan report needs a sigstore-message-signature entry; "
