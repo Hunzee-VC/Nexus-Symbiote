@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -228,6 +229,97 @@ def test_locked_only_tests_are_registered_and_left_out_only_at_the_floors(suite)
         assert pytest_runs(job) and not any(selects.search(run) for run in pytest_runs(job))
 
 
+PARALLEL = "-n auto --dist worksteal"
+
+
+def test_ci_and_make_run_the_suite_with_the_same_parallel_options():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
+    for job in ("test", "floor", "coverage"):
+        runs = [s["run"] for s in workflow["jobs"][job]["steps"] if "pytest" in s.get("run", "")]
+        assert len(runs) == 1 and runs[0].count(f"python -m pytest {PARALLEL} ") == 1
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert f"\nPYTEST_PARALLEL = {PARALLEL}\n" in makefile
+    recipes = [line for line in makefile.splitlines() if " -m pytest " in line]
+    assert len(recipes) == 4
+    assert all(" -m pytest $(PYTEST_PARALLEL) " in line for line in recipes)
+
+
+def test_the_time_limit_and_the_isolation_hold_in_a_parallel_worker(suite, monkeypatch):
+    suite.makepyfile(
+        """
+        import os
+        import socket
+        import time
+        from pathlib import Path
+
+        import pytest
+
+        @pytest.mark.timeout(0.5)
+        def test_hangs():
+            time.sleep(30)
+
+        def test_runs_in_a_worker_with_the_configured_limit(request):
+            assert os.environ["PYTEST_XDIST_WORKER"].startswith("gw")
+            assert request.config.getini("test_timeout") == "7"
+
+        def test_isolated():
+            assert "GH_TOKEN" not in os.environ
+            home = Path(os.environ["HOME"])
+            assert home.is_dir() and Path(os.environ["TMPDIR"]).parent == home
+            with pytest.raises(OSError, match="test suite blocked outbound non-loopback"):
+                socket.create_connection(("192.0.2.1", 443), 0.01)
+        """
+    )
+    monkeypatch.setenv("GH_TOKEN", "ambient-value")
+    result = suite.runpytest_subprocess("-p", "no:cacheprovider", "-n", "2", "-o", "test_timeout=7")
+    result.assert_outcomes(passed=2, failed=1)
+    result.stdout.fnmatch_lines(["*time.sleep(30)*", "*0.5-second time limit*"])
+
+
+def test_a_skip_in_a_parallel_worker_fails_a_strict_run(suite):
+    suite.makepyfile(
+        test_runs="def test_runs():\n    pass\n",
+        test_skips="import pytest\ndef test_skips():\n    pytest.skip('quarantined')\n",
+        test_optional=(
+            "import pytest\n"
+            "pytest.importorskip('a_module_that_is_not_installed')\n"
+            "def test_never_runs():\n    pass\n"
+        ),
+    )
+    result = suite.runpytest_subprocess("-p", "no:cacheprovider", "-n", "2", "--strict-skips")
+    assert result.ret == pytest.ExitCode.TESTS_FAILED
+    for line in ("*test_skips: quarantined", "*a_module_that_is_not_installed*"):
+        result.stdout.fnmatch_lines([f"UNEXPECTED: {line}"])
+    result.stdout.fnmatch_lines(["--strict-skips: unexpected skips fail this run"])
+    assert suite.runpytest_subprocess("-p", "no:cacheprovider", "-n", "2").ret == 0
+
+
+def test_a_no_cover_test_runs_untraced_in_a_parallel_worker(suite, monkeypatch):
+    suite.makepyfile(
+        """
+        import os
+
+        import coverage
+        import pytest
+
+        @pytest.mark.no_cover
+        def test_untraced():
+            assert os.environ["PYTEST_XDIST_WORKER"].startswith("gw")
+            assert coverage.Coverage.current() is None
+
+        def test_traced():
+            assert coverage.Coverage.current() is not None
+        """
+    )
+    # Under the coverage job this process is traced too, and a child that inherited these
+    # would start a collector of its own beneath the one this test is about.
+    for name in [n for n in os.environ if n.startswith(("COV_CORE_", "COVERAGE_"))]:
+        monkeypatch.delenv(name)
+    options = ("--cov=nexus_symbiote", "--cov-report=")
+    result = suite.runpytest_subprocess("-p", "no:cacheprovider", "-n", "2", *options)
+    result.assert_outcomes(passed=2)
+
+
 def test_every_subprocess_a_test_starts_has_its_own_timeout():
     """A hung child process must fail its test, not use up the CI job's time budget."""
     untimed = []
@@ -252,13 +344,16 @@ def test_the_scaling_check_tells_linear_from_quadratic_work():
         sum(range(2_000_000 * scale))
 
     def quadratic(scale):
-        n = 1_000 * scale
+        n = 2_000 * scale
         for _ in range(n):
             for _ in range(n):
                 pass
 
+    # Under pytest-xdist the other workers share the runner's cores, and a sample of a few
+    # milliseconds catches their load unevenly: two samples of a 1,000-square loop once
+    # measured 9.9 for a 16. Longer and more samples average it out.
     assert scaling_ratio(linear) < 10
-    assert scaling_ratio(quadratic) > 10
+    assert scaling_ratio(quadratic, repeats=3) > 10
 
 
 def test_a_ratio_skewed_by_a_burst_of_load_is_measured_once_more(monkeypatch):
