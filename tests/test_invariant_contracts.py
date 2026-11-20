@@ -327,7 +327,8 @@ def test_governance_gate_reporting_contract_matches_each_surface(tmp_path: Path)
     project = tmp_path / "project"
     project.mkdir()
     for index in range(count):
-        (project / f"w{index:02d}.pth").write_bytes(b"x")
+        # A pickle that imports a callable: a pickle-family name alone is not critical.
+        (project / f"w{index:02d}.pth").write_bytes(b"cos\nsystem\n(S'id'\ntR.")
     empty = tmp_path / "empty"
     empty.mkdir()
     (empty / ".mcp.json").write_text(json.dumps({"mcpServers": {}}), encoding="utf-8")
