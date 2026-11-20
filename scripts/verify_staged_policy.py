@@ -276,7 +276,7 @@ def run_staged_gate(
                 attestation.parse_envelope(raw_env),
                 raw_policy,
                 trusted_keys=ring,
-                purpose=cast("attestation.Purpose", POLICY_PURPOSE),
+                purpose=POLICY_PURPOSE,
                 threshold=1,
                 match="bytes",
                 max_age=timedelta(days=max_age_days) if max_age_days else None,
