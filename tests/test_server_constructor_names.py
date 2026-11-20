@@ -839,3 +839,77 @@ def test_an_earlier_inventory_of_a_source_server_fails_project_reconciliation(
     assert risked.exit_code == 1
     assert risked.output.startswith("Risk unknown. Project reconciliation failed.\n")
     assert mismatch in risked.output
+
+
+# The client files #256 reads, each holding a value the inventory never shows: under a
+# variable name that marks no credential, and under one that does in an entry the
+# collector drops. A literal name equal to either must not be published.
+_CONTINUE_SERVER = "    command: node\n    args: [n.js]\n    env:\n"
+WITHHELD_IN_CLIENT_DIALECTS = {
+    "opencode-environment-plain-name": {
+        "opencode.json": json.dumps(
+            {
+                "mcp": {
+                    "notes": {
+                        "type": "local",
+                        "command": ["node", "n.js"],
+                        "environment": {"TENANT": CONFIGURED},
+                    }
+                }
+            }
+        )
+    },
+    "zed-env-plain-name": {
+        ".zed/settings.json": json.dumps(
+            {
+                "context_servers": {
+                    "notes": {
+                        "command": {"path": "node", "args": ["n.js"], "env": {"TENANT": CONFIGURED}}
+                    }
+                }
+            }
+        )
+    },
+    "junie-env-plain-name": {
+        ".junie/mcp/mcp.json": json.dumps(
+            {
+                "mcpServers": {
+                    "notes": {"command": "node", "args": ["n.js"], "env": {"TENANT": CONFIGURED}}
+                }
+            }
+        )
+    },
+    "continue-env-plain-name": {
+        ".continue/config.yaml": "mcpServers:\n  - name: notes\n"
+        + _CONTINUE_SERVER
+        + f"      TENANT: {CONFIGURED}\n"
+    },
+    "continue-dropped-duplicate-entry": {
+        ".continue/config.yaml": "mcpServers:\n  - name: notes\n"
+        + _CONTINUE_SERVER
+        + "      DEBUG: '1'\n  - name: notes\n"
+        + _CONTINUE_SERVER
+        + f"      API_TOKEN: {CONFIGURED}\n"
+    },
+}
+
+
+@pytest.mark.parametrize("language", sorted(SECRET_SOURCES))
+@pytest.mark.parametrize(
+    "files", list(WITHHELD_IN_CLIENT_DIALECTS.values()), ids=list(WITHHELD_IN_CLIENT_DIALECTS)
+)
+def test_a_value_of_a_client_dialect_never_becomes_a_server_name(tmp_path, language, files):
+    relative, source, binding = SECRET_SOURCES[language]
+    text, names = _native(tmp_path, {**files, relative: source(f"notes-{CONFIGURED}")})
+    assert binding in names
+    assert text.count(CONFIGURED) == 0
+
+
+def test_an_opencode_file_refused_for_a_substitution_keeps_every_binding(tmp_path):
+    # opencode substitutes in the raw text, so a reference in a key can change any value;
+    # the file is parsed but not read, and its values are unknown.
+    refused = '{"mcp": {"{env:NAME}": {"type": "local", "command": ["node", "n.js"]}}}'
+    source = TS_IMPORT + 'const server = new McpServer({ name: "analytics-mcp" });\n'
+    result = _scan(tmp_path, {"opencode.json": refused, "src/server.ts": source})
+    assert any("opencode substitution outside one string value" in f for f in result.scan_failures)
+    assert [server.name for server in _servers(result)] == ["server"]
