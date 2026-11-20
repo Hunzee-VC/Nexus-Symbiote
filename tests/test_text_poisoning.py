@@ -836,6 +836,10 @@ def test_a_surface_the_rules_cannot_process_is_a_recorded_failure(
     failures: list[str] = []
     apply_text_poisoning_rules(AIBOM(components=[prompt]), tmp_path, failures=failures)
     assert failures == ["CLAUDE.md: text-poisoning rules could not be applied (UnicodeEncodeError)"]
+    described = PromptComponent(bom_ref="prompt:d", name="d", description="Be helpful.")
+    failures = []
+    apply_text_poisoning_rules(AIBOM(components=[described]), failures=failures)
+    assert failures == ["prompt:d: text-poisoning rules could not be applied (UnicodeEncodeError)"]
 
 
 def test_json_findings_belong_to_the_tool_that_declares_them(tmp_path: Path) -> None:
