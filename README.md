@@ -134,7 +134,7 @@ An agent's behavior depends on its configuration as much as its code — MCP ser
 | Tool rug pulls | Fingerprints the tools a [live observation](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/offline-and-live-modes.md#detect-drift-on-a-remote-mcp-server) records, so a changed definition is a critical drift alert; a static scan records declared tools by name and file digest |
 | Endpoint repointing, scope widening | Critical or high drift alert when an MCP or A2A endpoint moves host, or an A2A card's OAuth scopes grow |
 | Executable or unsigned model files | Classifies formats without loading them and validates SafeTensors headers; integrity stays `UNKNOWN` until your [signer policy](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/model-integrity.md#operator-signature-policy) verifies the weights |
-| Hidden instructions | Flags bidi and zero-width characters, and text hidden in HTML comments, unused link reference definitions or unreferenced footnotes, in instruction files |
+| Hidden instructions | Flags bidi and zero-width characters in instruction files and in declared MCP tool definitions, and text hidden in HTML comments, unused link reference definitions or unreferenced footnotes in instruction files |
 | Over-broad agent permissions | Flags `bypassPermissions`, blanket grants such as `Bash(*)` and hook commands; a changed setting is a drift alert, and without the binding key a record whose setting values the redaction removes is a medium drift alert that they are unbound |
 | Credential exposure | Records variable names, never values; redacts known secret patterns |
 
@@ -173,7 +173,7 @@ Every row has limits: [known limitations](https://github.com/aisecnomad/Nexus-Sy
 | MCP servers and clients | `mcp` | Clients, servers, launchers, package pins, transports, endpoints, tool fingerprints |
 | Model weights | `model` | SHA-256 of weight files, serialization safety, SafeTensors structure, signature status |
 | Instructions and rules | `prompt` | Content digests; hidden-character and hidden-comment findings |
-| RAG and vector stores | `rag` | Retrieval sources, store/index/embedding identities, URI origins, control states |
+| RAG and vector stores | `rag` | Retrieval sources, store/index/embedding identities, URI origins, control states; digests of guardrail and evaluation configuration files recognised by name |
 | Packages and images | `registry` | AI packages in the [catalog](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/registry-collector.md#ai-package-catalog), pins, lockfile integrity, image digests, registry redirects |
 | A2A agent cards | `a2a` | Endpoints, security schemes, scopes, card signatures |
 | IDE agent settings | `ide_agents` | Permission modes, blanket grants, hooks, settings digests |
