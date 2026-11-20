@@ -6,9 +6,9 @@ producing tool. It names the inventory it describes with a BOM-Link external
 reference, and its components carry the same types, versions, package URLs and
 digests as the CycloneDX inventory export.
 
-Every statement is ``in_triage``. The command takes no triage decisions, so the
-document cannot state ``not_affected``, ``exploitable`` or ``resolved``, and its
-``NEXUS-`` identifiers match no public vulnerability database.
+A statement is ``in_triage`` unless an unexpired operator decision sets its state, or
+reported trace evidence that a component never loaded sets ``not_affected``; trace
+evidence never sets ``exploitable``. ``NEXUS-`` identifiers match no public database.
 """
 
 from __future__ import annotations
