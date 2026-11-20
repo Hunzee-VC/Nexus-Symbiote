@@ -313,6 +313,38 @@ def test_the_indexed_matcher_reports_what_pairwise_matching_reported(ecosystem):
     }
 
 
+def test_a_block_is_undecided_only_where_its_first_undecidable_range_is_reached():
+    blocks = [
+        ("GHSA-1", {"ranges": [{"events": [{"introduced": "2.0"}, {"fixed": "nope!"}]}]}),
+        (
+            "GHSA-2",
+            {
+                "ranges": [
+                    {"events": [{"introduced": "0"}, {"limit": "1.0"}, {"limit": "x!"}]},
+                    {"events": "bad"},
+                ]
+            },
+        ),
+    ]
+    budget = offline._MatchBudget(10**6)
+    matcher = offline._PackageMatcher(
+        "PyPI", [(_advisory(record_id), block) for record_id, block in blocks], budget
+    )
+    compared, not_a_list = "OSV range version cannot be compared", "OSV range events are not a list"
+    expected = {
+        # Below "2.0" GHSA-1 never reaches its fix; below "1.0" GHSA-2 reaches the bad limit.
+        "0.5": [("GHSA-2", compared)],
+        # The first limit ends GHSA-2's first range, so its second range decides the reason.
+        "1.5": [("GHSA-2", not_a_list)],
+        "2.5": [("GHSA-1", compared), ("GHSA-2", not_a_list)],
+        "not-a-version": [("GHSA-1", compared), ("GHSA-2", compared)],
+    }
+    for version, undecided in expected.items():
+        assert _reference_blocks(blocks, "PyPI", version)[:2] == ([], undecided)
+        found, failed = matcher.matches(version, budget)
+        assert (found, [(adv.record_id, reason) for adv, reason in failed]) == ([], undecided)
+
+
 def _component(name: str, version: str, kind: str = "pypi") -> RegistryEntryComponent:
     return RegistryEntryComponent(
         bom_ref=f"pkg:{kind}:{name}@{version}",
