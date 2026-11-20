@@ -5,10 +5,18 @@ collection" means from ``assess_coverage``, so the two gates cannot disagree abo
 A claim is complete only when every built-in collector is recorded complete, nothing
 failed or was excluded, every requested collector completed and some surface was
 recorded. A claim with no collector records is unknown rather than partial.
+
+The claim keeps one record per collector: six walking collectors that meet the same
+escaping symlink record the same failure six times, and each is listed as not
+complete. The assessment states each distinct failure once, with how many records
+it has, and each state once, with the collectors in it, so a report does not repeat
+one cause for every collector that met it while the claim's records stay as they are.
 """
 
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -47,6 +55,28 @@ class CoverageGap:
     reason: str
 
 
+def group_failures(failures: Iterable[str]) -> list[tuple[str, int]]:
+    """Each distinct failure in order of first record, with how many records it has."""
+    counts = Counter(map(str, failures))
+    return list(counts.items())
+
+
+def failure_reason(failure: str, records: int) -> str:
+    """One failure as a gate lists it: a repeated record says how many times."""
+    return failure if records < 2 else f"{failure} (recorded {records} times)"
+
+
+def _state_reasons(incomplete: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """One (subject, reason) per state, naming the collectors in it, states sorted."""
+    by_state: dict[str, list[str]] = {}
+    for scanner, state in incomplete:
+        by_state.setdefault(state, []).append(scanner)
+    return [
+        ("coverage", f"Scanner coverage is {state} for " + ", ".join(sorted(names)) + ".")
+        for state, names in sorted(by_state.items())
+    ]
+
+
 @dataclass(frozen=True)
 class CoverageAssessment:
     status: CoverageStatus
@@ -80,16 +110,17 @@ def assess_coverage(
                 "Repository completeness requires explicit collection records",
             )
         )
+    failures = group_failures(claim.scan_failures)
     gaps.extend(
-        CoverageGap(GapKind.SCAN_FAILURE, "collection", f)
-        for f in claim.scan_failures[:MAX_LISTED_GAPS]
+        CoverageGap(GapKind.SCAN_FAILURE, "collection", failure_reason(failure, records))
+        for failure, records in failures[:MAX_LISTED_GAPS]
     )
-    if len(claim.scan_failures) > MAX_LISTED_GAPS:
+    if len(failures) > MAX_LISTED_GAPS:
         gaps.append(
             CoverageGap(
                 GapKind.SCAN_FAILURE,
                 "collection",
-                f"{len(claim.scan_failures) - MAX_LISTED_GAPS} further collection failures",
+                f"{len(failures) - MAX_LISTED_GAPS} further collection failures",
             )
         )
     if set(claim.collectors_requested) - set(claim.collectors_completed):
@@ -121,8 +152,8 @@ def assess_coverage(
         )
     incomplete = [(s, state) for s, state in claim.scanner_status.items() if state != "complete"]
     gaps.extend(
-        CoverageGap(GapKind.COLLECTOR_NOT_COMPLETE, scanner, f"Scanner coverage is {state}.")
-        for scanner, state in incomplete[:MAX_LISTED_GAPS]
+        CoverageGap(GapKind.COLLECTOR_NOT_COMPLETE, subject, reason)
+        for subject, reason in _state_reasons(incomplete[:MAX_LISTED_GAPS])
     )
     if len(incomplete) > MAX_LISTED_GAPS:
         gaps.append(

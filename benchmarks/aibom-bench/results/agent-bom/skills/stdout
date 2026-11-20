@@ -1,0 +1,91 @@
+
+agent-bom skills scan
+
+  10 file(s) · 0 package ref(s) · 0 server ref(s) · 0 credential var(s)
+
+                              Instruction Surface                               
+Skill / file               Status       Verdict     Action  Prov.     Find. Refs
+────────────────────────────────────────────────────────────────────────────────
+security.md                pending      benign      review  unsigned      1    0
+refund-approver            suspicious   suspicious  review  unsigned      3    0
+triage-ticket              pending      benign      review  unsigned      2    0
+python.mdc                 pending      benign      review  unsigned      3    0
+.cursorrules               pending      benign      review  unsigned      0    0
+copilot-instructions.md    pending      benign      review  unsigned      0    0
+AGENTS.md                  pending      benign      review  unsigned      0    0
+CLAUDE.md                  pending      benign      review  unsigned      0    0
+GEMINI.md                  pending      benign      review  unsigned      0    0
+system.md                  pending      benign      review  unsigned      0    0
+Action: handling · Prov.: provenance · Find.: findings · Refs: packages, servers
+  pending: no findings in the content, but a reviewer should confirm: provenance
+is not verified; Install Mechanism: No install methods and no source URL — 
+cannot verify provenance; Purpose & Capability: Missing name or description in 
+metadata
+
+                                  Top Findings                                  
+                                                                                
+  Sev      Skill / file              Category                         Title     
+ ────────────────────────────────────────────────────────────────────────────── 
+  HIGH     refund-approver           prompt_coercion                  Prompt    
+                                                                      coercion  
+                                                                      or        
+                                                                      guardra…  
+                                                                      override  
+  MEDIUM   refund-approver           missing_source                   No        
+                                                                      homepage  
+                                                                      or        
+                                                                      source    
+                                                                      URL in    
+                                                                      skill     
+                                                                      metadata  
+  MEDIUM   triage-ticket             missing_source                   No        
+                                                                      homepage  
+                                                                      or        
+                                                                      source    
+                                                                      URL in    
+                                                                      skill     
+                                                                      metadata  
+  MEDIUM   python.mdc                missing_source                   No        
+                                                                      homepage  
+                                                                      or        
+                                                                      source    
+                                                                      URL in    
+                                                                      skill     
+                                                                      metadata  
+  LOW      security.md               destructive_action               Destruc…  
+                                                                      system    
+                                                                      action    
+  LOW      python.mdc                missing_capability_declaration   No        
+                                                                      explicit  
+                                                                      skill     
+                                                                      capabil…  
+                                                                      declara…  
+  LOW      refund-approver           missing_license                  No        
+                                                                      license   
+                                                                      declared  
+                                                                      in skill  
+                                                                      metadata  
+  LOW      triage-ticket             missing_license                  No        
+                                                                      license   
+                                                                      declared  
+                                                                      in skill  
+                                                                      metadata  
+                                                                                
+
+                                Behavior Profile                                
+                                                                                
+  Family                                                               Signals  
+ ────────────────────────────────────────────────────────────────────────────── 
+  data access                                                                1  
+  prompt coercion                                                            1  
+                                                                                
+
+Recommended next steps
+  • Review instructions that override guardrails, memory, or system prompts 
+before trusting the skill.
+  • Remove credential file access patterns or isolate the tool
+  • Provide at least one install method and a source URL
+  • Review credential exposure and private-data access paths before exposing 
+this skill to real data.
+  • Add name and description to YAML frontmatter
+
