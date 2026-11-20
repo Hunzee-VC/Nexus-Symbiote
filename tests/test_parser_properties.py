@@ -24,7 +24,7 @@ from urllib.parse import quote
 
 import pytest
 from click.testing import CliRunner
-from hypothesis import assume, given, settings
+from hypothesis import assume, example, given, settings
 from hypothesis import strategies as st
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.utils import canonicalize_name
@@ -584,14 +584,23 @@ def test_deeply_nested_input_fails_closed_in_bounded_time(tmp_path, name):
         max_size=6,
     )
 )
+@example({"on": 0})
+@example({"null": "a", "plain": True})
 def test_yaml_mapping_reader_roundtrips_or_fails_closed(mapping):
+    import yaml
+
     from nexus_symbiote.policy import PolicyError, parse_yaml_mapping
 
     lines = [
         f"{k}: {json.dumps(v) if isinstance(v, (bool, str)) else v}" for k, v in mapping.items()
     ]
-    parsed = parse_yaml_mapping("\n".join(lines) + "\n", max_nodes=128)
-    assert parsed == mapping
+    text = "\n".join(lines) + "\n"
+    # A plain key that YAML 1.1 reads as a boolean or null (on, no, null) is not a string.
+    if all(isinstance(yaml.safe_load(key), str) for key in mapping):
+        assert parse_yaml_mapping(text, max_nodes=128) == mapping
+    else:
+        with pytest.raises(PolicyError, match="keys must be unique strings"):
+            parse_yaml_mapping(text, max_nodes=128)
     with pytest.raises((PolicyError, ValueError)):
         parse_yaml_mapping("a: [1\n", max_nodes=32)
 
