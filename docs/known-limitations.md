@@ -1405,6 +1405,21 @@ A way around a limit that its entry does not describe is worth a
   methods, and aliases imported by name from `a2a` modules are recognized. The
   alias check is syntactic and can report a gap even when a name is later rebound;
   assignment aliases, re-exports under other names and dynamic lookup are not resolved.
+- **Guardrail and evaluation configuration is recognised by name only.** The rag
+  collector records `promptfooconfig.yaml`, `promptfooconfig.yml`,
+  `promptfooconfig.json`, `guardrails.yaml`, `guardrails.yml`, `guardrails.json`, and a
+  `config.yml` or `config.yaml` beside at least one `.co` file, as `guardrail-policy`
+  components bound by digest. A configuration under any other name, such as a
+  promptfoo file passed with `-c`, or `.co` files in a subdirectory of the directory
+  that holds `config.yml`, is not recorded. The content is not parsed: the record
+  carries no model, version, rule or provider, raises no finding, and does not show
+  that anything loads or enforces the file. The inferred repository agent lists every
+  such file in `guardrail_refs`, which is a repository association, not observed use.
+  Guardrails declared in Terraform or other infrastructure code, or built in source
+  code, are not collected. `validate` does not recompute `config_hash` in its
+  integrity check; `validate --project` compares it with a fresh collection.
+- **Memory stores are not collected.** No built-in collector emits `memory-store`
+  components.
 - **Python import heuristics are shallow.** The a2a and rag collectors read only
   Python files that name the SDK or a vector-store library. The rag collector skips
   one it cannot read or parse or that exceeds 262,144 characters. The a2a

@@ -1861,7 +1861,7 @@
     },
     "GuardrailComponent": {
       "additionalProperties": false,
-      "description": "A safety classifier, content filter, or output validator.\n\nReserved: no built-in collector emits this type; it appears only in supplied inventories.",
+      "description": "A safety classifier, content filter, output validator, or evaluation configuration.\n\nThe rag collector records guardrail and evaluation configuration files that it\nrecognises by name, with the digest of their bytes in config_hash; it never parses\nthem, so a record does not show what the file configures or that anything enforces\nit. Every other field appears only in supplied inventories.",
       "properties": {
         "bom_ref": {
           "description": "Unique reference within this BOM",
@@ -1966,7 +1966,7 @@
             }
           ],
           "default": null,
-          "description": "input-filter, output-filter, classifier, rate-limiter",
+          "description": "policy or evaluation when a collector derived it from the file name; supplied inventories also use input-filter, output-filter, classifier, rate-limiter",
           "title": "Guardrail Type"
         },
         "model_ref": {
@@ -2004,6 +2004,7 @@
             }
           ],
           "default": null,
+          "description": "sha256:<hex> of the configuration file's bytes; for a directory with Colang files, the RFC 8785 digest of the map from each file name to its digest",
           "title": "Config Hash"
         },
         "risks": {

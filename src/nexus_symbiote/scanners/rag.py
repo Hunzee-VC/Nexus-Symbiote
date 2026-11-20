@@ -2,6 +2,10 @@
 
 Configuration and import references are discovery evidence. They do not establish
 that a store is deployed, reachable, authorized, or resistant to poisoning.
+
+Guardrail and evaluation configuration files are recognised by name and bound by
+digest. Their content is never parsed, so a record says that the file exists and
+which bytes it held, not what it configures or that anything enforces it.
 """
 
 from __future__ import annotations
@@ -13,8 +17,8 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from nexus_symbiote.core.enums import RiskSeverity, TrustTier
-from nexus_symbiote.core.hashing import hash_canonical
-from nexus_symbiote.core.models import RAGSourceComponent, RiskAssessment
+from nexus_symbiote.core.hashing import hash_bytes, hash_canonical
+from nexus_symbiote.core.models import GuardrailComponent, RAGSourceComponent, RiskAssessment
 from nexus_symbiote.policy import read_sexagesimal_integers_as_text
 from nexus_symbiote.scanners.base import (
     Scanner,
@@ -59,6 +63,18 @@ STORE_IMPORTS = {
 }
 _IMPORT_MARKERS = tuple(name.encode() for name in STORE_IMPORTS)
 ENV_FILES = {".env", ".env.example", ".env.local"}
+GUARDRAIL_CONFIG_FILES = {
+    "promptfooconfig.yaml": "evaluation",
+    "promptfooconfig.yml": "evaluation",
+    "promptfooconfig.json": "evaluation",
+    "guardrails.yaml": "policy",
+    "guardrails.yml": "policy",
+    "guardrails.json": "policy",
+}
+# A NeMo Guardrails directory: one of these names beside at least one Colang file.
+NEMO_CONFIG_NAMES = frozenset({"config.yml", "config.yaml"})
+NEMO_RAIL_SUFFIX = ".co"
+GUARDRAIL_DIRECTORY_PROFILE = "nexus-symbiote/guardrail-directory/v1"
 SOURCE_STRUCTURE_PROFILE = "nexus-symbiote/rag-source-structure/v2"
 SOURCE_VALUE_BINDING_PROFILE = "nexus-symbiote/rag-source-values/v1"
 _SOURCE_FIELDS = frozenset(
@@ -102,6 +118,9 @@ _READ_FIELDS = frozenset(
 )
 _LIST_KEYS = ("sources", "knowledge_bases")
 _FOLDED_CONFIG_NAMES = {fold_name(name): name for name in RAG_CONFIG_PATTERNS}
+_FOLDED_GUARDRAIL_NAMES = {
+    fold_name(name): name for name in (*GUARDRAIL_CONFIG_FILES, *NEMO_CONFIG_NAMES)
+}
 _MAX_ENTRIES = 1000
 _MAX_DEPTH = 32
 _MAX_NAME = 256
@@ -362,12 +381,18 @@ class RAGScanner(Scanner):
     def scan(self, project_root: Path) -> ScanResult:
         result = ScanResult(scanner_name=self.name)
         python_sources: list[Path] = []
+        guardrails: list[Path] = []
+        rails: dict[Path, list[Path]] = {}
         with self._collection(project_root, result) as files:
             for path in files.iter_files():
                 if path.name in RAG_CONFIG_PATTERNS:
                     result.components.extend(self._scan_rag_config(path, files, result))
                 elif fold_name(path.name) in _FOLDED_CONFIG_NAMES:
                     self._config_variant(path, files, result)
+                elif fold_name(path.name) in _FOLDED_GUARDRAIL_NAMES:
+                    guardrails.append(path)
+                elif path.suffix == NEMO_RAIL_SUFFIX:
+                    rails.setdefault(path.parent, []).append(path)
                 elif path.name in ENV_FILES and len(path.parts) == 1:
                     raw = files.read_bytes(path)
                     if raw is not None:
@@ -377,11 +402,84 @@ class RAGScanner(Scanner):
                         result.components.extend(self._scan_env(content, path))
                 elif path.suffix == ".py":
                     python_sources.append(path)
+            result.components.extend(self._scan_guardrails(guardrails, rails, files, result))
             result.components.extend(self._scan_imports(files.root, python_sources, result))
         result.surfaces_scanned.append("rag: Python vector-store imports (heuristic)")
         if not result.components and not result.scan_failures and not result.surfaces_excluded:
             result.surfaces_scanned.append("rag (no RAG configuration found)")
         return result
+
+    def _scan_guardrails(
+        self,
+        candidates: list[Path],
+        rails: dict[Path, list[Path]],
+        files: ConfinedCollection,
+        result: ScanResult,
+    ) -> list[GuardrailComponent]:
+        """Bind guardrail and evaluation configuration files by digest, unparsed.
+
+        A file is recognised by its name alone. ``config.yml`` and ``config.yaml`` are
+        common names, so they count only beside a Colang file, and then the record
+        binds those siblings too. Another spelling of a recognised name is a
+        collection failure, as for the RAG configuration names. A file that cannot be
+        read, or a directory with a Colang file that cannot be read, yields no record:
+        the collection has named the failure.
+        """
+        components = []
+        for path in sorted(candidates):
+            canonical = _FOLDED_GUARDRAIL_NAMES[fold_name(path.name)]
+            siblings = sorted(rails.get(path.parent, ())) if canonical in NEMO_CONFIG_NAMES else []
+            if canonical in NEMO_CONFIG_NAMES and not siblings:
+                continue
+            relative = path.as_posix()
+            if path.name != canonical:
+                result.scan_failures.append(
+                    f"{relative}: case variant of {path.with_name(canonical).as_posix()} is the "
+                    "active file on case-insensitive file systems and is not inventoried"
+                )
+                continue
+            if len(siblings) > _MAX_ENTRIES:
+                result.scan_failures.append(
+                    f"{relative}: more than {_MAX_ENTRIES} Colang files beside the configuration"
+                )
+                continue
+            raw = files.read_bytes(path)
+            if raw is None:
+                continue
+            digest = hash_bytes(raw)
+            properties: dict[str, Any] = {
+                "collection_mode": "static-file-digest",
+                "size_bytes": len(raw),
+            }
+            if siblings:
+                contents = [files.read_bytes(rail) for rail in siblings]
+                if any(content is None for content in contents):
+                    continue
+                rail_files = {
+                    rail.name: hash_bytes(content)
+                    for rail, content in zip(siblings, contents, strict=True)
+                    if content is not None
+                }
+                properties["config_file_hash"] = digest
+                properties["rail_files"] = rail_files
+                properties["config_hash_profile"] = GUARDRAIL_DIRECTORY_PROFILE
+                digest = hash_canonical({path.name: digest, **rail_files})
+            target = files.link_target(path)
+            if target is not None:
+                properties["symlink_target"] = target
+            result.surfaces_scanned.append(relative)
+            components.append(
+                GuardrailComponent(
+                    bom_ref=f"guardrail:{relative}",
+                    name=relative,
+                    guardrail_type=GUARDRAIL_CONFIG_FILES.get(canonical, "policy"),
+                    config_hash=digest,
+                    source_path=relative,
+                    trust_tier=TrustTier.INTERNAL_UNVERIFIED,
+                    properties=properties,
+                )
+            )
+        return components
 
     def _scan_imports(
         self, root: Path, sources: list[Path], result: ScanResult

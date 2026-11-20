@@ -20,7 +20,12 @@ from nexus_symbiote.scanners.prompt import (
     NESTED_INSTRUCTION_NAMES,
     SKILL_DIRECTORIES,
 )
-from nexus_symbiote.scanners.rag import ENV_FILES, RAG_CONFIG_PATTERNS
+from nexus_symbiote.scanners.rag import (
+    ENV_FILES,
+    GUARDRAIL_CONFIG_FILES,
+    NEMO_CONFIG_NAMES,
+    RAG_CONFIG_PATTERNS,
+)
 
 REFERENCE = (Path(__file__).parents[1] / "docs" / "collectors.md").read_text(encoding="utf-8")
 
@@ -51,7 +56,7 @@ def _row(collector: str) -> str:
                 *SKILL_DIRECTORIES,
             ],
         ),
-        ("rag", [*RAG_CONFIG_PATTERNS, *ENV_FILES]),
+        ("rag", [*RAG_CONFIG_PATTERNS, *ENV_FILES, *GUARDRAIL_CONFIG_FILES, *NEMO_CONFIG_NAMES]),
         ("a2a", [*A2A_CONFIG_FILES, *AGENT_CARD_NAMES, "a2a/agent.json"]),
         (
             "ide_agents",

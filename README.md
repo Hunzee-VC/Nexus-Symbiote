@@ -173,7 +173,7 @@ Every row has limits: [known limitations](https://github.com/aisecnomad/Nexus-Sy
 | MCP servers and clients | `mcp` | Clients, servers, launchers, package pins, transports, endpoints, tool fingerprints |
 | Model weights | `model` | SHA-256 of weight files, serialization safety, SafeTensors structure, signature status |
 | Instructions and rules | `prompt` | Content digests; hidden-character and hidden-comment findings |
-| RAG and vector stores | `rag` | Retrieval sources, store/index/embedding identities, URI origins, control states |
+| RAG and vector stores | `rag` | Retrieval sources, store/index/embedding identities, URI origins, control states; digests of guardrail and evaluation configuration files recognised by name |
 | Packages and images | `registry` | AI packages in the [catalog](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/registry-collector.md#ai-package-catalog), pins, lockfile integrity, image digests, registry redirects |
 | A2A agent cards | `a2a` | Endpoints, security schemes, scopes, card signatures |
 | IDE agent settings | `ide_agents` | Permission modes, blanket grants, hooks, settings digests |
