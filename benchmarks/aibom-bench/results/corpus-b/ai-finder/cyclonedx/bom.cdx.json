@@ -1,0 +1,576 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "serialNumber": "urn:uuid:b503991e-2154-447a-899d-0acfb49e921b",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-18T11:40:28.870720+00:00",
+    "tools": [
+      {
+        "vendor": "SCANOSS",
+        "name": "ai-finder",
+        "version": "0.5.0"
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "ai",
+      "purl": "pkg:npm/ai@5.0.0",
+      "bom-ref": "pkg:ai",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent.ts",
+            "line": 1,
+            "additionalContext": "import { generateText, tool } from \"ai\""
+          },
+          {
+            "location": "package.json",
+            "additionalContext": "ai ^5.0.0"
+          }
+        ]
+      },
+      "version": "5.0.0",
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@ai-sdk/openai",
+      "purl": "pkg:npm/ai-sdk/openai@2.0.0",
+      "bom-ref": "pkg:ai-sdk-openai",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/agent.ts",
+            "line": 2,
+            "additionalContext": "import { openai } from \"@ai-sdk/openai\""
+          },
+          {
+            "location": "package.json",
+            "additionalContext": "@ai-sdk/openai ^2.0.0"
+          }
+        ]
+      },
+      "version": "2.0.0",
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@mistralai/mistralai",
+      "purl": "pkg:npm/mistralai/mistralai@1.5.0",
+      "bom-ref": "pkg:mistralai-mistralai",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "src/rag.ts",
+            "line": 2,
+            "additionalContext": "import { MistralClient } from \"@mistralai/mistralai\""
+          },
+          {
+            "location": "package.json",
+            "additionalContext": "@mistralai/mistralai ^1.5.0"
+          }
+        ]
+      },
+      "version": "1.5.0",
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "github.com/sashabaranov/go-openai",
+      "purl": "pkg:golang/github.com/sashabaranov/go-openai",
+      "bom-ref": "pkg:github.com-sashabaranov-go-openai",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "sidecar/main.go",
+            "line": 4,
+            "additionalContext": "import \"github.com/sashabaranov/go-openai\""
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@modelcontextprotocol/sdk",
+      "purl": "pkg:npm/modelcontextprotocol/sdk@1.19.1",
+      "bom-ref": "pkg:modelcontextprotocol-sdk",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "mcp/analytics-server/src/server.ts",
+            "line": 1,
+            "additionalContext": "import { McpServer } from \"@modelcontextprotocol/sdk/server/mcp.js\""
+          },
+          {
+            "location": "mcp/analytics-server/package.json",
+            "additionalContext": "@modelcontextprotocol/sdk 1.19.1"
+          }
+        ]
+      },
+      "version": "1.19.1",
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "name": "analytics-mcp",
+      "properties": [
+        {
+          "name": "ai-finder:mcp:role",
+          "value": "server"
+        },
+        {
+          "name": "ai-finder:mcp:source",
+          "value": "code"
+        }
+      ],
+      "bom-ref": "pkg:analytics-mcp",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "mcp/analytics-server/src/server.ts",
+            "line": 3,
+            "additionalContext": "new McpServer(...)"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@anthropic-ai/sdk",
+      "version": "0.65.0",
+      "purl": "pkg:npm/anthropic-ai/sdk@0.65.0",
+      "bom-ref": "pkg:anthropic-ai-sdk",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "package.json",
+            "additionalContext": "@anthropic-ai/sdk 0.65.0"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "langchain",
+      "version": "0.3.0",
+      "purl": "pkg:npm/langchain@0.3.0",
+      "bom-ref": "pkg:langchain",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "package.json",
+            "additionalContext": "langchain ^0.3.0"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@langchain/community",
+      "version": "0.3.0",
+      "purl": "pkg:npm/langchain/community@0.3.0",
+      "bom-ref": "pkg:langchain-community",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "package.json",
+            "additionalContext": "@langchain/community ^0.3.0"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "go-openai",
+      "version": "v1.32.0",
+      "purl": "pkg:golang/go-openai@v1.32.0",
+      "bom-ref": "pkg:go-openai",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "sidecar/go.mod",
+            "line": 6,
+            "additionalContext": "go-openai v1.32.0"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "anthropic-sdk-go",
+      "version": "v0.2.0",
+      "purl": "pkg:golang/anthropic-sdk-go@v0.2.0",
+      "bom-ref": "pkg:anthropic-sdk-go",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "sidecar/go.mod",
+            "line": 7,
+            "additionalContext": "anthropic-sdk-go v0.2.0"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "name": "@notionhq/notion-mcp-server",
+      "properties": [
+        {
+          "name": "ai-finder:mcp:role",
+          "value": "server"
+        },
+        {
+          "name": "ai-finder:mcp:source",
+          "value": "config"
+        },
+        {
+          "name": "ai-finder:mcp:transport",
+          "value": "stdio"
+        }
+      ],
+      "purl": "pkg:npm/notionhq/notion-mcp-server@1.8.1",
+      "version": "1.8.1",
+      "bom-ref": "pkg:notionhq-notion-mcp-server",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "config/claude_desktop_config.json",
+            "line": 3,
+            "additionalContext": "npx @notionhq/notion-mcp-server@1.8.1"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "name": "@supabase/mcp-server-supabase",
+      "properties": [
+        {
+          "name": "ai-finder:mcp:role",
+          "value": "server"
+        },
+        {
+          "name": "ai-finder:mcp:source",
+          "value": "config"
+        },
+        {
+          "name": "ai-finder:mcp:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "ai-finder:kb:id",
+          "value": "mcpreg-npm-supabase-mcp-server-supabase-2be9e2f2"
+        }
+      ],
+      "purl": "pkg:npm/supabase/mcp-server-supabase",
+      "bom-ref": "pkg:supabase-mcp-server-supabase",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "config/claude_desktop_config.json",
+            "line": 13,
+            "additionalContext": "npx @supabase/mcp-server-supabase"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "name": "@modelcontextprotocol/server-sequential-thinking",
+      "properties": [
+        {
+          "name": "ai-finder:mcp:role",
+          "value": "server"
+        },
+        {
+          "name": "ai-finder:mcp:source",
+          "value": "config"
+        },
+        {
+          "name": "ai-finder:mcp:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "ai-finder:kb:id",
+          "value": "mcp-sequential-thinking"
+        }
+      ],
+      "purl": "pkg:npm/modelcontextprotocol/server-sequential-thinking",
+      "bom-ref": "pkg:modelcontextprotocol-server-sequential-thinking",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": ".windsurf/mcp_config.json",
+            "line": 3,
+            "additionalContext": "npx @modelcontextprotocol/server-sequential-thinking"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "name": "vendored-x",
+      "properties": [
+        {
+          "name": "ai-finder:mcp:role",
+          "value": "server"
+        },
+        {
+          "name": "ai-finder:mcp:source",
+          "value": "config"
+        },
+        {
+          "name": "ai-finder:mcp:transport",
+          "value": "stdio"
+        }
+      ],
+      "bom-ref": "pkg:vendored-x",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "vendor/pkg/.cursor/mcp.json",
+            "line": 3,
+            "additionalContext": "node"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "machine-learning-model",
+      "name": "hf-cache/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/model.safetensors",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "ce7603b60bc1d8c4d372a164a50a6f8a8b01288e688daf0d1d9c8d658f7df401"
+        }
+      ],
+      "description": "Model format: safetensors",
+      "modelCard": {
+        "modelParameters": {
+          "learningType": "supervised",
+          "inputs": [
+            {
+              "format": "string"
+            }
+          ],
+          "outputs": [
+            {
+              "format": "string"
+            }
+          ],
+          "modelArchitecture": "gemma3"
+        }
+      },
+      "properties": [
+        {
+          "name": "ai-finder:model:format",
+          "value": "safetensors"
+        },
+        {
+          "name": "ai-finder:model:parameters",
+          "value": "27432067952"
+        },
+        {
+          "name": "ai-finder:model:source_url",
+          "value": "https://huggingface.co/Otakadelic/mergekit-model_stock-prczfmj-Q4_K_M-GGUF"
+        },
+        {
+          "name": "ai-finder:model:base_model",
+          "value": "pkg:huggingface/mergekit-community/mergekit-model_stock-prczfmj"
+        }
+      ],
+      "bom-ref": "pkg:hf-cache-models--Qwen--Qwen2.5-0.5B-Instruct-snapshots-7ae557604adf67be50417f59c2c2f167def9a775-model.safetensors",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "hf-cache/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/model.safetensors"
+          }
+        ]
+      },
+      "purl": "pkg:huggingface/Otakadelic/mergekit-model_stock-prczfmj-Q4_K_M-GGUF",
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    },
+    {
+      "type": "machine-learning-model",
+      "name": "artifacts/churn.onnx",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "594e3630b20cf4e318fabfea47fe69cc2e4e3eea2956121afa6e8a7ea165f675"
+        }
+      ],
+      "description": "Model format: onnx",
+      "modelCard": {
+        "modelParameters": {
+          "learningType": "supervised",
+          "inputs": [
+            {
+              "format": "string"
+            }
+          ],
+          "outputs": [
+            {
+              "format": "string"
+            }
+          ],
+          "modelArchitecture": "BertForSequenceClassification",
+          "architectureFamily": "bert",
+          "task": "text-classification"
+        }
+      },
+      "properties": [
+        {
+          "name": "ai-finder:model:format",
+          "value": "onnx"
+        },
+        {
+          "name": "ai-finder:model:parameters",
+          "value": "108924674"
+        },
+        {
+          "name": "ai-finder:model:source_url",
+          "value": "https://huggingface.co/Maldak123/TOTVS_Churn_V3"
+        }
+      ],
+      "bom-ref": "pkg:artifacts-churn.onnx",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "artifacts/churn.onnx"
+          }
+        ]
+      },
+      "purl": "pkg:huggingface/Maldak123/TOTVS_Churn_V3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "machine-learning-model",
+      "name": "artifacts/intent.tflite",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "7a5d2fa44d4bbe4f7ef68e0e6f7ba38c40d32bad0475502ffb37f4dcb58af4f3"
+        }
+      ],
+      "description": "Model format: tflite",
+      "modelCard": {
+        "modelParameters": {
+          "learningType": "supervised",
+          "inputs": [
+            {
+              "format": "string"
+            }
+          ],
+          "outputs": [
+            {
+              "format": "string"
+            }
+          ]
+        }
+      },
+      "properties": [
+        {
+          "name": "ai-finder:model:format",
+          "value": "tflite"
+        }
+      ],
+      "bom-ref": "pkg:artifacts-intent.tflite",
+      "evidence": {
+        "occurrences": [
+          {
+            "location": "artifacts/intent.tflite"
+          }
+        ]
+      },
+      "licenses": [
+        {
+          "expression": "NOASSERTION"
+        }
+      ]
+    }
+  ]
+}

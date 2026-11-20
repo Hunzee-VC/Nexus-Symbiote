@@ -55,7 +55,7 @@ SRCROOT = "%SRCROOT%"
 # their handling is configured.
 DEFAULT_ANCHOR = ".nexus-symbiote.yaml"
 HELP_URI = (
-    "https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/docs/standard-exports.md"
+    "https://github.com/aisecnomad/Nexus-Symbiote/blob/main/docs/standard-exports.md"
     "#sarif-for-github-code-scanning"
 )
 GITHUB_MAX_RESULTS = 25_000
@@ -254,7 +254,7 @@ class SARIFGenerator(Generator):
                         "driver": {
                             "name": "nexus-symbiote",
                             "version": __version__,
-                            "informationUri": "https://github.com/Hunzee-VC/Nexus-Symbiote",
+                            "informationUri": "https://github.com/aisecnomad/Nexus-Symbiote",
                             "rules": ordered_rules,
                         }
                     },

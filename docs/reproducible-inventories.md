@@ -153,9 +153,9 @@ $ nexus-symbiote scan ci/work/second -o second.json 2>/dev/null
 $ cmp first.json second.json && echo identical
 identical
 $ nexus-symbiote digest first.json
-file_sha256: sha256:d536bc8339edf711fec4c9543414f0a2345cec1d28954a6b68a57c0b3cd384b9
-canonical_digest: sha256:cce2c4f27e2a95747c2a0a81eba36c617c55917b38dfaec39568bd3c57fb809a
-content_digest: sha256:cd54b9ae533148e13cd85f9b6febbc782dc6c949592d34eafd9827ecbe5dd1df
+file_sha256: sha256:28ce343ed9fb9a0e78850769b7359dbe9737778080cb487c4e4edcd7603d5262
+canonical_digest: sha256:a9d43fb7c42a787ab0c4ad57132ae07b9afcd903f6b402e9e168c56d76ee543e
+content_digest: sha256:e5b170433343303fe8b4a1f79111489ec313f79f67d6d088e0bbaf6638f5e1b1
 content_profile: nexus-symbiote/inventory-content/v1
 spec_version: 1.1.0
 components: 11
@@ -171,10 +171,10 @@ $ nexus-symbiote scan "$demo" -o now.json 2>/dev/null
 $ cmp -s first.json now.json || echo different
 different
 $ nexus-symbiote digest now.json --json-output | grep content_digest
-  "content_digest": "sha256:cd54b9ae533148e13cd85f9b6febbc782dc6c949592d34eafd9827ecbe5dd1df",
+  "content_digest": "sha256:e5b170433343303fe8b4a1f79111489ec313f79f67d6d088e0bbaf6638f5e1b1",
 $ grep serial_number first.json now.json
-first.json:    "serial_number": "urn:uuid:6c3c4d05-504d-5d70-97f4-d5fa45dcd741",
-now.json:    "serial_number": "urn:uuid:6c3c4d05-504d-5d70-97f4-d5fa45dcd741",
+first.json:    "serial_number": "urn:uuid:4cb72b5e-8e31-58a6-bc32-070395273e9d",
+now.json:    "serial_number": "urn:uuid:4cb72b5e-8e31-58a6-bc32-070395273e9d",
 $ nexus-symbiote scan "$demo" -o again.json 2>/dev/null
 $ cmp now.json again.json && echo identical
 identical
@@ -227,4 +227,12 @@ against the current tree.
   them, so a checkout whose names differ between machines, for example after Unicode
   normalization, records different paths. The byte-identical results on this page were
   checked with copies of a checkout on one file system.
+- **One collection bound counts time.** Every other bound counts something a scan
+  reads, such as bytes, entries or nodes, so two scans reach it alike. The mcp
+  collector also holds the parse of a TypeScript or JavaScript file to 250 ms of
+  processor time, which only a file the grammar cannot parse comes near. A busy
+  machine does not reach that limit sooner, but a slower one does, so scans on two
+  machines of different speed can record such a file with different failure reasons;
+  neither inventories it. See
+  [the TypeScript parse time limit](collection-limits.md#the-typescript-parse-time-limit).
 - **A digest is not a signature.** No digest on this page says who wrote a file.

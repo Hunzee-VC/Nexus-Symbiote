@@ -1,0 +1,1022 @@
+{
+  "capabilities": [],
+  "capability_graph": {
+    "edges": [
+      {
+        "source": "framework:langchain",
+        "target": "capability:mcp_tool_invocation",
+        "type": "enables"
+      },
+      {
+        "source": "framework:langchain",
+        "target": "capability:mcp_tool_invocation",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:langchain",
+        "target": "reachable_capability:langchain:mcp_tool_invocation:config/claude_desktop_config.json",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:langchain",
+        "target": "reachable_capability:langchain:mcp_tool_invocation:vendor/pkg/.cursor/mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:openai_agents",
+        "target": "capability:mcp_tool_invocation",
+        "type": "enables"
+      },
+      {
+        "source": "framework:openai_agents",
+        "target": "capability:mcp_tool_invocation",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:openai_agents",
+        "target": "reachable_capability:openai_agents:mcp_tool_invocation:config/claude_desktop_config.json",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:openai_agents",
+        "target": "reachable_capability:openai_agents:mcp_tool_invocation:vendor/pkg/.cursor/mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:vercel_ai_sdk",
+        "target": "capability:mcp_tool_invocation",
+        "type": "enables"
+      },
+      {
+        "source": "framework:vercel_ai_sdk",
+        "target": "capability:mcp_tool_invocation",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:vercel_ai_sdk",
+        "target": "reachable_capability:vercel_ai_sdk:mcp_tool_invocation:config/claude_desktop_config.json",
+        "type": "reaches"
+      },
+      {
+        "source": "framework:vercel_ai_sdk",
+        "target": "reachable_capability:vercel_ai_sdk:mcp_tool_invocation:vendor/pkg/.cursor/mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:notion",
+        "target": "capability:mcp_tool_invocation",
+        "type": "exposes"
+      },
+      {
+        "source": "mcp_server:notion",
+        "target": "mcp_risk:secrets_env_access",
+        "type": "risk"
+      },
+      {
+        "source": "mcp_server:notion",
+        "target": "reachable_capability:langchain:mcp_tool_invocation:config/claude_desktop_config.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:notion",
+        "target": "reachable_capability:openai_agents:mcp_tool_invocation:config/claude_desktop_config.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:notion",
+        "target": "reachable_capability:vercel_ai_sdk:mcp_tool_invocation:config/claude_desktop_config.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:supabase",
+        "target": "capability:mcp_tool_invocation",
+        "type": "exposes"
+      },
+      {
+        "source": "mcp_server:supabase",
+        "target": "mcp_risk:database_access",
+        "type": "risk"
+      },
+      {
+        "source": "mcp_server:supabase",
+        "target": "mcp_risk:secrets_env_access",
+        "type": "risk"
+      },
+      {
+        "source": "mcp_server:supabase",
+        "target": "reachable_capability:langchain:mcp_tool_invocation:config/claude_desktop_config.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:supabase",
+        "target": "reachable_capability:openai_agents:mcp_tool_invocation:config/claude_desktop_config.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:supabase",
+        "target": "reachable_capability:vercel_ai_sdk:mcp_tool_invocation:config/claude_desktop_config.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:vendored-x",
+        "target": "capability:mcp_tool_invocation",
+        "type": "exposes"
+      },
+      {
+        "source": "mcp_server:vendored-x",
+        "target": "mcp_risk:unknown_custom_server",
+        "type": "risk"
+      },
+      {
+        "source": "mcp_server:vendored-x",
+        "target": "reachable_capability:langchain:mcp_tool_invocation:vendor/pkg/.cursor/mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:vendored-x",
+        "target": "reachable_capability:openai_agents:mcp_tool_invocation:vendor/pkg/.cursor/mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "mcp_server:vendored-x",
+        "target": "reachable_capability:vercel_ai_sdk:mcp_tool_invocation:vendor/pkg/.cursor/mcp.json",
+        "type": "reaches"
+      },
+      {
+        "source": "model:claude-opus-4.1",
+        "target": "provider:gemini",
+        "type": "uses"
+      },
+      {
+        "source": "model:claude-opus-4.1",
+        "target": "provider:openai",
+        "type": "uses"
+      },
+      {
+        "source": "model:gemini-2.5-pro",
+        "target": "provider:gemini",
+        "type": "uses"
+      },
+      {
+        "source": "model:gemini-2.5-pro",
+        "target": "provider:openai",
+        "type": "uses"
+      },
+      {
+        "source": "model:gpt-4.1-mini",
+        "target": "provider:gemini",
+        "type": "uses"
+      },
+      {
+        "source": "model:gpt-4.1-mini",
+        "target": "provider:openai",
+        "type": "uses"
+      },
+      {
+        "source": "model:gpt-4o-mini",
+        "target": "provider:openai",
+        "type": "uses"
+      },
+      {
+        "source": "model:o3-mini",
+        "target": "provider:gemini",
+        "type": "uses"
+      },
+      {
+        "source": "model:o3-mini",
+        "target": "provider:openai",
+        "type": "uses"
+      },
+      {
+        "source": "reachable_capability:langchain:mcp_tool_invocation:config/claude_desktop_config.json",
+        "target": "capability:mcp_tool_invocation",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:langchain:mcp_tool_invocation:vendor/pkg/.cursor/mcp.json",
+        "target": "capability:mcp_tool_invocation",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:openai_agents:mcp_tool_invocation:config/claude_desktop_config.json",
+        "target": "capability:mcp_tool_invocation",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:openai_agents:mcp_tool_invocation:vendor/pkg/.cursor/mcp.json",
+        "target": "capability:mcp_tool_invocation",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:vercel_ai_sdk:mcp_tool_invocation:config/claude_desktop_config.json",
+        "target": "capability:mcp_tool_invocation",
+        "type": "reaches"
+      },
+      {
+        "source": "reachable_capability:vercel_ai_sdk:mcp_tool_invocation:vendor/pkg/.cursor/mcp.json",
+        "target": "capability:mcp_tool_invocation",
+        "type": "reaches"
+      }
+    ],
+    "nodes": [
+      {
+        "id": "capability:mcp_tool_invocation",
+        "name": "mcp_tool_invocation",
+        "type": "capability"
+      },
+      {
+        "id": "framework:langchain",
+        "name": "langchain",
+        "type": "framework"
+      },
+      {
+        "id": "framework:openai_agents",
+        "name": "openai_agents",
+        "type": "framework"
+      },
+      {
+        "id": "framework:vercel_ai_sdk",
+        "name": "vercel_ai_sdk",
+        "type": "framework"
+      },
+      {
+        "id": "mcp_risk:database_access",
+        "name": "database_access",
+        "type": "mcp_risk"
+      },
+      {
+        "id": "mcp_risk:secrets_env_access",
+        "name": "secrets_env_access",
+        "type": "mcp_risk"
+      },
+      {
+        "id": "mcp_risk:unknown_custom_server",
+        "name": "unknown_custom_server",
+        "type": "mcp_risk"
+      },
+      {
+        "id": "mcp_server:notion",
+        "name": "notion",
+        "type": "mcp_server"
+      },
+      {
+        "id": "mcp_server:supabase",
+        "name": "supabase",
+        "type": "mcp_server"
+      },
+      {
+        "id": "mcp_server:vendored-x",
+        "name": "vendored-x",
+        "type": "mcp_server"
+      },
+      {
+        "id": "model:claude-opus-4.1",
+        "name": "claude-opus-4.1",
+        "type": "model"
+      },
+      {
+        "id": "model:gemini-2.5-pro",
+        "name": "gemini-2.5-pro",
+        "type": "model"
+      },
+      {
+        "id": "model:gpt-4.1",
+        "name": "gpt-4.1",
+        "type": "model"
+      },
+      {
+        "id": "model:gpt-4.1-mini",
+        "name": "gpt-4.1-mini",
+        "type": "model"
+      },
+      {
+        "id": "model:gpt-4o-mini",
+        "name": "gpt-4o-mini",
+        "type": "model"
+      },
+      {
+        "id": "model:mistral-large-latest",
+        "name": "mistral-large-latest",
+        "type": "model"
+      },
+      {
+        "id": "model:o3-mini",
+        "name": "o3-mini",
+        "type": "model"
+      },
+      {
+        "id": "model:qwen2",
+        "name": "qwen2",
+        "type": "model"
+      },
+      {
+        "id": "prompt:prompts/system.prompt.md",
+        "name": "prompts/system.prompt.md",
+        "type": "prompt"
+      },
+      {
+        "id": "provider:anthropic",
+        "name": "anthropic",
+        "type": "provider"
+      },
+      {
+        "id": "provider:gemini",
+        "name": "gemini",
+        "type": "provider"
+      },
+      {
+        "id": "provider:openai",
+        "name": "openai",
+        "type": "provider"
+      },
+      {
+        "id": "reachable_capability:langchain:mcp_tool_invocation:config/claude_desktop_config.json",
+        "name": "langchain -> mcp_tool_invocation",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:langchain:mcp_tool_invocation:vendor/pkg/.cursor/mcp.json",
+        "name": "langchain -> mcp_tool_invocation",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:openai_agents:mcp_tool_invocation:config/claude_desktop_config.json",
+        "name": "openai_agents -> mcp_tool_invocation",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:openai_agents:mcp_tool_invocation:vendor/pkg/.cursor/mcp.json",
+        "name": "openai_agents -> mcp_tool_invocation",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:vercel_ai_sdk:mcp_tool_invocation:config/claude_desktop_config.json",
+        "name": "vercel_ai_sdk -> mcp_tool_invocation",
+        "type": "reachable_capability"
+      },
+      {
+        "id": "reachable_capability:vercel_ai_sdk:mcp_tool_invocation:vendor/pkg/.cursor/mcp.json",
+        "name": "vercel_ai_sdk -> mcp_tool_invocation",
+        "type": "reachable_capability"
+      }
+    ]
+  },
+  "dependencies": [
+    {
+      "category": "ai_framework",
+      "confidence": "medium",
+      "name": "ai",
+      "path": "package.json"
+    },
+    {
+      "category": "provider_sdk",
+      "confidence": "medium",
+      "name": "@ai-sdk/openai",
+      "path": "package.json"
+    },
+    {
+      "category": "provider_sdk",
+      "confidence": "medium",
+      "name": "@ai-sdk/google",
+      "path": "package.json"
+    },
+    {
+      "category": "ai_framework",
+      "confidence": "medium",
+      "name": "@openai/agents",
+      "path": "package.json"
+    },
+    {
+      "category": "provider_sdk",
+      "confidence": "medium",
+      "name": "@anthropic-ai/sdk",
+      "path": "package.json"
+    },
+    {
+      "category": "ai_framework",
+      "confidence": "medium",
+      "name": "langchain",
+      "path": "package.json"
+    },
+    {
+      "category": "provider_sdk",
+      "confidence": "medium",
+      "name": "github.com/sashabaranov/go-openai",
+      "path": "sidecar/go.mod"
+    }
+  ],
+  "frameworks": [
+    {
+      "confidence": "medium",
+      "name": "langchain",
+      "path": "package.json"
+    },
+    {
+      "confidence": "medium",
+      "name": "openai_agents",
+      "path": "package.json"
+    },
+    {
+      "confidence": "medium",
+      "name": "vercel_ai_sdk",
+      "path": "package.json"
+    },
+    {
+      "confidence": "medium",
+      "name": "langchain",
+      "path": "n8n/weekly-digest.json"
+    },
+    {
+      "confidence": "high",
+      "name": "openai_agents",
+      "path": "src/agent.ts"
+    },
+    {
+      "confidence": "high",
+      "name": "vercel_ai_sdk",
+      "path": "src/agent.ts"
+    }
+  ],
+  "generated_by": "agentbom",
+  "mcp_servers": [
+    {
+      "args": [
+        "-y",
+        "@notionhq/notion-mcp-server@1.8.1"
+      ],
+      "command": "npx",
+      "confidence": "medium",
+      "env": [
+        "NOTION_TOKEN"
+      ],
+      "kind": "server",
+      "name": "notion",
+      "package": "@notionhq/notion-mcp-server@1.8.1",
+      "parse_status": "parsed",
+      "path": "config/claude_desktop_config.json",
+      "rationale": [
+        "server declares environment variables: NOTION_TOKEN"
+      ],
+      "risk": "high",
+      "risk_categories": [
+        "secrets_env_access"
+      ],
+      "transport": "stdio"
+    },
+    {
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase",
+        "--access-token",
+        "[redacted]"
+      ],
+      "command": "npx",
+      "confidence": "medium",
+      "kind": "server",
+      "name": "supabase",
+      "package": "@supabase/mcp-server-supabase",
+      "parse_status": "parsed",
+      "path": "config/claude_desktop_config.json",
+      "rationale": [
+        "server name or package suggests database access",
+        "server declares environment variables: "
+      ],
+      "risk": "high",
+      "risk_categories": [
+        "database_access",
+        "secrets_env_access"
+      ],
+      "transport": "stdio"
+    },
+    {
+      "args": [
+        "x.js"
+      ],
+      "command": "node",
+      "confidence": "medium",
+      "kind": "server",
+      "name": "vendored-x",
+      "package": "x.js",
+      "parse_status": "parsed",
+      "path": "vendor/pkg/.cursor/mcp.json",
+      "rationale": [
+        "custom or unknown MCP server: x.js"
+      ],
+      "risk": "low",
+      "risk_categories": [
+        "unknown_custom_server"
+      ],
+      "transport": "stdio"
+    }
+  ],
+  "models": [
+    {
+      "confidence": "medium",
+      "evidence": "qwen2",
+      "name": "qwen2",
+      "source_file": "hf-cache/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/config.json",
+      "type": "model"
+    },
+    {
+      "confidence": "medium",
+      "evidence": "gpt-4o-mini",
+      "name": "gpt-4o-mini",
+      "source_file": "n8n/weekly-digest.json",
+      "type": "model"
+    },
+    {
+      "confidence": "medium",
+      "evidence": "gpt-4.1",
+      "name": "gpt-4.1",
+      "source_file": "openai/assistant.json",
+      "type": "model"
+    },
+    {
+      "confidence": "medium",
+      "evidence": "gemini-2.5-pro",
+      "name": "gemini-2.5-pro",
+      "source_file": "prompts/judge.yaml",
+      "type": "model"
+    },
+    {
+      "confidence": "high",
+      "evidence": "gpt-4.1-mini",
+      "name": "gpt-4.1-mini",
+      "source_file": "src/agent.ts",
+      "type": "model"
+    },
+    {
+      "confidence": "high",
+      "evidence": "gemini-2.5-pro",
+      "name": "gemini-2.5-pro",
+      "source_file": "src/agent.ts",
+      "type": "model"
+    },
+    {
+      "confidence": "high",
+      "evidence": "o3-mini",
+      "name": "o3-mini",
+      "source_file": "src/agent.ts",
+      "type": "model"
+    },
+    {
+      "confidence": "high",
+      "evidence": "claude-opus-4-1",
+      "name": "claude-opus-4.1",
+      "source_file": "src/agent.ts",
+      "type": "model"
+    },
+    {
+      "confidence": "high",
+      "evidence": "mistral-large-latest",
+      "name": "mistral-large-latest",
+      "source_file": "src/rag.ts",
+      "type": "model"
+    }
+  ],
+  "policy_findings": [
+    {
+      "message": "prompt file detected without security policy",
+      "severity": "low",
+      "source_file": "prompts/system.prompt.md"
+    },
+    {
+      "message": "MCP config detected without policy documentation",
+      "severity": "medium",
+      "source_file": "config/claude_desktop_config.json"
+    },
+    {
+      "message": "high-risk MCP server detected without policy restrictions: notion",
+      "severity": "high",
+      "source_file": "config/claude_desktop_config.json"
+    },
+    {
+      "message": "high-risk MCP server detected without policy restrictions: supabase",
+      "severity": "high",
+      "source_file": "config/claude_desktop_config.json"
+    },
+    {
+      "message": "MCP config detected without policy documentation",
+      "severity": "medium",
+      "source_file": "vendor/pkg/.cursor/mcp.json"
+    }
+  ],
+  "prompts": [
+    {
+      "confidence": "low",
+      "path": "prompts/system.prompt.md",
+      "type": "prompt"
+    }
+  ],
+  "providers": [
+    {
+      "confidence": "medium",
+      "name": "openai",
+      "path": "package.json"
+    },
+    {
+      "confidence": "medium",
+      "name": "anthropic",
+      "path": "package.json"
+    },
+    {
+      "confidence": "medium",
+      "name": "openai",
+      "path": ".github/workflows/review.yml"
+    },
+    {
+      "confidence": "medium",
+      "name": "openai",
+      "path": "k8s/vllm.yaml"
+    },
+    {
+      "confidence": "medium",
+      "name": "openai",
+      "path": "n8n/weekly-digest.json"
+    },
+    {
+      "confidence": "medium",
+      "name": "gemini",
+      "path": "prompts/judge.yaml"
+    },
+    {
+      "confidence": "high",
+      "name": "openai",
+      "path": "src/agent.ts"
+    },
+    {
+      "confidence": "high",
+      "name": "gemini",
+      "path": "src/agent.ts"
+    }
+  ],
+  "reachable_capabilities": [
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "notion",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server declares environment variables: NOTION_TOKEN"
+      ],
+      "reachable_from": "langchain",
+      "risk": "high",
+      "risk_categories": [
+        "secrets_env_access"
+      ],
+      "source_file": "config/claude_desktop_config.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "notion",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server declares environment variables: NOTION_TOKEN"
+      ],
+      "reachable_from": "openai_agents",
+      "risk": "high",
+      "risk_categories": [
+        "secrets_env_access"
+      ],
+      "source_file": "config/claude_desktop_config.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "notion",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server declares environment variables: NOTION_TOKEN"
+      ],
+      "reachable_from": "vercel_ai_sdk",
+      "risk": "high",
+      "risk_categories": [
+        "secrets_env_access"
+      ],
+      "source_file": "config/claude_desktop_config.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "notion",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server declares environment variables: NOTION_TOKEN"
+      ],
+      "reachable_from": "openai_agents",
+      "risk": "high",
+      "risk_categories": [
+        "secrets_env_access"
+      ],
+      "source_file": "config/claude_desktop_config.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "notion",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server declares environment variables: NOTION_TOKEN"
+      ],
+      "reachable_from": "vercel_ai_sdk",
+      "risk": "high",
+      "risk_categories": [
+        "secrets_env_access"
+      ],
+      "source_file": "config/claude_desktop_config.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "supabase",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or package suggests database access",
+        "server declares environment variables: "
+      ],
+      "reachable_from": "langchain",
+      "risk": "high",
+      "risk_categories": [
+        "database_access",
+        "secrets_env_access"
+      ],
+      "source_file": "config/claude_desktop_config.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "supabase",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or package suggests database access",
+        "server declares environment variables: "
+      ],
+      "reachable_from": "openai_agents",
+      "risk": "high",
+      "risk_categories": [
+        "database_access",
+        "secrets_env_access"
+      ],
+      "source_file": "config/claude_desktop_config.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "supabase",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or package suggests database access",
+        "server declares environment variables: "
+      ],
+      "reachable_from": "vercel_ai_sdk",
+      "risk": "high",
+      "risk_categories": [
+        "database_access",
+        "secrets_env_access"
+      ],
+      "source_file": "config/claude_desktop_config.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "supabase",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or package suggests database access",
+        "server declares environment variables: "
+      ],
+      "reachable_from": "openai_agents",
+      "risk": "high",
+      "risk_categories": [
+        "database_access",
+        "secrets_env_access"
+      ],
+      "source_file": "config/claude_desktop_config.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "supabase",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "server name or package suggests database access",
+        "server declares environment variables: "
+      ],
+      "reachable_from": "vercel_ai_sdk",
+      "risk": "high",
+      "risk_categories": [
+        "database_access",
+        "secrets_env_access"
+      ],
+      "source_file": "config/claude_desktop_config.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "vendored-x",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "custom or unknown MCP server: x.js"
+      ],
+      "reachable_from": "langchain",
+      "risk": "low",
+      "risk_categories": [
+        "unknown_custom_server"
+      ],
+      "source_file": "vendor/pkg/.cursor/mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "vendored-x",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "custom or unknown MCP server: x.js"
+      ],
+      "reachable_from": "openai_agents",
+      "risk": "low",
+      "risk_categories": [
+        "unknown_custom_server"
+      ],
+      "source_file": "vendor/pkg/.cursor/mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 75,
+      "mcp_server": "vendored-x",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "custom or unknown MCP server: x.js"
+      ],
+      "reachable_from": "vercel_ai_sdk",
+      "risk": "low",
+      "risk_categories": [
+        "unknown_custom_server"
+      ],
+      "source_file": "vendor/pkg/.cursor/mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "vendored-x",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "custom or unknown MCP server: x.js"
+      ],
+      "reachable_from": "openai_agents",
+      "risk": "low",
+      "risk_categories": [
+        "unknown_custom_server"
+      ],
+      "source_file": "vendor/pkg/.cursor/mcp.json"
+    },
+    {
+      "capability": "mcp_tool_invocation",
+      "confidence": "low",
+      "confidence_score": 80,
+      "mcp_server": "vendored-x",
+      "paths": [
+        "tool_invocation"
+      ],
+      "rationale": [
+        "custom or unknown MCP server: x.js"
+      ],
+      "reachable_from": "vercel_ai_sdk",
+      "risk": "low",
+      "risk_categories": [
+        "unknown_custom_server"
+      ],
+      "source_file": "vendor/pkg/.cursor/mcp.json"
+    }
+  ],
+  "repository": "/aibom-run/work/ai-agentbom/corpus",
+  "repository_risk": {
+    "rationale": [
+      "high-risk reachable capability detected: mcp_tool_invocation",
+      "secret references were detected",
+      "policy controls are missing or incomplete"
+    ],
+    "score": 65,
+    "severity": "high"
+  },
+  "risks": [
+    {
+      "reason": "prompt files detected without a policy file",
+      "severity": "low"
+    },
+    {
+      "reason": "high-risk MCP server detected",
+      "severity": "high"
+    }
+  ],
+  "schema_version": "0.1.0",
+  "secret_leak_findings": [
+    {
+      "category": "api_key",
+      "confidence": "high",
+      "line": 1,
+      "path": ".env.local",
+      "provider": "openai",
+      "redacted_evidence": "OPENAI_API_KEY = [REDACTED]",
+      "severity": "critical",
+      "suggested_action": "Value redacted. Remove the key and rotate it.",
+      "title": "Possible OPENAI_API_KEY value"
+    },
+    {
+      "category": "token",
+      "confidence": "medium",
+      "line": 7,
+      "path": ".continue/config.yaml",
+      "provider": "generic",
+      "redacted_evidence": "SLACK_BOT_TOKEN = [REDACTED]",
+      "severity": "high",
+      "suggested_action": "Value redacted. Remove the key and rotate it.",
+      "title": "Possible SLACK_BOT_TOKEN value"
+    }
+  ],
+  "secret_references": [
+    {
+      "confidence": "low",
+      "name": "GOOGLE_APPLICATION_CREDENTIALS_JSON",
+      "path": ".env.local"
+    },
+    {
+      "confidence": "low",
+      "name": "OPENAI_API_KEY",
+      "path": ".env.local"
+    },
+    {
+      "confidence": "medium",
+      "name": "SLACK_BOT_TOKEN",
+      "path": ".continue/config.yaml"
+    },
+    {
+      "confidence": "medium",
+      "name": "OPENAI_API_KEY",
+      "path": ".github/workflows/review.yml"
+    },
+    {
+      "confidence": "medium",
+      "name": "NOTION_TOKEN",
+      "path": "config/claude_desktop_config.json"
+    },
+    {
+      "confidence": "medium",
+      "name": "HF_TOKEN",
+      "path": "k8s/vllm.yaml"
+    },
+    {
+      "confidence": "high",
+      "name": "AUTHCREDENTIALS",
+      "path": "src/rag.ts"
+    },
+    {
+      "confidence": "high",
+      "name": "MISTRAL_API_KEY",
+      "path": "src/rag.ts"
+    }
+  ]
+}

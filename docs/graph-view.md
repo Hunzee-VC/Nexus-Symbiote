@@ -34,6 +34,9 @@ The view restates the inventory. It shows:
   `incomplete`, as [standard exports](standard-exports.md) state it, the verdict
   `risk` and `validate` reach (`complete`, `partial` or `unknown`), the number of scan
   failures and excluded surfaces, and up to 20 coverage gaps with the number left out.
+  The gaps state each distinct collection failure once, ending in `(recorded N times)`
+  when several collectors recorded it, and the collectors that are not complete as one
+  gap per state, while the number of scan failures counts every record.
 
 It does not show runtime reachability or effective authority. Every edge of a static
 scan is a repository association: that an agent's repository configures a server does
@@ -119,6 +122,8 @@ the rules do not read, such as `oauth_scopes`, `filesystem_paths` or
 
 Sources are the agents and IDE agents in the view, in node order (agents before IDE
 agents, each by name and reference), at most 200; the number not searched is reported.
+When there are more than 200, a source that reaches a sink, or is one, is searched
+before a source that reaches none, which has no path.
 Sinks are components with a `code-exec`, `exfil-capable`, `write-capable` or
 `secret-access` class or a high or critical finding; `network-egress` alone does not
 make a sink. Nor do unscoped allow rules: they leave an IDE agent unclassified, with a

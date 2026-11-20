@@ -33,7 +33,7 @@ from pathlib import Path
 from nexus_symbiote import limits
 from nexus_symbiote.core.enums import TrustTier
 from nexus_symbiote.core.models import MCPClientComponent
-from nexus_symbiote.scanners.base import ScanResult, SourceBudget, parse_python
+from nexus_symbiote.scanners.base import KnownValues, ScanResult, SourceBudget, parse_python
 from nexus_symbiote.scanners.mcp import without_js_comments
 from nexus_symbiote.scanners.python_tools import (
     _AGENT_FACTORIES,
@@ -64,7 +64,7 @@ _SDK_IMPORT = re.compile(
 
 # Test, build output, documentation and example trees are not searched, so code
 # that only illustrates an SDK never fails the collector.
-_EXCLUDED_DIRECTORIES = frozenset(
+SOURCE_SEARCH_SKIPPED = frozenset(
     {"tests", "test", "dist", "build", "docs", "benchmarks", "examples"}
 )
 # The launcher and server class names below are markers too, so a file that reaches
@@ -567,14 +567,14 @@ class _Kind:
 
 
 def _python_source(path: Path) -> bool:
-    return path.suffix == ".py" and not _EXCLUDED_DIRECTORIES.intersection(path.parts)
+    return path.suffix == ".py" and not SOURCE_SEARCH_SKIPPED.intersection(path.parts)
 
 
 def _script_source(suffix: str) -> Callable[[Path], bool]:
     def eligible(path: Path) -> bool:
         return (
             path.suffix == suffix
-            and not _EXCLUDED_DIRECTORIES.intersection(path.parts)
+            and not SOURCE_SEARCH_SKIPPED.intersection(path.parts)
             and not path.name.endswith(NOT_SOURCE_NAMES)
         )
 
@@ -1089,13 +1089,19 @@ def _outcome(result: ScanResult) -> tuple[int, int, int]:
 
 
 def collect_source_references(
-    files: ConfinedCollection, result: ScanResult, sources: Sequence[Path], budget: SourceBudget
+    files: ConfinedCollection,
+    result: ScanResult,
+    sources: Sequence[Path],
+    budget: SourceBudget,
+    known: KnownValues | None = None,
 ) -> None:
     """Inventory MCP servers, MCP clients and agent tools declared in source.
 
     ``sources`` is the collector's walk of the root. Every eligible file is searched
     as a stream, root files first, and ``budget`` bounds the text read: running out
-    of it is the budget's one named failure, and nothing after it is read.
+    of it is the budget's one named failure, and nothing after it is read. A server
+    name declared in source that holds one of the ``known`` values, which the scan
+    read from configuration files, is not recorded.
     """
     settings = limits.current()
     python_nodes = limits.bound("python-nodes")
@@ -1153,7 +1159,7 @@ def collect_source_references(
     detected: list[str] = []
     for path, content in servers.selected:
         before = _outcome(result)
-        collect_typescript_source(path, content, result)
+        collect_typescript_source(path, content, result, known)
         if _outcome(result) != before:
             surfaces.append(path.as_posix())
     for path, content in python.selected:
@@ -1175,7 +1181,7 @@ def collect_source_references(
             if len(nodes) > python_nodes.value:
                 fail(path, python_nodes.exceeded())
                 continue
-            collect_python_tools(tree, nodes, text, path, result)
+            collect_python_tools(tree, nodes, text, path, result, known)
             client = _python_client(tree)
             if client:
                 detected.append(location)
