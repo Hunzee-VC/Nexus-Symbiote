@@ -202,20 +202,6 @@ class CycloneDXGenerator(Generator):
             services = self._services(aibom)
             if services:
                 document["services"] = services
-            if aibom.metadata.timestamp is not None and subject is not None:
-                document["annotations"] = [
-                    {
-                        "subjects": [subject.bom_ref],
-                        "annotator": {
-                            "component": {
-                                "type": "application",
-                                "name": aibom.metadata.tool_name,
-                            }
-                        },
-                        "timestamp": aibom.metadata.timestamp.isoformat(),
-                        "text": f"Collection coverage aggregate: {aggregate}",
-                    }
-                ]
         return document
 
     @staticmethod
@@ -480,6 +466,7 @@ class CycloneDXGenerator(Generator):
         outgoing_edges: Any = (),
     ) -> dict[str, Any]:
         from nexus_symbiote.spdx_profiles import (
+            _clean_url,
             clean_license_identifier,
             spdx_license_expression,
             spdx_license_ids,
@@ -505,11 +492,12 @@ class CycloneDXGenerator(Generator):
                 expr = spdx_license_expression(lic)
                 if expr is None:
                     result["licenses"] = [{"license": {"name": lic} | ack}]
-                elif expr in spdx_license_ids():
+                elif expr in spdx_license_ids()[0]:
                     result["licenses"] = [{"license": {"id": expr} | ack}]
                 else:
                     result["licenses"] = [{"expression": expr} | ack]
-            observed_dl = getattr(comp, "source_uri", None)
+            # An observed URI may carry a query token; the same cleaning applies.
+            observed_dl = _clean_url(getattr(comp, "source_uri", None))
             dl = observed_dl or comp.properties.get("declared_download_location")
             if isinstance(dl, str) and _is_uri(dl):
                 ref = {"type": "distribution", "url": dl}

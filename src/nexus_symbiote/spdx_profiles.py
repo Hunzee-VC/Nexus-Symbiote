@@ -9,7 +9,7 @@ from datetime import UTC, date, datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Final
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
 from nexus_symbiote.core.enums import AssuranceLevel, AutonomyLevel, RiskSeverity, TrustTier
@@ -181,7 +181,7 @@ def _clean_url(value: Any) -> str | None:
     # A token-shaped host is a secret even though the path check below passes.
     if redact_url(candidate) == "[redacted-url]":
         return None
-    if parts.path and REDACTED in redact_text(parts.path):
+    if parts.path and REDACTED in redact_text(unquote(parts.path)):
         return None
     rebuilt = urlunsplit((scheme, parts.netloc, parts.path, "", ""))
     return rebuilt if _SAFE_URL_RE.fullmatch(rebuilt) else None
@@ -212,33 +212,63 @@ def clean_license_identifier(value: Any) -> str | None:
 
 
 @lru_cache(maxsize=1)
-def spdx_license_ids() -> frozenset[str]:
-    """SPDX license and exception ids from the vendored, digest-checked CycloneDX enum."""
+def spdx_license_ids() -> tuple[frozenset[str], frozenset[str]]:
+    """(licence ids, exception ids) from the vendored, digest-checked CycloneDX enum.
+
+    The enum lists sorted licence ids, then sorted exception ids; the one place
+    the order restarts is the boundary, and anything else fails closed.
+    """
     from nexus_symbiote.generators.validation import _schema
 
-    return frozenset(_schema("cyclonedx/spdx.schema.json")["enum"])
+    ids = _schema("cyclonedx/spdx.schema.json")["enum"]
+    (cut,) = [i for i in range(1, len(ids)) if ids[i].lower() < ids[i - 1].lower()]
+    return frozenset(ids[:cut]), frozenset(ids[cut:])
 
 
 def spdx_license_expression(value: Any) -> str | None:
-    """Return the value only if it is an SPDX expression over listed ids or LicenseRef-s."""
+    """Return the value only if it parses as an SPDX license expression.
+
+    or := and (OR and)*; and := with (AND with)*;
+    with := '(' or ')' | simple [WITH exception-id]; simple := license-id ['+'] | LicenseRef-.
+    """
     cleaned = clean_license_identifier(value)
     if cleaned is None:
         return None
-    depth, expect_operand = 0, True
-    for tok in re.findall(r"[()]|[^\s()]+", cleaned):
-        if tok == "(" and expect_operand:
-            depth += 1
-        elif tok == ")" and not expect_operand and depth:
-            depth -= 1
-        elif tok in {"AND", "OR", "WITH"} and not expect_operand:
-            expect_operand = True
-        elif expect_operand and (
-            tok.removesuffix("+") in spdx_license_ids() or _LICENSE_REF_RE.fullmatch(tok)
-        ):
-            expect_operand = False
+    licences, exceptions = spdx_license_ids()
+    tokens: list[str] = re.findall(r"[()]|[^\s()]+", cleaned)
+    pos = 0
+
+    def take() -> str | None:
+        nonlocal pos
+        pos += 1
+        return tokens[pos - 1] if pos <= len(tokens) else None
+
+    def accept(op: str) -> bool:
+        if tokens[pos : pos + 1] == [op]:
+            take()
+            return True
+        return False
+
+    def disjunction() -> bool:
+        return conjunction() and (not accept("OR") or disjunction())
+
+    def conjunction() -> bool:
+        return with_expr() and (not accept("AND") or conjunction())
+
+    def with_expr() -> bool:
+        tok = take()
+        if tok == "(":
+            return disjunction() and take() == ")"
+        if tok is None:
+            return False
+        base = tok.removesuffix("+")
+        if base in licences:
+            ok = base == tok or not base.endswith(("+", "-only", "-or-later"))
         else:
-            return None
-    return None if expect_operand or depth else cleaned
+            ok = base == tok and _LICENSE_REF_RE.fullmatch(tok) is not None
+        return ok and (not accept("WITH") or take() in exceptions)
+
+    return cleaned if disjunction() and pos == len(tokens) else None
 
 
 def _conflict_risk(field_name: str, component_name: str, locator: str) -> RiskAssessment:
@@ -486,6 +516,9 @@ def apply_agent_yaml_declarations(
             dataset_refs_by_name[ds_name] = ds_comp.bom_ref
 
     raw_models = parsed.get("models")
+    edge_keys: set[tuple[str, str, str]] = {
+        (e.source_ref, e.target_ref, e.relationship) for e in aibom.dependencies
+    }
     if isinstance(raw_models, list):
         for entry in raw_models[:200]:
             if not isinstance(entry, dict):
@@ -557,16 +590,13 @@ def apply_agent_yaml_declarations(
                     for ds_ref_name in ds_list[:50]:
                         clean_ds = _clean_text(ds_ref_name, max_len=200)
                         if clean_ds and clean_ds in dataset_refs_by_name:
-                            target = dataset_refs_by_name[clean_ds]
-                            if not any(
-                                (e.source_ref, e.target_ref, e.relationship)
-                                == (m_comp.bom_ref, target, "trained-on")
-                                for e in aibom.dependencies
-                            ):
+                            key = (m_comp.bom_ref, dataset_refs_by_name[clean_ds], "trained-on")
+                            if key not in edge_keys:
+                                edge_keys.add(key)
                                 aibom.dependencies.append(
                                     DependencyEdge(
                                         source_ref=m_comp.bom_ref,
-                                        target_ref=target,
+                                        target_ref=key[1],
                                         relationship="trained-on",
                                         assurance_level="declared",
                                     )

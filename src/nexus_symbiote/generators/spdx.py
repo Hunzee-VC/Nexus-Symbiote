@@ -381,6 +381,8 @@ class SPDXGenerator(Generator):
                         "to": [target_lic],
                     }
                 )
+                if target_lic != NO_ASSERTION_LICENSE and not getattr(src_comp, "license", None):
+                    license_relationships[-1]["comment"] = "declared by producer"
 
         subject = repository_subject(aibom)
         members: list[dict[str, Any]] = [
@@ -481,6 +483,7 @@ class SPDXGenerator(Generator):
         v4: bool = False,
     ) -> dict[str, Any]:
         from nexus_symbiote.spdx_profiles import (
+            _clean_url,
             normalize_spdx_dataset_type,
             spdx_autonomy_presence,
         )
@@ -567,7 +570,7 @@ class SPDXGenerator(Generator):
                 if isinstance(rel_ts, str) and rel_ts:
                     element["releaseTime"] = rel_ts
                     declared_fields.append("releaseTime")
-                observed_loc = getattr(comp, "source_uri", None)
+                observed_loc = _clean_url(getattr(comp, "source_uri", None))
                 dl_loc = observed_loc or comp.properties.get("declared_download_location")
                 if isinstance(dl_loc, str) and dl_loc:
                     element["software_downloadLocation"] = dl_loc
