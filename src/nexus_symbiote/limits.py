@@ -128,9 +128,8 @@ SPECS: dict[str, LimitSpec] = {
             "advisory-matches",
             "count",
             1_000_000_000,
-            "Advisory records `advisories --offline-db` matches to package versions, or "
-            "cannot decide for them, in one run, before aliases merge; evaluating a range "
-            "with many events counts too.",
+            "Advisory records `advisories --offline-db` matches to package versions in one "
+            "run, before aliases merge; evaluating a range with many events counts too.",
         ),
     )
 }

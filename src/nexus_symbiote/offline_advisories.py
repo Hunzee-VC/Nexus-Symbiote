@@ -401,16 +401,16 @@ class _PackageMatcher:
         self._listed: dict[Any, list[int]] = {}
         self._listed_text: dict[str, list[int]] = {}
         self._nodes: dict[int, list[_Hit]] = {}
-        self._failed: list[tuple[int, str]] = []
-        self._failed_unparsed: list[tuple[int, str]] = []
+        failed_parsed: list[tuple[int, str]] = []
+        failed_unparsed_blocks: list[tuple[int, str]] = []
 
         ranges: list[tuple[int, _Range]] = []
         for number, (_, affected) in enumerate(blocks):
             raw_versions, raw_ranges = affected.get("versions", []), affected.get("ranges", [])
             if not isinstance(raw_versions, list) or not isinstance(raw_ranges, list):
                 reason = "OSV affected versions or ranges are not a list"
-                self._failed.append((number, reason))
-                self._failed_unparsed.append((number, reason))
+                failed_parsed.append((number, reason))
+                failed_unparsed_blocks.append((number, reason))
                 continue
             for ver in raw_versions:
                 if not isinstance(ver, str):
@@ -438,13 +438,21 @@ class _PackageMatcher:
                     failed = failed or _UNCOMPARABLE
                 readable.append(rng)
             if failed is not None:
-                self._failed.append((number, failed))
+                failed_parsed.append((number, failed))
             else:
                 for rng in readable:
                     budget.spend((len(rng.versions()) + 1) ** 2 // _CHEAP_STEPS)
                     ranges.append((number, rng))
             if failed_unparsed is not None:
-                self._failed_unparsed.append((number, failed_unparsed))
+                failed_unparsed_blocks.append((number, failed_unparsed))
+        # Kept whole so a component costs nothing per error past the ones the report lists.
+        self._errors = {
+            parses: (
+                frozenset(number for number, _ in failed),
+                tuple((self._advisories[number], reason) for number, reason in failed),
+            )
+            for parses, failed in ((True, failed_parsed), (False, failed_unparsed_blocks))
+        }
 
         keys = {text: _version_key(ecosystem, text) for _, rng in ranges for text in rng.versions()}
         self._keys = sorted({key for key in keys.values() if key is not None})
@@ -492,19 +500,18 @@ class _PackageMatcher:
     def matches(
         self, version: str, budget: _MatchBudget
     ) -> tuple[
-        list[tuple[_ParsedAdvisory, list[str], list[str]]], list[tuple[_ParsedAdvisory, str]]
+        list[tuple[_ParsedAdvisory, list[str], list[str]]], tuple[tuple[_ParsedAdvisory, str], ...]
     ]:
         """Each matching block's advisory, fixes above ``version`` and undecided bounds (empty
         once a listing or a range without one decides it), then each block that cannot be
-        decided for it with the reason; both in bundle order.
+        decided for it with the reason; both in bundle order. The second is shared between
+        calls, so a caller lists the errors it reports without building the rest.
         """
         key = _version_key(self._ecosystem, version)
         position = -1
         if key is None:
-            failed = self._failed_unparsed
             hits: list[_Hit] = [(number, None) for number in self._listed_text.get(version, ())]
         else:
-            failed = self._failed
             rank = bisect_left(self._keys, key)
             exact = rank < len(self._keys) and self._keys[rank] == key
             position = 2 * rank + 1 if exact else 2 * rank
@@ -513,8 +520,7 @@ class _PackageMatcher:
             while node:
                 hits.extend(self._nodes.get(node, ()))
                 node >>= 1
-        budget.spend(len(failed))
-        undecidable = {number for number, _ in failed}
+        undecidable, failed = self._errors[key is not None]
         blocks: dict[int, tuple[list[str], list[str], list[bool]]] = {}
         for number, rng in sorted(hits, key=lambda hit: hit[0]):
             fixes = () if rng is None else rng.fixes
@@ -535,7 +541,7 @@ class _PackageMatcher:
             )
             for number, (fixed, bounds, decided) in sorted(blocks.items())
         ]
-        return found, [(self._advisories[number], reason) for number, reason in failed]
+        return found, failed
 
 
 def _build_package_index(
@@ -733,10 +739,10 @@ def match_offline_advisories(
                 )
             report.errors.append(f"Offline advisory matching stopped: {bound.exceeded()}")
             return report, provenance
-        for adv, reason in failed:
-            unlisted_errors += len(report.errors) >= MAX_OFFLINE_ERRORS
-            if len(report.errors) < MAX_OFFLINE_ERRORS:
-                report.errors.append(f"{bom_ref}: offline advisory {adv.record_id}: {reason}")
+        listed = max(0, min(len(failed), MAX_OFFLINE_ERRORS - len(report.errors)))
+        for adv, reason in failed[:listed]:
+            report.errors.append(f"{bom_ref}: offline advisory {adv.record_id}: {reason}")
+        unlisted_errors += len(failed) - listed
         for adv, fixed, undecided in found:
             hit = matched_by_adv.setdefault(adv.record_id, (adv, [], list(undecided)))
             hit[1].extend(fixed)

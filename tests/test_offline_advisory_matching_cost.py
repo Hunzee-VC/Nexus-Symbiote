@@ -588,6 +588,25 @@ def test_the_budget_is_an_operator_limit_and_the_command_exits_1(tmp_path):
     assert limits.DEFAULTS.advisory_matches == 2_000_000
 
 
+def test_errors_past_the_report_cap_spend_no_budget(tmp_path):
+    db_file = tmp_path / "osv.json"
+    db_file.write_text(
+        json.dumps([_range_record(index, [{"introduced": "bad!"}]) for index in range(400)]),
+        encoding="utf-8",
+    )
+    bom = AIBOM(components=[_component("victim", f"1.{i}.0") for i in range(50)])
+
+    with limits.applied(replace(limits.DEFAULTS, advisory_matches=1)):
+        report, _ = offline.match_offline_advisories(bom, db_path=db_file)
+    assert report.components_checked == 50
+    assert len(report.errors) == offline.MAX_OFFLINE_ERRORS + 1
+    assert report.errors[0] == (
+        "pkg:pypi:victim@1.0.0: offline advisory GHSA-000000: OSV range version cannot be compared"
+    )
+    assert report.errors[-1] == "19900 more offline advisory errors are not listed"
+    assert report.complete is False
+
+
 def test_a_range_with_many_events_spends_the_budget_before_it_is_evaluated(tmp_path):
     events = [
         {"introduced": f"5.{index}.0"} if index % 2 == 0 else {"fixed": f"5.{index}.0"}
