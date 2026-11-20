@@ -597,6 +597,17 @@ def test_an_unclosed_or_oversized_grant_is_still_a_grant(tmp_path: Path) -> None
         ("Use Bash(curl:* safe", "Use Bash(curl:* evil"),
         ("Use Bash(" + "a" * 600 + ")", "Use Bash(" + "a" * 600),
         ("Use mcp__" + "a" * 600, "Use mcp__" + "a" * 599 + "b"),
+        ("Use mcp__x(a)", "Use mcp__x(b)"),
+        ("Use mcp__x(a) now", "Use mcp__x(b) now"),
+        ("Use mcp__" + "a" * 600 + "(x)", "Use mcp__" + "a" * 600 + "(y)"),
+        ("Use mcp__x(" + "a" * 600 + ")", "Use mcp__x(" + "a" * 599 + "b)"),
+        ("Use Bash(foo(x) safe)", "Use Bash(foo(x) rm -rf /)"),
+        ("Use Bash(" + "a" * 600 + " foo(x) safe)", "Use Bash(" + "a" * 600 + " foo(x) rm -rf /)"),
+        ("Use Bash($(curl x))", "Use Bash($(curl y))"),
+        ("Use Bash(echo $(curl x) | sh)", "Use Bash(echo $(curl y) | sh)"),
+        ("Use Bash((a) safe", "Use Bash((a) evil"),
+        ("Use Bash((a) safe)", "Use Bash((a) evil)"),
+        ("Use Bash(a) and Read(b", "Use Bash(a) and Read(c"),
     ],
 )
 def test_a_change_inside_an_over_bound_grant_is_reported(
@@ -621,7 +632,20 @@ def test_a_change_inside_an_over_bound_grant_is_reported(
 def test_an_unchanged_over_bound_grant_raises_nothing(tmp_path: Path) -> None:
     base = tmp_path / "base"
     head = tmp_path / "head"
-    grants = "Use Bash(" + "a" * 600 + ") and Read(" + "b" * 600 + "\n\nmcp__" + "c" * 600
+    grants = (
+        "Use Bash("
+        + "a" * 600
+        + ") and Read("
+        + "b" * 600
+        + "\n\nmcp__"
+        + "c" * 600
+        + "\n\nUse mcp__x(a), Bash(foo(x) safe), Bash($(curl x)) and Bash((a) b"
+        + "\n\nmcp__"
+        + "d" * 600
+        + "("
+        + "e" * 600
+        + ")"
+    )
     _write(base, "CLAUDE.md", f"# A\n\n{grants}\n")
     _write(head, "CLAUDE.md", f"# A\n\nReworded intro.\n\n{grants}\n")
     assert _classes(base, head) == []
@@ -633,7 +657,17 @@ def test_an_unchanged_over_bound_grant_raises_nothing(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "unit",
-    ["Bash(" + "a" * 600 + ")\n", "Bash(" + "a" * 600 + " ", "mcp__" + "a" * 600 + " "],
+    [
+        "Bash(" + "a" * 600 + ")\n",
+        "Bash(" + "a" * 600 + " ",
+        "mcp__" + "a" * 600 + " ",
+        "Bash(" + "(" * 40 + ")" * 40 + ") ",
+        "Bash(" + "(" * 40 + ") ",
+        "Bash(((x) ",
+        "Bash(a) ",
+        "mcp__a(b) ",
+        "(" * 40 + "Bash(" + ")",
+    ],
 )
 def test_over_bound_grants_take_linear_time(unit: str) -> None:
     def run(scale: int) -> None:

@@ -72,10 +72,9 @@ MAX_SHOW_TEXT_CHARS = 4096
 # for the whole report: without it a 4 MiB file asks for more than a gigabyte of output.
 MAX_SHOW_TEXT_TOTAL = 1024 * 1024
 TEXT_WITHHELD = "[text withheld: --show-text output limit reached]"
-# Longest tool argument or MCP tool name kept as written. A longer or unclosed one is kept as
-# the digest of its whole text up to the closing parenthesis or the end of the line: the bare
-# tool name hid every later change to it, and the digest keeps a secret in a grant out of memory
-# and output. Its match consumes that text, so no character is scanned twice.
+# Longest tool argument or MCP tool name kept as written; a longer one is kept as the digest of
+# its whole text. The bare tool name hid every later change to it, and the digest keeps a secret
+# in a grant out of memory and output.
 _MAX_GRANT_CHARS = 512
 
 _FRONTMATTER_RE = re.compile(
@@ -103,10 +102,8 @@ _GRANT_VERB_PREFIX = (
     r"(?:allow|allows|allowed|grant|grants|enable|enables|use|call|tools?|permissions?|[:,\[])\s+"
 )
 _TOOL_GRANT_RE = re.compile(
-    rf"\b(?:{_PARAM_TOOLS})\([^)\n]{{0,{_MAX_GRANT_CHARS}}}\)"
-    rf"|\b(?P<long_tool>{_PARAM_TOOLS})(?P<long_arg>\([^)\r\n]*\)?)"
-    rf"|\bmcp__(?P<long_mcp>[A-Za-z0-9_.-]{{{_MAX_GRANT_CHARS + 1},}})"
-    rf"|\bmcp__[A-Za-z0-9_.-]{{1,{_MAX_GRANT_CHARS}}}(?:\([^)\n]{{0,{_MAX_GRANT_CHARS}}}\))?\b"
+    rf"\b(?P<tool>{_PARAM_TOOLS})(?=\()"
+    r"|\bmcp__(?P<mcp>[A-Za-z0-9_.-]+)"
     r"|\bmcp__"
     r"|^[ \t]*allowed[-_]tools[ \t]*:[ \t]*(?P<list>.+)$"
     rf"|(?<![A-Za-z0-9_])(?:{_UNAMBIGUOUS_BARE_TOOLS})(?![A-Za-z0-9_])"
@@ -133,6 +130,7 @@ _POLICY_FRONTMATTER_KEYS = (
 _PEM_BEGIN_RE = re.compile(r"-----BEGIN [A-Z0-9 _-]*PRIVATE KEY-----")
 _PEM_END_RE = re.compile(r"-----END [A-Z0-9 _-]*PRIVATE KEY-----")
 _NL_RE = re.compile(r"\r?\n")
+_PAREN_RE = re.compile(r"[()]")
 
 
 class InstructionChangeClass(StrEnum):
@@ -368,6 +366,25 @@ def _grant_digest(text: str) -> str:
     return hash_bytes(text.encode("utf-8", "surrogatepass"))
 
 
+def _grant_part(text: str, limit: int, opening: str, closing: str) -> str:
+    return text if len(text) <= limit else f"{opening}{_grant_digest(text)}{closing}"
+
+
+def _grant_argument(text: str, start: int, line_end: int) -> int:
+    """End of the argument opened at ``start``: its balanced ``)``, else the end of the line.
+
+    A ``$(...)`` or other nested group does not end the grant, and an argument left open by
+    an unbalanced ``(`` runs to the end of the line, so no text that may belong to it goes
+    unread. The scan consumes what it reads, so each character is read once.
+    """
+    depth = 0
+    for paren in _PAREN_RE.finditer(text, start, line_end):
+        depth += 1 if paren.group() == "(" else -1
+        if depth == 0:
+            return paren.end()
+    return line_end - 1 if text[line_end - 1 : line_end] == "\r" else line_end
+
+
 def _extract_block_signals(
     blocks: tuple[tuple[str, str], ...],
 ) -> tuple[
@@ -392,17 +409,33 @@ def _extract_block_signals(
         def _line_of(pos: int, _starts: list[int] = line_starts) -> int:
             return bisect_right(_starts, pos) - 1
 
-        for match in _TOOL_GRANT_RE.finditer(block_text):
+        pos = 0
+        line_end = -1
+        while (match := _TOOL_GRANT_RE.search(block_text, pos)) is not None:
             loc = (idx, _line_of(match.start()))
+            pos = match.end()
             if match.group("list") is not None:
                 for tok in _tool_list(match.group("list")):
                     tools.add(tok)
                     tool_locs.setdefault(tok, []).append(loc)
                 continue
-            if match.group("long_tool") is not None:
-                tok = f"{match.group('long_tool')}({_grant_digest(match.group('long_arg'))})"
-            elif match.group("long_mcp") is not None:
-                tok = f"mcp__({_grant_digest(match.group('long_mcp'))})"
+            name = match.group("tool") or match.group("mcp")
+            if name is not None:
+                if pos > line_end:
+                    line_end = block_text.find("\n", pos)
+                    if line_end < 0:
+                        line_end = len(block_text)
+                argument = ""
+                if block_text.startswith("(", pos):
+                    end = _grant_argument(block_text, pos, line_end)
+                    argument = _grant_part(block_text[pos:end], _MAX_GRANT_CHARS + 2, "(", ")")
+                    pos = end
+                elif match.group("mcp") is not None:
+                    name = name.rstrip(".-")
+                if match.group("tool") is not None:
+                    tok = f"{name}{argument}"
+                else:
+                    tok = f"mcp__{_grant_part(name, _MAX_GRANT_CHARS, '<', '>')}{argument}"
             else:
                 tok = match.group("quoted") or match.group("verb") or match.group("noun")
                 if tok is None:

