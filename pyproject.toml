@@ -96,6 +96,7 @@ Security = "https://github.com/aisecnomad/Nexus-Symbiote/blob/main/SECURITY.md"
 dev = [
     "pytest>=9.0.3,<10",
     "pytest-cov>=5.0,<8",
+    "pytest-xdist>=3.8,<4",
     "ruff>=0.4,<1",
     "mypy>=1.10,<3",
     "types-PyYAML>=6.0,<7",
