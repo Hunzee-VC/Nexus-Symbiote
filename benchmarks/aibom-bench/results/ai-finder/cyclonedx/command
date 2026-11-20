@@ -1,0 +1,1 @@
+/aibom-run/venvs/ai-finder/bin/ai-finder scan /aibom-run/work/ai-finder/corpus -r -f cyclonedx -o /aibom-run/results2/ai-finder/cyclonedx/bom.cdx.json 

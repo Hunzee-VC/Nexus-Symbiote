@@ -1,0 +1,1 @@
+/aibom-run/tools/cdxgen/node_modules/.bin/cdxgen -t ai -t python -t js -r --profile ml --no-install-deps --spec-version 1.7 --json-pretty -o /aibom-run/results3/cdxgen-trace/network-python/bom.json /aibom-run/work/cdxgen-trace/corpus 
