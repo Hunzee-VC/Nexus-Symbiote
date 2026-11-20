@@ -889,6 +889,9 @@ def _scan_and_analyze(root: Path, settings: dict[str, object], servers: dict[str
         (["Read(./docs/**)"], {"fetch": {"command": "npx", "args": ["-y", "mcp-server-fetch"]}}, 0),
         (["WebFetch", "Read(//**)"], {}, 1),
         (["Bash(npm test)"], {"time": {"command": "npx", "args": ["-y", "mcp-server-time"]}}, 0),
+        # A shell reads private files and sends them out, so it holds every leg.
+        (["WebFetch", "Bash"], {}, 1),
+        (["Bash(*)"], {}, 1),
     ],
 )
 def test_real_scan_ide_allow_rules_hold_the_legs_they_grant(
@@ -896,6 +899,37 @@ def test_real_scan_ide_allow_rules_hold_the_legs_they_grant(
 ) -> None:
     settings = {"permissions": {"defaultMode": "default", "allow": allow}}
     assert _scan_and_analyze(tmp_path, settings, servers) == exit_code
+
+
+@pytest.mark.parametrize(
+    ("mode", "exit_code"), [("bypassPermissions", 1), ("acceptEdits", 0), ("default", 0)]
+)
+def test_real_scan_bypass_mode_holds_every_leg(tmp_path: Path, mode: str, exit_code: int) -> None:
+    """Bypass mode runs Bash unprompted, so the agent is the private leg beside a fetch server."""
+    settings = {"permissions": {"defaultMode": mode}}
+    servers = {"fetch": {"command": "uvx", "args": ["mcp-server-fetch"]}}
+    assert _scan_and_analyze(tmp_path, settings, servers) == exit_code
+
+
+@pytest.mark.parametrize(
+    ("approval", "sandbox", "critical"),
+    [
+        ("never", "danger-full-access", True),
+        ("never", "workspace-write", False),
+        ("on-request", "danger-full-access", False),
+        ("never", ["danger-full-access"], False),
+    ],
+)
+def test_codex_without_prompts_or_sandbox_holds_every_leg(
+    approval: str, sandbox: object, critical: bool
+) -> None:
+    codex = IDEAgentComponent(
+        bom_ref="ide:codex",
+        name="codex",
+        ide_type="codex",
+        properties={"approval_policy": approval, "sandbox_mode": sandbox},
+    )
+    assert analyze_trifecta(AIBOM(components=[codex])).has_critical is critical
 
 
 def test_every_allowance_class_the_collector_names_has_its_legs() -> None:
@@ -955,6 +989,11 @@ def test_documentation_servers_named_for_a_platform_are_not_private_data() -> No
         ("API_BASE_URL", False),
         ("TOKENIZERS_PARALLELISM", False),
         ("KEYBOARD_LAYOUT", False),
+        ("MYPG_URL", True),
+        ("my-redis_uri", True),
+        ("REDIS_CACHE_URL", False),
+        ("DB" * 500 + "_URL", True),
+        ("DB" * 500, False),
     ],
 )
 def test_secret_environment_names(name: str, private: bool) -> None:
@@ -962,3 +1001,18 @@ def test_secret_environment_names(name: str, private: bool) -> None:
         bom_ref="mcp:s", name="thing", endpoint_url="https://x.example.com/mcp", env={name: "x"}
     )
     assert analyze_trifecta(AIBOM(components=[server])).has_critical is private
+
+
+def test_secret_environment_name_scan_is_linear() -> None:
+    """A long run of datastore names without a URL suffix must not rescan the run per name."""
+
+    def analyze(scale: int) -> None:
+        server = MCPServerComponent(
+            bom_ref="mcp:s",
+            name="thing",
+            endpoint_url="https://x.example.com/mcp",
+            env={"db" * (2000 * scale): "x", "pg_" * (1000 * scale): "x"},
+        )
+        analyze_trifecta(AIBOM(components=[server]))
+
+    assert scaling_ratio(analyze) < 10

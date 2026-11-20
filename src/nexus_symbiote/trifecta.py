@@ -150,15 +150,18 @@ _WITHHELD_ENV_NAME_RE = re.compile(r"\[redacted-[1-9][0-9]{0,5}\]")
 # Environment variable names that plausibly carry credentials, tokens, or private DSNs.
 # Benign runtime knobs (TZ, LANG, NODE_ENV, PORT, DEBUG, LOG_LEVEL) do not match. The
 # first alternatives match inside a word (PGPASSWORD), and a URL or URI counts only
-# beside a datastore name, since such a locator usually embeds its credentials.
+# beside a datastore name, since such a locator usually embeds its credentials. That
+# test starts only where a letter-and-digit run starts and checks the run's end once,
+# so a long run of datastore names (DBDBDB...) is scanned in linear time.
 _SECRET_ENV_KEY_RE = re.compile(
     r"secret|passw(?:or)?d|credential|apikey|"
     r"(?:^|_)(?:"
     r"key|keys|token|tokens|pass|pwd|cred|creds|auth|bearer|cookie|cookies|session|"
     r"private|jwt|oauth|pat|pem|dsn|conn_str|connection_string|kubeconfig|vault"
     r")(?:$|_)|"
+    r"(?<![a-z0-9])(?=[a-z0-9]*+_ur[il])[a-z0-9]*?"
     r"(?:postgres|pg|mysql|maria|mongo|redis|database|db|amqp|rabbitmq|supabase|neon|"
-    r"clickhouse|elastic|sqlalchemy)[a-z0-9]*_(?:url|uri)|"
+    r"clickhouse|elastic|sqlalchemy)|"
     r"^(?:aws_access|aws_session|openai_|anthropic_|stripe_|gcp_)",
     re.IGNORECASE,
 )
@@ -372,7 +375,8 @@ _IDE_GRANT = "permission_scope"
 _IDE_GRANT_RE = re.compile(r"unscoped tool allowances \(([^)]*)\)")
 _IDE_GRANT_LEGS: dict[str, frozenset[str]] = {
     "web fetches": frozenset({"untrusted", "egress"}),
-    "shell commands": frozenset({"egress"}),
+    # A shell reads any file the agent can and sends it with curl.
+    "shell commands": _LEGS,
     "file edits": frozenset({"egress"}),
     "file reads": frozenset({"private"}),
     "MCP server tools": frozenset(),
@@ -381,6 +385,7 @@ _IDE_GRANT_LEGS: dict[str, frozenset[str]] = {
 _GATING_ACTIONS = frozenset({"*", "egress"})
 _UNGATED_CLAUDE_MODES = frozenset({"bypassPermissions", "acceptEdits"})
 _UNGATED_CODEX_POLICIES = frozenset({"never"})
+_UNCONFINED_CODEX_SANDBOXES = frozenset({"danger-full-access", "full-access"})
 EVIDENCE_LIMIT = 10
 """Most components one finding lists for each leg."""
 _SHADOW_HIGH_TIERS = frozenset(
@@ -533,15 +538,32 @@ def _ide_grant_legs(component: AnyComponent) -> frozenset[str]:
 
     The ide_agents collector records such rules only as the class names in a
     ``permission_scope`` finding. A class this table does not name, such as
-    ``every tool``, holds all three legs.
+    ``every tool``, holds all three legs, and so does an agent that runs every tool,
+    shell included, without a prompt or a sandbox.
     """
     legs: set[str] = set()
     if isinstance(component, IDEAgentComponent):
+        if _runs_every_tool_unprompted(component):
+            return _LEGS
         for risk in component.risks:
             match = _IDE_GRANT_RE.search(risk.detail) if risk.category == _IDE_GRANT else None
             for name in match.group(1).split(", ") if match else ():
                 legs.update(_IDE_GRANT_LEGS.get(name, _LEGS))
     return frozenset(legs)
+
+
+def _runs_every_tool_unprompted(component: IDEAgentComponent) -> bool:
+    if component.ide_type == "claude-code":
+        return component.permission_mode == "bypassPermissions"
+    if component.ide_type == "codex":
+        policy, sandbox = (component.properties.get(k) for k in ("approval_policy", "sandbox_mode"))
+        return (
+            isinstance(policy, str)
+            and isinstance(sandbox, str)
+            and policy in _UNGATED_CODEX_POLICIES
+            and sandbox in _UNCONFINED_CODEX_SANDBOXES
+        )
+    return False
 
 
 def _is_explicitly_ungated(component: AnyComponent) -> bool:
