@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import time
+import tracemalloc
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -29,7 +31,14 @@ from nexus_symbiote.core.models import (
     RiskAssessment,
     ToolComponent,
 )
-from nexus_symbiote.trifecta import analyze_trifecta, canonical_tool_name
+from nexus_symbiote.scanners.ide_agents import _SCOPED_TOOL_CLASSES
+from nexus_symbiote.trifecta import (
+    _IDE_GRANT_LEGS,
+    EVIDENCE_LIMIT,
+    analyze_trifecta,
+    canonical_tool_name,
+)
+from tests.support import scaling_ratio
 
 
 def _trifecta_bom(*, gated: bool = False, partial_gate: bool = False) -> AIBOM:
@@ -44,7 +53,8 @@ def _trifecta_bom(*, gated: bool = False, partial_gate: bool = False) -> AIBOM:
         capabilities=CapabilityDeclaration(
             capabilities=[CapabilityClass.NETWORK, CapabilityClass.READ],
             side_effect_profile=SideEffectProfile.READ_ONLY,
-            human_in_the_loop=HumanInTheLoop.NONE,
+            # A URL fetcher is a way out as well as a way in, so the gated twin gates it too.
+            human_in_the_loop=hitl_egress,
         ),
     )
     secret_tool = ToolComponent(
@@ -141,10 +151,11 @@ def test_explicit_none_on_egress_tool_overrides_agent_gate() -> None:
 
 def test_authorization_record_approval_gates_agent() -> None:
     bom = _trifecta_bom(gated=False)
-    # Remove explicit NONE override on the egress tool so agent-level authorization governs it.
-    egress = next(c for c in bom.components if c.bom_ref == "tool:send-webhook")
-    assert isinstance(egress, ToolComponent) and egress.capabilities is not None
-    egress.capabilities.human_in_the_loop = None
+    # Remove explicit NONE overrides on the egress tools so agent-level authorization governs.
+    for ref in ("tool:send-webhook", "tool:web-fetch"):
+        egress = next(c for c in bom.components if c.bom_ref == ref)
+        assert isinstance(egress, ToolComponent) and egress.capabilities is not None
+        egress.capabilities.human_in_the_loop = None
     agent = next(c for c in bom.components if isinstance(c, AgentComponent))
     agent.authorizations = [
         AuthorizationRecord(principal="user:alice", action="egress", approval_required=True)
@@ -392,7 +403,9 @@ def test_ide_agent_gating_requires_verified_authorization_without_allow_rules() 
     assert analyze_trifecta(AIBOM(components=[unverified_default, server])).has_critical
     assert analyze_trifecta(AIBOM(components=[default_with_allow, server])).has_critical
     assert analyze_trifecta(AIBOM(components=[default_with_risk, server])).has_critical
-    assert not analyze_trifecta(AIBOM(components=[verified_gated, server])).has_critical
+    # No collector records verified effective authorization, so the untyped property that
+    # claims it clears nothing either.
+    assert analyze_trifecta(AIBOM(components=[verified_gated, server])).has_critical
 
 
 def test_ide_agent_with_prompt_edge_still_covers_workspace_mcp_servers() -> None:
@@ -450,6 +463,13 @@ def test_empty_agent_cannot_hide_unlinked_tools() -> None:
         ("get_url", "cat_file"),
         ("f\u0435tch", "read_secret"),  # Cyrillic small letter ie
         ("f\u0435tchUrl", "r\u0435adSecrets"),
+        ("fet\u03f2h", "read_secret"),  # Greek lunate sigma, which NFKC turns into a sigma
+        ("fet\u1d04h", "read_secret"),
+        ("fetch", "read_se\u1d04ret"),
+        ("\u0192etch", "read_secret"),
+        ("fetch", "re\u0251d_file"),
+        ("fetch", "l\u0585ad_file"),
+        ("fetch", "\u1d0fpen_file"),
     ],
 )
 def test_naming_evasion_variants_are_caught_without_capabilities(
@@ -636,3 +656,309 @@ def test_trifecta_cli_gate_and_determinism(tmp_path: Path) -> None:
     res_pass = runner.invoke(main, ["trifecta", str(gated_path)])
     assert res_pass.exit_code == 0
     assert json.loads(res_pass.output)["finding_count"] == 0
+
+
+def _name_only_tools() -> list[ToolComponent]:
+    return [
+        ToolComponent(bom_ref="tool:in", name="web_search"),
+        ToolComponent(bom_ref="tool:priv", name="read_secret"),
+        ToolComponent(
+            bom_ref="tool:out",
+            name="post_slack",
+            capabilities=CapabilityDeclaration(
+                capabilities=[CapabilityClass.NETWORK, CapabilityClass.WRITE]
+            ),
+        ),
+    ]
+
+
+def _critical_scopes(bom: AIBOM) -> set[str]:
+    return {f.scope_ref for f in analyze_trifecta(bom).findings if f.kind == "lethal_trifecta"}
+
+
+def test_legs_split_between_a_bound_ide_agent_and_unbound_servers_still_meet() -> None:
+    """A bypass-mode IDE agent bound to one harmless server does not shed the others."""
+    ide = IDEAgentComponent(
+        bom_ref="ide:claude",
+        name="claude-code",
+        ide_type="claude-code",
+        permission_mode="bypassPermissions",
+        mcp_server_refs=["mcp:time"],
+    )
+    servers = [
+        MCPServerComponent(bom_ref="mcp:time", name="time", launcher_package="mcp-server-time"),
+        MCPServerComponent(bom_ref="mcp:search", name="brave", launcher_package="brave-search"),
+        MCPServerComponent(bom_ref="mcp:pg", name="postgres", launcher_package="pg-mcp"),
+    ]
+    assert _critical_scopes(AIBOM(components=servers)) == set()
+    assert _critical_scopes(AIBOM(components=[ide, *servers])) == {"ide:claude"}
+
+
+def test_decoy_agent_bound_to_one_leg_does_not_split_the_trifecta() -> None:
+    decoy = AgentComponent(bom_ref="agent:decoy", name="decoy", tool_refs=["tool:in"])
+    assert _critical_scopes(AIBOM(components=[decoy, *_name_only_tools()])) == {"agent:decoy"}
+    # An agent that holds no leg adds nothing to the unbound pool's own finding.
+    idle = AgentComponent(bom_ref="agent:idle", name="idle")
+    assert _critical_scopes(AIBOM(components=[idle, *_name_only_tools()])) == {"inventory:unscoped"}
+
+
+def test_url_fetchers_count_as_egress() -> None:
+    """A tool or server that requests a URL of the model's choosing can carry data out."""
+    fetch = MCPServerComponent(
+        bom_ref="mcp:fetch", name="fetch", launcher_package="@modelcontextprotocol/server-fetch"
+    )
+    files = MCPServerComponent(
+        bom_ref="mcp:fs",
+        name="filesystem",
+        launcher_package="@modelcontextprotocol/server-filesystem",
+    )
+    assert _critical_scopes(AIBOM(components=[fetch, files])) == {"inventory:root"}
+    assert _critical_scopes(AIBOM(components=[files])) == set()
+
+    reader = ToolComponent(bom_ref="tool:priv", name="read_secret")
+    for name in ("fetch_url", "http_get", "browse"):
+        declared = ToolComponent(
+            bom_ref="tool:in",
+            name=name,
+            capabilities=CapabilityDeclaration(
+                capabilities=[CapabilityClass.NETWORK, CapabilityClass.READ],
+                side_effect_profile=SideEffectProfile.READ_ONLY,
+            ),
+        )
+        assert analyze_trifecta(AIBOM(components=[declared, reader])).has_critical, name
+        bare = ToolComponent(bom_ref="tool:in", name=name)
+        assert analyze_trifecta(AIBOM(components=[bare, reader])).has_critical, name
+
+
+def test_ungated_url_fetcher_beside_a_gated_webhook_is_critical() -> None:
+    bom = _trifecta_bom(gated=True)
+    fetch = next(c for c in bom.components if c.bom_ref == "tool:web-fetch")
+    assert isinstance(fetch, ToolComponent) and fetch.capabilities is not None
+    fetch.capabilities.human_in_the_loop = HumanInTheLoop.NONE
+    assert analyze_trifecta(bom).has_critical
+
+
+_NOW = datetime(2026, 6, 1, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("records", "gated"),
+    [
+        ([{"action": "egress"}], True),
+        ([{"action": "*", "resource_scope": "*"}], True),
+        ([{"action": "egress", "expires_at": datetime(2026, 6, 2, tzinfo=UTC)}], True),
+        ([{"action": "read-docs"}], False),
+        ([{"action": "egress", "resource_scope": "hooks.example.com"}], False),
+        ([{"action": "egress", "expires_at": datetime(2026, 5, 31, tzinfo=UTC)}], False),
+        ([{"action": "egress", "expires_at": datetime(2026, 6, 2)}], False),  # noqa: DTZ001
+        ([{"action": "egress"}, {"action": "deploy", "approval_required": False}], False),
+        (
+            [{"action": "egress"}, {"action": "x", "expires_at": datetime(2020, 1, 1, tzinfo=UTC)}],
+            False,
+        ),
+    ],
+)
+def test_approval_record_gates_only_what_it_covers(
+    records: list[dict[str, object]], gated: bool
+) -> None:
+    agent = AgentComponent(
+        bom_ref="agent:a",
+        name="a",
+        tool_refs=["tool:in", "tool:priv", "tool:out"],
+        authorizations=[
+            AuthorizationRecord.model_validate(
+                {"principal": "user:alice", "approval_required": True, **record}
+            )
+            for record in records
+        ],
+    )
+    report = analyze_trifecta(AIBOM(components=[agent, *_name_only_tools()]), now=_NOW)
+    assert report.has_critical is not gated
+
+
+def test_untyped_verified_authorization_property_cannot_gate_an_ide_agent() -> None:
+    server = MCPServerComponent(
+        bom_ref="mcp:remote",
+        name="remote-mcp",
+        endpoint_url="https://remote.example.com/mcp",
+        env={"API_TOKEN": "[redacted]"},
+    )
+    for ide_type, mode, properties in (
+        ("claude-code", "default", {}),
+        ("claude-code", "plan", {}),
+        ("codex", None, {"approval_policy": "untrusted"}),
+    ):
+        ide = IDEAgentComponent(
+            bom_ref="ide:agent",
+            name=ide_type,
+            ide_type=ide_type,
+            permission_mode=mode,
+            assurance_level=AssuranceLevel.VERIFIED,
+            properties={"effective_authorization_verified": True, **properties},
+        )
+        assert analyze_trifecta(AIBOM(components=[ide, server])).has_critical, ide_type
+
+
+def test_camel_case_split_is_linear_in_a_run_of_capitals() -> None:
+    assert canonical_tool_name("HTTPServerURL") == "http_server_url"
+    assert canonical_tool_name("getHTTPResponse2Json") == "get_http_response2_json"
+    assert canonical_tool_name("A" * 50 + "b") == "a" * 49 + "_ab"
+    assert scaling_ratio(lambda scale: canonical_tool_name("A" * (4000 * scale))) < 10
+    assert scaling_ratio(lambda scale: canonical_tool_name("aB" * (2000 * scale))) < 10
+    tool = [ToolComponent(bom_ref="tool:a", name="A" * 200_000)]
+    assert analyze_trifecta(AIBOM(components=tool)).findings == ()
+
+
+def _shared_hub(roots: int) -> AIBOM:
+    """Many root agents over one hub agent whose tools hold every leg many times."""
+    tools = [
+        ToolComponent(bom_ref=f"tool:{kind}-{i:05}", name=f"{name}_{i}")
+        for i in range(roots)
+        for kind, name in (("in", "fetch_url"), ("priv", "read_secret"), ("out", "post_slack"))
+    ]
+    hub = AgentComponent(bom_ref="agent:hub", name="hub", tool_refs=[t.bom_ref for t in tools])
+    agents = [
+        AgentComponent(bom_ref=f"agent:root-{i:05}", name=f"r{i}", sub_agent_refs=["agent:hub"])
+        for i in range(roots)
+    ]
+    return AIBOM(components=[*agents, hub, *tools])
+
+
+def test_scope_construction_is_linear_in_agents_sharing_one_tool_surface() -> None:
+    boms = {scale: _shared_hub(100 * scale) for scale in (1, 4)}
+    assert scaling_ratio(lambda scale: analyze_trifecta(boms[scale])) < 10
+
+    sizes = {}
+    peaks = {}
+    for scale, bom in boms.items():
+        tracemalloc.start()
+        report = analyze_trifecta(bom)
+        sizes[scale] = len(json.dumps(report.to_dict()))
+        peaks[scale] = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+        trifectas = [f for f in report.findings if f.kind == "lethal_trifecta"]
+        assert len(trifectas) == 100 * scale
+        for finding in trifectas:
+            for leg in ("untrusted_input", "private_data", "egress"):
+                listed = [e["component_ref"] for e in finding.evidence if e["leg"] == leg]
+                assert 0 < len(listed) <= EVIDENCE_LIMIT
+                assert listed == sorted(listed)
+            assert "at least" in finding.summary
+    assert sizes[4] < 6 * sizes[1]
+    assert peaks[4] < 6 * peaks[1]
+
+
+def test_evidence_cap_keeps_every_leg_and_the_smallest_references() -> None:
+    report = analyze_trifecta(_shared_hub(EVIDENCE_LIMIT + 5))
+    finding = next(f for f in report.findings if f.scope_ref == "agent:root-00000")
+    listed = [e["component_ref"] for e in finding.evidence if e["leg"] == "private_data"]
+    assert listed == [f"tool:priv-{i:05}" for i in range(EVIDENCE_LIMIT)]
+    small = analyze_trifecta(_shared_hub(2))
+    assert all("at least" not in f.summary for f in small.findings)
+
+
+def test_tool_description_text_from_collectors_feeds_the_untrusted_leg() -> None:
+    described = ToolComponent(
+        bom_ref="tool:in",
+        name="lookup",
+        description_text="Fetch external web pages, then summarize them.",
+    )
+    quiet = ToolComponent(bom_ref="tool:in", name="lookup", description_text="Adds two numbers.")
+    rest = _name_only_tools()[1:]
+    assert analyze_trifecta(AIBOM(components=[described, *rest])).has_critical
+    assert not analyze_trifecta(AIBOM(components=[quiet, *rest])).has_critical
+
+
+def _scan_and_analyze(root: Path, settings: dict[str, object], servers: dict[str, object]) -> int:
+    (root / ".mcp.json").write_text(json.dumps({"mcpServers": servers}), encoding="utf-8")
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+    runner = CliRunner()
+    bom_path = root / "bom.json"
+    assert runner.invoke(main, ["scan", str(root), "-o", str(bom_path)]).exit_code == 0
+    return runner.invoke(main, ["trifecta", str(bom_path)]).exit_code
+
+
+@pytest.mark.parametrize(
+    ("allow", "servers", "exit_code"),
+    [
+        # Every tool, with no narrowing, holds all three legs by itself.
+        (["*"], {}, 1),
+        # A read of everything is the private leg beside a server that fetches.
+        (["Read(**)"], {"fetch": {"command": "npx", "args": ["-y", "mcp-server-fetch"]}}, 1),
+        (["Read(./docs/**)"], {"fetch": {"command": "npx", "args": ["-y", "mcp-server-fetch"]}}, 0),
+        (["WebFetch", "Read(//**)"], {}, 1),
+        (["Bash(npm test)"], {"time": {"command": "npx", "args": ["-y", "mcp-server-time"]}}, 0),
+    ],
+)
+def test_real_scan_ide_allow_rules_hold_the_legs_they_grant(
+    tmp_path: Path, allow: list[str], servers: dict[str, object], exit_code: int
+) -> None:
+    settings = {"permissions": {"defaultMode": "default", "allow": allow}}
+    assert _scan_and_analyze(tmp_path, settings, servers) == exit_code
+
+
+def test_every_allowance_class_the_collector_names_has_its_legs() -> None:
+    """The collector's class names are the only record of the rules; a new one must be mapped."""
+    assert set(_SCOPED_TOOL_CLASSES.values()) <= _IDE_GRANT_LEGS.keys()
+    unknown = IDEAgentComponent(
+        bom_ref="ide:claude",
+        name="claude-code",
+        ide_type="claude-code",
+        risks=[
+            RiskAssessment(
+                severity=RiskSeverity.MEDIUM,
+                category="permission_scope",
+                detail="IDE agent 'claude-code' declares unscoped tool allowances (new class).",
+            )
+        ],
+    )
+    assert analyze_trifecta(AIBOM(components=[unknown])).has_critical
+
+
+def test_documentation_servers_named_for_a_platform_are_not_private_data() -> None:
+    def remote(name: str) -> MCPServerComponent:
+        return MCPServerComponent(
+            bom_ref=f"mcp:{name}", name=name, endpoint_url=f"https://{name}.example.com/mcp"
+        )
+
+    assert not analyze_trifecta(
+        AIBOM(components=[remote("aws-docs"), remote("react-docs")])
+    ).has_critical
+    packaged = MCPServerComponent(
+        bom_ref="mcp:d",
+        name="reference",
+        launcher_package="awslabs.aws-documentation-mcp-server",
+    )
+    assert not analyze_trifecta(AIBOM(components=[packaged, remote("react-docs")])).has_critical
+    # The platform itself, and a datastore whatever it is called, still count.
+    for name in ("aws", "aws-api", "postgres-docs", "docs-s3"):
+        bom = AIBOM(components=[remote(name), remote("react-docs")])
+        assert analyze_trifecta(bom).has_critical, name
+
+
+@pytest.mark.parametrize(
+    ("name", "private"),
+    [
+        ("PGPASSWORD", True),
+        ("MONGODB_URI", True),
+        ("POSTGRES_URL", True),
+        ("SUPABASE_SERVICE_ROLE_KEY", True),
+        ("DATABASE_URL", True),
+        ("MYSQL_PWD", True),
+        ("GITHUB_TOKEN", True),
+        ("APIKEY", True),
+        ("DBPASSWD", True),
+        ("TZ", False),
+        ("NODE_ENV", False),
+        ("LOG_LEVEL", False),
+        ("API_BASE_URL", False),
+        ("TOKENIZERS_PARALLELISM", False),
+        ("KEYBOARD_LAYOUT", False),
+    ],
+)
+def test_secret_environment_names(name: str, private: bool) -> None:
+    server = MCPServerComponent(
+        bom_ref="mcp:s", name="thing", endpoint_url="https://x.example.com/mcp", env={name: "x"}
+    )
+    assert analyze_trifecta(AIBOM(components=[server])).has_critical is private

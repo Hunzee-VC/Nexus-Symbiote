@@ -16,14 +16,18 @@ Evaluates an AgentBOM offline for three structural agentic risks:
 
 All rules operate strictly on recorded inventory evidence without executing code or
 contacting the network. Untrusted ad-hoc inventory properties (such as
-``properties.requires_approval``) and unverified IDE starting modes cannot clear a gate.
+``properties.requires_approval`` or ``properties.effective_authorization_verified``) and
+static IDE starting modes cannot clear a gate. Every finding lists at most
+``EVIDENCE_LIMIT`` components per leg, so a report grows linearly with its inventory.
 """
 
 from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM
@@ -128,37 +132,50 @@ _CONFUSABLES = str.maketrans(
         "\u0261": "g",
         "\u0578": "n",
         "\u0131": "i",
+        "\u03f2": "c",
+        "\u1d04": "c",
+        "\u1d0f": "o",
+        "\u0192": "f",
+        "\u0251": "a",
+        "\u0585": "o",
     }
 )
-_CAMEL_ACRONYM_RE = re.compile(r"([A-Z]+)([A-Z][a-z])")
-_CAMEL_BOUNDARY_RE = re.compile(r"([a-z0-9])([A-Z])")
+# Zero-width boundaries: a capturing run such as ([A-Z]+) rescans a long run of capitals
+# from every start position, which is quadratic on a hostile tool name.
+_CAMEL_BOUNDARY_RE = re.compile(r"(?<=[A-Z])(?=[A-Z][a-z])|(?<=[a-z0-9])(?=[A-Z])")
 _SEPARATOR_RE = re.compile(r"[\s\-_.]+")
 _IDENT_SPLIT_RE = re.compile(r"[^a-z0-9]+")
 _WITHHELD_ENV_NAME_RE = re.compile(r"\[redacted-[1-9][0-9]{0,5}\]")
 
 # Environment variable names that plausibly carry credentials, tokens, or private DSNs.
-# Benign runtime knobs (TZ, LANG, NODE_ENV, PORT, DEBUG, LOG_LEVEL) do not match.
+# Benign runtime knobs (TZ, LANG, NODE_ENV, PORT, DEBUG, LOG_LEVEL) do not match. The
+# first alternatives match inside a word (PGPASSWORD), and a URL or URI counts only
+# beside a datastore name, since such a locator usually embeds its credentials.
 _SECRET_ENV_KEY_RE = re.compile(
+    r"secret|passw(?:or)?d|credential|apikey|"
     r"(?:^|_)(?:"
-    r"secret|secrets|token|tokens|password|passwd|pass|pwd|"
-    r"cred|creds|credential|credentials|auth|bearer|cookie|cookies|session|"
-    r"private|private_key|api_key|apikey|access_key|signing_key|encryption_key|"
-    r"master_key|ssh_key|gpg_key|cert_key|client_secret|jwt|oauth|pat|pem|"
-    r"dsn|conn_str|connection_string|database_url|db_url|redis_url|mongo_uri|"
-    r"kubeconfig|vault"
-    r")(?:$|_)|^(?:aws_access|aws_secret|aws_session|openai_|anthropic_|"
-    r"gh_token|github_token|slack_token|stripe_|gcp_|azure_client_secret)",
+    r"key|keys|token|tokens|pass|pwd|cred|creds|auth|bearer|cookie|cookies|session|"
+    r"private|jwt|oauth|pat|pem|dsn|conn_str|connection_string|kubeconfig|vault"
+    r")(?:$|_)|"
+    r"(?:postgres|pg|mysql|maria|mongo|redis|database|db|amqp|rabbitmq|supabase|neon|"
+    r"clickhouse|elastic|sqlalchemy)[a-z0-9]*_(?:url|uri)|"
+    r"^(?:aws_access|aws_session|openai_|anthropic_|stripe_|gcp_)",
     re.IGNORECASE,
 )
 
 # Tool name patterns (applied to canonical_tool_name(), which splits camelCase and
 # folds Unicode confusables). Outbound sinks (send_webhook, post_slack) are excluded
 # from external-reader patterns so they do not satisfy untrusted_input on their own.
-_UNTRUSTED_TOOL_RE = re.compile(
-    r"(?:^|_)(?:"
+# A tool that requests a URL of the caller's choosing reads untrusted content and is also
+# a way out: the model can put private data in the URL it asks for.
+_URL_FETCH_NAMES = (
     r"fetch|fetch_url|web_fetch|get_url|load_url|read_url|open_url|fetch_page|get_page|"
-    r"scrape|scrape_url|crawl|browse|browser|web_browse|web_search|search_web|"
-    r"http_get|curl|download|download_url|read_web|external_read|"
+    r"scrape|scrape_url|crawl|browse|browser|web_browse|http_get|curl|download|"
+    r"download_url|read_web"
+)
+_URL_FETCH_TOOL_RE = re.compile(rf"(?:^|_)(?:{_URL_FETCH_NAMES})(?:$|_)")
+_UNTRUSTED_TOOL_RE = re.compile(
+    r"(?:^|_)(?:" + _URL_FETCH_NAMES + r"|web_search|search_web|external_read|"
     r"read_email|fetch_email|get_email|list_emails|read_issue|read_pr|"
     r"read_comment|read_message|read_slack|read_webhook|receive_webhook"
     r")(?:$|_)"
@@ -281,8 +298,18 @@ _MCP_PRIVATE_TOKENS = frozenset(
         "git",
     ]
 )
+# Public documentation about a platform is not that platform's account data.
+_MCP_DOC_TOKENS = frozenset({"doc", "docs", "documentation"})
+_MCP_PLATFORM_TOKENS = frozenset(
+    {"aws", "gcp", "azure", "git", "stripe", "plaid", "salesforce", "hubspot", "zendesk"}
+)
 _MCP_EGRESS_TOKENS = frozenset(
     [
+        "fetch",
+        "curl",
+        "crawl",
+        "scrape",
+        "firecrawl",
         "slack",
         "discord",
         "email",
@@ -340,10 +367,22 @@ _TRUST_RANK: dict[TrustTier, int] = {
     TrustTier.UNTRUSTED_PUBLIC: 1,
     TrustTier.UNKNOWN: 0,
 }
-_GATED_CLAUDE_MODES = frozenset({"default", "ask", "plan"})
+_LEGS = frozenset({"untrusted", "private", "egress"})
+_IDE_GRANT = "permission_scope"
+_IDE_GRANT_RE = re.compile(r"unscoped tool allowances \(([^)]*)\)")
+_IDE_GRANT_LEGS: dict[str, frozenset[str]] = {
+    "web fetches": frozenset({"untrusted", "egress"}),
+    "shell commands": frozenset({"egress"}),
+    "file edits": frozenset({"egress"}),
+    "file reads": frozenset({"private"}),
+    "MCP server tools": frozenset(),
+}
+# An approval record gates its component only when it covers every action or all egress.
+_GATING_ACTIONS = frozenset({"*", "egress"})
 _UNGATED_CLAUDE_MODES = frozenset({"bypassPermissions", "acceptEdits"})
-_GATED_CODEX_POLICIES = frozenset({"on-request", "untrusted"})
 _UNGATED_CODEX_POLICIES = frozenset({"never"})
+EVIDENCE_LIMIT = 10
+"""Most components one finding lists for each leg."""
 _SHADOW_HIGH_TIERS = frozenset(
     {TrustTier.THIRD_PARTY_UNSIGNED, TrustTier.UNTRUSTED_PUBLIC, TrustTier.UNKNOWN}
 )
@@ -436,16 +475,16 @@ class _ComponentSignals:
 
 def _normalize_identifier(text: str) -> str:
     """NFKC-normalize, strip invisible/combining chars, fold confusables, split camelCase."""
-    normalized = unicodedata.normalize("NFKC", text)
+    # Folded before as well as after: NFKC rewrites some look-alikes, such as the lunate
+    # sigma, into letters that no longer resemble the Latin one.
+    normalized = unicodedata.normalize("NFKC", text.translate(_CONFUSABLES))
     cleaned = "".join(
         ch
         for ch in normalized
         if unicodedata.category(ch) not in {"Cf", "Cc", "Cs", "Co", "Cn", "Mn"}
     )
     folded = cleaned.translate(_CONFUSABLES)
-    split = _CAMEL_ACRONYM_RE.sub(r"\1_\2", folded)
-    split = _CAMEL_BOUNDARY_RE.sub(r"\1_\2", split)
-    return split.strip().lower()
+    return _CAMEL_BOUNDARY_RE.sub("_", folded).strip().lower()
 
 
 def canonical_tool_name(name: str) -> str:
@@ -481,13 +520,28 @@ def _mcp_package_identities(server: MCPServerComponent) -> list[str]:
     return identities
 
 
-def _ide_has_allow_rules_or_risks(agent: IDEAgentComponent) -> bool:
-    counts = agent.properties.get("declared_permission_rule_counts")
-    if isinstance(counts, dict):
-        allow_count = counts.get("allow")
-        if isinstance(allow_count, int) and not isinstance(allow_count, bool) and allow_count > 0:
-            return True
-    return any(risk.category == "permission_scope" for risk in agent.risks)
+def _private_identity(identity: str) -> bool:
+    tokens = _identifier_tokens(identity)
+    private = tokens & _MCP_PRIVATE_TOKENS
+    if tokens & _MCP_DOC_TOKENS:
+        private -= _MCP_PLATFORM_TOKENS
+    return bool(private)
+
+
+def _ide_grant_legs(component: AnyComponent) -> frozenset[str]:
+    """The legs an IDE agent's unscoped allow rules hold by themselves.
+
+    The ide_agents collector records such rules only as the class names in a
+    ``permission_scope`` finding. A class this table does not name, such as
+    ``every tool``, holds all three legs.
+    """
+    legs: set[str] = set()
+    if isinstance(component, IDEAgentComponent):
+        for risk in component.risks:
+            match = _IDE_GRANT_RE.search(risk.detail) if risk.category == _IDE_GRANT else None
+            for name in match.group(1).split(", ") if match else ():
+                legs.update(_IDE_GRANT_LEGS.get(name, _LEGS))
+    return frozenset(legs)
 
 
 def _is_explicitly_ungated(component: AnyComponent) -> bool:
@@ -508,13 +562,14 @@ def _is_explicitly_ungated(component: AnyComponent) -> bool:
     return False
 
 
-def _has_explicit_approval_gate(component: AnyComponent) -> bool:
-    """Fail-closed check: True only when typed, verified approval evidence is recorded.
+def _has_explicit_approval_gate(component: AnyComponent, now: datetime) -> bool:
+    """Fail-closed check: True only when typed approval evidence covers the component.
 
-    Untrusted ad-hoc properties (such as ``properties.requires_approval``) are ignored.
-    Static IDE starting modes (such as ``default`` in ``.claude/settings.json``) do not
-    gate a scope unless effective authorization was verified without allow-rule bypasses
-    or ``permission_scope`` risks.
+    Untrusted ad-hoc properties (such as ``properties.requires_approval`` or
+    ``properties.effective_authorization_verified``) are ignored, and so is an IDE
+    starting mode: no collector verifies the approval a host enforces. Authorization
+    records gate only when every one requires approval and is unexpired, and one of
+    them covers every action or all egress on an unrestricted resource.
     """
     if _is_explicitly_ungated(component):
         return False
@@ -526,32 +581,23 @@ def _has_explicit_approval_gate(component: AnyComponent) -> bool:
     ):
         return True
 
-    auths = getattr(component, "authorizations", None)
-    if isinstance(auths, list) and auths:
-        records = [a for a in auths if isinstance(a, AuthorizationRecord)]
-        if records and all(r.approval_required is True for r in records):
-            return True
+    declared = getattr(component, "authorizations", None) or ()
+    records = [r for r in declared if isinstance(r, AuthorizationRecord)]
+    return (
+        bool(records)
+        and all(r.approval_required is True and _unexpired(r, now) for r in records)
+        and any(r.action in _GATING_ACTIONS and r.resource_scope in (None, "*") for r in records)
+    )
 
-    if isinstance(component, IDEAgentComponent):
-        verified = (
-            component.properties.get("effective_authorization_verified") is True
-            and component.assurance_level in {AssuranceLevel.VERIFIED, AssuranceLevel.OBSERVED}
-            and not _ide_has_allow_rules_or_risks(component)
-        )
-        if not verified:
-            return False
-        if component.ide_type == "claude-code" and component.permission_mode in _GATED_CLAUDE_MODES:
-            return True
-        if component.ide_type == "codex":
-            policy = component.properties.get("approval_policy")
-            if isinstance(policy, str) and policy in _GATED_CODEX_POLICIES:
-                return True
 
-    return False
+def _unexpired(record: AuthorizationRecord, now: datetime) -> bool:
+    expires = record.expires_at
+    # An expiry without a zone cannot be compared with the clock, so it does not gate.
+    return expires is None or (expires.utcoffset() is not None and expires > now)
 
 
 def _is_pure_readonly_network_reader(component: ToolComponent) -> bool:
-    """True for a read-only network search/fetch tool with no mutating or exfil capabilities."""
+    """True for a read-only search tool with no mutating, exfil or URL-fetching capability."""
     decl = component.capabilities
     if not isinstance(decl, CapabilityDeclaration):
         return False
@@ -563,7 +609,7 @@ def _is_pure_readonly_network_reader(component: ToolComponent) -> bool:
     if decl.side_effect_profile in _MUTATING_SIDE_EFFECTS:
         return False
     canon = canonical_tool_name(component.name)
-    if _EGRESS_TOOL_RE.search(canon):
+    if _EGRESS_TOOL_RE.search(canon) or _URL_FETCH_TOOL_RE.search(canon):
         return False
     return CapabilityClass.NETWORK in caps and CapabilityClass.READ in caps
 
@@ -584,11 +630,8 @@ def _untrusted_input_basis(component: AnyComponent, rc: RiskClassification) -> t
                 break
         if _identifier_tokens(component.name) & _MCP_UNTRUSTED_TOKENS:
             basis.add("mcp_server:untrusted_input_name")
-    if isinstance(component, IDEAgentComponent):
-        for risk in component.risks:
-            if risk.category == "permission_scope" and "web fetch" in risk.detail.lower():
-                basis.add("ide_agent:unscoped_web_fetch")
-                break
+    if "untrusted" in _ide_grant_legs(component):
+        basis.add("ide_agent:unscoped_allowance")
     decl = getattr(component, "capabilities", None)
     if isinstance(decl, CapabilityDeclaration):
         caps = set(decl.capabilities)
@@ -598,9 +641,10 @@ def _untrusted_input_basis(component: AnyComponent, rc: RiskClassification) -> t
         canon = canonical_tool_name(component.name)
         if _UNTRUSTED_TOOL_RE.search(canon):
             basis.add("tool_name:external_reader")
-        elif component.description:
-            desc_canon = canonical_tool_name(component.description)
-            if _UNTRUSTED_DESC_RE.search(desc_canon):
+        else:
+            # Collectors record a tool's description as description_text.
+            text = f"{component.description_text or ''} {component.description or ''}"
+            if _UNTRUSTED_DESC_RE.search(_IDENT_SPLIT_RE.sub("_", _normalize_identifier(text))):
                 basis.add("tool_description:external_reader")
     return tuple(sorted(basis))
 
@@ -617,12 +661,12 @@ def _private_data_basis(component: AnyComponent, rc: RiskClassification) -> tupl
             for key in component.env
         ):
             basis.add("mcp_server:secret_env")
-        for ident in _mcp_package_identities(component):
-            if _identifier_tokens(ident) & _MCP_PRIVATE_TOKENS:
-                basis.add("mcp_server:private_data_package")
-                break
-        if _identifier_tokens(component.name) & _MCP_PRIVATE_TOKENS:
+        if any(_private_identity(ident) for ident in _mcp_package_identities(component)):
+            basis.add("mcp_server:private_data_package")
+        if _private_identity(component.name):
             basis.add("mcp_server:private_data_name")
+    if "private" in _ide_grant_legs(component):
+        basis.add("ide_agent:unscoped_allowance")
     decl = getattr(component, "capabilities", None)
     if isinstance(decl, CapabilityDeclaration):
         caps = set(decl.capabilities)
@@ -671,15 +715,14 @@ def _egress_basis(component: AnyComponent, rc: RiskClassification) -> tuple[str,
                 break
         if _identifier_tokens(component.name) & _MCP_EGRESS_TOKENS:
             basis.add("mcp_server:egress_name")
-    if isinstance(component, IDEAgentComponent):
-        for risk in component.risks:
-            if risk.category == "permission_scope" and "shell command" in risk.detail.lower():
-                basis.add("ide_agent:unscoped_shell")
-                break
+    if "egress" in _ide_grant_legs(component):
+        basis.add("ide_agent:unscoped_allowance")
     if isinstance(component, ToolComponent) and not skip_readonly_net:
         canon = canonical_tool_name(component.name)
         if _EGRESS_TOOL_RE.search(canon):
             basis.add("tool_name:egress_or_mutation")
+        if _URL_FETCH_TOOL_RE.search(canon):
+            basis.add("tool_name:url_fetcher")
     return tuple(sorted(basis))
 
 
@@ -734,30 +777,78 @@ def _tarjan_scc(nodes: list[str], adj: dict[str, list[str]]) -> list[list[str]]:
     return sccs
 
 
+_Reach = dict[str, tuple[str, ...]]
+"""Per tag, the first ``EVIDENCE_LIMIT`` component references that carry it."""
+
+
+def _own_reach(sig: _ComponentSignals) -> _Reach:
+    comp = sig.component
+    chained = (
+        isinstance(comp, _CHAINABLE_TYPES)
+        and RiskClass.EXFIL_CAPABLE not in sig.risk_classification.classes
+    )
+    tags: list[str] = []
+    if sig.untrusted_basis:
+        tags.append("untrusted")
+    if sig.private_basis:
+        tags.extend(("private", "source") if chained else ("private",))
+    # "egress" holds what an ungated owner leaves open; "forced" what even a gated owner
+    # does, because the component itself opts out of approval.
+    if sig.egress_basis and not sig.explicitly_gated:
+        tags.extend(("egress", "sink") if chained else ("egress",))
+        if sig.explicitly_ungated:
+            tags.extend(("egress_forced", "sink_forced") if chained else ("egress_forced",))
+    if isinstance(comp, IDEAgentComponent) and sig.explicitly_ungated:
+        tags.append("ungated_ide")
+    if isinstance(comp, (MCPServerComponent, ToolComponent)):
+        tags.append("surface")
+    return dict.fromkeys(tags, (comp.bom_ref,))
+
+
+def _merge(into: _Reach, other: _Reach) -> None:
+    for tag, refs in other.items():
+        have = into.get(tag)
+        if have is None:
+            into[tag] = refs
+        elif have is not refs:
+            into[tag] = tuple(sorted({*have, *refs})[:EVIDENCE_LIMIT])
+
+
+def _summarize(refs: Iterable[str], own: dict[str, _Reach]) -> _Reach:
+    lists: dict[str, list[str]] = {}
+    for ref in sorted(refs):
+        for tag in own[ref]:
+            found = lists.setdefault(tag, [])
+            if len(found) < EVIDENCE_LIMIT:
+                found.append(ref)
+    return {tag: tuple(found) for tag, found in lists.items()}
+
+
 def _scopes(
     bom: AIBOM,
     signals: dict[str, _ComponentSignals],
-) -> list[tuple[str, bool, list[AnyComponent]]]:
+) -> list[tuple[str, bool, _Reach]]:
     """Compute evaluation scopes in O(V + E) time using SCC condensation.
 
-    Returns tuples of ``(scope_ref, scope_owner_gated, members)``.
+    Returns tuples of ``(scope_ref, scope_owner_gated, reach)``, where ``reach`` names
+    at most ``EVIDENCE_LIMIT`` components per leg. It is merged upwards through the
+    condensed graph, so no scope materializes its member set and many agents that
+    share one tool surface cost the surface once.
     - Cyclic agent graphs collapse into a single SCC so traversal is linear.
     - IDE agents without explicit MCP/tool bindings inherit the workspace MCP/tool
       surface even when they carry edges to prompt components.
-    - Any component left uncovered by all agent scopes is evaluated in an
-      ``inventory:unscoped`` scope so empty agents cannot hide unlinked tools.
+    - Components that no agent reaches are bound to no one, so nothing keeps them from
+      any agent: they are evaluated as ``inventory:unscoped`` and again with every
+      agent scope that holds a leg itself, so legs split between the two still meet.
     """
     by_ref = {comp.bom_ref: comp for comp in bom.components}
-    if not by_ref:
-        return []
-
+    own = {ref: _own_reach(signals[ref]) for ref in by_ref}
     agents = sorted(
         (c for c in bom.components if isinstance(c, (AgentComponent, IDEAgentComponent))),
         key=lambda c: c.bom_ref,
     )
     if not agents:
-        ordered = sorted(bom.components, key=lambda c: c.bom_ref)
-        return [("inventory:root", False, ordered)]
+        return [("inventory:root", False, _summarize(by_ref, own))] if by_ref else []
 
     adj: dict[str, list[str]] = {ref: [] for ref in by_ref}
     for dep in bom.dependencies:
@@ -848,54 +939,50 @@ def _scopes(
         if not parents or (not scc_gated[scc_id] and not has_ungated_ancestor[scc_id]):
             selected_sccs.append(scc_id)
 
-    workspace_surface = sorted(
-        (c for c in bom.components if isinstance(c, _WORKSPACE_SURFACE_TYPES)),
-        key=lambda c: c.bom_ref,
-    )
+    # Tarjan numbers a strongly connected component after everything it reaches.
+    reach: list[_Reach] = []
+    for scc_id, scc_members in enumerate(sccs):
+        merged: _Reach = {}
+        for ref in scc_members:
+            _merge(merged, own[ref])
+        for child in dag_adj[scc_id]:
+            _merge(merged, reach[child])
+        reach.append(merged)
 
-    covered_refs: set[str] = set()
-    result: list[tuple[str, bool, list[AnyComponent]]] = []
+    covered = set(scc_agents)
+    stack = list(scc_agents)
+    while stack:
+        for nxt in dag_adj[stack.pop()]:
+            if nxt not in covered:
+                covered.add(nxt)
+                stack.append(nxt)
+    unbound = {ref for ref in by_ref if scc_of[ref] not in covered}
 
+    # An IDE agent without explicit MCP/tool bindings governs the repository's
+    # workspace MCP/tool surface regardless of prompt edges.
+    inherits = {
+        scc_id
+        for scc_id in selected_sccs
+        if "surface" not in reach[scc_id]
+        and any(isinstance(a, IDEAgentComponent) for a in scc_agents[scc_id])
+    }
+    workspace: _Reach = {}
+    if inherits:
+        surface = [c.bom_ref for c in bom.components if isinstance(c, _WORKSPACE_SURFACE_TYPES)]
+        workspace = _summarize(surface, own)
+        unbound.difference_update(surface)
+    pool = _summarize(unbound, own)
+
+    result: list[tuple[str, bool, _Reach]] = []
     for scc_id in selected_sccs:
-        # BFS over condensed SCCs from scc_id.
-        visited_sccs: set[int] = {scc_id}
-        queue: list[int] = [scc_id]
-        q_idx = 0
-        while q_idx < len(queue):
-            cur = queue[q_idx]
-            q_idx += 1
-            for nxt in dag_adj[cur]:
-                if nxt not in visited_sccs:
-                    visited_sccs.add(nxt)
-                    queue.append(nxt)
-
-        member_refs: set[str] = set()
-        for sid in visited_sccs:
-            member_refs.update(sccs[sid])
-
-        # An IDE agent without explicit MCP/tool bindings governs the repository's
-        # workspace MCP/tool surface regardless of prompt edges.
-        owners = scc_agents[scc_id]
-        has_ide_owner = any(isinstance(a, IDEAgentComponent) for a in owners)
-        has_surface = any(
-            isinstance(by_ref[r], (MCPServerComponent, ToolComponent)) for r in member_refs
-        )
-        if has_ide_owner and not has_surface:
-            for comp in workspace_surface:
-                member_refs.add(comp.bom_ref)
-
-        covered_refs.update(member_refs)
-        scope_members = sorted((by_ref[r] for r in member_refs), key=lambda c: c.bom_ref)
-        scope_ref = owners[0].bom_ref
-        result.append((scope_ref, scc_gated[scc_id], scope_members))
-
-    uncovered = sorted(
-        (c for c in bom.components if c.bom_ref not in covered_refs),
-        key=lambda c: c.bom_ref,
-    )
-    if uncovered:
-        result.append(("inventory:unscoped", False, uncovered))
-
+        scope = dict(reach[scc_id])
+        if scc_id in inherits:
+            _merge(scope, workspace)
+        if _LEGS & scope.keys():
+            _merge(scope, pool)
+        result.append((scc_agents[scc_id][0].bom_ref, scc_gated[scc_id], scope))
+    if unbound:
+        result.append(("inventory:unscoped", False, pool))
     return result
 
 
@@ -968,8 +1055,111 @@ def _detect_shadowing(bom: AIBOM) -> tuple[list[FlowFinding], set[str]]:
     return findings, shadowed_refs
 
 
-def analyze_trifecta(bom: AIBOM) -> TrifectaReport:
-    """Analyze an inventory for lethal trifectas, chained toxic flows, and tool shadowing."""
+def _scope_findings(
+    scope_ref: str,
+    owner_gated: bool,
+    reach: _Reach,
+    signals: dict[str, _ComponentSignals],
+) -> list[FlowFinding]:
+    # Fail closed: an IDE agent that opts out of approval overrides an owner gate.
+    gated_owner = owner_gated and "ungated_ide" not in reach
+
+    def items(tag: str) -> list[LegEvidence]:
+        found = []
+        for ref in reach.get(tag, ()):
+            sig = signals[ref]
+            comp = sig.component
+            basis = sig.private_basis if tag in ("private", "source") else sig.egress_basis
+            found.append(
+                LegEvidence(
+                    ref,
+                    comp.name,
+                    sig.untrusted_basis if tag == "untrusted" else basis,
+                    sig.locator,
+                    comp.assurance_level,
+                    (gated_owner or sig.explicitly_gated) and not sig.explicitly_ungated,
+                )
+            )
+        return found
+
+    findings: list[FlowFinding] = []
+    untrusted = items("untrusted")
+    private = items("private")
+    ungated_egress = items("egress_forced" if gated_owner else "egress")
+    if untrusted and private and ungated_egress:
+        involved = sorted({i.component_ref for i in (*untrusted, *private, *ungated_egress)})
+        capped = EVIDENCE_LIMIT in (len(untrusted), len(private), len(ungated_egress))
+        findings.append(
+            FlowFinding(
+                kind="lethal_trifecta",
+                severity=RiskSeverity.CRITICAL,
+                scope_ref=scope_ref,
+                summary=(
+                    f"Scope '{scope_ref}' combines untrusted input, private data access, "
+                    "and ungated external egress/state mutation across "
+                    f"{'at least ' if capped else ''}{len(involved)} "
+                    "component(s) without an approval gate."
+                ),
+                component_refs=tuple(involved),
+                evidence=(
+                    *(_evidence_entry("untrusted_input", i) for i in untrusted),
+                    *(_evidence_entry("private_data", i) for i in private),
+                    *(_evidence_entry("egress", i) for i in ungated_egress),
+                ),
+                recommendation=(
+                    "Break at least one leg of the trifecta or enforce an explicit "
+                    "human-in-the-loop approval gate (human_in_the_loop: required) on "
+                    "every egress and state-modifying tool."
+                ),
+            )
+        )
+
+    # Item 24: Chained toxic flow across two distinct components where neither alone
+    # is EXFIL_CAPABLE (linear time without materializing Cartesian pairs).
+    chained_sources = items("source")
+    chained_sinks = items("sink_forced" if gated_owner else "sink")
+    source_refs = {src.component_ref for src in chained_sources}
+    sink_refs = {snk.component_ref for snk in chained_sinks}
+    active_sources = [
+        src for src in chained_sources if len(sink_refs) > 1 or src.component_ref not in sink_refs
+    ]
+    active_sinks = [
+        snk for snk in chained_sinks if len(source_refs) > 1 or snk.component_ref not in source_refs
+    ]
+    if active_sources and active_sinks:
+        pair_refs = tuple(sorted({i.component_ref for i in (*active_sources, *active_sinks)}))
+        capped = EVIDENCE_LIMIT in (len(chained_sources), len(chained_sinks))
+        findings.append(
+            FlowFinding(
+                kind="toxic_flow",
+                severity=RiskSeverity.HIGH,
+                scope_ref=scope_ref,
+                summary=(
+                    f"Scope '{scope_ref}' enables a chained toxic flow across "
+                    f"{'at least ' if capped else ''}{len(pair_refs)} distinct components "
+                    f"({', '.join(pair_refs)}) where "
+                    "private data from one component can leave through an ungated sink."
+                ),
+                component_refs=pair_refs,
+                evidence=(
+                    *(_evidence_entry("toxic_source", src) for src in active_sources),
+                    *(_evidence_entry("toxic_sink", snk) for snk in active_sinks),
+                ),
+                recommendation=(
+                    "Require explicit approval on egress/state-modifying sink tools or "
+                    "isolate private-data tools from network-capable tools."
+                ),
+            )
+        )
+    return findings
+
+
+def analyze_trifecta(bom: AIBOM, *, now: datetime | None = None) -> TrifectaReport:
+    """Analyze an inventory for lethal trifectas, chained toxic flows, and tool shadowing.
+
+    ``now`` is the time approval records' expiry is read against; the default is the clock.
+    """
+    moment = now or datetime.now(UTC)
     signals: dict[str, _ComponentSignals] = {}
     for comp in bom.components:
         rc = classify(comp)
@@ -980,155 +1170,14 @@ def analyze_trifecta(bom: AIBOM) -> TrifectaReport:
             untrusted_basis=_untrusted_input_basis(comp, rc),
             private_basis=_private_data_basis(comp, rc),
             egress_basis=_egress_basis(comp, rc),
-            explicitly_gated=_has_explicit_approval_gate(comp),
+            explicitly_gated=_has_explicit_approval_gate(comp, moment),
             explicitly_ungated=_is_explicitly_ungated(comp),
         )
 
     scopes = _scopes(bom, signals)
     findings: list[FlowFinding] = []
-
-    for scope_ref, owner_gated, members in scopes:
-        effective_owner_gated = owner_gated and not any(
-            isinstance(comp, IDEAgentComponent) and signals[comp.bom_ref].explicitly_ungated
-            for comp in members
-        )
-        untrusted: list[LegEvidence] = []
-        private: list[LegEvidence] = []
-        egress: list[LegEvidence] = []
-
-        for comp in members:
-            sig = signals[comp.bom_ref]
-            # Fail closed: an explicit opt-out on a component overrides an owner gate.
-            gated = (effective_owner_gated or sig.explicitly_gated) and not sig.explicitly_ungated
-            if sig.untrusted_basis:
-                untrusted.append(
-                    LegEvidence(
-                        comp.bom_ref,
-                        comp.name,
-                        sig.untrusted_basis,
-                        sig.locator,
-                        comp.assurance_level,
-                        gated,
-                    )
-                )
-            if sig.private_basis:
-                private.append(
-                    LegEvidence(
-                        comp.bom_ref,
-                        comp.name,
-                        sig.private_basis,
-                        sig.locator,
-                        comp.assurance_level,
-                        gated,
-                    )
-                )
-            if sig.egress_basis:
-                egress.append(
-                    LegEvidence(
-                        comp.bom_ref,
-                        comp.name,
-                        sig.egress_basis,
-                        sig.locator,
-                        comp.assurance_level,
-                        gated,
-                    )
-                )
-
-        ungated_egress = [item for item in egress if not item.gated]
-
-        if untrusted and private and ungated_egress:
-            involved = sorted(
-                {
-                    *(i.component_ref for i in untrusted),
-                    *(i.component_ref for i in private),
-                    *(i.component_ref for i in ungated_egress),
-                }
-            )
-            evidence = (
-                *(_evidence_entry("untrusted_input", i) for i in untrusted),
-                *(_evidence_entry("private_data", i) for i in private),
-                *(_evidence_entry("egress", i) for i in ungated_egress),
-            )
-            findings.append(
-                FlowFinding(
-                    kind="lethal_trifecta",
-                    severity=RiskSeverity.CRITICAL,
-                    scope_ref=scope_ref,
-                    summary=(
-                        f"Scope '{scope_ref}' combines untrusted input, private data access, "
-                        f"and ungated external egress/state mutation across {len(involved)} "
-                        "component(s) without an approval gate."
-                    ),
-                    component_refs=tuple(involved),
-                    evidence=evidence,
-                    recommendation=(
-                        "Break at least one leg of the trifecta or enforce an explicit "
-                        "human-in-the-loop approval gate (human_in_the_loop: required) on "
-                        "every egress and state-modifying tool."
-                    ),
-                )
-            )
-
-        # Item 24: Chained toxic flow across two distinct components where neither alone
-        # is EXFIL_CAPABLE (linear time without materializing Cartesian pairs).
-        chained_sources = [
-            item
-            for item in private
-            if isinstance(signals[item.component_ref].component, _CHAINABLE_TYPES)
-            and RiskClass.EXFIL_CAPABLE
-            not in signals[item.component_ref].risk_classification.classes
-        ]
-        chained_sinks = [
-            item
-            for item in ungated_egress
-            if isinstance(signals[item.component_ref].component, _CHAINABLE_TYPES)
-            and RiskClass.EXFIL_CAPABLE
-            not in signals[item.component_ref].risk_classification.classes
-        ]
-        if chained_sources and chained_sinks:
-            source_refs = {src.component_ref for src in chained_sources}
-            sink_refs = {snk.component_ref for snk in chained_sinks}
-            active_sources = [
-                src
-                for src in chained_sources
-                if len(sink_refs) > 1 or src.component_ref not in sink_refs
-            ]
-            active_sinks = [
-                snk
-                for snk in chained_sinks
-                if len(source_refs) > 1 or snk.component_ref not in source_refs
-            ]
-            if active_sources and active_sinks:
-                pair_refs = tuple(
-                    sorted(
-                        {
-                            *(src.component_ref for src in active_sources),
-                            *(snk.component_ref for snk in active_sinks),
-                        }
-                    )
-                )
-                pair_evidence = (
-                    *(_evidence_entry("toxic_source", src) for src in active_sources),
-                    *(_evidence_entry("toxic_sink", snk) for snk in active_sinks),
-                )
-                findings.append(
-                    FlowFinding(
-                        kind="toxic_flow",
-                        severity=RiskSeverity.HIGH,
-                        scope_ref=scope_ref,
-                        summary=(
-                            f"Scope '{scope_ref}' enables a chained toxic flow across "
-                            f"{len(pair_refs)} distinct components ({', '.join(pair_refs)}) where "
-                            "private data from one component can leave through an ungated sink."
-                        ),
-                        component_refs=pair_refs,
-                        evidence=pair_evidence,
-                        recommendation=(
-                            "Require explicit approval on egress/state-modifying sink tools or "
-                            "isolate private-data tools from network-capable tools."
-                        ),
-                    )
-                )
+    for scope_ref, owner_gated, reach in scopes:
+        findings.extend(_scope_findings(scope_ref, owner_gated, reach, signals))
 
     shadow_findings, shadowed_refs = _detect_shadowing(bom)
     findings.extend(shadow_findings)
