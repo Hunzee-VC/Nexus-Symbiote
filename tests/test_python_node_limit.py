@@ -131,7 +131,7 @@ def test_the_operator_raises_the_limit(tmp_path, how):
         result, document = _scan(project, tmp_path / "out.json", env=env)
     assert _failures(document) == []
     names = {(c["component_type"], c["name"]) for c in document["components"]}
-    assert {("mcp-server", "server"), ("tool", "ping")} <= names
+    assert {("mcp-server", "demo"), ("tool", "ping")} <= names
     assert result.exit_code == 0, result.output
 
 

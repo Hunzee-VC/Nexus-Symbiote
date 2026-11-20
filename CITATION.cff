@@ -7,9 +7,9 @@ type: software
 authors:
   - given-names: Emmanuel
     family-names: Dahunsi
-repository-code: https://github.com/Hunzee-VC/Nexus-Symbiote
+repository-code: https://github.com/aisecnomad/Nexus-Symbiote
 repository-artifact: https://pypi.org/project/nexus-symbiote/
-url: https://github.com/Hunzee-VC/Nexus-Symbiote
+url: https://github.com/aisecnomad/Nexus-Symbiote
 # The code's licence. The distributions also bundle CycloneDX schemas (Apache-2.0) and
 # SPDX schemas (Community-Spec-1.0 AND CC-BY-3.0); see src/nexus_symbiote/generators/schemas/vendor/NOTICE.txt.
 license: MIT

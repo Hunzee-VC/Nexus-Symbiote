@@ -302,7 +302,7 @@ keep working; configure one of the two.
 
 ```yaml
 repos:
-  - repo: https://github.com/Hunzee-VC/Nexus-Symbiote
+  - repo: https://github.com/aisecnomad/Nexus-Symbiote
     rev: <reviewed-40-character-commit-sha>
     hooks:
       - id: nexus-symbiote-scan
@@ -552,8 +552,9 @@ nexus-symbiote graph [OPTIONS] INVENTORY
 
 Exposure paths are the shortest recorded paths from agents and IDE agents to
 components with a `code-exec`, `exfil-capable`, `write-capable` or `secret-access`
-risk class or a high or critical finding: at most 200 agents are searched and 200
-paths kept, and the view reports how many were left out. Edges are static repository
+risk class or a high or critical finding: at most 200 agents and IDE agents are
+searched, those that reach such a component first, and 200 paths kept, and the view
+reports how many were left out. Edges are static repository
 associations; runtime use and effective authority are not observed. The HTML file
 loads nothing from outside, pins its one style block and one script with a
 Content-Security-Policy hash, and shows inventory text only escaped. A graph larger
@@ -640,8 +641,13 @@ the top 15 findings, each followed by its `fingerprint:` line (`--json-output` l
 `Gate: FAILED` it lists, one `  - ` line each, every reason, such as
 `finding at or above critical` or `collection coverage is unknown or incomplete`, the
 findings that tripped the severity cutoff, the score with the threshold it was compared
-with, the first 20 of the inventory's collection failures (and how many more
-`metadata.completeness.scan_failures` holds), its other coverage gaps, and how many
+with, the first 20 distinct collection failures the inventory records (a failure
+several collectors recorded, such as a symbolic link leaving the root, is one line
+ending in `(recorded N times)`, and the line after the twentieth says how many more
+distinct failures `metadata.completeness.scan_failures` holds; see
+[known limitations](known-limitations.md#every-collector) for what the grouping cannot
+say), its other coverage gaps, among them
+one line per state naming the collectors that are not complete, and how many
 findings the project policy suppressed, and each suppression that no longer matches
 its changed finding. When unsigned ShadowScan evidence was accepted,
 the report says `Discovery producer: not verified (unsigned evidence accepted)`.

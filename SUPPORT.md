@@ -7,7 +7,7 @@ Nexus SymBiote is alpha security tooling maintained by one developer. This guide
 | I need to… | Go to |
 | --- | --- |
 | Report a security vulnerability | [SECURITY.md](SECURITY.md): use private vulnerability reporting, never a public issue |
-| Report a bug or request a feature | [GitHub Issues](https://github.com/Hunzee-VC/Nexus-Symbiote/issues) |
+| Report a bug or request a feature | [GitHub Issues](https://github.com/aisecnomad/Nexus-Symbiote/issues) |
 | Find any guide | [Documentation hub](docs/README.md), organized by why, what and how |
 | Install a release or develop from reviewed source | [Install a verified release](README.md#install-a-verified-release) · [Install from reviewed source](README.md#install-from-reviewed-source) · [CONTRIBUTING.md](CONTRIBUTING.md) |
 | Understand evidence and trust | [Security model](docs/security-model.md) · [Runtime assurance](docs/runtime-assurance.md) |
@@ -68,18 +68,18 @@ The package validates exports against pinned vendored schemas. The `cyclonedx` e
 From the locked development environment:
 
 ```bash
-python -m pytest
+python -m pytest -n auto --dist worksteal
 ruff check src tests scripts
 ruff format --check src tests scripts
 mypy src/nexus_symbiote scripts
 python scripts/check_workflows.py
 python scripts/check_repository_hygiene.py
 python scripts/check_security_regressions.py --out security-regressions.json
-python -m pytest --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=json:coverage.json
+python -m pytest -n auto --dist worksteal --cov=nexus_symbiote --cov=scripts --cov-branch --cov-report=json:coverage.json
 python scripts/check_coverage.py coverage.json
 ```
 
-These are local checks. They do not apply GitHub protection, qualify another platform, establish a successful hosted workflow or publish a package. The remaining enforcement steps are in the [repository controls runbook](docs/repository-controls.md#operator-prerequisites); [issue #74](https://github.com/Hunzee-VC/Nexus-Symbiote/issues/74) records the remediation history.
+These are local checks. They do not apply GitHub protection, qualify another platform, establish a successful hosted workflow or publish a package. The remaining enforcement steps are in the [repository controls runbook](docs/repository-controls.md#operator-prerequisites); [issue #74](https://github.com/aisecnomad/Nexus-Symbiote/issues/74) records the remediation history.
 
 ## Response expectations
 

@@ -71,7 +71,7 @@ def test_long_failure_lists_are_summarized(tmp_path, monkeypatch):
     run, _ = _run(tmp_path, monkeypatch, result)
     assert "file_19.md" in run.output
     assert "file_20.md" not in run.output
-    assert "5 more in metadata.completeness.scan_failures" in run.output
+    assert "5 more distinct failures in metadata.completeness.scan_failures" in run.output
 
 
 def test_reasons_are_neutralized_for_the_terminal(tmp_path, monkeypatch):
