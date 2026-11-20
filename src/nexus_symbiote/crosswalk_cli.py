@@ -330,6 +330,8 @@ def register_crosswalk_commands(main: click.Group) -> None:
             raise click.UsageError(
                 "--project and --signature-policy require --include-evidence-pack"
             )
+        if include_evidence_pack and output_format == "markdown":
+            raise click.UsageError("--include-evidence-pack requires --format json")
         _refuse_source_overwrite(output, aibom_path)
         bom, raw_bytes = _load_with_bytes(aibom_path)
         report = RiskScorer.from_policy(default_policy().risk).score(bom)

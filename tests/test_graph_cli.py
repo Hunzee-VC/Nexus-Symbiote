@@ -408,6 +408,8 @@ def test_export_policy_cedar_rego_json_and_crosswalk_evidence_pack(runner, tmp_p
         == 2
     )
     assert runner.invoke(main, ["crosswalk", str(path), "--project", str(tmp_path)]).exit_code == 2
+    markdown_pack = ["crosswalk", str(path), "--include-evidence-pack", "--format", "markdown"]
+    assert runner.invoke(main, markdown_pack).exit_code == 2
     assert (
         runner.invoke(main, ["crosswalk", str(path), "--signature-policy", str(path)]).exit_code
         == 2

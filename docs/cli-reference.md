@@ -423,7 +423,7 @@ nexus-symbiote crosswalk [OPTIONS] AIBOM_PATH
 | `--framework` `NAME` | Report only this framework edition: `owasp-llm-2025`, `owasp-llm-2026`, `owasp-asi-2026`, `mitre-atlas-2026.10`, `nist-ai-rmf-1.0`, `eu-ai-act-2024`, `iso-iec-42001-2023` or `cwe`. Repeatable; default: every edition. |
 | `--format` `json\|markdown` | Report format (default: `json`). |
 | `-o`, `--output` `PATH` | Write the report to this file instead of standard output. A path that names the inventory is a usage error. |
-| `--include-evidence-pack` | Attach cryptographic inventory digests, corroborated `verified_models`, `declared_signed_models`, pinned MCP servers, and fingerprinted tools to the JSON report. |
+| `--include-evidence-pack` | Attach cryptographic inventory digests, corroborated `verified_models`, `declared_signed_models`, pinned MCP servers, and fingerprinted tools to the JSON report; requires `--format json`. Only `verified_models` is corroborated by `--project`: the pinned servers and fingerprinted tools are the inventory's own claims. |
 | `--project` `DIRECTORY` | Reconcile `AIBOM_PATH` against this project to corroborate `verified_models` in `--include-evidence-pack`. |
 | `--signature-policy` `FILE` | Explicit operator signer policy JSON for `--include-evidence-pack`; requires `--project`. |
 
