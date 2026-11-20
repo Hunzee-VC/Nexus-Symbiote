@@ -4,7 +4,10 @@ Matches exact pinned PyPI and npm packages in an AgentBOM against an operator-su
 OSV bundle (a JSON file or a flat directory of them) without network I/O. Files are
 opened without following symlinks and bounded in size. A bundle or catalog that is empty
 or wrongly shaped is refused, and a package whose ecosystem the bundle holds no record
-for is an error, so neither can pass as a complete result with no advisories.
+for is an error, so neither can pass as a complete result with no advisories. Each feed's
+own date (never a file time, which a checkout sets) is recorded, and a feed that is undated,
+older than the operator's limit or dated in the future is an error, so a stale answer is
+not complete either.
 """
 
 from __future__ import annotations
@@ -15,14 +18,16 @@ import io
 import math
 import os
 import re
+from bisect import bisect_left
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from packaging.version import InvalidVersion, Version
 
-from nexus_symbiote import __version__
+from nexus_symbiote import __version__, limits
 from nexus_symbiote.advisories import (
     MAX_ADVISORIES,
     AdvisoryReport,
@@ -43,12 +48,20 @@ MAX_DB_RECORDS = 100_000
 MAX_CATALOG_BYTES = 16 * 1024 * 1024
 MAX_OFFLINE_COMPONENTS = 50_000
 MAX_OFFLINE_ERRORS = 100
+DEFAULT_MAX_FEED_AGE_DAYS = 30
+MAX_FEED_AGE_DAYS = 36_500
+_FUTURE_TOLERANCE = timedelta(days=1)
+_FEED_DATE_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:?\d{2}))?"
+)
 
 _SEMVER_RE = re.compile(
     r"^v?(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*))?(?:\.(0|[1-9][0-9]*))?"
     r"(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$"
 )
 _SUPPORTED_RANGE_TYPES = frozenset({"ECOSYSTEM", "SEMVER"})
+# Steps of evaluating a range, or of filtering its fixes, that cost about what one match does.
+_CHEAP_STEPS = 32
 _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "unknown": 4}
 
 
@@ -59,6 +72,7 @@ class _ParsedAdvisory:
     summary: str
     severity: str
     affected: tuple[dict[str, Any], ...]
+    dated: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -81,6 +95,37 @@ def _read_bounded_bytes(path: Path, max_bytes: int, label: str) -> bytes:
     return data
 
 
+def _parse_feed_date(raw: object, label: str) -> datetime | None:
+    """Parse a date a feed states about itself: None when absent, an error when malformed."""
+    if raw is None:
+        return None
+    try:
+        if not isinstance(raw, str) or _FEED_DATE_RE.fullmatch(raw) is None:
+            raise ValueError
+        parsed = datetime.fromisoformat(raw)
+        return (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)).astimezone(UTC)
+    except (ValueError, OverflowError):
+        raise ValueError(f"{label} is not an RFC 3339 date or date-time") from None
+
+
+def _feed_age_error(
+    label: str, noun: str, dated: datetime | None, now: datetime, limit: int
+) -> str | None:
+    if dated is None:
+        field = "record 'modified' or 'published' date" if noun == "newest record" else noun
+        return f"{label} carries no {field}, so its age is unknown; limit {limit} days"
+    if dated - now > _FUTURE_TOLERANCE:
+        return f"{label} {noun} {dated:%Y-%m-%d} is in the future"
+    age = (now.date() - dated.date()).days
+    if age > limit:
+        return f"{label} is {age} days old ({noun} {dated:%Y-%m-%d}); limit {limit}"
+    return None
+
+
+def _iso(dated: datetime | None) -> str | None:
+    return None if dated is None else dated.isoformat()
+
+
 def _semver_key(raw: str) -> tuple[int, int, int, int, tuple[tuple[int, int | str], ...]] | None:
     match = _SEMVER_RE.fullmatch(raw.strip())
     if match is None:
@@ -91,19 +136,13 @@ def _semver_key(raw: str) -> tuple[int, int, int, int, tuple[tuple[int, int | st
     return (major, minor, patch, 0 if parts else 1, parts)
 
 
-def _compare_versions(ecosystem: str, left: str, right: str) -> int | None:
+def _version_key(ecosystem: str, raw: str) -> Any | None:
     if ecosystem == "PyPI":
         try:
-            lv, rv = Version(left), Version(right)
+            return Version(raw)
         except InvalidVersion:
             return None
-        return -1 if lv < rv else (1 if lv > rv else 0)
-    if ecosystem == "npm":
-        lk, rk = _semver_key(left), _semver_key(right)
-        if lk is None or rk is None:
-            return None
-        return -1 if lk < rk else (1 if lk > rk else 0)
-    return None
+    return _semver_key(raw) if ecosystem == "npm" else None
 
 
 def _parse_epss_unit(raw: object, field_name: str) -> float:
@@ -161,8 +200,15 @@ def _parse_osv_records(payload: object) -> list[_ParsedAdvisory]:
             raise ValueError(
                 f"Offline advisory DB record {rec_id.strip()} has malformed 'affected'"
             )
+        raw_dated = item.get("modified")
+        dated = _parse_feed_date(
+            item.get("published") if raw_dated is None else raw_dated,
+            "Offline advisory DB record 'modified' or 'published'",
+        )
         parsed.append(
-            _ParsedAdvisory(rec_id.strip(), aliases, summary, _extract_severity(item), (*affected,))
+            _ParsedAdvisory(
+                rec_id.strip(), aliases, summary, _extract_severity(item), (*affected,), dated
+            )
         )
     return parsed
 
@@ -205,14 +251,20 @@ def load_offline_advisory_db(path: Path) -> tuple[list[_ParsedAdvisory], str]:
     if len(records) > MAX_DB_RECORDS:
         raise ValueError(f"Offline advisory DB exceeds {MAX_DB_RECORDS} records")
     # Matches merge by id, so a different record could drop another's aliases and KEV status.
+    # Copies that differ only in their date (two exports of one record) are one record, with
+    # the latest date; any other difference, a stale copy stamped later included, is refused.
     by_id: dict[str, _ParsedAdvisory] = {}
-    if dup := next((r.record_id for r in records if by_id.setdefault(r.record_id, r) != r), ""):
-        raise ValueError(f"Offline advisory DB holds two different records {dup}")
+    for rec in records:
+        kept = by_id.setdefault(rec.record_id, rec)
+        if replace(kept, dated=None) != replace(rec, dated=None):
+            raise ValueError(f"Offline advisory DB holds two different records {rec.record_id}")
+        if rec.dated is not None and (kept.dated is None or rec.dated > kept.dated):
+            by_id[rec.record_id] = rec
     return list(by_id.values()), digest
 
 
-def load_kev_catalog(path: Path) -> tuple[dict[str, list[_KEVEntry]], str]:
-    """Load an offline CISA or ENISA KEV JSON catalog."""
+def load_kev_catalog(path: Path) -> tuple[dict[str, list[_KEVEntry]], str, datetime | None]:
+    """Load an offline CISA or ENISA KEV JSON catalog, with the ``dateReleased`` it states."""
     data = _read_bounded_bytes(path, MAX_CATALOG_BYTES, "KEV catalog")
     payload = parse_json_strict(data.decode("utf-8"), max_bytes=MAX_CATALOG_BYTES)
     if not isinstance(payload, dict):
@@ -241,10 +293,25 @@ def load_kev_catalog(path: Path) -> tuple[dict[str, list[_KEVEntry]], str]:
         )
     if not index:
         raise ValueError("KEV catalog holds no entries")
-    return index, hash_bytes(data)
+    released = _parse_feed_date(payload.get("dateReleased"), "KEV catalog 'dateReleased'")
+    return index, hash_bytes(data), released
 
 
-def load_epss_catalog(path: Path) -> tuple[dict[str, _EPSSEntry], str]:
+def _epss_csv_score_date(text: str) -> datetime | None:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if not stripped.startswith("#"):
+            break
+        for part in stripped.lstrip("#").split(","):
+            key, found, value = part.partition(":")
+            if found and key.strip() == "score_date":
+                return _parse_feed_date(value.strip(), "EPSS catalog 'score_date'")
+    return None
+
+
+def load_epss_catalog(path: Path) -> tuple[dict[str, _EPSSEntry], str, datetime | None]:
     """Load an offline EPSS CSV or JSON catalog with strict finite [0, 1] validation."""
     data = _read_bounded_bytes(path, MAX_CATALOG_BYTES, "EPSS catalog")
     text = data.decode("utf-8")
@@ -253,6 +320,7 @@ def load_epss_catalog(path: Path) -> tuple[dict[str, _EPSSEntry], str]:
         payload = parse_json_strict(text, max_bytes=MAX_CATALOG_BYTES)
         if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
             raise ValueError("EPSS JSON catalog must be an object with a 'data' array")
+        scored = _parse_feed_date(payload.get("score_date"), "EPSS catalog 'score_date'")
         for row in payload["data"]:
             if not isinstance(row, dict):
                 continue
@@ -264,6 +332,7 @@ def load_epss_catalog(path: Path) -> tuple[dict[str, _EPSSEntry], str]:
                 _parse_epss_unit(pct, "percentile") if pct is not None else None,
             )
     else:
+        scored = _epss_csv_score_date(text)
         rows = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
         for row in csv.DictReader(io.StringIO("\n".join(rows))):
             cve, epss, pct = row.get("cve"), row.get("epss"), row.get("percentile")
@@ -275,105 +344,308 @@ def load_epss_catalog(path: Path) -> tuple[dict[str, _EPSSEntry], str]:
             )
     if not index:
         raise ValueError("EPSS catalog holds no entries")
-    return index, hash_bytes(data)
+    return index, hash_bytes(data), scored
 
 
-def _range_matches(
-    ecosystem: str, version: str, rng: dict[str, Any]
-) -> tuple[bool, list[str], list[str]]:
-    """Evaluate one OSV range: (in range, fixed versions above it, unparsable upper bounds).
+class _MatchBudgetError(Exception):
+    pass
 
-    The queried version and every ``introduced`` must parse; another event that does not
-    leaves the version possibly affected, and is reported. It is out of range below its
-    ``introduced``, at or above every ``limit`` when all parse and none is "*" (a version
-    below any limit is in range), or past a parsable bound of an interval with none unparsable.
+
+class _MatchBudget:
+    def __init__(self, units: int) -> None:
+        self.left = units
+
+    def spend(self, units: int) -> None:
+        self.left -= units
+        if self.left < 0:
+            raise _MatchBudgetError
+
+
+_UNCOMPARABLE = "OSV range version cannot be compared"
+
+
+@dataclass(frozen=True)
+class _Range:
+    """One OSV range; a version is a string until its package is ranked, then a position.
+
+    A ranked bound the ecosystem cannot parse is None, and ``unparsed`` holds the reported
+    form (cut to 64 characters) of each such ``fixed``, ``last_affected`` or ``limit``.
+    ``owners`` holds, per ``fixed`` or ``last_affected``, the ``introduced`` that event order
+    puts it after ("0" for the zero one, None before the first) with the bound; once ranked,
+    only the owner positions of the unparsable ones, and ``origin`` is the position of "0".
     """
+
+    zero_intro: bool
+    intros: tuple[Any, ...]
+    fixes: tuple[tuple[Any, str], ...]
+    last_affected: tuple[Any, ...]
+    limits: tuple[Any, ...]
+    owners: tuple[Any, ...] = ()
+    unparsed: tuple[str, ...] = ()
+    origin: Any = None
+
+    def versions(self) -> tuple[Any, ...]:
+        return (*self.intros, *(fix for fix, _ in self.fixes), *self.last_affected, *self.limits)
+
+
+def _read_range(rng: dict[str, Any]) -> _Range | None:
+    """Read one range's events; None when its type is not matched, ``ValueError`` if malformed."""
     raw_type = rng.get("type")
     if raw_type is not None and (
         not isinstance(raw_type, str) or raw_type.upper() not in _SUPPORTED_RANGE_TYPES
     ):
-        return False, [], []
+        return None
     events = rng.get("events")
     if not isinstance(events, list):
         raise ValueError("OSV range events are not a list")
 
-    def cmp(left: str, right: str) -> int:
-        if (result := _compare_versions(ecosystem, left, right)) is None:
-            raise ValueError("OSV range version cannot be compared")
-        return result
-
     has_zero_intro = False
     found: dict[str, list[str]] = {"introduced": [], "fixed": [], "last_affected": [], "limit": []}
-    ordered: list[tuple[str, str]] = []
+    owner: str | None = None
+    owners: list[tuple[str | None, str]] = []
     for ev in events:
         kind, raw = next(iter(ev.items())) if isinstance(ev, dict) and len(ev) == 1 else ("", "")
         if kind == "introduced" and raw in ("0", 0) and not isinstance(raw, bool):
-            has_zero_intro = True
-            ordered.append((kind, "0"))
+            has_zero_intro, owner = True, "0"
         elif kind in found and isinstance(raw, str) and raw.strip():
             found[kind].append(raw.strip())
-            ordered.append((kind, raw.strip()))
+            if kind == "introduced":
+                owner = raw.strip()
+            elif kind != "limit":
+                owners.append((owner, raw.strip()))
         else:
             raise ValueError("OSV range event cannot be parsed")
     intros, fixed_versions, last_affected, limits = found.values()
+    # A "*" limit bounds nothing: it is kept, ranked as None, so limits cannot exclude a
+    # version, and it is never reported.
+    return _Range(
+        has_zero_intro,
+        tuple(intros),
+        tuple((fix, fix) for fix in fixed_versions),
+        tuple(last_affected),
+        tuple(limits),
+        tuple(owners),
+    )
 
-    cmp(version, version)
-    best_intro: str | None = None
-    found_intro = has_zero_intro
-    for intro in intros:
-        if cmp(intro, version) > 0:
+
+def _in_range(version: int, rng: _Range) -> bool:
+    """Decide one ranked OSV range for a parsed version (order-independent per OSV spec).
+
+    Every ``introduced`` parses here; a block naming one that does not is an error before
+    any range of it is evaluated. An upper bound that does not parse (None) excludes no
+    version, so a range that only it could have ended still matches, reported undecided;
+    while one lies in the interval of the version's ``introduced`` (by event order), no
+    ``fixed`` or ``last_affected`` excludes the version either. Limits exclude it only when
+    it is at or above every one of them, all parsable and none "*" (OSV: a version below any
+    limit is in range).
+    """
+    best_intro: int | None = None
+    found_intro = rng.zero_intro
+    for intro in rng.intros:
+        if intro > version:
             continue
         found_intro = True
-        if best_intro is None or cmp(intro, best_intro) > 0:
+        if best_intro is None or intro > best_intro:
             best_intro = intro
     if not found_intro:
-        return False, [], []
+        return False
+    start = rng.origin if best_intro is None else best_intro
+    open_interval = any(owner is None or owner == start for owner in rng.owners)
 
-    bounds = (*fixed_versions, *last_affected, *(lim for lim in limits if lim != "*"))
-    unparsed = [b for b in bounds if _compare_versions(ecosystem, b, b) is None]
+    def ends_after_intro(bound: int | None) -> bool:
+        if open_interval or bound is None:
+            return False
+        return best_intro is None or best_intro <= bound
 
-    def ends_after_intro(bound: str) -> bool:
-        decided = not open_interval and bound not in unparsed
-        return decided and (best_intro is None or cmp(best_intro, bound) <= 0)
-
-    owner: str | None = None  # the introduced an event follows; None before the first
-    open_interval = False  # an unparsable bound may close the version's interval
-    for kind, value in ordered:
-        owner = value if kind == "introduced" else owner
-        held = owner is None or cmp(owner, best_intro or "0") == 0
-        open_interval |= held and kind in ("fixed", "last_affected") and value in unparsed
-    if (
-        all(x != "*" and x not in unparsed and cmp(version, x) >= 0 for x in limits or ["*"])
-        or any(ends_after_intro(fix) and cmp(fix, version) <= 0 for fix in fixed_versions)
-        or any(ends_after_intro(last) and cmp(last, version) < 0 for last in last_affected)
-    ):
-        return False, [], []
-    fixed_above = [fix for fix in fixed_versions if fix not in unparsed and cmp(fix, version) > 0]
-    return True, fixed_above, [bound[:64] for bound in unparsed]
-
-
-def _matches_affected_version(
-    affected: dict[str, Any], ecosystem: str, version: str
-) -> tuple[bool, list[str], list[str]]:
-    """(matched, fixed, undecided bounds), empty bounds once a listing or range decides."""
-    fixed_versions: list[str] = []
-    raw_versions, raw_ranges = affected.get("versions", []), affected.get("ranges", [])
-    if not isinstance(raw_versions, list) or not isinstance(raw_ranges, list):
-        raise ValueError("OSV affected versions or ranges are not a list")
-    matched = decided = any(
-        isinstance(ver, str) and (ver == version or _compare_versions(ecosystem, version, ver) == 0)
-        for ver in raw_versions
+    return not (
+        (bool(rng.limits) and all(lim is not None and version >= lim for lim in rng.limits))
+        or any(ends_after_intro(fix) and fix <= version for fix, _ in rng.fixes)
+        or any(ends_after_intro(last) and last < version for last in rng.last_affected)
     )
-    undecided: list[str] = []
-    for rng in raw_ranges:
-        in_range, rng_fixed, rng_unparsed = _range_matches(
-            ecosystem, version, rng if isinstance(rng, dict) else {}
-        )
-        if in_range:
-            matched, decided = True, decided or not rng_unparsed
-            fixed_versions.extend(rng_fixed)
-            undecided.extend(rng_unparsed)
-    return matched, sorted(set(fixed_versions)), [] if decided else sorted(set(undecided))
+
+
+# A block's evidence for one version: (block, matching range, or None for a listed version).
+_Hit = tuple[int, _Range | None]
+
+
+class _PackageMatcher:
+    """Every affected block of one package, indexed by the versions it matches.
+
+    Whether a range matches depends on a version only through how it compares with the
+    range's own parsable events. The distinct versions a package's ranges name are ranked:
+    one has the odd position ``2 * rank + 1``, and the versions between two neighbours share
+    the even position between them. ``_in_range`` runs once per position a range can tell
+    apart, and each run of matching positions is stored in a segment tree, so a component
+    version costs one bisection plus the blocks that match it, however many do not.
+
+    A block that cannot be decided is an error, never a miss, and which blocks those are
+    depends on the version only through whether it parses: a malformed block or range, or a
+    range with an unparsable ``introduced``, for a version that parses; any range of a
+    matched type, for one that does not. So each block's error, the first that evaluating
+    its ranges in order meets, is found once per package for each of the two cases.
+    """
+
+    def __init__(
+        self,
+        ecosystem: str,
+        blocks: list[tuple[_ParsedAdvisory, dict[str, Any]]],
+        budget: _MatchBudget,
+    ) -> None:
+        self._ecosystem = ecosystem
+        self._advisories = [adv for adv, _ in blocks]
+        self._listed: dict[Any, list[int]] = {}
+        self._listed_text: dict[str, list[int]] = {}
+        self._nodes: dict[int, list[_Hit]] = {}
+        failed_parsed: list[tuple[int, str]] = []
+        failed_unparsed_blocks: list[tuple[int, str]] = []
+
+        ranges: list[tuple[int, _Range]] = []
+        for number, (_, affected) in enumerate(blocks):
+            raw_versions, raw_ranges = affected.get("versions", []), affected.get("ranges", [])
+            if not isinstance(raw_versions, list) or not isinstance(raw_ranges, list):
+                reason = "OSV affected versions or ranges are not a list"
+                failed_parsed.append((number, reason))
+                failed_unparsed_blocks.append((number, reason))
+                continue
+            for ver in raw_versions:
+                if not isinstance(ver, str):
+                    continue
+                if (key := _version_key(ecosystem, ver)) is None:
+                    # Only the identical string equals a version the ecosystem cannot parse.
+                    self._listed_text.setdefault(ver, []).append(number)
+                else:
+                    self._listed.setdefault(key, []).append(number)
+            failed: str | None = None
+            failed_unparsed: str | None = None
+            readable: list[_Range] = []
+            for raw_range in raw_ranges:
+                try:
+                    rng = _read_range(raw_range if isinstance(raw_range, dict) else {})
+                except ValueError as exc:
+                    # Evaluation never gets past this range, for any version.
+                    failed = failed or str(exc)
+                    failed_unparsed = failed_unparsed or str(exc)
+                    break
+                if rng is None:
+                    continue
+                failed_unparsed = failed_unparsed or _UNCOMPARABLE
+                if any(_version_key(ecosystem, intro) is None for intro in rng.intros):
+                    failed = failed or _UNCOMPARABLE
+                readable.append(rng)
+            if failed is not None:
+                failed_parsed.append((number, failed))
+            else:
+                for rng in readable:
+                    budget.spend((len(rng.versions()) + 1) ** 2 // _CHEAP_STEPS)
+                    ranges.append((number, rng))
+            if failed_unparsed is not None:
+                failed_unparsed_blocks.append((number, failed_unparsed))
+        # Kept whole so a component costs nothing per error past the ones the report lists.
+        self._errors = {
+            parses: (
+                frozenset(number for number, _ in failed),
+                tuple((self._advisories[number], reason) for number, reason in failed),
+            )
+            for parses, failed in ((True, failed_parsed), (False, failed_unparsed_blocks))
+        }
+
+        texts = {text for _, rng in ranges for text in rng.versions()}
+        if any(rng.owners for _, rng in ranges):
+            texts.add("0")  # the version a zero introduced, which owns bounds, starts at
+        keys = {text: _version_key(ecosystem, text) for text in texts}
+        self._keys = sorted({key for key in keys.values() if key is not None})
+        position = {key: 2 * rank + 1 for rank, key in enumerate(self._keys)}
+        self._leaves = 2 * len(self._keys) + 1
+
+        def at(text: str) -> int | None:
+            return None if (key := keys[text]) is None else position[key]
+
+        for number, raw in ranges:
+            bounds = (*(fix for fix, _ in raw.fixes), *raw.last_affected, *raw.limits)
+            rng = _Range(
+                raw.zero_intro,
+                tuple(at(text) for text in raw.intros),
+                tuple((at(text), text) for text, _ in raw.fixes),
+                tuple(at(text) for text in raw.last_affected),
+                tuple(at(text) for text in raw.limits),
+                owners=tuple(
+                    None if owner is None else at(owner)
+                    for owner, bound in raw.owners
+                    if keys[bound] is None
+                ),
+                unparsed=tuple(text[:64] for text in bounds if keys[text] is None and text != "*"),
+                origin=at("0") if raw.owners else None,
+            )
+            start: int | None = None
+            low = 0
+            for named in (*sorted({p for p in rng.versions() if p is not None}), self._leaves):
+                for probe in (low, named)[: 1 if named == self._leaves else 2]:
+                    if _in_range(probe, rng):
+                        start = probe if start is None else start
+                    elif start is not None:
+                        self._store(start, probe - 1, (number, rng))
+                        start = None
+                low = named + 1
+            if start is not None:
+                self._store(start, self._leaves - 1, (number, rng))
+
+    def _store(self, first: int, last: int, entry: _Hit) -> None:
+        low, high = first + self._leaves, last + self._leaves + 1
+        while low < high:
+            if low & 1:
+                self._nodes.setdefault(low, []).append(entry)
+                low += 1
+            if high & 1:
+                high -= 1
+                self._nodes.setdefault(high, []).append(entry)
+            low >>= 1
+            high >>= 1
+
+    def matches(
+        self, version: str, budget: _MatchBudget
+    ) -> tuple[
+        list[tuple[_ParsedAdvisory, list[str], list[str]]], tuple[tuple[_ParsedAdvisory, str], ...]
+    ]:
+        """Each matching block's advisory, fixes above ``version`` and undecided bounds (empty
+        once a listing or a range without one decides it), then each block that cannot be
+        decided for it with the reason; both in bundle order. The second is shared between
+        calls, so a caller lists the errors it reports without building the rest.
+        """
+        key = _version_key(self._ecosystem, version)
+        position = -1
+        if key is None:
+            hits: list[_Hit] = [(number, None) for number in self._listed_text.get(version, ())]
+        else:
+            rank = bisect_left(self._keys, key)
+            exact = rank < len(self._keys) and self._keys[rank] == key
+            position = 2 * rank + 1 if exact else 2 * rank
+            hits = [(number, None) for number in self._listed.get(key, ())]
+            node = position + self._leaves
+            while node:
+                hits.extend(self._nodes.get(node, ()))
+                node >>= 1
+        undecidable, failed = self._errors[key is not None]
+        blocks: dict[int, tuple[list[str], list[str], list[bool]]] = {}
+        for number, rng in sorted(hits, key=lambda hit: hit[0]):
+            fixes = () if rng is None else rng.fixes
+            budget.spend(1 + len(fixes) // _CHEAP_STEPS)
+            if number in undecidable:
+                continue
+            fixed, bounds, decided = blocks.setdefault(number, ([], [], [False]))
+            fixed.extend(text for at, text in fixes if at is not None and at > position)
+            if rng is None or not rng.unparsed:
+                decided[0] = True
+            else:
+                bounds.extend(rng.unparsed)
+        found = [
+            (
+                self._advisories[number],
+                sorted(set(fixed)),
+                [] if decided[0] else sorted(set(bounds)),
+            )
+            for number, (fixed, bounds, decided) in sorted(blocks.items())
+        ]
+        return found, failed
 
 
 def _build_package_index(
@@ -456,8 +728,20 @@ def match_offline_advisories(
     exclude: Iterable[str] = (),
     exclude_private_origins: bool = False,
     inventory_sha256: str | None = None,
+    now: datetime,
+    max_feed_age_days: int = DEFAULT_MAX_FEED_AGE_DAYS,
 ) -> tuple[AdvisoryReport, dict[str, Any]]:
-    """Match pinned packages in ``bom`` against an offline OSV DB with KEV/EPSS enrichment."""
+    """Match pinned packages in ``bom`` against an offline OSV DB with KEV/EPSS enrichment.
+
+    ``now`` is the caller's clock. A feed whose own date is missing, more than
+    ``max_feed_age_days`` before it, or more than a day after it adds an error, so the
+    report is not complete.
+    """
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    if type(max_feed_age_days) is not int or not 1 <= max_feed_age_days <= MAX_FEED_AGE_DAYS:
+        raise ValueError(f"max_feed_age_days must be an integer from 1 to {MAX_FEED_AGE_DAYS}")
+    now = now.astimezone(UTC)
     patterns = list(exclude)
     if any(not isinstance(p, str) or not p or len(p) > 256 for p in patterns):
         raise ValueError("exclusion patterns must be 1 to 256 characters")
@@ -467,31 +751,61 @@ def match_offline_advisories(
     records, db_digest = load_offline_advisory_db(db_path)
     pkg_index = _build_package_index(records)
     covered = {ecosystem for ecosystem, _ in pkg_index}
+    db_dated = max((adv.dated for adv in records if adv.dated is not None), default=None)
+    feed_errors = [
+        _feed_age_error("offline advisory DB", "newest record", db_dated, now, max_feed_age_days)
+    ]
 
     kev_index: dict[str, list[_KEVEntry]] = {}
     kev_provenance: list[dict[str, Any]] = []
     for kpath in kev_paths:
-        k_idx, k_digest = load_kev_catalog(kpath)
-        kev_provenance.append({"path": kpath.name, "sha256": k_digest, "entries": len(k_idx)})
+        k_idx, k_digest, released = load_kev_catalog(kpath)
+        kev_provenance.append(
+            {
+                "path": kpath.name,
+                "sha256": k_digest,
+                "entries": len(k_idx),
+                "date_released": _iso(released),
+            }
+        )
+        feed_errors.append(
+            _feed_age_error(
+                f"KEV catalog {kpath.name}", "dateReleased", released, now, max_feed_age_days
+            )
+        )
         for key, entries in k_idx.items():
             kev_index.setdefault(key, []).extend(entries)
 
     epss_index: dict[str, _EPSSEntry] = {}
     epss_provenance: dict[str, Any] | None = None
     if epss_path is not None:
-        epss_index, digest = load_epss_catalog(epss_path)
-        epss_provenance = {"path": epss_path.name, "sha256": digest, "entries": len(epss_index)}
+        epss_index, digest, scored = load_epss_catalog(epss_path)
+        epss_provenance = {
+            "path": epss_path.name,
+            "sha256": digest,
+            "entries": len(epss_index),
+            "score_date": _iso(scored),
+        }
+        feed_errors.append(
+            _feed_age_error(
+                f"EPSS catalog {epss_path.name}", "score_date", scored, now, max_feed_age_days
+            )
+        )
 
     provenance: dict[str, Any] = {
         "offline": True,
         "db_sha256": db_digest,
         "records_loaded": len(records),
+        "db_newest_record": _iso(db_dated),
+        "max_feed_age_days": max_feed_age_days,
+        "feed_age_evaluated_at": now.isoformat(),
         "kev_catalogs": kev_provenance,
         "epss_catalog": epss_provenance,
     }
     report = AdvisoryReport(
         tool_version=__version__, inventory_sha256=inventory_sha256, dry_run=False
     )
+    report.errors.extend(error for error in feed_errors if error is not None)
 
     targets: list[tuple[str, str, str, str]] = []
     for comp in sorted(bom.components, key=lambda c: c.bom_ref):
@@ -537,24 +851,35 @@ def match_offline_advisories(
         return report, provenance
 
     unlisted_errors = 0
+    bound = limits.bound("advisory-matches")
+    budget = _MatchBudget(bound.value)
+    matchers: dict[tuple[str, str], _PackageMatcher] = {}
     for bom_ref, eco, name, version in targets:
         report.components_checked += 1
         report.queries.append(
             {"component_ref": bom_ref, "ecosystem": eco, "name": name, "version": version}
         )
         matched_by_adv: dict[str, tuple[_ParsedAdvisory, list[str], list[str]]] = {}
-        for adv, aff in pkg_index.get((eco.lower(), name), ()):
-            try:
-                is_match, fixed, undecided = _matches_affected_version(aff, eco, version)
-            except ValueError as exc:
-                unlisted_errors += len(report.errors) >= MAX_OFFLINE_ERRORS
-                if len(report.errors) < MAX_OFFLINE_ERRORS:
-                    report.errors.append(f"{bom_ref}: offline advisory {adv.record_id}: {exc}")
-                continue
-            if is_match:
-                hit = matched_by_adv.setdefault(adv.record_id, (adv, [], list(undecided)))
-                hit[1].extend(fixed)
-                hit[2][:] = [*hit[2], *undecided] if hit[2] and undecided else []
+        package = (eco.lower(), name)
+        try:
+            if package not in matchers:
+                matchers[package] = _PackageMatcher(eco, pkg_index.get(package, []), budget)
+            found, failed = matchers[package].matches(version, budget)
+        except _MatchBudgetError:
+            if unlisted_errors:
+                report.errors.append(
+                    f"{unlisted_errors} more offline advisory errors are not listed"
+                )
+            report.errors.append(f"Offline advisory matching stopped: {bound.exceeded()}")
+            return report, provenance
+        listed = max(0, min(len(failed), MAX_OFFLINE_ERRORS - len(report.errors)))
+        for adv, reason in failed[:listed]:
+            report.errors.append(f"{bom_ref}: offline advisory {adv.record_id}: {reason}")
+        unlisted_errors += len(failed) - listed
+        for adv, fixed, undecided in found:
+            hit = matched_by_adv.setdefault(adv.record_id, (adv, [], list(undecided)))
+            hit[1].extend(fixed)
+            hit[2][:] = [*hit[2], *undecided] if hit[2] and undecided else []
         raw_matches = [(a, sorted(set(f)), sorted(set(u))) for a, f, u in matched_by_adv.values()]
         for entry in _deduplicate_matches(raw_matches):
             if len(report.advisories) >= MAX_ADVISORIES:
