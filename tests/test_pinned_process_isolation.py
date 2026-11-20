@@ -404,6 +404,7 @@ for _ in range(1000):
             os.kill(_host_pid(marker), signal.SIGKILL)
 
 
+@_SWEEP_ONLY
 def test_opt_out_stops_the_launcher_before_its_tree_is_swept(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -835,6 +836,7 @@ def test_the_launch_state_comparison_detects_a_wrapper_that_leaks(
     assert wrapped != direct
 
 
+@_LINUX_ONLY
 def test_a_stalled_subreaper_wrapper_is_bounded_by_the_protocol_deadline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
