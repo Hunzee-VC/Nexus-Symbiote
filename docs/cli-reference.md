@@ -469,7 +469,7 @@ nexus-symbiote diff-instructions [OPTIONS] BASE_TREE HEAD_TREE
 | `--json-output` | Print the instruction diff as JSON. |
 | `--fail-on-change` | Exit with status 1 if any security-relevant instruction change or new excluded agent-directory gap is detected. |
 
-Escaped, broken, credential-targeted, oversized, invalid UTF-8, or case-variant instruction surfaces, and malformed YAML front matter, are recorded under `failures` and exit 1 (fail closed) rather than silently reporting 0 changes; in-root symlinks to non-credential targets are read through their confined target and diffed. Changed text under `--show-text` masks multi-line PEM private keys and secrets across the whole block before terminal neutralization.
+Escaped, broken, credential-targeted, oversized, invalid UTF-8, or case-variant instruction surfaces, and malformed YAML front matter, are recorded under `failures` and exit 1 (fail closed) rather than silently reporting 0 changes; in-root symlinks to non-credential targets are read through their confined target and diffed. Changed text under `--show-text` masks multi-line PEM private keys and secrets across the whole block before terminal neutralization. A report shows at most 1 MiB of changed text; past that, each further change carries `[text withheld: --show-text output limit reached]` in place of its text. An instruction file that is in `BASE_TREE` only is reported as `tool_grant_changed` when it held tool grants or limits, and a rule that drops its `paths` front matter, or a negated glob, as `scope_widened`.
 
 ### `digest`
 

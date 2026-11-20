@@ -26,7 +26,6 @@ from bisect import bisect_right
 from collections import Counter, deque
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
-from difflib import SequenceMatcher
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -68,15 +67,23 @@ FORMAT = "nexus-symbiote/instruction-diff/v1"
 MAX_FILES = 2000
 MAX_FRONTMATTER_NODES = 4096
 MAX_SHOW_TEXT_CHARS = 4096
+# One block holds many URLs, and each change repeats the block, so the text shown is bounded
+# for the whole report: without it a 4 MiB file asks for more than a gigabyte of output.
+MAX_SHOW_TEXT_TOTAL = 1024 * 1024
+TEXT_WITHHELD = "[text withheld: --show-text output limit reached]"
+# Longest tool argument or MCP tool name read as one grant; a longer or unclosed one is
+# reported under the bare tool name, so no match scans to the end of the block.
+_MAX_GRANT_CHARS = 512
 
 _FRONTMATTER_RE = re.compile(
     r"\A---[ \t]*\r?\n(?:(.*?)\r?\n)?---[ \t]*(?:\r?\n|\Z)",
     re.DOTALL,
 )
-_URL_RE = re.compile(r"(?:https?|wss?|ftp|file)://[^\s<>\"'`\)\]]+", re.IGNORECASE)
+_URL_RE = re.compile(r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]{1,31}://[^\s<>\"'`\)\]]+")
 _PATH_RE = re.compile(
     r"(?<![A-Za-z0-9_/:])"
-    r"(?:~/|\.\./|/(?:etc|var|usr|opt|tmp|root|home|Users|srv|mnt|private)/|[A-Za-z]:\\)"
+    r"(?:~/|\.\./|\$\{?HOME\}?/|[A-Za-z]:\\"
+    r"|/(?:etc|var|usr|opt|tmp|root|home|Users|srv|mnt|private|bin|sbin|dev|proc|sys|run)/)"
     r"[^\s<>\"'`\)\],;]+"
 )
 _INCLUDE_RE = re.compile(r"<!--\s*include\s*:\s*([^\s>]+)\s*-->", re.IGNORECASE)
@@ -93,10 +100,11 @@ _GRANT_VERB_PREFIX = (
     r"(?:allow|allows|allowed|grant|grants|enable|enables|use|call|tools?|permissions?|[:,\[])\s+"
 )
 _TOOL_GRANT_RE = re.compile(
-    rf"\b(?:{_PARAM_TOOLS})\([^)]*\)"
-    r"|\bmcp__[A-Za-z0-9_.-]+(?:\([^)]*\))?\b"
-    r"|^\s*allowed[-_]tools\s*:\s*(.+)$"
-    rf"|(?<![A-Za-z0-9_])(?:{_UNAMBIGUOUS_BARE_TOOLS})(?![A-Za-z0-9_(])"
+    rf"\b(?:{_PARAM_TOOLS})\([^)\n]{{0,{_MAX_GRANT_CHARS}}}\)"
+    rf"|\bmcp__[A-Za-z0-9_.-]{{1,{_MAX_GRANT_CHARS}}}(?:\([^)\n]{{0,{_MAX_GRANT_CHARS}}}\))?\b"
+    r"|\bmcp__"
+    r"|^[ \t]*allowed[-_]tools[ \t]*:[ \t]*(.+)$"
+    rf"|(?<![A-Za-z0-9_])(?:{_UNAMBIGUOUS_BARE_TOOLS})(?![A-Za-z0-9_])"
     rf"|`({_CONTEXT_BARE_TOOLS})`"
     rf"|(?i:{_GRANT_VERB_PREFIX})({_CONTEXT_BARE_TOOLS})\b"
     rf"|\b({_CONTEXT_BARE_TOOLS})\s+(?i:tools?|permissions?)\b",
@@ -155,6 +163,7 @@ class _ParsedInstruction:
     rel_path: str
     content: str
     globs: frozenset[str]
+    path_scoped: bool
     always_apply: bool
     frontmatter_grants: frozenset[str]
     blocks: tuple[tuple[str, str], ...]
@@ -218,14 +227,25 @@ def _normalize_glob(pattern: str) -> str:
     return cleaned
 
 
+def _canonical(value: Any) -> str:
+    """One comparable, redacted line for a front-matter value of any YAML type."""
+
+    def plain(item: Any) -> Any:
+        return sorted(map(str, item)) if isinstance(item, (set, frozenset)) else str(item)
+
+    return neutralize(json.dumps(redact_metadata(value), sort_keys=True, default=plain))
+
+
 def _glob_list(value: Any) -> frozenset[str]:
+    if value is None:
+        return frozenset()
     if isinstance(value, str):
         items = [_normalize_glob(part) for part in value.split(",")]
-        return frozenset(item for item in items if item)
-    if isinstance(value, list):
-        items = [_normalize_glob(str(item)) for item in value if isinstance(item, str)]
-        return frozenset(item for item in items if item)
-    return frozenset()
+    elif isinstance(value, list):
+        items = [_normalize_glob(str(item)) for item in value]
+    else:
+        items = [_canonical(value)]
+    return frozenset(item for item in items if item)
 
 
 def _tool_list(value: Any) -> frozenset[str]:
@@ -239,7 +259,8 @@ def _tool_list(value: Any) -> frozenset[str]:
         return frozenset(
             neutralize(redact_text(str(item).strip())) for item in value if str(item).strip()
         )
-    return frozenset()
+    # A value of a type no host documents still changed the grant: compare it, never drop it.
+    return frozenset() if value is None else frozenset({_canonical(value)})
 
 
 def _fallback_frontmatter_fields(raw_yaml: str) -> dict[str, Any]:
@@ -302,11 +323,13 @@ def _parse_frontmatter(
 ) -> tuple[dict[str, Any], str]:
     if not _uses_frontmatter(rel_path):
         return {}, content
-    match = _FRONTMATTER_RE.match(content)
+    # Front-matter readers such as gray-matter drop a byte order mark before the delimiter.
+    unmarked = content.removeprefix("\ufeff")
+    match = _FRONTMATTER_RE.match(unmarked)
     if match is None:
         return {}, content
     raw_yaml = match.group(1) or ""
-    body = content[match.end() :]
+    body = unmarked[match.end() :]
     if not raw_yaml.strip():
         return {}, body
     try:
@@ -327,8 +350,7 @@ def _frontmatter_grants(meta: Mapping[str, Any]) -> frozenset[str]:
         val = meta.get(key)
         if val is None or val == {} or val == []:
             continue
-        safe_val = redact_metadata(val)
-        serialized = neutralize(json.dumps(safe_val, sort_keys=True, ensure_ascii=True))
+        serialized = _canonical(val)
         canonical_key = {
             "permission_mode": "permissionMode",
             "mcp_servers": "mcpServers",
@@ -443,7 +465,7 @@ def _parse_instruction(rel_path: str, content: str, failures: list[str]) -> _Par
     globs: set[str] = set()
     for key in ("globs", "applyTo", "paths"):
         globs.update(_glob_list(meta.get(key)))
-    always_apply = bool(meta.get("alwaysApply") is True)
+    always_apply = str(meta.get("alwaysApply")).strip().lower() == "true"
     fm_grants = _frontmatter_grants(meta)
 
     blocks = tuple(commonmark_blocks(body))
@@ -461,6 +483,7 @@ def _parse_instruction(rel_path: str, content: str, failures: list[str]) -> _Par
         rel_path=rel_path,
         content=content,
         globs=frozenset(globs),
+        path_scoped=bool(_glob_list(meta.get("paths"))),
         always_apply=always_apply,
         frontmatter_grants=fm_grants,
         blocks=blocks,
@@ -759,30 +782,19 @@ def _changed_block_indices(
     base_blocks: tuple[tuple[str, str], ...],
     head_blocks: tuple[tuple[str, str], ...],
 ) -> list[int]:
-    if base_blocks == head_blocks:
-        return []
-    base_norm = [re.sub(r"\s+", " ", content).strip() for _, content in base_blocks]
-    head_norm = [re.sub(r"\s+", " ", content).strip() for _, content in head_blocks]
-    # Trim matching prefix and suffix in O(N) before SequenceMatcher.
-    prefix = 0
-    limit = min(len(base_norm), len(head_norm))
-    while prefix < limit and base_norm[prefix] == head_norm[prefix]:
-        prefix += 1
-    suffix = 0
-    while (
-        suffix < (limit - prefix)
-        and base_norm[len(base_norm) - 1 - suffix] == head_norm[len(head_norm) - 1 - suffix]
-    ):
-        suffix += 1
-    b_mid = base_norm[prefix : len(base_norm) - suffix]
-    h_mid = head_norm[prefix : len(head_norm) - suffix]
-    if not b_mid:
-        return list(range(prefix, len(head_norm) - suffix))
-    matcher = SequenceMatcher(None, b_mid, h_mid, autojunk=False)
+    """Head blocks that pair with no equal base block, in one pass.
+
+    Both sides are untrusted, and an alignment such as ``difflib`` takes quadratic time
+    on blocks that repeat; the indices only choose which block a change points at.
+    """
+    remaining = Counter(re.sub(r"\s+", " ", content).strip() for _, content in base_blocks)
     indices: list[int] = []
-    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
-        if tag in {"replace", "insert"}:
-            indices.extend(range(prefix + j1, prefix + j2))
+    for index, (_, content) in enumerate(head_blocks):
+        key = re.sub(r"\s+", " ", content).strip()
+        if remaining[key] > 0:
+            remaining[key] -= 1
+        else:
+            indices.append(index)
     return indices
 
 
@@ -811,6 +823,7 @@ def diff_instruction_trees(
     base_records, base_failures, base_excluded = _read_confined_tree(base_tree)
     head_records, head_failures, head_excluded = _read_confined_tree(head_tree)
     changes: list[InstructionChange] = []
+    shown = 0
 
     for rel_path in sorted(head_records):
         head = head_records[rel_path]
@@ -829,7 +842,7 @@ def diff_instruction_trees(
             _head: _ParsedInstruction = head,
             _cache: dict[int, tuple[str, list[str]]] = sanitized_cache,
         ) -> str | None:
-            nonlocal pem_masked
+            nonlocal pem_masked, shown
             if not show_text or blk is None:
                 return None
             entry = _cache.get(blk)
@@ -846,7 +859,11 @@ def diff_instruction_trees(
                 cached_full = "\n".join(cached_lines)
                 entry = (cached_full, cached_lines)
                 _cache[blk] = entry
-            return _truncate_cached_text(entry[0], entry[1], line_hint)
+            snippet = _truncate_cached_text(entry[0], entry[1], line_hint)
+            if shown + len(snippet) > MAX_SHOW_TEXT_TOTAL:
+                return TEXT_WITHHELD
+            shown += len(snippet)
+            return snippet
 
         # 1. scope_widened
         if base is None:
@@ -869,7 +886,23 @@ def diff_instruction_trees(
                         summary=f"'{safe_path}' changed alwaysApply from false to true",
                     )
                 )
-            widened_globs = sorted(g for g in head.globs if not _glob_covered_by(g, base.globs))
+            if base.path_scoped and not head.path_scoped:
+                changes.append(
+                    InstructionChange(
+                        change_class=InstructionChangeClass.SCOPE_WIDENED,
+                        file=safe_path,
+                        block_index=None,
+                        summary=f"'{safe_path}' dropped its paths and now loads unconditionally",
+                    )
+                )
+            widened_globs = sorted(
+                {
+                    g
+                    for g in head.globs
+                    if not g.startswith("!") and not _glob_covered_by(g, base.globs)
+                }
+                | {g for g in base.globs - head.globs if g.startswith("!")}
+            )
             if widened_globs:
                 changes.append(
                     InstructionChange(
@@ -878,7 +911,7 @@ def diff_instruction_trees(
                         block_index=None,
                         summary=(
                             f"'{safe_path}' widened activation globs: "
-                            + neutralize(", ".join(widened_globs))
+                            + neutralize(redact_text(", ".join(widened_globs)))
                         ),
                     )
                 )
@@ -959,6 +992,18 @@ def diff_instruction_trees(
                     block_index=blk,
                     summary=f"'{safe_path}' added hidden markup or invisible Unicode",
                     text=txt,
+                )
+            )
+
+    for rel_path in sorted(base_records.keys() - head_records.keys()):
+        removed = base_records[rel_path]
+        if removed.frontmatter_grants or removed.inline_tools[0]:
+            changes.append(
+                InstructionChange(
+                    change_class=InstructionChangeClass.TOOL_GRANT_CHANGED,
+                    file=neutralize(rel_path),
+                    block_index=None,
+                    summary=f"'{neutralize(rel_path)}' is gone, with its tool grants or limits",
                 )
             )
 

