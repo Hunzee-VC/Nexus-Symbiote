@@ -1134,10 +1134,22 @@ def test_a_trusted_key_inside_the_inventory_repository_is_refused(tmp_path, monk
         args += ["--launch-policy", str(policy_path), "--require-transport-evidence"]
         args += ["--transport-evidence", str(evidence_path)]
         args += ["--transport-evidence-attestation", str(att_path), "--trusted-key", str(key)]
-        return CliRunner().invoke(main, [*args, "--json-output", *extra])
+        return CliRunner().invoke(
+            main,
+            [*args, *(e for e in extra if e != "--text")]
+            if "--text" in extra
+            else [*args, "--json-output", *extra],
+        )
 
     trusted = run(operator / "obs.pub")
     assert trusted.exit_code == 0, trusted.output
+    assert json.loads(trusted.stdout)["origin_bound_servers"] == 1
+    text = run(operator / "obs.pub", ev_path, "--text")
+    assert "mcp:tickets: verified by origin-only transport evidence observed 2019" in text.output
+    strict = run(operator / "obs.pub", ev_path, "--require-full-url-binding")
+    assert strict.exit_code == 1 and json.loads(strict.stdout)["origin_bound_servers"] == 0
+    overflow = run(operator / "obs.pub", ev_path, "--max-evidence-age", "9999999999")
+    assert overflow.exit_code == 2
     stale = run(operator / "obs.pub", ev_path, "--max-evidence-age", "24")
     assert stale.exit_code == 1 and "invalid-transport-evidence" in stale.output
     unused = CliRunner().invoke(
@@ -1145,7 +1157,7 @@ def test_a_trusted_key_inside_the_inventory_repository_is_refused(tmp_path, monk
         ["--live", "verify-live", str(bom_path), "--project", str(project)]
         + ["--launch-policy", str(policy_path), "--max-evidence-age", "24"],
     )
-    assert unused.exit_code == 2 and "--max-evidence-age require" in unused.output
+    assert unused.exit_code == 2 and "require --transport-evidence" in unused.output
     inside = run(repo / "obs.pub")
     assert inside.exit_code == 2
     assert "INVENTORY" in inside.output
@@ -1233,3 +1245,54 @@ def test_an_operator_bound_on_evidence_age_refuses_stale_and_future_observations
         _claim(server, "server_declaration", observed_at=when)
         report = verify_mcp_servers(approved, transport_evidence=[evidence], max_evidence_age=day)
         assert report.all_servers_verified is verified, when
+
+
+def test_without_an_age_bound_future_dated_evidence_is_still_refused():
+    from datetime import UTC, datetime, timedelta
+
+    approved, evidence, server, _tool = _remote_case()
+    _claim(server, "server_declaration", observed_at=datetime.now(UTC) + timedelta(hours=1))
+    assert _remote_reason(approved, evidence) == ("failed", "invalid-transport-evidence", False)
+
+
+def test_full_url_binding_can_be_required_and_counts_origin_only_servers():
+    approved, evidence, _server, _tool = _remote_case()
+    loose = verify_mcp_servers(approved, transport_evidence=[evidence])
+    assert loose.all_servers_verified and loose.to_dict()["origin_bound_servers"] == 1
+    strict = verify_mcp_servers(
+        approved, transport_evidence=[evidence], require_full_url_binding=True
+    )
+    assert (strict.results[0].status, strict.results[0].reason) == (
+        "failed",
+        "invalid-transport-evidence",
+    )
+    record_candidate(approved, loose)
+    bound = verify_mcp_servers(
+        approved, transport_evidence=[evidence], require_full_url_binding=True
+    )
+    assert bound.all_servers_verified and bound.to_dict()["origin_bound_servers"] == 0
+    # Deleting the recorded digest from the untrusted inventory no longer verifies.
+    _approved_server(approved).properties.pop("observed_endpoint_hash")
+    stripped = verify_mcp_servers(
+        approved, transport_evidence=[evidence], require_full_url_binding=True
+    )
+    assert not stripped.all_servers_verified
+
+
+@pytest.mark.parametrize(
+    ("inventory_endpoint", "evidence_endpoint", "verified"),
+    [
+        ("http://mcp.example.com", "http://mcp.example.com/mcp", False),
+        ("https://MCP.Example.COM", "https://mcp.example.com/mcp", True),
+        ("https://mcp.example.com:443", "https://MCP.example.com/mcp", True),
+    ],
+)
+def test_origins_compare_by_scheme_case_folded_host_and_port(
+    inventory_endpoint, evidence_endpoint, verified
+):
+    approved, evidence, server, _tool = _remote_case()
+    _approved_server(approved).endpoint_url = inventory_endpoint
+    server.endpoint_url = evidence_endpoint
+    _claim(server, "server_declaration", locator=evidence_endpoint)
+    report = verify_mcp_servers(approved, transport_evidence=[evidence])
+    assert report.all_servers_verified is verified

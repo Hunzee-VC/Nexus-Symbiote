@@ -210,6 +210,11 @@ class LiveVerifyReport:
         )
 
     @property
+    def origin_bound(self) -> list[ServerVerifyResult]:
+        binding = [(r, (r.transport_evidence or {}).get("endpoint_binding")) for r in self.results]
+        return [r for r, b in binding if r.status == "verified" and b == "origin"]
+
+    @property
     def all_servers_verified(self) -> bool:
         return self.complete and self.servers_skipped == 0 and not self.has_drift
 
@@ -239,6 +244,7 @@ class LiveVerifyReport:
             "servers_checked": self.servers_checked,
             "servers_reachable": self.servers_reachable,
             "servers_skipped": self.servers_skipped,
+            "origin_bound_servers": len(self.origin_bound),
             "has_drift": self.has_drift,
             "inputs": dict(self.inputs),
             "results": [r.to_dict() for r in self.results],
@@ -357,10 +363,11 @@ def _canonical_https_origin(url: str | None) -> tuple[str, str, int] | None:
     return scheme, host.lower(), (443 if port is None else port)
 
 
-def _recent(observed_at: datetime, max_age: timedelta) -> bool:
+def _recent(observed_at: datetime, max_age: timedelta | None) -> bool:
     now = datetime.now(UTC)
-    aware = observed_at.tzinfo is not None
-    return aware and now - max_age <= observed_at <= now + timedelta(minutes=5)
+    if observed_at.tzinfo is None or observed_at > now + timedelta(minutes=5):
+        return False
+    return max_age is None or now - max_age <= observed_at
 
 
 def _refuse(result: ServerVerifyResult, reason: str) -> bool:
@@ -422,6 +429,7 @@ def _verify_remote_evidence(
     observed_server: MCPServerComponent,
     result: ServerVerifyResult,
     max_age: timedelta | None = None,
+    require_full_url: bool = False,
 ) -> bool:
     """Compare an approved remote server against a recorded discover-mcp observation."""
     from nexus_symbiote.core.enums import AssuranceLevel
@@ -435,7 +443,7 @@ def _verify_remote_evidence(
         or server_claim.collector != "live-mcp"
         or server_claim.method != "https-mcp-initialize"
         or server_claim.observed_at is None
-        or (max_age is not None and not _recent(server_claim.observed_at, max_age))
+        or not _recent(server_claim.observed_at, max_age)
     ):
         return _refuse(result, "invalid-transport-evidence")
     obs_origin = _canonical_https_origin(observed_server.endpoint_url)
@@ -449,6 +457,7 @@ def _verify_remote_evidence(
         or _canonical_https_origin(server_claim.locator) != obs_origin
         or _canonical_https_origin(server.endpoint_url) != obs_origin
         or endpoint_hash is None
+        or (require_full_url and expected_ep_hash is None)
         or (expected_ep_hash is not None and _valid_digest(expected_ep_hash) != endpoint_hash)
     ):
         return _refuse(result, "invalid-transport-evidence")
@@ -568,6 +577,7 @@ def verify_mcp_servers(
     transport_evidence: list[AIBOM] | tuple[AIBOM, ...] = (),
     require_transport_evidence: bool = False,
     max_evidence_age: timedelta | None = None,
+    require_full_url_binding: bool = False,
 ) -> LiveVerifyReport:
     """Bind collection to the exact server reference in an independent launch policy."""
     report = LiveVerifyReport()
@@ -620,7 +630,13 @@ def verify_mcp_servers(
                 report.servers_checked += 1
                 obs_bom, obs_server = evidence_by_ref[server.bom_ref]
                 if _verify_remote_evidence(
-                    bom, server, obs_bom, obs_server, result, max_evidence_age
+                    bom,
+                    server,
+                    obs_bom,
+                    obs_server,
+                    result,
+                    max_evidence_age,
+                    require_full_url_binding,
                 ):
                     report.servers_reachable += 1
                 continue

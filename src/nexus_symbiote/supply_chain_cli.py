@@ -215,9 +215,14 @@ def register_supply_chain_commands(main: click.Group) -> None:
     )
     @click.option(
         "--max-evidence-age",
-        type=click.IntRange(min=1),
+        type=click.IntRange(min=1, max=876000),
         default=None,
-        help="Refuse --transport-evidence observed more than this many hours ago, or later than now.",
+        help="Refuse --transport-evidence observed more than this many hours ago.",
+    )
+    @click.option(
+        "--require-full-url-binding",
+        is_flag=True,
+        help="Refuse --transport-evidence for a server whose inventory records no full-URL digest.",
     )
     @click.option(
         "--no-isolation",
@@ -248,6 +253,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         transport_evidence_purpose: str | None,
         require_transport_evidence: bool,
         max_evidence_age: int | None,
+        require_full_url_binding: bool,
         no_isolation: bool,
     ) -> None:
         """Live: observe independently pinned stdio launchers; optionally emit an unsigned candidate.
@@ -279,10 +285,11 @@ def register_supply_chain_commands(main: click.Group) -> None:
             or trusted_keys
             or transport_evidence_purpose is not None
             or max_evidence_age is not None
+            or require_full_url_binding
         ) and not transport_evidence:
             raise click.UsageError(
-                "--transport-evidence-attestation, --trusted-key, --transport-evidence-purpose "
-                "and --max-evidence-age require --transport-evidence"
+                "--transport-evidence-attestation, --trusted-key, --transport-evidence-purpose, "
+                "--max-evidence-age and --require-full-url-binding require --transport-evidence"
             )
         if transport_evidence:
             if len(transport_evidence_attestations) != len(transport_evidence):
@@ -397,6 +404,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 max_evidence_age=None
                 if max_evidence_age is None
                 else timedelta(hours=max_evidence_age),
+                require_full_url_binding=require_full_url_binding,
             )
         report.inputs = {
             "inventory_sha256": hash_bytes(inventory_bytes),
@@ -443,6 +451,9 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 f"{report.servers_skipped} remote not verifiable here; ",
                 f"complete={report.complete}; drift={report.has_drift}",
             )
+            for result in report.origin_bound:
+                shown = f"{result.server_ref}: verified by origin-only transport evidence observed "
+                echo_line("Server ", shown, (result.transport_evidence or {})["observed_at"])
             for result in report.results:
                 if result.reason is not None:
                     echo_line(
