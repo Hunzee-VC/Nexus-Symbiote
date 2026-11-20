@@ -19,7 +19,7 @@ import math
 import os
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -254,9 +254,15 @@ def load_offline_advisory_db(path: Path) -> tuple[list[_ParsedAdvisory], str]:
     if len(records) > MAX_DB_RECORDS:
         raise ValueError(f"Offline advisory DB exceeds {MAX_DB_RECORDS} records")
     # Matches merge by id, so a different record could drop another's aliases and KEV status.
+    # Copies that differ only in their date (two exports of one record) are one record, with
+    # the latest date; any other difference, a stale copy stamped later included, is refused.
     by_id: dict[str, _ParsedAdvisory] = {}
-    if dup := next((r.record_id for r in records if by_id.setdefault(r.record_id, r) != r), ""):
-        raise ValueError(f"Offline advisory DB holds two different records {dup}")
+    for rec in records:
+        kept = by_id.setdefault(rec.record_id, rec)
+        if replace(kept, dated=None) != replace(rec, dated=None):
+            raise ValueError(f"Offline advisory DB holds two different records {rec.record_id}")
+        if rec.dated is not None and (kept.dated is None or rec.dated > kept.dated):
+            by_id[rec.record_id] = rec
     return list(by_id.values()), digest
 
 

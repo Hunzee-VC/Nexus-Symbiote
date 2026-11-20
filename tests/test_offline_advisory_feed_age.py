@@ -12,7 +12,7 @@ from click.testing import CliRunner
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.models import RegistryEntryComponent
-from nexus_symbiote.offline_advisories import match_offline_advisories
+from nexus_symbiote.offline_advisories import load_offline_advisory_db, match_offline_advisories
 
 NOW = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
 FRESH = "2026-11-15T08:30:00Z"
@@ -277,3 +277,33 @@ def test_cli_refuses_the_limit_without_an_offline_database(tmp_path):
     result = CliRunner().invoke(main, ["advisories", str(bom_path), "--max-feed-age-days", "30"])
     assert result.exit_code == 1
     assert "--max-feed-age-days requires --offline-db" in result.output
+
+
+def test_copies_of_one_record_that_differ_only_in_date_are_one_record(tmp_path):
+    record = {
+        "id": "GHSA-dddd-dddd-dddd",
+        "affected": [
+            {"package": {"ecosystem": "PyPI", "name": "transformers"}, "versions": ["4.35.0"]}
+        ],
+    }
+    db_dir = tmp_path / "osv"
+    db_dir.mkdir()
+    (db_dir / "a.json").write_text(
+        json.dumps({**record, "modified": "2026-11-01T00:00:00Z"}), "utf-8"
+    )
+    (db_dir / "b.json").write_text(
+        json.dumps({**record, "modified": "2026-11-18T00:00:00Z"}), "utf-8"
+    )
+    (db_dir / "c.json").write_text(
+        json.dumps({**record, "modified": "2026-11-05T00:00:00Z"}), "utf-8"
+    )
+    records, _ = load_offline_advisory_db(db_dir)
+    assert [(r.record_id, r.dated) for r in records] == [
+        ("GHSA-dddd-dddd-dddd", datetime(2026, 11, 18, tzinfo=UTC))
+    ]
+
+    # A copy stamped later with other content is not the same record, so it cannot win.
+    stale = {**record, "modified": "2026-11-19T00:00:00Z", "affected": []}
+    (db_dir / "d.json").write_text(json.dumps(stale), encoding="utf-8")
+    with pytest.raises(ValueError, match="two different records GHSA-dddd-dddd-dddd"):
+        load_offline_advisory_db(db_dir)
