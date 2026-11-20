@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM
@@ -356,6 +357,12 @@ def _canonical_https_origin(url: str | None) -> tuple[str, str, int] | None:
     return scheme, host.lower(), (443 if port is None else port)
 
 
+def _recent(observed_at: datetime, max_age: timedelta) -> bool:
+    now = datetime.now(UTC)
+    aware = observed_at.tzinfo is not None
+    return aware and now - max_age <= observed_at <= now + timedelta(minutes=5)
+
+
 def _refuse(result: ServerVerifyResult, reason: str) -> bool:
     result.reason, result.error = reason, REASONS[reason]
     return False
@@ -414,6 +421,7 @@ def _verify_remote_evidence(
     observed_bom: AIBOM,
     observed_server: MCPServerComponent,
     result: ServerVerifyResult,
+    max_age: timedelta | None = None,
 ) -> bool:
     """Compare an approved remote server against a recorded discover-mcp observation."""
     from nexus_symbiote.core.enums import AssuranceLevel
@@ -427,6 +435,7 @@ def _verify_remote_evidence(
         or server_claim.collector != "live-mcp"
         or server_claim.method != "https-mcp-initialize"
         or server_claim.observed_at is None
+        or (max_age is not None and not _recent(server_claim.observed_at, max_age))
     ):
         return _refuse(result, "invalid-transport-evidence")
     obs_origin = _canonical_https_origin(observed_server.endpoint_url)
@@ -558,6 +567,7 @@ def verify_mcp_servers(
     trusted_launchers: dict[str, dict[str, str]] | None = None,
     transport_evidence: list[AIBOM] | tuple[AIBOM, ...] = (),
     require_transport_evidence: bool = False,
+    max_evidence_age: timedelta | None = None,
 ) -> LiveVerifyReport:
     """Bind collection to the exact server reference in an independent launch policy."""
     report = LiveVerifyReport()
@@ -609,7 +619,9 @@ def verify_mcp_servers(
             if server.bom_ref in evidence_by_ref:
                 report.servers_checked += 1
                 obs_bom, obs_server = evidence_by_ref[server.bom_ref]
-                if _verify_remote_evidence(bom, server, obs_bom, obs_server, result):
+                if _verify_remote_evidence(
+                    bom, server, obs_bom, obs_server, result, max_evidence_age
+                ):
                     report.servers_reachable += 1
                 continue
             if require_transport_evidence:

@@ -1127,17 +1127,25 @@ def test_a_trusted_key_inside_the_inventory_repository_is_refused(tmp_path, monk
     policy_path = operator / "launch-policy.json"
     policy_path.write_text("{}")
 
-    def run(key: Path, evidence_path: Path = ev_path) -> Any:
+    def run(key: Path, evidence_path: Path = ev_path, *extra: str) -> Any:
         key.write_bytes(pub)
         key.chmod(0o600)
         args = ["--live", "verify-live", str(bom_path), "--project", str(project)]
         args += ["--launch-policy", str(policy_path), "--require-transport-evidence"]
         args += ["--transport-evidence", str(evidence_path)]
         args += ["--transport-evidence-attestation", str(att_path), "--trusted-key", str(key)]
-        return CliRunner().invoke(main, args)
+        return CliRunner().invoke(main, [*args, "--json-output", *extra])
 
     trusted = run(operator / "obs.pub")
     assert trusted.exit_code == 0, trusted.output
+    stale = run(operator / "obs.pub", ev_path, "--max-evidence-age", "24")
+    assert stale.exit_code == 1 and "invalid-transport-evidence" in stale.output
+    unused = CliRunner().invoke(
+        main,
+        ["--live", "verify-live", str(bom_path), "--project", str(project)]
+        + ["--launch-policy", str(policy_path), "--max-evidence-age", "24"],
+    )
+    assert unused.exit_code == 2 and "--max-evidence-age require" in unused.output
     inside = run(repo / "obs.pub")
     assert inside.exit_code == 2
     assert "INVENTORY" in inside.output
@@ -1205,3 +1213,23 @@ def test_remote_evidence_is_compared_like_a_pinned_observation():
     [again] = verify_mcp_servers(approved, transport_evidence=[evidence]).results
     assert again.declaration_status == "new" and again.rug_pull_detected
     assert ("gone", "missing") in {(f.name, f.status) for f in again.tool_findings}
+
+
+def test_an_operator_bound_on_evidence_age_refuses_stale_and_future_observations():
+    from datetime import UTC, datetime, timedelta
+
+    day = timedelta(hours=24)
+    approved, evidence, server, _tool = _remote_case()
+    old = verify_mcp_servers(approved, transport_evidence=[evidence], max_evidence_age=day)
+    assert (old.results[0].status, old.results[0].reason) == (
+        "failed",
+        "invalid-transport-evidence",
+    )
+    for when, verified in (
+        (datetime.now(UTC) - timedelta(hours=1), True),
+        (datetime.now(UTC) + timedelta(hours=1), False),
+        (datetime.now() - timedelta(hours=1), False),
+    ):
+        _claim(server, "server_declaration", observed_at=when)
+        report = verify_mcp_servers(approved, transport_evidence=[evidence], max_evidence_age=day)
+        assert report.all_servers_verified is verified, when

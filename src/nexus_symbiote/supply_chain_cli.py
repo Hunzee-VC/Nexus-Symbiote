@@ -228,6 +228,12 @@ def register_supply_chain_commands(main: click.Group) -> None:
         ),
     )
     @click.option(
+        "--max-evidence-age",
+        type=click.IntRange(min=1),
+        default=None,
+        help="Refuse --transport-evidence observed more than this many hours ago, or later than now.",
+    )
+    @click.option(
         "--no-isolation",
         is_flag=True,
         help=(
@@ -255,6 +261,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         trusted_keys: tuple[Path, ...],
         transport_evidence_purpose: str | None,
         require_transport_evidence: bool,
+        max_evidence_age: int | None,
         no_isolation: bool,
     ) -> None:
         """Live: observe independently pinned stdio launchers; optionally emit an unsigned candidate.
@@ -268,6 +275,7 @@ def register_supply_chain_commands(main: click.Group) -> None:
         --require-transport-evidence.
         """
         modes.require_live("verify-live")
+        from datetime import timedelta
         from typing import cast
 
         from nexus_symbiote.attestation import Purpose
@@ -284,10 +292,11 @@ def register_supply_chain_commands(main: click.Group) -> None:
             transport_evidence_attestations
             or trusted_keys
             or transport_evidence_purpose is not None
+            or max_evidence_age is not None
         ) and not transport_evidence:
             raise click.UsageError(
-                "--transport-evidence-attestation, --trusted-key and "
-                "--transport-evidence-purpose require --transport-evidence"
+                "--transport-evidence-attestation, --trusted-key, --transport-evidence-purpose "
+                "and --max-evidence-age require --transport-evidence"
             )
         if transport_evidence:
             if len(transport_evidence_attestations) != len(transport_evidence):
@@ -399,6 +408,9 @@ def register_supply_chain_commands(main: click.Group) -> None:
                 trusted_launchers=policy,
                 transport_evidence=evidence_boms,
                 require_transport_evidence=require_transport_evidence,
+                max_evidence_age=None
+                if max_evidence_age is None
+                else timedelta(hours=max_evidence_age),
             )
         report.inputs = {
             "inventory_sha256": hash_bytes(inventory_bytes),
