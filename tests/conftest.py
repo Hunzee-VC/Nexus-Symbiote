@@ -143,6 +143,12 @@ def pytest_configure(config: pytest.Config) -> None:
         " schema, with a committed file; the dependency-floor job deselects it",
     )
     config.pluginmanager.register(SkipAccounting(config), "nexus-symbiote-skip-accounting")
+    # pytest-cov starts its controller's collector in every pytest-xdist worker before it knows
+    # the process is a worker, and the worker's own collector on top. Pausing the latter for a
+    # no_cover test resumes the former, whose data is never saved, so the test would run traced.
+    controller = getattr(config.pluginmanager.get_plugin("_cov"), "cov_controller", None)
+    if controller is not None and hasattr(config, "workerinput"):
+        controller.cov.stop()
 
 
 class SkipAccounting:

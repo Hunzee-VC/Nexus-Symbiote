@@ -63,7 +63,8 @@ SPECS: dict[str, LimitSpec] = {
             "bytes",
             64 * GIB,
             "Bytes one collector reads in total, except model weights; the mcp, a2a and "
-            "rag collectors, which also search source, may read source-scan-bytes more.",
+            "rag collectors, which also search source, may read source-scan-bytes more, "
+            "which alone bounds the files a ShadowScan report cites.",
         ),
         LimitSpec(
             "entries",
@@ -96,7 +97,8 @@ SPECS: dict[str, LimitSpec] = {
             64 * GIB,
             "Bytes of Python, TypeScript and JavaScript source one collector reads while "
             "it looks for references: the mcp collector's SDK and tool references, the "
-            "a2a collector's SDK references and the rag collector's vector-store imports.",
+            "a2a collector's SDK references and the rag collector's vector-store imports; "
+            "also the files of any type that a ShadowScan report cites.",
         ),
         LimitSpec(
             "syntax-bytes",
@@ -125,6 +127,13 @@ SPECS: dict[str, LimitSpec] = {
             "and distinct import targets it looks up, in one collection.",
         ),
         LimitSpec(
+            "prompt-files",
+            "count",
+            1_000_000,
+            "Text files under prompts directories, and *.prompt.md, *.prompt.yaml and "
+            "*.prompt.yml files, that the prompt collector records in one collection.",
+        ),
+        LimitSpec(
             "advisory-matches",
             "count",
             1_000_000_000,
@@ -142,7 +151,7 @@ class CollectionLimits:
     file_bytes: int = 4 * MIB
     total_bytes: int = 32 * MIB
     entries: int = 100_000
-    depth: int = 32
+    depth: int = 64
     model_bytes: int = 64 * GIB
     model_total_bytes: int = 256 * GIB
     source_scan_bytes: int = 64 * MIB
@@ -150,6 +159,7 @@ class CollectionLimits:
     ts_nodes: int = 20_000
     python_nodes: int = 200_000
     import_lookups: int = 5_000
+    prompt_files: int = 5_000
     advisory_matches: int = 2_000_000
 
     def value(self, name: str) -> int:

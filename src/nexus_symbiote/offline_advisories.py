@@ -344,13 +344,14 @@ def _read_range(rng: dict[str, Any]) -> _Range | None:
         else:
             raise ValueError("OSV range event cannot be parsed")
     intros, fixed_versions, last_affected, limits = found.values()
-    # A "*" limit bounds nothing, so it is neither compared nor reported.
+    # A "*" limit bounds nothing: it is kept, ranked as None, so limits cannot exclude a
+    # version, and it is never reported.
     return _Range(
         has_zero_intro,
         tuple(intros),
         tuple((fix, fix) for fix in fixed_versions),
         tuple(last_affected),
-        tuple(lim for lim in limits if lim != "*"),
+        tuple(limits),
         tuple(owners),
     )
 
@@ -362,7 +363,9 @@ def _in_range(version: int, rng: _Range) -> bool:
     any range of it is evaluated. An upper bound that does not parse (None) excludes no
     version, so a range that only it could have ended still matches, reported undecided;
     while one lies in the interval of the version's ``introduced`` (by event order), no
-    ``fixed`` or ``last_affected`` excludes the version either. A parsable limit still does.
+    ``fixed`` or ``last_affected`` excludes the version either. Limits exclude it only when
+    it is at or above every one of them, all parsable and none "*" (OSV: a version below any
+    limit is in range).
     """
     best_intro: int | None = None
     found_intro = rng.zero_intro
@@ -383,7 +386,7 @@ def _in_range(version: int, rng: _Range) -> bool:
         return best_intro is None or best_intro <= bound
 
     return not (
-        any(lim is not None and version >= lim for lim in rng.limits)
+        (bool(rng.limits) and all(lim is not None and version >= lim for lim in rng.limits))
         or any(ends_after_intro(fix) and fix <= version for fix, _ in rng.fixes)
         or any(ends_after_intro(last) and last < version for last in rng.last_affected)
     )
@@ -498,7 +501,7 @@ class _PackageMatcher:
                     for owner, bound in raw.owners
                     if keys[bound] is None
                 ),
-                unparsed=tuple(text[:64] for text in bounds if keys[text] is None),
+                unparsed=tuple(text[:64] for text in bounds if keys[text] is None and text != "*"),
                 origin=at("0") if raw.owners else None,
             )
             start: int | None = None

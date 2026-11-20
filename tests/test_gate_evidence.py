@@ -179,11 +179,19 @@ def test_a_claim_listing_many_failures_is_summarized_consistently():
     from nexus_symbiote.core.models import CompletenessClaim
     from nexus_symbiote.validators.risk import RiskScorer
 
-    claim = CompletenessClaim(scope="repository", scan_failures=["x"] * 50_000)
+    # Distinct failures are listed up to the bound and then counted; one failure
+    # recorded many times, as every collector that meets it records it, is one gap.
+    claim = CompletenessClaim(
+        scope="repository", scan_failures=[f"x{index}" for index in range(50_000)]
+    )
     bom = AIBOM(metadata={"completeness": claim})
     reasons = assess_coverage(claim).reasons()
     assert len(reasons) < 2 * MAX_LISTED_GAPS
     assert f"{50_000 - MAX_LISTED_GAPS} further collection failures" in reasons
+    repeated = CompletenessClaim(scope="repository", scan_failures=["x"] * 50_000)
+    reasons = assess_coverage(repeated).reasons()
+    assert reasons.count("x (recorded 50000 times)") == 1
+    assert "x" not in reasons and not any("further collection failures" in r for r in reasons)
     report = CompletenessValidator().validate(bom)
     assert not report.is_complete and len(report.issues) < 2 * MAX_LISTED_GAPS
     assert RiskScorer().score(bom).coverage_status == "partial"

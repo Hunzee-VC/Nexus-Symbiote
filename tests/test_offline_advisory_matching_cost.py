@@ -3,10 +3,10 @@
 The indexed matcher must report exactly what pairwise matching reported: the same matches,
 fixed versions and undecidable bounds for every block, and the same error for every block
 it cannot decide. The reference below is the pairwise matcher this module replaced, as of
-564d4039 (unparsable upper bounds flag a match, and stop parsable ones excluding a version
-in the interval event order puts them in; malformed blocks, an unparsable ``introduced``
-and an unparsable queried version are errors), kept word for word apart from its names as
-the oracle.
+37b3cfce (unparsable upper bounds flag a match, and stop parsable ones excluding a version
+in the interval event order puts them in; limits exclude only a version at or above all of
+them; malformed blocks, an unparsable ``introduced`` and an unparsable queried version are
+errors), kept word for word apart from its names as the oracle.
 """
 
 from __future__ import annotations
@@ -52,10 +52,10 @@ def _reference_range_matches(
 ) -> tuple[bool, list[str], list[str]]:
     """Evaluate one OSV range: (in range, fixed versions above it, unparsable upper bounds).
 
-    The queried version and every ``introduced`` must parse. A ``fixed``, ``last_affected``
-    or ``limit`` that does not leaves the version possibly affected: the range matches with
-    that bound reported unless the lower bound or a parsable limit excludes it, or a parsable
-    bound does in an interval (by event order) that holds no unparsable one.
+    The queried version and every ``introduced`` must parse; another event that does not
+    leaves the version possibly affected, and is reported. It is out of range below its
+    ``introduced``, at or above every ``limit`` when all parse and none is "*" (a version
+    below any limit is in range), or past a parsable bound of an interval with none unparsable.
     """
     raw_type = rng.get("type")
     if raw_type is not None and (
@@ -112,7 +112,7 @@ def _reference_range_matches(
         held = owner is None or cmp(owner, best_intro or "0") == 0
         open_interval |= held and kind in ("fixed", "last_affected") and value in unparsed
     if (
-        any(lim != "*" and lim not in unparsed and cmp(version, lim) >= 0 for lim in limits)
+        all(x != "*" and x not in unparsed and cmp(version, x) >= 0 for x in limits or ["*"])
         or any(ends_after_intro(fix) and cmp(fix, version) <= 0 for fix in fixed_versions)
         or any(ends_after_intro(last) and cmp(last, version) < 0 for last in last_affected)
     ):
@@ -488,7 +488,7 @@ def test_a_random_bundle_gives_the_report_pairwise_matching_gave(tmp_path, monke
     parsed = offline._parse_osv_records(records)
     expected = []
     errors = []
-    # The record merge, alias deduplication and error cap of pairwise matching at 564d4039.
+    # The record merge, alias deduplication and error cap of pairwise matching at 37b3cfce.
     unlisted_errors = 0
     for component in sorted(components, key=lambda item: item.bom_ref):
         ecosystem = "PyPI" if component.registry_type == "pypi" else "npm"

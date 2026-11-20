@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import Any
 
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge
+from nexus_symbiote.core.collection import CITED_EVIDENCE_CLAIM
 from nexus_symbiote.core.enums import ComponentType, SerializationSafety, TrustTier
 from nexus_symbiote.core.hashing import TOOL_DEFINITION_HASH_VERSION, canonical_json
 from nexus_symbiote.core.models import (
@@ -39,12 +40,15 @@ def _values_unbound(component: AnyComponent) -> bool:
 
     The collector records that as a low completeness finding naming
     ``UNBOUND_VALUES_DETAIL``: MCP launch values, IDE settings values, RAG and A2A
-    values, or the content of a prompt file whose digest is withheld. Nothing else in
-    the record changes when one of those values does, so diff cannot see the change
-    and must not report the snapshots as equal.
+    values, or the content of a prompt file whose digest is withheld. Prompt templates
+    share one such finding, so a withheld digest without a binding counts too. Nothing
+    else in the record changes when one of those values does, so diff cannot see the
+    change and must not report the snapshots as equal.
     """
     if component.properties.get("static_value_binding"):
         return False
+    if component.properties.get("content_hash_withheld"):
+        return True
     return any(
         risk.category == "completeness" and UNBOUND_VALUES_DETAIL in risk.detail
         for risk in getattr(component, "risks", ())
@@ -260,6 +264,13 @@ def _incompleteness(claim: CompletenessClaim) -> list[str]:
 
 def _semantic_value(value: Any, path: tuple[str, ...]) -> Any:
     """Ignore set ordering and fresh claim observation times, never arbitrary JSON arrays."""
+    if (
+        isinstance(value, str)
+        and path[:2] == ("claims", CITED_EVIDENCE_CLAIM)
+        and path[2:] in {("locator",), ("evidence_refs", "[]")}
+    ):
+        # A cited line moves with every edit above it; the cited file is what is compared.
+        return value.rpartition(":")[0]
     if isinstance(value, dict):
         return {
             key: _semantic_value(item, (*path, key))

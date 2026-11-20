@@ -301,7 +301,7 @@ keep working; configure one of the two.
 
 ```yaml
 repos:
-  - repo: https://github.com/Hunzee-VC/Nexus-Symbiote
+  - repo: https://github.com/aisecnomad/Nexus-Symbiote
     rev: <reviewed-40-character-commit-sha>
     hooks:
       - id: nexus-symbiote-scan
@@ -334,7 +334,7 @@ nexus-symbiote advisories [OPTIONS] AIBOM_PATH
 | `--exclude` `NAME` | Never send this package name to OSV; a trailing `*` matches a prefix, and a `*` anywhere else is refused. Names are compared as PyPI normalizes them, and in any case (repeatable). |
 | `--exclude-private-origins` | Send only packages whose lockfile resolution records the public PyPI or npm registry. A Python package that no `uv.lock` or `poetry.lock` resolves has no recorded origin, so it is withheld; withhold private names with `--exclude` instead to keep public ones checked. |
 | `--dry-run` | List the package identities that would be sent, without contacting OSV (works offline). |
-| `--offline-db` `PATH` | Match exact pinned PyPI/npm packages offline against an OSV JSON bundle or directory without contacting `api.osv.dev`; deduplicates alias pairs and records bundle SHA-256 provenance. A directory is read flat, and one with a subdirectory is refused, as is a bundle with no records, with an entry that is not an OSV record, or with two different records under one id. A package whose ecosystem the bundle holds no record for is an error, so the report is not complete, as is a record for the package with malformed `affected` data or an unparsable `introduced` (at most 100 such errors are listed, then a count). A `fixed`, `last_affected` or `limit` the version parser rejects is not an error: the advisory matches unless the lower bound or a parsable limit excludes the version, or a parsable bound does and event order puts no rejected bound in the version's interval, and when no exact `versions` entry or other range decides the match it carries `range_undecidable: true` and up to 16 `undecidable_bounds` (64 characters each). Like any match it fails this command; an operator decision passed to `vex --decisions` records its triage there, and the `vex` export marks it `rangeUndecidable`. Matching stops with one error, and exit status 1, past the [`advisory-matches`](collection-limits.md#limits) limit. |
+| `--offline-db` `PATH` | Match exact pinned PyPI/npm packages offline against an OSV JSON bundle or directory without contacting `api.osv.dev`; deduplicates alias pairs and records bundle SHA-256 provenance. A directory is read flat, and one with a subdirectory is refused, as is a bundle with no records, with an entry that is not an OSV record, or with two different records under one id. A package whose ecosystem the bundle holds no record for is an error, so the report is not complete, as is a record for the package with malformed `affected` data or an unparsable `introduced` (at most 100 such errors are listed, then a count). A `fixed`, `last_affected` or `limit` the version parser rejects is not an error: the advisory matches unless the lower bound excludes the version, the version is at or above every `limit` while all limits parse and none is `*`, or a parsable bound does and event order puts no rejected bound in the version's interval, and when no exact `versions` entry or other range decides the match it carries `range_undecidable: true` and up to 16 `undecidable_bounds` (64 characters each). Like any match it fails this command; an operator decision passed to `vex --decisions` records its triage there, and the `vex` export marks it `rangeUndecidable`. Matching stops with one error, and exit status 1, past the [`advisory-matches`](collection-limits.md#limits) limit. |
 | `--kev` `PATH` | Offline CISA/ENISA KEV JSON catalog used with `--offline-db` to elevate matched advisories to `critical` with source provenance (repeatable). A catalog with no entries is refused. |
 | `--epss` `PATH` | Offline EPSS CSV/JSON catalog used with `--offline-db` to attach EPSS scores and percentiles. A catalog with no entries is refused. |
 
@@ -554,8 +554,9 @@ nexus-symbiote graph [OPTIONS] INVENTORY
 
 Exposure paths are the shortest recorded paths from agents and IDE agents to
 components with a `code-exec`, `exfil-capable`, `write-capable` or `secret-access`
-risk class or a high or critical finding: at most 200 agents are searched and 200
-paths kept, and the view reports how many were left out. Edges are static repository
+risk class or a high or critical finding: at most 200 agents and IDE agents are
+searched, those whose best path ranks highest, and the 200 best paths kept, and the view
+reports how many were left out. Edges are static repository
 associations; runtime use and effective authority are not observed. The HTML file
 loads nothing from outside, pins its one style block and one script with a
 Content-Security-Policy hash, and shows inventory text only escaped. A graph larger
@@ -642,8 +643,13 @@ the top 15 findings, each followed by its `fingerprint:` line (`--json-output` l
 `Gate: FAILED` it lists, one `  - ` line each, every reason, such as
 `finding at or above critical` or `collection coverage is unknown or incomplete`, the
 findings that tripped the severity cutoff, the score with the threshold it was compared
-with, the first 20 of the inventory's collection failures (and how many more
-`metadata.completeness.scan_failures` holds), its other coverage gaps, and how many
+with, the first 20 distinct collection failures the inventory records (a failure
+several collectors recorded, such as a symbolic link leaving the root, is one line
+ending in `(recorded N times)`, and the line after the twentieth says how many more
+distinct failures `metadata.completeness.scan_failures` holds; see
+[known limitations](known-limitations.md#every-collector) for what the grouping cannot
+say), its other coverage gaps, among them
+one line per state naming the collectors that are not complete, and how many
 findings the project policy suppressed, and each suppression that no longer matches
 its changed finding. When unsigned ShadowScan evidence was accepted,
 the report says `Discovery producer: not verified (unsigned evidence accepted)`.
