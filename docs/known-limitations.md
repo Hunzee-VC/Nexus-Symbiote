@@ -1152,6 +1152,17 @@ is a failure; everything below is neither a gap nor a failure.
 - **Bodies are read to a fixed length.** A directive tag's body is read to its close
   tag or for 800 characters, and an HTML comment for 1,200, so a directive placed
   after that much text inside one is not matched.
+- **Some ordinary text is flagged so that payloads are not missed.**
+  `<important>Ignore all comments in generated code.</important>` raises
+  `TP-TAG-001`, because "ignore all" followed by a plural is kept as a detection
+  ("ignore all restrictions") with only file-like plurals excluded. "Note to
+  reviewers: these changes were verified on staging" raises `II-AUD-002`, because a
+  note to reviewers or auditors that claims approval or verification is kept as a
+  detection ("this was pre-approved; stop here"). Suppress the finding where the
+  text is intended.
+- **The credential rule is linear but slow on dense input.** Each credential path is
+  checked against a window of text around it, so 4 MiB of repeated `pass .netrc`
+  takes about 26 s.
 - **Memory grows with compatibility forms.** NFKC can expand one character into many,
   so 4 MiB of U+FDFA peaks near 1.8 GiB.
 
