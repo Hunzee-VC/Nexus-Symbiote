@@ -149,7 +149,7 @@ observation fails with reason `invalid-transport-evidence`. Until a `--record` r
 stores the evidence's full-URL digest on the server (`observed_endpoint_hash`), the
 binding is origin-only, so an observation of another path on the same origin passes;
 each server's report names its `endpoint_binding` and the evidence's `observed_at`,
-`--require-full-url-binding` refuses origin-only evidence, `--max-evidence-age HOURS` refuses older evidence, and future-dated evidence is always refused. `--require-transport-evidence` makes a remote server
+`--require-full-url-binding` refuses origin-only evidence (it checks the inventory's recorded digest against the evidence, not the configured URL, so an inventory that records the digest of another URL satisfies it), `--max-evidence-age HOURS` refuses older evidence, and future-dated evidence is always refused. `--require-transport-evidence` makes a remote server
 without such evidence fail with reason `remote-transport`. Such a server that records a launch command, which
 a client may start, fails with reason `ambiguous-transport` unless the launch policy
 names it; one that the launch policy names is verified through its pinned launcher. A
