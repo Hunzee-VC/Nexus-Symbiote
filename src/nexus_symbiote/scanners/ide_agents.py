@@ -742,8 +742,17 @@ _VERSIONED_NAME = re.compile(r"(python|ruby|php|perl|lua|nodejs|node)[0-9][0-9.]
 _SEGMENT_BOUNDARY = re.compile(r"[\n|;&]")
 _PREFIX_REDIR = re.compile(r"\d*(?:<<-|<<<|<<|<>|>>|>&|&>|[<>])")
 # `base64` decodes with `-d` or `-D`, alone or in a bundle such as `-di`, or `--decode`,
-# which GNU getopt also takes abbreviated, anywhere among its arguments.
-_BASE64_DECODE = re.compile(r"-[A-Za-z0-9]*[dD][A-Za-z0-9]*|(?i:--d(?:e(?:c(?:o(?:de?)?)?)?)?)")
+# which GNU getopt also takes abbreviated, anywhere among its arguments. The letters
+# before the flag's leave it out, so a long bundle that ends in another character is
+# read once, not once for each `d` in it. A letter after it that takes a value (GNU's
+# `-w`, macOS's `-b`, `-i` and `-o`) ends the bundle with any value: `-dw+76`.
+_BASE64_DECODE = re.compile(
+    r"-[A-CE-Za-ce-z0-9]*[dD][A-Za-z0-9]*(?:[biow][\s\S]*)?"
+    r"|(?i:--d(?:e(?:c(?:o(?:de?)?)?)?)?)"
+)
+# `sudo -s`, `-i`, alone or in a bundle such as `-Es`, or their long forms; the letters
+# before the flag's leave it out for the same reason.
+_SUDO_SHELL_FLAG = re.compile(r"--(?:shell|login)|-[A-Za-hj-rt-z]*[si][A-Za-z]*")
 _SCRIPT_FLAG = re.compile(r"(?i)-c(?:ommand(?:withargs)?)?\Z|-[A-Za-z]*c\Z")
 # An interpreter's flag that takes its program as the next argument: `-e`, `-E`, `-p`,
 # `-r` (PHP only: node and ruby load a module with it) and the long `--eval` and
@@ -1529,9 +1538,7 @@ def _sudo_shell(words: list[str]) -> bool:
     for index, word in enumerate(words):
         if _name_variants(word) & {"sudo", "doas"}:
             return any(
-                re.fullmatch(
-                    r"--(?:shell|login)|-[A-Za-z]*[si][A-Za-z]*", _decode_word(w, drop_ifs=True)
-                )
+                _SUDO_SHELL_FLAG.fullmatch(_decode_word(w, drop_ifs=True))
                 for w in words[index + 1 : index + 33]
             )
     return False

@@ -1,0 +1,291 @@
+Offline mode — local vulnerability DB only
+11:40:09 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+Auto-detected project scan surfaces: jupyter, terraform, iac, github_actions
+────────────────────────────────── Discovery ───────────────────────────────────
+
+🔍 Discovering MCP configurations...
+
+  ✓ Found project config with 1 MCP server(s): 
+/aibom-run/work/agent-bom/corpus/.continue/config.yaml
+
+  Found 1 configured agent(s) with 1 MCP server(s) total.
+
+Scanning 1 path(s) for AI components...
+
+11:40:09 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+11:40:09 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+  ✓ 4 files scanned — 12 components, no high-risk AI component findings
+    SDKs: go-openai, mcp-sdk, mistral, openai, openai-agents
+    Models: claude-opus-4-1, gemini-2.5-pro, gpt-4.1-mini, gpt-4o-2024-08-06 +3
+
+Scanning project directory for package manifests: corpus
+
+  ⚠ skipping symlinked directory: 
+/aibom-run/work/agent-bom/corpus/vendor/self
+  ✓ corpus: 13 package(s) across 3 manifest directories (3 files, 0 lockfiles, 
+13 direct / 0 transitive, 0 lockfile-backed / 13 declaration-only)
+
+Scanning 1 Terraform directory...
+
+    /aibom-run/work/agent-bom/corpus: no AI resources or providers found
+
+Scanning GitHub Actions workflows in 
+/aibom-run/work/agent-bom/corpus...
+
+  ⚠ CI hardening in review.yml: missing top-level permissions: policy; declare 
+least-privilege GITHUB_TOKEN permissions
+  ⚠ CI hardening: unpinned action × 2 (review.yml: actions/checkout@v4, 
+openai/codex-action@v1); pin remote actions and reusable workflows to a full 
+commit SHA
+  ✓ 1 workflow(s) with AI usage, 2 action/reusable-workflow dependency(ies), 0 
+credential(s) detected
+11:40:09 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+
+Scanned 2 prompt template file(s)...
+
+  • judge.yaml
+  • system.prompt.md
+  ✓ No security issues found in prompt templates
+
+Scanning Jupyter notebooks in 
+/aibom-run/work/agent-bom/corpus...
+
+  ✓ 1 notebook(s) with AI libraries found, 1 package(s) to scan
+11:40:09 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+
+Scanning 1 path(s) for IaC misconfigurations...
+
+  ✓ 
+/aibom-run/work/agent-bom/corpus: 17 finding(s) (1 critical, 2 high, 8 medium, 6 
+low)
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                    IaC Misconfigurations — 17 finding(s)                     │
+│ ┏━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┓ │
+│ ┃    Sev     ┃ Rule         ┃ Finding                   ┃ File             ┃ │
+│ ┡━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━┩ │
+│ │ 🔴 CRITIC… │ K8S-007      │ Secret in plain env value │ vllm.yaml:12     │ │
+│ │            │              │ Container 'vllm' in       │                  │ │
+│ │            │              │ 'vllm' has env var        │                  │ │
+│ │            │              │ 'HF_TOKEN' with a         │                  │ │
+│ │            │              │ hardcoded value instead   │                  │ │
+│ │            │              │ of secretKeyRef. Use      │                  │ │
+│ │            │              │ Kubernetes Secrets with   │                  │ │
+│ │            │              │ valueFrom.secretKeyRef.   │                  │ │
+│ │  🟠 HIGH   │ DOCKER-002   │ No USER directive (runs   │ Dockerfile:1     │ │
+│ │            │              │ as root)                  │                  │ │
+│ │            │              │ The final build stage     │                  │ │
+│ │            │              │ sets no USER, so the      │                  │ │
+│ │            │              │ container runs as root by │                  │ │
+│ │            │              │ default. Add a USER       │                  │ │
+│ │            │              │ directive with a non-root │                  │ │
+│ │            │              │ user.                     │                  │ │
+│ │  🟠 HIGH   │ K8S-006      │ Writable root filesystem  │ vllm.yaml:8      │ │
+│ │            │              │ Container 'vllm' in       │                  │ │
+│ │            │              │ 'vllm' does not set       │                  │ │
+│ │            │              │ readOnlyRootFilesystem:   │                  │ │
+│ │            │              │ true. A read-only root    │                  │ │
+│ │            │              │ filesystem prevents       │                  │ │
+│ │            │              │ attackers from writing    │                  │ │
+│ │            │              │ malicious binaries.       │                  │ │
+│ │ 🟡 MEDIUM  │ GHA-002      │ Action not pinned to a    │ review.yml:7     │ │
+│ │            │              │ commit SHA                │                  │ │
+│ │            │              │ 'actions/checkout@v4'     │                  │ │
+│ │            │              │ resolves a mutable tag or │                  │ │
+│ │            │              │ branch. Pin remote        │                  │ │
+│ │            │              │ actions and reusable      │                  │ │
+│ │            │              │ workflows to a full       │                  │ │
+│ │            │              │ commit SHA.               │                  │ │
+│ │ 🟡 MEDIUM  │ GHA-002      │ Action not pinned to a    │ review.yml:8     │ │
+│ │            │              │ commit SHA                │                  │ │
+│ │            │              │ 'openai/codex-action@v1'  │                  │ │
+│ │            │              │ resolves a mutable tag or │                  │ │
+│ │            │              │ branch. Pin remote        │                  │ │
+│ │            │              │ actions and reusable      │                  │ │
+│ │            │              │ workflows to a full       │                  │ │
+│ │            │              │ commit SHA.               │                  │ │
+│ │ 🟡 MEDIUM  │ DOCKER-010   │ FROM without digest pin   │ Dockerfile:1     │ │
+│ │            │              │ Image 'node:22-alpine' is │                  │ │
+│ │            │              │ not pinned by digest      │                  │ │
+│ │            │              │ (sha256). Use             │                  │ │
+│ │            │              │ @sha256:<hash> to         │                  │ │
+│ │            │              │ guarantee immutable base  │                  │ │
+│ │            │              │ images.                   │                  │ │
+│ │ 🟡 MEDIUM  │ K8S-008      │ Using default namespace   │ vllm.yaml:3      │ │
+│ │            │              │ Resource 'vllm' uses the  │                  │ │
+│ │            │              │ default namespace. Use    │                  │ │
+│ │            │              │ dedicated namespaces for  │                  │ │
+│ │            │              │ workload isolation and    │                  │ │
+│ │            │              │ RBAC.                     │                  │ │
+│ │ 🟡 MEDIUM  │ K8S-010      │ Service account token     │ vllm.yaml:6      │ │
+│ │            │              │ auto-mounted              │                  │ │
+│ │            │              │ Resource 'vllm' does not  │                  │ │
+│ │            │              │ set                       │                  │ │
+│ │            │              │ automountServiceAccountT… │                  │ │
+│ │            │              │ false. The default        │                  │ │
+│ │            │              │ service account token is  │                  │ │
+│ │            │              │ mounted into every pod,   │                  │ │
+│ │            │              │ enabling lateral movement │                  │ │
+│ │            │              │ if compromised.           │                  │ │
+│ │ 🟡 MEDIUM  │ K8S-013      │ No securityContext at pod │ vllm.yaml:6      │ │
+│ │            │              │ level                     │                  │ │
+│ │            │              │ Pod 'vllm' has no         │                  │ │
+│ │            │              │ pod-level                 │                  │ │
+│ │            │              │ securityContext. Set      │                  │ │
+│ │            │              │ runAsNonRoot, fsGroup,    │                  │ │
+│ │            │              │ and seccompProfile.       │                  │ │
+│ │ 🟡 MEDIUM  │ K8S-004      │ No resource limits        │ vllm.yaml:8      │ │
+│ │            │              │ Container 'vllm' in       │                  │ │
+│ │            │              │ 'vllm' has no resource    │                  │ │
+│ │            │              │ limits. Set CPU and       │                  │ │
+│ │            │              │ memory limits to prevent  │                  │ │
+│ │            │              │ resource exhaustion and   │                  │ │
+│ │            │              │ noisy-neighbor issues.    │                  │ │
+│ │ 🟡 MEDIUM  │ K8S-031      │ Missing seccompProfile    │ vllm.yaml:8      │ │
+│ │            │              │ Container 'vllm' in       │                  │ │
+│ │            │              │ 'vllm' has no             │                  │ │
+│ │            │              │ seccompProfile set at     │                  │ │
+│ │            │              │ container or pod level.   │                  │ │
+│ │            │              │ Set seccompProfile.type   │                  │ │
+│ │            │              │ to RuntimeDefault or      │                  │ │
+│ │            │              │ Localhost to restrict     │                  │ │
+│ │            │              │ syscalls.                 │                  │ │
+│ │   ⚪ LOW   │ GHA-004      │ Workflow has no top-level │ review.yml:1     │ │
+│ │            │              │ permissions               │                  │ │
+│ │            │              │ Without a top-level       │                  │ │
+│ │            │              │ permissions: block the    │                  │ │
+│ │            │              │ GITHUB_TOKEN gets the     │                  │ │
+│ │            │              │ repository default, which │                  │ │
+│ │            │              │ may be write. Declare     │                  │ │
+│ │            │              │ least-privilege           │                  │ │
+│ │            │              │ permissions.              │                  │ │
+│ │   ⚪ LOW   │ DOCKER-006   │ No HEALTHCHECK directive  │ Dockerfile:1     │ │
+│ │            │              │ No HEALTHCHECK            │                  │ │
+│ │            │              │ instruction found. Add a  │                  │ │
+│ │            │              │ HEALTHCHECK to enable     │                  │ │
+│ │            │              │ container health          │                  │ │
+│ │            │              │ monitoring and automatic  │                  │ │
+│ │            │              │ restart on failure.       │                  │ │
+│ │   ⚪ LOW   │ K8S-021      │ No PodDisruptionBudget    │ vllm.yaml:3      │ │
+│ │            │              │ for Deployment 'vllm'     │                  │ │
+│ │            │              │ Deployment 'vllm' has no  │                  │ │
+│ │            │              │ matching                  │                  │ │
+│ │            │              │ PodDisruptionBudget in    │                  │ │
+│ │            │              │ the same manifest. A PDB  │                  │ │
+│ │            │              │ ensures minimum           │                  │ │
+│ │            │              │ availability during       │                  │ │
+│ │            │              │ voluntary disruptions     │                  │ │
+│ │            │              │ like node drains.         │                  │ │
+│ │   ⚪ LOW   │ K8S-030      │ Deployment without        │ vllm.yaml:6      │ │
+│ │            │              │ PodAntiAffinity           │                  │ │
+│ │            │              │ Deployment 'vllm' does    │                  │ │
+│ │            │              │ not define                │                  │ │
+│ │            │              │ podAntiAffinity. Without  │                  │ │
+│ │            │              │ anti-affinity, all        │                  │ │
+│ │            │              │ replicas may be scheduled │                  │ │
+│ │            │              │ on the same node,         │                  │ │
+│ │            │              │ creating a single point   │                  │ │
+│ │            │              │ of failure.               │                  │ │
+│ │   ⚪ LOW   │ K8S-022      │ Container without         │ vllm.yaml:8      │ │
+│ │            │              │ liveness probe            │                  │ │
+│ │            │              │ Container 'vllm' in       │                  │ │
+│ │            │              │ 'vllm' has no             │                  │ │
+│ │            │              │ livenessProbe. Without a  │                  │ │
+│ │            │              │ liveness probe,           │                  │ │
+│ │            │              │ Kubernetes cannot detect  │                  │ │
+│ │            │              │ and restart deadlocked or │                  │ │
+│ │            │              │ unresponsive containers.  │                  │ │
+│ │   ⚪ LOW   │ K8S-023      │ Container without         │ vllm.yaml:8      │ │
+│ │            │              │ readiness probe           │                  │ │
+│ │            │              │ Container 'vllm' in       │                  │ │
+│ │            │              │ 'vllm' has no             │                  │ │
+│ │            │              │ readinessProbe. Without a │                  │ │
+│ │            │              │ readiness probe, traffic  │                  │ │
+│ │            │              │ is sent to pods before    │                  │ │
+│ │            │              │ they are ready to serve   │                  │ │
+│ │            │              │ requests.                 │                  │ │
+│ └────────────┴──────────────┴───────────────────────────┴──────────────────┘ │
+╰──────────────────── 1 critical · 2 high · scan complete ─────────────────────╯
+11:40:09 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+
+Kubernetes workloads declared in manifests
+  ✓ 1 workload(s) in 1 namespace(s): 1 image(s) (1 pinned to a running digest), 
+1 service account(s), 0 RBAC grant(s), 0 referenced secret(s)
+
+────────────────────────────── Package Extraction ──────────────────────────────
+
+  Extracting packages from project:corpus/slack...
+  Extracting packages from project:corpus/ai-inventory...
+  Extracting packages from project:corpus/corpus...
+  Extracting packages from project:corpus/mcp/analytics-server...
+  Extracting packages from project:corpus/sidecar...
+  Extracting packages from project:corpus/github-actions...
+  Extracting packages from gha:review/gha:review...
+  Extracting packages from jupyter:train_churn/notebook:train_churn...
+
+  17 packages (12 npm, 2 go, 2 github-action, 1 pypi)
+  ⚠ slack: Docker MCP image mcp/slack:latest could not be expanded: Image not 
+found locally and pull failed: mcp<path>:latest — failed to connect to the 
+docker API at unix:<path> check if the path is correct and if the daemon is 
+running: dial unix <path>: connect: no 
+  Docker MCP image expansion incomplete; retaining available inventory in a 
+partial report.
+
+Running enforcement checks on 8 server(s)...
+
+                              Enforcement Findings                              
+┏━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━┓
+┃ Severity   ┃ Category         ┃ Server               ┃ Tool             ┃ R… ┃
+┡━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━┩
+│ CRITICAL   │ plaintext_secret │ slack                │ —                │ M… │
+│            │                  │                      │                  │ s… │
+│            │                  │                      │                  │ '… │
+│            │                  │                      │                  │ h… │
+│            │                  │                      │                  │ a  │
+│            │                  │                      │                  │ l… │
+│            │                  │                      │                  │ s… │
+│            │                  │                      │                  │ v… │
+│            │                  │                      │                  │ in │
+│            │                  │                      │                  │ i… │
+│            │                  │                      │                  │ c… │
+│            │                  │                      │                  │ e… │
+│            │                  │                      │                  │ S… │
+└────────────┴──────────────────┴──────────────────────┴──────────────────┴────┘
+
+  Enforcement: FAIL (1 critical, 0 high)
+
+  ⚠ Offline mode: skipped version resolution for 11 package(s) — coverage stays 
+partial for packages without pinned versions
+
+────────────────────────────── Vulnerability Scan ──────────────────────────────
+
+  Vulnerability scanning skipped (--no-scan)
+11:40:09 WARNING agent_bom.graph.kubernetes_context: Skipped 1 malformed Kubernetes controller_context record(s)
+  ⚠ Toxic combinations: 1 finding(s)
+  > Scanning for model files in 
+/aibom-run/work/agent-bom/corpus...
+  ⚠ Model file churn.pt: LOW — PICKLE_SCAN_ERROR. Pickle opcode scan could not 
+complete (no deserialization attempted): not a readable zip archive: File is not
+a zip file
+    5 model file(s) found (5 with security flags)
+    1 model manifest(s) found
+  > Scanning for dataset cards in 
+/aibom-run/work/agent-bom/corpus...
+11:40:09 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+    2 dataset(s) found (1 with flags)
+11:40:09 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+11:40:09 WARNING agent_bom.traversal: Directory traversal receipt: Paths were excluded by scanner policy, linked-worktree or symlink rules; contents were not inspected.
+  > Code analysis: 1 prompts, 0 guardrails, 2 tools, 1 application entrypoints
+  ⚠ Findings — 2 critical · 3 high · 8 medium · 7 low (all finding categories)
+
+  ✓ JSON report written to /aibom-run/resultsB/agent-bom/repeat/report.json
+
+  Exiting with code 1: IaC critical misconfiguration (K8S-007 in k8s/vllm.yaml)
+
+  Exiting with code 1: scan execution was partial; inspect scan_run.scopes and 
+scan_run.issues
+
+  Exit code 1 is a scan verdict, not a scanner error — the reason is above and 
+the report records findings and coverage limits.
+  Exit-code contract: 
+https://koda-ai-studio.github.io/agent-bom/reference/exit-codes/

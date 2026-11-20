@@ -1,0 +1,1402 @@
+{
+  "coverage_status": "partial",
+  "findings": [
+    {
+      "category": "bidi_override",
+      "component_ref": "skill:.claude/skills/refund-approver/SKILL.md",
+      "detail": "'.claude/skills/refund-approver/SKILL.md' contains bidirectional override characters: RIGHT-TO-LEFT OVERRIDE (U+202E) x1. Bidi overrides can make malicious instructions appear as benign text.",
+      "severity": "critical"
+    },
+    {
+      "category": "serialization_format",
+      "component_ref": "model:data/raw/embeddings.bin",
+      "detail": "Model 'embeddings.bin' has evidence of a potentially code-executing serialization or loader.",
+      "severity": "critical"
+    },
+    {
+      "category": "serialization_format",
+      "component_ref": "model:models/legacy/intent.pkl",
+      "detail": "Model 'intent.pkl' has evidence of a potentially code-executing serialization or loader.",
+      "severity": "critical"
+    },
+    {
+      "category": "serialization_format",
+      "component_ref": "model:models/legacy/intent.pt",
+      "detail": "Model 'intent.pt' has evidence of a potentially code-executing serialization or loader.",
+      "severity": "critical"
+    },
+    {
+      "category": "hidden_markup",
+      "component_ref": "skill:.claude/skills/refund-approver/SKILL.md",
+      "detail": "'.claude/skills/refund-approver/SKILL.md' contains 1 HTML or Markdown comment(s) (173 characters of HTML comments) that rendered views hide and agents read. At least one comment contains an instruction, a URL or a home-directory path.",
+      "severity": "high"
+    },
+    {
+      "category": "invisible_characters",
+      "component_ref": "skill:.claude/skills/refund-approver/SKILL.md",
+      "detail": "'.claude/skills/refund-approver/SKILL.md' contains invisible Unicode characters: ZERO WIDTH SPACE (U+200B) x1. These are invisible in most editors and may alter LLM behavior.",
+      "severity": "high"
+    },
+    {
+      "category": "serialization_format_unknown",
+      "component_ref": "model:models/llm/acme-intent-tiny.Q8_0.gguf",
+      "detail": "Model 'acme-intent-tiny.Q8_0.gguf' format/loader safety could not be established.",
+      "severity": "high"
+    },
+    {
+      "category": "signing_status",
+      "component_ref": "model:data/raw/embeddings.bin",
+      "detail": "Model 'embeddings.bin' has no verified artifact-bound signature (signature-not-found).",
+      "severity": "high"
+    },
+    {
+      "category": "signing_status",
+      "component_ref": "model:models/classifier/model.safetensors",
+      "detail": "Model 'model.safetensors' has no verified artifact-bound signature (signature-not-found).",
+      "severity": "high"
+    },
+    {
+      "category": "signing_status",
+      "component_ref": "model:models/legacy/intent.pkl",
+      "detail": "Model 'intent.pkl' has no verified artifact-bound signature (signature-not-found).",
+      "severity": "high"
+    },
+    {
+      "category": "signing_status",
+      "component_ref": "model:models/legacy/intent.pt",
+      "detail": "Model 'intent.pt' has no verified artifact-bound signature (signature-not-found).",
+      "severity": "high"
+    },
+    {
+      "category": "signing_status",
+      "component_ref": "model:models/llm/acme-intent-tiny.Q8_0.gguf",
+      "detail": "Model 'acme-intent-tiny.Q8_0.gguf' has no verified artifact-bound signature (signature-not-found).",
+      "severity": "high"
+    },
+    {
+      "category": "version_pinning",
+      "component_ref": "mcp-server:caa03812ec0f73faeef20d0f675ad578adec6861d634134f64c889f1f7079c0f",
+      "detail": "MCP server 'browser\ufffd[2K\ufffd[1;32m[verified]\ufffd[0m' uses an unpinned package reference (arguments omitted).",
+      "severity": "high"
+    },
+    {
+      "category": "version_pinning",
+      "component_ref": "mcp-server:e8c8e6c3a3348d5eded17b4e6b3ac9b45c6f40a64e464b480081308f0d25c7c0",
+      "detail": "MCP server 'postgres' uses an unpinned package reference (arguments omitted).",
+      "severity": "high"
+    },
+    {
+      "category": "version_pinning",
+      "component_ref": "registry:docker/ollama/ollama:latest",
+      "detail": "Docker image 'ollama/ollama:latest' lacks an immutable digest pin.",
+      "severity": "high"
+    },
+    {
+      "category": "hook_commands",
+      "component_ref": "ide-agent:claude-code",
+      "detail": "IDE agent 'claude-code' declares 1 hook command(s) that run automatically on agent events.",
+      "severity": "medium"
+    },
+    {
+      "category": "local_process",
+      "component_ref": "mcp-server:0cce754229178ca3019e16245a00c1016bf99b36a416d0c1d85a865ddc2d4f4e",
+      "detail": "MCP server 'filesystem' uses stdio transport (local process).",
+      "severity": "medium"
+    },
+    {
+      "category": "local_process",
+      "component_ref": "mcp-server:0ebbf02c2ef1e115f8445d5eb9853fbbedb2d2d3778ab4df96073ed665b5f34d",
+      "detail": "MCP server 'sqlite' uses stdio transport (local process).",
+      "severity": "medium"
+    },
+    {
+      "category": "local_process",
+      "component_ref": "mcp-server:3fbfd7787a7542d632d309995f1d7ad97c71c419488f3755fe2871ba8d8fb4eb",
+      "detail": "MCP server 'github' uses stdio transport (local process).",
+      "severity": "medium"
+    },
+    {
+      "category": "local_process",
+      "component_ref": "mcp-server:caa03812ec0f73faeef20d0f675ad578adec6861d634134f64c889f1f7079c0f",
+      "detail": "MCP server 'browser\ufffd[2K\ufffd[1;32m[verified]\ufffd[0m' uses stdio transport (local process).",
+      "severity": "medium"
+    },
+    {
+      "category": "local_process",
+      "component_ref": "mcp-server:e37ae79bbad5a2f5937669a336cb72e182b2d23d2f8c693eb6aeef3d2ff0dc25",
+      "detail": "MCP server 'filesystem' uses stdio transport (local process).",
+      "severity": "medium"
+    },
+    {
+      "category": "local_process",
+      "component_ref": "mcp-server:e8c8e6c3a3348d5eded17b4e6b3ac9b45c6f40a64e464b480081308f0d25c7c0",
+      "detail": "MCP server 'postgres' uses stdio transport (local process).",
+      "severity": "medium"
+    },
+    {
+      "category": "mutable_image_tag",
+      "component_ref": "registry:docker/qdrant/qdrant:v1.12.1",
+      "detail": "Docker image 'qdrant/qdrant:v1.12.1' lacks an immutable digest pin.",
+      "severity": "medium"
+    },
+    {
+      "category": "transitive_resolution",
+      "component_ref": "mcp-server:0cce754229178ca3019e16245a00c1016bf99b36a416d0c1d85a865ddc2d4f4e",
+      "detail": "MCP server 'filesystem' pins its package but resolves dependencies at launch without a lockfile.",
+      "severity": "medium"
+    },
+    {
+      "category": "transitive_resolution",
+      "component_ref": "mcp-server:0ebbf02c2ef1e115f8445d5eb9853fbbedb2d2d3778ab4df96073ed665b5f34d",
+      "detail": "MCP server 'sqlite' pins its package but resolves dependencies at launch without a lockfile.",
+      "severity": "medium"
+    },
+    {
+      "category": "transitive_resolution",
+      "component_ref": "mcp-server:e37ae79bbad5a2f5937669a336cb72e182b2d23d2f8c693eb6aeef3d2ff0dc25",
+      "detail": "MCP server 'filesystem' pins its package but resolves dependencies at launch without a lockfile.",
+      "severity": "medium"
+    },
+    {
+      "category": "completeness",
+      "component_ref": "a2a-server:Acme Support Agent",
+      "detail": "A2A agent 'Acme Support Agent' values not bound in this inventory: endpoint URL beyond its exported origin.",
+      "severity": "low"
+    },
+    {
+      "category": "completeness",
+      "component_ref": "ide-agent:claude-code",
+      "detail": "IDE agent 'claude-code' settings values not bound in this inventory: the redacted values of .claude/settings.json.",
+      "severity": "low"
+    },
+    {
+      "category": "completeness",
+      "component_ref": "ide-agent:gemini",
+      "detail": "IDE agent 'gemini' settings values not bound in this inventory: the redacted values of .gemini/settings.json.",
+      "severity": "low"
+    },
+    {
+      "category": "completeness",
+      "component_ref": "mcp-server:0cce754229178ca3019e16245a00c1016bf99b36a416d0c1d85a865ddc2d4f4e",
+      "detail": "MCP server 'filesystem' values not bound in this inventory: launch arguments.",
+      "severity": "low"
+    },
+    {
+      "category": "completeness",
+      "component_ref": "mcp-server:0ebbf02c2ef1e115f8445d5eb9853fbbedb2d2d3778ab4df96073ed665b5f34d",
+      "detail": "MCP server 'sqlite' values not bound in this inventory: launch arguments.",
+      "severity": "low"
+    },
+    {
+      "category": "completeness",
+      "component_ref": "mcp-server:3263889520201b938c02c2694649f99e56a8e09161b9964f55186af27399b1ad",
+      "detail": "MCP server 'slack' values not bound in this inventory: endpoint path and query.",
+      "severity": "low"
+    },
+    {
+      "category": "completeness",
+      "component_ref": "mcp-server:3fbfd7787a7542d632d309995f1d7ad97c71c419488f3755fe2871ba8d8fb4eb",
+      "detail": "MCP server 'github' values not bound in this inventory: launch arguments; environment values.",
+      "severity": "low"
+    },
+    {
+      "category": "completeness",
+      "component_ref": "mcp-server:bd771aa146767c63b3bd0ab0d2843d77d0decc2a36e8a77db43da6d8febd4833",
+      "detail": "MCP server 'remote-crm' values not bound in this inventory: header values; endpoint path and query.",
+      "severity": "low"
+    },
+    {
+      "category": "completeness",
+      "component_ref": "mcp-server:e37ae79bbad5a2f5937669a336cb72e182b2d23d2f8c693eb6aeef3d2ff0dc25",
+      "detail": "MCP server 'filesystem' values not bound in this inventory: launch arguments.",
+      "severity": "low"
+    },
+    {
+      "category": "completeness",
+      "component_ref": "mcp-server:e8c8e6c3a3348d5eded17b4e6b3ac9b45c6f40a64e464b480081308f0d25c7c0",
+      "detail": "MCP server 'postgres' values not bound in this inventory: environment values.",
+      "severity": "low"
+    },
+    {
+      "category": "instruction_layering",
+      "component_ref": "ide-agent:cursor",
+      "detail": "IDE agent 'cursor' has multiple declared instruction locations.",
+      "severity": "low"
+    },
+    {
+      "category": "rag_discovery",
+      "component_ref": "rag:env-pinecone",
+      "detail": "Vector store 'pinecone' referenced by environment variable names.",
+      "severity": "info"
+    },
+    {
+      "category": "rag_discovery",
+      "component_ref": "rag:import-chroma",
+      "detail": "Vector store library 'chroma' imported in Python code.",
+      "severity": "info"
+    },
+    {
+      "category": "rag_discovery",
+      "component_ref": "rag:import-pinecone",
+      "detail": "Vector store library 'pinecone' imported in Python code.",
+      "severity": "info"
+    }
+  ],
+  "format": "nexus-symbiote/crosswalk/v1",
+  "frameworks": [
+    {
+      "edition": "2025",
+      "entries": [
+        {
+          "categories": [
+            {
+              "category": "bidi_override",
+              "rationale": "Instruction text that reads differently to a reviewer than to the model can carry injected instructions."
+            },
+            {
+              "category": "hidden_markup",
+              "rationale": "Instruction text that reads differently to a reviewer than to the model can carry injected instructions."
+            },
+            {
+              "category": "instruction_layering",
+              "rationale": "A second instruction location is another place where instructions can be inserted."
+            },
+            {
+              "category": "invisible_characters",
+              "rationale": "Instruction text that reads differently to a reviewer than to the model can carry injected instructions."
+            }
+          ],
+          "entry": "LLM01:2025",
+          "findings": [
+            0,
+            4,
+            5,
+            36
+          ],
+          "severity_counts": {
+            "critical": 1,
+            "high": 2,
+            "info": 0,
+            "low": 1,
+            "medium": 0
+          },
+          "title": "Prompt Injection"
+        },
+        {
+          "categories": [
+            {
+              "category": "mutable_image_tag",
+              "rationale": "An image referenced by a movable tag is a supply chain weakness."
+            },
+            {
+              "category": "serialization_format",
+              "rationale": "A model artifact that can run code when it is loaded or its chat template is rendered is a supply chain weakness."
+            },
+            {
+              "category": "serialization_format_unknown",
+              "rationale": "A model artifact whose loading safety is unknown is an unverified supply chain component."
+            },
+            {
+              "category": "signing_status",
+              "rationale": "Unverified model weights are a supply chain weakness."
+            },
+            {
+              "category": "transitive_resolution",
+              "rationale": "A pinned MCP package whose dependencies are resolved at launch is a supply chain weakness."
+            },
+            {
+              "category": "version_pinning",
+              "rationale": "An unpinned package, server package or image is a supply chain weakness."
+            }
+          ],
+          "entry": "LLM03:2025",
+          "findings": [
+            1,
+            2,
+            3,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            22,
+            23,
+            24,
+            25
+          ],
+          "severity_counts": {
+            "critical": 3,
+            "high": 9,
+            "info": 0,
+            "low": 0,
+            "medium": 4
+          },
+          "title": "Supply Chain"
+        },
+        {
+          "categories": [
+            {
+              "category": "rag_discovery",
+              "rationale": "A vector store is referenced without a declared configuration."
+            }
+          ],
+          "entry": "LLM08:2025",
+          "findings": [
+            37,
+            38,
+            39
+          ],
+          "severity_counts": {
+            "critical": 0,
+            "high": 0,
+            "info": 3,
+            "low": 0,
+            "medium": 0
+          },
+          "title": "Vector and Embedding Weaknesses"
+        }
+      ],
+      "findings_with_reference": 23,
+      "findings_without_reference": 17,
+      "framework": "owasp-llm-2025",
+      "name": "OWASP Top 10 for LLM Applications",
+      "note": "The edition that the earlier SARIF tags name. The 2026 edition renumbered the list, so an identifier is meaningful only with its edition.",
+      "source": "https://github.com/GenAI-Security-Project/GenAI-LLM-Top10/tree/main/2025",
+      "verification": "primary"
+    },
+    {
+      "edition": "2026",
+      "entries": [
+        {
+          "categories": [
+            {
+              "category": "bidi_override",
+              "rationale": "Instruction text that reads differently to a reviewer than to the model can carry injected instructions."
+            },
+            {
+              "category": "hidden_markup",
+              "rationale": "Instruction text that reads differently to a reviewer than to the model can carry injected instructions."
+            },
+            {
+              "category": "instruction_layering",
+              "rationale": "A second instruction location is another place where instructions can be inserted."
+            },
+            {
+              "category": "invisible_characters",
+              "rationale": "Instruction text that reads differently to a reviewer than to the model can carry injected instructions."
+            }
+          ],
+          "entry": "LLM01:2026",
+          "findings": [
+            0,
+            4,
+            5,
+            36
+          ],
+          "severity_counts": {
+            "critical": 1,
+            "high": 2,
+            "info": 0,
+            "low": 1,
+            "medium": 0
+          },
+          "title": "Prompt Injection"
+        },
+        {
+          "categories": [
+            {
+              "category": "mutable_image_tag",
+              "rationale": "An image referenced by a movable tag is a supply chain weakness."
+            },
+            {
+              "category": "serialization_format",
+              "rationale": "A model artifact that can run code when it is loaded or its chat template is rendered is a supply chain weakness."
+            },
+            {
+              "category": "serialization_format_unknown",
+              "rationale": "A model artifact whose loading safety is unknown is an unverified supply chain component."
+            },
+            {
+              "category": "signing_status",
+              "rationale": "Unverified model weights are a supply chain weakness."
+            },
+            {
+              "category": "transitive_resolution",
+              "rationale": "A pinned MCP package whose dependencies are resolved at launch is a supply chain weakness."
+            },
+            {
+              "category": "version_pinning",
+              "rationale": "An unpinned package, server package or image is a supply chain weakness."
+            }
+          ],
+          "entry": "LLM04:2026",
+          "findings": [
+            1,
+            2,
+            3,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            22,
+            23,
+            24,
+            25
+          ],
+          "severity_counts": {
+            "critical": 3,
+            "high": 9,
+            "info": 0,
+            "low": 0,
+            "medium": 4
+          },
+          "title": "Supply Chain"
+        },
+        {
+          "categories": [
+            {
+              "category": "rag_discovery",
+              "rationale": "A vector store is referenced without a declared configuration."
+            }
+          ],
+          "entry": "LLM09:2026",
+          "findings": [
+            37,
+            38,
+            39
+          ],
+          "severity_counts": {
+            "critical": 0,
+            "high": 0,
+            "info": 3,
+            "low": 0,
+            "medium": 0
+          },
+          "title": "Vector and Embedding Weaknesses"
+        }
+      ],
+      "findings_with_reference": 23,
+      "findings_without_reference": 17,
+      "framework": "owasp-llm-2026",
+      "name": "OWASP Top 10 for LLM Applications",
+      "note": "Published on 2026-08-04 and renumbered: LLM03:2026 is Excessive Agency and LLM04:2026 is Supply Chain.",
+      "source": "https://github.com/GenAI-Security-Project/GenAI-LLM-Top10/blob/main/2026/README.md",
+      "verification": "primary"
+    },
+    {
+      "edition": "2026",
+      "entries": [
+        {
+          "categories": [
+            {
+              "category": "bidi_override",
+              "rationale": "Such text can redirect the agent's goal without a reviewer noticing."
+            },
+            {
+              "category": "hidden_markup",
+              "rationale": "Such text can redirect the agent's goal without a reviewer noticing."
+            },
+            {
+              "category": "instruction_layering",
+              "rationale": "Instructions from either location shape the agent's goal."
+            },
+            {
+              "category": "invisible_characters",
+              "rationale": "Such text can redirect the agent's goal without a reviewer noticing."
+            }
+          ],
+          "entry": "ASI01",
+          "findings": [
+            0,
+            4,
+            5,
+            36
+          ],
+          "severity_counts": {
+            "critical": 1,
+            "high": 2,
+            "info": 0,
+            "low": 1,
+            "medium": 0
+          },
+          "title": "Agent Goal Hijack"
+        },
+        {
+          "categories": [
+            {
+              "category": "mutable_image_tag",
+              "rationale": "The image the agent runs can change without review."
+            },
+            {
+              "category": "serialization_format",
+              "rationale": "The model artifact is part of the agent's supply chain."
+            },
+            {
+              "category": "serialization_format_unknown",
+              "rationale": "The model artifact is part of the agent's supply chain."
+            },
+            {
+              "category": "signing_status",
+              "rationale": "The model artifact is part of the agent's supply chain."
+            },
+            {
+              "category": "transitive_resolution",
+              "rationale": "The agent's launched packages can change without a change to the pin."
+            },
+            {
+              "category": "version_pinning",
+              "rationale": "The agent's packages, servers or images can change without review."
+            }
+          ],
+          "entry": "ASI04",
+          "findings": [
+            1,
+            2,
+            3,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            22,
+            23,
+            24,
+            25
+          ],
+          "severity_counts": {
+            "critical": 3,
+            "high": 9,
+            "info": 0,
+            "low": 0,
+            "medium": 4
+          },
+          "title": "Agentic Supply Chain Vulnerabilities"
+        },
+        {
+          "categories": [
+            {
+              "category": "hook_commands",
+              "rationale": "Commands run automatically on agent events."
+            },
+            {
+              "category": "serialization_format",
+              "rationale": "Loading the model, or rendering its chat template, can execute code."
+            }
+          ],
+          "entry": "ASI05",
+          "findings": [
+            1,
+            2,
+            3,
+            15
+          ],
+          "severity_counts": {
+            "critical": 3,
+            "high": 0,
+            "info": 0,
+            "low": 0,
+            "medium": 1
+          },
+          "title": "Unexpected Code Execution (RCE)"
+        },
+        {
+          "categories": [
+            {
+              "category": "rag_discovery",
+              "rationale": "An undeclared retrieval source can feed the agent's context."
+            }
+          ],
+          "entry": "ASI06",
+          "findings": [
+            37,
+            38,
+            39
+          ],
+          "severity_counts": {
+            "critical": 0,
+            "high": 0,
+            "info": 3,
+            "low": 0,
+            "medium": 0
+          },
+          "title": "Memory & Context Poisoning"
+        },
+        {
+          "categories": [
+            {
+              "category": "local_process",
+              "rationale": "The agent exchanges messages with a tool server process whose executable is not verified."
+            }
+          ],
+          "entry": "ASI07",
+          "findings": [
+            16,
+            17,
+            18,
+            19,
+            20,
+            21
+          ],
+          "severity_counts": {
+            "critical": 0,
+            "high": 0,
+            "info": 0,
+            "low": 0,
+            "medium": 6
+          },
+          "title": "Insecure Inter-Agent Communication"
+        }
+      ],
+      "findings_with_reference": 30,
+      "findings_without_reference": 10,
+      "framework": "owasp-asi-2026",
+      "name": "OWASP Top 10 for Agentic Applications",
+      "note": "Announced on 2025-12-09. Names were checked against Appendix A of the OWASP Top 10 for LLM Applications 2026, not against the list's own page.",
+      "source": "https://github.com/GenAI-Security-Project/GenAI-LLM-Top10/blob/main/2026/final/Appendix_A_Related_Framework_Mappings.md",
+      "verification": "primary"
+    },
+    {
+      "edition": "2026.10",
+      "entries": [
+        {
+          "categories": [
+            {
+              "category": "signing_status",
+              "rationale": "Weights without a verified signature or pin could be replaced in a model repository undetected."
+            }
+          ],
+          "entry": "AML.T0010.003",
+          "findings": [
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "severity_counts": {
+            "critical": 0,
+            "high": 5,
+            "info": 0,
+            "low": 0,
+            "medium": 0
+          },
+          "title": "Supply Chain Compromise: Model Repository"
+        },
+        {
+          "categories": [
+            {
+              "category": "mutable_image_tag",
+              "rationale": "Pushing other content under an existing tag is how this technique replaces an image."
+            }
+          ],
+          "entry": "AML.T0010.004",
+          "findings": [
+            22
+          ],
+          "severity_counts": {
+            "critical": 0,
+            "high": 0,
+            "info": 0,
+            "low": 0,
+            "medium": 1
+          },
+          "title": "Supply Chain Compromise: Container Registry"
+        },
+        {
+          "categories": [
+            {
+              "category": "local_process",
+              "rationale": "An unverified tool executable could be a compromised agent tool without detection."
+            }
+          ],
+          "entry": "AML.T0010.005",
+          "findings": [
+            16,
+            17,
+            18,
+            19,
+            20,
+            21
+          ],
+          "severity_counts": {
+            "critical": 0,
+            "high": 0,
+            "info": 0,
+            "low": 0,
+            "medium": 6
+          },
+          "title": "Supply Chain Compromise: AI Agent Tool"
+        },
+        {
+          "categories": [
+            {
+              "category": "serialization_format",
+              "rationale": "Serialized models that run code when loaded, and chat templates that reach Python internals, are unsafe artifacts as the technique defines them."
+            },
+            {
+              "category": "serialization_format_unknown",
+              "rationale": "An artifact whose loading safety is unknown may be unsafe."
+            }
+          ],
+          "entry": "AML.T0011.000",
+          "findings": [
+            1,
+            2,
+            3,
+            6
+          ],
+          "severity_counts": {
+            "critical": 3,
+            "high": 1,
+            "info": 0,
+            "low": 0,
+            "medium": 0
+          },
+          "title": "User Execution: Unsafe AI Artifacts"
+        },
+        {
+          "categories": [
+            {
+              "category": "bidi_override",
+              "rationale": "Hiding or disguising instruction text from human review is what this technique describes."
+            },
+            {
+              "category": "hidden_markup",
+              "rationale": "Hiding or disguising instruction text from human review is what this technique describes."
+            },
+            {
+              "category": "invisible_characters",
+              "rationale": "Hiding or disguising instruction text from human review is what this technique describes."
+            }
+          ],
+          "entry": "AML.T0068",
+          "findings": [
+            0,
+            4,
+            5
+          ],
+          "severity_counts": {
+            "critical": 1,
+            "high": 2,
+            "info": 0,
+            "low": 0,
+            "medium": 0
+          },
+          "title": "LLM Prompt Obfuscation"
+        },
+        {
+          "categories": [
+            {
+              "category": "transitive_resolution",
+              "rationale": "A dependency resolved at launch can be replaced without moving the package pin."
+            },
+            {
+              "category": "version_pinning",
+              "rationale": "An unpinned reference takes the next published version, which a rug pull relies on."
+            }
+          ],
+          "entry": "AML.T0109",
+          "findings": [
+            12,
+            13,
+            14,
+            23,
+            24,
+            25
+          ],
+          "severity_counts": {
+            "critical": 0,
+            "high": 3,
+            "info": 0,
+            "low": 0,
+            "medium": 3
+          },
+          "title": "AI Supply Chain Rug Pull"
+        },
+        {
+          "categories": [
+            {
+              "category": "hook_commands",
+              "rationale": "Hooks that run commands on agent events are the mechanism this technique abuses."
+            }
+          ],
+          "entry": "AML.T0142",
+          "findings": [
+            15
+          ],
+          "severity_counts": {
+            "critical": 0,
+            "high": 0,
+            "info": 0,
+            "low": 0,
+            "medium": 1
+          },
+          "title": "Event Triggered Execution"
+        }
+      ],
+      "findings_with_reference": 26,
+      "findings_without_reference": 14,
+      "framework": "mitre-atlas-2026.10",
+      "name": "MITRE ATLAS",
+      "note": "Release 2026.10 (data format 6.1.0, modified 2026-10-28). Names are verbatim from this release and differ from older ones; a sub-technique is shown after its technique.",
+      "source": "https://github.com/mitre-atlas/atlas-data/blob/main/dist/v6/ATLAS-2026.10.yaml",
+      "verification": "primary"
+    },
+    {
+      "edition": "1.0",
+      "entries": [
+        {
+          "categories": [
+            {
+              "category": "completeness",
+              "rationale": "Records values the inventory cannot bind, identity fields it withholds, or an agent card without skills."
+            },
+            {
+              "category": "rag_discovery",
+              "rationale": "Records a retrieval source found only in code or in environment variable names."
+            }
+          ],
+          "entry": "GOVERN-1.6",
+          "findings": [
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            37,
+            38,
+            39
+          ],
+          "severity_counts": {
+            "critical": 0,
+            "high": 0,
+            "info": 3,
+            "low": 10,
+            "medium": 0
+          },
+          "title": "AI systems are inventoried"
+        },
+        {
+          "categories": [
+            {
+              "category": "bidi_override",
+              "rationale": "Records a security-relevant property of the configuration, an input to evaluating its security."
+            },
+            {
+              "category": "hidden_markup",
+              "rationale": "Records a security-relevant property of the configuration, an input to evaluating its security."
+            },
+            {
+              "category": "hook_commands",
+              "rationale": "Records a security-relevant property of the configuration, an input to evaluating its security."
+            },
+            {
+              "category": "instruction_layering",
+              "rationale": "Records a security-relevant property of the configuration, an input to evaluating its security."
+            },
+            {
+              "category": "invisible_characters",
+              "rationale": "Records a security-relevant property of the configuration, an input to evaluating its security."
+            },
+            {
+              "category": "local_process",
+              "rationale": "Records a security-relevant property of the configuration, an input to evaluating its security."
+            }
+          ],
+          "entry": "MEASURE-2.7",
+          "findings": [
+            0,
+            4,
+            5,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            36
+          ],
+          "severity_counts": {
+            "critical": 1,
+            "high": 2,
+            "info": 0,
+            "low": 1,
+            "medium": 7
+          },
+          "title": "Security and resilience are evaluated"
+        },
+        {
+          "categories": [
+            {
+              "category": "mutable_image_tag",
+              "rationale": "Records a third-party component whose identity, version or resolution is not established."
+            },
+            {
+              "category": "transitive_resolution",
+              "rationale": "Records a third-party component whose identity, version or resolution is not established."
+            },
+            {
+              "category": "version_pinning",
+              "rationale": "Records a third-party component whose identity, version or resolution is not established."
+            }
+          ],
+          "entry": "MANAGE-3.1",
+          "findings": [
+            12,
+            13,
+            14,
+            22,
+            23,
+            24,
+            25
+          ],
+          "severity_counts": {
+            "critical": 0,
+            "high": 3,
+            "info": 0,
+            "low": 0,
+            "medium": 4
+          },
+          "title": "Third-party AI risks are monitored and controlled"
+        },
+        {
+          "categories": [
+            {
+              "category": "serialization_format",
+              "rationale": "Records how safely a pre-trained model loads, or whether its weights are verified."
+            },
+            {
+              "category": "serialization_format_unknown",
+              "rationale": "Records how safely a pre-trained model loads, or whether its weights are verified."
+            },
+            {
+              "category": "signing_status",
+              "rationale": "Records how safely a pre-trained model loads, or whether its weights are verified."
+            }
+          ],
+          "entry": "MANAGE-3.2",
+          "findings": [
+            1,
+            2,
+            3,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "severity_counts": {
+            "critical": 3,
+            "high": 6,
+            "info": 0,
+            "low": 0,
+            "medium": 0
+          },
+          "title": "Pre-trained models are monitored"
+        }
+      ],
+      "findings_with_reference": 40,
+      "findings_without_reference": 0,
+      "framework": "nist-ai-rmf-1.0",
+      "name": "NIST AI Risk Management Framework (AI 100-1)",
+      "note": "Subcategory identifiers of the AI RMF Core, checked against secondary sources only. Titles are short summaries in this project's words, not the subcategory text.",
+      "source": "https://doi.org/10.6028/NIST.AI.100-1",
+      "verification": "secondary"
+    },
+    {
+      "edition": "2024",
+      "entries": [
+        {
+          "categories": [
+            {
+              "category": "rag_discovery",
+              "rationale": "Records an element of the system that the inventory does not show as declared."
+            }
+          ],
+          "entry": "Art. 11",
+          "findings": [
+            37,
+            38,
+            39
+          ],
+          "severity_counts": {
+            "critical": 0,
+            "high": 0,
+            "info": 3,
+            "low": 0,
+            "medium": 0
+          },
+          "title": "Technical documentation of the system and its elements (Annex IV)"
+        },
+        {
+          "categories": [
+            {
+              "category": "bidi_override",
+              "rationale": "Records a property of the system that bears on its robustness and cybersecurity."
+            },
+            {
+              "category": "hidden_markup",
+              "rationale": "Records a property of the system that bears on its robustness and cybersecurity."
+            },
+            {
+              "category": "hook_commands",
+              "rationale": "Records a property of the system that bears on its robustness and cybersecurity."
+            },
+            {
+              "category": "invisible_characters",
+              "rationale": "Records a property of the system that bears on its robustness and cybersecurity."
+            },
+            {
+              "category": "local_process",
+              "rationale": "Records a property of the system that bears on its robustness and cybersecurity."
+            },
+            {
+              "category": "mutable_image_tag",
+              "rationale": "Records a property of the system that bears on its robustness and cybersecurity."
+            },
+            {
+              "category": "serialization_format",
+              "rationale": "Records a property of the system that bears on its robustness and cybersecurity."
+            },
+            {
+              "category": "serialization_format_unknown",
+              "rationale": "Records a property of the system that bears on its robustness and cybersecurity."
+            },
+            {
+              "category": "signing_status",
+              "rationale": "Records a property of the system that bears on its robustness and cybersecurity."
+            },
+            {
+              "category": "transitive_resolution",
+              "rationale": "Records a property of the system that bears on its robustness and cybersecurity."
+            },
+            {
+              "category": "version_pinning",
+              "rationale": "Records a property of the system that bears on its robustness and cybersecurity."
+            }
+          ],
+          "entry": "Art. 15",
+          "findings": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25
+          ],
+          "severity_counts": {
+            "critical": 4,
+            "high": 11,
+            "info": 0,
+            "low": 0,
+            "medium": 11
+          },
+          "title": "Robustness and cybersecurity, including resistance to manipulation"
+        }
+      ],
+      "findings_with_reference": 29,
+      "findings_without_reference": 11,
+      "framework": "eu-ai-act-2024",
+      "name": "EU AI Act",
+      "note": "Regulation (EU) 2024/1689. An article is named where a finding can serve as evidence. Whether it applies depends on the system's risk class and the operator's role, which an inventory cannot establish. Titles are this project's words.",
+      "source": "https://eur-lex.europa.eu/eli/reg/2024/1689/oj",
+      "verification": "secondary"
+    },
+    {
+      "edition": "2023",
+      "entries": [
+        {
+          "categories": [
+            {
+              "category": "completeness",
+              "rationale": "Records information about a component that the inventory does not document."
+            },
+            {
+              "category": "rag_discovery",
+              "rationale": "Records a resource of the AI system that the inventory does not show as declared."
+            }
+          ],
+          "entry": "A.4.2",
+          "findings": [
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            37,
+            38,
+            39
+          ],
+          "severity_counts": {
+            "critical": 0,
+            "high": 0,
+            "info": 3,
+            "low": 10,
+            "medium": 0
+          },
+          "title": "Resources of the AI system are documented"
+        },
+        {
+          "categories": [
+            {
+              "category": "rag_discovery",
+              "rationale": "The provenance of data from this source is not recorded."
+            }
+          ],
+          "entry": "A.7.5",
+          "findings": [
+            37,
+            38,
+            39
+          ],
+          "severity_counts": {
+            "critical": 0,
+            "high": 0,
+            "info": 3,
+            "low": 0,
+            "medium": 0
+          },
+          "title": "Data provenance is recorded"
+        },
+        {
+          "categories": [
+            {
+              "category": "mutable_image_tag",
+              "rationale": "Records a supplied component whose identity, version or resolution is not established."
+            },
+            {
+              "category": "transitive_resolution",
+              "rationale": "Records a supplied component whose identity, version or resolution is not established."
+            },
+            {
+              "category": "version_pinning",
+              "rationale": "Records a supplied component whose identity, version or resolution is not established."
+            }
+          ],
+          "entry": "A.10.3",
+          "findings": [
+            12,
+            13,
+            14,
+            22,
+            23,
+            24,
+            25
+          ],
+          "severity_counts": {
+            "critical": 0,
+            "high": 3,
+            "info": 0,
+            "low": 0,
+            "medium": 4
+          },
+          "title": "Suppliers are managed"
+        }
+      ],
+      "findings_with_reference": 20,
+      "findings_without_reference": 20,
+      "framework": "iso-iec-42001-2023",
+      "name": "ISO/IEC 42001 Annex A",
+      "note": "Control identifiers only: the standard's text is copyrighted and was not consulted, and the labels are this project's words.",
+      "source": "https://www.iso.org/standard/81230.html",
+      "verification": "secondary"
+    },
+    {
+      "edition": "4.20",
+      "entries": [
+        {
+          "categories": [
+            {
+              "category": "signing_status",
+              "rationale": "The model's weights are not bound to a verified signature or digest pin."
+            }
+          ],
+          "entry": "CWE-345",
+          "findings": [
+            7,
+            8,
+            9,
+            10,
+            11
+          ],
+          "severity_counts": {
+            "critical": 0,
+            "high": 5,
+            "info": 0,
+            "low": 0,
+            "medium": 0
+          },
+          "title": "Insufficient Verification of Data Authenticity"
+        },
+        {
+          "categories": [
+            {
+              "category": "bidi_override",
+              "rationale": "The file can display differently from what the agent processes."
+            },
+            {
+              "category": "invisible_characters",
+              "rationale": "The file can display differently from what the agent processes."
+            }
+          ],
+          "entry": "CWE-451",
+          "findings": [
+            0,
+            5
+          ],
+          "severity_counts": {
+            "critical": 1,
+            "high": 1,
+            "info": 0,
+            "low": 0,
+            "medium": 0
+          },
+          "title": "User Interface (UI) Misrepresentation of Critical Information"
+        },
+        {
+          "categories": [
+            {
+              "category": "serialization_format",
+              "rationale": "Pickle-based formats run code when deserialized; kept from the earlier SARIF rules, it does not hold for chat template findings, which record a template engine weakness."
+            },
+            {
+              "category": "serialization_format_unknown",
+              "rationale": "The model may use a format that runs code when deserialized."
+            }
+          ],
+          "entry": "CWE-502",
+          "findings": [
+            1,
+            2,
+            3,
+            6
+          ],
+          "severity_counts": {
+            "critical": 3,
+            "high": 1,
+            "info": 0,
+            "low": 0,
+            "medium": 0
+          },
+          "title": "Deserialization of Untrusted Data"
+        },
+        {
+          "categories": [
+            {
+              "category": "mutable_image_tag",
+              "rationale": "The tag can be moved to other image content outside the project's control."
+            },
+            {
+              "category": "transitive_resolution",
+              "rationale": "Dependencies of a pinned package are resolved when the server starts."
+            },
+            {
+              "category": "version_pinning",
+              "rationale": "What runs can change under a publisher's control without a change to the repository."
+            }
+          ],
+          "entry": "CWE-829",
+          "findings": [
+            12,
+            13,
+            14,
+            22,
+            23,
+            24,
+            25
+          ],
+          "severity_counts": {
+            "critical": 0,
+            "high": 3,
+            "info": 0,
+            "low": 0,
+            "medium": 4
+          },
+          "title": "Inclusion of Functionality from Untrusted Control Sphere"
+        },
+        {
+          "categories": [
+            {
+              "category": "bidi_override",
+              "rationale": "Instruction text reaches the model with characters that are not neutralized."
+            },
+            {
+              "category": "invisible_characters",
+              "rationale": "Instruction text reaches the model with characters that are not neutralized."
+            }
+          ],
+          "entry": "CWE-1427",
+          "findings": [
+            0,
+            5
+          ],
+          "severity_counts": {
+            "critical": 1,
+            "high": 1,
+            "info": 0,
+            "low": 0,
+            "medium": 0
+          },
+          "title": "Improper Neutralization of Input Used for LLM Prompting"
+        }
+      ],
+      "findings_with_reference": 18,
+      "findings_without_reference": 22,
+      "framework": "cwe",
+      "name": "Common Weakness Enumeration (CWE)",
+      "note": "Identifiers from the earlier SARIF catalog. The names of CWE-494, CWE-829 and CWE-1427 match CWE 4.20 as the OWASP Top 10 for LLM Applications 2026 cites them; the others were not checked against the CWE site for this release.",
+      "source": "https://cwe.mitre.org/",
+      "verification": "secondary"
+    }
+  ],
+  "ignored_findings": 0,
+  "meaning": "A reference means that the finding records a precondition for the framework entry, a weakness of its type, or evidence relevant to it. It does not mean that a technique was used, that an attack happened, that a control fails or is met, or that a legal obligation applies. Findings describe what the inventory records; neither a finding nor its absence shows that an agent, model or tool is safe.",
+  "policy_source": "built-in",
+  "suppressed_findings": 0,
+  "unmapped_categories": []
+}

@@ -1,0 +1,1151 @@
+{
+  "version": "1.0",
+  "notes": "Hand-authored ground truth for the corpus that build_corpus.py materializes. A component counts as detected when any match_any substring (case-insensitive) or the match_regex pattern appears in the tool's output. 'soft' items are reported but weighted at 0.5 because reasonable tools may scope them out. Class weights are in SPEC.md.",
+  "classes": {
+    "mcp-server": "MCP servers declared in client configuration or implemented by the project",
+    "tool": "Tool definitions exposed to a model (code decorators, function schemas, MCP server tools)",
+    "skill": "Agent skills (SKILL.md packages)",
+    "prompt": "Instruction files, prompt templates, inline system prompts and their imports",
+    "model": "Hosted or provider model references in code and configuration",
+    "model-file": "Local model artifacts and their metadata",
+    "dataset": "Training, evaluation and retrieval data and their pointers",
+    "training": "Fine-tuning pipeline code and configuration",
+    "vector-store": "Retrieval and vector databases",
+    "a2a": "Agent-to-agent cards and endpoints",
+    "agent-config": "IDE and CLI agent settings, permissions and hooks",
+    "ci-agent": "Agents that run in CI",
+    "container": "Container images referenced by the project",
+    "package": "AI-relevant software dependencies",
+    "guardrail": "Guardrail and evaluation configuration"
+  },
+  "components": [
+    {
+      "id": "mcp.filesystem",
+      "class": "mcp-server",
+      "source": [
+        ".mcp.json",
+        ".gemini/settings.json"
+      ],
+      "match_any": [
+        "server-filesystem"
+      ],
+      "pin": "2025.8.21",
+      "note": "declared twice; a precise inventory records both declarations or one component with two evidence locations",
+      "match_regex": "(?i)server-filesystem|mcp[^\\n]{0,40}\\bfilesystem\\b|\\bfilesystem\\b[^\\n]{0,40}mcp"
+    },
+    {
+      "id": "mcp.github",
+      "class": "mcp-server",
+      "source": [
+        ".mcp.json"
+      ],
+      "match_any": [
+        "github-mcp-server"
+      ],
+      "pin": "sha256:7c7f6ab9bb4a4e4e4a1d0a0c5f2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d",
+      "note": "container launch, env credential",
+      "match_regex": "(?i)github-mcp-server|\\bgithub\\b[^\\n]{0,30}\\(mcp|mcp[ _-]?server[^\\n]{0,30}\\bgithub\\b"
+    },
+    {
+      "id": "mcp.postgres",
+      "class": "mcp-server",
+      "source": [
+        ".mcp.json"
+      ],
+      "match_any": [
+        "mcp-server-postgres"
+      ],
+      "note": "floating @latest; credential in URL userinfo",
+      "match_regex": "(?i)mcp-server-postgres|\\bpostgres\\b[^\\n]{0,30}\\(mcp|mcp[ _-]?server[^\\n]{0,30}\\bpostgres\\b"
+    },
+    {
+      "id": "mcp.remote-crm",
+      "class": "mcp-server",
+      "source": [
+        ".mcp.json"
+      ],
+      "match_any": [
+        "mcp.crm.example.com",
+        "remote-crm"
+      ],
+      "note": "remote HTTP transport; bearer header; description carries a scanner-targeted injection"
+    },
+    {
+      "id": "mcp.cursor-browser",
+      "class": "mcp-server",
+      "source": [
+        ".cursor/mcp.json"
+      ],
+      "match_any": [
+        "playwright/mcp"
+      ],
+      "note": "unversioned; server name carries ANSI escape sequences",
+      "match_regex": "(?i)playwright/mcp|\\bbrowser\\b[^\\n]{0,30}\\(mcp|mcp[ _-]?server[^\\n]{0,30}\\bbrowser\\b"
+    },
+    {
+      "id": "mcp.vscode-sqlite",
+      "class": "mcp-server",
+      "source": [
+        ".vscode/mcp.json"
+      ],
+      "match_any": [
+        "mcp-server-sqlite"
+      ],
+      "pin": "0.6.2",
+      "note": "JSONC with comments and trailing commas",
+      "match_regex": "(?i)mcp-server-sqlite|\\bsqlite\\b[^\\n]{0,30}\\(mcp|mcp[ _-]?server[^\\n]{0,30}\\bsqlite\\b"
+    },
+    {
+      "id": "mcp.gemini-slack",
+      "class": "mcp-server",
+      "source": [
+        ".gemini/settings.json"
+      ],
+      "match_any": [
+        "mcp.slack.example.com"
+      ],
+      "note": "remote httpUrl",
+      "match_regex": "(?i)mcp\\.slack\\.example\\.com|\\bslack\\b[^\\n]{0,30}\\(mcp|mcp[ _-]?server[^\\n]{0,30}\\bslack\\b"
+    },
+    {
+      "id": "mcp.codex-jira",
+      "class": "mcp-server",
+      "source": [
+        ".codex/config.toml"
+      ],
+      "match_any": [
+        "jira-mcp"
+      ],
+      "soft": true,
+      "note": "file is malformed TOML; credit is given for detection OR an explicit recorded parse failure for the file"
+    },
+    {
+      "id": "mcp.own-server",
+      "class": "mcp-server",
+      "source": [
+        "mcp-server/src/index.ts",
+        "mcp-server/package.json"
+      ],
+      "match_any": [
+        "acme-support-mcp",
+        "@acme/support-mcp"
+      ],
+      "note": "MCP server the project implements"
+    },
+    {
+      "id": "mcp.deep-nested",
+      "class": "mcp-server",
+      "source": [
+        "deep/n/.../.mcp.json"
+      ],
+      "match_any": [
+        "deep-mcp"
+      ],
+      "soft": true,
+      "note": "40 directories deep"
+    },
+    {
+      "id": "tool.lookup_customer",
+      "class": "tool",
+      "source": [
+        "src/agent/tools.py",
+        "mcp-server/src/index.ts"
+      ],
+      "match_any": [
+        "lookup_customer"
+      ]
+    },
+    {
+      "id": "tool.issue_refund",
+      "class": "tool",
+      "source": [
+        "src/agent/tools.py",
+        "tools/schemas/issue_refund.json",
+        "mcp-server/src/index.ts"
+      ],
+      "match_any": [
+        "issue_refund"
+      ]
+    },
+    {
+      "id": "tool.search_kb",
+      "class": "tool",
+      "source": [
+        "src/agent/tools.py",
+        "tools/schemas/search_kb.json"
+      ],
+      "match_any": [
+        "search_kb"
+      ],
+      "note": "schema description is poisoned"
+    },
+    {
+      "id": "skill.triage-ticket",
+      "class": "skill",
+      "source": [
+        ".claude/skills/triage-ticket/SKILL.md"
+      ],
+      "match_any": [
+        "triage-ticket"
+      ]
+    },
+    {
+      "id": "skill.refund-approver",
+      "class": "skill",
+      "source": [
+        ".claude/skills/refund-approver/SKILL.md"
+      ],
+      "match_any": [
+        "refund-approver",
+        "refund‮revorppa"
+      ],
+      "note": "name carries U+202E; body hides an injection in an HTML comment"
+    },
+    {
+      "id": "prompt.claude-md",
+      "class": "prompt",
+      "source": [
+        "CLAUDE.md"
+      ],
+      "match_regex": "(?<![A-Za-z./])CLAUDE\\.md"
+    },
+    {
+      "id": "prompt.claude-import-policies",
+      "class": "prompt",
+      "source": [
+        "docs/policies.md"
+      ],
+      "match_any": [
+        "docs/policies.md"
+      ],
+      "note": "@import from CLAUDE.md"
+    },
+    {
+      "id": "prompt.claude-import-rules",
+      "class": "prompt",
+      "source": [
+        ".claude/rules/security.md"
+      ],
+      "match_any": [
+        "rules/security.md"
+      ],
+      "note": "@import from CLAUDE.md"
+    },
+    {
+      "id": "prompt.agents-md",
+      "class": "prompt",
+      "source": [
+        "AGENTS.md"
+      ],
+      "match_any": [
+        "AGENTS.md"
+      ]
+    },
+    {
+      "id": "prompt.cursorrules",
+      "class": "prompt",
+      "source": [
+        ".cursorrules"
+      ],
+      "match_any": [
+        ".cursorrules"
+      ]
+    },
+    {
+      "id": "prompt.cursor-mdc",
+      "class": "prompt",
+      "source": [
+        ".cursor/rules/python.mdc"
+      ],
+      "match_any": [
+        "python.mdc"
+      ],
+      "soft": true
+    },
+    {
+      "id": "prompt.gemini-md",
+      "class": "prompt",
+      "source": [
+        "GEMINI.md"
+      ],
+      "match_any": [
+        "GEMINI.md"
+      ]
+    },
+    {
+      "id": "prompt.copilot-instructions",
+      "class": "prompt",
+      "source": [
+        ".github/copilot-instructions.md"
+      ],
+      "match_any": [
+        "copilot-instructions.md"
+      ]
+    },
+    {
+      "id": "prompt.system-md",
+      "class": "prompt",
+      "source": [
+        "prompts/system.md"
+      ],
+      "match_any": [
+        "prompts/system.md"
+      ]
+    },
+    {
+      "id": "prompt.triage-j2",
+      "class": "prompt",
+      "source": [
+        "prompts/triage.j2"
+      ],
+      "match_any": [
+        "triage.j2"
+      ]
+    },
+    {
+      "id": "prompt.refund-policy",
+      "class": "prompt",
+      "source": [
+        "prompts/refund_policy.txt"
+      ],
+      "match_any": [
+        "refund_policy.txt"
+      ]
+    },
+    {
+      "id": "prompt.inline-system",
+      "class": "prompt",
+      "source": [
+        "src/agent/llm.py"
+      ],
+      "match_any": [
+        "SYSTEM_PROMPT"
+      ],
+      "soft": true,
+      "note": "inline system prompt constant"
+    },
+    {
+      "id": "prompt.relocated-claude-md",
+      "class": "prompt",
+      "source": [
+        "services/billing/claude.md"
+      ],
+      "match_any": [
+        "billing/claude.md"
+      ],
+      "soft": true,
+      "note": "lower-case relocation; credit for detection or an explicit evasion finding"
+    },
+    {
+      "id": "prompt.modelfile-system",
+      "class": "prompt",
+      "source": [
+        "Modelfile"
+      ],
+      "match_any": [
+        "Modelfile"
+      ],
+      "soft": true
+    },
+    {
+      "id": "model.claude-sonnet-4-5",
+      "class": "model",
+      "source": [
+        "src/agent/llm.py",
+        "evals/promptfooconfig.yaml"
+      ],
+      "match_any": [
+        "claude-sonnet-4-5"
+      ]
+    },
+    {
+      "id": "model.claude-haiku-4-5",
+      "class": "model",
+      "source": [
+        "src/agent/llm.py"
+      ],
+      "match_any": [
+        "claude-haiku-4-5"
+      ]
+    },
+    {
+      "id": "model.gpt-4o-mini",
+      "class": "model",
+      "source": [
+        "src/agent/llm.py",
+        "evals/promptfooconfig.yaml"
+      ],
+      "match_any": [
+        "gpt-4o-mini"
+      ]
+    },
+    {
+      "id": "model.azure-gpt-4o-prod",
+      "class": "model",
+      "source": [
+        "src/agent/llm.py"
+      ],
+      "match_any": [
+        "gpt-4o-prod",
+        "acme-eastus.openai.azure.com"
+      ]
+    },
+    {
+      "id": "model.bedrock-claude",
+      "class": "model",
+      "source": [
+        "src/agent/llm.py"
+      ],
+      "match_any": [
+        "anthropic.claude-3-5-sonnet-20241022-v2:0"
+      ]
+    },
+    {
+      "id": "model.ollama-llama3.2",
+      "class": "model",
+      "source": [
+        "Modelfile",
+        "src/agent/llm.py"
+      ],
+      "match_any": [
+        "llama3.2"
+      ]
+    },
+    {
+      "id": "model.hf-roberta-sentiment",
+      "class": "model",
+      "source": [
+        "src/agent/llm.py"
+      ],
+      "match_any": [
+        "twitter-roberta-base-sentiment-latest"
+      ],
+      "note": "revision=main (floating)"
+    },
+    {
+      "id": "model.hf-distilbert-sst2",
+      "class": "model",
+      "source": [
+        "src/agent/llm.py"
+      ],
+      "match_any": [
+        "distilbert-base-uncased-finetuned-sst-2-english"
+      ],
+      "pin": "714eb0fa89d2f80546fda750413ed43d93601a13"
+    },
+    {
+      "id": "model.hf-distilbert-base",
+      "class": "model",
+      "source": [
+        "src/agent/llm.py",
+        "src/training/finetune.py",
+        "configs/finetune.yaml",
+        "models/classifier/config.json"
+      ],
+      "match_regex": "distilbert-base-uncased(?!-finetuned)",
+      "pin": "1c4513b2eedbda136f57676a34eea67aba266e5c"
+    },
+    {
+      "id": "model.hf-minilm",
+      "class": "model",
+      "source": [
+        "src/agent/llm.py"
+      ],
+      "match_any": [
+        "all-MiniLM-L6-v2"
+      ]
+    },
+    {
+      "id": "model.llama-guard",
+      "class": "model",
+      "source": [
+        "src/agent/guardrails.py",
+        "configs/guardrails.yaml"
+      ],
+      "match_any": [
+        "Llama-Guard-3-1B"
+      ]
+    },
+    {
+      "id": "model.text-embedding-3-small",
+      "class": "model",
+      "source": [
+        "src/agent/retrieval.py"
+      ],
+      "match_any": [
+        "text-embedding-3-small"
+      ]
+    },
+    {
+      "id": "model.codex-o4-mini",
+      "class": "model",
+      "source": [
+        ".codex/config.toml"
+      ],
+      "match_regex": "(?<![A-Za-z0-9-])o4-mini",
+      "soft": true
+    },
+    {
+      "id": "file.safetensors",
+      "class": "model-file",
+      "source": [
+        "models/classifier/model.safetensors"
+      ],
+      "match_any": [
+        "model.safetensors"
+      ],
+      "sha256": "5bdeef2029fa7ebfc5507027c5060f6557fd4187cad5cf02cded1eecd1a977f7"
+    },
+    {
+      "id": "file.pickle",
+      "class": "model-file",
+      "source": [
+        "models/legacy/intent.pkl"
+      ],
+      "match_any": [
+        "intent.pkl"
+      ],
+      "sha256": "9e1aae1cca74c27bd2903263856ba049f3854d8a0605f5efa7c2ad9162dfffed",
+      "note": "pickle: code-executing loader format"
+    },
+    {
+      "id": "file.torch-pt",
+      "class": "model-file",
+      "source": [
+        "models/legacy/intent.pt"
+      ],
+      "match_any": [
+        "intent.pt"
+      ],
+      "sha256": "90d72e0bfe091224a075ec8d66d9ab989d874bbeca15431794c8eb9894ad3734",
+      "note": "zip-wrapped pickle"
+    },
+    {
+      "id": "file.gguf",
+      "class": "model-file",
+      "source": [
+        "models/llm/acme-intent-tiny.Q8_0.gguf"
+      ],
+      "match_any": [
+        "acme-intent-tiny"
+      ],
+      "sha256": "46cac5ddd076c4f843546daacd3586af7beaa78211b614c9c778868979a30c50",
+      "note": "valid GGUF v3 header; metadata general.architecture=llama"
+    },
+    {
+      "id": "file.model-config",
+      "class": "model-file",
+      "source": [
+        "models/classifier/config.json"
+      ],
+      "match_any": [
+        "models/classifier/config.json",
+        "DistilBertForSequenceClassification"
+      ],
+      "soft": true
+    },
+    {
+      "id": "file.model-card",
+      "class": "model-file",
+      "source": [
+        "models/classifier/README.md"
+      ],
+      "match_any": [
+        "models/classifier/README.md"
+      ],
+      "soft": true
+    },
+    {
+      "id": "data.acme-support-tickets",
+      "class": "dataset",
+      "source": [
+        "src/training/finetune.py",
+        "configs/finetune.yaml",
+        "data/DATASHEET.md",
+        "models/classifier/README.md"
+      ],
+      "match_any": [
+        "acme/support-tickets"
+      ]
+    },
+    {
+      "id": "data.imdb",
+      "class": "dataset",
+      "source": [
+        "src/training/finetune.py"
+      ],
+      "match_regex": "(?i)(?<![A-Za-z])imdb(?![A-Za-z])"
+    },
+    {
+      "id": "data.dvc-pointer",
+      "class": "dataset",
+      "source": [
+        "data/tickets.csv.dvc"
+      ],
+      "match_any": [
+        "tickets.csv.dvc",
+        "s3://acme-ml-data"
+      ]
+    },
+    {
+      "id": "data.golden-eval",
+      "class": "dataset",
+      "source": [
+        "data/eval/golden.jsonl"
+      ],
+      "match_any": [
+        "golden.jsonl"
+      ]
+    },
+    {
+      "id": "data.faq-corpus",
+      "class": "dataset",
+      "source": [
+        "data/faq/returns.md",
+        "data/faq/shipping.md"
+      ],
+      "match_any": [
+        "data/faq"
+      ],
+      "note": "RAG source documents; also the filesystem MCP root"
+    },
+    {
+      "id": "data.datasheet",
+      "class": "dataset",
+      "source": [
+        "data/DATASHEET.md"
+      ],
+      "match_any": [
+        "DATASHEET.md"
+      ],
+      "soft": true
+    },
+    {
+      "id": "train.finetune-script",
+      "class": "training",
+      "source": [
+        "src/training/finetune.py"
+      ],
+      "match_any": [
+        "finetune.py"
+      ]
+    },
+    {
+      "id": "train.finetune-config",
+      "class": "training",
+      "source": [
+        "configs/finetune.yaml"
+      ],
+      "match_any": [
+        "finetune.yaml"
+      ]
+    },
+    {
+      "id": "rag.chroma",
+      "class": "vector-store",
+      "source": [
+        "src/agent/retrieval.py"
+      ],
+      "match_any": [
+        "chroma"
+      ]
+    },
+    {
+      "id": "rag.pinecone",
+      "class": "vector-store",
+      "source": [
+        "src/agent/retrieval.py"
+      ],
+      "match_any": [
+        "acme-faq-prod",
+        "pinecone"
+      ]
+    },
+    {
+      "id": "rag.qdrant",
+      "class": "vector-store",
+      "source": [
+        "src/agent/retrieval.py",
+        "docker-compose.yml"
+      ],
+      "match_any": [
+        "qdrant"
+      ]
+    },
+    {
+      "id": "a2a.agent-card",
+      "class": "a2a",
+      "source": [
+        "public/.well-known/agent-card.json"
+      ],
+      "match_any": [
+        "agent-card.json",
+        "agent.acme.example"
+      ]
+    },
+    {
+      "id": "ide.claude-settings",
+      "class": "agent-config",
+      "source": [
+        ".claude/settings.json"
+      ],
+      "match_any": [
+        ".claude/settings.json"
+      ]
+    },
+    {
+      "id": "ide.hook-pretooluse",
+      "class": "agent-config",
+      "source": [
+        ".claude/settings.json"
+      ],
+      "match_any": [
+        "audit-tool-call.sh"
+      ],
+      "note": "hook executes a shell command on every Bash tool call"
+    },
+    {
+      "id": "ide.permission-webfetch",
+      "class": "agent-config",
+      "source": [
+        ".claude/settings.json"
+      ],
+      "match_any": [
+        "docs.acme.example"
+      ],
+      "soft": true
+    },
+    {
+      "id": "ci.claude-code-action",
+      "class": "ci-agent",
+      "source": [
+        ".github/workflows/agent-review.yml"
+      ],
+      "match_any": [
+        "claude-code-action"
+      ]
+    },
+    {
+      "id": "img.python-base",
+      "class": "container",
+      "source": [
+        "Dockerfile"
+      ],
+      "match_any": [
+        "python:3.12-slim"
+      ],
+      "pin": "sha256:0f2c3bd4a1e9c8b7a6d5e4f3c2b1a0f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3"
+    },
+    {
+      "id": "img.agent-base-latest",
+      "class": "container",
+      "source": [
+        "Dockerfile.agent"
+      ],
+      "match_any": [
+        "agent-base"
+      ],
+      "note": "floating :latest"
+    },
+    {
+      "id": "img.qdrant",
+      "class": "container",
+      "source": [
+        "docker-compose.yml"
+      ],
+      "match_any": [
+        "qdrant/qdrant"
+      ],
+      "pin": "v1.12.1"
+    },
+    {
+      "id": "img.ollama",
+      "class": "container",
+      "source": [
+        "docker-compose.yml"
+      ],
+      "match_any": [
+        "ollama/ollama"
+      ],
+      "note": "floating :latest"
+    },
+    {
+      "id": "pkg.anthropic",
+      "class": "package",
+      "source": [
+        "requirements.txt",
+        "pyproject.toml"
+      ],
+      "match_regex": "(?s)(?<![A-Za-z-])anthropic.{0,80}?0\\.69\\.0"
+    },
+    {
+      "id": "pkg.mcp",
+      "class": "package",
+      "source": [
+        "requirements.txt",
+        "pyproject.toml"
+      ],
+      "match_regex": "(?s)(?<![A-Za-z-])mcp(?![A-Za-z-]).{0,80}?1\\.16\\.0"
+    },
+    {
+      "id": "pkg.langgraph",
+      "class": "package",
+      "source": [
+        "requirements.txt",
+        "pyproject.toml"
+      ],
+      "match_regex": "(?s)langgraph.{0,80}?0\\.6\\.7"
+    },
+    {
+      "id": "pkg.transformers",
+      "class": "package",
+      "source": [
+        "requirements.txt",
+        "pyproject.toml"
+      ],
+      "match_regex": "(?s)(?<![A-Za-z-])transformers.{0,80}?4\\.57\\.0"
+    },
+    {
+      "id": "pkg.npm-mcp-sdk",
+      "class": "package",
+      "source": [
+        "mcp-server/package.json"
+      ],
+      "match_any": [
+        "@modelcontextprotocol/sdk"
+      ]
+    },
+    {
+      "id": "pkg.unresolvable",
+      "class": "package",
+      "source": [
+        "requirements.txt",
+        "pyproject.toml"
+      ],
+      "match_any": [
+        "langchain-acme-utils"
+      ],
+      "note": "does not exist on PyPI; flagging it needs a live lookup"
+    },
+    {
+      "id": "guard.config",
+      "class": "guardrail",
+      "source": [
+        "configs/guardrails.yaml"
+      ],
+      "match_any": [
+        "guardrails.yaml"
+      ],
+      "soft": true
+    },
+    {
+      "id": "eval.promptfoo",
+      "class": "guardrail",
+      "source": [
+        "evals/promptfooconfig.yaml"
+      ],
+      "match_any": [
+        "promptfooconfig"
+      ],
+      "soft": true
+    }
+  ],
+  "decoys": [
+    {
+      "id": "decoy.doc-code-block",
+      "kind": "hard",
+      "source": "docs/archive/legacy-setup.md",
+      "match_any": [
+        "legacy-jira"
+      ],
+      "why": "an MCP configuration quoted in documentation is not a configured server"
+    },
+    {
+      "id": "decoy.comment-model",
+      "kind": "hard",
+      "source": "src/agent/llm.py",
+      "match_any": [
+        "gpt-3.5-turbo"
+      ],
+      "why": "a model name inside a code comment is not a dependency"
+    },
+    {
+      "id": "decoy.readme-model",
+      "kind": "hard",
+      "source": "README.md",
+      "match_any": [
+        "Mistral-7B-Instruct"
+      ],
+      "why": "a model mentioned in prose as not used"
+    },
+    {
+      "id": "decoy.node-modules-mcp",
+      "kind": "hard",
+      "source": "node_modules/@acme/legacy-tool/.mcp.json",
+      "match_any": [
+        "vendored-legacy"
+      ],
+      "why": "a dependency's own client configuration is not the project's"
+    },
+    {
+      "id": "decoy.test-fixture",
+      "kind": "soft",
+      "source": "tests/fixtures/mock_mcp_config.json",
+      "match_any": [
+        "mock-weather"
+      ],
+      "why": "a test fixture is arguably not a configured server; weighted 0.5"
+    },
+    {
+      "id": "decoy.zero-bin-as-model",
+      "kind": "soft",
+      "source": "data/raw/embeddings.bin",
+      "match_regex": "(?i)embeddings\\.bin[^\\n]{0,200}(code[- ]execut|unsafe[- ]code|arbitrary code|pickle_deserialization|serialization_format[\\\"'\\]](?!:)|\\bpickle\\b(?![ -]family)(?! evidence))|(code[- ]execut|unsafe[- ]code|arbitrary code|pickle_deserialization|serialization_format[\\\"'\\]](?!:)|\\bpickle\\b(?![ -]family)(?! evidence))[^\\n]{0,200}embeddings\\.bin",
+      "why": "a 32 MiB file of zeros is not evidence of a code-executing model format; reporting it as one is a false positive. A report that the file's format or loader safety could not be established is not one: the pattern counts a code-execution, unsafe-loader or pickle claim or the serialization_format finding category, not the words pickle-family or 'no pickle evidence', the serialization_format field name or serialization_format_unknown"
+    }
+  ],
+  "secrets": {
+    "github_pat": "ghp_AIBOMBENCHSENTINEL01AIBOMBENCHSENT",
+    "db_password": "AIBOMBENCH_DB_SENTINEL_02",
+    "crm_bearer": "AIBOMBENCH_CRM_SENTINEL_03",
+    "anthropic_key": "sk-ant-AIBOMBENCH-SENTINEL-04",
+    "openai_key": "sk-proj-AIBOMBENCH-SENTINEL-05",
+    "hf_token": "hf_AIBOMBENCHSENTINEL06",
+    "pinecone_key": "pcsk_AIBOMBENCH_SENTINEL_07",
+    "aws_secret": "AIBOMBENCHSENTINEL08AIBOMBENCHSENTINEL08",
+    "jira_token": "AIBOMBENCH_JIRA_SENTINEL_09"
+  },
+  "leak_markers": {
+    "etc-passwd": "root:x:0:0",
+    "why": "content from outside the scan root reached the output through a symbolic link"
+  },
+  "neutralization": {
+    "ansi_escape_raw": "\u001b[",
+    "ansi_escape_json": "\\u001b",
+    "rlo_raw": "‮",
+    "zwsp_raw": "​"
+  },
+  "integrity_digests": {
+    "models/classifier/model.safetensors": "5bdeef2029fa7ebfc5507027c5060f6557fd4187cad5cf02cded1eecd1a977f7",
+    "models/llm/acme-intent-tiny.Q8_0.gguf": "46cac5ddd076c4f843546daacd3586af7beaa78211b614c9c778868979a30c50",
+    "models/legacy/intent.pkl": "9e1aae1cca74c27bd2903263856ba049f3854d8a0605f5efa7c2ad9162dfffed",
+    "models/legacy/intent.pt": "90d72e0bfe091224a075ec8d66d9ab989d874bbeca15431794c8eb9894ad3734"
+  },
+  "pins": {
+    "mcp.filesystem": "2025.8.21",
+    "mcp.vscode-sqlite": "0.6.2",
+    "mcp.github.image": "7c7f6ab9bb4a4e4e4a1d0a0c5f2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d",
+    "img.python-base": "0f2c3bd4a1e9c8b7a6d5e4f3c2b1a0f9e8d7c6b5a4f3e2d1c0b9a8f7e6d5c4b3",
+    "model.hf-distilbert-sst2.revision": "714eb0fa89d2f80546fda750413ed43d93601a13"
+  },
+  "expected_findings": [
+    {
+      "id": "F01",
+      "title": "Floating MCP server versions",
+      "where": [
+        ".mcp.json postgres @latest",
+        ".cursor/mcp.json playwright unversioned"
+      ],
+      "hints": [
+        "latest",
+        "unpinned",
+        "floating",
+        "unversioned",
+        "no version"
+      ]
+    },
+    {
+      "id": "F02",
+      "title": "Floating container tags",
+      "where": [
+        "Dockerfile.agent agent-base:latest",
+        "docker-compose.yml ollama:latest"
+      ],
+      "hints": [
+        "latest"
+      ]
+    },
+    {
+      "id": "F03",
+      "title": "Credentials in agent configuration",
+      "where": [
+        ".mcp.json env/headers/URL userinfo",
+        ".env"
+      ],
+      "hints": [
+        "credential",
+        "secret",
+        "token",
+        "api key",
+        "password"
+      ]
+    },
+    {
+      "id": "F04",
+      "title": "Code-executing model serialization",
+      "where": [
+        "models/legacy/intent.pkl",
+        "models/legacy/intent.pt"
+      ],
+      "hints": [
+        "pickle",
+        "deserializ",
+        "arbitrary code"
+      ]
+    },
+    {
+      "id": "F05",
+      "title": "Tool-description poisoning",
+      "where": [
+        "tools/schemas/search_kb.json",
+        "mcp-server/src/index.ts lookup_customer"
+      ],
+      "hints": [
+        "poison",
+        "injection",
+        "IMPORTANT",
+        "id_rsa",
+        "credentials"
+      ]
+    },
+    {
+      "id": "F06",
+      "title": "Instruction injection aimed at the agent and at the scanner",
+      "where": [
+        ".claude/skills/refund-approver/SKILL.md HTML comment",
+        "AGENTS.md",
+        ".mcp.json remote-crm description"
+      ],
+      "hints": [
+        "injection",
+        "ignore all previous",
+        "hidden"
+      ]
+    },
+    {
+      "id": "F07",
+      "title": "Hidden or obfuscating characters in names and instructions",
+      "where": [
+        ".cursor/mcp.json server name ANSI",
+        "SKILL.md name U+202E",
+        "SKILL.md body U+200B"
+      ],
+      "hints": [
+        "bidi",
+        "zero-width",
+        "control character",
+        "escape",
+        "invisible",
+        "unicode"
+      ]
+    },
+    {
+      "id": "F08",
+      "title": "Remote MCP endpoints",
+      "where": [
+        ".mcp.json remote-crm",
+        ".gemini/settings.json slack"
+      ],
+      "hints": [
+        "remote",
+        "http",
+        "url"
+      ]
+    },
+    {
+      "id": "F09",
+      "title": "Hook runs a shell command on tool calls",
+      "where": [
+        ".claude/settings.json PreToolUse"
+      ],
+      "hints": [
+        "hook",
+        "audit-tool-call"
+      ]
+    },
+    {
+      "id": "F10",
+      "title": "Malformed configuration recorded as a gap, not silence",
+      "where": [
+        ".codex/config.toml"
+      ],
+      "hints": [
+        "codex",
+        "toml",
+        "parse",
+        "malformed",
+        "failed",
+        "gap"
+      ]
+    },
+    {
+      "id": "F11",
+      "title": "Symbolic links that escape the root or loop are refused and recorded",
+      "where": [
+        "config/secrets-link",
+        "models/escape.gguf",
+        "vendor/loop"
+      ],
+      "hints": [
+        "symlink",
+        "symbolic",
+        "outside",
+        "escape",
+        "loop"
+      ]
+    },
+    {
+      "id": "F12",
+      "title": "Hosted model references without an immutable revision",
+      "where": [
+        "cardiffnlp/... revision=main",
+        "all-MiniLM-L6-v2",
+        "Llama-Guard-3-1B"
+      ],
+      "hints": [
+        "revision",
+        "unpinned",
+        "main"
+      ]
+    },
+    {
+      "id": "F13",
+      "title": "Declared dependency that cannot be resolved (live only)",
+      "where": [
+        "langchain-acme-utils==0.3.1"
+      ],
+      "hints": [
+        "not found",
+        "unresolv",
+        "does not exist",
+        "hallucinat"
+      ]
+    },
+    {
+      "id": "F14",
+      "title": "Permissive agent permissions",
+      "where": [
+        ".claude/settings.json allow WebFetch, Bash"
+      ],
+      "hints": [
+        "permission",
+        "allow",
+        "WebFetch"
+      ]
+    },
+    {
+      "id": "F15",
+      "title": "Exposure path: untrusted input + sensitive tools + egress",
+      "where": [
+        "tickets (untrusted) -> issue_refund/CRM (sensitive) -> WebFetch/remote MCP (egress)"
+      ],
+      "hints": [
+        "trifecta",
+        "exposure",
+        "exfiltrat",
+        "blast radius",
+        "egress"
+      ]
+    }
+  ]
+}

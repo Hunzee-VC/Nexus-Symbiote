@@ -1,0 +1,816 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "serialNumber": "urn:uuid:bc430c90-af9d-4cc4-9613-ab2eb34dc550",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-11-18T10:35:00Z",
+    "tools": {
+      "components": [
+        {
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "version": "12.9.2",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@12.9.2",
+          "type": "application",
+          "bom-ref": "pkg:npm/@cyclonedx/cdxgen@12.9.2",
+          "publisher": "OWASP Foundation",
+          "authors": [
+            {
+              "name": "OWASP Foundation"
+            }
+          ]
+        }
+      ]
+    },
+    "authors": [
+      {
+        "name": "OWASP Foundation"
+      }
+    ],
+    "lifecycles": [
+      {
+        "phase": "pre-build"
+      }
+    ],
+    "component": {
+      "group": "",
+      "name": "corpus",
+      "version": "latest",
+      "type": "application",
+      "bom-ref": "pkg:generic/corpus@latest",
+      "purl": "pkg:generic/corpus@latest"
+    },
+    "properties": []
+  },
+  "components": [
+    {
+      "group": "",
+      "name": ".mcp.json",
+      "version": "",
+      "scope": "optional",
+      "type": "file",
+      "bom-ref": "file:/aibom-run/work/cdxgen-alt/corpus/.mcp.json",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen-alt/corpus/.mcp.json"
+        },
+        {
+          "name": "cdx:file:kind",
+          "value": "mcp-config"
+        },
+        {
+          "name": "cdx:mcp:inventorySource",
+          "value": "config-file"
+        },
+        {
+          "name": "cdx:mcp:configFormat",
+          "value": "dot-mcp-json"
+        },
+        {
+          "name": "cdx:mcp:configuredServiceCount",
+          "value": "3"
+        },
+        {
+          "name": "cdx:mcp:configuredServiceNames",
+          "value": "filesystem,postgres,remote-crm"
+        },
+        {
+          "name": "cdx:mcp:configuredEndpoints",
+          "value": "https://mcp.crm.example.com/mcp"
+        },
+        {
+          "name": "cdx:mcp:credentialExposure",
+          "value": "true"
+        },
+        {
+          "name": "cdx:mcp:credentialExposedServiceCount",
+          "value": "1"
+        },
+        {
+          "name": "cdx:mcp:package",
+          "value": "true"
+        },
+        {
+          "name": "cdx:mcp:official",
+          "value": "false"
+        },
+        {
+          "name": "cdx:mcp:role",
+          "value": "sdk"
+        },
+        {
+          "name": "cdx:mcp:catalogSource",
+          "value": "heuristic"
+        },
+        {
+          "name": "cdx:mcp:packageName",
+          "value": ".mcp.json"
+        }
+      ],
+      "tags": [
+        "mcp",
+        "mcp-sdk"
+      ]
+    },
+    {
+      "group": "",
+      "name": ".mcp.json",
+      "version": "",
+      "scope": "optional",
+      "type": "file",
+      "bom-ref": "file:/aibom-run/work/cdxgen-alt/corpus/deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen-alt/corpus/deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json"
+        },
+        {
+          "name": "cdx:file:kind",
+          "value": "mcp-config"
+        },
+        {
+          "name": "cdx:mcp:inventorySource",
+          "value": "config-file"
+        },
+        {
+          "name": "cdx:mcp:configFormat",
+          "value": "dot-mcp-json"
+        },
+        {
+          "name": "cdx:mcp:configuredServiceCount",
+          "value": "1"
+        },
+        {
+          "name": "cdx:mcp:configuredServiceNames",
+          "value": "deep-nested"
+        },
+        {
+          "name": "cdx:mcp:package",
+          "value": "true"
+        },
+        {
+          "name": "cdx:mcp:official",
+          "value": "false"
+        },
+        {
+          "name": "cdx:mcp:role",
+          "value": "sdk"
+        },
+        {
+          "name": "cdx:mcp:catalogSource",
+          "value": "heuristic"
+        },
+        {
+          "name": "cdx:mcp:packageName",
+          "value": ".mcp.json"
+        }
+      ],
+      "tags": [
+        "mcp",
+        "mcp-sdk"
+      ]
+    },
+    {
+      "group": "",
+      "name": "mcp.json",
+      "version": "",
+      "scope": "optional",
+      "type": "file",
+      "bom-ref": "file:/aibom-run/work/cdxgen-alt/corpus/.vscode/mcp.json",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen-alt/corpus/.vscode/mcp.json"
+        },
+        {
+          "name": "cdx:file:kind",
+          "value": "mcp-config"
+        },
+        {
+          "name": "cdx:mcp:inventorySource",
+          "value": "config-file"
+        },
+        {
+          "name": "cdx:mcp:configFormat",
+          "value": "vscode"
+        },
+        {
+          "name": "cdx:mcp:configuredServiceCount",
+          "value": "1"
+        },
+        {
+          "name": "cdx:mcp:configuredServiceNames",
+          "value": "sqlite"
+        },
+        {
+          "name": "cdx:mcp:package",
+          "value": "true"
+        },
+        {
+          "name": "cdx:mcp:official",
+          "value": "false"
+        },
+        {
+          "name": "cdx:mcp:role",
+          "value": "sdk"
+        },
+        {
+          "name": "cdx:mcp:catalogSource",
+          "value": "heuristic"
+        },
+        {
+          "name": "cdx:mcp:packageName",
+          "value": "mcp.json"
+        }
+      ],
+      "tags": [
+        "mcp",
+        "mcp-sdk"
+      ]
+    },
+    {
+      "group": "",
+      "name": "mcp.json",
+      "version": "",
+      "scope": "optional",
+      "type": "file",
+      "bom-ref": "file:/aibom-run/work/cdxgen-alt/corpus/.cursor/mcp.json",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "aibom-run/work/cdxgen-alt/corpus/.cursor/mcp.json"
+        },
+        {
+          "name": "cdx:file:kind",
+          "value": "mcp-config"
+        },
+        {
+          "name": "cdx:mcp:inventorySource",
+          "value": "config-file"
+        },
+        {
+          "name": "cdx:mcp:configFormat",
+          "value": "cursor"
+        },
+        {
+          "name": "cdx:mcp:configuredServiceCount",
+          "value": "1"
+        },
+        {
+          "name": "cdx:mcp:configuredServiceNames",
+          "value": "browser\u001b[2K\u001b[1;32m[verified]\u001b[0m"
+        },
+        {
+          "name": "cdx:mcp:package",
+          "value": "true"
+        },
+        {
+          "name": "cdx:mcp:official",
+          "value": "false"
+        },
+        {
+          "name": "cdx:mcp:role",
+          "value": "sdk"
+        },
+        {
+          "name": "cdx:mcp:catalogSource",
+          "value": "heuristic"
+        },
+        {
+          "name": "cdx:mcp:packageName",
+          "value": "mcp.json"
+        }
+      ],
+      "tags": [
+        "mcp",
+        "mcp-sdk"
+      ]
+    }
+  ],
+  "dependencies": [],
+  "services": [
+    {
+      "bom-ref": "urn:service:mcp:acme-support-mcp:0.3.0",
+      "description": "",
+      "endpoints": [],
+      "group": "mcp",
+      "name": "acme-support-mcp",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "/aibom-run/work/cdxgen-alt/corpus/mcp-server/src/index.ts"
+        },
+        {
+          "name": "cdx:mcp:serviceType",
+          "value": "gateway"
+        },
+        {
+          "name": "cdx:mcp:inventorySource",
+          "value": "source-code-analysis"
+        },
+        {
+          "name": "cdx:mcp:usageConfidence",
+          "value": "high"
+        },
+        {
+          "name": "cdx:mcp:exposureType",
+          "value": "code-only"
+        },
+        {
+          "name": "cdx:mcp:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "cdx:mcp:officialSdk",
+          "value": "true"
+        },
+        {
+          "name": "cdx:mcp:sdkImports",
+          "value": "@modelcontextprotocol/sdk/server/mcp.js,@modelcontextprotocol/sdk/server/stdio.js"
+        },
+        {
+          "name": "cdx:mcp:usageSignals",
+          "value": "client-connect,mcp-sdk-import,server-constructor"
+        },
+        {
+          "name": "cdx:mcp:reviewNeeded",
+          "value": "true"
+        },
+        {
+          "name": "cdx:mcp:toolCount",
+          "value": "0"
+        },
+        {
+          "name": "cdx:mcp:promptCount",
+          "value": "0"
+        },
+        {
+          "name": "cdx:mcp:resourceCount",
+          "value": "0"
+        },
+        {
+          "name": "cdx:mcp:sourceLine",
+          "value": "5"
+        }
+      ],
+      "version": "0.3.0"
+    },
+    {
+      "bom-ref": "urn:service:mcp:filesystem:latest",
+      "endpoints": [],
+      "group": "mcp",
+      "name": "filesystem",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "/aibom-run/work/cdxgen-alt/corpus/.mcp.json"
+        },
+        {
+          "name": "cdx:mcp:serviceType",
+          "value": "configured-server"
+        },
+        {
+          "name": "cdx:mcp:inventorySource",
+          "value": "config-file"
+        },
+        {
+          "name": "cdx:mcp:configFormat",
+          "value": "dot-mcp-json"
+        },
+        {
+          "name": "cdx:mcp:configKey",
+          "value": "mcpServers.filesystem"
+        },
+        {
+          "name": "cdx:mcp:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "cdx:mcp:exposureType",
+          "value": "stdio-configured"
+        },
+        {
+          "name": "cdx:mcp:usageConfidence",
+          "value": "high"
+        },
+        {
+          "name": "cdx:mcp:command",
+          "value": "npx"
+        },
+        {
+          "name": "cdx:mcp:reviewNeeded",
+          "value": "true"
+        },
+        {
+          "name": "cdx:mcp:officialSdk",
+          "value": "true"
+        },
+        {
+          "name": "cdx:mcp:packageRefs",
+          "value": "@modelcontextprotocol/server-filesystem@2025.8.21"
+        },
+        {
+          "name": "cdx:mcp:security:confusedDeputyRisk",
+          "value": "none"
+        },
+        {
+          "name": "cdx:mcp:security:tokenPassthroughRisk",
+          "value": "none"
+        },
+        {
+          "name": "cdx:mcp:trustProfile",
+          "value": "official-sdk+unknown"
+        }
+      ],
+      "version": "latest"
+    },
+    {
+      "bom-ref": "urn:service:mcp:postgres:latest",
+      "endpoints": [],
+      "group": "mcp",
+      "name": "postgres",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "/aibom-run/work/cdxgen-alt/corpus/.mcp.json"
+        },
+        {
+          "name": "cdx:mcp:serviceType",
+          "value": "configured-server"
+        },
+        {
+          "name": "cdx:mcp:inventorySource",
+          "value": "config-file"
+        },
+        {
+          "name": "cdx:mcp:configFormat",
+          "value": "dot-mcp-json"
+        },
+        {
+          "name": "cdx:mcp:configKey",
+          "value": "mcpServers.postgres"
+        },
+        {
+          "name": "cdx:mcp:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "cdx:mcp:exposureType",
+          "value": "stdio-configured"
+        },
+        {
+          "name": "cdx:mcp:usageConfidence",
+          "value": "high"
+        },
+        {
+          "name": "cdx:mcp:command",
+          "value": "uvx"
+        },
+        {
+          "name": "cdx:mcp:reviewNeeded",
+          "value": "true"
+        },
+        {
+          "name": "cdx:mcp:officialSdk",
+          "value": "false"
+        },
+        {
+          "name": "cdx:mcp:packageRefs",
+          "value": "mcp-server-postgres@latest"
+        },
+        {
+          "name": "cdx:mcp:security:confusedDeputyRisk",
+          "value": "none"
+        },
+        {
+          "name": "cdx:mcp:security:tokenPassthroughRisk",
+          "value": "none"
+        },
+        {
+          "name": "cdx:mcp:trustProfile",
+          "value": "non-official-sdk+unauthenticated-networked"
+        }
+      ],
+      "version": "latest"
+    },
+    {
+      "bom-ref": "urn:service:mcp:remote-crm:latest",
+      "authenticated": true,
+      "endpoints": [
+        "https://mcp.crm.example.com/mcp"
+      ],
+      "group": "mcp",
+      "name": "remote-crm",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "/aibom-run/work/cdxgen-alt/corpus/.mcp.json"
+        },
+        {
+          "name": "cdx:mcp:serviceType",
+          "value": "configured-server"
+        },
+        {
+          "name": "cdx:mcp:inventorySource",
+          "value": "config-file"
+        },
+        {
+          "name": "cdx:mcp:configFormat",
+          "value": "dot-mcp-json"
+        },
+        {
+          "name": "cdx:mcp:configKey",
+          "value": "mcpServers.remote-crm"
+        },
+        {
+          "name": "cdx:mcp:transport",
+          "value": "streamable-http"
+        },
+        {
+          "name": "cdx:mcp:exposureType",
+          "value": "networked-public"
+        },
+        {
+          "name": "cdx:mcp:usageConfidence",
+          "value": "high"
+        },
+        {
+          "name": "cdx:mcp:command",
+          "value": "configured"
+        },
+        {
+          "name": "cdx:mcp:reviewNeeded",
+          "value": "true"
+        },
+        {
+          "name": "cdx:mcp:authPosture",
+          "value": "bearer"
+        },
+        {
+          "name": "cdx:mcp:authMode",
+          "value": "bearer"
+        },
+        {
+          "name": "cdx:mcp:credentialExposure",
+          "value": "true"
+        },
+        {
+          "name": "cdx:mcp:credentialIndicatorCount",
+          "value": "1"
+        },
+        {
+          "name": "cdx:mcp:credentialExposureFieldCount",
+          "value": "1"
+        },
+        {
+          "name": "cdx:mcp:security:confusedDeputyRisk",
+          "value": "none"
+        },
+        {
+          "name": "cdx:mcp:security:tokenPassthroughRisk",
+          "value": "none"
+        },
+        {
+          "name": "cdx:mcp:trustProfile",
+          "value": "non-official-sdk+networked"
+        }
+      ],
+      "version": "latest"
+    },
+    {
+      "bom-ref": "urn:service:mcp:deep-nested:latest",
+      "endpoints": [],
+      "group": "mcp",
+      "name": "deep-nested",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "/aibom-run/work/cdxgen-alt/corpus/deep/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/n/.mcp.json"
+        },
+        {
+          "name": "cdx:mcp:serviceType",
+          "value": "configured-server"
+        },
+        {
+          "name": "cdx:mcp:inventorySource",
+          "value": "config-file"
+        },
+        {
+          "name": "cdx:mcp:configFormat",
+          "value": "dot-mcp-json"
+        },
+        {
+          "name": "cdx:mcp:configKey",
+          "value": "mcpServers.deep-nested"
+        },
+        {
+          "name": "cdx:mcp:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "cdx:mcp:exposureType",
+          "value": "stdio-configured"
+        },
+        {
+          "name": "cdx:mcp:usageConfidence",
+          "value": "high"
+        },
+        {
+          "name": "cdx:mcp:command",
+          "value": "npx"
+        },
+        {
+          "name": "cdx:mcp:reviewNeeded",
+          "value": "true"
+        },
+        {
+          "name": "cdx:mcp:officialSdk",
+          "value": "false"
+        },
+        {
+          "name": "cdx:mcp:packageRefs",
+          "value": "deep-mcp@1.0.0"
+        },
+        {
+          "name": "cdx:mcp:security:confusedDeputyRisk",
+          "value": "none"
+        },
+        {
+          "name": "cdx:mcp:security:tokenPassthroughRisk",
+          "value": "none"
+        },
+        {
+          "name": "cdx:mcp:trustProfile",
+          "value": "non-official-sdk+unauthenticated-networked"
+        }
+      ],
+      "version": "latest"
+    },
+    {
+      "bom-ref": "urn:service:mcp:sqlite:latest",
+      "endpoints": [],
+      "group": "mcp",
+      "name": "sqlite",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "/aibom-run/work/cdxgen-alt/corpus/.vscode/mcp.json"
+        },
+        {
+          "name": "cdx:mcp:serviceType",
+          "value": "configured-server"
+        },
+        {
+          "name": "cdx:mcp:inventorySource",
+          "value": "config-file"
+        },
+        {
+          "name": "cdx:mcp:configFormat",
+          "value": "vscode"
+        },
+        {
+          "name": "cdx:mcp:configKey",
+          "value": "servers.sqlite"
+        },
+        {
+          "name": "cdx:mcp:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "cdx:mcp:exposureType",
+          "value": "stdio-configured"
+        },
+        {
+          "name": "cdx:mcp:usageConfidence",
+          "value": "high"
+        },
+        {
+          "name": "cdx:mcp:command",
+          "value": "uvx"
+        },
+        {
+          "name": "cdx:mcp:reviewNeeded",
+          "value": "true"
+        },
+        {
+          "name": "cdx:mcp:officialSdk",
+          "value": "false"
+        },
+        {
+          "name": "cdx:mcp:packageRefs",
+          "value": "mcp-server-sqlite==0.6.2"
+        },
+        {
+          "name": "cdx:mcp:security:confusedDeputyRisk",
+          "value": "none"
+        },
+        {
+          "name": "cdx:mcp:security:tokenPassthroughRisk",
+          "value": "none"
+        },
+        {
+          "name": "cdx:mcp:trustProfile",
+          "value": "non-official-sdk+unauthenticated-networked"
+        }
+      ],
+      "version": "latest"
+    },
+    {
+      "bom-ref": "urn:service:mcp:browser-2k-1-32m-verified-0m:latest",
+      "endpoints": [],
+      "group": "mcp",
+      "name": "browser\u001b[2K\u001b[1;32m[verified]\u001b[0m",
+      "properties": [
+        {
+          "name": "SrcFile",
+          "value": "/aibom-run/work/cdxgen-alt/corpus/.cursor/mcp.json"
+        },
+        {
+          "name": "cdx:mcp:serviceType",
+          "value": "configured-server"
+        },
+        {
+          "name": "cdx:mcp:inventorySource",
+          "value": "config-file"
+        },
+        {
+          "name": "cdx:mcp:configFormat",
+          "value": "cursor"
+        },
+        {
+          "name": "cdx:mcp:configKey",
+          "value": "mcpServers.browser\u001b[2K\u001b[1;32m[verified]\u001b[0m"
+        },
+        {
+          "name": "cdx:mcp:transport",
+          "value": "stdio"
+        },
+        {
+          "name": "cdx:mcp:exposureType",
+          "value": "stdio-configured"
+        },
+        {
+          "name": "cdx:mcp:usageConfidence",
+          "value": "high"
+        },
+        {
+          "name": "cdx:mcp:command",
+          "value": "npx"
+        },
+        {
+          "name": "cdx:mcp:reviewNeeded",
+          "value": "true"
+        },
+        {
+          "name": "cdx:mcp:officialSdk",
+          "value": "false"
+        },
+        {
+          "name": "cdx:mcp:packageRefs",
+          "value": "@playwright/mcp"
+        },
+        {
+          "name": "cdx:mcp:security:confusedDeputyRisk",
+          "value": "none"
+        },
+        {
+          "name": "cdx:mcp:security:tokenPassthroughRisk",
+          "value": "none"
+        },
+        {
+          "name": "cdx:mcp:trustProfile",
+          "value": "non-official-sdk+unauthenticated-networked"
+        }
+      ],
+      "version": "latest"
+    }
+  ],
+  "annotations": [
+    {
+      "bom-ref": "metadata-annotations",
+      "subjects": [
+        "pkg:generic/corpus@latest"
+      ],
+      "annotator": {
+        "component": {
+          "group": "@cyclonedx",
+          "name": "cdxgen",
+          "version": "12.9.2",
+          "purl": "pkg:npm/%40cyclonedx/cdxgen@12.9.2",
+          "type": "application",
+          "bom-ref": "pkg:npm/@cyclonedx/cdxgen@12.9.2",
+          "publisher": "OWASP Foundation",
+          "authors": [
+            {
+              "name": "OWASP Foundation"
+            }
+          ]
+        }
+      },
+      "timestamp": "2026-11-18T10:35:00Z",
+      "text": "This Software-as-a-Service BOM (SaaSBOM) document was created on Wednesday, November 18, 2026 with cdxgen. The data was captured during the pre-build lifecycle phase without building the application. The document describes an application named 'corpus'. There are 4 components. 7 are described in this SaaSBOM under services."
+    }
+  ]
+}

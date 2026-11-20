@@ -215,7 +215,7 @@ jobs:
           gh api -H 'Accept: application/vnd.github.raw'
           "repos/$GITHUB_REPOSITORY/contents/.nexus-symbiote/reviewed.json?ref=$BASE_SHA"
           > "$RUNNER_TEMP/reviewed.json"
-      - uses: Hunzee-VC/Nexus-Symbiote@<reviewed-40-character-commit-sha>
+      - uses: aisecnomad/Nexus-Symbiote@<reviewed-40-character-commit-sha>
         env:
           NEXUS_SYMBIOTE_SOURCE_BINDING_KEY: ${{ secrets.AGENTBOM_BINDING_KEY }}
         with:

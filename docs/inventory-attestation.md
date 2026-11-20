@@ -282,8 +282,9 @@ undecodable bytes are replaced with U+FFFD, a U+FFFD after the `##` breaks a
 `##name[` CI log command, and it is cut to 255 characters. Verification does not compare
 it with the file name you pass. Unlike the runtime contracts, whose subject is a
 contract digest, the subject here is a file, as generic in-toto tooling expects. The
-predicate type is in the repository's current namespace; the runtime contracts'
-predicate types keep the project's original one.
+predicate type names the Hunzee-VC organization, which owned the repository when the
+type was minted; the runtime contracts' predicate types name aisecnomad. Both are
+stable type identifiers, not links, and do not change when the repository moves.
 
 The predicate:
 

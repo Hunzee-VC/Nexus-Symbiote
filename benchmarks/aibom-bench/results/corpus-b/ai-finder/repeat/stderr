@@ -1,0 +1,9 @@
+TLSH library not available. Install with: pip install python-tlsh
+Scanning /aibom-run/work/ai-finder/corpus...
+Scanned 15 files in 817ms
+Found 22 AI artifacts
+Building component relationships...
+Warning: --relationships requires Python 3.10+ (Relationship analysis requires tree-sitter which needs Python 3.10+. Install with: pip install 'ai-finder[relationships]' (Python 3.10+)). Skipping relationship analysis.
+Knowledge base auto-initialized at /aibom-run/work/ai-finder/home/.ai-finder/kb/ai-finder.db
+Enriching with KB metadata...
+Output written to /aibom-run/resultsB/ai-finder/repeat/report.json

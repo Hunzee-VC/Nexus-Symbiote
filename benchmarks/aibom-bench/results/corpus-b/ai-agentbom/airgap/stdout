@@ -1,0 +1,16 @@
+Wrote /aibom-run/resultsB/ai-agentbom/airgap/agentbom.json
+Wrote /aibom-run/resultsB/ai-agentbom/airgap/agentbom.md
+Wrote /aibom-run/resultsB/ai-agentbom/airgap/agentbom.cdx.json
+Wrote /aibom-run/resultsB/ai-agentbom/airgap/agentbom.mmd
+Wrote /aibom-run/resultsB/ai-agentbom/airgap/agentbom.sarif
+Risk: high (65/100)
+
+Reports written to: /aibom-run/resultsB/ai-agentbom/airgap/
+
+Next:
+  Open HTML report:
+    agentbom scan /aibom-run/work/ai-agentbom/corpus --output-dir /aibom-run/resultsB/ai-agentbom/airgap --html --open
+
+  Start policy review:
+    agentbom init
+    agentbom scan /aibom-run/work/ai-agentbom/corpus --output-dir /aibom-run/resultsB/ai-agentbom/airgap --policy agentbom.toml --html --open
