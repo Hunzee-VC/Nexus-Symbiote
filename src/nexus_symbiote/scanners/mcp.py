@@ -2769,7 +2769,7 @@ class MCPScanner(Scanner):
                 continue
             # Prepared once per file and reused for every server and diagnostic.
             file_secrets = SecretScrubber(values)
-            configs = {id(config): config for config in [*dict(entries).values(), *read.dropped]}
+            configs = {id(config): config for config in [*(c for _, c in entries), *read.dropped]}
             for server, hits in server_hits.items():
                 literals.extend(_server_literals(configs[server], hits))
             if len(file_secrets) > MAX_SECRETS_PER_FILE:
