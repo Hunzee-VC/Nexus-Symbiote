@@ -15,6 +15,7 @@ import io
 import math
 import os
 import re
+from bisect import bisect_left
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,7 +23,7 @@ from typing import Any
 
 from packaging.version import InvalidVersion, Version
 
-from nexus_symbiote import __version__
+from nexus_symbiote import __version__, limits
 from nexus_symbiote.advisories import (
     MAX_ADVISORIES,
     AdvisoryReport,
@@ -48,6 +49,8 @@ _SEMVER_RE = re.compile(
     r"(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$"
 )
 _SUPPORTED_RANGE_TYPES = frozenset({"ECOSYSTEM", "SEMVER"})
+# Steps of evaluating a range, or of filtering its fixes, that cost about what one match does.
+_CHEAP_STEPS = 32
 _SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "unknown": 4}
 
 
@@ -92,19 +95,19 @@ def _semver_key(raw: str) -> tuple[int, int, int, int, tuple[tuple[int, int | st
     return (major, minor, patch, 0, parts)
 
 
-def _compare_versions(ecosystem: str, left: str, right: str) -> int | None:
+def _version_key(ecosystem: str, raw: str) -> Any | None:
     if ecosystem == "PyPI":
         try:
-            lv, rv = Version(left), Version(right)
+            return Version(raw)
         except InvalidVersion:
             return None
-        return -1 if lv < rv else (1 if lv > rv else 0)
-    if ecosystem == "npm":
-        lk, rk = _semver_key(left), _semver_key(right)
-        if lk is None or rk is None:
-            return None
-        return -1 if lk < rk else (1 if lk > rk else 0)
-    return None
+    return _semver_key(raw) if ecosystem == "npm" else None
+
+
+def _compare(left: int | None, right: int | None) -> int | None:
+    if left is None or right is None:
+        return None
+    return (left > right) - (left < right)
 
 
 def _parse_epss_unit(raw: object, field_name: str) -> float:
@@ -276,16 +279,43 @@ def load_epss_catalog(path: Path) -> tuple[dict[str, _EPSSEntry], str]:
     return index, hash_bytes(data)
 
 
-def _range_matches(ecosystem: str, version: str, rng: dict[str, Any]) -> tuple[bool, list[str]]:
-    """Evaluate one OSV range by version intervals (order-independent per OSV spec)."""
+class _MatchBudgetError(Exception):
+    pass
+
+
+class _MatchBudget:
+    def __init__(self, units: int) -> None:
+        self.left = units
+
+    def spend(self, units: int) -> None:
+        self.left -= units
+        if self.left < 0:
+            raise _MatchBudgetError
+
+
+@dataclass(frozen=True)
+class _Range:
+    """One OSV range; a version is a string until its package is ranked, then a position."""
+
+    zero_intro: bool
+    intros: tuple[Any, ...]
+    fixes: tuple[tuple[Any, str], ...]
+    last_affected: tuple[Any, ...]
+    limits: tuple[Any, ...]
+
+    def versions(self) -> tuple[Any, ...]:
+        return (*self.intros, *(fix for fix, _ in self.fixes), *self.last_affected, *self.limits)
+
+
+def _read_range(rng: dict[str, Any]) -> _Range | None:
     raw_type = rng.get("type")
     if raw_type is not None and (
         not isinstance(raw_type, str) or raw_type.upper() not in _SUPPORTED_RANGE_TYPES
     ):
-        return False, []
+        return None
     events = rng.get("events")
     if not isinstance(events, list):
-        return False, []
+        return None
 
     has_zero_intro = False
     intros: list[str] = []
@@ -313,74 +343,154 @@ def _range_matches(ecosystem: str, version: str, rng: dict[str, Any]) -> tuple[b
             last_affected.append(ev["last_affected"].strip())
         elif "limit" in ev and isinstance(ev["limit"], str) and ev["limit"].strip():
             limits.append(ev["limit"].strip())
+    return _Range(
+        has_zero_intro,
+        tuple(intros),
+        tuple((fix, fix) for fix in fixed_versions),
+        tuple(last_affected),
+        tuple(limits),
+    )
 
-    if any(
-        (c := _compare_versions(ecosystem, version, lim)) is not None and c >= 0 for lim in limits
-    ):
-        return False, []
 
-    best_intro: str | None = None
-    found_intro = has_zero_intro
-    for intro in intros:
-        cmp_v = _compare_versions(ecosystem, intro, version)
+def _in_range(version: int | None, rng: _Range) -> bool:
+    """Evaluate one ranked OSV range by version intervals (order-independent per OSV spec)."""
+    if any((c := _compare(version, lim)) is not None and c >= 0 for lim in rng.limits):
+        return False
+
+    best_intro: int | None = None
+    found_intro = rng.zero_intro
+    for intro in rng.intros:
+        cmp_v = _compare(intro, version)
         if cmp_v is None or cmp_v > 0:
             continue
         found_intro = True
-        if best_intro is None or (
-            (cb := _compare_versions(ecosystem, intro, best_intro)) is not None and cb > 0
-        ):
+        if best_intro is None or ((cb := _compare(intro, best_intro)) is not None and cb > 0):
             best_intro = intro
     if not found_intro:
-        return False, []
+        return False
 
-    for fix in fixed_versions:
-        cmp_v = _compare_versions(ecosystem, fix, version)
+    for fix, _ in rng.fixes:
+        cmp_v = _compare(fix, version)
         if cmp_v is None or cmp_v > 0:
             continue
-        if best_intro is None or (
-            (ci := _compare_versions(ecosystem, best_intro, fix)) is not None and ci <= 0
-        ):
-            return False, []
+        if best_intro is None or ((ci := _compare(best_intro, fix)) is not None and ci <= 0):
+            return False
 
-    for last in last_affected:
-        cmp_v = _compare_versions(ecosystem, last, version)
+    for last in rng.last_affected:
+        cmp_v = _compare(last, version)
         if cmp_v is None or cmp_v >= 0:
             continue
-        if best_intro is None or (
-            (ci := _compare_versions(ecosystem, best_intro, last)) is not None and ci <= 0
-        ):
-            return False, []
-
-    relevant_fixes = [
-        fix
-        for fix in fixed_versions
-        if (cf := _compare_versions(ecosystem, fix, version)) is not None and cf > 0
-    ]
-    return True, relevant_fixes
+        if best_intro is None or ((ci := _compare(best_intro, last)) is not None and ci <= 0):
+            return False
+    return True
 
 
-def _matches_affected_version(
-    affected: dict[str, Any], ecosystem: str, version: str
-) -> tuple[bool, list[str]]:
-    """Evaluate version lists and OSV ranges for an already-package-matched affected block."""
-    fixed_versions: list[str] = []
-    matched = False
-    raw_versions = affected.get("versions")
-    if isinstance(raw_versions, list) and any(
-        isinstance(ver, str) and _compare_versions(ecosystem, version, ver) == 0
-        for ver in raw_versions
-    ):
-        matched = True
-    raw_ranges = affected.get("ranges")
-    if isinstance(raw_ranges, list):
-        for rng in raw_ranges:
-            if not isinstance(rng, dict):
-                continue
-            in_range, rng_fixed = _range_matches(ecosystem, version, rng)
-            if in_range:
-                matched = True
-                fixed_versions.extend(rng_fixed)
-    return matched, sorted(set(fixed_versions))
+class _PackageMatcher:
+    """Every affected block of one package, indexed by the versions it matches.
+
+    Whether a range matches depends on a version only through how it compares with the
+    range's own events. The distinct versions a package's ranges name are ranked: one has
+    the odd position ``2 * rank + 1``, and the versions between two neighbours share the
+    even position between them. ``_in_range`` runs once per position a range can tell apart,
+    and each run of matching positions is stored in a segment tree, so a component version
+    costs one bisection plus the blocks that match it, however many do not.
+    """
+
+    def __init__(
+        self,
+        ecosystem: str,
+        blocks: list[tuple[_ParsedAdvisory, dict[str, Any]]],
+        budget: _MatchBudget,
+    ) -> None:
+        self._ecosystem = ecosystem
+        self._advisories = [adv for adv, _ in blocks]
+        self._listed: dict[Any, list[tuple[int, _Range | None]]] = {}
+        self._nodes: dict[int, list[tuple[int, _Range | None]]] = {}
+        self._unparsed: list[tuple[int, _Range | None]] = []
+
+        ranges: list[tuple[int, _Range]] = []
+        for number, (_, affected) in enumerate(blocks):
+            raw_versions = affected.get("versions")
+            for ver in raw_versions if isinstance(raw_versions, list) else ():
+                if isinstance(ver, str) and (key := _version_key(ecosystem, ver)) is not None:
+                    self._listed.setdefault(key, []).append((number, None))
+            raw_ranges = affected.get("ranges")
+            for raw_range in raw_ranges if isinstance(raw_ranges, list) else ():
+                rng = _read_range(raw_range) if isinstance(raw_range, dict) else None
+                if rng is not None:
+                    budget.spend((len(rng.versions()) + 1) ** 2 // _CHEAP_STEPS)
+                    ranges.append((number, rng))
+
+        keys = {text: _version_key(ecosystem, text) for _, rng in ranges for text in rng.versions()}
+        self._keys = sorted({key for key in keys.values() if key is not None})
+        position = {key: 2 * rank + 1 for rank, key in enumerate(self._keys)}
+        self._leaves = 2 * len(self._keys) + 1
+
+        def at(text: str) -> int | None:
+            return None if (key := keys[text]) is None else position[key]
+
+        for number, raw in ranges:
+            rng = _Range(
+                raw.zero_intro,
+                tuple(at(text) for text in raw.intros),
+                tuple((at(text), text) for text, _ in raw.fixes),
+                tuple(at(text) for text in raw.last_affected),
+                tuple(at(text) for text in raw.limits),
+            )
+            if _in_range(None, rng):
+                self._unparsed.append((number, None))
+            start: int | None = None
+            low = 0
+            for named in (*sorted({p for p in rng.versions() if p is not None}), self._leaves):
+                for probe in (low, named)[: 1 if named == self._leaves else 2]:
+                    if _in_range(probe, rng):
+                        start = probe if start is None else start
+                    elif start is not None:
+                        self._store(start, probe - 1, (number, rng))
+                        start = None
+                low = named + 1
+            if start is not None:
+                self._store(start, self._leaves - 1, (number, rng))
+
+    def _store(self, first: int, last: int, entry: tuple[int, _Range | None]) -> None:
+        low, high = first + self._leaves, last + self._leaves + 1
+        while low < high:
+            if low & 1:
+                self._nodes.setdefault(low, []).append(entry)
+                low += 1
+            if high & 1:
+                high -= 1
+                self._nodes.setdefault(high, []).append(entry)
+            low >>= 1
+            high >>= 1
+
+    def matches(
+        self, version: str, budget: _MatchBudget
+    ) -> list[tuple[_ParsedAdvisory, list[str]]]:
+        """Each matching block's advisory and the fixes above ``version``, in bundle order."""
+        key = _version_key(self._ecosystem, version)
+        position = -1
+        hits = self._unparsed
+        if key is not None:
+            rank = bisect_left(self._keys, key)
+            exact = rank < len(self._keys) and self._keys[rank] == key
+            position = 2 * rank + 1 if exact else 2 * rank
+            hits = list(self._listed.get(key, ()))
+            node = position + self._leaves
+            while node:
+                hits.extend(self._nodes.get(node, ()))
+                node >>= 1
+        found: list[tuple[_ParsedAdvisory, list[str]]] = []
+        for number, rng in sorted(hits, key=lambda hit: hit[0]):
+            fixes = () if rng is None else rng.fixes
+            budget.spend(1 + len(fixes) // _CHEAP_STEPS)
+            found.append(
+                (
+                    self._advisories[number],
+                    [text for at, text in fixes if at is not None and at > position],
+                )
+            )
+        return found
 
 
 def _build_package_index(
@@ -552,20 +662,29 @@ def match_offline_advisories(
         )
         return report, provenance
 
+    bound = limits.bound("advisory-matches")
+    budget = _MatchBudget(bound.value)
+    matchers: dict[tuple[str, str], _PackageMatcher] = {}
     for bom_ref, eco, name, version in targets:
         report.components_checked += 1
         report.queries.append(
             {"component_ref": bom_ref, "ecosystem": eco, "name": name, "version": version}
         )
         matched_by_adv: dict[str, tuple[_ParsedAdvisory, list[str]]] = {}
-        for adv, aff in pkg_index.get((eco.lower(), name), ()):
-            is_match, fixed = _matches_affected_version(aff, eco, version)
-            if is_match:
-                existing = matched_by_adv.get(adv.record_id)
-                if existing is None:
-                    matched_by_adv[adv.record_id] = (adv, list(fixed))
-                else:
-                    existing[1].extend(fixed)
+        package = (eco.lower(), name)
+        try:
+            if package not in matchers:
+                matchers[package] = _PackageMatcher(eco, pkg_index.get(package, []), budget)
+            found = matchers[package].matches(version, budget)
+        except _MatchBudgetError:
+            report.errors.append(f"Offline advisory matching stopped: {bound.exceeded()}")
+            return report, provenance
+        for adv, fixed in found:
+            existing = matched_by_adv.get(adv.record_id)
+            if existing is None:
+                matched_by_adv[adv.record_id] = (adv, fixed)
+            else:
+                existing[1].extend(fixed)
         raw_matches = [(adv, sorted(set(fx))) for adv, fx in matched_by_adv.values()]
         for entry in _deduplicate_matches(raw_matches):
             if len(report.advisories) >= MAX_ADVISORIES:

@@ -124,6 +124,13 @@ SPECS: dict[str, LimitSpec] = {
             "Memory and context files whose @path imports the prompt collector follows, "
             "and distinct import targets it looks up, in one collection.",
         ),
+        LimitSpec(
+            "advisory-matches",
+            "count",
+            1_000_000_000,
+            "Advisory records `advisories --offline-db` matches to package versions in one "
+            "run, before aliases merge; evaluating a range with many events counts too.",
+        ),
     )
 }
 
@@ -143,6 +150,7 @@ class CollectionLimits:
     ts_nodes: int = 20_000
     python_nodes: int = 200_000
     import_lookups: int = 5_000
+    advisory_matches: int = 2_000_000
 
     def value(self, name: str) -> int:
         value: int = getattr(self, SPECS[name].attribute)

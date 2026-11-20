@@ -62,7 +62,8 @@ malformed or out-of-range value, or a name set twice in one place is a usage err
 
 Limits apply to every command that collects from a project: `scan`, `baseline`,
 `validate --project` and `risk --project`, which collect the project again, and
-`verify-artifact`, which hashes under `model-bytes`. `import-shadowscan` reads one
+`verify-artifact`, which hashes under `model-bytes`. `advisories --offline-db`
+matches under `advisory-matches`. `import-shadowscan` reads one
 report under a [fixed bound](#fixed-bounds). Nothing in the scanned checkout can
 change a limit, including the project policy file `.nexus-symbiote.yaml`. Use the
 same limits for `scan` and for a later `validate --project` or `risk --project` of
@@ -94,6 +95,7 @@ The pre-commit hooks add their arguments after the command, so set
 | `ts-nodes` | 20000 | 10000000 | Syntax nodes in one TypeScript or JavaScript file the mcp collector parses for MCP servers and client transports. | That file is not collected. |
 | `python-nodes` | 200000 | 10000000 | Syntax nodes in one Python file the mcp collector parses for MCP servers, clients and agent tools, counted as the Python that runs the scan parses the file. | That file is not collected. |
 | `import-lookups` | 5000 | 1000000 | Memory files whose `@path` imports the prompt collector follows, and distinct import targets it looks up, together in one collection. A monorepo of 2,000 packages whose `CLAUDE.md` files each import three shared documents uses 2,003. | The imports of the file being followed, and of every file after it, are not inventoried. |
+| `advisory-matches` | 2000000 | 1000000000 | Work of one `advisories --offline-db` run that grows with the inventory and the bundle together: each advisory record that matches a package version, counted before alias pairs merge, plus one for every 32 `fixed` events of the matching range, and for a range of `n` versions `(n + 1)² / 32` when it is first evaluated. Advisories that do not match a version cost nothing here. The report stops at 20,000 advisories, so the default is reached only when more than 100 records merge into each one, or by a range with over 8,000 events. | Matching stops; the report holds one error naming the limit, is not complete, and the command exits 1. |
 
 A bounded listing may fetch one additional entry to detect that it does not fit;
 for a budget of `N` entries, an overflowing listing observes at most `N + 1`
