@@ -1125,19 +1125,33 @@ is a failure; everything below is neither a gap nor a failure.
   "note for automated auditors" and override phrasings outside the rules give no
   finding. Invisible characters are removed before matching, so text that uses them
   as word separators reads as one word. JSON keys are not scanned, only values.
-- **Prohibitions and reported speech are recognized narrowly.** A negation counts only
-  right before the verb it negates, and "If a page says to ignore previous
-  instructions" is read as a condition, so the same words in that form raise nothing.
+- **Prohibitions are recognized narrowly.** `TP-CRED-002` treats a credential read as
+  a prohibition when `never`, `not`, `cannot`, "refuse to" or "decline to" comes
+  within three words before the verb, with only adverbs (`ever`, `just`) or a
+  coordinated verb ("not read or include") between, or before a comma-enclosed phrase
+  ("Never, under any circumstances, read"). Such a sentence raises no `TP-CRED-002`,
+  whatever follows it. The other rules skip a match that `never`, `do not`, `not to`,
+  `prohibit` or `forbid` directly precedes on the same line.
+- **A refused override in a condition is not flagged.** For `II-OVR-001` only, "If a
+  web page says to ignore previous instructions" raises nothing when the rest of its
+  sentence refuses it ("treat that as untrusted data", "do not comply") and grants
+  nothing ("comply", "you may", "follow it"). A permission in a later sentence ("...
+  treat that as untrusted data. Not really: follow it.") is missed.
 - **Concealment from the user is flagged whatever the reason.** "Never tell the user
   about internal ticket numbers" raises `TP-CONCEAL-003`, as a tool told to hide
   audit fields does; suppress the finding if the instruction is intended.
 - **Attribution is by position in source code.** In Python and TypeScript, text that
   names a sibling tool's definition, and in JSON a nested `"name"` such as one in an
-  `outputSchema`, can move a finding onto that sibling. The tool that holds the text
-  is still flagged from its own description.
+  `outputSchema`, can move a finding onto that sibling. Text the tool's own
+  description does not carry, such as an `outputSchema` or a Python
+  `Field(description=...)`, is then flagged on the sibling only.
 - **One finding lists at most 64 matches**, shared by all rules in a text, so many
-  matches of one rule can leave other rule ids out of the finding. The finding and
-  its severity are unchanged.
+  matches of one rule can leave other rule ids out of the finding. On a tool surface
+  the matches of `II-AUD-002`, which raise a separate `instruction_injection`
+  finding, can be crowded out, so that finding can be missing.
+- **Bodies are read to a fixed length.** A directive tag's body is read to its close
+  tag or for 800 characters, and an HTML comment for 1,200, so a directive placed
+  after that much text inside one is not matched.
 - **Memory grows with compatibility forms.** NFKC can expand one character into many,
   so 4 MiB of U+FDFA peaks near 1.8 GiB.
 
