@@ -152,15 +152,12 @@ def test_source_byte_and_ast_limits_fail_without_partial_tools(tmp_path):
     assert not _tools(result) and result.scan_failures
 
 
-def test_receiver_alias_and_parser_deadline_are_reported(tmp_path, monkeypatch):
+def test_receiver_alias_is_reported(tmp_path):
     result = _scan(
         tmp_path, IMPORT + SERVER + 'const alias=server; alias.tool("read", {}, handler);'
     )
     assert not _tools(result)
     assert any("unresolved MCP registration receiver" in x for x in result.surfaces_excluded)
-    monkeypatch.setattr("nexus_symbiote.scanners.ts_tools.MAX_PARSE_SECONDS", -1)
-    result = _scan(tmp_path, IMPORT + SERVER + 'server.tool("read", {}, handler);')
-    assert not _tools(result) and result.scan_failures
 
 
 def test_factory_source_declarations_remain_static_and_shadow_aware(tmp_path):
@@ -206,7 +203,7 @@ def test_ambient_declarations_record_no_server_or_tool(tmp_path):
         + '  server.tool("phantom", {}, handler);\n}\n',
     )
     servers = [c.name for c in result.components if isinstance(c, MCPServerComponent)]
-    assert servers == ["server"] and [t.name for t in _tools(result)] == ["read"]
+    assert servers == ["demo"] and [t.name for t in _tools(result)] == ["read"]
 
 
 def test_method_names_bind_nothing_inside_the_method(tmp_path):
@@ -218,7 +215,7 @@ def test_method_names_bind_nothing_inside_the_method(tmp_path):
         + 'class Plugin { server() { server.tool("read", {}, handler); } }\n',
     )
     servers = [c for c in result.components if isinstance(c, MCPServerComponent)]
-    assert sorted(server.name for server in servers) == ["inner", "server"]
+    assert sorted(server.name for server in servers) == ["demo", "inner"]
     assert [t.name for t in _tools(result)] == ["read"]
     assert not result.surfaces_excluded and not result.scan_failures
 

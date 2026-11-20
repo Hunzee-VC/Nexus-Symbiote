@@ -168,7 +168,7 @@ class TestFullPipeline:
         project.mkdir()
         _create_full_project(project)
         unsafe = project / "models" / "extra.pkl"
-        unsafe.write_bytes(b"\x00" * 50)
+        unsafe.write_bytes(b"\x80\x04N.")
         runner = CliRunner()
         bom_path = tmp_path / "risky.json"
         scanned = runner.invoke(main, ["scan", "--report-only", str(project), "-o", str(bom_path)])

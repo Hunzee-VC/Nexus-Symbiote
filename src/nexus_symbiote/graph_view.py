@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import heapq
 import html
+import re
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -236,6 +237,17 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+_RECORDED = re.compile(r" \(recorded \d+ times\)$")
+
+
+def _clip_gap(gap: str) -> str:
+    """Clip a gap to DETAIL_CHARS, keeping the record count a grouped failure ends with."""
+    suffix = _RECORDED.search(gap)
+    if suffix is None or len(gap) <= DETAIL_CHARS:
+        return _clip(gap, DETAIL_CHARS)
+    return _clip(gap[: suffix.start()], DETAIL_CHARS - len(suffix[0])) + suffix[0]
+
+
 def build_view(bom: AIBOM, *, max_nodes: int, focus: str | None = None) -> GraphView:
     """The view of ``bom``, or of the potential blast radius of ``focus`` in it.
 
@@ -411,6 +423,20 @@ def _exposure(
     rank = {node.index: rank for rank, node in enumerate(sorted(nodes, key=attrgetter("ref")))}
     weight = [node.weight for node in nodes]
     sources = [node.index for node in nodes if node.type in _SOURCE_TYPES]
+    # A source that reaches no sink has no path: the first left unsearched. One search
+    # back from the sinks finds them all, in time linear in the nodes and edges.
+    predecessors: list[list[int]] = [[] for _ in nodes]
+    for origin, successors_of in enumerate(adjacency):
+        for successor in successors_of:
+            predecessors[successor].append(origin)
+    reaches = [bool(value) for value in weight]
+    pending = [index for index, reached in enumerate(reaches) if reached]
+    while pending:
+        for previous in predecessors[pending.pop()]:
+            if not reaches[previous]:
+                reaches[previous] = True
+                pending.append(previous)
+    sources.sort(key=lambda source: not reaches[source])
     kept = sources[:MAX_SOURCES]
     best: list[tuple[int, int, int, int, int, int]] = []
     total = 0
@@ -454,7 +480,7 @@ def _coverage(claim: CompletenessClaim | None) -> Coverage:
         collection=assessment.status.value,
         scan_failures=len(claim.scan_failures) if claim is not None else 0,
         surfaces_excluded=len(claim.surfaces_excluded) if claim is not None else 0,
-        gaps=tuple(_clip(gap, DETAIL_CHARS) for gap in gaps[:MAX_GAPS]),
+        gaps=tuple(_clip_gap(gap) for gap in gaps[:MAX_GAPS]),
         gaps_omitted=max(0, len(gaps) - MAX_GAPS),
     )
 

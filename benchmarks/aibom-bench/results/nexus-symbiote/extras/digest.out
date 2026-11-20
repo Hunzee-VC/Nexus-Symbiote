@@ -1,0 +1,6 @@
+file_sha256: sha256:2f1a94f0b54127f09a358d176bc38394b16a145acdac4b9a502fdf4804e7d534
+canonical_digest: sha256:1c8b8b627ac6322300f188ceb66da8a5908ef827dd6eadd72d6febd9f3fa85d4
+content_digest: sha256:36a57591cf9ba878fcaf226461051fc948f964dfb77316efe821e44675c423ee
+content_profile: nexus-symbiote/inventory-content/v1
+spec_version: 1.1.0
+components: 61

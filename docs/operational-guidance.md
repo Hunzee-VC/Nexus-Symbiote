@@ -21,7 +21,7 @@ This page collects the practices that keep a Nexus SymBiote deployment inside th
 
 ## Continuity
 
-The project currently has a single maintainer. Organizations with supplier-continuity requirements should treat that as an unresolved risk until a second owner is added to the organization, the PyPI project and the security contacts. See [governance](../GOVERNANCE.md#continuity).
+The project currently has a single maintainer. Organizations with supplier-continuity requirements should treat that as an unresolved risk until a second administrator is added to the repository, the PyPI project and the security contacts. See [governance](../GOVERNANCE.md#continuity).
 
 ## Larger engineering items (not yet implemented)
 

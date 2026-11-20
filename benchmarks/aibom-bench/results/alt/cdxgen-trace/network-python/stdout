@@ -1,0 +1,59 @@
++------------------------+------------+--------------------------+----------------------------------------------------+
+|                                           SECURE MODE: Environment audit                                            |
+|                                                   3 high   8 low                                                    |
++------------------------+------------+--------------------------+----------------------------------------------------+
+| Category               | Severity   | Variable(s)              | Details                                            |
++------------------------+------------+--------------------------+----------------------------------------------------+
+| Environment Variable   | HIGH       | NODE_PATH                | NODE_PATH is set and may cause unexpected modules  |
+|                        |            |                          | to be loaded, enabling module-resolution poisoning |
+|                        |            |                          | .                                                  |
+|                        |            |                          | Mitigation: Unset NODE_PATH before processing untr |
+|                        |            |                          | usted repositories.                                |
++------------------------+------------+--------------------------+----------------------------------------------------+
+| Environment Variable   | HIGH       | DENO_CERT                | DENO_CERT is set to a custom TLS certificate autho |
+|                        |            |                          | rity. A custom CA combined with an outbound proxy  |
+|                        |            |                          | can enable man-in-the-middle attacks on registry l |
+|                        |            |                          | ookups and SBOM uploads.                           |
+|                        |            |                          | Mitigation: Unset DENO_CERT unless you explicitly  |
+|                        |            |                          | require a private CA bundle. Prefer the system tru |
+|                        |            |                          | st store.                                          |
++------------------------+------------+--------------------------+----------------------------------------------------+
+| Privilege              | HIGH       | UID                      | cdxgen is running as root (UID 0). Any code execut |
+|                        |            |                          | ed during SBOM generation—including package manage |
+|                        |            |                          | r install hooks—will run with full system privileg |
+|                        |            |                          | es.                                                |
+|                        |            |                          | Mitigation: Run cdxgen as a non-privileged user. U |
+|                        |            |                          | se a container or VM with a dedicated low-privileg |
+|                        |            |                          | e account.                                         |
++------------------------+------------+--------------------------+----------------------------------------------------+
+| Credential Exposure    | LOW        | AWS_SECRET_ACCESS_KEY    | Credential-like environment variables are set. Bui |
+|                        |            | CLAUDE_CODE_CHILD_SESSIO | ld tools or install scripts invoked during SBOM ge |
+|                        |            | N                        | neration may read inherited environment variables. |
+|                        |            | CLAUDE_CODE_MESSAGING_TO | Mitigation: Unset unneeded secrets when scanning u |
+|                        |            | KEN                      | ntrusted repositories. Prefer ephemeral, scoped CI |
+|                        |            | CLAUDE_CODE_USER_EMAIL   |  credentials injected only for the step that needs |
+|                        |            | CLOUDSDK_AUTH_ACCESS_TOK |  them.                                             |
+|                        |            | EN                       |                                                    |
+|                        |            | GH_TOKEN                 |                                                    |
+|                        |            | GITHUB_TOKEN             |                                                    |
++------------------------+------------+--------------------------+----------------------------------------------------+
+| Network Interception   | LOW        | HTTPS_PROXY              | An outbound proxy is configured via HTTPS_PROXY. R |
+|                        |            |                          | egistry lookups, dependency downloads, and SBOM up |
+|                        |            |                          | loads will be routed through this proxy.           |
+|                        |            |                          | Mitigation: Verify the proxy is trusted and uses T |
+|                        |            |                          | LS. Remove the variable if not required for this s |
+|                        |            |                          | can.                                               |
++------------------------+------------+--------------------------+----------------------------------------------------+
+[1;35mSECURE MODE: DO NOT run cdxgen with root privileges.[0m
+Generate BOM for project types: ai, python, js
+Executing 'npm install --ignore-scripts --no-audit --no-bin-links --git=git' in /aibom-run/work/cdxgen-trace/corpus/node_modules/@acme/legacy-tool
+Executing 'npm install --ignore-scripts --no-audit --no-bin-links --git=git' in /aibom-run/work/cdxgen-trace/corpus/mcp-server
+Constructing the actual dependency hierarchy from /aibom-run/work/cdxgen-trace/corpus/mcp-server/node_modules.
+The version or the version specifiers used for a dependency is invalid. Try with a different python type such as -t python310 or -t python39.
+Original error from pip:
+
+ERROR: Ignored the following versions that require a different python version: 3.0.0 Requires-Python >=3.8,<3.13; 3.0.1 Requires-Python >=3.8,<3.13; 3.0.2 Requires-Python >=3.8,<3.13; 3.0.3 Requires-Python >=3.8,<3.13
+ERROR: Could not find a version that satisfies the requirement langchain-acme-utils==0.3.1 (from acme-support-agent) (from versions: none)
+ERROR: No matching distribution found for langchain-acme-utils==0.3.1
+
+Set the environment variable CDXGEN_GEM_HOME or GEM_HOME to collect the module names for installed gems.

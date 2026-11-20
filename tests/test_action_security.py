@@ -280,7 +280,7 @@ def test_real_entry_point_ignores_untrusted_python_path_and_policy(tmp_path, val
         "scan:\n  scanners: [prompt]\nvalidate:\n  require_completeness: false\n  require_integrity: false\n"
     )
     (project / "CLAUDE.md").write_text("Review issues with read-only tools.\n")
-    (project / "model.pkl").write_bytes(b"unsafe-format-fixture")
+    (project / "model.pkl").write_bytes(b"\x80\x04N.")
     env = {
         **os.environ,
         "GITHUB_WORKSPACE": str(tmp_path),

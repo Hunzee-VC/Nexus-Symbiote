@@ -1,0 +1,20 @@
+Vendored schema resources retain their upstream licences; they are benchmark inputs, not
+part of the Nexus SymBiote package (the source distribution excludes this directory).
+
+CycloneDX schemas (bom-1.5, bom-1.6, bom-1.7, jsf-0.82, spdx, cryptography-defs) are from the
+OWASP CycloneDX specification project, copyright OWASP Foundation, Apache License 2.0:
+https://github.com/CycloneDX/specification/blob/master/LICENSE
+
+sarif-schema-2.1.0.json is the OASIS Static Analysis Results Format (SARIF) Version 2.1.0
+JSON schema. Copyright (c) OASIS Open. All Rights Reserved. Distributed under the OASIS IPR
+Policy; the OASIS copyright notice applies: https://www.oasis-open.org/policies-guidelines/ipr/
+
+spdx-json-schema-3.0.1.json is the SPDX 3.0.1 JSON schema, Community Specification License 1.0
+(pre-existing portions CC-BY-3.0): https://github.com/spdx/spdx-spec/blob/3.0.1/LICENSE
+It is byte-identical to the copy the package ships under
+src/nexus_symbiote/generators/schemas/vendor/spdx/.
+
+jsf-0.82.schema.json differs from upstream only in that the author's e-mail address is
+removed from its $comment; the author credit and the licence statement are kept.
+
+SOURCES.json records each copy's source, retrieval date and SHA-256.

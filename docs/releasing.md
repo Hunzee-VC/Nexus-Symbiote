@@ -40,12 +40,17 @@ as described below.
    - PyPI: <https://pypi.org/manage/account/publishing/>
    - TestPyPI: <https://test.pypi.org/manage/account/publishing/>
 
-   Use project name `nexus-symbiote`, the repository's current owner (`Hunzee-VC`;
-   the repository was transferred from `aisecnomad`, and the OIDC token carries the
-   current owner), repository `Nexus-Symbiote`, workflow `release.yml`, and
+   Use project name `nexus-symbiote`, the repository's current owner (`aisecnomad`;
+   the repository moved back from the Hunzee-VC organization, and the OIDC token
+   carries the current owner), repository `Nexus-Symbiote`, workflow `release.yml`, and
    environment `pypi` or `testpypi` respectively. Always set the environment:
    without it, any job in the workflow holding an OIDC token could publish. No API
    token is needed or stored.
+
+   After a repository move, the project's existing trusted publishers still name the
+   previous owner, and the next run's OIDC token names the new one, so publishing
+   fails. Before dispatching a publish, edit the trusted publisher on PyPI and on
+   TestPyPI to the current owner, keeping the repository, workflow and environment.
 4. **Protect `main`** and require successful `Verified CI`, including CodeQL
    high/critical and dependency-advisory acceptance, and, once a second
    authorized reviewer exists, reviewed changes, following the configurations in
@@ -130,7 +135,7 @@ as described below.
    `pypi-attestations verify pypi` fetches provenance only from PyPI, so for a
    TestPyPI file download
    `https://test.pypi.org/integrity/nexus-symbiote/<version>/<file>/provenance` and
-   run `pypi-attestations verify pypi --repository https://github.com/Hunzee-VC/Nexus-Symbiote --provenance-file <provenance> <local file>`
+   run `pypi-attestations verify pypi --repository https://github.com/aisecnomad/Nexus-Symbiote --provenance-file <provenance> <local file>`
    in a throwaway environment. Open the rendered project page and check the
    headings, the banner and the alpha note.
 
@@ -169,8 +174,8 @@ as described below.
 
    ```bash
    gh auth login
-   gh attestation verify <file> --repo Hunzee-VC/Nexus-Symbiote \
-     --signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml \
+   gh attestation verify <file> --repo aisecnomad/Nexus-Symbiote \
+     --signer-workflow aisecnomad/Nexus-Symbiote/.github/workflows/release.yml \
      --source-ref refs/heads/main --source-digest <release commit SHA> \
      --deny-self-hosted-runners
    ```

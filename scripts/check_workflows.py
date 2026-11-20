@@ -262,9 +262,9 @@ REVIEWED_GATE_STEPS: dict[str, dict[str, dict[str, tuple[str, dict[str, str]]]]]
     "ci.yml": {
         "quality": {
             "scripts/check_pull_request_size.py": (
-                'git fetch --no-tags origin "$PR_BASE"\n'
-                'python scripts/check_pull_request_size.py --base "origin/$PR_BASE"\n',
-                {"PR_BASE": "${{ github.base_ref }}"},
+                'git fetch --no-tags --depth=2 origin "$MERGE_SHA"\n'
+                'python scripts/check_pull_request_size.py --base "$MERGE_SHA^1"\n',
+                {"MERGE_SHA": "${{ github.sha }}"},
             )
         },
         "codeql": {

@@ -190,7 +190,9 @@ def _scanned_project(tmp_path, model_name, *, policy=None, inventory=None):
     project = tmp_path / "project"
     (project / "models").mkdir(parents=True)
     (project / "AGENTS.md").write_text("Use read-only tools.\n")
-    (project / "models" / model_name).write_bytes(b"model bytes")
+    # A pickle-family name is rated by its content; any other name holds no pickle.
+    pickled = model_name.endswith(".pkl")
+    (project / "models" / model_name).write_bytes(b"\x80\x04N." if pickled else b"model bytes")
     if policy is not None:
         (project / ".nexus-symbiote.yaml").write_text(policy)
     inventory = inventory or tmp_path / "bom.json"
@@ -493,7 +495,7 @@ def test_shipped_hooks_gate_with_the_built_in_policy_and_write_nothing(tmp_path)
     (project / "AGENTS.md").write_text("Keep receipts.")
     # A checkout must not pick the gate it is checked under.
     (project / ".nexus-symbiote.yaml").write_text("scan: {failure_mode: report-only}\n")
-    (project / "classifier.pkl").write_bytes(b"unsafe-format-fixture")
+    (project / "classifier.pkl").write_bytes(b"\x80\x04N.")
     for hook in hooks:
         program, *args = shlex.split(hook["entry"])
         assert program == "nexus-symbiote"
