@@ -183,8 +183,8 @@ RULES: dict[str, RuleInfo] = {
     ),
     "invalid_safetensors": RuleInfo(
         "Unverified SafeTensors structure",
-        "A model recorded as SafeTensors has no established structural safety: its header "
-        "is malformed, over the inspection limit, or was not inspected.",
+        "A model file named or recorded as SafeTensors has no established structural safety: "
+        "its header is malformed, over the inspection limit, or was not inspected.",
     ),
     "launch_context": RuleInfo(
         "Widened MCP launch context",
