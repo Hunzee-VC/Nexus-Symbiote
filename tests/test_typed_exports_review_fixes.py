@@ -382,3 +382,53 @@ def test_declared_training_edge_dedup_is_linear(tmp_path: Path) -> None:
         assert len(bom.dependencies) == 3000 * scale + 800 * scale
 
     assert scaling_ratio(run) < 8
+
+
+@pytest.mark.parametrize("reorder", ["exceptions-first", "licence-appended"])
+def test_a_reordered_spdx_enum_fails_closed(monkeypatch, reorder: str) -> None:
+    from nexus_symbiote.generators import validation
+
+    real = validation._schema("cyclonedx/spdx.schema.json")
+    ids = real["enum"]
+    cut = ids.index("389-exception")
+    if reorder == "exceptions-first":
+        reordered = ids[cut:] + ids[:cut]
+    else:
+        reordered = [i for i in ids if i != "Zlib"] + ["Zlib"]
+    monkeypatch.setattr(validation, "_schema", lambda name: real | {"enum": reordered})
+    spdx_license_ids.cache_clear()
+    try:
+        with pytest.raises(ValueError):
+            spdx_license_ids()
+    finally:
+        spdx_license_ids.cache_clear()
+
+
+def test_a_refused_declared_url_is_reported_not_dropped_silently(tmp_path: Path) -> None:
+    _, notices = _declare(
+        tmp_path,
+        "download_location: http://example.com/agent.tgz\n"
+        "datasets:\n  - name: tickets\n    download_location: ftp://example.com/t\n"
+        "models:\n  - name: models/clf.safetensors\n"
+        f"    download_location: https://{GH_TOKEN}.example.com/m\n",
+    )
+    assert notices == [
+        "agent:a: download_location refused (scheme, credentials or secret)",
+        "dataset tickets: download_location refused (scheme, credentials or secret)",
+        "model models/clf.safetensors: download_location refused (scheme, credentials or secret)",
+    ]
+    assert GH_TOKEN not in "".join(notices)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [["-f", "cyclonedx"], ["-f", "spdx"], ["-f", "cyclonedx", "--cyclonedx-projection", "2"]],
+)
+def test_an_observed_http_source_uri_left_out_is_noted(tmp_path: Path, args) -> None:
+    bom = _observed()
+    bom.get_component("dataset:d").source_uri = "http://data.example.com/tickets.parquet"
+    bom.save(tmp_path / "inv.json")
+    result = CliRunner().invoke(main, ["export-standard", str(tmp_path / "inv.json"), *args])
+    assert result.exit_code == 0, result.output
+    noted = "dataset:d: source_uri left out of standard fields" in result.stderr
+    assert noted == ("--cyclonedx-projection" not in args)

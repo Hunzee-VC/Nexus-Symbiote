@@ -9,7 +9,7 @@ import click
 
 from nexus_symbiote.core.aibom import AIBOM, ContentSerialError, NativeFormatError
 from nexus_symbiote.policy import PolicyError
-from nexus_symbiote.spdx_profiles import apply_agent_yaml_declarations
+from nexus_symbiote.spdx_profiles import _clean_url, apply_agent_yaml_declarations
 from nexus_symbiote.supply_chain_cli import _refuse_source_overwrite
 from nexus_symbiote.utils.secrets import redact_text
 from nexus_symbiote.utils.terminal import echo_line, json_text, neutralize, write_cli_output
@@ -145,7 +145,16 @@ def export_standard_cmd(
                 f"Cannot safely read agent.yaml declarations: {neutralize(type(exc).__name__)}"
             ) from exc
         for notice in notices:
-            echo_line("Declaration conflict: ", notice, err=True)
+            echo_line("Declaration notice: ", notice, err=True)
+    # Projections that fill a standard download field from source_uri drop an unsafe one.
+    v3_cdx = output_format == "cyclonedx" and cyclonedx_projection == "3"
+    if v3_cdx or (output_format == "spdx" and spdx_projection == "4"):
+        for comp in bom.components:
+            uri = getattr(comp, "source_uri", None)
+            if uri and _clean_url(uri) is None:
+                echo_line(
+                    "Note: ", comp.bom_ref, ": source_uri left out of standard fields", err=True
+                )
 
     if author:
         seen = set(bom.metadata.authors)

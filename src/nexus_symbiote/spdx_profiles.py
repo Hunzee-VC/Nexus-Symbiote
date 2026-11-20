@@ -187,6 +187,13 @@ def _clean_url(value: Any) -> str | None:
     return rebuilt if _SAFE_URL_RE.fullmatch(rebuilt) else None
 
 
+def _declared_url(value: Any, owner: str, notices: list[str]) -> str | None:
+    cleaned = _clean_url(value)
+    if cleaned is None and isinstance(value, str) and value.strip():
+        notices.append(f"{owner}: download_location refused (scheme, credentials or secret)")
+    return cleaned
+
+
 def _clean_rfc3339(value: Any) -> str | None:
     if isinstance(value, datetime):
         aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
@@ -222,7 +229,16 @@ def spdx_license_ids() -> tuple[frozenset[str], frozenset[str]]:
 
     ids = _schema("cyclonedx/spdx.schema.json")["enum"]
     (cut,) = [i for i in range(1, len(ids)) if ids[i].lower() < ids[i - 1].lower()]
-    return frozenset(ids[:cut]), frozenset(ids[cut:])
+    licences, exceptions = frozenset(ids[:cut]), frozenset(ids[cut:])
+    # A reordered enum would silently swap or mix the sets: pin both ends of both runs.
+    if (ids[0], ids[cut - 1], ids[cut], ids[-1]) != (
+        "0BSD",
+        "ZPL-2.1",
+        "389-exception",
+        "x11vnc-openssl-exception",
+    ) or not ("MIT" in licences and "LLVM-exception" in exceptions):
+        raise ValueError("vendored SPDX enum no longer lists licence ids before exception ids")
+    return licences, exceptions
 
 
 def spdx_license_expression(value: Any) -> str | None:
@@ -431,7 +447,9 @@ def apply_agent_yaml_declarations(
                 if extra_key == "release_time" and (ts := _clean_rfc3339(raw_val)):
                     comp.properties.setdefault("declared_release_time", ts)
                     _record_claim(comp, "release_time", locator)
-                elif extra_key == "download_location" and (dl := _clean_url(raw_val)):
+                elif extra_key == "download_location" and (
+                    dl := _declared_url(raw_val, comp.bom_ref, notices)
+                ):
                     comp.properties.setdefault("declared_download_location", dl)
                     _record_claim(comp, "download_location", locator)
                 elif extra_key == "version" and (ver := _clean_text(raw_val, max_len=128)):
@@ -452,7 +470,11 @@ def apply_agent_yaml_declarations(
             ds_ver = _clean_text(entry.get("version"), max_len=128)
             ds_sup = _clean_text(entry.get("supplier"), max_len=200) or owner
             ds_lic = clean_license_identifier(entry.get("license")) or default_license
-            ds_uri = _clean_url(entry.get("download_location") or entry.get("source_uri"))
+            ds_uri = _declared_url(
+                entry.get("download_location") or entry.get("source_uri"),
+                f"dataset {ds_name}",
+                notices,
+            )
             ds_rel = _clean_rfc3339(entry.get("release_time") or entry.get("collection_date"))
             ds_type = _clean_text(entry.get("dataset_type"), max_len=64)
             ds_avail = _clean_text(entry.get("availability"), max_len=64)
@@ -530,7 +552,7 @@ def apply_agent_yaml_declarations(
             m_ver = _clean_text(entry.get("version"), max_len=128)
             m_sup = _clean_text(entry.get("supplier"), max_len=200) or owner
             m_lic = clean_license_identifier(entry.get("license")) or default_license
-            m_dl = _clean_url(entry.get("download_location"))
+            m_dl = _declared_url(entry.get("download_location"), f"model {m_name}", notices)
             m_rel = _clean_rfc3339(entry.get("release_time"))
             m_domain = _clean_text(entry.get("domain"), max_len=128)
             training = entry.get("training")
