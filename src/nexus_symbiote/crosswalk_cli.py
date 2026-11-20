@@ -26,7 +26,7 @@ import click
 
 from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
 from nexus_symbiote.crosswalk import FRAMEWORK_KEYS
-from nexus_symbiote.supply_chain_cli import _refuse_source_overwrite
+from nexus_symbiote.runtime_cli import _refuse_source_overwrite
 from nexus_symbiote.utils.terminal import json_text, neutralize, write_cli_output
 
 if TYPE_CHECKING:

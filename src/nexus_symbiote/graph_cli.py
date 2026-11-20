@@ -13,7 +13,7 @@ from pathlib import Path
 import click
 
 from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
-from nexus_symbiote.supply_chain_cli import _refuse_source_overwrite
+from nexus_symbiote.runtime_cli import _refuse_source_overwrite
 from nexus_symbiote.utils.terminal import echo_line, json_text, neutralize, write_cli_output
 
 DEFAULT_MAX_NODES = 2_000

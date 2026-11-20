@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 import click
 
 from nexus_symbiote import attestation
+from nexus_symbiote.attestation import MAX_SUBJECT_BYTES
 from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
 from nexus_symbiote.core.enums import AssuranceLevel, SerializationSafety
 from nexus_symbiote.core.hashing import normalize_digest
@@ -39,7 +40,6 @@ if TYPE_CHECKING:
 
     from nexus_symbiote.utils.crypto import SigstoreArtifactPolicy
 
-MAX_SUBJECT_BYTES = 64 * 1024 * 1024
 _POLICY_FORMATS = frozenset({"cedar", "rego", "json"})
 _UNVERIFIED_SEVERITIES = frozenset({"critical", "error", "unknown"})
 

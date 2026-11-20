@@ -14,6 +14,7 @@ import click
 from nexus_symbiote import modes
 from nexus_symbiote.core.aibom import AIBOM, NativeFormatError
 from nexus_symbiote.live_cli import review_notice
+from nexus_symbiote.runtime_cli import _refuse_source_overwrite
 from nexus_symbiote.utils.files import create_staging_file
 from nexus_symbiote.utils.terminal import (
     echo_line,
@@ -45,21 +46,6 @@ def _load_inventory(path: Path) -> AIBOM:
         ) from exc
     except (OSError, ValueError, RecursionError) as exc:
         raise click.ClickException(f"{neutralize(path)} is not a valid native AIBOM file.") from exc
-
-
-def _refuse_source_overwrite(output: Path | None, source: Path) -> None:
-    if output is None:
-        return
-    try:
-        # Path text alone misses a second name for the same file (a hard link, a bind
-        # mount or a case variant), so an existing output is also compared by identity.
-        same = output.resolve() == source.resolve() or (
-            output.exists() and os.path.samefile(output, source)
-        )
-    except (OSError, RuntimeError) as exc:
-        raise output_failure(exc) from exc
-    if same:
-        raise click.BadParameter("output must not overwrite the source inventory")
 
 
 def _repository_roots(path: Path) -> list[Path]:
