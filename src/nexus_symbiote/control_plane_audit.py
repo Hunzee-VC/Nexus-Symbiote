@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
+import yaml
+
 from nexus_symbiote.core.aibom import AIBOM, DependencyEdge, Relationship
 from nexus_symbiote.core.enums import AssuranceLevel, ComponentType, RiskSeverity
 from nexus_symbiote.core.hashing import open_regular_file, parse_json_strict
@@ -88,7 +90,7 @@ _SETTINGS_TARGET_RE = re.compile(
     r"(?:\.claude/settings|\.cursor/mcp\.json|\.cursor/hooks|\.claude\.json|CLAUDE\.md|AGENTS\.md)"
 )
 _WRITE_OP_RE = re.compile(
-    r"(?:>>|>|\btee\b|write_text|write_bytes|writeFileSync|appendFileSync|open\([^)]*['\"][wa]['\"])"
+    r"(?:>>|>|\btee\b|write_text|write_bytes|writeFileSync|appendFileSync|open\([^)\n]{0,200}['\"][wa]['\"])"
 )
 _AUTO_APPROVE_RE = re.compile(
     r"""(?:permissionDecision|permission_decision)["'\s:=]+["']?allow\b|"decision"["'\s:]+"approve\"""",
@@ -96,6 +98,7 @@ _AUTO_APPROVE_RE = re.compile(
 )
 _PREAMBLE_RE = re.compile(r"^\s*!(?:`([^`]+)`|\s+(.+))$")
 _HEX_40_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+_ON_KEY_RE = re.compile(r"(?m)^([ \t]*)on([ \t]*:)")
 _SPIFFE_RE = re.compile(r"^spiffe://[a-z0-9.-]+/[A-Za-z0-9._/-]+$")
 
 
@@ -106,6 +109,16 @@ def _clean(val: Any) -> str:
     if raw.startswith("spiffe://") and not _contains_secret(raw.split("://", 1)[-1]):
         return neutralize(raw)
     return neutralize(redact_text(raw))
+
+
+def _parse_yaml(text: str) -> dict[str, Any]:
+    try:
+        for index, _token in enumerate(yaml.scan(text)):
+            if index >= 20_000:
+                raise ValueError("YAML exceeds 20,000 tokens")
+    except yaml.YAMLError as exc:
+        raise ValueError(str(exc)) from exc
+    return parse_yaml_mapping(text)
 
 
 def _origin_only(url_text: str) -> str:
@@ -170,7 +183,7 @@ def _classify_script_body(body: str) -> tuple[bool, bool, bool]:
 
 
 def _normalize_rel_candidate(token: str, *, allow_any_file: bool = False) -> str | None:
-    cleaned = token.strip().strip("'\"")
+    cleaned = re.sub(r"^\$\{?CLAUDE_PROJECT_DIR\}?/", "./", token.strip().strip("'\""))
     if not cleaned or cleaned.startswith("-") or "://" in cleaned:
         return None
     had_dot_slash = cleaned.startswith("./")
@@ -288,7 +301,19 @@ class ControlPlaneAuditSummary:
             )
         else:
             comp = SkillPackageComponent(skill_type=kind, **base_kw)
-        self.bom.add_component(comp)
+        self.add(comp)
+
+    def add(self, comp: Any) -> None:
+        prior = self.bom.get_component(comp.bom_ref)
+        if prior is None:
+            self.bom.add_component(comp)
+            return
+        for key, val in comp.properties.items():
+            old = prior.properties.setdefault(key, val)
+            if old != val:
+                olds = old if isinstance(old, list) else [old]
+                news = val if isinstance(val, list) else [val]
+                prior.properties[key] = olds + [v for v in news if v not in olds]
 
     def add_mcp(
         self,
@@ -304,7 +329,7 @@ class ControlPlaneAuditSummary:
         assurance: AssuranceLevel = AssuranceLevel.OBSERVED,
     ) -> None:
         clean_name = neutralize(name)
-        self.bom.add_component(
+        self.add(
             MCPServerComponent(
                 bom_ref=f"mcp-server:{clean_name}",
                 name=clean_name,
@@ -346,6 +371,9 @@ def _bind_script_target(
     event_or_server: str,
 ) -> dict[str, Any] | None:
     before_gaps = len(summary.gaps)
+    if "$" in target_path or files.excluded(target_path):
+        summary.gaps.append(f"{target_path}: {role} target is unresolved or excluded")
+        return None
     raw = _read_confined_bytes(files, target_path, summary.gaps)
     if raw is None:
         if len(summary.gaps) == before_gaps:
@@ -488,12 +516,14 @@ def _inspect_hooks_and_preambles(
                 )
 
 
-def _extract_mcp_servers(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    for key in ("mcpServers", "servers", "context_servers"):
-        block = doc.get(key)
-        if isinstance(block, dict):
-            return {str(k): v for k, v in block.items() if isinstance(v, dict)}
-    return {}
+def _extract_mcp_servers(doc: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    # Every map is read, as hosts differ in which one they use; a name in two is audited twice.
+    return [
+        (str(k), v)
+        for key in ("mcpServers", "servers", "context_servers")
+        for k, v in _as_dict(doc.get(key)).items()
+        if isinstance(v, dict)
+    ]
 
 
 def _find_bridge_package(tokens: list[str]) -> tuple[str, int] | None:
@@ -516,7 +546,7 @@ def _inspect_mcp_launchers_and_bridges(
     live_versions: dict[str, str],
 ) -> None:
     for cfg_path, doc in _load_json_docs(files, all_paths, MCP_CONFIG_FILES, summary.gaps):
-        for srv_name, srv_cfg in _extract_mcp_servers(doc).items():
+        for srv_name, srv_cfg in _extract_mcp_servers(doc):
             cmd = srv_cfg.get("command")
             args = _as_list(srv_cfg.get("args"))
             env_map = _as_dict(srv_cfg.get("env"))
@@ -558,10 +588,11 @@ def _inspect_mcp_launchers_and_bridges(
                     if cfg_body is not None and norm_cfg is not None:
                         try:
                             sub_doc = parse_json_strict(cfg_body)
-                        except ValueError:
+                        except (ValueError, RecursionError) as exc:
+                            summary.gaps.append(f"{norm_cfg}: invalid JSON ({exc})")
                             sub_doc = None
                         if isinstance(sub_doc, dict):
-                            for sub_name in _extract_mcp_servers(sub_doc):
+                            for sub_name, _sub_cfg in _extract_mcp_servers(sub_doc):
                                 proxied.append(sub_name)
                                 summary.edge(
                                     srv_ref, f"mcp-server:{sub_name}", "delegates-to", norm_cfg
@@ -705,7 +736,7 @@ def _inspect_steering_surfaces(
     deny_covered = _deny_covers_steering(deny_rules)
 
     for cfg_path, doc in _load_json_docs(files, all_paths, MCP_CONFIG_FILES, summary.gaps):
-        for srv_name, srv_cfg in _extract_mcp_servers(doc).items():
+        for srv_name, srv_cfg in _extract_mcp_servers(doc):
             cmd = str(srv_cfg.get("command") or "")
             args = [
                 str(a) for a in _as_list(srv_cfg.get("args")) if isinstance(a, (str, int, float))
@@ -848,10 +879,11 @@ def _record_ci_agent(
     if isinstance(mcp_config_raw, str) and mcp_config_raw.strip():
         try:
             mcp_doc = parse_json_strict(mcp_config_raw)
-        except ValueError:
+        except (ValueError, RecursionError) as exc:
+            summary.gaps.append(f"{source_file}: invalid inline mcp_config ({exc})")
             mcp_doc = None
         if isinstance(mcp_doc, dict):
-            for s_name, s_cfg in _extract_mcp_servers(mcp_doc).items():
+            for s_name, s_cfg in _extract_mcp_servers(mcp_doc):
                 inline_servers.append(s_name)
                 if _contains_secret(json.dumps(s_cfg)):
                     summary.flag(
@@ -930,8 +962,8 @@ def _inspect_workflows_and_claims(
         if text is None:
             continue
         try:
-            doc = parse_yaml_mapping(re.sub(r"(?m)^(\s*)on(\s*:)", r'\1"on"\2', text))
-        except (PolicyError, ValueError) as exc:
+            doc = _parse_yaml(_ON_KEY_RE.sub(r'\1"on"\2', text))
+        except (PolicyError, ValueError, RecursionError) as exc:
             summary.gaps.append(f"{wf_path}: {neutralize(str(exc))}")
             continue
         on_block = doc.get("on")
@@ -1026,7 +1058,7 @@ def _inspect_workflows_and_claims(
                     source_path=ag_file,
                     assurance_level=AssuranceLevel.DECLARED,
                 )
-                summary.bom.add_component(m_comp)
+                summary.add(m_comp)
                 summary.edge(ag_ref, m_comp.bom_ref, "uses-model", ag_file)
             for t_name in tools:
                 t_comp = ToolComponent(
@@ -1035,7 +1067,7 @@ def _inspect_workflows_and_claims(
                     source_path=ag_file,
                     assurance_level=AssuranceLevel.DECLARED,
                 )
-                summary.bom.add_component(t_comp)
+                summary.add(t_comp)
                 summary.edge(ag_ref, t_comp.bom_ref, "provides-tool", ag_file)
             summary.framework_agents.append(_rec(agent_name=ag_name, source_file=ag_file, **props))
 
@@ -1264,7 +1296,7 @@ def audit_project_control_plane(
             parsed = parse_json_strict(raw_claims)
             if isinstance(parsed, dict):
                 decl_sources.append(("shadowscan:claims", parsed, AssuranceLevel.DECLARED))
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, RecursionError) as exc:
             summary.gaps.append(f"{claims_path.name}: {neutralize(str(exc))}")
 
     with ConfinedCollection(project_root, summary.gaps) as files:
@@ -1274,10 +1306,8 @@ def audit_project_control_plane(
                 text = _read_confined_text(files, decl_path, summary.gaps)
                 if text is not None:
                     try:
-                        decl_sources.append(
-                            (decl_path, parse_yaml_mapping(text), AssuranceLevel.DECLARED)
-                        )
-                    except (PolicyError, ValueError) as exc:
+                        decl_sources.append((decl_path, _parse_yaml(text), AssuranceLevel.DECLARED))
+                    except (PolicyError, ValueError, RecursionError) as exc:
                         summary.gaps.append(f"{decl_path}: {neutralize(str(exc))}")
         _inspect_hooks_and_preambles(files, all_paths, summary)
         _inspect_mcp_launchers_and_bridges(files, all_paths, summary, live_versions or {})
