@@ -100,7 +100,7 @@ _AUTO_APPROVE_RE = re.compile(
 _PREAMBLE_RE = re.compile(r"^\s*!(?:`([^`]+)`|\s+(.+))$")
 _HEX_40_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 _ON_KEY_RE = re.compile(r"(?m)^([ \t]*)on([ \t]*:)")
-_PROJECT_DIR_RE = re.compile(r"^\$\{?(?:CLAUDE_PROJECT_DIR|workspaceFolder|workspaceRoot)\}?/")
+_PROJECT_DIR_RE = re.compile(r"^(?:\$\{?CLAUDE_PROJECT_DIR\}?|\$\{workspace(?:Folder|Root)\})/")
 _SPIFFE_RE = re.compile(r"^spiffe://[a-z0-9.-]+/[A-Za-z0-9._/-]+$")
 
 
@@ -139,7 +139,8 @@ def _read_confined_bytes(files: ConfinedCollection, rel_path: str, gaps: list[st
         gaps.append(f"{rel_path}: excluded credential-shaped path")
         return None
     try:
-        raw = files.read_bytes(rel_path, missing_ok=True)
+        named = rel_path.startswith(INSTALLED_BIN_DIRS)
+        raw = files.read_named(rel_path) if named else files.read_bytes(rel_path, missing_ok=True)
         gap = credential_gap(rel_path, files.link_target(rel_path))
     except (OSError, ValueError) as exc:
         gaps.append(f"{rel_path}: {neutralize(str(exc))}")
@@ -373,12 +374,8 @@ def _bind_script_target(
     event_or_server: str,
 ) -> dict[str, Any] | None:
     before_gaps = len(summary.gaps)
-    if target_path.startswith(INSTALLED_BIN_DIRS):
-        # An installed entry point is the dependency's code, not a project script.
-        msg = f"{role} '{target_path}' is an installed executable whose body is not audited."
-        summary.flag("launch_target_unaudited", RiskSeverity.MEDIUM, msg, source_file, target_path)
-        return None
-    if "$" in target_path or files.excluded(target_path):
+    installed = target_path.startswith(INSTALLED_BIN_DIRS)
+    if "$" in target_path or (files.excluded(target_path) and not installed):
         summary.gaps.append(f"{target_path}: {role} target is unresolved or excluded")
         return None
     raw = _read_confined_bytes(files, target_path, summary.gaps)
