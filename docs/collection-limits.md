@@ -94,6 +94,7 @@ The pre-commit hooks add their arguments after the command, so set
 | `ts-nodes` | 20000 | 10000000 | Syntax nodes in one TypeScript or JavaScript file the mcp collector parses for MCP servers and client transports. | That file is not collected. |
 | `python-nodes` | 200000 | 10000000 | Syntax nodes in one Python file the mcp collector parses for MCP servers, clients and agent tools, counted as the Python that runs the scan parses the file. | That file is not collected. |
 | `import-lookups` | 5000 | 1000000 | Memory files whose `@path` imports the prompt collector follows, and distinct import targets it looks up, together in one collection. A monorepo of 2,000 packages whose `CLAUDE.md` files each import three shared documents uses 2,003. | The imports of the file being followed, and of every file after it, are not inventoried. |
+| `prompt-files` | 5000 | 1000000 | Text files under directories named `prompts`, and `*.prompt.md`, `*.prompt.yaml` and `*.prompt.yml` files, that the prompt collector reads as prompt templates at any depth in one collection, outside the trees it skips and those another walk inventories (see the [collector reference](collectors.md#what-each-collector-reads)). | That file, and every prompt file after it in path order, is not inventoried; instruction files found by name are still inventoried. |
 
 A bounded listing may fetch one additional entry to detect that it does not fit;
 for a budget of `N` entries, an overflowing listing observes at most `N + 1`

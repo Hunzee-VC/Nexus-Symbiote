@@ -824,9 +824,45 @@ A way around a limit that its entry does not describe is worth a
 
 - **Instruction files under other names are not recorded.** The `prompt` collector
   reads the fixed files the [collector reference lists](collectors.md#what-each-collector-reads),
-  `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` and `.cursorrules` in any subdirectory, and
-  every file in the rule, prompt and subagent directories, apart from files named as
-  holding credentials (see below). Another spelling of a
+  `CLAUDE.md`, `AGENTS.md`, `GEMINI.md` and `.cursorrules` in any subdirectory,
+  every file in the rule, prompt and subagent directories, and every text file under
+  a directory named `prompts` and every `*.prompt.md`, `*.prompt.yaml` or
+  `*.prompt.yml` file at any depth, apart from files named as holding credentials
+  (see below). A `prompts` directory or `*.prompt.*` file under `tests`, `test`,
+  `dist`, `build`, `docs`, `benchmarks`, `examples`, `node_modules` or `vendor`, the
+  names the mcp collector's source search skips, is not read and not recorded as a
+  gap; those names match exactly, as in the source search, so `Tests/prompts` is
+  read. Neither is a file under another spelling of the directory name, such as
+  `Prompts/a.md`, while the `*.prompt.*` suffix matches in any case, so
+  `src/Review.PROMPT.MD` is recorded. Under `prompts`, only the text suffixes the
+  [collector reference lists](collectors.md#what-each-collector-reads) and names
+  without a suffix are read: code such as `prompts/__init__.py`, images and dotfiles
+  such as `.DS_Store` are not, while `prompts/LICENSE` and `prompts/README.md` are
+  recorded as prompt templates. A new file under `prompts` can fail `scan` and
+  `validate --project` on a project that passed before: a text-named file that is
+  not UTF-8, such as a UTF-16 one, is a failure, as in a rule directory; a file
+  named as holding credentials, such as `support/prompts/credentials_help.txt`, is a
+  gap and is not read; a file larger than the
+  [`file-bytes`](collection-limits.md#limits) limit, such as a 5 MB
+  `prompts/eval_set.json`, is a failure; and prompt templates are read after every
+  other file the collector reads, so templates past the
+  [`total-bytes`](collection-limits.md#limits) limit fail while skills keep their
+  budget. A directory symlink under which a file would be a
+  prompt template, such as `app/prompts -> ../data` or `agent -> examples/agent` with
+  `examples/agent/prompts/a.md`, is a gap when no walk inventories that file: the walk
+  reads the directory a symlink leads to once, under that directory's own name, and a
+  file there that is a prompt template, or another kind, under that name is recorded
+  under it. A file under `prompts` that a memory file imports, also through a
+  directory symlink, is recorded once, as that import, with the
+  `imported-instruction` identity it had before prompt templates were read, and
+  another spelling of a nested name there, such as `pkg/prompts/claude.md`, is the
+  failure described below, not a prompt template. `llms.txt`, a prompt stored under another name, such as
+  `app/system.yaml`, and a prompt held in code or a database are not read either. A
+  file under a `prompts` directory that is not Markdown and not named `*.prompt.*`,
+  such as `prompts/settings.yaml`, is inventoried without a content hash, as the next
+  entry explains. More prompt files than the
+  [`prompt-files`](collection-limits.md#limits) limit are a collection failure, as
+  past every operator limit, until the limit is raised. Another spelling of a
   nested name, such as `claude.md` in a subdirectory, is a
   [failure](#every-collector), not a file that is read, unless one of those
   directories, or a skill or command directory, holds it. `CLAUDE.local.md`,
@@ -863,7 +899,10 @@ A way around a limit that its entry does not describe is worth a
   the collector records: an instruction, nested memory, rule, prompt or subagent file
   keeps its content hash only when its name is Markdown, or is an instruction file name
   without one (`.cursorrules`, `.clinerules`, `.windsurfrules`, `system_prompt.txt`),
-  or, in a rule, prompt or subagent directory, has no suffix at all; and when a symlink
+  or is a prompt template named `*.prompt.yaml` or `*.prompt.yml`, or, in a rule,
+  prompt or subagent directory, has no suffix at all; so `prompts/x.prompt.yml` and
+  `src/x.prompt.yml` keep a content hash, while `.github/prompts/x.prompt.yml`, a
+  file of a prompt directory that is not Markdown, does not; and when a symlink
   there leads to a file with a Markdown suffix, the same test an import of that file
   passes. So `AGENTS.md` linked to `config/app.json` or `config/.windsurfrules`,
   `.cursorrules` linked to `docs/rules.txt` or `shared/.cursorrules`, and
@@ -877,7 +916,9 @@ A way around a limit that its entry does not describe is worth a
   content, which `validate --project` with the same key verifies; without the key the
   component carries a low `completeness` finding saying its values are not bound in
   this inventory, validation counts it as unbound, and a change to the file fails no
-  validation. `diff` cannot see the change either, so it raises a medium alert that
+  validation. Prompt templates share one such finding, on the first of them, which
+  counts them and names up to 12, so a library of templates adds one point to the
+  score. `diff` cannot see the change either, so it raises a medium alert that
   the record's values are unbound on every comparison, changed or not, and a keyless
   `diff --fail-on-alert` fails. A project with more
   than the [`import-lookups`](collection-limits.md#limits) limit of memory files and
@@ -941,6 +982,30 @@ A way around a limit that its entry does not describe is worth a
   zero-width or bidirectional characters each separated by another byte, plane-14
   characters spread so that no 4,096 characters hold 16 of them, and a UTF-16 or
   UTF-32 file without a byte-order mark.
+- **Escapes are decoded only in prompt templates.** A JSON, YAML or TOML prompt
+  template, under a `prompts` directory or named `*.prompt.yaml` or `*.prompt.yml`,
+  and the YAML front matter of a Markdown one, is checked in what it decodes to as
+  well as in its raw text, also when a memory file imports it, so a hidden character
+  written as an escape, such as `\udb40\udc49` in JSON or `"\U000E0049"` in YAML or
+  TOML, is the same finding as one written raw. YAML of at most 20,000 parser events
+  and 64 nested flow collections, counting brackets in its strings too, and TOML 1.0
+  within the dotted-key bound, each up to 65,536 characters, give the strings they
+  parse to. JSON, which hosts read leniently, with
+  comments, duplicate keys, large numbers or lone surrogates, and YAML or TOML that
+  does not parse or is past those bounds, have each escape that an odd run of
+  backslashes starts decoded by pattern: `\x`, `\u` and `\U` with their hexadecimal
+  digits, YAML's `\L`, `\P`, `\N` and `\_`, and `\e`. The pattern also decodes such
+  an escape in a YAML or TOML literal string or comment, which a host keeps as text,
+  so it can only add findings, which may be false positives: in a Jinja-templated
+  YAML file, or front matter that does not parse, a single-quoted Windows path or
+  regular expression, such as `'C:\Logs\Pipeline'` (`\L` and `\P`, U+2028 and
+  U+2029) or `'\P{L}+'` (`\P`, U+2029), is a low `line_separators` finding, while the
+  same lines in YAML that parses give none. A character the file holds raw in a comment
+  and also spells in a parsed string is counted once. The same file in a rule, prompt,
+  subagent, skill or command
+  directory, or imported with `@path` from outside a `prompts` directory, is checked
+  as raw text only, as are a Markdown body and templates in other formats, such as
+  Jinja's `{{ "\u202e" }}`, which only rendering decodes.
 - **Hidden-character detection is character-based.** Lookalike letters are not
   detected, and neither are control characters such as ESC, spaces other than
   U+0020, such as U+00A0 and U+3000, or private-use characters.
