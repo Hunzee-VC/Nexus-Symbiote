@@ -412,7 +412,9 @@ def run_export_policy(
             project=project,
             subject_bytes=raw_bytes,
         )
-    corroborated_models: frozenset[str] | None = None
+    # A reviewed attestation vouches for the file, not for a model's digest or signature:
+    # only --project with --signature-policy corroborates a model permit.
+    corroborated_models: frozenset[str] = frozenset()
     unverified_refs: frozenset[str] = frozenset()
     if project is not None:
         _basis, corroborated_models, unverified_refs = corroborate_against_project(

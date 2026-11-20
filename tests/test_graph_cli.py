@@ -474,7 +474,8 @@ def test_export_policy_cedar_rego_json_and_crosswalk_evidence_pack(runner, tmp_p
     assert 'NexusSymbiote::Tool::"tool:search##vso\\u{5b}task.setvariable]"' in cedar.stdout
     assert "##vso[" not in cedar.stdout
     assert "tool:declared_only" not in cedar.stdout
-    assert 'NexusSymbiote::Model::"model:mod\\u{e8}le-1"' in cedar.stdout
+    # A reviewed attestation alone never permits a model on its own signing_status.
+    assert "UseModel" not in cedar.stdout
     assert "model:unsafe" not in cedar.stdout
 
     rego = runner.invoke(
@@ -508,6 +509,7 @@ def test_export_policy_cedar_rego_json_and_crosswalk_evidence_pack(runner, tmp_p
     assert [t["bom_ref"] for t in parsed_pol["allowed_tools"]] == [
         "tool:search##vso[task.setvariable]"
     ]
+    assert parsed_pol["allowed_models"] == []
 
     # Wrong attestation key must fail closed.
     wrong_pub = key_dir / "wrong.pub"
