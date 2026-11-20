@@ -64,7 +64,15 @@ Every built-in collector and CLI command on `main` is classified below (`N8`, co
 
 ### Gate reporting contract
 
-Every gate (`scan`, `validate`, `risk`, `baseline`, `diff`, and the GitHub Action) prints all gate failure reasons and caps console findings at 15 (`TOP_FINDINGS`); pass `--json-output` for the complete list.
+Every gate prints each of its failure reasons. How many findings the console lists, and where the complete list is, differs by surface:
+
+| Surface | Console lists | Complete list |
+| --- | --- | --- |
+| `scan`, `baseline` | Every gate reason, then the first 10 findings at or above the severity cutoff (`LISTED`) and a count of the rest; the first 20 collection failures and the first 10 excluded surfaces | No `--json-output`. The inventory that `scan -o FILE` writes holds every finding, and `risk FILE --json-output` lists them; `baseline` writes no inventory when its gate fails |
+| `risk` | The first 15 findings (`TOP_FINDINGS`), under a heading that gives the total; on failure also every gate reason, the first 10 findings at or above the cutoff and the first 10 coverage gaps | `--json-output` |
+| `validate` | Every issue in the report, with no console cap; each check keeps at most 1,000 issues, blocking ones first, and counts the rest | `--json-output`, which holds the same issues and the omitted count |
+| `diff` | Every security alert and every change, with no cap | `--json-output` |
+| GitHub Action | The `scan`, `validate`, `risk` and `diff` reports above, rendered by the same functions, so each keeps its own limit | The inventory at the `aibom-path` output |
 
 ### Built-in collectors
 
