@@ -104,12 +104,6 @@ def _version_key(ecosystem: str, raw: str) -> Any | None:
     return _semver_key(raw) if ecosystem == "npm" else None
 
 
-def _compare(left: int | None, right: int | None) -> int | None:
-    if left is None or right is None:
-        return None
-    return (left > right) - (left < right)
-
-
 def _parse_epss_unit(raw: object, field_name: str) -> float:
     """Validate that an EPSS score or percentile is a finite float in [0.0, 1.0]."""
     if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
@@ -160,14 +154,13 @@ def _parse_osv_records(payload: object) -> list[_ParsedAdvisory]:
         )
         raw_summary = item.get("summary")
         summary = raw_summary.strip() if isinstance(raw_summary, str) else ""
-        raw_affected = item.get("affected")
-        affected = (
-            tuple(a for a in raw_affected if isinstance(a, dict))
-            if isinstance(raw_affected, list)
-            else ()
-        )
+        affected = item.get("affected", [])
+        if not isinstance(affected, list) or not all(isinstance(a, dict) for a in affected):
+            raise ValueError(
+                f"Offline advisory DB record {rec_id.strip()} has malformed 'affected'"
+            )
         parsed.append(
-            _ParsedAdvisory(rec_id.strip(), aliases, summary, _extract_severity(item), affected)
+            _ParsedAdvisory(rec_id.strip(), aliases, summary, _extract_severity(item), (*affected,))
         )
     return parsed
 
@@ -308,6 +301,7 @@ class _Range:
 
 
 def _read_range(rng: dict[str, Any]) -> _Range | None:
+    """Read one range's events; None when its type is not matched, ``ValueError`` if malformed."""
     raw_type = rng.get("type")
     if raw_type is not None and (
         not isinstance(raw_type, str) or raw_type.upper() not in _SUPPORTED_RANGE_TYPES
@@ -315,74 +309,76 @@ def _read_range(rng: dict[str, Any]) -> _Range | None:
         return None
     events = rng.get("events")
     if not isinstance(events, list):
-        return None
+        raise ValueError("OSV range events are not a list")
 
     has_zero_intro = False
-    intros: list[str] = []
-    fixed_versions: list[str] = []
-    last_affected: list[str] = []
-    limits: list[str] = []
+    found: dict[str, list[str]] = {"introduced": [], "fixed": [], "last_affected": [], "limit": []}
     for ev in events:
-        if not isinstance(ev, dict):
-            continue
-        if "introduced" in ev:
-            raw_intro = ev["introduced"]
-            if raw_intro == "0" or (
-                isinstance(raw_intro, int) and not isinstance(raw_intro, bool) and raw_intro == 0
-            ):
-                has_zero_intro = True
-            elif isinstance(raw_intro, str) and raw_intro.strip():
-                intros.append(raw_intro.strip())
-        elif "fixed" in ev and isinstance(ev["fixed"], str) and ev["fixed"].strip():
-            fixed_versions.append(ev["fixed"].strip())
-        elif (
-            "last_affected" in ev
-            and isinstance(ev["last_affected"], str)
-            and ev["last_affected"].strip()
-        ):
-            last_affected.append(ev["last_affected"].strip())
-        elif "limit" in ev and isinstance(ev["limit"], str) and ev["limit"].strip():
-            limits.append(ev["limit"].strip())
+        kind, raw = next(iter(ev.items())) if isinstance(ev, dict) and len(ev) == 1 else ("", "")
+        if kind == "introduced" and raw in ("0", 0) and not isinstance(raw, bool):
+            has_zero_intro = True
+        elif kind in found and isinstance(raw, str) and raw.strip():
+            found[kind].append(raw.strip())
+        else:
+            raise ValueError("OSV range event cannot be parsed")
+    intros, fixed_versions, last_affected, limits = found.values()
+    # A "*" limit bounds nothing, so it is never compared.
     return _Range(
         has_zero_intro,
         tuple(intros),
         tuple((fix, fix) for fix in fixed_versions),
         tuple(last_affected),
-        tuple(limits),
+        tuple(lim for lim in limits if lim != "*"),
     )
 
 
 def _in_range(version: int | None, rng: _Range) -> bool:
-    """Evaluate one ranked OSV range by version intervals (order-independent per OSV spec)."""
-    if any((c := _compare(version, lim)) is not None and c >= 0 for lim in rng.limits):
+    """Decide one ranked OSV range; ``ValueError`` when a comparison it needs cannot be made.
+
+    A position is None for a version the ecosystem cannot parse. The comparisons, and the
+    order that decides which of them are made at all, are those of OSV interval matching.
+    """
+
+    def cmp(left: int | None, right: int | None) -> int:
+        if left is None or right is None:
+            raise ValueError("OSV range version cannot be compared")
+        return (left > right) - (left < right)
+
+    if any(cmp(version, lim) >= 0 for lim in rng.limits):
         return False
 
     best_intro: int | None = None
     found_intro = rng.zero_intro
     for intro in rng.intros:
-        cmp_v = _compare(intro, version)
-        if cmp_v is None or cmp_v > 0:
+        if cmp(intro, version) > 0:
             continue
         found_intro = True
-        if best_intro is None or ((cb := _compare(intro, best_intro)) is not None and cb > 0):
+        if best_intro is None or cmp(intro, best_intro) > 0:
             best_intro = intro
     if not found_intro:
         return False
 
     for fix, _ in rng.fixes:
-        cmp_v = _compare(fix, version)
-        if cmp_v is None or cmp_v > 0:
-            continue
-        if best_intro is None or ((ci := _compare(best_intro, fix)) is not None and ci <= 0):
+        if cmp(fix, version) <= 0 and (best_intro is None or cmp(best_intro, fix) <= 0):
             return False
-
     for last in rng.last_affected:
-        cmp_v = _compare(last, version)
-        if cmp_v is None or cmp_v >= 0:
-            continue
-        if best_intro is None or ((ci := _compare(best_intro, last)) is not None and ci <= 0):
+        if cmp(last, version) < 0 and (best_intro is None or cmp(best_intro, last) <= 0):
             return False
     return True
+
+
+def _outcome(version: int | None, rng: _Range) -> bool | str:
+    """``_in_range``, with the reason it cannot decide in place of raising."""
+    try:
+        return _in_range(version, rng)
+    except ValueError as exc:
+        return str(exc)
+
+
+# A block's match, or the reason it cannot be decided: (block, range index, range, reason).
+# A listed version has no range; a reason with the lowest range index is the one reported,
+# because evaluation stops at the first range of a block that cannot be decided.
+_Hit = tuple[int, int, _Range | None, str | None]
 
 
 class _PackageMatcher:
@@ -394,6 +390,12 @@ class _PackageMatcher:
     even position between them. ``_in_range`` runs once per position a range can tell apart,
     and each run of matching positions is stored in a segment tree, so a component version
     costs one bisection plus the blocks that match it, however many do not.
+
+    A block that cannot be decided for a version is an error for that version, never a
+    miss: a malformed block or range is one for every version, and a range naming a version
+    the ecosystem cannot parse is one for the runs of positions whose evaluation compares
+    it. Those runs are stored like matching ones, so a well-formed range that does not
+    match still costs a component nothing.
     """
 
     def __init__(
@@ -404,24 +406,36 @@ class _PackageMatcher:
     ) -> None:
         self._ecosystem = ecosystem
         self._advisories = [adv for adv, _ in blocks]
-        self._listed: dict[Any, list[tuple[int, _Range | None]]] = {}
-        self._nodes: dict[int, list[tuple[int, _Range | None]]] = {}
-        self._unparsed: list[tuple[int, _Range | None]] = []
+        self._listed: dict[Any, list[_Hit]] = {}
+        self._nodes: dict[int, list[_Hit]] = {}
+        self._always: list[_Hit] = []
+        self._unparsed: list[_Hit] = []
 
-        ranges: list[tuple[int, _Range]] = []
+        ranges: list[tuple[int, int, _Range]] = []
         for number, (_, affected) in enumerate(blocks):
-            raw_versions = affected.get("versions")
-            for ver in raw_versions if isinstance(raw_versions, list) else ():
+            raw_versions, raw_ranges = affected.get("versions", []), affected.get("ranges", [])
+            if not isinstance(raw_versions, list) or not isinstance(raw_ranges, list):
+                self._always.append(
+                    (number, -1, None, "OSV affected versions or ranges are not a list")
+                )
+                continue
+            for ver in raw_versions:
                 if isinstance(ver, str) and (key := _version_key(ecosystem, ver)) is not None:
-                    self._listed.setdefault(key, []).append((number, None))
-            raw_ranges = affected.get("ranges")
-            for raw_range in raw_ranges if isinstance(raw_ranges, list) else ():
-                rng = _read_range(raw_range) if isinstance(raw_range, dict) else None
+                    self._listed.setdefault(key, []).append((number, -1, None, None))
+            for index, raw_range in enumerate(raw_ranges):
+                try:
+                    rng = _read_range(raw_range if isinstance(raw_range, dict) else {})
+                except ValueError as exc:
+                    # Later ranges of this block are never reached for any version.
+                    self._always.append((number, index, None, str(exc)))
+                    break
                 if rng is not None:
                     budget.spend((len(rng.versions()) + 1) ** 2 // _CHEAP_STEPS)
-                    ranges.append((number, rng))
+                    ranges.append((number, index, rng))
 
-        keys = {text: _version_key(ecosystem, text) for _, rng in ranges for text in rng.versions()}
+        keys = {
+            text: _version_key(ecosystem, text) for _, _, rng in ranges for text in rng.versions()
+        }
         self._keys = sorted({key for key in keys.values() if key is not None})
         position = {key: 2 * rank + 1 for rank, key in enumerate(self._keys)}
         self._leaves = 2 * len(self._keys) + 1
@@ -429,7 +443,7 @@ class _PackageMatcher:
         def at(text: str) -> int | None:
             return None if (key := keys[text]) is None else position[key]
 
-        for number, raw in ranges:
+        for number, index, raw in ranges:
             rng = _Range(
                 raw.zero_intro,
                 tuple(at(text) for text in raw.intros),
@@ -437,22 +451,30 @@ class _PackageMatcher:
                 tuple(at(text) for text in raw.last_affected),
                 tuple(at(text) for text in raw.limits),
             )
-            if _in_range(None, rng):
-                self._unparsed.append((number, None))
+            if (unparsed := self._hit(number, index, rng, _outcome(None, rng))) is not None:
+                self._unparsed.append(unparsed)
             start: int | None = None
+            run: _Hit | None = None
             low = 0
             for named in (*sorted({p for p in rng.versions() if p is not None}), self._leaves):
                 for probe in (low, named)[: 1 if named == self._leaves else 2]:
-                    if _in_range(probe, rng):
-                        start = probe if start is None else start
-                    elif start is not None:
-                        self._store(start, probe - 1, (number, rng))
-                        start = None
+                    hit = self._hit(number, index, rng, _outcome(probe, rng))
+                    if hit == run:
+                        continue
+                    if run is not None and start is not None:
+                        self._store(start, probe - 1, run)
+                    start, run = probe, hit
                 low = named + 1
-            if start is not None:
-                self._store(start, self._leaves - 1, (number, rng))
+            if run is not None and start is not None:
+                self._store(start, self._leaves - 1, run)
 
-    def _store(self, first: int, last: int, entry: tuple[int, _Range | None]) -> None:
+    @staticmethod
+    def _hit(number: int, index: int, rng: _Range, outcome: bool | str) -> _Hit | None:
+        if outcome is False:
+            return None
+        return (number, index, rng, None) if outcome is True else (number, index, None, outcome)
+
+    def _store(self, first: int, last: int, entry: _Hit) -> None:
         low, high = first + self._leaves, last + self._leaves + 1
         while low < high:
             if low & 1:
@@ -466,31 +488,39 @@ class _PackageMatcher:
 
     def matches(
         self, version: str, budget: _MatchBudget
-    ) -> list[tuple[_ParsedAdvisory, list[str]]]:
-        """Each matching block's advisory and the fixes above ``version``, in bundle order."""
+    ) -> tuple[list[tuple[_ParsedAdvisory, list[str]]], list[tuple[_ParsedAdvisory, str]]]:
+        """Each matching block's advisory and fixes above ``version``, then each block that
+        cannot be decided for it with the reason; both in bundle order.
+        """
         key = _version_key(self._ecosystem, version)
         position = -1
-        hits = self._unparsed
+        hits = [*self._always, *self._unparsed]
         if key is not None:
             rank = bisect_left(self._keys, key)
             exact = rank < len(self._keys) and self._keys[rank] == key
             position = 2 * rank + 1 if exact else 2 * rank
-            hits = list(self._listed.get(key, ()))
+            hits = [*self._always, *self._listed.get(key, ())]
             node = position + self._leaves
             while node:
                 hits.extend(self._nodes.get(node, ()))
                 node >>= 1
+        undecided: dict[int, tuple[int, str]] = {}
+        for number, index, _, reason in hits:
+            if reason is not None and (number not in undecided or index < undecided[number][0]):
+                undecided[number] = (index, reason)
         found: list[tuple[_ParsedAdvisory, list[str]]] = []
-        for number, rng in sorted(hits, key=lambda hit: hit[0]):
+        for number, _, rng, reason in sorted(hits, key=lambda hit: hit[0]):
             fixes = () if rng is None else rng.fixes
             budget.spend(1 + len(fixes) // _CHEAP_STEPS)
-            found.append(
-                (
-                    self._advisories[number],
-                    [text for at, text in fixes if at is not None and at > position],
+            if reason is None and number not in undecided:
+                found.append(
+                    (
+                        self._advisories[number],
+                        [text for at, text in fixes if at is not None and at > position],
+                    )
                 )
-            )
-        return found
+        failed = [(self._advisories[number], undecided[number][1]) for number in sorted(undecided)]
+        return found, failed
 
 
 def _build_package_index(
@@ -675,10 +705,12 @@ def match_offline_advisories(
         try:
             if package not in matchers:
                 matchers[package] = _PackageMatcher(eco, pkg_index.get(package, []), budget)
-            found = matchers[package].matches(version, budget)
+            found, failed = matchers[package].matches(version, budget)
         except _MatchBudgetError:
             report.errors.append(f"Offline advisory matching stopped: {bound.exceeded()}")
             return report, provenance
+        for adv, reason in failed:
+            report.errors.append(f"{bom_ref}: offline advisory {adv.record_id}: {reason}")
         for adv, fixed in found:
             existing = matched_by_adv.get(adv.record_id)
             if existing is None:

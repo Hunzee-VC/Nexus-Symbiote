@@ -763,3 +763,101 @@ def test_offline_advisories_stop_matching_at_the_report_limit(tmp_path, monkeypa
     assert report.errors == ["Advisory report limit reached (3)"]
     assert report.components_checked == 2
     assert report.complete is False
+
+
+def _transformers_record(record_id: str = "GHSA-bad0-bad0-bad0", **affected: object) -> dict:
+    package = {"package": {"ecosystem": "PyPI", "name": "transformers"}}
+    return {"id": record_id, "affected": [{**package, **affected}]}
+
+
+_FIXED_BEFORE_4 = _transformers_record(
+    "GHSA-good-good-good",
+    ranges=[{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "1.0"}]}],
+)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        _transformers_record(ranges="bad"),
+        _transformers_record(versions="4.35.0"),
+        _transformers_record(ranges=["bad"]),
+        _transformers_record(ranges=[{"type": "ECOSYSTEM", "events": "bad"}]),
+        _transformers_record(
+            ranges=[{"type": "ECOSYSTEM", "events": [{"introduced": "not a version!"}]}]
+        ),
+        _transformers_record(ranges=[{"type": "ECOSYSTEM", "events": [{"introduced": False}]}]),
+        _transformers_record(
+            ranges=[{"type": "ECOSYSTEM", "events": [{"introduced": "0"}, {"fixed": "nope!"}]}]
+        ),
+        _transformers_record(
+            ranges=[{"type": "ECOSYSTEM", "events": [{"introduced": "0", "fixed": "5"}]}]
+        ),
+    ],
+    ids=[
+        "ranges-not-list",
+        "versions-not-list",
+        "range-not-object",
+        "events-not-list",
+        "introduced-not-version",
+        "introduced-bool",
+        "fixed-not-version",
+        "two-keys-in-event",
+    ],
+)
+def test_offline_advisories_unevaluable_record_for_the_package_is_incomplete(tmp_path, bad):
+    bom_path = tmp_path / "aibom.json"
+    _bom_with_package().save(bom_path)
+    db_file = tmp_path / "osv.json"
+    db_file.write_text(json.dumps([_FIXED_BEFORE_4, bad]), encoding="utf-8")
+
+    report, _ = match_offline_advisories(_bom_with_package(), db_path=db_file)
+    assert report.advisories == []
+    assert report.complete is False
+    assert len(report.errors) == 1
+    assert report.errors[0].startswith("pkg:pypi:transformers@4.35.0: offline advisory GHSA-bad0")
+
+    res = CliRunner().invoke(main, ["advisories", str(bom_path), "--offline-db", str(db_file)])
+    assert res.exit_code == 1
+    assert json.loads(res.output)["complete"] is False
+
+
+def test_offline_advisories_refuse_a_record_whose_affected_is_not_a_list_of_objects(tmp_path):
+    bom_path = tmp_path / "aibom.json"
+    _bom_with_package().save(bom_path)
+    db_file = tmp_path / "osv.json"
+    for affected in ("oops", ["oops", *_FIXED_BEFORE_4["affected"]]):
+        bad = {"id": "GHSA-bad0-bad0-bad0", "affected": affected}
+        db_file.write_text(json.dumps([_FIXED_BEFORE_4, bad]), encoding="utf-8")
+        with pytest.raises(ValueError, match="GHSA-bad0-bad0-bad0 has malformed 'affected'"):
+            match_offline_advisories(_bom_with_package(), db_path=db_file)
+        res = CliRunner().invoke(main, ["advisories", str(bom_path), "--offline-db", str(db_file)])
+        assert res.exit_code == 1
+        assert '"complete"' not in res.output
+
+
+def test_offline_advisories_unevaluable_record_elsewhere_keeps_other_matches_complete(tmp_path):
+    other = _transformers_record(ranges="bad")
+    other["affected"][0]["package"]["name"] = "torch"
+    vulnerable = _transformers_record(
+        "GHSA-vuln-vuln-vuln",
+        ranges=[{"type": "ECOSYSTEM", "events": [{"introduced": "4.0"}, {"fixed": "4.48.0"}]}],
+    )
+    db_file = tmp_path / "osv.json"
+    db_file.write_text(json.dumps([_FIXED_BEFORE_4, other, vulnerable]), encoding="utf-8")
+
+    report, _ = match_offline_advisories(_bom_with_package(), db_path=db_file)
+    assert report.complete is True
+    assert report.errors == []
+    assert [(a["id"], a["fixed_versions"]) for a in report.advisories] == [
+        ("GHSA-vuln-vuln-vuln", ["4.48.0"])
+    ]
+
+    torch = _bom_with_package(name="torch", version="2.0.0")
+    both = AIBOM(components=[*_bom_with_package().components, *torch.components])
+    mixed, _ = match_offline_advisories(both, db_path=db_file)
+    assert [a["component_ref"] for a in mixed.advisories] == ["pkg:pypi:transformers@4.35.0"]
+    assert mixed.errors == [
+        "pkg:pypi:torch@2.0.0: offline advisory GHSA-bad0-bad0-bad0: "
+        "OSV affected versions or ranges are not a list"
+    ]

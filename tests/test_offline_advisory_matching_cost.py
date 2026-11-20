@@ -1,13 +1,16 @@
 """Offline advisory matching: indexed cost, the advisory-matches budget, and equivalence.
 
-The indexed matcher must report exactly what pairwise matching reported. The reference
-below is the pairwise matcher this module replaced, kept word for word as the oracle.
+The indexed matcher must report exactly what pairwise matching reported: the same matches,
+and the same error for every block it cannot decide. The reference below is the pairwise
+matcher this module replaced, as of fd259a7f (which made it fail closed), kept word for word
+apart from its names as the oracle.
 """
 
 from __future__ import annotations
 
 import json
 import random
+from collections import Counter
 from dataclasses import replace
 from typing import Any
 
@@ -44,6 +47,7 @@ def _reference_compare(ecosystem: str, left: str, right: str) -> int | None:
 def _reference_range_matches(
     ecosystem: str, version: str, rng: dict[str, Any]
 ) -> tuple[bool, list[str]]:
+    """Evaluate one OSV range by version intervals (order-independent per OSV spec)."""
     raw_type = rng.get("type")
     if raw_type is not None and (
         not isinstance(raw_type, str) or raw_type.upper() not in _SUPPORTED_RANGE_TYPES
@@ -51,101 +55,67 @@ def _reference_range_matches(
         return False, []
     events = rng.get("events")
     if not isinstance(events, list):
-        return False, []
+        raise ValueError("OSV range events are not a list")
+
+    def cmp(left: str, right: str) -> int:
+        if (result := _reference_compare(ecosystem, left, right)) is None:
+            raise ValueError("OSV range version cannot be compared")
+        return result
 
     has_zero_intro = False
-    intros: list[str] = []
-    fixed_versions: list[str] = []
-    last_affected: list[str] = []
-    limit_versions: list[str] = []
+    found: dict[str, list[str]] = {"introduced": [], "fixed": [], "last_affected": [], "limit": []}
     for ev in events:
-        if not isinstance(ev, dict):
-            continue
-        if "introduced" in ev:
-            raw_intro = ev["introduced"]
-            if raw_intro == "0" or (
-                isinstance(raw_intro, int) and not isinstance(raw_intro, bool) and raw_intro == 0
-            ):
-                has_zero_intro = True
-            elif isinstance(raw_intro, str) and raw_intro.strip():
-                intros.append(raw_intro.strip())
-        elif "fixed" in ev and isinstance(ev["fixed"], str) and ev["fixed"].strip():
-            fixed_versions.append(ev["fixed"].strip())
-        elif (
-            "last_affected" in ev
-            and isinstance(ev["last_affected"], str)
-            and ev["last_affected"].strip()
-        ):
-            last_affected.append(ev["last_affected"].strip())
-        elif "limit" in ev and isinstance(ev["limit"], str) and ev["limit"].strip():
-            limit_versions.append(ev["limit"].strip())
+        kind, raw = next(iter(ev.items())) if isinstance(ev, dict) and len(ev) == 1 else ("", "")
+        if kind == "introduced" and raw in ("0", 0) and not isinstance(raw, bool):
+            has_zero_intro = True
+        elif kind in found and isinstance(raw, str) and raw.strip():
+            found[kind].append(raw.strip())
+        else:
+            raise ValueError("OSV range event cannot be parsed")
+    intros, fixed_versions, last_affected, limits = found.values()
 
-    if any(
-        (c := _reference_compare(ecosystem, version, lim)) is not None and c >= 0
-        for lim in limit_versions
-    ):
+    if any(lim != "*" and cmp(version, lim) >= 0 for lim in limits):
         return False, []
 
     best_intro: str | None = None
     found_intro = has_zero_intro
     for intro in intros:
-        cmp_v = _reference_compare(ecosystem, intro, version)
-        if cmp_v is None or cmp_v > 0:
+        if cmp(intro, version) > 0:
             continue
         found_intro = True
-        if best_intro is None or (
-            (cb := _reference_compare(ecosystem, intro, best_intro)) is not None and cb > 0
-        ):
+        if best_intro is None or cmp(intro, best_intro) > 0:
             best_intro = intro
     if not found_intro:
         return False, []
 
     for fix in fixed_versions:
-        cmp_v = _reference_compare(ecosystem, fix, version)
-        if cmp_v is None or cmp_v > 0:
-            continue
-        if best_intro is None or (
-            (ci := _reference_compare(ecosystem, best_intro, fix)) is not None and ci <= 0
-        ):
+        if cmp(fix, version) <= 0 and (best_intro is None or cmp(best_intro, fix) <= 0):
             return False, []
-
     for last in last_affected:
-        cmp_v = _reference_compare(ecosystem, last, version)
-        if cmp_v is None or cmp_v >= 0:
-            continue
-        if best_intro is None or (
-            (ci := _reference_compare(ecosystem, best_intro, last)) is not None and ci <= 0
-        ):
+        if cmp(last, version) < 0 and (best_intro is None or cmp(best_intro, last) <= 0):
             return False, []
-
-    relevant_fixes = [
-        fix
-        for fix in fixed_versions
-        if (cf := _reference_compare(ecosystem, fix, version)) is not None and cf > 0
-    ]
-    return True, relevant_fixes
+    return True, [fix for fix in fixed_versions if cmp(fix, version) > 0]
 
 
 def _reference_matches_affected_version(
     affected: dict[str, Any], ecosystem: str, version: str
 ) -> tuple[bool, list[str]]:
+    """Evaluate a package-matched affected block; raise ``ValueError`` when it cannot decide."""
     fixed_versions: list[str] = []
-    matched = False
-    raw_versions = affected.get("versions")
-    if isinstance(raw_versions, list) and any(
+    raw_versions, raw_ranges = affected.get("versions", []), affected.get("ranges", [])
+    if not isinstance(raw_versions, list) or not isinstance(raw_ranges, list):
+        raise ValueError("OSV affected versions or ranges are not a list")
+    matched = any(
         isinstance(ver, str) and _reference_compare(ecosystem, version, ver) == 0
         for ver in raw_versions
-    ):
-        matched = True
-    raw_ranges = affected.get("ranges")
-    if isinstance(raw_ranges, list):
-        for rng in raw_ranges:
-            if not isinstance(rng, dict):
-                continue
-            in_range, rng_fixed = _reference_range_matches(ecosystem, version, rng)
-            if in_range:
-                matched = True
-                fixed_versions.extend(rng_fixed)
+    )
+    for rng in raw_ranges:
+        in_range, rng_fixed = _reference_range_matches(
+            ecosystem, version, rng if isinstance(rng, dict) else {}
+        )
+        if in_range:
+            matched = True
+            fixed_versions.extend(rng_fixed)
     return matched, sorted(set(fixed_versions))
 
 
@@ -155,6 +125,28 @@ def _merged(found: list[tuple[str, list[str]]]) -> list[tuple[str, list[str]]]:
     for record_id, fixed in found:
         by_id.setdefault(record_id, []).extend(fixed)
     return [(record_id, sorted(set(fixed))) for record_id, fixed in by_id.items()]
+
+
+def _reference_blocks(
+    blocks: list[tuple[str, dict[str, Any]]], ecosystem: str, version: str
+) -> tuple[list[tuple[str, list[str]]], list[tuple[str, str]], list[str | None]]:
+    """Pairwise matching of one version: merged matches, each undecided block in order, and
+    every block's reason (None when decided).
+    """
+    found: list[tuple[str, list[str]]] = []
+    undecided: list[tuple[str, str]] = []
+    outcomes: list[str | None] = []
+    for record_id, affected in blocks:
+        try:
+            hit, fixed = _reference_matches_affected_version(affected, ecosystem, version)
+        except ValueError as exc:
+            undecided.append((record_id, str(exc)))
+            outcomes.append(str(exc))
+            continue
+        outcomes.append(None)
+        if hit:
+            found.append((record_id, fixed))
+    return _merged(found), undecided, outcomes
 
 
 _VERSIONS = {
@@ -174,45 +166,89 @@ _VERSIONS = {
         *("1.2.3+build", " 2.0.0 ", "01.2.3", "1.0.0.0", "1!0.5", "not-a-version", "1.x", "", "0"),
     ],
 }
+# Event versions are mostly ones the ecosystem parses, so most ranges can be decided and
+# the ones that cannot are each about one unparseable version, whose effect depends on
+# which comparisons the component version leads evaluation to make.
+_PARSEABLE = {
+    eco: [v for v in vs if offline._version_key(eco, v) is not None]
+    for eco, vs in _VERSIONS.items()
+}
+_UNPARSEABLE = {
+    eco: [v for v in vs if v.strip() and offline._version_key(eco, v) is None]
+    for eco, vs in _VERSIONS.items()
+}
+# Each event shape fd259a7f refuses: several keys, no key, not an object, an unknown key, a
+# value that is not a non-empty string, and the integers and booleans "0" must not admit.
+_MALFORMED_EVENTS: list[object] = [
+    {"introduced": "1.0", "fixed": "2.0"},
+    {"fixed": "1.0", "limit": "2.0"},
+    {},
+    "event",
+    None,
+    ["introduced", "0"],
+    {"withdrawn": "1.0"},
+    {"fixed": 3},
+    {"last_affected": None},
+    {"limit": "  "},
+    {"introduced": ""},
+    {"introduced": True},
+    {"introduced": False},
+    {"introduced": 5},
+    {"introduced": "0", "limit": "*"},
+]
 
 
-def _random_event(rng: random.Random, versions: list[str]) -> object:
-    version = rng.choice(versions)
+def _random_event(rng: random.Random, ecosystem: str) -> object:
+    pool = _UNPARSEABLE if rng.random() < 0.04 else _PARSEABLE
+    version = rng.choice(pool[ecosystem])
     roll = rng.random()
     if roll < 0.30:
-        return {"introduced": rng.choice([version, version, version, "0", "0", 0, True, 5, ""])}
-    if roll < 0.55:
+        return {"introduced": rng.choice([version, version, version, "0", "0", 0, 0.0])}
+    if roll < 0.58:
         return {"fixed": version}
-    if roll < 0.70:
+    if roll < 0.73:
         return {"last_affected": version}
-    if roll < 0.80:
-        return {"limit": version}
-    if roll < 0.88:
-        return {"introduced": version, "fixed": rng.choice(versions)}
-    if roll < 0.94:
-        return {"fixed": version, "limit": rng.choice(versions)}
-    return rng.choice(["event", None, {"fixed": 3}, {"last_affected": None}, {}])
+    if roll < 0.83:
+        return {"limit": rng.choice([version, version, "*", " * "])}
+    if roll < 0.97:
+        return {"introduced": version}
+    return rng.choice(_MALFORMED_EVENTS)
 
 
-def _random_block(rng: random.Random, versions: list[str]) -> dict[str, Any]:
+def _random_block(rng: random.Random, ecosystem: str) -> dict[str, Any]:
+    versions = _VERSIONS[ecosystem]
     block: dict[str, Any] = {}
     if rng.random() < 0.4:
-        block["versions"] = [
-            rng.choice([*versions, 7, None]) for _ in range(rng.randint(0, 4))
-        ] or rng.choice([[], "1.0"])
+        block["versions"] = [rng.choice([*versions, 7, None]) for _ in range(rng.randint(0, 4))]
+    if rng.random() < 0.03:
+        block["versions"] = rng.choice(["1.0", None, {"1.0": True}])
     if rng.random() < 0.9:
         ranges: list[object] = []
         for _ in range(rng.randint(0, 3)):
-            entry: dict[str, Any] = {
-                "events": [_random_event(rng, versions) for _ in range(rng.randint(0, 6))]
-            }
+            roll = rng.random()
+            events: list[object] = (
+                [{"introduced": "0"}, *rng.choice([[], [{"limit": "*"}]])]
+                if roll < 0.08
+                else [_random_event(rng, ecosystem) for _ in range(rng.randint(0, 6))]
+            )
+            if 0.08 <= roll < 0.2:
+                # One version that cannot be compared, among ones that can: whether a
+                # component reaches it depends on how it compares with the others.
+                kind = rng.choice(["introduced", "fixed", "last_affected", "limit"])
+                bad = {kind: rng.choice(_UNPARSEABLE[ecosystem])}
+                events.insert(rng.randint(0, len(events)), bad)
+            entry: dict[str, Any] = {"events": events}
             kind = rng.choice(["ECOSYSTEM", "SEMVER", "semver", None, None, "GIT", 7])
             if kind is not None:
                 entry["type"] = kind
-            if rng.random() < 0.05:
+            if rng.random() < 0.04:
                 entry["events"] = rng.choice([None, "events", {"introduced": "0"}])
-            ranges.append(entry if rng.random() < 0.95 else "range")
-        block["ranges"] = ranges if rng.random() < 0.95 else {"type": "ECOSYSTEM"}
+            if rng.random() < 0.02:
+                del entry["events"]
+            ranges.append(entry if rng.random() < 0.96 else rng.choice(["range", 7, None, []]))
+        block["ranges"] = (
+            ranges if rng.random() < 0.97 else rng.choice([{"type": "ECOSYSTEM"}, "ranges", None])
+        )
     return block
 
 
@@ -225,35 +261,56 @@ def test_the_indexed_matcher_reports_what_pairwise_matching_reported(ecosystem):
     rng = random.Random(273)  # noqa: S311 - a reproducible corpus, not a secret
     versions = _VERSIONS[ecosystem]
     budget = offline._MatchBudget(10**9)
-    matched = unmatched = undecidable = with_fixes = 0
-    for _ in range(400):
+    matched = unmatched = undecidable = with_fixes = mixed = reached_only_by_some = 0
+    reasons: Counter[str] = Counter()
+    for _ in range(600):
         blocks = [
-            (_advisory(f"GHSA-{rng.randint(0, 5)}"), _random_block(rng, versions))
+            (f"GHSA-{rng.randint(0, 5)}", _random_block(rng, ecosystem))
             for _ in range(rng.randint(1, 8))
         ]
-        matcher = offline._PackageMatcher(ecosystem, blocks, budget)
+        matcher = offline._PackageMatcher(
+            ecosystem, [(_advisory(record_id), block) for record_id, block in blocks], budget
+        )
+        parsed_outcomes: list[set[str | None]] = [set() for _ in blocks]
         for version in versions:
-            expected = _merged(
-                [
-                    (adv.record_id, fixed)
-                    for adv, affected in blocks
-                    for hit, fixed in [
-                        _reference_matches_affected_version(affected, ecosystem, version)
-                    ]
-                    if hit
-                ]
+            expected, expected_undecided, outcomes = _reference_blocks(blocks, ecosystem, version)
+            if offline._version_key(ecosystem, version) is not None:
+                for seen, outcome in zip(parsed_outcomes, outcomes, strict=True):
+                    seen.add(outcome)
+            found, undecided = matcher.matches(version, budget)
+            assert _merged([(adv.record_id, fixed) for adv, fixed in found]) == expected, (
+                ecosystem,
+                version,
+                blocks,
             )
-            found = _merged(
-                [(adv.record_id, fixed) for adv, fixed in matcher.matches(version, budget)]
+            assert [(adv.record_id, reason) for adv, reason in undecided] == expected_undecided, (
+                ecosystem,
+                version,
+                blocks,
             )
-            assert found == expected, (ecosystem, version, blocks)
+            reasons.update(reason for _, reason in expected_undecided)
             matched += bool(expected)
             unmatched += not expected
+            mixed += bool(expected) and bool(expected_undecided)
             with_fixes += any(fixed for _, fixed in expected)
             undecidable += bool(expected) and offline._version_key(ecosystem, version) is None
+        # Blocks decided for some versions and not comparable for others: the short-circuit
+        # order of the comparisons is what the index has to reproduce there.
+        reached_only_by_some += sum(
+            {None, "OSV range version cannot be compared"} <= seen for seen in parsed_outcomes
+        )
     assert min(matched, unmatched) > 2_000
+    assert reached_only_by_some > 50
     assert with_fixes > 500
-    assert undecidable > 100
+    assert undecidable > 50
+    assert mixed > 500
+    assert min(reasons.values()) > 300
+    assert set(reasons) == {
+        "OSV affected versions or ranges are not a list",
+        "OSV range events are not a list",
+        "OSV range event cannot be parsed",
+        "OSV range version cannot be compared",
+    }
 
 
 def _component(name: str, version: str, kind: str = "pypi") -> RegistryEntryComponent:
@@ -279,7 +336,7 @@ def test_a_random_bundle_gives_the_report_pairwise_matching_gave(tmp_path):
         ecosystem = "PyPI" if kind == "pypi" else "npm"
         affected = []
         for _ in range(rng.randint(1, 3)):
-            block = _random_block(rng, _VERSIONS[ecosystem])
+            block = _random_block(rng, ecosystem)
             block["package"] = {
                 "ecosystem": rng.choice([ecosystem, ecosystem.lower()]),
                 "name": rng.choice(names),
@@ -308,10 +365,10 @@ def test_a_random_bundle_gives_the_report_pairwise_matching_gave(tmp_path):
 
     report, _ = offline.match_offline_advisories(AIBOM(components=components), db_path=db_file)
 
-    assert report.complete is True
     assert report.components_checked == len(components) > 400
     parsed = offline._parse_osv_records(records)
     expected = []
+    errors = []
     for component in sorted(components, key=lambda item: item.bom_ref):
         ecosystem = "PyPI" if component.registry_type == "pypi" else "npm"
         raw: dict[str, tuple[offline._ParsedAdvisory, list[str]]] = {}
@@ -323,9 +380,13 @@ def test_a_random_bundle_gives_the_report_pairwise_matching_gave(tmp_path):
                     component.name,
                 ):
                     continue
-                hit, fixed = _reference_matches_affected_version(
-                    block, ecosystem, component.version
-                )
+                try:
+                    hit, fixed = _reference_matches_affected_version(
+                        block, ecosystem, component.version
+                    )
+                except ValueError as exc:
+                    errors.append(f"{component.bom_ref}: offline advisory {adv.record_id}: {exc}")
+                    continue
                 if hit:
                     raw.setdefault(adv.record_id, (adv, []))[1].extend(fixed)
         for entry in offline._deduplicate_matches(
@@ -336,7 +397,10 @@ def test_a_random_bundle_gives_the_report_pairwise_matching_gave(tmp_path):
     assert [{key: entry[key] for key in keys} for entry in report.advisories] == [
         {key: entry[key] for key in keys} for entry in expected
     ]
+    assert report.errors == errors
+    assert report.complete is False
     assert len(expected) > 1_000
+    assert len(errors) > 1_000
     assert sum(bool(entry["fixed_versions"]) for entry in expected) > 100
 
 
