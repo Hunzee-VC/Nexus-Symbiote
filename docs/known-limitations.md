@@ -24,6 +24,7 @@ A way around a limit that its entry does not describe is worth a
 - [MCP servers and tools](#mcp-servers-and-tools)
 - [Models](#models)
 - [Instructions and IDE settings](#instructions-and-ide-settings)
+- [Text-poisoning rules](#text-poisoning-rules)
 - [Registry and containers](#registry-and-containers)
 - [A2A and RAG](#a2a-and-rag)
 - [ShadowScan](#shadowscan)
@@ -1106,6 +1107,39 @@ A way around a limit that its entry does not describe is worth a
   not recognize, such as `.vscode/settings.json`, or a host's user or managed
   settings outside the project, is neither digested nor a gap, so a change to it
   passes every gate.
+
+## Text-poisoning rules
+
+`scan` and `--project` reconciliation run a lexical rule pack over the text of
+collected components and the files the selected collectors recorded as their sources
+(`instruction_injection` and `tool_description_poisoning` in the
+[finding catalog](finding-catalog.md#categories)). It matches phrasing, not meaning,
+so it misses rewordings and can flag ordinary text. A source it cannot read or parse
+is a failure; everything below is neither a gap nor a failure.
+
+- **Files no collector records are not read**, such as `openai/assistant.json` or a
+  `*.tool.json` schema. Skill resources other than text declarations (`.md`, `.txt`,
+  `.json`, `.yaml`, `.toml` and similar), such as `.html` or `.tmpl` templates, are
+  skipped as well.
+- **Rewordings are missed.** Cyrillic homoglyphs, HTML entities, `[//]: #` comments,
+  "note for automated auditors" and override phrasings outside the rules give no
+  finding. Invisible characters are removed before matching, so text that uses them
+  as word separators reads as one word. JSON keys are not scanned, only values.
+- **Prohibitions and reported speech are recognized narrowly.** A negation counts only
+  right before the verb it negates, and "If a page says to ignore previous
+  instructions" is read as a condition, so the same words in that form raise nothing.
+- **Concealment from the user is flagged whatever the reason.** "Never tell the user
+  about internal ticket numbers" raises `TP-CONCEAL-003`, as a tool told to hide
+  audit fields does; suppress the finding if the instruction is intended.
+- **Attribution is by position in source code.** In Python and TypeScript, text that
+  names a sibling tool's definition, and in JSON a nested `"name"` such as one in an
+  `outputSchema`, can move a finding onto that sibling. The tool that holds the text
+  is still flagged from its own description.
+- **One finding lists at most 64 matches**, shared by all rules in a text, so many
+  matches of one rule can leave other rule ids out of the finding. The finding and
+  its severity are unchanged.
+- **Memory grows with compatibility forms.** NFKC can expand one character into many,
+  so 4 MiB of U+FDFA peaks near 1.8 GiB.
 
 ## Registry and containers
 
