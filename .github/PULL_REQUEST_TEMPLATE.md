@@ -17,7 +17,7 @@
 
 ## Checklist
 
-`make check` runs the offline subset of the required CI checks. See [CONTRIBUTING.md](https://github.com/Hunzee-VC/Nexus-Symbiote/blob/main/CONTRIBUTING.md).
+`make check` runs the offline subset of the required CI checks. See [CONTRIBUTING.md](https://github.com/aisecnomad/Nexus-Symbiote/blob/main/CONTRIBUTING.md).
 
 - [ ] Tests cover the new or changed behavior
 - [ ] `ruff check src tests scripts` passes
