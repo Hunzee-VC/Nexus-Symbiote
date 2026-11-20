@@ -112,6 +112,8 @@ def test_only_host_file_system_skips_pass_a_strict_run(suite, reason, strict, st
     [
         "the subreaper wrapper is Linux-only",
         "clone(CLONE_PARENT) is Linux-only",
+        "the /proc descendant sweep is Linux-only",
+        "the PID namespace teardown is Linux-only",
         "no /proc/self/cwd",
         "no /dev/fd link into /proc",
     ],
@@ -495,7 +497,8 @@ def test_loopback_targets_and_names_pass():
         udp.sendmsg([b"x"], [], 0, ("127.0.0.1", 9))
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
-        listener.listen(1)
+        # macOS keeps no spare slot past the backlog, so a second unaccepted connect waits.
+        listener.listen(8)
         with socket.create_connection(listener.getsockname(), 1):
             pass
         with socket.socket() as client:

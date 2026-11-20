@@ -1,7 +1,7 @@
 # Container image
 
 Each PyPI release from the next one on also publishes the CLI as a container image,
-`ghcr.io/hunzee-vc/nexus-symbiote`, tagged with the version. It is the same wheel
+`ghcr.io/aisecnomad/nexus-symbiote`, tagged with the version. It is the same wheel
 that went to PyPI, installed on the hash-locked runtime the GitHub Action uses, and it
 carries a build-provenance attestation of its own. Use it where the CLI cannot run
 directly, such as on Windows ([platforms](../SECURITY.md#platforms)).
@@ -29,14 +29,14 @@ change.
 
 ```bash
 gh auth login
-docker buildx imagetools inspect ghcr.io/hunzee-vc/nexus-symbiote:<version>
-gh attestation verify oci://ghcr.io/hunzee-vc/nexus-symbiote@<digest> \
-  --repo Hunzee-VC/Nexus-Symbiote \
-  --signer-workflow Hunzee-VC/Nexus-Symbiote/.github/workflows/release.yml \
+docker buildx imagetools inspect ghcr.io/aisecnomad/nexus-symbiote:<version>
+gh attestation verify oci://ghcr.io/aisecnomad/nexus-symbiote@<digest> \
+  --repo aisecnomad/Nexus-Symbiote \
+  --signer-workflow aisecnomad/Nexus-Symbiote/.github/workflows/release.yml \
   --source-ref refs/heads/main --source-digest <release commit SHA> \
   --deny-self-hosted-runners
 docker run --rm --network none --read-only --user "$(id -u):$(id -g)" \
-  -v "$PWD:/work:ro" ghcr.io/hunzee-vc/nexus-symbiote@<digest> \
+  -v "$PWD:/work:ro" ghcr.io/aisecnomad/nexus-symbiote@<digest> \
   scan /work --no-project-policy -f cyclonedx > agent.cdx.json
 ```
 

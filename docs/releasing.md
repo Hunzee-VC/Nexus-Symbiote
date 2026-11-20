@@ -116,7 +116,9 @@ as described below.
      expected_sha="$(awk -v file="dist/$wheel" \
        '$2 == file { n++; print $1 } END { if (n != 1) exit 1 }' "$run_checksums")"
      [[ "$expected_sha" =~ ^[0-9a-f]{64}$ ]]
-     (cd "$wheel_dir" && printf '%s  %s\n' "$expected_sha" "$wheel" | sha256sum --strict -c -)
+     check=(sha256sum --strict -c -)
+     command -v sha256sum >/dev/null || check=(shasum -a 256 --strict -c -)  # macOS
+     (cd "$wheel_dir" && printf '%s  %s\n' "$expected_sha" "$wheel" | "${check[@]}")
      "$rehearsal/bin/python" -m pip install --index-url https://pypi.org/simple/ "$wheel_dir/$wheel"
      "$rehearsal/bin/nexus-symbiote" --version
    )
@@ -188,7 +190,7 @@ as described below.
    ```
 
    For the image, take the digest from the `image` job's summary and verify it the
-   same way, as `oci://ghcr.io/hunzee-vc/nexus-symbiote@<digest>` (see
+   same way, as `oci://ghcr.io/aisecnomad/nexus-symbiote@<digest>` (see
    [container image](container-image.md#verify-and-run-a-published-image)).
 
    Do not claim publication succeeded until the package index and the source revision

@@ -87,10 +87,14 @@ EXPECTED_SKIP_REASONS = (
 LOCAL_SKIP_REASONS = (
     re.compile(r"\Apip is not importable here; CI, which installs with pip, runs this test\Z"),
 )
-# Expected only off Linux: these tests drive /proc, prctl or clone(CLONE_PARENT), which
-# macOS lacks. A Linux run that skips one fails.
+# Expected only off Linux: these tests drive /proc, prctl, pidfds or clone(CLONE_PARENT),
+# which macOS lacks. A Linux run that skips one fails. Pinned execution elsewhere refuses
+# the namespace launch these mechanisms serve, which runs on every platform.
 NON_LINUX_SKIP_REASONS = (
-    re.compile(r"\A(?:the subreaper wrapper|clone\(CLONE_PARENT\)) is Linux-only\Z"),
+    re.compile(
+        r"\A(?:the subreaper wrapper|clone\(CLONE_PARENT\)|the /proc descendant sweep"
+        r"|the PID namespace teardown) is Linux-only\Z"
+    ),
     re.compile(r"\Ano (?:/proc/self/cwd|/dev/fd link into /proc)\Z"),
 )
 DEFAULT_TIMEOUT_SECONDS = 300

@@ -288,8 +288,11 @@ def namespace_available() -> bool:
 
     The result is cached. Ubuntu 24.04 with AppArmor's unprivileged-user-namespace
     restriction returns false; the probe is one short ``unshare`` of ``/bin/true``.
+    Only Linux has these namespaces, so elsewhere it is false without a probe.
     """
     global _NAMESPACE_OK
+    if not sys.platform.startswith("linux"):
+        return False
     if _NAMESPACE_OK is None:
         _NAMESPACE_OK = _probe_namespace()
     return _NAMESPACE_OK
@@ -336,7 +339,9 @@ def _launch_argv(staged: Path) -> tuple[list[str], bool]:
     """The argv that runs ``staged``, and whether the namespace init waits to be released."""
     if not isolation_enabled():
         return _subreaper_argv(staged) or [str(staged)], False
-    if not namespace_available():
+    # Off Linux an ``unshare`` on the default path is not util-linux's, and confirming
+    # the teardown reads /proc, so no launch there may count as contained.
+    if not sys.platform.startswith("linux") or not namespace_available():
         raise PinnedProcessError(
             "isolation-unavailable",
             "kernel PID containment is unavailable; no launcher was executed. "
@@ -1170,6 +1175,12 @@ def terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
             except ProcessLookupError:
                 # The group already exited; the caller's wait() still reaps the launcher.
                 pass
+            except PermissionError:
+                # macOS refuses killpg when it signals no member, as when the group holds
+                # only the exited, unreaped launcher, which Linux signals without error. A
+                # launcher that still runs and cannot be signalled stays an error.
+                if sys.platform.startswith("linux") or proc.poll() is None:
+                    raise
         if not namespaced:
             _kill_descendants(proc.pid)
     finally:
