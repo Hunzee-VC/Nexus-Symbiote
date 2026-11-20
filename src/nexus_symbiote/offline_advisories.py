@@ -4,7 +4,10 @@ Matches exact pinned PyPI and npm packages in an AgentBOM against an operator-su
 OSV bundle (a JSON file or a flat directory of them) without network I/O. Files are
 opened without following symlinks and bounded in size. A bundle or catalog that is empty
 or wrongly shaped is refused, and a package whose ecosystem the bundle holds no record
-for is an error, so neither can pass as a complete result with no advisories.
+for is an error, so neither can pass as a complete result with no advisories. Each feed's
+own date (never a file time, which a checkout sets) is recorded, and a feed that is undated,
+older than the operator's limit or dated in the future is an error, so a stale answer is
+not complete either.
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ import os
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +46,12 @@ MAX_DB_FILES = 10_000
 MAX_DB_RECORDS = 100_000
 MAX_CATALOG_BYTES = 16 * 1024 * 1024
 MAX_OFFLINE_COMPONENTS = 50_000
+DEFAULT_MAX_FEED_AGE_DAYS = 30
+MAX_FEED_AGE_DAYS = 36_500
+_FUTURE_TOLERANCE = timedelta(days=1)
+_FEED_DATE_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:?\d{2}))?"
+)
 
 _SEMVER_RE = re.compile(
     r"^v?(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*))?(?:\.(0|[1-9][0-9]*))?"
@@ -58,6 +68,7 @@ class _ParsedAdvisory:
     summary: str
     severity: str
     affected: tuple[dict[str, Any], ...]
+    dated: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -78,6 +89,37 @@ def _read_bounded_bytes(path: Path, max_bytes: int, label: str) -> bytes:
     if len(data) > max_bytes:
         raise ValueError(f"{label} exceeds maximum size of {max_bytes} bytes")
     return data
+
+
+def _parse_feed_date(raw: object, label: str) -> datetime | None:
+    """Parse a date a feed states about itself: None when absent, an error when malformed."""
+    if raw is None:
+        return None
+    try:
+        if not isinstance(raw, str) or _FEED_DATE_RE.fullmatch(raw) is None:
+            raise ValueError
+        parsed = datetime.fromisoformat(raw)
+        return (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)).astimezone(UTC)
+    except (ValueError, OverflowError):
+        raise ValueError(f"{label} is not an RFC 3339 date or date-time") from None
+
+
+def _feed_age_error(
+    label: str, noun: str, dated: datetime | None, now: datetime, limit: int
+) -> str | None:
+    if dated is None:
+        field = "record 'modified' or 'published' date" if noun == "newest record" else noun
+        return f"{label} carries no {field}, so its age is unknown; limit {limit} days"
+    if dated - now > _FUTURE_TOLERANCE:
+        return f"{label} {noun} {dated:%Y-%m-%d} is in the future"
+    age = (now.date() - dated.date()).days
+    if age > limit:
+        return f"{label} is {age} days old ({noun} {dated:%Y-%m-%d}); limit {limit}"
+    return None
+
+
+def _iso(dated: datetime | None) -> str | None:
+    return None if dated is None else dated.isoformat()
 
 
 def _semver_key(raw: str) -> tuple[int, int, int, int, tuple[tuple[int, int | str], ...]] | None:
@@ -163,8 +205,15 @@ def _parse_osv_records(payload: object) -> list[_ParsedAdvisory]:
             if isinstance(raw_affected, list)
             else ()
         )
+        raw_dated = item.get("modified")
+        dated = _parse_feed_date(
+            item.get("published") if raw_dated is None else raw_dated,
+            "Offline advisory DB record 'modified' or 'published'",
+        )
         parsed.append(
-            _ParsedAdvisory(rec_id.strip(), aliases, summary, _extract_severity(item), affected)
+            _ParsedAdvisory(
+                rec_id.strip(), aliases, summary, _extract_severity(item), affected, dated
+            )
         )
     return parsed
 
@@ -209,8 +258,8 @@ def load_offline_advisory_db(path: Path) -> tuple[list[_ParsedAdvisory], str]:
     return records, digest
 
 
-def load_kev_catalog(path: Path) -> tuple[dict[str, list[_KEVEntry]], str]:
-    """Load an offline CISA or ENISA KEV JSON catalog."""
+def load_kev_catalog(path: Path) -> tuple[dict[str, list[_KEVEntry]], str, datetime | None]:
+    """Load an offline CISA or ENISA KEV JSON catalog, with the ``dateReleased`` it states."""
     data = _read_bounded_bytes(path, MAX_CATALOG_BYTES, "KEV catalog")
     payload = parse_json_strict(data.decode("utf-8"), max_bytes=MAX_CATALOG_BYTES)
     if not isinstance(payload, dict):
@@ -239,10 +288,25 @@ def load_kev_catalog(path: Path) -> tuple[dict[str, list[_KEVEntry]], str]:
         )
     if not index:
         raise ValueError("KEV catalog holds no entries")
-    return index, hash_bytes(data)
+    released = _parse_feed_date(payload.get("dateReleased"), "KEV catalog 'dateReleased'")
+    return index, hash_bytes(data), released
 
 
-def load_epss_catalog(path: Path) -> tuple[dict[str, _EPSSEntry], str]:
+def _epss_csv_score_date(text: str) -> datetime | None:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if not stripped.startswith("#"):
+            break
+        for part in stripped.lstrip("#").split(","):
+            key, found, value = part.partition(":")
+            if found and key.strip() == "score_date":
+                return _parse_feed_date(value.strip(), "EPSS catalog 'score_date'")
+    return None
+
+
+def load_epss_catalog(path: Path) -> tuple[dict[str, _EPSSEntry], str, datetime | None]:
     """Load an offline EPSS CSV or JSON catalog with strict finite [0, 1] validation."""
     data = _read_bounded_bytes(path, MAX_CATALOG_BYTES, "EPSS catalog")
     text = data.decode("utf-8")
@@ -251,6 +315,7 @@ def load_epss_catalog(path: Path) -> tuple[dict[str, _EPSSEntry], str]:
         payload = parse_json_strict(text, max_bytes=MAX_CATALOG_BYTES)
         if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
             raise ValueError("EPSS JSON catalog must be an object with a 'data' array")
+        scored = _parse_feed_date(payload.get("score_date"), "EPSS catalog 'score_date'")
         for row in payload["data"]:
             if not isinstance(row, dict):
                 continue
@@ -262,6 +327,7 @@ def load_epss_catalog(path: Path) -> tuple[dict[str, _EPSSEntry], str]:
                 _parse_epss_unit(pct, "percentile") if pct is not None else None,
             )
     else:
+        scored = _epss_csv_score_date(text)
         rows = [ln for ln in text.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
         for row in csv.DictReader(io.StringIO("\n".join(rows))):
             cve, epss, pct = row.get("cve"), row.get("epss"), row.get("percentile")
@@ -273,7 +339,7 @@ def load_epss_catalog(path: Path) -> tuple[dict[str, _EPSSEntry], str]:
             )
     if not index:
         raise ValueError("EPSS catalog holds no entries")
-    return index, hash_bytes(data)
+    return index, hash_bytes(data), scored
 
 
 def _range_matches(ecosystem: str, version: str, rng: dict[str, Any]) -> tuple[bool, list[str]]:
@@ -472,8 +538,20 @@ def match_offline_advisories(
     exclude: Iterable[str] = (),
     exclude_private_origins: bool = False,
     inventory_sha256: str | None = None,
+    now: datetime,
+    max_feed_age_days: int = DEFAULT_MAX_FEED_AGE_DAYS,
 ) -> tuple[AdvisoryReport, dict[str, Any]]:
-    """Match pinned packages in ``bom`` against an offline OSV DB with KEV/EPSS enrichment."""
+    """Match pinned packages in ``bom`` against an offline OSV DB with KEV/EPSS enrichment.
+
+    ``now`` is the caller's clock. A feed whose own date is missing, more than
+    ``max_feed_age_days`` before it, or more than a day after it adds an error, so the
+    report is not complete.
+    """
+    if now.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    if type(max_feed_age_days) is not int or not 1 <= max_feed_age_days <= MAX_FEED_AGE_DAYS:
+        raise ValueError(f"max_feed_age_days must be an integer from 1 to {MAX_FEED_AGE_DAYS}")
+    now = now.astimezone(UTC)
     patterns = list(exclude)
     if any(not isinstance(p, str) or not p or len(p) > 256 for p in patterns):
         raise ValueError("exclusion patterns must be 1 to 256 characters")
@@ -483,31 +561,61 @@ def match_offline_advisories(
     records, db_digest = load_offline_advisory_db(db_path)
     pkg_index = _build_package_index(records)
     covered = {ecosystem for ecosystem, _ in pkg_index}
+    db_dated = max((adv.dated for adv in records if adv.dated is not None), default=None)
+    feed_errors = [
+        _feed_age_error("offline advisory DB", "newest record", db_dated, now, max_feed_age_days)
+    ]
 
     kev_index: dict[str, list[_KEVEntry]] = {}
     kev_provenance: list[dict[str, Any]] = []
     for kpath in kev_paths:
-        k_idx, k_digest = load_kev_catalog(kpath)
-        kev_provenance.append({"path": kpath.name, "sha256": k_digest, "entries": len(k_idx)})
+        k_idx, k_digest, released = load_kev_catalog(kpath)
+        kev_provenance.append(
+            {
+                "path": kpath.name,
+                "sha256": k_digest,
+                "entries": len(k_idx),
+                "date_released": _iso(released),
+            }
+        )
+        feed_errors.append(
+            _feed_age_error(
+                f"KEV catalog {kpath.name}", "dateReleased", released, now, max_feed_age_days
+            )
+        )
         for key, entries in k_idx.items():
             kev_index.setdefault(key, []).extend(entries)
 
     epss_index: dict[str, _EPSSEntry] = {}
     epss_provenance: dict[str, Any] | None = None
     if epss_path is not None:
-        epss_index, digest = load_epss_catalog(epss_path)
-        epss_provenance = {"path": epss_path.name, "sha256": digest, "entries": len(epss_index)}
+        epss_index, digest, scored = load_epss_catalog(epss_path)
+        epss_provenance = {
+            "path": epss_path.name,
+            "sha256": digest,
+            "entries": len(epss_index),
+            "score_date": _iso(scored),
+        }
+        feed_errors.append(
+            _feed_age_error(
+                f"EPSS catalog {epss_path.name}", "score_date", scored, now, max_feed_age_days
+            )
+        )
 
     provenance: dict[str, Any] = {
         "offline": True,
         "db_sha256": db_digest,
         "records_loaded": len(records),
+        "db_newest_record": _iso(db_dated),
+        "max_feed_age_days": max_feed_age_days,
+        "feed_age_evaluated_at": now.isoformat(),
         "kev_catalogs": kev_provenance,
         "epss_catalog": epss_provenance,
     }
     report = AdvisoryReport(
         tool_version=__version__, inventory_sha256=inventory_sha256, dry_run=False
     )
+    report.errors.extend(error for error in feed_errors if error is not None)
 
     targets: list[tuple[str, str, str, str]] = []
     for comp in sorted(bom.components, key=lambda c: c.bom_ref):

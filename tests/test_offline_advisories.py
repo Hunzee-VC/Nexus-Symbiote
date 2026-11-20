@@ -4,19 +4,22 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import UTC, datetime
+from functools import partial
 
 import pytest
 from click.testing import CliRunner
 
+from nexus_symbiote import offline_advisories
 from nexus_symbiote.cli import main
 from nexus_symbiote.core.aibom import AIBOM
 from nexus_symbiote.core.enums import AssuranceLevel
 from nexus_symbiote.core.models import ClaimEvidence, RegistryEntryComponent
-from nexus_symbiote.offline_advisories import (
-    load_epss_catalog,
-    load_kev_catalog,
-    match_offline_advisories,
-)
+from nexus_symbiote.offline_advisories import load_epss_catalog, load_kev_catalog
+
+NOW = datetime(2026, 11, 20, tzinfo=UTC)
+MODIFIED = "2026-11-15T00:00:00Z"
+match_offline_advisories = partial(offline_advisories.match_offline_advisories, now=NOW)
 
 
 def _bom_with_package(
@@ -55,6 +58,7 @@ def _sample_osv_bundle() -> dict:
         "advisories": [
             {
                 "id": "GHSA-aaaa-bbbb-cccc",
+                "modified": MODIFIED,
                 "aliases": ["CVE-2024-99999"],
                 "summary": "Unsafe deserialization in transformers checkpoint loader",
                 "database_specific": {"severity": "MEDIUM"},
@@ -195,6 +199,7 @@ def test_offline_advisories_order_independent_range_events_and_bounds(tmp_path):
                 "advisories": [
                     {
                         "id": "CVE-2026-00001",
+                        "modified": MODIFIED,
                         "summary": "Multi-branch range in unsorted event order",
                         "database_specific": {"severity": "HIGH"},
                         "affected": [
@@ -469,6 +474,7 @@ def test_offline_advisories_over_4mb_db_and_over_500_packages_linear_speed(tmp_p
     records.append(
         {
             "id": "CVE-2026-88888",
+            "modified": MODIFIED,
             "summary": "Planted target match",
             "database_specific": {"severity": "HIGH"},
             "affected": [
@@ -608,6 +614,7 @@ def test_advisories_cli_offline_mode_and_help_exit_codes(tmp_path):
 def _pypi_record(record_id: str = "GHSA-cccc-dddd-eeee") -> dict:
     return {
         "id": record_id,
+        "modified": MODIFIED,
         "affected": [
             {
                 "package": {"ecosystem": "PyPI", "name": "transformers"},
